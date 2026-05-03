@@ -59,6 +59,12 @@ public sealed class ChangeTracker
     private static readonly string[] SymbolTrackedSubstrings = ["search_symbol"];
     private readonly ConcurrentQueue<SymbolSearchRecord> _symbolPending = new();
 
+    // Separate tracking for call-site searches — results go to the evidence graph as
+    // SymbolReference nodes. Kept distinct from SymbolTrackedSubstrings so the two flows
+    // emit different node types without a discriminator field.
+    private static readonly string[] CallerTrackedSubstrings = ["search_callers"];
+    private readonly ConcurrentQueue<CallerSearchRecord> _callerPending = new();
+
     // AIFunctionFactory strips underscores and uses PascalCase (e.g. WriteFileAsync → WriteFile,
     // RunAsync → Run). Normalize both sides by removing underscores before comparing.
     private static bool FunctionNameMatches(string name, string pattern) =>
@@ -162,14 +168,20 @@ public sealed class ChangeTracker
         var records = new List<InvocationRecord>();
         while (_pending.TryDequeue(out var r)) records.Add(r);
 
-        // Symbol nodes are read-only and flush independently of change records so recon
-        // turns (which only call search_symbol) still populate the evidence graph.
+        // Symbol and caller nodes are read-only and flush independently of change records
+        // so recon turns (which only call search_symbol / search_callers) still populate
+        // the evidence graph.
         if (_evidenceStore is not null)
         {
             var symRecords = new List<SymbolSearchRecord>();
             while (_symbolPending.TryDequeue(out var sr)) symRecords.Add(sr);
             if (symRecords.Count > 0)
                 await EmitSymbolEvidenceNodesAsync(agentName, turnIndex, symRecords, cancellationToken);
+
+            var callerRecords = new List<CallerSearchRecord>();
+            while (_callerPending.TryDequeue(out var cr)) callerRecords.Add(cr);
+            if (callerRecords.Count > 0)
+                await EmitCallerEvidenceNodesAsync(agentName, turnIndex, callerRecords, cancellationToken);
         }
 
         if (records.Count == 0) return;
@@ -425,6 +437,48 @@ public sealed class ChangeTracker
             await _evidenceStore!.RecordAsync(nodes, null, ct);
     }
 
+    // Parses search_callers output to extract SymbolReference nodes for the evidence graph.
+    // TargetFile is resolved from any existing SymbolDefinition nodes in the store so the
+    // reference graph can be traversed in both directions (definition → callers, caller → definition).
+    private async Task EmitCallerEvidenceNodesAsync(
+        string agentName,
+        int turnIndex,
+        List<CallerSearchRecord> records,
+        CancellationToken ct)
+    {
+        var nodes = new List<EvidenceNode>();
+        var now   = DateTime.UtcNow;
+
+        foreach (var record in records)
+        {
+            // Resolve definition file(s) for the symbol — best-effort; null when symbol
+            // is external or recon hasn't run yet.
+            var definitionFiles = await _evidenceStore!.FindDefinitionFilesAsync(record.Symbol, ct);
+            var targetFile      = definitionFiles.Count > 0 ? definitionFiles[0] : null;
+
+            // ParseSymbolSearchOutput is reused: search_callers emits the same :L format.
+            // The "kind" yield value is the call-site content snippet (not a definition kind)
+            // so it's discarded here.
+            foreach (var (callerFile, _) in ParseSymbolSearchOutput(record.Output))
+            {
+                nodes.Add(new EvidenceNode
+                {
+                    NodeType   = "SymbolReference",
+                    Timestamp  = now,
+                    Agent      = agentName,
+                    Turn       = turnIndex,
+                    SessionId  = _sessionId,
+                    Path       = callerFile,
+                    SymbolName = record.Symbol,
+                    TargetFile = targetFile,
+                });
+            }
+        }
+
+        if (nodes.Count > 0)
+            await _evidenceStore!.RecordAsync(nodes, null, ct);
+    }
+
     // Parses search_symbol output lines into (filePath, kind) pairs.
     // Output format per line: "path/to/file.ext:L42  <content>"
     private static IEnumerable<(string FilePath, string Kind)> ParseSymbolSearchOutput(string output)
@@ -558,6 +612,17 @@ public sealed class ChangeTracker
             _symbolPending.Enqueue(new SymbolSearchRecord(sym, resultText));
         }
 
+        // Intercept search_callers results to populate SymbolReference evidence nodes.
+        // Read-only — same path as search_symbol but produces reference nodes instead of
+        // definition nodes; TargetFile is resolved from existing SymbolDefinition nodes at flush.
+        if (_evidenceStore is not null
+            && succeeded
+            && CallerTrackedSubstrings.Any(s => FunctionNameMatches(name, s)))
+        {
+            var sym = GetArg(context.Arguments, "symbol") ?? string.Empty;
+            _callerPending.Enqueue(new CallerSearchRecord(sym, resultText));
+        }
+
         // Only enqueue state-changing calls to _pending — these feed changes.json and are
         // used by routing validators (RequireShellPass, RequireAllFilesWritten, etc.).
         // Read-only calls (read_file, list_files, search_content) are visible in events
@@ -602,3 +667,6 @@ public sealed record InvocationRecord(
 
 /// <summary>In-memory snapshot of one search_symbol result, pending evidence-graph emission.</summary>
 internal sealed record SymbolSearchRecord(string Symbol, string Output);
+
+/// <summary>In-memory snapshot of one search_callers result, pending evidence-graph emission.</summary>
+internal sealed record CallerSearchRecord(string Symbol, string Output);
