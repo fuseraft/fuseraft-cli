@@ -148,6 +148,82 @@ public sealed class SearchPlugin
         return header + "\n\n" + sb.ToString().TrimEnd();
     }
 
+    // Caller search
+
+    [Description("Find call sites and usages of a symbol across source files.")]
+    public string SearchCallers(
+        [Description("Symbol name to find usages of.")] string symbol,
+        [Description("Root directory.")] string directory = ".",
+        [Description("File extension filter, e.g. '.cs'.")] string extension = "",
+        [Description("Max results.")] int maxResults = 100)
+    {
+        if (!Directory.Exists(directory))
+            return PluginResult.Error($"Directory not found: {directory}");
+
+        var escapedSymbol = Regex.Escape(symbol);
+
+        // Call-site pattern: symbol used as invocation, constructor, type annotation, or inheritance.
+        Regex callSiteRegex;
+        try
+        {
+            callSiteRegex = GetOrCreateRegex(
+                $@"\b{escapedSymbol}\s*[(<\.:]|\bnew\s+{escapedSymbol}\b|:\s*{escapedSymbol}\b",
+                RegexOptions.IgnoreCase);
+        }
+        catch (ArgumentException ex)
+        {
+            return PluginResult.Error($"Could not build caller pattern: {ex.Message}");
+        }
+
+        // Exclude definition lines — same patterns used by SearchSymbol — so we return
+        // only references, not the declaration of the symbol itself.
+        var defPattern = string.Join("|", SymbolPatterns.Select(p => string.Format(p.Pattern, escapedSymbol)));
+        Regex? defRegex = null;
+        try { defRegex = GetOrCreateRegex(defPattern, RegexOptions.IgnoreCase); }
+        catch { /* best-effort; if pattern fails, skip exclusion */ }
+
+        var filePattern = string.IsNullOrWhiteSpace(extension)
+            ? "*"
+            : $"*{(extension.StartsWith('.') ? extension : '.' + extension)}";
+
+        var sb = new StringBuilder();
+        int totalMatches = 0;
+        int skippedFiles = 0;
+
+        foreach (var file in Directory.EnumerateFiles(directory, filePattern, SearchOption.AllDirectories))
+        {
+            if (totalMatches >= maxResults) break;
+
+            string[] lines;
+            try { lines = File.ReadAllLines(file); }
+            catch { skippedFiles++; continue; }
+
+            for (int i = 0; i < lines.Length && totalMatches < maxResults; i++)
+            {
+                var line = lines[i];
+                if (!callSiteRegex.IsMatch(line)) continue;
+                if (defRegex?.IsMatch(line) == true) continue;
+
+                sb.AppendLine($"{file}:L{i + 1}  {line.Trim()}");
+                totalMatches++;
+            }
+        }
+
+        if (totalMatches == 0)
+        {
+            var note = skippedFiles > 0 ? $" ({skippedFiles} unreadable file(s) skipped)" : string.Empty;
+            return PluginResult.Info($"No call sites found for '{symbol}' under {directory}{note}");
+        }
+
+        var header = $"[RESULTS] {totalMatches} call site(s) found for '{symbol}'";
+        if (totalMatches >= maxResults)
+            header += " (limit reached — increase maxResults to see more)";
+        if (skippedFiles > 0)
+            header += $" ({skippedFiles} unreadable file(s) skipped)";
+
+        return header + ":\n\n" + sb.ToString().TrimEnd();
+    }
+
     // Symbol search
 
     [Description("Find symbol definitions across source files.")]

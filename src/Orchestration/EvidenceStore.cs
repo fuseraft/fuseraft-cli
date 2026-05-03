@@ -179,6 +179,26 @@ public sealed class EvidenceStore
             .ToList();
     }
 
+    /// <summary>
+    /// Returns the distinct file paths where a <c>SymbolDefinition</c> node for
+    /// <paramref name="symbolName"/> was recorded. Used by <c>ChangeTracker</c> to populate
+    /// <c>TargetFile</c> on <c>SymbolReference</c> nodes without a separate lookup argument.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> FindDefinitionFilesAsync(
+        string symbolName,
+        CancellationToken ct = default)
+    {
+        var graph = await LoadAsync(ct);
+        return graph.Nodes
+            .Where(n =>
+                string.Equals(n.NodeType, "SymbolDefinition", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(n.SymbolName, symbolName, StringComparison.OrdinalIgnoreCase)
+                && n.Path is not null)
+            .Select(n => n.Path!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     // Simple path equivalence: matches on equal, suffix, or prefix normalization.
     private static bool PathsMatch(string? a, string? b)
     {
