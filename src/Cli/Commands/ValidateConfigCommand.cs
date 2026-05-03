@@ -326,9 +326,9 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
         if (type == "regex" && string.IsNullOrWhiteSpace(t.Pattern))
             issues.Add(("error", $"{prefix}Regex strategy requires a Pattern."));
 
-        // MaxIterations is only a meaningful cap at the top-level or for maxiterations-type
-        // strategies; nested child strategies within a composite rely on the outer cap.
-        if (t.MaxIterations <= 0 && (depth == 0 || type == "maxiterations"))
+        // MaxIterations: warn when explicitly using the maxiterations type with no cap,
+        // or at depth 0 for non-composite strategies (composite delegates capping to children).
+        if (t.MaxIterations <= 0 && (type == "maxiterations" || (depth == 0 && type != "composite")))
             issues.Add(("warning", $"{prefix}MaxIterations should be > 0 (got {t.MaxIterations})."));
 
         if (t.AgentNames is { Length: > 0 })
