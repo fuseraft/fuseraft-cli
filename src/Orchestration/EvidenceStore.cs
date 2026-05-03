@@ -172,7 +172,11 @@ public sealed class EvidenceStore
             var raw = await System.IO.File.ReadAllTextAsync(_graphPath, ct);
             return JsonSerializer.Deserialize<EvidenceGraph>(raw, JsonOpts) ?? new EvidenceGraph();
         }
-        catch { return new EvidenceGraph(); }
+        catch (Exception ex)
+        {
+            await Console.Error.WriteLineAsync($"[fuseraft] EvidenceStore: failed to load '{_graphPath}': {ex.Message} — evidence graph reset.");
+            return new EvidenceGraph();
+        }
     }
 
     private async Task SaveAsync(EvidenceGraph graph, CancellationToken ct)

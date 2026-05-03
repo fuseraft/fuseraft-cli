@@ -103,7 +103,7 @@ public sealed class AgentFactory(
         {
             var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(remoteCfg.TimeoutSeconds) };
             var resolver   = new A2ACardResolver(new Uri(remoteUrl), httpClient);
-            var remoteAgent = resolver.GetAIAgentAsync(httpClient, loggerFactory: loggerFactory)
+            var remoteAgent = Task.Run(() => resolver.GetAIAgentAsync(httpClient, loggerFactory: loggerFactory))
                                       .GetAwaiter().GetResult();
 
             // ChangeTracker wraps at the turn level (BeginTurn / ApplyAsync), so remote

@@ -126,7 +126,7 @@ Every session is driven by a single JSON or YAML file under the top-level `Orche
 
 **Steps:**
 
-0. **Remote agent short-circuit** — When `AgentConfig.RemoteAgent` is set, `AgentFactory` resolves the remote agent card from `{Url}/.well-known/agent.json` via `A2ACardResolver`, wraps it as an `AIAgent`, and returns immediately. Steps 1–5 below are skipped; `Model`, `Plugins`, `FunctionChoice`, and `Capabilities` are ignored. `Instructions`, `TrustScore`, `ContextWindow`, and `ChangeTracker` wrapping all continue to apply.
+0. **Remote agent short-circuit** — When `AgentConfig.RemoteAgent` is set, `AgentFactory` resolves the remote agent card from `{Url}/.well-known/agent.json` via `A2ACardResolver`, wraps it as an `AIAgent`, and returns immediately. Steps 1–5 below are skipped; `Model`, `Plugins`, `FunctionChoice`, and `Capabilities` are ignored. `Instructions`, `TrustScore`, `ContextWindow`, and `ChangeTracker` wrapping all continue to apply. `GetAIAgentAsync` is dispatched via `Task.Run` so the blocking `.GetAwaiter().GetResult()` call runs on the thread pool rather than the caller's `SynchronizationContext`, avoiding potential deadlocks in hosted environments.
 
 1. **Identity** — An `AgentIdentity` (DID: `did:fuseraft:<name>`) is created and registered with the `IdentityRegistry`. The governance audit log uses the DID as the actor identifier.
 
@@ -518,12 +518,15 @@ Example — a Reviewer that inspects files and git history but cannot write, del
 - `BeginTurn(agentName, turnIndex)` must be called before each `agent.RunAsync` so middleware has the correct turn index. All three orchestrators (`AgentOrchestrator`, `MagenticOrchestrator`, `WorkflowOrchestrator`) call this immediately after `OnAgentTurnStarting()`.
 - On session resume, any `Pending` entries indicate operations that were in-flight at interruption time.
 - The `"intent"` compaction mode reads from this log to produce a deterministic `✓`/`✗` summary — no LLM call required.
+- If the intent log file is corrupt or unreadable on load, the failure is written to stderr and the store resets to empty for the session.
+
+**`ChangeLog` load failures** (`changes.json`): Both the session-init path (setting `ActiveSessionId`) and the per-entry flush path read the existing change log before appending. If either read fails, the failure is written to stderr (`[fuseraft] ChangeTracker: ...`) and the log resets to empty for that operation. The `EvidenceStore` (`evidence.json`) follows the same pattern — a corrupt graph is logged to stderr and resets to empty.
 
 **`IntentStore` schema** (`intents.json`):
 - `ActiveSessionId`
 - `Entries[]` — `{ IntentId, Timestamp, Agent, TurnIndex, SessionId, Operation: { FunctionName, TargetPath, ArgsSummary }, Status, ErrorMessage, CompletedAt }`
 
-**`FileVersionStore`** (`file_versions.json`): A lightweight per-file version counter, also initialized by `OrchestratorBuilder`. Every successful `write_file` call increments the counter. Agents call `stat_file` to probe the current version and pass `baseVersion` to `write_file` to detect concurrent-write conflicts.
+**`FileVersionStore`** (`file_versions.json`): A lightweight per-file version counter, also initialized by `OrchestratorBuilder`. Every successful `write_file` call increments the counter. Agents call `stat_file` to probe the current version and pass `baseVersion` to `write_file` to detect concurrent-write conflicts. If the store file is corrupt or unreadable, the load failure is written to stderr and the counter resets to zero for the session — agents will see all files at version 0 and conflict detection will not fire until files are written again.
 
 **Downstream use:** The `Changes` plugin exposes `changes_read` and `changes_read_latest` so agents (typically Tester or Reviewer) can read what previous agents actually did rather than inferring it from chat history. `RequireShellPass` and `RequireWriteFile` validators also read this log to verify deterministic pre-conditions before routes fire.
 

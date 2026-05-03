@@ -102,7 +102,11 @@ public sealed class ChangeTracker
                     var raw = await File.ReadAllTextAsync(_logPath, cancellationToken);
                     log = JsonSerializer.Deserialize<ChangeLog>(raw, JsonOpts) ?? new ChangeLog();
                 }
-                catch { log = new ChangeLog(); }
+                catch (Exception ex)
+                {
+                    await Console.Error.WriteLineAsync($"[fuseraft] ChangeTracker: failed to load '{_logPath}': {ex.Message} — change log reset.");
+                    log = new ChangeLog();
+                }
             }
             else
             {
@@ -218,7 +222,11 @@ public sealed class ChangeTracker
                     var raw = await File.ReadAllTextAsync(_logPath, cancellationToken);
                     log = JsonSerializer.Deserialize<ChangeLog>(raw, JsonOpts) ?? new ChangeLog();
                 }
-                catch { log = new ChangeLog(); }
+                catch (Exception ex)
+                {
+                    await Console.Error.WriteLineAsync($"[fuseraft] ChangeTracker: failed to load '{_logPath}' during flush: {ex.Message} — change log reset.");
+                    log = new ChangeLog();
+                }
             }
             else
             {
