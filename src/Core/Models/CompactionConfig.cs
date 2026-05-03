@@ -70,4 +70,14 @@ public record CompactionConfig
     /// Reads <c>reasoning</c> events from the session's events log. Default: <c>false</c>.
     /// </summary>
     public bool IncludeReasoning { get; init; } = false;
+
+    /// <summary>
+    /// When <c>true</c>, a symbol dependency graph derived from the session's changed files is
+    /// prepended to the compaction summary (before reasoning excerpts when both are enabled).
+    /// Queries <c>SymbolDefinition</c> and <c>SymbolReference</c> nodes from the evidence store
+    /// for every file written during the session, giving agents an explicit map of what symbols
+    /// were in scope across the compacted turns. Requires an active <c>EvidenceStore</c>.
+    /// Default: <c>false</c>.
+    /// </summary>
+    public bool IncludeSymbolGraph { get; init; } = false;
 }

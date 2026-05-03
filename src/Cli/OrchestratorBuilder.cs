@@ -484,7 +484,7 @@ public static class OrchestratorBuilder
             compactor = new ConversationCompactor(
                 chatClientFactory.Create(summaryModel), compactionConfig,
                 loggerFactory.CreateLogger<ConversationCompactor>(),
-                resumptionNote, changeLogPath, intentLog, config.Events?.Path);
+                resumptionNote, changeLogPath, intentLog, config.Events?.Path, evidenceStore);
         }
 
         // WorkflowOrchestrator uses MAF's phase-based WorkflowBuilder with a hardcoded

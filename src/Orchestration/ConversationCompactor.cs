@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using fuseraft.Core.Interfaces;
@@ -24,7 +25,8 @@ public sealed class ConversationCompactor(
     string? resumptionNote = null,
     string? changeLogPath = null,
     IntentLog? intentLog = null,
-    string? eventsLogPath = null)
+    string? eventsLogPath = null,
+    EvidenceStore? evidenceStore = null)
 {
     /// <summary>
     /// Returns true when the current mode is <c>window</c>.
@@ -112,7 +114,9 @@ public sealed class ConversationCompactor(
 
         var reasoningExcerpts = await ReadReasoningForRangeAsync(
             toCompact[0].TurnIndex, toCompact[^1].TurnIndex);
-        var reasoningBlock = BuildReasoningBlock(reasoningExcerpts);
+        var reasoningBlock  = BuildReasoningBlock(reasoningExcerpts);
+        var symbolBlock     = await BuildSymbolGraphBlockAsync(cancellationToken);
+        var prefixBlock     = CombineBlocks(symbolBlock, reasoningBlock);
 
         // Intent mode: reconstruct from the intent log — fully deterministic, no LLM call.
         if (mode == "intent")
@@ -122,7 +126,7 @@ public sealed class ConversationCompactor(
                 var intents = await intentLog.GetIntentsForRangeAsync(
                     toCompact[0].TurnIndex, toCompact[^1].TurnIndex, cancellationToken);
                 var intentSummary = BuildIntentDerivedSummary(
-                    toCompact[0].TurnIndex, toCompact[^1].TurnIndex, intents, reasoningBlock);
+                    toCompact[0].TurnIndex, toCompact[^1].TurnIndex, intents, prefixBlock);
                 logger.LogInformation(
                     "Intent compaction: {Compacted} turns replaced by intent log reconstruction ({IntentCount} intents).",
                     toCompact.Count, intents.Count);
@@ -139,10 +143,10 @@ public sealed class ConversationCompactor(
         {
             var snapshot      = await snapshotter.SnapshotAsync(cancellationToken);
             var reconstructed = ContextRebuilder.BuildContextMessage(snapshot, toCompact[^1].TurnIndex);
-            if (!string.IsNullOrEmpty(reasoningBlock))
+            if (!string.IsNullOrEmpty(prefixBlock))
                 reconstructed = reconstructed with
                 {
-                    Content = reasoningBlock + "\n\n---\n\n" + reconstructed.Content
+                    Content = prefixBlock + "\n\n---\n\n" + reconstructed.Content
                 };
             logger.LogInformation(
                 "Lossless compaction: {Compacted} turns replaced by evidence reconstruction.",
@@ -163,7 +167,7 @@ public sealed class ConversationCompactor(
 
             var hybridContent =
                 reconstructed.Content + "\n\n---\n\n" +
-                FormatSummaryContent(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, summText, reasoningBlock);
+                FormatSummaryContent(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, summText, prefixBlock);
 
             var hybridSummary = new AgentMessage
             {
@@ -197,7 +201,7 @@ public sealed class ConversationCompactor(
         var summary = new AgentMessage
         {
             AgentName           = "System",
-            Content             = FormatSummaryContent(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, summaryText, reasoningBlock),
+            Content             = FormatSummaryContent(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, summaryText, prefixBlock),
             Role                = "user",
             TurnIndex           = toCompact[^1].TurnIndex,
             IsCompactionSummary = true,
@@ -219,7 +223,7 @@ public sealed class ConversationCompactor(
         int firstTurn,
         int lastTurn,
         IReadOnlyList<fuseraft.Core.Models.IntentEntry> intents,
-        string reasoningBlock = "")
+        string prefixBlock = "")
     {
         var sb = new StringBuilder();
         sb.AppendLine($"[INTENT-DERIVED RECONSTRUCTION — covers turns {firstTurn + 1}–{lastTurn + 1}]");
@@ -266,8 +270,8 @@ public sealed class ConversationCompactor(
             sb.Append("\n\n---\n" + resumptionNote);
 
         var content = sb.ToString().TrimEnd();
-        if (!string.IsNullOrEmpty(reasoningBlock))
-            content = reasoningBlock + "\n\n---\n\n" + content;
+        if (!string.IsNullOrEmpty(prefixBlock))
+            content = prefixBlock + "\n\n---\n\n" + content;
 
         return new AgentMessage
         {
@@ -377,12 +381,12 @@ public sealed class ConversationCompactor(
         "(2) changes_read_latest to confirm what is already done, " +
         "(3) do not redo work changes.json confirms is complete.";
 
-    private string FormatSummaryContent(int firstTurn, int lastTurn, string summaryText, string reasoningBlock = "")
+    private string FormatSummaryContent(int firstTurn, int lastTurn, string summaryText, string prefixBlock = "")
     {
-        var reasoningSection = !string.IsNullOrEmpty(reasoningBlock)
-            ? reasoningBlock + "\n\n---\n\n"
+        var prefixSection = !string.IsNullOrEmpty(prefixBlock)
+            ? prefixBlock + "\n\n---\n\n"
             : string.Empty;
-        var header = $"{reasoningSection}[CONVERSATION SUMMARY — covers turns {firstTurn + 1}–{lastTurn + 1}]\n\n{summaryText}";
+        var header = $"{prefixSection}[CONVERSATION SUMMARY — covers turns {firstTurn + 1}–{lastTurn + 1}]\n\n{summaryText}";
         return resumptionNote is not null
             ? $"{header}\n\n---\n{resumptionNote}"
             : header;
@@ -439,6 +443,100 @@ public sealed class ConversationCompactor(
             sb.AppendLine();
         }
         return sb.ToString().TrimEnd();
+    }
+
+    // Combines symbolBlock and reasoningBlock into a single prefix, separated by a divider
+    // when both are non-empty. Symbol graph comes first so the dependency map frames the
+    // reasoning excerpts that follow.
+    private static string CombineBlocks(string symbolBlock, string reasoningBlock)
+    {
+        if (string.IsNullOrEmpty(symbolBlock) && string.IsNullOrEmpty(reasoningBlock))
+            return string.Empty;
+        if (string.IsNullOrEmpty(symbolBlock)) return reasoningBlock;
+        if (string.IsNullOrEmpty(reasoningBlock)) return symbolBlock;
+        return symbolBlock + "\n\n---\n\n" + reasoningBlock;
+    }
+
+    private static readonly JsonSerializerOptions ChangeLogJsonOpts = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
+
+    // Queries the evidence store for symbol dependency nodes across all files changed during
+    // the active session. Returns an empty string when IncludeSymbolGraph is false, the store
+    // is absent, or no symbol nodes are found.
+    private async Task<string> BuildSymbolGraphBlockAsync(CancellationToken ct)
+    {
+        if (!config.IncludeSymbolGraph || evidenceStore is null) return string.Empty;
+
+        var changedFiles = await LoadAllChangedFilesAsync(ct);
+        if (changedFiles.Count == 0) return string.Empty;
+
+        var nodesByFile = new Dictionary<string, List<EvidenceNode>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in changedFiles)
+        {
+            var nodes = await evidenceStore.QuerySymbolDependenciesAsync(file, ct);
+            if (nodes.Count == 0) continue;
+            nodesByFile[file] = [..nodes];
+        }
+
+        return BuildSymbolGraphText(nodesByFile);
+    }
+
+    private static string BuildSymbolGraphText(Dictionary<string, List<EvidenceNode>> nodesByFile)
+    {
+        if (nodesByFile.Count == 0) return string.Empty;
+
+        var totalNodes = nodesByFile.Values.Sum(v => v.Count);
+        var sb = new StringBuilder();
+        sb.AppendLine($"[SYMBOL DEPENDENCY GRAPH — {totalNodes} node(s) across {nodesByFile.Count} file(s)]");
+        sb.AppendLine();
+
+        foreach (var (file, nodes) in nodesByFile.OrderBy(kv => kv.Key))
+        {
+            sb.AppendLine($"File: {file}");
+            foreach (var node in nodes.OrderBy(n => n.NodeType).ThenBy(n => n.SymbolName))
+            {
+                if (string.Equals(node.NodeType, "SymbolDefinition", StringComparison.OrdinalIgnoreCase))
+                {
+                    var kind = string.IsNullOrEmpty(node.SymbolKind) ? "" : $" ({node.SymbolKind})";
+                    sb.AppendLine($"  SymbolDefinition{kind}: {node.SymbolName}");
+                }
+                else if (string.Equals(node.NodeType, "SymbolReference", StringComparison.OrdinalIgnoreCase))
+                {
+                    var target = string.IsNullOrEmpty(node.TargetFile) ? "" : $" → {node.TargetFile}";
+                    sb.AppendLine($"  SymbolReference: {node.SymbolName}{target}");
+                }
+            }
+            sb.AppendLine();
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    // Reads all unique file paths written across every change-log entry for the active session.
+    private async Task<IReadOnlyList<string>> LoadAllChangedFilesAsync(CancellationToken ct)
+    {
+        if (changeLogPath is null || !File.Exists(changeLogPath)) return [];
+
+        try
+        {
+            var json = await File.ReadAllTextAsync(changeLogPath, ct);
+            var log  = JsonSerializer.Deserialize<ChangeLog>(json, ChangeLogJsonOpts);
+            if (log is null) return [];
+
+            var sessionId = log.ActiveSessionId;
+            return log.Entries
+                .Where(e => sessionId is null || e.SessionId == sessionId)
+                .SelectMany(e => e.FilesWritten)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch
+        {
+            return [];
+        }
     }
 
     private const string SummaryPrompt = """
