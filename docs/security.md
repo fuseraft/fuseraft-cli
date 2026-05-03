@@ -54,6 +54,37 @@ The agent sees this as a tool error and can respond accordingly (typically by st
 
 ---
 
+## Change envelope
+
+Restricts **write** operations (`write_file`, `patch_file`, `delete_file`) to files matching at least one declared glob pattern. Read operations (`read_file`, `list_files`) are never affected. Requires `FileSystemSandboxPath` to be set — patterns are evaluated relative to the sandbox root.
+
+```yaml
+Security:
+  FileSystemSandboxPath: /home/user/projects/myapp
+  ChangeEnvelope:
+    - src/billing/**
+    - src/payments/processor.go
+    - tests/billing/**
+```
+
+A write attempt outside the envelope produces:
+
+```
+[DENIED] Path 'src/auth/token.go' is outside the configured change envelope.
+Only files matching the declared envelope globs may be written in this session.
+Ask the Planner to expand the scope if this file needs to change.
+```
+
+**Glob syntax** — standard glob patterns using `*` (single directory level), `**` (any depth), and `?` (single character). Patterns are matched case-insensitively on Windows and case-sensitively on Unix.
+
+**Brownfield auto-population** — when `Brownfield.SeedEnvelopeFromBrief: true` is set and a discovery brief exists at `Brownfield.DiscoveryBriefPath`, the brief's `in_scope_files` list is automatically merged into `ChangeEnvelope` at session startup. The envelope grows as the Archaeologist expands scope; it never shrinks during a session. See [Configuration → Brownfield mode](configuration.md#brownfield-mode).
+
+**Enforcement is additive** — any pattern already in `ChangeEnvelope` at config load is retained alongside the patterns seeded from the brief.
+
+**When no envelope is set** — all writes within the sandbox root are permitted (default behaviour).
+
+---
+
 ## File read size limit
 
 `read_file` returns at most `Security.ReadFileSizeLimit` characters per call (default 20,000 ≈ 5k tokens). Files larger than the limit are truncated with a notice telling the agent how to read further with `shell_run + tail`.

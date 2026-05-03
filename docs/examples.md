@@ -221,6 +221,160 @@ A complete runnable version of this config is in `config/examples/orchestration.
 
 ---
 
+## Brownfield pipeline
+
+A five-agent pipeline designed for large existing codebases where agents must understand existing conventions, limit their write surface to the task scope, and run targeted tests rather than the full suite.
+
+**Key features:**
+- `Archaeologist` agent runs first — surveys the codebase from declared entry points, writes a discovery brief (`brief.brownfield.json`) and a convention profile (`conventions.json`)
+- `ReconComplete` contract blocks the handoff to Planning until both files exist on disk
+- Change envelope seeded automatically from the discovery brief's `in_scope_files` list — the Developer cannot write files outside that list (`[DENIED]` tool result with governance event)
+- Convention profile injected into every agent's system prompt at session startup — no re-derivation needed on subsequent runs
+- Fragility signals in the discovery brief inform the Planner and Developer to handle high-churn files conservatively
+- `TestSelector.FindRelatedCommand` guides the Tester to run only the tests covering changed files
+- State machine routing ensures agents can only advance when evidence contracts are satisfied
+
+```yaml
+Orchestration:
+  Name: BrownfieldPipeline
+
+  Brownfield:
+    EntryPoints:
+      - src/main.go
+    DiscoveryBriefPath: .fuseraft/brief.brownfield.json
+    ConventionProfilePath: .fuseraft/conventions.json
+    SeedEnvelopeFromBrief: true
+
+  TestSelector:
+    FindRelatedCommand: "go test -list . $(go list -f '{{.Dir}}' {file}) 2>/dev/null | head -40"
+    FullSuiteCommand: "go test ./..."
+
+  Security:
+    FileSystemSandboxPath: .
+
+  EvidenceStore:
+    Path: .fuseraft/evidence.json
+
+  ChangeTracking:
+    Path: .fuseraft/changes.json
+
+  Contracts:
+    - Name: ReconComplete
+      Requires:
+        - FileExists:
+            Path: .fuseraft/brief.brownfield.json
+        - FileExists:
+            Path: .fuseraft/conventions.json
+
+    - Name: BriefExists
+      Requires:
+        - FileExists:
+            Path: .fuseraft/brief.json
+
+    - Name: ImplementationComplete
+      Requires:
+        - FilesWritten:
+            Source: .fuseraft/brief.json
+            Field: files_to_change
+        - CommandSucceeded:
+            Pattern: "build|compile|test"
+
+    - Name: TestsValid
+      Requires:
+        - FileExists:
+            Path: .fuseraft/test-report.json
+        - TestReport:
+            NoFailures: true
+            HasAssertions: true
+
+  Selection:
+    Type: statemachine
+    StateMachine:
+      Initial: Recon
+      States:
+        Recon:
+          Agent: Archaeologist
+          Transitions:
+            - To: Planning
+              Signal: "RECON COMPLETE"
+              Contract: ReconComplete
+        Planning:
+          Agent: Planner
+          Transitions:
+            - To: Implementation
+              Signal: "HANDOFF TO DEVELOPER"
+              Contract: BriefExists
+        Implementation:
+          Agent: Developer
+          Transitions:
+            - To: Testing
+              Signal: "HANDOFF TO TESTER"
+              Contract: ImplementationComplete
+            - To: Planning
+              Signal: "REPLAN REQUIRED"
+        Testing:
+          Agent: Tester
+          Transitions:
+            - To: Review
+              Signal: "HANDOFF TO REVIEWER"
+              Contract: TestsValid
+              RecoveryAgent: Developer
+            - To: Implementation
+              Signal: "BUGS FOUND"
+        Review:
+          Agent: Reviewer
+          Transitions:
+            - To: Done
+              Signal: APPROVED
+            - To: Implementation
+              Signal: "REVISION REQUIRED"
+            - To: Planning
+              Signal: "REPLAN REQUIRED"
+        Done:
+          Agent: Reviewer
+          Terminal: true
+
+  Termination:
+    Type: composite
+    MaxIterations: 50
+    Strategies:
+      - Type: regex
+        Pattern: "(?m)^\\s*APPROVED\\s*$"
+        AgentNames:
+          - Reviewer
+```
+
+A complete runnable version with full agent instructions (including the Archaeologist's step-by-step recon procedure) is in `config/examples/brownfield.yaml`.
+
+**How the envelope is enforced**
+
+On the first run, the Archaeologist writes `brief.brownfield.json` containing `in_scope_files`. On every subsequent run (and after the first recon completes), the orchestrator reads that file at startup and merges `in_scope_files` into `Security.ChangeEnvelope`. The `SandboxEnforcementFilter` then blocks any `write_file`, `patch_file`, or `delete_file` call that does not match the envelope globs:
+
+```
+[DENIED] Path 'src/auth/token.go' is outside the configured change envelope.
+Only files matching the declared envelope globs may be written in this session.
+Ask the Planner to expand the scope if this file needs to change.
+```
+
+The Developer's instructions direct it to call `REPLAN REQUIRED` when this happens, routing back to the Planner to formally expand the scope.
+
+**How the convention profile is injected**
+
+Once `conventions.json` exists (written by the Archaeologist), the orchestrator formats it into a `PROJECT CONVENTIONS` block and appends it to every agent's system prompt:
+
+```
+PROJECT CONVENTIONS (detected by Archaeologist — follow these in all code you write):
+  Language/ecosystem: go
+  Build command: go build ./...
+  Test command:  go test ./...
+  Naming:       test files match *_test.go
+  Error handling: wrap errors with fmt.Errorf("%w", err)
+  Forbidden:    no panic() outside main
+  Tests:        table-driven tests with testify/require
+```
+
+---
+
 ## Single agent (minimal)
 
 A single agent with filesystem access — good for quick tasks or as a starting point.

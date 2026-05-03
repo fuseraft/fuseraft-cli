@@ -217,7 +217,11 @@ public sealed class AgentFactory(
         if (!string.IsNullOrEmpty(securityConfig?.FileSystemSandboxPath))
         {
             var ring = governanceKernel?.Rings?.ComputeRing(config.TrustScore) ?? ExecutionRing.Ring2;
-            agent = new SandboxEnforcementFilter(securityConfig.FileSystemSandboxPath, governanceKernel?.InjectionDetector, ring)
+            agent = new SandboxEnforcementFilter(
+                    securityConfig.FileSystemSandboxPath,
+                    governanceKernel?.InjectionDetector,
+                    ring,
+                    securityConfig.ChangeEnvelope)
                 .WrapAgent(agent);
         }
 

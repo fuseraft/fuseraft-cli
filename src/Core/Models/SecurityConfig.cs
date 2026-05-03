@@ -37,4 +37,22 @@ public record SecurityConfig
     /// per-read token cost for agents with small context windows.
     /// </summary>
     public int ReadFileSizeLimit { get; init; } = 20_000;
+
+    /// <summary>
+    /// Restricts <em>write</em> operations (<c>write_file</c>, <c>patch_file</c>,
+    /// <c>delete_file</c>) to files that match at least one of these glob patterns.
+    /// Patterns are evaluated relative to <see cref="FileSystemSandboxPath"/> using
+    /// standard glob syntax (<c>*</c>, <c>**</c>, <c>?</c>).
+    /// Read operations are unaffected.
+    ///
+    /// <para>
+    /// Typical use: set this in brownfield projects to the list of files the Planner
+    /// scoped for the current task. Combined with <see cref="BrownfieldConfig.SeedEnvelopeFromBrief"/>,
+    /// the Archaeologist's discovery brief populates this list automatically at startup.
+    /// </para>
+    ///
+    /// Null or empty means all writes are allowed (within the sandbox root).
+    /// Example: <c>["src/billing/**", "src/payments/processor.go"]</c>
+    /// </summary>
+    public List<string>? ChangeEnvelope { get; init; }
 }

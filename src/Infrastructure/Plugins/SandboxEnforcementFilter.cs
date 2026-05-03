@@ -3,6 +3,7 @@ using AgentGovernance.Hypervisor;
 using AgentGovernance.Security;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.FileSystemGlobbing;
 
 namespace fuseraft.Infrastructure.Plugins;
 
@@ -43,6 +44,7 @@ public sealed class SandboxEnforcementFilter
     private readonly PromptInjectionDetector? _injectionDetector;
     private readonly ExecutionRing _ring;
     private readonly RingResourceLimits _limits;
+    private readonly Matcher? _changeEnvelopeMatcher;
 
     // Prefixes of OS directories that contain executables and shared libraries.
     private static readonly string[] SystemPrefixes = OperatingSystem.IsWindows()
@@ -69,12 +71,28 @@ public sealed class SandboxEnforcementFilter
     private static readonly string[] NetworkFunctions =
         ["http_request"];
 
-    public SandboxEnforcementFilter(string sandboxRoot, PromptInjectionDetector? injectionDetector = null, ExecutionRing ring = ExecutionRing.Ring2)
+    // Write operations subject to the change envelope (distinct from the ring-level WriteFunctions
+    // list which also covers shell — shell is too coarse-grained for path-level envelope checks).
+    private static readonly string[] EnvelopedFunctions =
+        ["write_file", "patch_file", "delete_file"];
+
+    public SandboxEnforcementFilter(
+        string sandboxRoot,
+        PromptInjectionDetector? injectionDetector = null,
+        ExecutionRing ring = ExecutionRing.Ring2,
+        IReadOnlyList<string>? changeEnvelope = null)
     {
         _sandboxRoot       = Path.GetFullPath(ProcessHelper.ExpandHome(sandboxRoot));
         _injectionDetector = injectionDetector;
         _ring              = ring;
         _limits            = RingResourceLimits.Defaults[ring];
+
+        if (changeEnvelope is { Count: > 0 })
+        {
+            _changeEnvelopeMatcher = new Matcher(StringComparison.OrdinalIgnoreCase);
+            foreach (var pattern in changeEnvelope)
+                _changeEnvelopeMatcher.AddInclude(pattern);
+        }
     }
 
     /// <summary>
@@ -108,7 +126,7 @@ public sealed class SandboxEnforcementFilter
 
         if (FileSystemFunctions.Any(f =>
                 string.Equals(f, functionName, StringComparison.OrdinalIgnoreCase)))
-            return InspectFileSystem(args);
+            return InspectFileSystem(functionName, args);
 
         if (ShellFunctions.Any(f =>
                 string.Equals(f, functionName, StringComparison.OrdinalIgnoreCase)))
@@ -134,15 +152,24 @@ public sealed class SandboxEnforcementFilter
         return null;
     }
 
-    private string? InspectFileSystem(IReadOnlyDictionary<string, object?>? args)
+    private string? InspectFileSystem(string functionName, IReadOnlyDictionary<string, object?>? args)
     {
         if (args is null) return null;
+        bool isEnveloped = _changeEnvelopeMatcher is not null &&
+            EnvelopedFunctions.Any(f => string.Equals(f, functionName, StringComparison.OrdinalIgnoreCase));
+
         foreach (var argName in (ReadOnlySpan<string>)["path", "directory"])
         {
             if (args.TryGetValue(argName, out var val) && val is string raw)
             {
                 var denial = CheckPath(raw);
                 if (denial is not null) return denial;
+
+                if (isEnveloped)
+                {
+                    var envelopeDenial = CheckEnvelope(raw);
+                    if (envelopeDenial is not null) return envelopeDenial;
+                }
             }
         }
         return null;
@@ -223,6 +250,28 @@ public sealed class SandboxEnforcementFilter
                     $"configured sandbox '{_sandboxRoot}'. Move the file into the sandbox " +
                     $"or remove the reference.");
         }
+
+        return null;
+    }
+
+    private string? CheckEnvelope(string rawPath)
+    {
+        string resolved;
+        try
+        {
+            var expanded = ProcessHelper.ExpandHome(rawPath);
+            resolved = Path.IsPathRooted(expanded)
+                ? Path.GetFullPath(expanded)
+                : Path.GetFullPath(expanded, _sandboxRoot);
+        }
+        catch { return null; }
+
+        var relative = Path.GetRelativePath(_sandboxRoot, resolved).Replace('\\', '/');
+        if (!_changeEnvelopeMatcher!.Match(relative).HasMatches)
+            return PluginResult.Denied(
+                $"Path '{relative}' is outside the configured change envelope. " +
+                $"Only files matching the declared envelope globs may be written in this session. " +
+                $"Ask the Planner to expand the scope if this file needs to change.");
 
         return null;
     }

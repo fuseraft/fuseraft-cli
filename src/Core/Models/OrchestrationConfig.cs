@@ -199,6 +199,23 @@ public record OrchestrationConfig
     /// legacy uniform-threshold behaviour while providing better injected messages.
     /// </summary>
     public FailureHandlingConfig? FailureHandling { get; init; }
+
+    /// <summary>
+    /// Optional brownfield-mode settings. When present, enables structured recon-phase
+    /// support: convention profile injection, change envelope seeding from the
+    /// Archaeologist's discovery brief, and entry-point-aware context summarisation.
+    /// Null (default) keeps standard greenfield behaviour.
+    /// </summary>
+    public BrownfieldConfig? Brownfield { get; init; }
+
+    /// <summary>
+    /// Optional incremental test-selection settings. Exposes the shell command template
+    /// used by agents to discover the minimal test set for a changed file, enabling
+    /// targeted verification instead of full-suite runs on every handoff.
+    /// Null (default) means agents must use the full test command from the convention
+    /// profile or their own instructions.
+    /// </summary>
+    public TestSelectorConfig? TestSelector { get; init; }
 }
 
 /// <summary>

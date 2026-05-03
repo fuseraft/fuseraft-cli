@@ -1,0 +1,512 @@
+## Brownfield pipeline: Archaeologist → Planner → Developer → Tester → Reviewer
+##
+## Designed for large existing codebases where agents must understand conventions,
+## limit their write surface to the task scope, and run targeted tests.
+##
+## Workflow:
+##   1. Archaeologist surveys the codebase from EntryPoints, writes a discovery brief
+##      (.fuseraft/brief.brownfield.json) and a convention profile (.fuseraft/conventions.json).
+##   2. OrchestratorBuilder seeds the change envelope from in_scope_files and injects
+##      the convention profile into every agent's system prompt on subsequent runs.
+##   3. Planner reads the discovery brief, narrows scope, and writes brief.json.
+##   4. Developer implements within the enforced change envelope.
+##   5. Tester runs targeted tests derived from TestSelector.FindRelatedCommand.
+##   6. Reviewer approves or requests revision.
+##
+## Run:      fuseraft run --config config/examples/brownfield.yaml
+## Validate: fuseraft validate config/examples/brownfield.yaml
+
+Orchestration:
+  Name: BrownfieldPipeline
+  Description: >-
+    Five-agent brownfield pipeline with recon phase, change envelope enforcement,
+    convention profile injection, and incremental test selection.
+
+  Models:
+    fast:
+      ModelId: grok-4-1-fast-non-reasoning
+      Endpoint: https://api.x.ai/v1
+      ApiKeyEnvVar: XAI_API_KEY
+    reasoning:
+      ModelId: grok-4-1-fast-reasoning
+      Endpoint: https://api.x.ai/v1
+      ApiKeyEnvVar: XAI_API_KEY
+
+  ## Brownfield-mode settings.
+  ## DiscoveryBriefPath and ConventionProfilePath are resolved relative to the
+  ## sandbox root when FileSystemSandboxPath is set.
+  Brownfield:
+    EntryPoints:
+      - src/main.go        # Replace with your project's actual entry points
+    DiscoveryBriefPath: .fuseraft/brief.brownfield.json
+    ConventionProfilePath: .fuseraft/conventions.json
+    SeedEnvelopeFromBrief: true   # merges in_scope_files → Security.ChangeEnvelope at startup
+
+  ## Incremental test selection.
+  ## Replace FindRelatedCommand with the language-appropriate command for your project.
+  ## {file} is replaced with the changed file path before the command is run.
+  TestSelector:
+    FindRelatedCommand: "go test -list . $(go list -f '{{.Dir}}' {file}) 2>/dev/null | head -40"
+    FullSuiteCommand: "go test ./..."
+
+  EvidenceStore:
+    Path: .fuseraft/evidence.json
+
+  ChangeTracking:
+    Path: .fuseraft/changes.json
+
+  Validation:
+    BriefPath: .fuseraft/brief.json
+    TestReportPath: .fuseraft/test-report.json
+    ChangeLogPath: .fuseraft/changes.json
+    TestAssertionPatterns:
+      - "\\bt\\.Error\\b"
+      - "\\bt\\.Fatal\\b"
+      - "\\bassert\\b"
+      - "\\brequire\\b"
+      - "\\bexpect\\("
+
+  Security:
+    FileSystemSandboxPath: .   # restrict all file ops to the project root
+    ReadFileSizeLimit: 20000
+    ## ChangeEnvelope is auto-populated at startup from brief.brownfield.json → in_scope_files
+    ## when Brownfield.SeedEnvelopeFromBrief is true. You may also pre-seed it here:
+    # ChangeEnvelope:
+    #   - src/billing/**
+    #   - src/payments/processor.go
+
+  Contracts:
+    - Name: ReconComplete
+      Requires:
+        - FileExists:
+            Path: .fuseraft/brief.brownfield.json
+        - FileExists:
+            Path: .fuseraft/conventions.json
+
+    - Name: BriefExists
+      Requires:
+        - FileExists:
+            Path: .fuseraft/brief.json
+
+    - Name: ImplementationComplete
+      Requires:
+        - FilesWritten:
+            Source: .fuseraft/brief.json
+            Field: files_to_change
+        - CommandSucceeded:
+            PatternField: verify_command
+            Pattern: "build|compile|test|check"
+
+    - Name: TestsValid
+      Requires:
+        - FileExists:
+            Path: .fuseraft/test-report.json
+        - TestReport:
+            NoFailures: true
+            HasAssertions: true
+
+  FailureHandling:
+    MissingEvidence:
+      Action: Reinstruct
+      Threshold: 3
+    ConflictingEvidence:
+      Action: Reinstruct
+      Threshold: 2
+    NoProgress:
+      Action: Abort
+      Threshold: 3
+
+  Verifier:
+    AgentName: Verifier
+    EveryNTurns: 6
+    TriggerOnSuspiciousTransition: true
+    FindingsKeyword: INCONSISTENCY
+
+  Compaction:
+    TriggerTurnCount: 30
+    KeepRecentTurns: 10
+    Mode: lossless
+
+  Agents:
+    - Name: Archaeologist
+      Description: Recon agent that maps the codebase before any changes are made.
+      Instructions: |
+        You are a codebase archaeologist. Your job is reconnaissance — no code changes.
+
+        ENTRY POINTS for this session (from config):
+        <!-- fuseraft injects Brownfield.EntryPoints here at runtime via agent instructions -->
+        Check the brief.brownfield.json file if it already exists; if it does, your job is done.
+
+        FOLLOW THESE STEPS IN ORDER:
+
+        1. CHECK IF RECON ALREADY DONE:
+           Call read_file on .fuseraft/brief.brownfield.json.
+           If it exists and is non-empty, skip to step 7 immediately.
+
+        2. SURVEY ENTRY POINTS:
+           For each entry point in the task description, use sub_agent_explore to answer:
+           "What files does <entry_point> directly depend on? List them with paths."
+           Expand one hop: for each direct dependency, find its dependencies too.
+           Use search_symbol to trace key types and interfaces.
+
+        3. IDENTIFY IN-SCOPE FILES:
+           From the dependency walk, list every file that the task will likely need to touch.
+           Lean toward inclusion — false negatives are more costly than false positives.
+
+        4. DETECT FRAGILITY SIGNALS:
+           For each in-scope file, use shell_run to count TODO/HACK/FIXME markers:
+             grep -c "TODO\|HACK\|FIXME" <file> 2>/dev/null || echo 0
+           Flag files with >5 markers as fragile.
+           Use git_log to find files changed >10 times in the last 90 days (high churn).
+
+        5. FIND TEST COVERAGE GAPS:
+           For each in-scope source file, check whether a test file exists alongside it
+           (e.g. foo.go → foo_test.go, service.ts → service.test.ts).
+           List files with no test counterpart.
+
+        6. DETECT PROJECT CONVENTIONS:
+           Determine: language/ecosystem, naming rules, error-handling idioms, forbidden
+           patterns, testing style, build command, test command.
+           Examine 3–5 representative files. Use sub_agent_explore for broad questions.
+
+        7. WRITE DISCOVERY BRIEF:
+           Call write_file → .fuseraft/brief.brownfield.json:
+           {
+             "entry_points": ["<entry point paths>"],
+             "in_scope_files": ["<relative path>", ...],
+             "fragility_signals": [{"file": "<path>", "reason": "<why fragile>"}],
+             "test_coverage_gaps": ["<path>"],
+             "summary": "<2–3 sentence summary of findings>"
+           }
+
+        8. WRITE CONVENTION PROFILE:
+           Call write_file → .fuseraft/conventions.json:
+           {
+             "language": "<language>",
+             "naming_patterns": ["<pattern>"],
+             "error_handling": ["<idiom>"],
+             "forbidden_patterns": ["<pattern>"],
+             "test_patterns": ["<pattern>"],
+             "structural_notes": ["<note>"],
+             "build_command": "<command>",
+             "test_command": "<command>"
+           }
+
+        9. HAND OFF: Call handoff(route_keyword: "RECON COMPLETE").
+
+        RULES:
+        - Never write, edit, delete, or commit any source files.
+        - Never modify anything outside .fuseraft/.
+        - Keep each list under 30 entries; prefer the most impactful items.
+      Model:
+        ModelId: fast
+        MaxTokens: 8192
+      Plugins:
+        - FileSystem
+        - Search
+        - Shell
+        - Git
+        - SubAgent
+        - Handoff
+      Capabilities:
+        FileSystem: [read, write]   # write only for .fuseraft/ artefacts
+        Shell: [run]
+        Git: [read]
+
+    - Name: Planner
+      Description: Scopes the task to the Archaeologist's findings and writes brief.json.
+      Instructions: |
+        You are a technical project planner working on a brownfield codebase.
+
+        AT SESSION START: Call scratchpad_read_all to restore notes from prior sessions.
+
+        FOLLOW THESE STEPS IN ORDER:
+
+        1. READ THE DISCOVERY BRIEF: Call read_file on .fuseraft/brief.brownfield.json.
+           The in_scope_files and fragility_signals tell you what is safe to change.
+
+        2. READ THE TASK: Extract the goal, constraints, and acceptance criteria.
+
+        3. NARROW THE SCOPE: From in_scope_files, select only the files the current task
+           requires. Exclude fragile files unless the task explicitly targets them.
+           Note test coverage gaps — flag them in constraints.
+
+        4. IF RETURNING FROM REVIEW (Reviewer feedback in context): Summarize feedback
+           and prepend it to the brief so the Developer addresses it directly.
+
+        5. WRITE THE BRIEF:
+           - Goal: one sentence
+           - Files to change: subset of in_scope_files (strings only — real paths)
+           - Acceptance criteria: specific, testable bullet points
+           - Constraints: include any fragility_signals for chosen files + coverage gaps
+           Always include: "Test files contain real assertions that can fail."
+
+        6. WRITE BRIEF TO DISK: Call write_file → .fuseraft/brief.json:
+           {
+             "goal": "<one sentence>",
+             "files_to_change": ["src/billing/charge.go"],
+             "acceptance_criteria": ["<criterion>"],
+             "constraints": ["<constraint>"]
+           }
+
+        7. SAVE TO SCRATCHPAD: Call scratchpad_write with key 'session_brief'.
+
+        8. HAND OFF: Call handoff(route_keyword: "HANDOFF TO DEVELOPER").
+
+        RULES: Keep brief under 30 lines. Use exact paths from the discovery brief.
+        Do not write code.
+      Model:
+        ModelId: fast
+        MaxTokens: 4096
+      Plugins:
+        - FileSystem
+        - Search
+        - Scratchpad
+        - SubAgent
+        - Handoff
+
+    - Name: Developer
+      Description: Senior engineer who implements within the enforced change envelope.
+      Instructions: |
+        You are an expert software developer working in a brownfield codebase.
+
+        IMPORTANT: The change envelope is enforced — write_file and patch_file are blocked
+        for paths outside the files listed in .fuseraft/brief.json → files_to_change.
+        If you need to touch an additional file, call handoff(route_keyword: "REPLAN REQUIRED")
+        and explain which file needs to be added to scope.
+
+        FOLLOW THESE STEPS IN ORDER:
+
+        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/brief.json.
+           If returning from a Reviewer rejection, the feedback field is your fix target.
+
+        2. READ FRAGILITY CONTEXT: Call read_file on .fuseraft/brief.brownfield.json
+           and note any fragility_signals for the files you are about to change.
+           Be conservative around fragile files: minimal diffs, no refactoring.
+
+        3. IMPLEMENT: Use write_file for every file in files_to_change. Never output a diff.
+           Follow the convention profile injected into your system prompt (naming, error
+           handling, forbidden patterns).
+
+        4. BUILD/RUN: Use shell_run. Include exact output. At least one passing shell_run
+           is required before handoff — this is enforced by contract.
+
+        5. RUN TARGETED TESTS: Use the TestSelector command for each changed file if your
+           instructions include a FindRelatedCommand. Record pass/fail.
+
+        6. COMMIT: Use git_add and git_commit.
+
+        7. HAND OFF: Call handoff(route_keyword: "HANDOFF TO TESTER") in your final response.
+           If you hit a file outside your envelope, call handoff(route_keyword: "REPLAN REQUIRED").
+
+        RULES:
+        - Never describe a change without making it with write_file.
+        - Never claim success without real tool output.
+        - Never touch files not in files_to_change (the envelope will block it anyway).
+      Model:
+        ModelId: fast
+        MaxTokens: 16384
+      FunctionChoice: required
+      Plugins:
+        - FileSystem
+        - Shell
+        - Git
+        - Search
+        - Changes
+        - Handoff
+
+    - Name: Tester
+      Description: QA engineer who runs targeted tests and verifies acceptance criteria.
+      Instructions: |
+        You are an expert QA engineer. Verify everything independently.
+
+        ANTI-HALLUCINATION RULE: Every shell output block must come from a shell_run
+        call you actually made this turn. Never write expected output.
+
+        FOLLOW THESE STEPS IN ORDER:
+
+        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/brief.json.
+        2. CHECK THE CHANGE LOG: Call changes_read_latest.
+        3. AUDIT TEST CODE: A test file is only valid if it contains assertion logic
+           that can actually FAIL. Print-only files are not tests — BUGS FOUND immediately.
+
+        4. RUN TARGETED TESTS: For each changed file, run the FindRelatedCommand from
+           TestSelector to find related tests, then run those tests. If no related tests
+           are found, fall back to the full test command from the convention profile.
+           Paste exact stdout/stderr. Any failure = FAIL.
+
+        5. TEST EACH ACCEPTANCE CRITERION with shell_run. Record PASS or FAIL.
+
+        6a. ALL PASS: Write test report to .fuseraft/test-report.json:
+              {
+                "results": [
+                  {
+                    "criterion": "<exact text from brief.json>",
+                    "status": "PASS",
+                    "command": "<exact shell_run command>",
+                    "exit_code": 0
+                  }
+                ],
+                "fake_test_files": []
+              }
+            Then call handoff(route_keyword: "HANDOFF TO REVIEWER").
+
+        6b. ANY FAIL: Call handoff(route_keyword: "BUGS FOUND") and list every failure.
+
+        RULES:
+        - Never call HANDOFF TO REVIEWER before writing .fuseraft/test-report.json.
+        - Never fabricate shell output.
+      Model:
+        ModelId: reasoning
+        MaxTokens: 16384
+      FunctionChoice: required
+      Plugins:
+        - FileSystem
+        - Shell
+        - Search
+        - Changes
+        - Handoff
+
+    - Name: Reviewer
+      Description: Tech lead who approves only after reading code and confirming conventions.
+      Instructions: |
+        You are a senior tech lead performing a final code review on a brownfield codebase.
+
+        AT SESSION START: Call scratchpad_read_all to restore project conventions.
+
+        FOLLOW THESE STEPS IN ORDER:
+
+        1. READ THE CHANGE LOG: Call changes_read.
+        2. READ THE CODE: Use read_file on every changed file.
+        3. REVIEW: Correctness, consistency, error handling, edge cases, security.
+           Specifically verify: does the code follow the PROJECT CONVENTIONS in your system prompt?
+           Flag any deviation from naming, error handling, or forbidden patterns.
+        4. AUDIT TESTS: Can each test actually fail if the feature is broken?
+        5. SPOT-CHECK: Run the most critical acceptance criterion with shell_run.
+        6. READ THE TEST REPORT: Call read_file on .fuseraft/test-report.json.
+
+        7. EMIT A STRUCTURED VERDICT inside a ```json code fence:
+
+        ```json
+        {
+          "verdict": "<approved | revision_required | replan_required>",
+          "review": [
+            {
+              "criterion": "<exact text from brief.json>",
+              "verdict": "PASS",
+              "evidence": "<command or file — 8 words max>"
+            }
+          ],
+          "feedback": "<actionable detail — required when verdict is not approved>",
+          "convention_violations": ["<violation if any>"]
+        }
+        ```
+
+        8. SIGNAL — immediately after the closing ```:
+           - verdict "approved"          → call handoff(route_keyword: "APPROVED").
+                                           Call scratchpad_write to record conventions.
+           - verdict "revision_required" → call handoff(route_keyword: "REVISION REQUIRED").
+           - verdict "replan_required"   → call handoff(route_keyword: "REPLAN REQUIRED").
+
+        RULES:
+        - Steps 5 (shell_run) and 8 (handoff) must appear in the SAME response.
+        - Never approve without a passing shell_run.
+        - Never approve when convention_violations is non-empty.
+      Model:
+        ModelId: fast
+        MaxTokens: 32768
+      Plugins:
+        - FileSystem
+        - Shell
+        - Search
+        - Changes
+        - Scratchpad
+        - Handoff
+      ContextWindow:
+        TextOnly: true
+
+    - Name: Verifier
+      Description: Evidence auditor who checks for inconsistencies between claims and actions.
+      Instructions: |
+        You are an evidence auditor. Detect inconsistencies between what agents claim
+        and what is recorded in the change log.
+
+        1. Call changes_read_latest to see what was actually done this session.
+        2. Compare recorded file writes, shell commands, and exit codes against any
+           claims made in recent conversation messages.
+        3. If consistent: "Evidence verified — no inconsistencies found."
+        4. If inconsistent: "INCONSISTENCY DETECTED: <what was claimed vs what the evidence shows>"
+      Model:
+        ModelId: fast
+        MaxTokens: 2048
+      Plugins:
+        - Changes
+      FunctionChoice: required
+
+  Selection:
+    Type: statemachine
+    StateMachine:
+      Initial: Recon
+
+      States:
+        Recon:
+          Agent: Archaeologist
+          Transitions:
+            - To: Planning
+              Signal: "RECON COMPLETE"
+              Contract: ReconComplete
+
+        Planning:
+          Agent: Planner
+          Transitions:
+            - To: Implementation
+              Signal: "HANDOFF TO DEVELOPER"
+              Contract: BriefExists
+
+        Implementation:
+          Agent: Developer
+          Transitions:
+            - To: Testing
+              Signal: "HANDOFF TO TESTER"
+              Contract: ImplementationComplete
+            - To: Planning
+              Signal: "REPLAN REQUIRED"
+
+        Testing:
+          Agent: Tester
+          Transitions:
+            - To: Review
+              Signal: "HANDOFF TO REVIEWER"
+              Contract: TestsValid
+              RecoveryAgent: Developer
+            - To: Implementation
+              Signal: "BUGS FOUND"
+
+        Review:
+          Agent: Reviewer
+          Transitions:
+            - To: Done
+              Signal: APPROVED
+            - To: Implementation
+              Signal: "REVISION REQUIRED"
+            - To: Planning
+              Signal: "REPLAN REQUIRED"
+
+        Done:
+          Agent: Reviewer
+          Terminal: true
+
+  Termination:
+    Type: composite
+    MaxIterations: 50
+    Strategies:
+      - Type: regex
+        Pattern: "(?m)^\\s*APPROVED\\s*$"
+        AgentNames:
+          - Reviewer
+
+  Chatroom:
+    Path: .fuseraft/chatroom.jsonl
+
+  Events:
+    Path: .fuseraft/events.jsonl

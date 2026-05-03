@@ -1,5 +1,8 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using AgentGovernance;
 using AgentGovernance.Audit;
 using AgentGovernance.Sre;
@@ -25,6 +28,12 @@ public static class OrchestratorBuilder
 {
     // Shared client for API-key validation probes — created once, never disposed.
     private static readonly HttpClient _validationHttp = new() { Timeout = TimeSpan.FromSeconds(10) };
+
+    private static readonly JsonSerializerOptions BrownfieldJsonOpts = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition      = JsonIgnoreCondition.WhenWritingNull,
+    };
 
     /// <summary>
     /// Loads <paramref name="configPath"/>, validates it, connects to any configured MCP servers,
@@ -97,6 +106,52 @@ public static class OrchestratorBuilder
                 };
         }
 
+        // Brownfield: resolve discovery brief and convention profile paths against the
+        // sandbox root when a sandbox is configured, mirroring how validation paths are treated.
+        if (config.Brownfield is { } bf && config.Security?.FileSystemSandboxPath is { } bfSandbox)
+        {
+            var bfRoot = Path.GetFullPath(ProcessHelper.ExpandHome(bfSandbox));
+
+            static string BfResolve(string path, string root) =>
+                Path.IsPathRooted(ProcessHelper.ExpandHome(path))
+                    ? path
+                    : Path.GetFullPath(ProcessHelper.ExpandHome(path), root);
+
+            config = config with
+            {
+                Brownfield = bf with
+                {
+                    DiscoveryBriefPath   = BfResolve(bf.DiscoveryBriefPath,   bfRoot),
+                    ConventionProfilePath = BfResolve(bf.ConventionProfilePath, bfRoot),
+                }
+            };
+        }
+
+        // Brownfield: seed the change envelope from the Archaeologist's discovery brief
+        // when the brief already exists on disk (written by a prior recon pass).
+        if (config.Brownfield is { SeedEnvelopeFromBrief: true, DiscoveryBriefPath: { } discoveryPath }
+            && File.Exists(discoveryPath))
+        {
+            try
+            {
+                var briefJson  = await File.ReadAllTextAsync(discoveryPath, cancellationToken);
+                var brief      = JsonSerializer.Deserialize<BrownfieldDiscoveryBrief>(briefJson, BrownfieldJsonOpts);
+                var scopeFiles = brief?.InScopeFiles;
+                if (scopeFiles is { Count: > 0 })
+                {
+                    var existing = config.Security?.ChangeEnvelope ?? [];
+                    var merged   = existing.Concat(scopeFiles).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    config = config with { Security = (config.Security ?? new SecurityConfig()) with { ChangeEnvelope = merged } };
+                }
+            }
+            catch (Exception ex)
+            {
+                loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
+                    "Could not seed change envelope from brownfield brief '{Path}': {Message}",
+                    discoveryPath, ex.Message);
+            }
+        }
+
         // Cross-validate ChangeTracking.Path and Validation.ChangeLogPath. If both are
         // configured, they must resolve to the same file.
         if (config.ChangeTracking is { } ctPathCheck && config.Validation?.ChangeLogPath is { } vlPathCheck)
@@ -143,6 +198,47 @@ public static class OrchestratorBuilder
                     })
                     .ToList()
             };
+        }
+
+        // Brownfield: when a convention profile exists on disk, inject its contents into
+        // every agent's system prompt so agents follow project conventions automatically.
+        if (config.Brownfield is { ConventionProfilePath: { } conventionPath }
+            && File.Exists(conventionPath))
+        {
+            try
+            {
+                var profileJson    = await File.ReadAllTextAsync(conventionPath, cancellationToken);
+                var profile        = JsonSerializer.Deserialize<ConventionProfile>(profileJson, BrownfieldJsonOpts);
+                var conventionBlock = BuildConventionBlock(profile);
+                if (conventionBlock is not null)
+                {
+                    config = config with
+                    {
+                        Agents = config.Agents
+                            .Select(a => a with
+                            {
+                                Instructions = a.Instructions.TrimEnd() + "\n\n" + conventionBlock
+                            })
+                            .ToList()
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
+                    "Could not load convention profile from '{Path}': {Message}",
+                    conventionPath, ex.Message);
+            }
+        }
+
+        // Also emit a startup warning when a change envelope is declared without a sandbox —
+        // the envelope is enforced by SandboxEnforcementFilter which requires a sandbox root.
+        if (config.Security?.ChangeEnvelope is { Count: > 0 }
+            && string.IsNullOrEmpty(config.Security.FileSystemSandboxPath))
+        {
+            loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
+                "Security.ChangeEnvelope is configured but Security.FileSystemSandboxPath is not set. " +
+                "The change envelope will not be enforced. Add a FileSystemSandboxPath to enable it.");
         }
 
         // Connect to MCP servers and register their tools before building agents.
@@ -591,6 +687,41 @@ public static class OrchestratorBuilder
 
         return config
             ?? throw new InvalidOperationException($"File '{configPath}' is missing the top-level 'Orchestration' key.");
+    }
+
+    private static string? BuildConventionBlock(ConventionProfile? profile)
+    {
+        if (profile is null) return null;
+
+        var sb = new StringBuilder();
+        sb.AppendLine("PROJECT CONVENTIONS (detected by Archaeologist — follow these in all code you write):");
+
+        if (!string.IsNullOrWhiteSpace(profile.Language))
+            sb.AppendLine($"  Language/ecosystem: {profile.Language}");
+
+        if (!string.IsNullOrWhiteSpace(profile.BuildCommand))
+            sb.AppendLine($"  Build command: {profile.BuildCommand}");
+
+        if (!string.IsNullOrWhiteSpace(profile.TestCommand))
+            sb.AppendLine($"  Test command:  {profile.TestCommand}");
+
+        AppendList(sb, "  Naming:     ", profile.NamingPatterns);
+        AppendList(sb, "  Error handling: ", profile.ErrorHandling);
+        AppendList(sb, "  Forbidden:  ", profile.ForbiddenPatterns);
+        AppendList(sb, "  Tests:      ", profile.TestPatterns);
+        AppendList(sb, "  Structure:  ", profile.StructuralNotes);
+
+        var result = sb.ToString().TrimEnd();
+        return result.Length > "PROJECT CONVENTIONS (detected by Archaeologist — follow these in all code you write):".Length
+            ? result
+            : null;
+    }
+
+    private static void AppendList(StringBuilder sb, string label, IReadOnlyList<string> items)
+    {
+        if (items.Count == 0) return;
+        foreach (var item in items)
+            sb.AppendLine($"{label}{item}");
     }
 
     /// <summary>

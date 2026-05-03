@@ -180,7 +180,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
         // Selection strategy
         var selType = config.Selection.Type.ToLowerInvariant();
-        if (selType is not ("sequential" or "roundrobin" or "llm" or "keyword" or "structured" or "magentic"))
+        if (selType is not ("sequential" or "roundrobin" or "llm" or "keyword" or "structured" or "magentic" or "statemachine"))
             issues.Add(("error", $"Unknown selection type: '{config.Selection.Type}'."));
 
         if (selType == "llm" && config.Selection.Model is null)
@@ -326,7 +326,9 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
         if (type == "regex" && string.IsNullOrWhiteSpace(t.Pattern))
             issues.Add(("error", $"{prefix}Regex strategy requires a Pattern."));
 
-        if (t.MaxIterations <= 0)
+        // MaxIterations is only a meaningful cap at the top-level or for maxiterations-type
+        // strategies; nested child strategies within a composite rely on the outer cap.
+        if (t.MaxIterations <= 0 && (depth == 0 || type == "maxiterations"))
             issues.Add(("warning", $"{prefix}MaxIterations should be > 0 (got {t.MaxIterations})."));
 
         if (t.AgentNames is { Length: > 0 })
