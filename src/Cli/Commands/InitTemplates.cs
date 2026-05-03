@@ -1,3 +1,5 @@
+using fuseraft.Core;
+
 namespace fuseraft.Cli.Commands;
 
 internal static class InitTemplates
@@ -12,6 +14,7 @@ internal static class InitTemplates
             "code-research" => CodeResearch(model, endpoint),
             "magentic"      => Magentic(model, endpoint),
             "designer"      => Designer(model, endpoint),
+            "brownfield"    => Brownfield(model, endpoint),
             _               => DevTeam(model, endpoint),   // "dev-team" + fallback
         };
 
@@ -45,14 +48,14 @@ internal static class InitTemplates
 
       # EvidenceStore: structured evidence graph — required for contracts and lossless compaction.
       # EvidenceStore:
-      #   Path: .fuseraft/evidence.json
+      #   Path: {FuseraftPaths.LocalEvidence}
 
       # Contracts: evidence-gated guards on routes or state machine transitions.
       # Contracts:
       #   - Name: BriefExists
       #     Requires:
       #       - Type: FileExists
-      #         Path: .fuseraft/brief.json
+      #         Path: {FuseraftPaths.LocalBrief}
       #   - Name: ImplementationComplete
       #     Requires:
       #       - Type: CommandSucceeded
@@ -87,16 +90,16 @@ internal static class InitTemplates
 
       # ChangeTracking: record every file write/delete made by agents.
       # ChangeTracking:
-      #   Path: .fuseraft/changes.json
+      #   Path: {FuseraftPaths.LocalChanges}
 
       # Validation: paths used by built-in routing validators.
       # Validation:
-      #   BriefPath: .fuseraft/brief.json
-      #   TestReportPath: .fuseraft/test-report.json
-      #   ChangeLogPath: .fuseraft/changes.json
+      #   BriefPath: {FuseraftPaths.LocalBrief}
+      #   TestReportPath: {FuseraftPaths.LocalTestReport}
+      #   ChangeLogPath: {FuseraftPaths.LocalChanges}
 
       Events:
-        Path: .fuseraft/events.jsonl
+        Path: {FuseraftPaths.LocalEventsLog}
 
       # MaxTotalTokens: token budget (input + output combined) — session halts when exceeded.
       # MaxTotalTokens: 200000
@@ -128,26 +131,26 @@ internal static class InitTemplates
             evidence contracts, failure handling, and self-verification.
 
           EvidenceStore:
-            Path: .fuseraft/evidence.json
+            Path: {FuseraftPaths.LocalEvidence}
 
           ChangeTracking:
-            Path: .fuseraft/changes.json
+            Path: {FuseraftPaths.LocalChanges}
 
           Validation:
-            BriefPath: .fuseraft/brief.json
-            TestReportPath: .fuseraft/test-report.json
-            ChangeLogPath: .fuseraft/changes.json
+            BriefPath: {FuseraftPaths.LocalBrief}
+            TestReportPath: {FuseraftPaths.LocalTestReport}
+            ChangeLogPath: {FuseraftPaths.LocalChanges}
 
           Contracts:
             - Name: BriefExists
               Requires:
                 - Type: FileExists
-                  Path: .fuseraft/brief.json
+                  Path: {FuseraftPaths.LocalBrief}
 
             - Name: ImplementationComplete
               Requires:
                 - Type: FilesWritten
-                  Source: .fuseraft/brief.json
+                  Source: {FuseraftPaths.LocalBrief}
                   Field: files_to_change
                 - Type: CommandSucceeded
                   Pattern: "build|compile"
@@ -155,7 +158,7 @@ internal static class InitTemplates
             - Name: TestsValid
               Requires:
                 - Type: FileExists
-                  Path: .fuseraft/test-report.json
+                  Path: {FuseraftPaths.LocalTestReport}
                 - Type: TestReport
                   NoFailures: true
                   HasAssertions: true
@@ -183,7 +186,7 @@ internal static class InitTemplates
             Mode: lossless
 
           Events:
-            Path: .fuseraft/events.jsonl
+            Path: {FuseraftPaths.LocalEventsLog}
 
           Agents:
             - Name: Planner
@@ -193,7 +196,7 @@ internal static class InitTemplates
                 1. Read and understand the task thoroughly.
                 2. Use sub_agent_explore for broad codebase questions without filling
                    your context with raw file contents.
-                3. Write a brief to .fuseraft/brief.json with fields:
+                3. Write a brief to {FuseraftPaths.LocalBrief} with fields:
                      goal — one-sentence description of what to build
                      files_to_change — array of file paths to create or modify
                      acceptance_criteria — array of testable criteria the code must satisfy
@@ -212,7 +215,7 @@ internal static class InitTemplates
               Description: Implements the changes described in the brief.
               Instructions: |
                 You are a senior software engineer. Your job is to:
-                1. Read .fuseraft/brief.json and implement every listed file using write_file.
+                1. Read {FuseraftPaths.LocalBrief} and implement every listed file using write_file.
                 2. Run a build command with shell_run to confirm it compiles.
                 3. Commit your work with git_add and git_commit.
                 When done, call handoff(route_keyword: "HANDOFF TO TESTER").
@@ -231,9 +234,9 @@ internal static class InitTemplates
               Description: Writes and runs tests, produces a structured report.
               Instructions: |
                 You are a QA engineer. Your job is to:
-                1. Read .fuseraft/brief.json to understand acceptance criteria.
+                1. Read {FuseraftPaths.LocalBrief} to understand acceptance criteria.
                 2. Write tests and run them with shell_run.
-                3. Write results to .fuseraft/test-report.json with fields:
+                3. Write results to {FuseraftPaths.LocalTestReport} with fields:
                      passed — true or false
                      results — array of objects, each with name, status (PASS or FAIL), and exit_code
                 If all pass, call handoff(route_keyword: "HANDOFF TO REVIEWER").
@@ -251,7 +254,7 @@ internal static class InitTemplates
               Description: Reviews implementation and test results; gives final approval.
               Instructions: |
                 You are a principal engineer. Your job is to:
-                1. Read the implementation and .fuseraft/test-report.json.
+                1. Read the implementation and {FuseraftPaths.LocalTestReport}.
                 2. Run at least one acceptance criterion as a spot-check with shell_run.
                 If the code meets all acceptance criteria, call handoff(route_keyword: "APPROVED").
                 If changes are needed, call handoff(route_keyword: "REVISION REQUIRED") and explain what to fix.
@@ -370,7 +373,7 @@ internal static class InitTemplates
             Researcher gathers information with a verified handoff; Writer synthesises the final document.
 
           EvidenceStore:
-            Path: .fuseraft/evidence.json
+            Path: {FuseraftPaths.LocalEvidence}
 
           Contracts:
             - Name: ResearchComplete
@@ -452,13 +455,13 @@ internal static class InitTemplates
             Planner → Developer → Operator pipeline for infrastructure and deployment tasks.
 
           EvidenceStore:
-            Path: .fuseraft/evidence.json
+            Path: {FuseraftPaths.LocalEvidence}
 
           Contracts:
             - Name: PlanExists
               Requires:
                 - Type: FileExists
-                  Path: .fuseraft/brief.json
+                  Path: {FuseraftPaths.LocalBrief}
 
             - Name: ArtifactsReady
               Requires:
@@ -480,7 +483,7 @@ internal static class InitTemplates
                 You are a DevOps architect. Your job is to:
                 1. Understand the infrastructure or deployment task.
                 2. Use sub_agent_explore to survey relevant config files and scripts.
-                3. Write a step-by-step execution plan to .fuseraft/brief.json with fields:
+                3. Write a step-by-step execution plan to {FuseraftPaths.LocalBrief} with fields:
                      goal — what the deployment achieves
                      steps — ordered list of execution steps
                      rollback — steps to undo if something goes wrong
@@ -497,7 +500,7 @@ internal static class InitTemplates
               Description: Implements scripts, manifests, and config files.
               Instructions: |
                 You are a DevOps engineer. Your job is to:
-                1. Read the plan from .fuseraft/brief.json and implement all required
+                1. Read the plan from {FuseraftPaths.LocalBrief} and implement all required
                    scripts, manifests, or config files using write_file.
                 2. Run static analysis or validation with shell_run (e.g. lint, validate, check).
                 3. Commit with git_add and git_commit when ready.
@@ -517,7 +520,7 @@ internal static class InitTemplates
               Description: Executes the deployment and verifies success.
               Instructions: |
                 You are a site reliability engineer. Your job is to:
-                1. Execute the deployment steps from .fuseraft/brief.json using shell_run.
+                1. Execute the deployment steps from {FuseraftPaths.LocalBrief} using shell_run.
                 2. Run smoke tests to verify the deployment succeeded.
                 3. Report the outcome clearly with exact command output.
                 If successful, call handoff(route_keyword: "DEPLOYMENT_COMPLETE").
@@ -583,7 +586,7 @@ internal static class InitTemplates
             Writer drafts content with a verified handoff; Editor refines and approves.
 
           EvidenceStore:
-            Path: .fuseraft/evidence.json
+            Path: {FuseraftPaths.LocalEvidence}
 
           Contracts:
             - Name: DraftExists
@@ -691,16 +694,16 @@ internal static class InitTemplates
             changes; Reviewer inspects by code review alone — no test execution required.
 
           EvidenceStore:
-            Path: .fuseraft/evidence.json
+            Path: {FuseraftPaths.LocalEvidence}
 
           ChangeTracking:
-            Path: .fuseraft/changes.json
+            Path: {FuseraftPaths.LocalChanges}
 
           Contracts:
             - Name: BriefExists
               Requires:
                 - Type: FileExists
-                  Path: .fuseraft/brief.json
+                  Path: {FuseraftPaths.LocalBrief}
 
           FailureHandling:
             MissingEvidence:
@@ -717,7 +720,7 @@ internal static class InitTemplates
                 You are a senior engineer doing code research. Your job is to:
                 1. Use sub_agent_explore for broad surveys — avoid loading large files into your context.
                 2. Read only the specific sections you need to understand the problem.
-                3. Write a brief to .fuseraft/brief.json with fields:
+                3. Write a brief to {FuseraftPaths.LocalBrief} with fields:
                      goal — one-sentence description of the change to make
                      findings — summary of relevant code locations and logic
                      files_to_change — array of file paths to create or modify
@@ -736,7 +739,7 @@ internal static class InitTemplates
               Description: Makes targeted code changes described in the brief.
               Instructions: |
                 You are a senior developer making a targeted code change. Your job is to:
-                1. Read .fuseraft/brief.json and implement the described change.
+                1. Read {FuseraftPaths.LocalBrief} and implement the described change.
                 2. Modify only the files listed in files_to_change — do not touch other files.
                 3. Commit with git_add and git_commit.
                 When done, call handoff(route_keyword: "HANDOFF TO REVIEWER").
@@ -755,7 +758,7 @@ internal static class InitTemplates
               Description: Inspects the code change for correctness by code review alone.
               Instructions: |
                 You are a principal engineer doing a code review. Your job is to:
-                1. Read each file listed in .fuseraft/brief.json under files_to_change.
+                1. Read each file listed in {FuseraftPaths.LocalBrief} under files_to_change.
                 2. Verify every acceptance criterion from the brief is satisfied by code inspection.
                 3. Confirm no unrelated files were modified.
                 Do NOT run shell commands or tests — this is a code-inspection-only review.
@@ -890,7 +893,220 @@ internal static class InitTemplates
             Path: .fuseraft/checkpoints
 
           Events:
-            Path: .fuseraft/events.jsonl
+            Path: {FuseraftPaths.LocalEventsLog}
+        """;
+
+    private static string Brownfield(string model, string? endpoint) => $"""
+        Orchestration:
+          Name: Brownfield Codebase Pipeline
+          Description: >-
+            Archaeologist recons the existing codebase and writes a discovery brief;
+            Planner designs the targeted change; Developer implements with a scoped change
+            envelope; Reviewer inspects by code review. Conventions detected during recon
+            are automatically injected into every agent's system prompt.
+
+          Security:
+            FileSystemSandboxPath: .   # set to your project root (e.g. ~/projects/myapp)
+            # ChangeEnvelope is seeded automatically from the discovery brief when
+            # Brownfield.SeedEnvelopeFromBrief is true — no need to list files manually.
+
+          Brownfield:
+            EntryPoints:
+              - src/   # replace with your actual entry points (e.g. cmd/server/main.go)
+            SeedEnvelopeFromBrief: true
+            DiscoveryBriefPath: {FuseraftPaths.LocalBrownfieldBrief}
+            ConventionProfilePath: {FuseraftPaths.LocalConventions}
+
+          EvidenceStore:
+            Path: {FuseraftPaths.LocalEvidence}
+
+          ChangeTracking:
+            Path: {FuseraftPaths.LocalChanges}
+
+          Validation:
+            BriefPath: {FuseraftPaths.LocalBrief}
+            ChangeLogPath: {FuseraftPaths.LocalChanges}
+
+          Contracts:
+            - Name: ReconComplete
+              Requires:
+                - Type: FileExists
+                  Path: {FuseraftPaths.LocalBrownfieldBrief}
+                - Type: FileExists
+                  Path: {FuseraftPaths.LocalConventions}
+
+            - Name: BriefExists
+              Requires:
+                - Type: FileExists
+                  Path: {FuseraftPaths.LocalBrief}
+
+            - Name: ImplementationComplete
+              Requires:
+                - Type: FilesWritten
+                  Source: {FuseraftPaths.LocalBrief}
+                  Field: files_to_change
+
+          FailureHandling:
+            MissingEvidence:
+              Action: Reinstruct
+              Threshold: 3
+            NoProgress:
+              Action: Abort
+              Threshold: 3
+
+          Events:
+            Path: {FuseraftPaths.LocalEventsLog}
+
+          Agents:
+            - Name: Archaeologist
+              Description: Recons the codebase and writes the discovery brief and convention profile.
+              Instructions: |
+                You are a codebase archaeologist. Your job is to understand an existing project
+                before any changes are made. Follow this procedure:
+
+                1. Read the entry point files listed in the task to orient yourself.
+                2. Use list_files and sub_agent_explore to map the directory structure — do NOT
+                   read every file; focus on understanding the shape of the codebase.
+                3. Identify: primary language and framework, naming conventions (snake_case vs camelCase),
+                   import style, test framework, build system, and key architectural patterns.
+                4. Write the convention profile to {FuseraftPaths.LocalConventions} with fields:
+                     language, framework, naming_convention, import_style, test_framework,
+                     build_command, lint_command, notes (array of key architectural observations).
+                5. Identify the files most likely to need modification for the given task.
+                6. Write the discovery brief to {FuseraftPaths.LocalBrownfieldBrief} with fields:
+                     summary — one paragraph describing the codebase structure
+                     in_scope_files — array of file paths likely relevant to the task
+                     dependencies — key external dependencies to be aware of
+                     risks — array of fragility signals (e.g. no tests, circular deps, god objects)
+
+                When both files are written, call handoff(route_keyword: "RECON COMPLETE").
+              Model:
+                ModelId: {model}{Ep(endpoint, "        ")}
+              Plugins:
+                - FileSystem
+                - Search
+                - SubAgent
+                - Handoff
+              FunctionChoice: required
+        {AgentOptions}
+            - Name: Planner
+              Description: Designs the targeted change based on the discovery brief.
+              Instructions: |
+                You are a software architect working on an existing codebase. Your job is to:
+                1. Read {FuseraftPaths.LocalBrownfieldBrief} to understand the codebase shape and risks.
+                2. Read {FuseraftPaths.LocalConventions} to understand the project's conventions — follow them exactly.
+                3. Use sub_agent_explore for any additional targeted questions about specific files.
+                4. Write a scoped brief to {FuseraftPaths.LocalBrief} with fields:
+                     goal — one-sentence description of the change
+                     findings — summary of relevant existing code to modify
+                     files_to_change — only the files that genuinely need to change
+                     acceptance_criteria — observable code properties the change must satisfy
+                     convention_notes — specific conventions to follow from the profile
+                When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
+              Model:
+                ModelId: {model}{Ep(endpoint, "        ")}
+              Plugins:
+                - FileSystem
+                - Search
+                - SubAgent
+                - Handoff
+              FunctionChoice: required
+        {AgentOptions}
+            - Name: Developer
+              Description: Implements the change staying strictly within the scoped file list.
+              Instructions: |
+                You are a developer working carefully inside an existing codebase. Your job is to:
+                1. Read {FuseraftPaths.LocalBrief} — implement ONLY the files listed in files_to_change.
+                2. Read {FuseraftPaths.LocalConventions} — follow the project's naming, import, and style conventions exactly.
+                3. Use read_file to read existing files before modifying them — never overwrite blindly.
+                4. Use patch_file for surgical edits to existing files; use write_file only for new files.
+                5. Run the build command from the convention profile to confirm nothing is broken.
+                6. Commit with git_add and git_commit.
+                When done, call handoff(route_keyword: "HANDOFF TO REVIEWER").
+                If the brief is unclear, call handoff(route_keyword: "REPLAN REQUIRED").
+              Model:
+                ModelId: {model}{Ep(endpoint, "        ")}
+              Plugins:
+                - FileSystem
+                - Shell
+                - Git
+                - Changes
+                - Handoff
+              FunctionChoice: required
+        {AgentOptions}
+            - Name: Reviewer
+              Description: Code-review-only inspection against the brief and conventions.
+              Instructions: |
+                You are a principal engineer reviewing a change to an existing codebase. Your job is to:
+                1. Read each file listed in {FuseraftPaths.LocalBrief} under files_to_change.
+                2. Verify every acceptance criterion is satisfied by code inspection.
+                3. Check that the change follows conventions from {FuseraftPaths.LocalConventions}.
+                4. Confirm no files outside files_to_change were modified (use changes_read_latest).
+                Do NOT run shell commands — this is a code-inspection-only review.
+                If the change is correct, call handoff(route_keyword: "APPROVED").
+                If revision is needed, call handoff(route_keyword: "REVISION REQUIRED") and explain what to fix.
+                If the plan needs rethinking, call handoff(route_keyword: "REPLAN REQUIRED").
+              Model:
+                ModelId: {model}{Ep(endpoint, "        ")}
+              Plugins:
+                - FileSystem
+                - Changes
+                - Handoff
+              FunctionChoice: auto
+              ContextWindow:
+                TextOnly: true
+
+          Selection:
+            Type: statemachine
+            StateMachine:
+              Initial: Recon
+
+              States:
+                Recon:
+                  Agent: Archaeologist
+                  Transitions:
+                    - To: Planning
+                      Signal: "RECON COMPLETE"
+                      Contract: ReconComplete
+
+                Planning:
+                  Agent: Planner
+                  Transitions:
+                    - To: Implementation
+                      Signal: "HANDOFF TO DEVELOPER"
+                      Contract: BriefExists
+
+                Implementation:
+                  Agent: Developer
+                  Transitions:
+                    - To: Review
+                      Signal: "HANDOFF TO REVIEWER"
+                      Contract: ImplementationComplete
+                    - To: Planning
+                      Signal: "REPLAN REQUIRED"
+
+                Review:
+                  Agent: Reviewer
+                  Transitions:
+                    - To: Done
+                      Signal: APPROVED
+                    - To: Implementation
+                      Signal: "REVISION REQUIRED"
+                    - To: Planning
+                      Signal: "REPLAN REQUIRED"
+
+                Done:
+                  Agent: Reviewer
+                  Terminal: true
+
+          Termination:
+            Type: composite
+            Strategies:
+              - Type: regex
+                Pattern: "\\bAPPROVED\\b"
+                AgentNames: [Reviewer]
+              - Type: maxiterations
+                MaxIterations: 60
         """;
 
     private static string Designer(string model, string? endpoint) => $"""
@@ -935,7 +1151,7 @@ internal static class InitTemplates
                 Name (required), Instructions (required), Description (one sentence, used by LLM selectors),
                 Model.ModelId, Plugins (list), FunctionChoice (auto|required|none — use required for action
                 agents to prevent fabricated tool output), TrustScore (0.0–1.0, default 0.7),
-                Capabilities (per-plugin tool filter, e.g. FileSystem: [read]),
+                Capabilities (per-plugin tool filter, e.g. FileSystem: [read_file]),
                 ContextWindow.TextOnly (strip tool frames from history — useful for review agents),
                 MaxToolCallsPerTurn, MaxInTurnContextTokens, EnableMemory, SubAgentModel, SubAgentPlugins,
                 RemoteAgent.Url (delegate to remote A2A endpoint — ignores Model/Plugins/FunctionChoice/Capabilities).
@@ -955,9 +1171,20 @@ internal static class InitTemplates
                 - llm: LLM decides when to stop.
 
                 EVIDENCE CONTRACTS (optional, for production pipelines):
-                EvidenceStore.Path: path to evidence graph JSON.
+                EvidenceStore.Path: {FuseraftPaths.LocalEvidence}
                 Contracts[]: Name + Requires[] (FileExists, FilesWritten, CommandSucceeded, TestReport).
                 Transitions reference a Contract name to gate state advancement.
+
+                BROWNFIELD (for existing codebases):
+                Add a Brownfield block with EntryPoints and SeedEnvelopeFromBrief: true.
+                Add an Archaeologist agent that writes {FuseraftPaths.LocalBrownfieldBrief} and
+                {FuseraftPaths.LocalConventions} before the Planner runs.
+                See the 'brownfield' template for a complete example.
+
+                STANDARD PATHS:
+                Brief: {FuseraftPaths.LocalBrief}, TestReport: {FuseraftPaths.LocalTestReport},
+                Changes: {FuseraftPaths.LocalChanges}, Evidence: {FuseraftPaths.LocalEvidence},
+                Events: {FuseraftPaths.LocalEventsLog}
 
                 COMMON AGENT PATTERNS:
                 - Planner: FunctionChoice required, Plugins: FileSystem + Search + SubAgent + Handoff
@@ -966,6 +1193,7 @@ internal static class InitTemplates
                 - Reviewer: FunctionChoice auto, ContextWindow.TextOnly true, Plugins: FileSystem + Changes + Handoff
                 - Researcher: Plugins: FileSystem + Search + Http + Scratchpad + Handoff
                 - Writer: Plugins: FileSystem + Search + Handoff
+                - Archaeologist: FunctionChoice required, Plugins: FileSystem + Search + SubAgent + Handoff
 
                 RULES:
                 - Never invent plugin names or field names. Use only those listed above.
@@ -984,7 +1212,7 @@ internal static class InitTemplates
                 - Search
                 - SubAgent
               Capabilities:
-                Shell: [run]
+                Shell: [shell_run]
 
           Selection:
             Type: roundrobin

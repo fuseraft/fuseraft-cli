@@ -12,7 +12,7 @@ public sealed class InitSettings : CommandSettings
     public string? OutputPath { get; set; }
 
     [CommandOption("-t|--template")]
-    [Description("Team template: dev-team, research, devops, content, minimal, code-research, magentic, designer.")]
+    [Description("Team template: dev-team, research, devops, content, minimal, code-research, magentic, brownfield, designer.")]
     public string? Template { get; set; }
 
     [CommandOption("-m|--model")]
@@ -52,6 +52,8 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
             "Planner → Developer → Reviewer for exploratory or targeted code changes — no test execution required"),
         new("magentic",      "Magentic Team",
             "AI-managed team: a manager LLM plans and coordinates participants dynamically"),
+        new("brownfield",    "Brownfield Codebase Pipeline",
+            "Archaeologist recons the codebase → Planner → Developer (change-envelope enforced) → Reviewer"),
         new("designer",      "Orchestration Designer",
             "A single agent that helps you design, write, and validate fuseraft orchestration configs"),
     ];
@@ -186,6 +188,9 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
 
     private static string DetectDefaultModel()
     {
+        var saved = UserConfigStore.Load().Config?.ModelId;
+        if (!string.IsNullOrWhiteSpace(saved)) return saved;
+
         foreach (var (envVar, model) in ProviderDefaults)
             if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(envVar)))
                 return model;
