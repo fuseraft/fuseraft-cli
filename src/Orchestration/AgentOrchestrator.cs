@@ -385,6 +385,27 @@ public sealed class AgentOrchestrator(
                         output_tokens = agentMessage.Usage?.OutputTokens,
                     });
 
+            // Emit reasoning content when the model produced any (e.g. xAI reasoning models).
+            // Capped at 8 000 chars to keep events.jsonl compact for long reasoning traces.
+            if (eventEmitter is not null)
+            {
+                const int MaxReasoningChars = 8_000;
+                var reasoningText = string.Concat(
+                    response.Messages
+                        .SelectMany(m => m.Contents.OfType<TextReasoningContent>())
+                        .Select(r => r.Text));
+                if (!string.IsNullOrWhiteSpace(reasoningText))
+                {
+                    var truncated = reasoningText.Length > MaxReasoningChars
+                        ? reasoningText[..MaxReasoningChars] + $"\n[TRUNCATED — {reasoningText.Length:N0} chars total]"
+                        : reasoningText;
+                    await eventEmitter.EmitAsync("reasoning",
+                        agent:   agentMessage.AgentName,
+                        turn:    agentMessage.TurnIndex,
+                        payload: new { text = truncated });
+                }
+            }
+
             // Flush change-tracking middleware queue for this turn to disk.
             if (changeTracker is not null)
             {

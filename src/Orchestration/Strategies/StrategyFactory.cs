@@ -15,12 +15,14 @@ namespace fuseraft.Orchestration.Strategies;
 /// <summary>
 /// Builds agent selection and termination strategies from configuration.
 /// </summary>
-public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatClient, EventEmitter? eventEmitter = null, ILoggerFactory? loggerFactory = null, GovernanceKernel? governanceKernel = null, IHumanApprovalService? humanApprovalService = null, EvidenceStore? evidenceStore = null)
+public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatClient, EventEmitter? eventEmitter = null, ILoggerFactory? loggerFactory = null, GovernanceKernel? governanceKernel = null, IHumanApprovalService? humanApprovalService = null, EvidenceStore? evidenceStore = null, TestSelectorConfig? testSelector = null, string? sandboxRoot = null)
 {
     private readonly EventEmitter? _eventEmitter = eventEmitter;
     private readonly GovernanceKernel? _governanceKernel = governanceKernel;
     private readonly IHumanApprovalService? _humanApprovalService = humanApprovalService;
     private readonly EvidenceStore? _evidenceStore = evidenceStore;
+    private readonly TestSelectorConfig? _testSelector = testSelector;
+    private readonly string? _sandboxRoot = sandboxRoot;
 
     // Selection
 
@@ -68,11 +70,11 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
         if (config.Routes is not { Count: > 0 })
             throw new InvalidOperationException("Keyword selection strategy requires at least one entry in 'Routes'.");
 
-        var validators = BuildValidators(validationConfig);
+        var validators = BuildValidators(validationConfig, testSelector: _testSelector, sandboxRoot: _sandboxRoot);
 
         // Build the contract engine once — shared across all routes that reference contracts.
         ContractEngine? contractEngine = contracts is { Count: > 0 }
-            ? new ContractEngine(contracts, validationConfig, _evidenceStore)
+            ? new ContractEngine(contracts, validationConfig, _evidenceStore, _testSelector, _sandboxRoot)
             : null;
 
         var routes = config.Routes
@@ -214,7 +216,7 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
         }
 
         ContractEngine? contractEngine = contracts is { Count: > 0 }
-            ? new ContractEngine(contracts, validationConfig, _evidenceStore)
+            ? new ContractEngine(contracts, validationConfig, _evidenceStore, _testSelector, _sandboxRoot)
             : null;
 
         var strategyLogger = loggerFactory?.CreateLogger<StateMachineSelectionStrategy>();
@@ -223,7 +225,9 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
 
     private static Dictionary<string, IRoutingValidator> BuildValidators(
         ValidationConfig? config,
-        bool isTermination = false)
+        bool isTermination = false,
+        TestSelectorConfig? testSelector = null,
+        string? sandboxRoot = null)
     {
         var registry = new Dictionary<string, IRoutingValidator>(StringComparer.OrdinalIgnoreCase)
         {
@@ -255,6 +259,14 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
             registry["RequireReviewJudgement"]   = new RequireReviewJudgementValidator();
         }
 
+        if (testSelector is { FindRelatedCommand.Length: > 0 })
+        {
+            registry["RequireRelatedTestsPass"] = new RequireRelatedTestsPassValidator(
+                testSelector,
+                changeLogPath: config?.ChangeLogPath,
+                sandboxRoot: sandboxRoot);
+        }
+
         return registry;
     }
 
@@ -281,7 +293,7 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
 
         if (validatorNames is not null && config.Type != "maxiterations")
         {
-            var validatorRegistry = BuildValidators(validationConfig, isTermination: true);
+            var validatorRegistry = BuildValidators(validationConfig, isTermination: true, testSelector: _testSelector, sandboxRoot: _sandboxRoot);
             var validatorList = validatorNames
                 .Select(name => validatorRegistry.TryGetValue(name, out var v) ? v : null)
                 .Where(v => v is not null)

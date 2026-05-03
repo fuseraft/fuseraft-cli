@@ -180,9 +180,11 @@ public record KeywordRoute
     /// Built-in validators: <c>"RequireWriteFile"</c> (blocks HANDOFF TO TESTER unless
     /// the agent called <c>write_file</c> this turn), <c>"RequireShellPass"</c> (blocks
     /// unless a shell command exited 0 this turn), <c>"RequireBrief"</c> (blocks
-    /// HANDOFF TO DEVELOPER unless <c>brief.json</c> exists with valid content), and
+    /// HANDOFF TO DEVELOPER unless <c>brief.json</c> exists with valid content),
     /// <c>"TestReportValid"</c> (blocks HANDOFF TO REVIEWER unless <c>test-report.json</c>
-    /// is structurally sound).
+    /// is structurally sound), and <c>"RequireRelatedTestsPass"</c> (runs incremental tests
+    /// scoped to changed files using <c>TestSelector.FindRelatedCommand</c> — requires
+    /// <c>TestSelector</c> to be configured at the orchestration level).
     /// When null or omitted (and <see cref="Validators"/> is also empty) no validation is
     /// performed for this route.
     /// </summary>
@@ -348,7 +350,8 @@ public record TerminationStrategyConfig
     /// If validation fails the error is injected into the conversation and the agent
     /// is re-invoked, giving it a chance to correct before termination is allowed.
     /// Built-in validators: <c>"RequireShellPass"</c>, <c>"RequireWriteFile"</c>,
-    /// <c>"TestReportValid"</c>, <c>"RequireReviewJudgement"</c>. Only meaningful on
+    /// <c>"TestReportValid"</c>, <c>"RequireReviewJudgement"</c>, <c>"RequireRelatedTestsPass"</c>.
+    /// Only meaningful on
     /// <c>regex</c> strategies; ignored on <c>maxiterations</c>.
     /// </summary>
     public string? Validator { get; init; }

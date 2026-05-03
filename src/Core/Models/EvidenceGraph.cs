@@ -43,6 +43,8 @@ public record EvidenceNode
     ///   <item><c>CommandRun</c> — a shell command was executed.</item>
     ///   <item><c>GitCommit</c> — a git commit was made.</item>
     ///   <item><c>TestResult</c> — a test result was recorded in the test report.</item>
+    ///   <item><c>SymbolDefinition</c> — a symbol was analyzed during recon (name, kind, file).</item>
+    ///   <item><c>SymbolReference</c> — a cross-file reference was mapped by the Archaeologist (source file, symbol name, target file).</item>
     /// </list>
     /// </summary>
     public string NodeType { get; init; } = string.Empty;
@@ -108,6 +110,23 @@ public record EvidenceNode
     /// against CommandRun nodes to detect fabricated results.
     /// </summary>
     public string? Evidence { get; init; }
+
+    // SymbolDefinition / SymbolReference fields
+
+    /// <summary>Symbol name. Set for SymbolDefinition and SymbolReference nodes.</summary>
+    public string? SymbolName { get; init; }
+
+    /// <summary>
+    /// Symbol kind. Set for SymbolDefinition nodes.
+    /// Expected values: <c>"function"</c>, <c>"class"</c>, <c>"interface"</c>, <c>"type"</c>, <c>"variable"</c>.
+    /// </summary>
+    public string? SymbolKind { get; init; }
+
+    /// <summary>
+    /// File that defines the referenced symbol. Set for SymbolReference nodes.
+    /// <see cref="Path"/> carries the file where the reference occurs.
+    /// </summary>
+    public string? TargetFile { get; init; }
 }
 
 /// <summary>

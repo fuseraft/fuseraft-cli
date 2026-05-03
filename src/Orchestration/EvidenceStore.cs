@@ -157,6 +157,39 @@ public sealed class EvidenceStore
             n => string.Equals(n.NodeType, "TestResult", StringComparison.OrdinalIgnoreCase),
             ct);
 
+    /// <summary>
+    /// Returns all symbol-dependency nodes related to <paramref name="filePath"/>:
+    /// every <c>SymbolDefinition</c> node whose <c>Path</c> matches the file, plus
+    /// every <c>SymbolReference</c> node where the reference site (<c>Path</c>) or the
+    /// definition site (<c>TargetFile</c>) matches the file.
+    /// Not session-scoped — symbol nodes written by the Archaeologist persist across
+    /// sessions and remain valid for the lifetime of the discovery brief.
+    /// </summary>
+    public async Task<IReadOnlyList<EvidenceNode>> QuerySymbolDependenciesAsync(
+        string filePath,
+        CancellationToken ct = default)
+    {
+        var graph = await LoadAsync(ct);
+        return graph.Nodes
+            .Where(n =>
+                (string.Equals(n.NodeType, "SymbolDefinition", StringComparison.OrdinalIgnoreCase)
+                    && PathsMatch(n.Path, filePath)) ||
+                (string.Equals(n.NodeType, "SymbolReference", StringComparison.OrdinalIgnoreCase)
+                    && (PathsMatch(n.Path, filePath) || PathsMatch(n.TargetFile, filePath))))
+            .ToList();
+    }
+
+    // Simple path equivalence: matches on equal, suffix, or prefix normalization.
+    private static bool PathsMatch(string? a, string? b)
+    {
+        if (a is null || b is null) return false;
+        a = a.Replace('\\', '/').TrimStart('.', '/');
+        b = b.Replace('\\', '/').TrimStart('.', '/');
+        return string.Equals(a, b, StringComparison.OrdinalIgnoreCase)
+            || a.EndsWith("/" + b, StringComparison.OrdinalIgnoreCase)
+            || b.EndsWith("/" + a, StringComparison.OrdinalIgnoreCase);
+    }
+
     // Helpers
 
     internal static string? HashContent(string? content)

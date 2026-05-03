@@ -99,7 +99,14 @@ public record ContractPredicate
 {
     /// <summary>
     /// Predicate type. One of: <c>FilesWritten</c>, <c>CommandSucceeded</c>,
-    /// <c>FileExists</c>, <c>TestReport</c>.
+    /// <c>FileExists</c>, <c>TestReport</c>, <c>RelatedTestsPass</c>.
+    /// <para>
+    /// <c>RelatedTestsPass</c> runs incremental test selection scoped to the current
+    /// session's changed files using <c>TestSelector.FindRelatedCommand</c>, then
+    /// executes the discovered tests via <c>TestSelector.FullSuiteCommand</c>.
+    /// Requires both <c>TestSelector</c> fields to be set at the orchestration level.
+    /// No additional predicate fields are needed beyond <c>Type</c>.
+    /// </para>
     /// </summary>
     public string Type { get; init; } = string.Empty;
 
