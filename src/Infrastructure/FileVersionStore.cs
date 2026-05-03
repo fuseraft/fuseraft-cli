@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging;
 
 namespace fuseraft.Infrastructure;
 
@@ -25,6 +26,7 @@ public sealed class FileVersionStore
 {
     private readonly string _storePath;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly ILogger<FileVersionStore>? _logger;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -32,9 +34,10 @@ public sealed class FileVersionStore
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    public FileVersionStore(string storePath)
+    public FileVersionStore(string storePath, ILogger<FileVersionStore>? logger = null)
     {
         _storePath = storePath;
+        _logger    = logger;
     }
 
     /// <summary>
@@ -114,7 +117,7 @@ public sealed class FileVersionStore
         }
         catch (Exception ex)
         {
-            await Console.Error.WriteLineAsync($"[fuseraft] FileVersionStore: failed to load '{_storePath}': {ex.Message} — version history reset.");
+            _logger?.LogWarning(ex, "FileVersionStore: failed to load '{Path}' — version history reset.", _storePath);
             return new Dictionary<string, FileVersionRecord>(StringComparer.OrdinalIgnoreCase);
         }
     }

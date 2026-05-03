@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -12,9 +13,7 @@ namespace fuseraft.Infrastructure;
 /// </summary>
 public sealed class JsonSessionStore(ILogger<JsonSessionStore> logger, string? sessionDir = null) : ISessionStore
 {
-    private readonly string SessionDir = sessionDir ?? Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".fuseraft", "sessions");
+    private readonly string SessionDir = sessionDir ?? FuseraftPaths.GlobalSessions;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

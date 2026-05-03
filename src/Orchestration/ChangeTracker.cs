@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using fuseraft.Core.Models;
 
 namespace fuseraft.Orchestration;
@@ -35,6 +36,7 @@ public sealed class ChangeTracker
     private readonly EventEmitter? _eventEmitter;
     private readonly EvidenceStore? _evidenceStore;
     private readonly IntentLog? _intentLog;
+    private readonly ILogger<ChangeTracker>? _logger;
     private readonly ConcurrentQueue<InvocationRecord> _pending = new();
     private readonly SemaphoreSlim _fileLock = new(1, 1);
     private string? _sessionId;
@@ -65,12 +67,13 @@ public sealed class ChangeTracker
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    public ChangeTracker(string logPath, EventEmitter? eventEmitter = null, EvidenceStore? evidenceStore = null, IntentLog? intentLog = null)
+    public ChangeTracker(string logPath, EventEmitter? eventEmitter = null, EvidenceStore? evidenceStore = null, IntentLog? intentLog = null, ILogger<ChangeTracker>? logger = null)
     {
         _logPath        = logPath;
         _eventEmitter   = eventEmitter;
         _evidenceStore  = evidenceStore;
         _intentLog      = intentLog;
+        _logger         = logger;
     }
 
     /// <summary>
@@ -104,7 +107,7 @@ public sealed class ChangeTracker
                 }
                 catch (Exception ex)
                 {
-                    await Console.Error.WriteLineAsync($"[fuseraft] ChangeTracker: failed to load '{_logPath}': {ex.Message} — change log reset.");
+                    _logger?.LogWarning(ex, "ChangeTracker: failed to load '{Path}' — change log reset.", _logPath);
                     log = new ChangeLog();
                 }
             }
@@ -224,7 +227,7 @@ public sealed class ChangeTracker
                 }
                 catch (Exception ex)
                 {
-                    await Console.Error.WriteLineAsync($"[fuseraft] ChangeTracker: failed to load '{_logPath}' during flush: {ex.Message} — change log reset.");
+                    _logger?.LogWarning(ex, "ChangeTracker: failed to load '{Path}' during flush — change log reset.", _logPath);
                     log = new ChangeLog();
                 }
             }

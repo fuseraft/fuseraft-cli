@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using fuseraft.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace fuseraft.Orchestration;
 
@@ -24,6 +25,7 @@ public sealed class IntentLog
 {
     private readonly string _logPath;
     private readonly SemaphoreSlim _fileLock = new(1, 1);
+    private readonly ILogger<IntentLog>? _logger;
     private string? _sessionId;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -33,9 +35,10 @@ public sealed class IntentLog
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public IntentLog(string logPath)
+    public IntentLog(string logPath, ILogger<IntentLog>? logger = null)
     {
         _logPath = logPath;
+        _logger  = logger;
     }
 
     public void SetSessionId(string sessionId) => _sessionId = sessionId;
@@ -147,7 +150,7 @@ public sealed class IntentLog
         }
         catch (Exception ex)
         {
-            await Console.Error.WriteLineAsync($"[fuseraft] IntentLog: failed to load '{_logPath}': {ex.Message} — intent history reset.");
+            _logger?.LogWarning(ex, "IntentLog: failed to load '{Path}' — intent history reset.", _logPath);
             return new IntentStore();
         }
     }

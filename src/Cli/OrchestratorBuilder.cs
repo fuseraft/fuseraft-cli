@@ -9,6 +9,7 @@ using AgentGovernance.Sre;
 using AgentGovernance.Trust;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
@@ -253,7 +254,7 @@ public static class OrchestratorBuilder
         // Evidence graph: structured typed evidence alongside the flat change log.
         EvidenceStore? evidenceStore = null;
         if (config.EvidenceStore is { } esCfg)
-            evidenceStore = new EvidenceStore(esCfg.Path);
+            evidenceStore = new EvidenceStore(esCfg.Path, loggerFactory.CreateLogger<EvidenceStore>());
 
         // Change tracking: hook a filter into every agent kernel that records tool results.
         // Pass eventEmitter, evidenceStore, and intentLog so tracked tool calls emit flat
@@ -262,19 +263,19 @@ public static class OrchestratorBuilder
         IntentLog? intentLog = null;
         if (config.ChangeTracking is { } ctConfig)
         {
-            intentLog     = new IntentLog(ctConfig.ResolveIntentLogPath());
-            changeTracker = new ChangeTracker(ctConfig.Path, eventEmitter, evidenceStore, intentLog);
+            intentLog     = new IntentLog(ctConfig.ResolveIntentLogPath(), loggerFactory.CreateLogger<IntentLog>());
+            changeTracker = new ChangeTracker(ctConfig.Path, eventEmitter, evidenceStore, intentLog, loggerFactory.CreateLogger<ChangeTracker>());
             pluginRegistry.Register("Changes", () => new ChangesPlugin(ctConfig.Path));
         }
 
         // File version store: tracks monotonic write counters per file so agents can detect
         // concurrent-write conflicts via stat_file + write_file(baseVersion: N).
         // Path is derived from the (sandbox-resolved) change-tracking path so the store
-        // lands in the same .fuseraft directory as changes.json and intents.json.
+        // lands in the same .fuseraft/state directory as changes.json and intents.json.
         var versionStorePath = config.ChangeTracking is { } ct2
-            ? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(ct2.Path)) ?? ".fuseraft", "file_versions.json")
-            : ".fuseraft/file_versions.json";
-        var fileVersionStore = new fuseraft.Infrastructure.FileVersionStore(versionStorePath);
+            ? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(ct2.Path)) ?? FuseraftPaths.LocalState, "file_versions.json")
+            : FuseraftPaths.LocalFileVersions;
+        var fileVersionStore = new fuseraft.Infrastructure.FileVersionStore(versionStorePath, loggerFactory.CreateLogger<fuseraft.Infrastructure.FileVersionStore>());
 
         // Re-configure the FileSystem plugin with the version store so write_file and
         // stat_file can participate in version-aware conflict detection.
@@ -348,8 +349,8 @@ public static class OrchestratorBuilder
 
         var identityRegistry  = new IdentityRegistry();
         var providerErrorLog  = config.Events is { } evtPath
-            ? Path.Combine(Path.GetDirectoryName(evtPath.Path) ?? ".fuseraft", "provider-errors.jsonl")
-            : ".fuseraft/provider-errors.jsonl";
+            ? Path.Combine(Path.GetDirectoryName(evtPath.Path) ?? FuseraftPaths.LocalLogs, "provider_errors.jsonl")
+            : FuseraftPaths.LocalProviderErrors;
         var chatClientFactory = new ChatClientFactory(config.Models.Count > 0 ? config.Models : null, providerErrorLog, eventEmitter);
 
         // Eagerly resolve every agent's model config so that undefined aliases

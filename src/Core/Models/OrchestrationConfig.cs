@@ -1,3 +1,5 @@
+using fuseraft.Core;
+
 namespace fuseraft.Core.Models;
 
 /// <summary>
@@ -259,7 +261,7 @@ public record EventsConfig
     /// File path where JSONL events are appended. The directory is created automatically.
     /// Example: <c>".fuseraft/events.jsonl"</c>
     /// </summary>
-    public string Path { get; init; } = ".fuseraft/events.jsonl";
+    public string Path { get; init; } = FuseraftPaths.LocalEventsLog;
 }
 
 /// <summary>

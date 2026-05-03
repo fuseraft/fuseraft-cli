@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using fuseraft.Cli.Display;
+using fuseraft.Core;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.KeyStore;
@@ -118,7 +119,7 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
 
         var cwd        = Directory.GetCurrentDirectory();
         var sessionId  = GenerateSessionId();
-        var eventsPath = Path.Combine(cwd, ".fuseraft", "repl_events.jsonl");
+        var eventsPath = Path.Combine(cwd, FuseraftPaths.LocalReplEventsLog);
 
         AnsiConsole.MarkupLine($"[dim]Model:[/] [bold]{Markup.Escape(modelId)}[/]");
         if (initialTools.Count > 0)

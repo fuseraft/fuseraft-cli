@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using fuseraft.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace fuseraft.Orchestration;
 
@@ -26,6 +27,7 @@ public sealed class EvidenceStore
 {
     private readonly string _graphPath;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly ILogger<EvidenceStore>? _logger;
     private string? _sessionId;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -34,9 +36,10 @@ public sealed class EvidenceStore
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    public EvidenceStore(string graphPath)
+    public EvidenceStore(string graphPath, ILogger<EvidenceStore>? logger = null)
     {
         _graphPath = graphPath;
+        _logger    = logger;
     }
 
     /// <summary>
@@ -174,7 +177,7 @@ public sealed class EvidenceStore
         }
         catch (Exception ex)
         {
-            await Console.Error.WriteLineAsync($"[fuseraft] EvidenceStore: failed to load '{_graphPath}': {ex.Message} — evidence graph reset.");
+            _logger?.LogWarning(ex, "EvidenceStore: failed to load '{Path}' — evidence graph reset.", _graphPath);
             return new EvidenceGraph();
         }
     }

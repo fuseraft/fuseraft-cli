@@ -1,3 +1,5 @@
+using fuseraft.Core;
+
 namespace fuseraft.Core.Models;
 
 /// <summary>
@@ -17,7 +19,7 @@ public record ChangeTrackingConfig
     /// Relative paths are resolved against the current working directory.
     /// Defaults to <c>.fuseraft/changes.json</c>.
     /// </summary>
-    public string Path { get; init; } = ".fuseraft/changes.json";
+    public string Path { get; init; } = FuseraftPaths.LocalChanges;
 
     /// <summary>
     /// Path to write the intent log JSON file.
@@ -35,7 +37,7 @@ public record ChangeTrackingConfig
     public string ResolveIntentLogPath()
     {
         if (IntentLogPath is { Length: > 0 }) return IntentLogPath;
-        var dir = System.IO.Path.GetDirectoryName(Path) ?? ".fuseraft";
+        var dir = System.IO.Path.GetDirectoryName(Path) ?? FuseraftPaths.LocalState;
         return System.IO.Path.Combine(dir, "intents.json");
     }
 }

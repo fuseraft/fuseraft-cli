@@ -443,7 +443,7 @@ The run stops before the next agent turn if the cumulative token count (input + 
 
 ```yaml
 ChangeTracking:
-  Path: .fuseraft/changes.json
+  Path: .fuseraft/state/changes.json
 ```
 
 When present, the orchestrator attaches a `ChangeTracker` to every agent's kernel. After each agent text turn it flushes a structured JSON entry recording exactly which tool calls completed: files written or deleted, shell commands run (with pass/fail status), and git commits made.
@@ -453,11 +453,11 @@ The change log is consumed in two ways:
 - **Agents** — add `"Changes"` to a Tester or Reviewer agent's `Plugins` list and call `changes_read_latest` to see what the previous agent did. See [Plugins](plugins.md#changes).
 - **Validators** — set `Validation.ChangeLogPath` to the same path to enable check 8 in `TestReportValid` (cross-referencing report commands against actually-run commands) and to allow `RequireAllFilesWritten` to count files written in prior turns.
 
-**Intent log** — Alongside `changes.json`, the orchestrator also writes `.fuseraft/intents.json`. Unlike the change log (which records what happened *after* a tool call returns), the intent log records what is *about to happen* before the call executes, then updates the entry `APPLIED` or `FAILED` when it completes. On session resume, any `PENDING` entries represent operations that were in-flight at the time of interruption and can be replayed or skipped. The intent log also backs the `"intent"` compaction mode. See [Conversation compaction](#conversation-compaction).
+**Intent log** — Alongside `changes.json`, the orchestrator also writes `.fuseraft/state/intents.json`. Unlike the change log (which records what happened *after* a tool call returns), the intent log records what is *about to happen* before the call executes, then updates the entry `APPLIED` or `FAILED` when it completes. On session resume, any `PENDING` entries represent operations that were in-flight at the time of interruption and can be replayed or skipped. The intent log also backs the `"intent"` compaction mode. See [Conversation compaction](#conversation-compaction).
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `Path` | string | `.fuseraft/changes.json` | Path to write the change log. Relative paths resolve against the current working directory. |
+| `Path` | string | `.fuseraft/state/changes.json` | Path to write the change log. Relative paths resolve against the current working directory. |
 | `IntentLogPath` | string | _(derived)_ | Path to write the intent log. When omitted, the path is derived from `Path` by replacing the filename with `intents.json` in the same directory. |
 
 **Omit** `ChangeTracking` entirely if you don't need cross-agent observability or the command cross-reference check.
@@ -470,8 +470,10 @@ Emit a structured JSONL stream of session events to a file on disk:
 
 ```yaml
 Events:
-  Path: .fuseraft/events.jsonl
+  Path: .fuseraft/logs/events.jsonl
 ```
+
+> **App log** — In addition to this configurable event stream, fuseraft-cli always writes `Warning`-level and higher diagnostic messages to `.fuseraft/logs/app.log` via an always-on Serilog file sink (5 MB per file, 3 retained). This includes store-corruption warnings from `ChangeTracker`, `IntentLog`, `EvidenceStore`, and `FileVersionStore`. No configuration needed.
 
 Each line is a JSON object:
 
@@ -551,7 +553,7 @@ Validation:
 |-------|------|---------|-------------|
 | `BriefPath` | string | `.fuseraft/brief.json` | Canonical path for the project brief. Required by `RequireBrief` and `TestReportValid`. |
 | `TestReportPath` | string | `.fuseraft/test-report.json` | Canonical path for the test report. Required by `TestReportValid`. |
-| `ChangeLogPath` | string | — | Path to `changes.json` produced by `ChangeTracking` (must match `ChangeTracking.Path`). Enables check 8 in `TestReportValid` and prior-turn file detection in `RequireAllFilesWritten`. |
+| `ChangeLogPath` | string | `.fuseraft/state/changes.json` | Path to `changes.json` produced by `ChangeTracking` (must match `ChangeTracking.Path`). Enables check 8 in `TestReportValid` and prior-turn file detection in `RequireAllFilesWritten`. |
 | `TestAssertionPatterns` | array | see above | Regex patterns that identify real assertion calls in test files. |
 
 See [Validators](validators.md) for full detail.
@@ -703,12 +705,12 @@ Enables a structured, queryable evidence graph alongside `changes.json`. When co
 
 ```yaml
 EvidenceStore:
-  Path: .fuseraft/evidence.json
+  Path: .fuseraft/state/evidence.json
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `Path` | string | `.fuseraft/evidence.json` | File path for the evidence graph JSON. The directory is created automatically. |
+| `Path` | string | `.fuseraft/state/evidence.json` | File path for the evidence graph JSON. The directory is created automatically. |
 
 **Node types recorded:**
 

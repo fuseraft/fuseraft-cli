@@ -2,14 +2,13 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using fuseraft.Core;
 
 namespace fuseraft.Infrastructure;
 
 public static class CrashDumper
 {
-    private static readonly string DumpDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".fuseraft", "crashdump");
+    private static string DumpDir => FuseraftPaths.GlobalCrashDumps;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

@@ -8,21 +8,22 @@ This document describes the architecture and design decisions behind fuseraft-cl
 
 1. [What It Is](#1-what-it-is)
 2. [Layer Map](#2-layer-map)
-3. [Configuration](#3-configuration)
-4. [Agent Construction](#4-agent-construction)
-5. [Orchestrators](#5-orchestrators)
-6. [Selection Strategies](#6-selection-strategies)
-7. [Termination Strategies](#7-termination-strategies)
-8. [Routing Validators](#8-routing-validators)
-9. [Session and Checkpoint Layer](#9-session-and-checkpoint-layer)
-10. [Conversation Compaction](#10-conversation-compaction)
-11. [Plugin System](#11-plugin-system)
-12. [Governance](#12-governance)
-13. [Change Tracking](#13-change-tracking)
-14. [Event Emission](#14-event-emission)
-15. [DevUI](#15-devui)
-16. [Microsoft Agent Framework Usage](#16-microsoft-agent-framework-usage)
-17. [Decisions Against Framework Features](#17-decisions-against-framework-features)
+3. [Directory Layout](#3-directory-layout)
+4. [Configuration](#4-configuration)
+5. [Agent Construction](#5-agent-construction)
+6. [Orchestrators](#6-orchestrators)
+7. [Selection Strategies](#7-selection-strategies)
+8. [Termination Strategies](#8-termination-strategies)
+9. [Routing Validators](#9-routing-validators)
+10. [Session and Checkpoint Layer](#10-session-and-checkpoint-layer)
+11. [Conversation Compaction](#11-conversation-compaction)
+12. [Plugin System](#12-plugin-system)
+13. [Governance](#13-governance)
+14. [Change Tracking](#14-change-tracking)
+15. [Event Emission](#15-event-emission)
+16. [DevUI](#16-devui)
+17. [Microsoft Agent Framework Usage](#17-microsoft-agent-framework-usage)
+18. [Decisions Against Framework Features](#18-decisions-against-framework-features)
 
 ---
 
@@ -74,7 +75,48 @@ Orchestration/
 
 ---
 
-## 3. Configuration
+## 3. Directory layout
+
+All runtime artifacts are written under `.fuseraft/` in the current working directory (project-local) or `~/.fuseraft/` in the user's home directory (global). The `FuseraftPaths` static class in `src/Core/FuseraftPaths.cs` is the single authoritative source for every path — config defaults and infrastructure classes all reference it.
+
+**Global (`~/.fuseraft/`)**
+
+| Path | Contents |
+|------|----------|
+| `~/.fuseraft/config` | Model ID, endpoint URL (no secrets) |
+| `~/.fuseraft/.key` | Plain-text fallback API key (mode 0600; used only when no keychain) |
+| `~/.fuseraft/sessions/` | Session checkpoint files (`<sessionId>.json`, mode 0600) |
+| `~/.fuseraft/crashdump/` | Crash dump JSON files |
+| `~/.fuseraft/scratchpad/` | Default per-agent scratchpad directory |
+| `~/.fuseraft/memory/repl/` | REPL persistent memories |
+| `~/.fuseraft/memory/agents/<name>/` | Per-agent persistent memories |
+
+**Local (`.fuseraft/` relative to CWD)**
+
+| Path | Contents |
+|------|----------|
+| `.fuseraft/logs/events.jsonl` | Structured JSONL session events (`EventEmitter`) |
+| `.fuseraft/logs/repl_events.jsonl` | REPL session events |
+| `.fuseraft/logs/provider_errors.jsonl` | LLM provider error records |
+| `.fuseraft/logs/app.log` | Warning+ diagnostic log (always-on Serilog file sink, 5 MB rolling, 3 retained) |
+| `.fuseraft/state/changes.json` | Change tracker: file/shell/git activity per turn |
+| `.fuseraft/state/intents.json` | Intent log: pre-execution records updated to APPLIED/FAILED |
+| `.fuseraft/state/evidence.json` | Evidence graph: typed nodes for contract evaluation |
+| `.fuseraft/state/file_versions.json` | Per-file monotonic write counters for conflict detection |
+| `.fuseraft/brief.json` | Planner brief (validator input) |
+| `.fuseraft/test-report.json` | Tester report (validator input) |
+| `.fuseraft/chatroom.jsonl` | Shared agent coordination log |
+| `.fuseraft/conventions.json` | Brownfield convention profile (auto-injected into agent prompts) |
+| `.fuseraft/brief.brownfield.json` | Brownfield discovery brief (`in_scope_files` seeds change envelope) |
+| `.fuseraft/memory_refs.json` | GUIDs of memories scoped to this working directory |
+| `.fuseraft/context/` | Context store entries and index |
+| `.fuseraft/summaries/` | File summaries written by FileSystem plugin |
+
+All paths are configurable via their corresponding config keys. The table above shows defaults.
+
+---
+
+## 5. Configuration
 
 Every session is driven by a single JSON or YAML file under the top-level `Orchestration` key. The file is loaded by `OrchestratorBuilder.BuildAsync` and bound to `OrchestrationConfig`.
 
@@ -120,7 +162,7 @@ Every session is driven by a single JSON or YAML file under the top-level `Orche
 
 ---
 
-## 4. Agent Construction
+## 6. Agent Construction
 
 `AgentFactory.Create(AgentConfig)` produces a fully configured `AIAgent` ready for use by any orchestrator.
 
@@ -145,7 +187,7 @@ Every session is driven by a single JSON or YAML file under the top-level `Orche
 
 ---
 
-## 5. Orchestrators
+## 6. Orchestrators
 
 `OrchestratorBuilder` selects among three orchestrators based on the config's `Selection.Type` and agent names. The selection order is:
 
@@ -279,7 +321,7 @@ START
 
 ---
 
-## 6. Selection Strategies
+## 7. Selection Strategies
 
 Built and returned by `StrategyFactory.CreateSelection`. All implement `IAgentSelector`.
 
@@ -321,7 +363,7 @@ Built and returned by `StrategyFactory.CreateSelection`. All implement `IAgentSe
 
 ---
 
-## 7. Termination Strategies
+## 8. Termination Strategies
 
 Built and returned by `StrategyFactory.CreateTermination`. All implement `ITerminationCondition`.
 
@@ -335,7 +377,7 @@ Termination strategies can be decorated with routing validators via the `Validat
 
 ---
 
-## 8. Routing Validators
+## 9. Routing Validators
 
 Validators implement `IRoutingValidator` and run synchronously before a route or termination fires. They examine external artifacts (change log, test report, brief file) rather than LLM output.
 
@@ -364,7 +406,7 @@ No component may bypass this pipeline. Correction messages injected at step 3 ar
 
 ---
 
-## 9. Session and Checkpoint Layer
+## 10. Session and Checkpoint Layer
 
 Every session is backed by a `SessionCheckpoint` persisted after each agent turn.
 
@@ -403,7 +445,7 @@ Every session is backed by a `SessionCheckpoint` persisted after each agent turn
 
 ---
 
-## 10. Conversation Compaction
+## 11. Conversation Compaction
 
 `ConversationCompactor` prevents context window exhaustion on long sessions by summarizing older turns using an LLM.
 
@@ -427,7 +469,7 @@ Compaction must never cause a previously valid route to become invalid, or a val
 
 ---
 
-## 11. Plugin System
+## 12. Plugin System
 
 Plugins are `AIFunction`-providing objects registered in `PluginRegistry` and referenced by name in `AgentConfig.Plugins`.
 
@@ -480,7 +522,7 @@ Example — a Reviewer that inspects files and git history but cannot write, del
 
 ---
 
-## 12. Governance
+## 13. Governance
 
 `GovernanceKernel` (from `Microsoft.AgentGovernance`) is constructed by `OrchestratorBuilder` and threaded through the entire stack.
 
@@ -503,7 +545,7 @@ Example — a Reviewer that inspects files and git history but cannot write, del
 
 ---
 
-## 13. Change Tracking
+## 14. Change Tracking
 
 `ChangeTracker` wraps every agent with a `CapturingMiddleware` that intercepts tool call results and records structured entries to a JSON change log.
 
@@ -513,20 +555,20 @@ Example — a Reviewer that inspects files and git history but cannot write, del
 - `ActiveSessionId` — current session ID
 - `Entries[]` — `{ Agent, TurnIndex, Timestamp, SessionId, FilesWritten[], FilesDeleted[], CommandsRun[], GitCommits[] }`
 
-**Intent log** (`intents.json`): Alongside the change log, `CapturingMiddleware` also writes to an `IntentLog` — one entry per tracked tool call, written *before* the call executes with `Status: Pending`, then updated to `Applied` or `Failed` once the call returns.
+**Intent log** (`.fuseraft/state/intents.json`): Alongside the change log, `CapturingMiddleware` also writes to an `IntentLog` — one entry per tracked tool call, written *before* the call executes with `Status: Pending`, then updated to `Applied` or `Failed` once the call returns.
 
 - `BeginTurn(agentName, turnIndex)` must be called before each `agent.RunAsync` so middleware has the correct turn index. All three orchestrators (`AgentOrchestrator`, `MagenticOrchestrator`, `WorkflowOrchestrator`) call this immediately after `OnAgentTurnStarting()`.
 - On session resume, any `Pending` entries indicate operations that were in-flight at interruption time.
 - The `"intent"` compaction mode reads from this log to produce a deterministic `✓`/`✗` summary — no LLM call required.
-- If the intent log file is corrupt or unreadable on load, the failure is written to stderr and the store resets to empty for the session.
+- If the intent log file is corrupt or unreadable on load, the failure is emitted via `ILogger<IntentLog>` at Warning level and the store resets to empty for the session.
 
-**`ChangeLog` load failures** (`changes.json`): Both the session-init path (setting `ActiveSessionId`) and the per-entry flush path read the existing change log before appending. If either read fails, the failure is written to stderr (`[fuseraft] ChangeTracker: ...`) and the log resets to empty for that operation. The `EvidenceStore` (`evidence.json`) follows the same pattern — a corrupt graph is logged to stderr and resets to empty.
+**`ChangeLog` load failures** (`.fuseraft/state/changes.json`): Both the session-init path (setting `ActiveSessionId`) and the per-entry flush path read the existing change log before appending. If either read fails, the failure is emitted via `ILogger<ChangeTracker>` at Warning level and the log resets to empty for that operation. `EvidenceStore` and `FileVersionStore` follow the same pattern. All warnings route to `.fuseraft/logs/app.log` via the always-on Serilog file sink so they survive past the terminal session.
 
-**`IntentStore` schema** (`intents.json`):
+**`IntentStore` schema** (`.fuseraft/state/intents.json`):
 - `ActiveSessionId`
 - `Entries[]` — `{ IntentId, Timestamp, Agent, TurnIndex, SessionId, Operation: { FunctionName, TargetPath, ArgsSummary }, Status, ErrorMessage, CompletedAt }`
 
-**`FileVersionStore`** (`file_versions.json`): A lightweight per-file version counter, also initialized by `OrchestratorBuilder`. Every successful `write_file` call increments the counter. Agents call `stat_file` to probe the current version and pass `baseVersion` to `write_file` to detect concurrent-write conflicts. If the store file is corrupt or unreadable, the load failure is written to stderr and the counter resets to zero for the session — agents will see all files at version 0 and conflict detection will not fire until files are written again.
+**`FileVersionStore`** (`.fuseraft/state/file_versions.json`): A lightweight per-file version counter, also initialized by `OrchestratorBuilder`. Every successful `write_file` call increments the counter. Agents call `stat_file` to probe the current version and pass `baseVersion` to `write_file` to detect concurrent-write conflicts. If the store file is corrupt or unreadable, the failure is emitted via `ILogger<FileVersionStore>` at Warning level and the counter resets to zero for the session — agents will see all files at version 0 and conflict detection will not fire until files are written again.
 
 **Downstream use:** The `Changes` plugin exposes `changes_read` and `changes_read_latest` so agents (typically Tester or Reviewer) can read what previous agents actually did rather than inferring it from chat history. `RequireShellPass` and `RequireWriteFile` validators also read this log to verify deterministic pre-conditions before routes fire.
 
@@ -534,7 +576,7 @@ Example — a Reviewer that inspects files and git history but cannot write, del
 
 ---
 
-## 14. Event Emission
+## 15. Event Emission
 
 `EventEmitter` is the primary mechanism for extending orchestration behavior without modifying core logic. It appends structured JSONL events to a configured file path; external systems can tail this file and react to events in real time. All writes are serialized through a `SemaphoreSlim`. Errors are swallowed — event emission is best-effort and never disrupts the session.
 
@@ -640,7 +682,7 @@ Event consumers may inject messages, trigger external systems, or enforce additi
 
 ---
 
-## 15. DevUI
+## 16. DevUI
 
 `DevUIServer` is a lightweight ASP.NET Core server (started inline via `WebApplication.CreateSlimBuilder`) that provides real-time session visualization in a browser.
 
@@ -658,7 +700,7 @@ Event consumers may inject messages, trigger external systems, or enforce additi
 
 ---
 
-## 16. Microsoft Agent Framework Usage
+## 17. Microsoft Agent Framework Usage
 
 Fuseraft-cli is built on MAF (`Microsoft.Agents.AI`, `Microsoft.Agents.AI.Workflows`) with optional A2A client federation via `Microsoft.Agents.AI.A2A`.
 
@@ -708,7 +750,7 @@ Fuseraft-cli is built on MAF (`Microsoft.Agents.AI`, `Microsoft.Agents.AI.Workfl
 
 ---
 
-## 17. Decisions Against Framework Features
+## 18. Decisions Against Framework Features
 
 A summary of explicit decisions **not** to use certain framework capabilities, with rationale.
 

@@ -1,3 +1,5 @@
+using fuseraft.Core;
+
 namespace fuseraft.Core.Models;
 
 /// <summary>
@@ -10,5 +12,5 @@ public record ChatroomConfig
     /// The directory is created automatically.
     /// Example: <c>".fuseraft/chatroom.jsonl"</c>
     /// </summary>
-    public string Path { get; init; } = ".fuseraft/chatroom.jsonl";
+    public string Path { get; init; } = FuseraftPaths.LocalChatroom;
 }
