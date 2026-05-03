@@ -55,12 +55,6 @@ Pipelines range from a single task-routed assistant:
 
 ---
 
-## REPL
-
-![REPL session](docs/.assets/repl.gif)
-
----
-
 ## Features
 
 - Coordinates any number of agents via keyword routing, state machine routing, LLM-based selection, or fully autonomous Magentic orchestration
