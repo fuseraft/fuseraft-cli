@@ -112,8 +112,9 @@ public sealed class FileVersionStore
                 ? new Dictionary<string, FileVersionRecord>(dict, StringComparer.OrdinalIgnoreCase)
                 : new Dictionary<string, FileVersionRecord>(StringComparer.OrdinalIgnoreCase);
         }
-        catch
+        catch (Exception ex)
         {
+            await Console.Error.WriteLineAsync($"[fuseraft] FileVersionStore: failed to load '{_storePath}': {ex.Message} — version history reset.");
             return new Dictionary<string, FileVersionRecord>(StringComparer.OrdinalIgnoreCase);
         }
     }

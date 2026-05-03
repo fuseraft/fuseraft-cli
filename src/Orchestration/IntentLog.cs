@@ -145,7 +145,11 @@ public sealed class IntentLog
             var raw = await File.ReadAllTextAsync(_logPath, ct);
             return JsonSerializer.Deserialize<IntentStore>(raw, JsonOpts) ?? new IntentStore();
         }
-        catch { return new IntentStore(); }
+        catch (Exception ex)
+        {
+            await Console.Error.WriteLineAsync($"[fuseraft] IntentLog: failed to load '{_logPath}': {ex.Message} — intent history reset.");
+            return new IntentStore();
+        }
     }
 
     private async Task<IntentStore> LoadReadOnlyAsync(CancellationToken ct)
