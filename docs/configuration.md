@@ -110,6 +110,7 @@ Each entry in `Agents` configures one participant in the group chat.
 
 | Field | Type | Default | Required | Description |
 |-------|------|---------|----------|-------------|
+| `AgentFile` | string | — | no | Path to a YAML file that provides the base agent definition. Relative paths resolve against the orchestration config's directory. Inline fields that differ from their defaults override the file; fields left at defaults are inherited. See [Agent files](#agent-files). |
 | `Name` | string | — | yes | Unique name used in routing and logs. |
 | `Instructions` | string | — | yes | System prompt defining the agent's persona and behavior. |
 | `Description` | string | — | no | Short description used by LLM selection strategies. |
@@ -155,6 +156,62 @@ Per-plugin tool filter. Keys are plugin names; values are arrays of capability t
 | `CodeExecution` | `read` (code_execution_check_docker) · `execute` (sandbox_run, repl_*) |
 
 Tools not in the capability map (e.g. MCP-registered tools) always pass through unfiltered.
+
+### Agent files
+
+`AgentFile` lets you extract a reusable agent definition into a stand-alone YAML file and reference it from any number of orchestration configs. Orchestration configs stay small; agents can be independently versioned, diffed, and shared across projects.
+
+**Agent file format** — the file is a plain YAML object with the same fields as an inline agent entry. No top-level wrapper key is required, though `Agent:` is accepted for tooling compatibility:
+
+```yaml
+# agents/reviewer.yaml
+Name: Reviewer
+Instructions: |
+  You are a senior engineer reviewing code changes for correctness,
+  test coverage, and adherence to project conventions.
+  ...
+Model:
+  ModelId: claude-opus-4-7
+Plugins:
+  - FileSystem
+  - Git
+  - Changes
+Capabilities:
+  FileSystem: [read]
+  Git:        [read]
+FunctionChoice: required
+TrustScore: 0.85
+```
+
+**Referencing from an orchestration config:**
+
+```yaml
+Agents:
+  - AgentFile: agents/reviewer.yaml   # loads the base definition above
+
+  - AgentFile: agents/reviewer.yaml   # same base, different model for this project
+    Model: claude-sonnet-4-6
+
+  - AgentFile: agents/developer.yaml
+    Name: LeadDeveloper               # rename the agent for this config's routing rules
+    MaxInTurnContextTokens: 40000     # tighter context cap for this environment
+```
+
+**Override semantics** — inline fields whose value differs from the field's default override the file; fields left at their defaults are inherited. The practical rules:
+
+| Field type | Inline overrides base when… |
+|------------|------------------------------|
+| string | inline is non-empty |
+| array / object | inline is non-empty |
+| nullable | inline is non-null |
+| int | inline is non-zero |
+| `TrustScore` | inline differs from `0.7` |
+| `FunctionChoice` | inline differs from `"auto"` |
+| `EnableMemory` | either inline or file is `true` |
+
+This means: to inherit a field from the file, simply omit it in the inline config. To override, set it explicitly.
+
+**Validation** — `fuseraft validate` resolves `AgentFile` paths and reports missing files as errors before the session starts.
 
 ### SubAgent
 

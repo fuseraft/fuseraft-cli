@@ -6,6 +6,16 @@ namespace fuseraft.Core.Models;
 public record AgentConfig
 {
     /// <summary>
+    /// Path to an external YAML file containing the base agent definition.
+    /// Relative paths are resolved against the directory that contains the
+    /// orchestration config file. Inline fields that differ from their default
+    /// values override the file; fields left at their defaults are inherited.
+    /// This lets commonly-reused agents (Archaeologist, Reviewer, etc.) live in
+    /// versioned stand-alone files and be referenced from many orchestration configs.
+    /// </summary>
+    public string? AgentFile { get; init; }
+
+    /// <summary>
     /// Unique name used to identify this agent within the group chat.
     /// </summary>
     public string Name { get; init; } = string.Empty;
