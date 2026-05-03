@@ -517,6 +517,8 @@ Compaction:
 | `Model` | object | first agent's model | Model used for generating the summary (`llm` and `hybrid` modes only). |
 | `Mode` | string | `"llm"` | Compaction mode. See below. |
 | `TokenBudget` | int | `80000` | Estimated token budget for `window` mode. Oldest message pairs are dropped until the total estimated token count (characters ÷ 4) falls within this limit. Ignored by all other modes. |
+| `IncludeReasoning` | bool | `false` | When `true`, reasoning excerpts from the compacted turns are prepended to the summary as a `[REASONING EXCERPTS]` block. Each excerpt is truncated to ~500 tokens so agents resuming after compaction can see the WHY behind prior decisions. Reads `reasoning` events from the session events log (`Events.Path`). Has no effect when `Events` is not configured. |
+| `IncludeSymbolGraph` | bool | `false` | When `true`, a `[SYMBOL DEPENDENCY GRAPH]` block is prepended to the summary (before `[REASONING EXCERPTS]` when both are enabled). The block lists every `SymbolDefinition` and `SymbolReference` node in the evidence graph for files written during the session, giving agents an explicit map of what symbols were in scope. Requires `EvidenceStore` and `ChangeTracking` to be configured. |
 
 **Compaction modes**
 
@@ -721,6 +723,8 @@ EvidenceStore:
 | `CommandRun` | Agent calls `shell_run` (exit code captured) |
 | `GitCommit` | Agent calls `git_commit` |
 | `TestResult` | Future: emitted by test report plugins |
+| `SymbolDefinition` | Agent calls `search_symbol` (auto-populated from results; one node per unique file found) |
+| `SymbolReference` | Agent calls `search_callers` (auto-populated from results; `TargetFile` resolved from existing `SymbolDefinition` nodes) |
 
 Nodes are linked by typed edges (`produced_by`, `verified_by`, `depends_on`) so contracts can express causal relationships rather than just presence checks.
 
@@ -761,6 +765,7 @@ Contracts are referenced by name from keyword route `Contracts` lists or from st
 | `CommandSucceeded` | `Pattern` | At least one shell command whose text matches any pipe-separated alternative in `Pattern` exited 0 this session. |
 | `FileExists` | `Path` | The file at `Path` exists on disk. |
 | `TestReport` | `NoFailures`, `HasAssertions` | `test-report.json` exists, has results, and satisfies the declared checks. |
+| `RelatedTestsPass` | _(none)_ | Resolves changed files for the session from `ChangeTracking`, discovers related test targets via `TestSelector.FindRelatedCommand`, runs them (falling back to `TestSelector.FullSuiteCommand`), and passes only when the test command exits 0. Requires `TestSelector` and `ChangeTracking` to be configured. |
 
 All predicates within a contract use AND semantics — every predicate must pass. All contracts on a route also use AND semantics.
 
@@ -986,7 +991,12 @@ TestSelector:
 | TypeScript (jest) | `jest --listTests --testPathPattern=$(dirname {file}) 2>/dev/null` |
 | Rust | `cargo test --list 2>/dev/null \| grep $(basename {file} .rs) \| head -20` |
 
-The `TestSelector` block is read by the Tester and Developer agents and referenced in their instructions. It does not automatically wire up a validator — use the convention profile's `test_command` for the `RequireShellPass` validator.
+The `TestSelector` block is used in two ways:
+
+- **Agent instructions** — referenced by Tester and Developer agents so they know which command to run.
+- **`RelatedTestsPass` contract predicate** — `TestSelector.FindRelatedCommand` and `FullSuiteCommand` are read automatically by the `RelatedTestsPass` predicate to discover and run targeted tests at handoff time. This is the recommended way to enforce incremental test coverage on brownfield projects without running the full suite on every turn.
+
+For simple "did any test pass" checks without test selection, use `RequireShellPass` with `RequiredCommandPattern` pointing at your test runner.
 
 ---
 
