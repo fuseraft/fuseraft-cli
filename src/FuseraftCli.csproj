@@ -1,0 +1,76 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>fuseraft</RootNamespace>
+    <AssemblyName>fuseraft</AssemblyName>
+    <AssemblyTitle>Fuseraft CLI</AssemblyTitle>
+    <Description>Production-grade multi-agent orchestration powered by Microsoft Agent Framework.</Description>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Microsoft Agent Framework -->
+    <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.3.0" />
+    <PackageReference Include="Microsoft.Agents.AI.Workflows" Version="1.3.0" />
+
+    <!-- A2A protocol — client-side agent federation -->
+    <PackageReference Include="A2A" Version="1.0.0-preview2" />
+    <PackageReference Include="Microsoft.Agents.AI.A2A" Version="1.3.0-preview.260423.1" />
+
+    <!-- Azure OpenAI SDK + identity -->
+    <PackageReference Include="Azure.AI.OpenAI" Version="2.1.0" />
+    <PackageReference Include="Azure.Identity" Version="1.21.0" />
+
+    <!-- Ollama provider -->
+    <PackageReference Include="OllamaSharp" Version="5.4.25" />
+
+    <!-- DI -->
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.15.1" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.15.1" />
+
+    <!-- Structured logging -->
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+
+    <!-- Rich CLI: brings in Spectre.Console transitively -->
+    <PackageReference Include="Spectre.Console.Cli" Version="0.55.0" />
+
+    <!-- MCP client SDK -->
+    <PackageReference Include="ModelContextProtocol" Version="1.2.0" />
+    <PackageReference Include="YamlDotNet" Version="17.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Agent Governance Toolkit — policy enforcement, audit, rate limiting, injection detection -->
+    <PackageReference Include="Microsoft.AgentGovernance" Version="3.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ASP.NET Core framework reference — needed for DevUIServer (WebApplication / SSE) -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources/FUSERAFT.md" />
+    <EmbeddedResource Include="Resources/fender.flf" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="../config/orchestration.yaml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>FuseraftCli.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+</Project>

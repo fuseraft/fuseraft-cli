@@ -1,0 +1,297 @@
+## Main example: Software Development Team with state machine routing, evidence contracts,
+## failure handling, self-verification, and lossless compaction.
+## YAML is a superset of JSON so either format is accepted by fuseraft.
+## Run:      fuseraft run --config config/examples/orchestration.yaml "Your task"
+## Validate: fuseraft validate config/examples/orchestration.yaml
+
+Orchestration:
+  Name: SoftwareDevelopmentTeam
+  Description: >-
+    Four-agent pipeline: Planner scopes, Developer implements, Tester verifies,
+    Reviewer approves. State machine routing with evidence contracts ensures each
+    handoff is backed by real on-disk evidence before the next agent starts.
+
+  Models:
+    fast:
+      ModelId: grok-4-1-fast-non-reasoning
+      Endpoint: https://api.x.ai/v1
+      ApiKeyEnvVar: XAI_API_KEY
+    reasoning:
+      ModelId: grok-4-1-fast-reasoning
+      Endpoint: https://api.x.ai/v1
+      ApiKeyEnvVar: XAI_API_KEY
+
+  EvidenceStore:
+    Path: .fuseraft/evidence.json
+
+  ChangeTracking:
+    Path: .fuseraft/changes.json
+
+  Validation:
+    BriefPath: .fuseraft/brief.json
+    TestReportPath: .fuseraft/test-report.json
+    ChangeLogPath: .fuseraft/changes.json
+    TestAssertionPatterns:
+      - "tester::assert"
+      - "if .+ throw"
+      - "\\bassert\\b"
+      - "\\bexpect\\b"
+
+  Contracts:
+    - Name: BriefExists
+      Requires:
+        - FileExists:
+            Path: .fuseraft/brief.json
+
+    - Name: ImplementationComplete
+      Requires:
+        - FilesWritten:
+            Source: .fuseraft/brief.json
+            Field: files_to_change
+        - CommandSucceeded:
+            # Read the verify command from the Planner's brief so this works for any
+            # runtime — the Planner writes the correct invocation and the contract
+            # checks that the Developer actually ran it.
+            PatternField: verify_command
+            # Fallback literal pattern for configs that omit verify_command from the brief.
+            Pattern: "build|compile|test|check"
+
+    - Name: TestsValid
+      Requires:
+        - FileExists:
+            Path: .fuseraft/test-report.json
+        - TestReport:
+            NoFailures: true
+            HasAssertions: true
+
+  FailureHandling:
+    MissingEvidence:
+      Action: Reinstruct
+      Threshold: 3
+    ConflictingEvidence:
+      Action: Reinstruct
+      Threshold: 2
+    NoProgress:
+      Action: Abort
+      Threshold: 3
+
+  Verifier:
+    AgentName: Verifier
+    EveryNTurns: 5
+    TriggerOnSuspiciousTransition: true
+    FindingsKeyword: INCONSISTENCY
+
+  Compaction:
+    TriggerTurnCount: 25
+    KeepRecentTurns: 10
+    Mode: lossless
+
+  Agents:
+    - Name: Planner
+      Description: Session planner who reads the task and codebase to produce a focused brief.
+      Instructions: |
+        You are a technical project planner.
+
+        FOLLOW THESE STEPS IN ORDER:
+
+        1. READ THE TASK: Identify what is being asked.
+
+        2. EXPLORE: Use sub_agent_explore for broad codebase questions, or list_files
+           and read_file for targeted reads of 1–2 specific files.
+
+        3. WRITE THE BRIEF:
+           - Goal: one sentence
+           - Files to change: list of paths (strings only — not objects)
+           - Acceptance criteria: bullet list of specific, testable conditions
+           - Constraints: anything to avoid or preserve
+
+        4. WRITE BRIEF TO DISK: Call write_file to save .fuseraft/brief.json.
+           Schema:
+             {
+               "goal": "<one sentence>",
+               "files_to_change": ["src/a.go", "src/b.go"],
+               "acceptance_criteria": ["<criterion 1>", "<criterion 2>"],
+               "constraints": ["<constraint>"]
+             }
+
+        5. HAND OFF: Call handoff(route_keyword: "HANDOFF TO DEVELOPER").
+      Model:
+        ModelId: fast
+        MaxTokens: 4096
+      Plugins:
+        - FileSystem
+        - Search
+        - Scratchpad
+        - SubAgent
+        - Handoff
+
+    - Name: Developer
+      Description: Senior software engineer who implements features using tools.
+      Instructions: |
+        You are an expert software developer.
+
+        FOLLOW THESE STEPS IN ORDER:
+
+        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/brief.json.
+        2. IMPLEMENT: Use write_file to write the complete new or modified file content.
+           Implement every path listed in files_to_change.
+        3. BUILD/RUN: Use shell_run to build and confirm it works. Include exact output.
+        4. COMMIT: Use git_add and git_commit to commit your changes.
+        5. HAND OFF: Call handoff(route_keyword: "HANDOFF TO TESTER").
+           If the plan needs rethinking, call handoff(route_keyword: "REPLAN REQUIRED").
+      Model:
+        ModelId: fast
+        MaxTokens: 16384
+      FunctionChoice: required
+      Plugins:
+        - FileSystem
+        - Shell
+        - Git
+        - Search
+        - Changes
+        - Handoff
+
+    - Name: Tester
+      Description: QA engineer who runs tests and writes a structured report.
+      Instructions: |
+        You are a quality assurance engineer.
+
+        FOLLOW THESE STEPS IN ORDER:
+
+        1. READ THE BRIEF: Call read_file on .fuseraft/brief.json.
+        2. CHECK THE CHANGE LOG: Call changes_read_latest to verify what the Developer wrote.
+        3. RUN TESTS: Execute the project's test suite with shell_run. Paste exact output.
+        4. EVALUATE: Map each acceptance criterion to PASS or FAIL.
+        5. WRITE REPORT: Save results to .fuseraft/test-report.json:
+             {
+               "results": [
+                 {
+                   "criterion": "<exact text from brief.json>",
+                   "status": "PASS",
+                   "command": "<exact shell_run command>",
+                   "exit_code": 0
+                 }
+               ],
+               "fake_test_files": []
+             }
+        6. HAND OFF:
+           - All criteria PASS → call handoff(route_keyword: "HANDOFF TO REVIEWER").
+           - Any criterion FAIL → call handoff(route_keyword: "BUGS FOUND").
+      Model:
+        ModelId: fast
+        MaxTokens: 8192
+      FunctionChoice: required
+      Plugins:
+        - FileSystem
+        - Shell
+        - Changes
+        - Handoff
+
+    - Name: Reviewer
+      Description: Tech lead who approves completed work or requests revisions.
+      Instructions: |
+        You are a senior tech lead performing a final code review.
+
+        FOLLOW THESE STEPS IN ORDER:
+
+        1. READ THE BRIEF: Call read_file on .fuseraft/brief.json.
+        2. READ THE CHANGE LOG: Call changes_read to see what was actually done this session.
+        3. READ THE CODE: Use read_file to inspect the changed files.
+        4. REVIEW: Check code quality, correctness, and adherence to the brief.
+        5. SPOT-CHECK: Run at least one acceptance criterion yourself with shell_run.
+        6. READ THE TEST REPORT: Call read_file on .fuseraft/test-report.json.
+        7. DECIDE:
+           - All criteria verified → call handoff(route_keyword: "APPROVED").
+           - Code or tests need fixing → call handoff(route_keyword: "REVISION REQUIRED")
+             with specific actionable feedback.
+           - Plan is fundamentally wrong → call handoff(route_keyword: "REPLAN REQUIRED").
+      Model:
+        ModelId: reasoning
+        MaxTokens: 8192
+      Plugins:
+        - FileSystem
+        - Shell
+        - Changes
+        - Handoff
+      ContextWindow:
+        TextOnly: true
+
+    - Name: Verifier
+      Description: Evidence auditor who checks for inconsistencies between claims and recorded actions.
+      Instructions: |
+        You are an evidence auditor. Detect inconsistencies between what agents claim
+        and what is recorded in the change log.
+
+        1. Call changes_read_latest to see what was actually done this session.
+        2. Compare recorded file writes, shell commands, and exit codes against any
+           claims made in recent conversation messages.
+        3. If consistent: "Evidence verified — no inconsistencies found."
+        4. If inconsistent: "INCONSISTENCY DETECTED: <what was claimed vs what the evidence shows>"
+      Model:
+        ModelId: fast
+        MaxTokens: 2048
+      Plugins:
+        - Changes
+      FunctionChoice: required
+
+  Selection:
+    Type: statemachine
+    StateMachine:
+      Initial: Planning
+
+      States:
+        Planning:
+          Agent: Planner
+          Transitions:
+            - To: Implementation
+              Signal: "HANDOFF TO DEVELOPER"
+              Contract: BriefExists
+
+        Implementation:
+          Agent: Developer
+          Transitions:
+            - To: Testing
+              Signal: "HANDOFF TO TESTER"
+              Contract: ImplementationComplete
+            - To: Planning
+              Signal: "REPLAN REQUIRED"
+
+        Testing:
+          Agent: Tester
+          Transitions:
+            - To: Review
+              Signal: "HANDOFF TO REVIEWER"
+              Contract: TestsValid
+              RecoveryAgent: Developer  # invoked after 2 consecutive TestsValid failures — fixes bugs or bad test setup
+            - To: Implementation
+              Signal: "BUGS FOUND"
+
+        Review:
+          Agent: Reviewer
+          Transitions:
+            - To: Done
+              Signal: APPROVED
+            - To: Implementation
+              Signal: "REVISION REQUIRED"
+            - To: Planning
+              Signal: "REPLAN REQUIRED"
+
+        Done:
+          Agent: Reviewer
+          Terminal: true
+
+  Termination:
+    Type: composite
+    MaxIterations: 40
+    Strategies:
+      - Type: regex
+        Pattern: "(?m)^\\s*APPROVED\\s*$"
+        AgentNames:
+          - Reviewer
+
+  Checkpoint:
+    Mode: json
+    Path: .fuseraft/checkpoints
+
+  Events:
+    Path: .fuseraft/events.jsonl
