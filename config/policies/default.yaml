@@ -1,0 +1,60 @@
+apiVersion: governance.toolkit/v1
+version: "1.0"
+name: fuseraft-default
+description: >
+  Default governance policy for fuseraft sessions.
+  All phases of the governance migration are active:
+  ring enforcement, injection detection, circuit breaker,
+  SLO tracking, hash-chain audit, and routing validator compliance.
+  Rules here add a policy-engine layer on top of the runtime enforcement
+  already provided by SandboxEnforcementFilter.
+scope: global
+default_action: allow
+
+rules:
+  # Destructive operations
+  - name: warn-delete-file
+    description: >
+      Flag every delete_file call for audit review. Deletes are irreversible;
+      the warning surfaces in audit logs and SLO metrics even when allowed.
+    condition: tool_name == 'delete_file'
+    action: warn
+    priority: 100
+
+  # Shell execution rate limits
+  - name: rate-limit-shell-run
+    description: >
+      Limit shell_run to 30 invocations per hour per agent to prevent
+      runaway shell loops and reduce blast radius if an agent is compromised.
+    condition: tool_name == 'shell_run'
+    action: rate_limit
+    limit: "30/hour"
+    priority: 80
+
+  - name: rate-limit-shell-run-script
+    description: >
+      Same budget as rate-limit-shell-run but for multi-line script execution.
+    condition: tool_name == 'shell_run_script'
+    action: rate_limit
+    limit: "30/hour"
+    priority: 80
+
+  # Network rate limit
+  - name: rate-limit-http-request
+    description: >
+      Cap outbound HTTP calls to 100 per hour to guard against data exfiltration
+      and runaway API usage. Network access for Ring 3 agents is already blocked
+      by the sandbox filter; this rule applies to Ring 1 and Ring 2 agents.
+    condition: tool_name == 'http_request'
+    action: rate_limit
+    limit: "100/hour"
+    priority: 60
+
+  # Audit logging
+  - name: log-write-file
+    description: >
+      Emit a PolicyCheck audit event for every write_file call so all
+      file mutations appear in the hash-chain audit log.
+    condition: tool_name == 'write_file'
+    action: log
+    priority: 20

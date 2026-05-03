@@ -1,0 +1,631 @@
+using System.Net;
+using System.Net.Http.Headers;
+using AgentGovernance;
+using AgentGovernance.Audit;
+using AgentGovernance.Sre;
+using AgentGovernance.Trust;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using fuseraft.Core.Interfaces;
+using fuseraft.Core.Models;
+using fuseraft.Infrastructure;
+using fuseraft.Infrastructure.Plugins;
+using fuseraft.Orchestration;
+using fuseraft.Orchestration.Saga;
+using fuseraft.Orchestration.Strategies;
+using fuseraft.Orchestration.Workflow;
+
+namespace fuseraft.Cli;
+
+/// <summary>
+/// Builds a ready-to-use <see cref="IOrchestrator"/> directly from a config file path,
+/// without requiring a full DI host. Used by CLI commands that load config at runtime.
+/// </summary>
+public static class OrchestratorBuilder
+{
+    // Shared client for API-key validation probes — created once, never disposed.
+    private static readonly HttpClient _validationHttp = new() { Timeout = TimeSpan.FromSeconds(10) };
+
+    /// <summary>
+    /// Loads <paramref name="configPath"/>, validates it, connects to any configured MCP servers,
+    /// and returns a configured orchestrator together with the active session manager.
+    /// The caller is responsible for disposing <paramref name="mcpManager"/> (via <c>await using</c>).
+    /// </summary>
+    public static async Task<(IOrchestrator Orchestrator, OrchestrationConfig Config, McpSessionManager McpManager, ConversationCompactor? Compactor, ChangeTracker? ChangeTracker, EventEmitter? EventEmitter, GovernanceKernel GovernanceKernel)> BuildAsync(
+        string configPath,
+        ILoggerFactory loggerFactory,
+        PluginRegistry pluginRegistry,
+        IHumanApprovalService? humanApprovalService = null,
+        bool hitlMode = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (!File.Exists(configPath))
+            throw new FileNotFoundException($"Config file not found: {configPath}");
+
+        var configuration = YamlConfigLoader.IsYamlPath(configPath)
+            ? YamlConfigLoader.LoadAsConfiguration(configPath)
+            : new ConfigurationBuilder()
+                .AddJsonFile(Path.GetFullPath(configPath), optional: false)
+                .Build();
+
+        var config = BindConfig(configPath, configuration);
+
+        if (config.Agents.Count == 0)
+            throw new InvalidOperationException("Config must define at least one agent.");
+
+        // Expand ${ENV_VAR} tokens in security and API profile config before use.
+        config = ExpandEnvVars(config);
+
+        // Apply per-config security constraints and API profiles to the security-sensitive plugins.
+        var profiles = config.ApiProfiles.Count > 0
+            ? (IReadOnlyDictionary<string, ApiProfileConfig>)config.ApiProfiles
+            : null;
+        Func<string, Task<bool>>? shellApprover = hitlMode && humanApprovalService is not null
+            ? humanApprovalService.PromptShellCommandAsync
+            : null;
+
+        pluginRegistry.Configure(config.Security, profiles, shellApprover);
+
+        // When a filesystem sandbox is configured, resolve relative validation and
+        // change-tracking paths against the sandbox root so that validators and
+        // ChangeTracker agree with FileSystemPlugin on where files live — regardless
+        // of the working directory from which fuseraft was invoked.
+        if (config.Security?.FileSystemSandboxPath is { } rawSandbox)
+        {
+            var sandboxRoot = Path.GetFullPath(ProcessHelper.ExpandHome(rawSandbox));
+
+            static string Resolve(string path, string root) =>
+                Path.IsPathRooted(ProcessHelper.ExpandHome(path))
+                    ? path
+                    : Path.GetFullPath(ProcessHelper.ExpandHome(path), root);
+
+            if (config.Validation is { } v)
+                config = config with
+                {
+                    Validation = v with
+                    {
+                        BriefPath      = Resolve(v.BriefPath,      sandboxRoot),
+                        TestReportPath = Resolve(v.TestReportPath, sandboxRoot),
+                        ChangeLogPath  = v.ChangeLogPath is not null ? Resolve(v.ChangeLogPath, sandboxRoot) : null,
+                    }
+                };
+
+            if (config.ChangeTracking is { } ct)
+                config = config with
+                {
+                    ChangeTracking = ct with { Path = Resolve(ct.Path, sandboxRoot) }
+                };
+        }
+
+        // Cross-validate ChangeTracking.Path and Validation.ChangeLogPath. If both are
+        // configured, they must resolve to the same file.
+        if (config.ChangeTracking is { } ctPathCheck && config.Validation?.ChangeLogPath is { } vlPathCheck)
+        {
+            var ctNorm = Path.GetFullPath(ProcessHelper.ExpandHome(ctPathCheck.Path));
+            var vlNorm = Path.GetFullPath(ProcessHelper.ExpandHome(vlPathCheck));
+            if (!string.Equals(ctNorm, vlNorm, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"ChangeTracking.Path ('{ctPathCheck.Path}') and Validation.ChangeLogPath ('{vlPathCheck}') " +
+                    $"must point to the same file, but resolve to different paths:\n" +
+                    $"  ChangeTracking.Path      → {ctNorm}\n" +
+                    $"  Validation.ChangeLogPath → {vlNorm}\n" +
+                    $"Update one of them to match the other.");
+        }
+
+        // Prepend the base system prompt to every agent's instructions.
+        // Source priority: SystemPromptPath > SystemPrompt > embedded FUSERAFT.md.
+        var basePrompt = ResolveBasePrompt(config, configPath);
+        if (basePrompt is not null)
+        {
+            config = config with
+            {
+                Agents = config.Agents
+                    .Select(a => a with
+                    {
+                        Instructions = basePrompt + "\n\n" + a.Instructions.TrimStart()
+                    })
+                    .ToList()
+            };
+        }
+
+        // Inject context items into every agent's system prompt so agents know what
+        // reference material is available without burning a tool call on discovery.
+        var contextStore = new fuseraft.Infrastructure.ContextStore();
+        var contextSummary = await contextStore.BuildPromptSummaryAsync(cancellationToken);
+        if (contextSummary is not null)
+        {
+            config = config with
+            {
+                Agents = config.Agents
+                    .Select(a => a with
+                    {
+                        Instructions = a.Instructions.TrimEnd() + "\n\n" + contextSummary
+                    })
+                    .ToList()
+            };
+        }
+
+        // Connect to MCP servers and register their tools before building agents.
+        var mcpManager = new McpSessionManager(loggerFactory);
+        if (config.McpServers.Count > 0)
+            await mcpManager.InitializeAsync(config.McpServers, pluginRegistry, cancellationToken);
+
+        EventEmitter? eventEmitter = config.Events is { } evtCfg
+            ? new EventEmitter(evtCfg.Path, loggerFactory.CreateLogger<EventEmitter>())
+            : null;
+
+        // Evidence graph: structured typed evidence alongside the flat change log.
+        EvidenceStore? evidenceStore = null;
+        if (config.EvidenceStore is { } esCfg)
+            evidenceStore = new EvidenceStore(esCfg.Path);
+
+        // Change tracking: hook a filter into every agent kernel that records tool results.
+        // Pass eventEmitter, evidenceStore, and intentLog so tracked tool calls emit flat
+        // entries, typed graph nodes, and pre-execution intent records.
+        ChangeTracker? changeTracker = null;
+        IntentLog? intentLog = null;
+        if (config.ChangeTracking is { } ctConfig)
+        {
+            intentLog     = new IntentLog(ctConfig.ResolveIntentLogPath());
+            changeTracker = new ChangeTracker(ctConfig.Path, eventEmitter, evidenceStore, intentLog);
+            pluginRegistry.Register("Changes", () => new ChangesPlugin(ctConfig.Path));
+        }
+
+        // File version store: tracks monotonic write counters per file so agents can detect
+        // concurrent-write conflicts via stat_file + write_file(baseVersion: N).
+        // Path is derived from the (sandbox-resolved) change-tracking path so the store
+        // lands in the same .fuseraft directory as changes.json and intents.json.
+        var versionStorePath = config.ChangeTracking is { } ct2
+            ? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(ct2.Path)) ?? ".fuseraft", "file_versions.json")
+            : ".fuseraft/file_versions.json";
+        var fileVersionStore = new fuseraft.Infrastructure.FileVersionStore(versionStorePath);
+
+        // Re-configure the FileSystem plugin with the version store so write_file and
+        // stat_file can participate in version-aware conflict detection.
+        pluginRegistry.Configure(config.Security ?? new SecurityConfig(), profiles, shellApprover, fileVersionStore);
+
+        // Governance kernel: load default policy if one exists alongside the config file.
+        var configDir         = Path.GetDirectoryName(Path.GetFullPath(configPath)) ?? ".";
+        var defaultPolicyPath = Path.Combine(configDir, "policies", "default.yaml");
+        var governanceKernel  = new GovernanceKernel(new GovernanceOptions
+        {
+            EnableAudit                    = true,
+            EnableMetrics                  = true,
+            EnablePromptInjectionDetection = true,
+            EnableRings                    = true,
+            EnableCircuitBreaker           = true,
+            CircuitBreakerConfig           = new CircuitBreakerConfig
+            {
+                FailureThreshold  = 5,
+                ResetTimeout      = TimeSpan.FromSeconds(30),
+                HalfOpenMaxCalls  = 1,
+            },
+            PolicyPaths                    = File.Exists(defaultPolicyPath) ? [defaultPolicyPath] : [],
+        });
+
+        // SLO: track routing validator compliance over a 1-hour rolling window.
+        // Target: 95% of validator checks should pass. Burn-rate alerts fire at 2× and 5×.
+        governanceKernel.SloEngine.Register(new SloSpec
+        {
+            Name        = "policy-compliance",
+            Description = "Fraction of routing validator checks that pass within the session",
+            Sli         = new SliSpec
+            {
+                Metric     = "compliance_rate",
+                Threshold  = 1.0,
+                Comparison = ComparisonOp.GreaterThanOrEqual,
+            },
+            Target = 95.0,
+            Window = TimeSpan.FromHours(1),
+            ErrorBudgetPolicy = new ErrorBudgetPolicy
+            {
+                Thresholds =
+                [
+                    new BurnRateThreshold { Name = "warning",  Rate = 2.0, Severity = BurnRateSeverity.Warning,  WindowSeconds = 3600 },
+                    new BurnRateThreshold { Name = "critical", Rate = 5.0, Severity = BurnRateSeverity.Critical, WindowSeconds =  600 },
+                ]
+            },
+        });
+
+        // Bridge ToolCallBlocked events (from sandbox + injection checks) into the JSONL log.
+        // PolicyViolation is NOT bridged here — KeywordSelectionStrategy emits those directly
+        // via _eventEmitter to preserve the richer per-turn context (consecutive count, etc.).
+        if (eventEmitter is not null)
+        {
+            governanceKernel.OnEvent(GovernanceEventType.ToolCallBlocked, async evt =>
+                await eventEmitter.EmitAsync("tool_blocked", evt.AgentId,
+                    payload: new { policy = evt.PolicyName, data = evt.Data }));
+        }
+
+        // Hash-chain audit log: subscribe to all governance events so every denial
+        // and policy check is tamper-evidently recorded for the session's lifetime.
+        var auditLogger = new AuditLogger();
+        governanceKernel.OnAllEvents(evt =>
+        {
+            var action   = evt.PolicyName is not null ? $"{evt.Type}:{evt.PolicyName}" : evt.Type.ToString();
+            var decision = evt.Type is GovernanceEventType.PolicyViolation
+                               or GovernanceEventType.ToolCallBlocked
+                               or GovernanceEventType.TrustFailed
+                ? "deny" : "allow";
+            auditLogger.Log(evt.AgentId, action, decision);
+        });
+
+        var identityRegistry  = new IdentityRegistry();
+        var providerErrorLog  = config.Events is { } evtPath
+            ? Path.Combine(Path.GetDirectoryName(evtPath.Path) ?? ".fuseraft", "provider-errors.jsonl")
+            : ".fuseraft/provider-errors.jsonl";
+        var chatClientFactory = new ChatClientFactory(config.Models.Count > 0 ? config.Models : null, providerErrorLog, eventEmitter);
+
+        // Eagerly resolve every agent's model config so that undefined aliases
+        // (e.g. "fast" not declared in the Models registry) fail here at startup
+        // rather than mid-session when the agent is first invoked.
+        foreach (var agent in config.Agents)
+        {
+            try { chatClientFactory.Resolve(agent.Model); }
+            catch (InvalidOperationException ex)
+            {
+                throw new InvalidOperationException(
+                    $"Agent '{agent.Name}' has an unresolvable model: {ex.Message}", ex);
+            }
+        }
+        if (config.Selection.Model is { } selectionModel)
+        {
+            try { chatClientFactory.Resolve(selectionModel); }
+            catch (InvalidOperationException ex)
+            {
+                throw new InvalidOperationException(
+                    $"Selection strategy has an unresolvable model: {ex.Message}", ex);
+            }
+        }
+
+        // Eagerly validate the Magentic manager model and loop-counter config when that strategy is selected.
+        if (config.Selection.Type.Equals("magentic", StringComparison.OrdinalIgnoreCase))
+        {
+            if (config.Selection.Magentic?.Model is null)
+                throw new InvalidOperationException(
+                    "Selection.Type 'magentic' requires a 'Selection.Magentic.Model' configuration block.");
+
+            try { chatClientFactory.Resolve(config.Selection.Magentic.Model); }
+            catch (InvalidOperationException ex)
+            {
+                throw new InvalidOperationException(
+                    $"Magentic manager has an unresolvable model: {ex.Message}", ex);
+            }
+
+            var mag = config.Selection.Magentic;
+            if (mag.MaxRoundCount < 1)
+                throw new InvalidOperationException(
+                    $"Selection.Magentic.MaxRoundCount must be at least 1 (got {mag.MaxRoundCount}). " +
+                    "A value of 0 would exit immediately without invoking any participant agents.");
+            if (mag.MaxStallCount < 1)
+                throw new InvalidOperationException(
+                    $"Selection.Magentic.MaxStallCount must be at least 1 (got {mag.MaxStallCount}). " +
+                    "A value of 0 would trigger a replan on every single round.");
+
+            if (mag.MaxResetCount < 0)
+                throw new InvalidOperationException(
+                    $"Selection.Magentic.MaxResetCount must be >= 0 (got {mag.MaxResetCount}). " +
+                    "Use 0 to disable replanning entirely.");
+
+            // Warn when a Termination section is configured alongside the magentic type — it is
+            // silently ignored and users may not realise termination is driven by MaxRoundCount,
+            // MaxStallCount, and MaxResetCount in the Magentic block instead.
+            var t = config.Termination;
+            bool hasNonDefaultTermination = t is not null && (
+                !t.Type.Equals("composite", StringComparison.OrdinalIgnoreCase) ||
+                t.Pattern    is not null ||
+                t.Strategies is { Count: > 0 });
+            if (hasNonDefaultTermination)
+                loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
+                    "The 'Termination' section is ignored for Selection.Type 'magentic'. " +
+                    "Session termination is controlled by MaxRoundCount, MaxStallCount, and MaxResetCount " +
+                    "in the 'Selection.Magentic' block.");
+        }
+
+        // Warn when Selection.Magentic is configured but Selection.Type is not "magentic" —
+        // the Magentic block would be silently ignored and the session would run as sequential.
+        if (config.Selection.Magentic is not null &&
+            !config.Selection.Type.Equals("magentic", StringComparison.OrdinalIgnoreCase))
+            loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
+                "Selection.Magentic is configured but Selection.Type is '{Type}', not 'magentic'. " +
+                "The Magentic block will be ignored. Set Selection.Type: magentic to enable it.",
+                config.Selection.Type);
+
+        var agentFactory      = new AgentFactory(chatClientFactory, pluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, identityRegistry, eventEmitter, loggerFactory);
+        var wfLogger          = loggerFactory.CreateLogger<WorkflowOrchestrator>();
+        var aoLogger          = loggerFactory.CreateLogger<AgentOrchestrator>();
+
+        bool useMagentic = config.Selection.Type.Equals("magentic", StringComparison.OrdinalIgnoreCase);
+
+        ConversationCompactor? compactor = null;
+        if (config.Compaction is { } compactionConfig)
+        {
+            if (compactionConfig.TriggerTurnCount <= 0)
+                throw new InvalidOperationException(
+                    $"Compaction.TriggerTurnCount must be a positive integer (got {compactionConfig.TriggerTurnCount}). " +
+                    "A value of 0 or less would compact the conversation on every turn.");
+
+            if (compactionConfig.KeepRecentTurns < 1)
+                throw new InvalidOperationException(
+                    "Compaction.KeepRecentTurns must be at least 1.");
+
+            if (compactionConfig.KeepRecentTurns >= compactionConfig.TriggerTurnCount)
+                throw new InvalidOperationException(
+                    $"Compaction.KeepRecentTurns ({compactionConfig.KeepRecentTurns}) must be " +
+                    $"less than Compaction.TriggerTurnCount ({compactionConfig.TriggerTurnCount}).");
+
+            var summaryModel = compactionConfig.Model ?? config.Agents[0].Model;
+            // Magentic sessions have no brief.json or change log, so the workflow-specific
+            // resumption note is suppressed to avoid agents wasting tokens on missing files.
+            var resumptionNote = useMagentic ? null : ConversationCompactor.WorkflowResumptionNote;
+            var changeLogPath  = useMagentic ? null
+                : (config.Validation?.ChangeLogPath ?? config.ChangeTracking?.Path);
+            compactor = new ConversationCompactor(
+                chatClientFactory.Create(summaryModel), compactionConfig,
+                loggerFactory.CreateLogger<ConversationCompactor>(),
+                resumptionNote, changeLogPath, intentLog);
+        }
+
+        // WorkflowOrchestrator uses MAF's phase-based WorkflowBuilder with a hardcoded
+        // planner → developer → tester → reviewer agent chain. It is only correct for
+        // keyword-routing configs whose agents match that exact layout.
+        //
+        // MagenticOrchestrator handles the "magentic" selection type: a manager LLM drives
+        // dynamic planning, speaker selection, and stall detection without hard-coded routing.
+        //
+        // AgentOrchestrator is the general-purpose path: it drives any selection strategy
+        // (sequential, llm, keyword, structured) through StrategyFactory and works with
+        // any agent names and any team size.
+        var strategyFactory = new StrategyFactory(chatClientFactory.Create, eventEmitter, loggerFactory, governanceKernel, humanApprovalService, evidenceStore);
+
+        bool useWorkflow = !useMagentic
+            && config.Selection.Type.Equals("keyword", StringComparison.OrdinalIgnoreCase)
+            && config.Agents.Select(a => a.Name.ToLowerInvariant())
+                            .All(n => n is "planner" or "developer" or "tester" or "reviewer");
+
+        if (!useMagentic
+            && config.Selection.Type.Equals("keyword", StringComparison.OrdinalIgnoreCase)
+            && !useWorkflow)
+        {
+            loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
+                "Selection.Type is 'keyword' but agent names {Names} do not match the required " +
+                "{{planner, developer, tester, reviewer}} layout — falling back to AgentOrchestrator. " +
+                "WorkflowOrchestrator will not be used.",
+                string.Join(", ", config.Agents.Select(a => a.Name)));
+        }
+
+        // Validate verifier config: the named agent must exist in the agent pool.
+        if (config.Verifier is { AgentName: { Length: > 0 } verifierAgentName })
+        {
+            var agentNameSet = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (!agentNameSet.Contains(verifierAgentName))
+                throw new InvalidOperationException(
+                    $"Verifier.AgentName '{verifierAgentName}' is not defined in 'Orchestration.Agents'. " +
+                    $"Add an agent with that name or correct the verifier configuration.");
+        }
+
+        // Validate state machine config at startup when that strategy is selected.
+        if (config.Selection.Type.Equals("statemachine", StringComparison.OrdinalIgnoreCase))
+        {
+            if (config.Selection.StateMachine is null)
+                throw new InvalidOperationException(
+                    "Selection.Type 'statemachine' requires a 'Selection.StateMachine' configuration block.");
+
+            // Eagerly validate that every agent referenced in state machine states exists.
+            var agentNames = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var (stateName, state) in config.Selection.StateMachine.States)
+            {
+                if (!string.IsNullOrWhiteSpace(state.Agent) && !agentNames.Contains(state.Agent))
+                    throw new InvalidOperationException(
+                        $"State machine state '{stateName}' references agent '{state.Agent}' " +
+                        $"which is not defined in 'Orchestration.Agents'.");
+            }
+        }
+
+        IOrchestrator orchestrator;
+
+        if (useMagentic)
+        {
+            var magCfg        = config.Selection.Magentic!;           // validated above
+            var managerModel  = chatClientFactory.Resolve(magCfg.Model!);
+            var managerClient = chatClientFactory.Create(managerModel);
+            var magLogger     = loggerFactory.CreateLogger<MagenticOrchestrator>();
+
+            orchestrator = new MagenticOrchestrator(
+                config, agentFactory, managerClient, magLogger,
+                hitlMode ? humanApprovalService : null,
+                changeTracker, eventEmitter, governanceKernel);
+        }
+        else if (useWorkflow)
+        {
+            orchestrator = new WorkflowOrchestrator(config, agentFactory, wfLogger, changeTracker, eventEmitter, governanceKernel);
+        }
+        else
+        {
+            orchestrator = new AgentOrchestrator(config, agentFactory, strategyFactory, aoLogger, changeTracker, eventEmitter, governanceKernel);
+        }
+
+        // Wrap with SagaOrchestrator when the saga pattern is enabled.
+        // The wrapper preserves the IOrchestrator contract so the rest of the pipeline
+        // is unaffected; it adds compensating-rollback behaviour on failure.
+        if (config.Saga?.Enabled == true)
+            orchestrator = new SagaOrchestrator(orchestrator, config.Saga, compensators: null, eventEmitter);
+
+        return (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel);
+    }
+
+    /// <summary>
+    /// Makes a lightweight <c>GET /models</c> call to each unique API endpoint in
+    /// <paramref name="config"/> to verify the keys are valid before the session starts.
+    /// Throws <see cref="InvalidOperationException"/> if any key is missing or rejected.
+    /// </summary>
+    public static async Task ValidateApiKeysAsync(
+        OrchestrationConfig config,
+        CancellationToken cancellationToken = default)
+    {
+        // Collect all ModelConfigs: one per agent + optional selection-strategy model
+        // + optional Magentic manager model.
+        // Resolve aliases against the Models registry first so agents that reference
+        // a named alias (e.g. "fast") get the endpoint and API key from the alias.
+        var models = config.Agents.Select(a => ResolveAlias(a.Model, config.Models))
+            .Concat(config.Selection.Model is not null
+                ? [ResolveAlias(config.Selection.Model, config.Models)]
+                : Array.Empty<ModelConfig>())
+            .Concat(config.Selection.Magentic?.Model is not null
+                ? [ResolveAlias(config.Selection.Magentic.Model, config.Models)]
+                : Array.Empty<ModelConfig>())
+            .Where(m => !string.IsNullOrWhiteSpace(m.ApiKeyEnvVar))  // skip Ollama (no key)
+            .GroupBy(m => m.ApiKeyEnvVar)   // deduplicate: only probe each key once
+            .Select(g => g.First())
+            .ToList();
+
+        var http = _validationHttp;
+
+        foreach (var model in models)
+        {
+            var apiKey = Environment.GetEnvironmentVariable(model.ApiKeyEnvVar);
+            if (string.IsNullOrWhiteSpace(apiKey))
+                throw new InvalidOperationException(
+                    $"API key variable '{model.ApiKeyEnvVar}' is not set.");
+
+            // Strip /chat/completions (or any path) to get the provider base URL.
+            var uri    = new Uri(model.Endpoint.TrimEnd('/'));
+            var baseUrl = $"{uri.Scheme}://{uri.Host}{(uri.IsDefaultPort ? string.Empty : $":{uri.Port}")}";
+
+            // Use a per-request message so keys from different providers don't bleed
+            // across iterations via DefaultRequestHeaders.
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/v1/models");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+            HttpResponseMessage response;
+            try
+            {
+                response = await http.SendAsync(request, cancellationToken);
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new InvalidOperationException(
+                    $"Could not reach API endpoint '{baseUrl}': {ex.Message}", ex);
+            }
+
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+                throw new InvalidOperationException(
+                    $"API key from '{model.ApiKeyEnvVar}' was rejected by the provider (HTTP 401). " +
+                    $"Verify the key is current and has the correct permissions.");
+        }
+    }
+
+    /// <summary>
+    /// Tries to load <paramref name="configPath"/> without constructing full services.
+    /// Returns the parsed <see cref="OrchestrationConfig"/> for display purposes.
+    /// </summary>
+    public static OrchestrationConfig LoadConfig(string configPath)
+    {
+        if (!File.Exists(configPath))
+            throw new FileNotFoundException($"Config file not found: {configPath}");
+
+        var configuration = YamlConfigLoader.IsYamlPath(configPath)
+            ? YamlConfigLoader.LoadAsConfiguration(configPath)
+            : new ConfigurationBuilder()
+                .AddJsonFile(Path.GetFullPath(configPath), optional: false)
+                .Build();
+
+        return BindConfig(configPath, configuration);
+    }
+
+    // Resolves the base system prompt prepended to every agent.
+    // Priority: SystemPromptPath (file) > SystemPrompt (inline) > embedded FUSERAFT.md.
+    private static string? ResolveBasePrompt(OrchestrationConfig config, string configPath)
+    {
+        if (!string.IsNullOrWhiteSpace(config.SystemPromptPath))
+        {
+            var configDir  = Path.GetDirectoryName(Path.GetFullPath(configPath)) ?? ".";
+            var promptPath = Path.IsPathRooted(config.SystemPromptPath)
+                ? config.SystemPromptPath
+                : Path.GetFullPath(config.SystemPromptPath, configDir);
+            return File.ReadAllText(promptPath).Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(config.SystemPrompt))
+            return config.SystemPrompt.Trim();
+
+        // Fall back to the embedded FUSERAFT.md.
+        var asm  = typeof(OrchestratorBuilder).Assembly;
+        var name = asm.GetManifestResourceNames()
+                      .FirstOrDefault(n => n.EndsWith("FUSERAFT.md", StringComparison.OrdinalIgnoreCase));
+        if (name is null) return null;
+
+        using var stream = asm.GetManifestResourceStream(name)!;
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd().Trim();
+    }
+
+    private static ModelConfig ResolveAlias(
+        ModelConfig model,
+        IReadOnlyDictionary<string, ModelConfig> registry)
+    {
+        if (registry.TryGetValue(model.ModelId, out var alias))
+        {
+            return alias with
+            {
+                Temperature = model.Temperature ?? alias.Temperature,
+                MaxTokens   = model.MaxTokens > 0 ? model.MaxTokens : alias.MaxTokens
+            };
+        }
+        return model;
+    }
+
+    // Separates binding from loading so both BuildAsync and LoadConfig get the same
+    // helpful error message when a field type doesn't match the schema.
+    private static OrchestrationConfig BindConfig(string configPath, IConfiguration configuration)
+    {
+        OrchestrationConfig? config;
+        try
+        {
+            config = configuration.GetSection("Orchestration").Get<OrchestrationConfig>();
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Failed to bind '{configPath}': {ex.Message} Check that all field types match the expected schema.", ex);
+        }
+
+        return config
+            ?? throw new InvalidOperationException($"File '{configPath}' is missing the top-level 'Orchestration' key.");
+    }
+
+    /// <summary>
+    /// Expands <c>${ENV_VAR}</c> tokens in the security and API profile sections of the config.
+    /// Expansion is performed at startup so that secrets stay in environment variables and
+    /// never appear in agent instructions or conversation history.
+    /// </summary>
+    private static OrchestrationConfig ExpandEnvVars(OrchestrationConfig config)
+    {
+        // Expand HttpAllowedHosts so ${SNOW_INSTANCE} style entries work.
+        var expandedHosts = config.Security.HttpAllowedHosts
+            .Select(ProcessHelper.ExpandEnvTokens)
+            .ToList();
+
+        var expandedSecurity = config.Security with { HttpAllowedHosts = expandedHosts };
+
+        // Expand ApiProfiles: BaseUrl and every header value.
+        var expandedProfiles = config.ApiProfiles
+            .ToDictionary(
+                kvp => kvp.Key,
+                kvp => kvp.Value with
+                {
+                    BaseUrl        = ProcessHelper.ExpandEnvTokens(kvp.Value.BaseUrl),
+                    DefaultHeaders = kvp.Value.DefaultHeaders
+                        .ToDictionary(
+                            h => h.Key,
+                            h => ProcessHelper.ExpandEnvTokens(h.Value),
+                            StringComparer.OrdinalIgnoreCase),
+                },
+                StringComparer.OrdinalIgnoreCase);
+
+        return config with
+        {
+            Security    = expandedSecurity,
+            ApiProfiles = expandedProfiles,
+        };
+    }
+}

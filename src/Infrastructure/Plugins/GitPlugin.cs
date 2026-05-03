@@ -1,0 +1,202 @@
+using System.ComponentModel;
+using Microsoft.Extensions.AI;
+
+namespace fuseraft.Infrastructure.Plugins;
+
+/// <summary>
+/// Gives agents access to common Git operations.
+/// Requires <c>git</c> to be installed and available on PATH.
+/// </summary>
+public sealed class GitPlugin
+{
+    // Read-only queries
+
+    [Description("Get working-tree status.")]
+    public async Task<string> StatusAsync([Description("Repo path.")] string? repoPath = null)
+    {
+        var result = await Git("status --short --branch", repoPath);
+        return result.ToPluginOutput();
+    }
+
+    [Description("Show working-tree or staged diff.")]
+    public async Task<string> DiffAsync(
+        [Description("Repo path.")] string? repoPath = null,
+        [Description("Show staged diff.")] bool staged = false,
+        [Description("Max output lines.")] int maxLines = 200)
+    {
+        var args = staged ? "diff --cached" : "diff";
+        var result = await Git(args, repoPath);
+        return TruncateLines(result.ToPluginOutput(), maxLines);
+    }
+
+    [Description("Show commit history.")]
+    public async Task<string> LogAsync(
+        [Description("Repo path.")] string? repoPath = null,
+        [Description("Max commits.")] int count = 10,
+        [Description("Branch or ref.")] string? @ref = null)
+    {
+        var refArg = string.IsNullOrWhiteSpace(@ref) ? string.Empty : $" {@ref}";
+        var result = await Git(
+            $"log --oneline --decorate -n {count}{refArg}", repoPath);
+        return result.ToPluginOutput();
+    }
+
+    [Description("Show a specific commit.")]
+    public async Task<string> ShowAsync(
+        [Description("Commit hash or ref.")] string commitRef,
+        [Description("Repo path.")] string? repoPath = null,
+        [Description("Max output lines.")] int maxLines = 300)
+    {
+        var result = await Git($"show {commitRef}", repoPath);
+        return TruncateLines(result.ToPluginOutput(), maxLines);
+    }
+
+    [Description("List branches.")]
+    public async Task<string> BranchListAsync(
+        [Description("Repo path.")] string? repoPath = null,
+        [Description("Include remote-tracking branches.")] bool includeRemotes = false)
+    {
+        var args = includeRemotes ? "branch -a" : "branch";
+        var result = await Git(args, repoPath);
+        return result.ToPluginOutput();
+    }
+
+    // Write operations
+
+    [Description("Stage files for commit.")]
+    public async Task<string> AddAsync(
+        [Description("File path(s) or '.' for everything.")] string paths,
+        [Description("Repo path.")] string? repoPath = null)
+    {
+        // Split on whitespace so "src/ tests/" stages two paths safely.
+        var parts = paths.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var args = new[] { "add" }.Concat(parts);
+        var result = await ProcessHelper.RunAsync("git", args, repoPath);
+        // Always unstage fuseraft's own working directory — .fuseraft/ contains session
+        // artifacts (event logs, summaries, memory) that should never be committed by the agent.
+        await ProcessHelper.RunAsync("git", ["reset", "--", ".fuseraft/"], repoPath);
+        return result.ToPluginOutput();
+    }
+
+    [Description("Create a commit.")]
+    public async Task<string> CommitAsync(
+        [Description("Commit message.")] string message,
+        [Description("Repo path.")] string? repoPath = null,
+        [Description("Stage all tracked changes before commit.")] bool stageAll = false)
+    {
+        var args = stageAll
+            ? new[] { "commit", "-a", "-m", message }
+            : new[] { "commit", "-m", message };
+        var result = await ProcessHelper.RunAsync("git", args, repoPath);
+        return result.ToPluginOutput();
+    }
+
+    [Description("Switch branch or restore files.")]
+    public async Task<string> CheckoutAsync(
+        [Description("Branch, commit, or file path.")] string target,
+        [Description("Repo path.")] string? repoPath = null,
+        [Description("Create branch if it doesn't exist.")] bool createBranch = false)
+    {
+        var args = createBranch
+            ? new[] { "checkout", "-b", target }
+            : new[] { "checkout", target };
+        var result = await ProcessHelper.RunAsync("git", args, repoPath);
+        return result.ToPluginOutput();
+    }
+
+    [Description("Create a new branch from HEAD.")]
+    public async Task<string> CreateBranchAsync(
+        [Description("Branch name.")] string branchName,
+        [Description("Repo path.")] string? repoPath = null)
+    {
+        var result = await ProcessHelper.RunAsync("git", ["checkout", "-b", branchName], repoPath);
+        return result.ToPluginOutput();
+    }
+
+    [Description("Initialize a git repository.")]
+    public async Task<string> InitAsync([Description("Directory path.")] string? directory = null)
+    {
+        var result = await Git("init", directory);
+        return result.ToPluginOutput();
+    }
+
+    [Description("Push commits to a remote.")]
+    public async Task<string> PushAsync(
+        [Description("Remote name.")] string? remote = null,
+        [Description("Branch to push.")] string? branch = null,
+        [Description("Set upstream tracking reference.")] bool setUpstream = false,
+        [Description("Repo path.")] string? repoPath = null)
+    {
+        var args = new List<string> { "push" };
+        if (setUpstream) args.Add("--set-upstream");
+        if (!string.IsNullOrWhiteSpace(remote)) args.Add(remote);
+        if (!string.IsNullOrWhiteSpace(branch)) args.Add(branch);
+        var result = await ProcessHelper.RunAsync("git", args, repoPath, timeoutSeconds: 120);
+        return result.ToPluginOutput();
+    }
+
+    [Description("Pull changes from a remote.")]
+    public async Task<string> PullAsync(
+        [Description("Remote name.")] string? remote = null,
+        [Description("Branch to pull.")] string? branch = null,
+        [Description("Repo path.")] string? repoPath = null)
+    {
+        var args = new List<string> { "pull" };
+        if (!string.IsNullOrWhiteSpace(remote)) args.Add(remote);
+        if (!string.IsNullOrWhiteSpace(branch)) args.Add(branch);
+        var result = await ProcessHelper.RunAsync("git", args, repoPath, timeoutSeconds: 120);
+        return result.ToPluginOutput();
+    }
+
+    [Description("Stash working-tree changes.")]
+    public async Task<string> StashAsync(
+        [Description("Stash message.")] string? message = null,
+        [Description("Repo path.")] string? repoPath = null)
+    {
+        var args = string.IsNullOrWhiteSpace(message) ? "stash push" : $"stash push -m \"{message}\"";
+        var result = await Git(args, repoPath);
+        return result.ToPluginOutput();
+    }
+
+    [Description("List stashed changesets.")]
+    public async Task<string> StashListAsync(
+        [Description("Repo path.")] string? repoPath = null)
+    {
+        var result = await Git("stash list", repoPath);
+        return result.ToPluginOutput();
+    }
+
+    [Description("Apply and remove the most recent stash.")]
+    public async Task<string> StashPopAsync(
+        [Description("Repo path.")] string? repoPath = null)
+    {
+        var result = await Git("stash pop", repoPath);
+        return result.ToPluginOutput();
+    }
+
+    [Description("Reset HEAD. soft: moves HEAD; mixed: unstages; hard: discards all changes.")]
+    public async Task<string> ResetAsync(
+        [Description("Reset mode: 'soft', 'mixed', or 'hard'.")] string mode = "mixed",
+        [Description("Target ref.")] string @ref = "HEAD",
+        [Description("Repo path.")] string? repoPath = null)
+    {
+        mode = mode.ToLowerInvariant();
+        if (mode is not ("soft" or "mixed" or "hard"))
+            return PluginResult.Error($"Invalid mode '{mode}'. Must be 'soft', 'mixed', or 'hard'.");
+        var result = await Git($"reset --{mode} {@ref}", repoPath);
+        return result.ToPluginOutput();
+    }
+
+    // Helpers
+
+    private static Task<ProcessResult> Git(string args, string? workingDirectory = null) =>
+        ProcessHelper.RunAsync("git", args, workingDirectory);
+
+    private static string TruncateLines(string text, int maxLines)
+    {
+        if (maxLines <= 0) return text;
+        var lines = text.Split('\n');
+        if (lines.Length <= maxLines) return text;
+        return string.Join('\n', lines[..maxLines]) + $"\n... [{lines.Length - maxLines} lines truncated]";
+    }
+}

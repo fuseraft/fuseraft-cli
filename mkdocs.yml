@@ -1,0 +1,62 @@
+site_name: fuseraft-cli
+site_description: Multi-agent orchestration CLI built on Microsoft Agent Framework
+site_url: https://fuseraft.github.io/fuseraft-cli/
+repo_url: https://github.com/fuseraft/fuseraft-cli
+repo_name: fuseraft/fuseraft-cli
+edit_uri: https://github.com/fuseraft/fuseraft-cli/edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.action.edit
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - CLI Reference: cli-reference.md
+  - Configuration: configuration.md
+  - Models & Providers: models.md
+  - Plugins: plugins.md
+  - Strategies: strategies.md
+  - Validators: validators.md
+  - Harness Engineering: harness-engineering.md
+  - MCP: mcp.md
+  - Security: security.md
+  - Governance: governance.md
+  - Sessions: sessions.md
+  - Examples: examples.md
+  - Design: design.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true

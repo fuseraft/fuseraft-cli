@@ -1,0 +1,109 @@
+{
+  "Orchestration": {
+    "Name": "ResearchTeam",
+    "Description": "Two-agent research pipeline: Researcher fetches data and writes structured findings to disk; Writer synthesises a polished report. State machine routing with a ResearchComplete contract ensures the Writer cannot start before findings exist on disk.",
+
+    "EvidenceStore": {
+      "Path": ".fuseraft/evidence.json"
+    },
+
+    "ChangeTracking": {
+      "Path": ".fuseraft/changes.json"
+    },
+
+    "Contracts": [
+      {
+        "Name": "ResearchComplete",
+        "Requires": [
+          { "FileExists": { "Path": "research/raw_data.txt" } }
+        ]
+      }
+    ],
+
+    "FailureHandling": {
+      "MissingEvidence": { "Action": "Reinstruct", "Threshold": 3 },
+      "NoProgress":      { "Action": "Abort",      "Threshold": 3 }
+    },
+
+    "Compaction": {
+      "TriggerTurnCount": 20,
+      "KeepRecentTurns": 6,
+      "Mode": "lossless"
+    },
+
+    "Agents": [
+      {
+        "Name": "Researcher",
+        "Description": "Data researcher who fetches real information using HTTP and filesystem tools.",
+        "Instructions": "You are a research specialist.\n\nFOLLOW THESE STEPS IN ORDER:\n\n1. FETCH: Use http_get to retrieve data from relevant public APIs or URLs. Include the exact response content.\n\n2. EXTRACT: Use json_get to pull specific fields from JSON responses. Don't paraphrase — capture the real data.\n\n3. SAVE: Use write_file to save your raw findings to 'research/raw_data.txt'. The file must exist on disk before you hand off.\n\n4. VERIFY: Use read_file on 'research/raw_data.txt' to confirm it was written correctly.\n\n5. HAND OFF: Call handoff(route_keyword: \"HANDOFF TO WRITER\") with a summary of what sources you consulted and what data was captured.\n\nRULES:\n- Never summarize or paraphrase API responses — write the actual data to the file.\n- Never claim a file was written without verifying it with read_file.",
+        "Model": {
+          "ModelId": "grok-4-1-fast-non-reasoning",
+          "Endpoint": "https://api.x.ai/v1",
+          "ApiKeyEnvVar": "XAI_API_KEY",
+          "MaxTokens": 8192
+        },
+        "FunctionChoice": "required",
+        "Plugins": ["Http", "Json", "FileSystem", "Changes", "Handoff"]
+      },
+      {
+        "Name": "Writer",
+        "Description": "Technical writer who synthesises research into a structured report.",
+        "Instructions": "You are a technical writer.\n\nFOLLOW THESE STEPS IN ORDER:\n\n1. READ: Use read_file to load 'research/raw_data.txt'. Do not proceed if the file is missing or empty — report BLOCKED: no research data found.\n\n2. ANALYSE: Identify key insights, patterns, trends, and gaps in the data.\n\n3. WRITE REPORT: Use write_file to save a structured Markdown report to 'research/report.md'. The report must have clear sections: Summary, Key Findings, and Recommendations.\n\n4. VERIFY: Use read_file to confirm 'research/report.md' was written correctly.\n\n5. COMPLETE: Call handoff(route_keyword: \"REPORT COMPLETE\") followed by a one-paragraph summary of the findings.",
+        "Model": {
+          "ModelId": "grok-4-1-fast-reasoning",
+          "Endpoint": "https://api.x.ai/v1",
+          "ApiKeyEnvVar": "XAI_API_KEY",
+          "MaxTokens": 8192
+        },
+        "FunctionChoice": "required",
+        "Plugins": ["FileSystem", "Json", "Handoff"]
+      }
+    ],
+
+    "Selection": {
+      "Type": "statemachine",
+      "StateMachine": {
+        "Initial": "Research",
+        "States": {
+          "Research": {
+            "Agent": "Researcher",
+            "Transitions": [
+              {
+                "To": "Writing",
+                "Signal": "HANDOFF TO WRITER",
+                "Contract": "ResearchComplete"
+              }
+            ]
+          },
+          "Writing": {
+            "Agent": "Writer",
+            "Transitions": [
+              { "To": "Done", "Signal": "REPORT COMPLETE" }
+            ]
+          },
+          "Done": {
+            "Agent": "Writer",
+            "Terminal": true
+          }
+        }
+      }
+    },
+
+    "Termination": {
+      "Type": "composite",
+      "MaxIterations": 15,
+      "Strategies": [
+        {
+          "Type": "regex",
+          "Pattern": "REPORT COMPLETE",
+          "MaxIterations": 15,
+          "AgentNames": ["Writer"]
+        }
+      ]
+    },
+
+    "Events": {
+      "Path": ".fuseraft/events.jsonl"
+    }
+  }
+}

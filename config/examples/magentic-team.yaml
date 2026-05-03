@@ -1,0 +1,73 @@
+Orchestration:
+  Name: MagenticTeam
+  Description: >
+    Two-agent research and development team orchestrated by a Magentic manager.
+    The manager gathers facts, creates a plan, then dynamically selects the right
+    participant for each step — adapting if the team gets stuck.
+
+  Models:
+    manager:
+      ModelId: gpt-4o
+      Endpoint: https://api.openai.com/v1
+      ApiKeyEnvVar: OPENAI_API_KEY
+    worker:
+      ModelId: gpt-4o-mini
+      Endpoint: https://api.openai.com/v1
+      ApiKeyEnvVar: OPENAI_API_KEY
+
+  Agents:
+    - Name: Researcher
+      Description: Gathers information, summarizes findings, and answers factual questions.
+      Instructions: |
+        You are a Researcher. Your job is to find information, analyze data, and produce
+        well-sourced summaries. When asked to investigate a topic, be thorough but concise.
+        Use your available tools to search and read content when needed.
+      Model:
+        ModelId: worker
+        MaxTokens: 4096
+      Plugins:
+        - FileSystem
+        - Scratchpad
+
+    - Name: Developer
+      Description: Writes code, implements features, runs tests, and fixes bugs.
+      Instructions: |
+        You are a Developer. Your job is to write clean, working code that solves the
+        problem at hand. When implementing features, write the code first, then test it.
+        Always prefer working code over theoretical explanations.
+      Model:
+        ModelId: worker
+        MaxTokens: 8192
+      Plugins:
+        - FileSystem
+        - Shell
+        - Git
+        - Scratchpad
+
+  Selection:
+    Type: magentic
+    Magentic:
+      # The manager model should be capable of structured reasoning.
+      # It drives the entire planning and progress-evaluation loop.
+      Model:
+        ModelId: manager
+      # Optional custom instructions for the manager LLM.
+      # When omitted, a sensible default is used automatically.
+      # Instructions: |
+      #   You are MagenticManager. Coordinate your team efficiently...
+      MaxRoundCount: 20     # hard cap on inner-loop rounds
+      MaxStallCount: 3      # stalled rounds before replanning
+      MaxResetCount: 2      # max replan cycles before terminating
+      EnablePlanReview: false  # set true to approve the plan before execution begins
+
+  Termination:
+    # NOTE: The Termination section is ignored for the 'magentic' selection type.
+    # MagenticOrchestrator self-terminates via MaxRoundCount, MaxStallCount, and MaxResetCount
+    # in the Magentic block above. This section is kept only for documentation purposes and
+    # has no effect on session behaviour.
+    Type: maxiterations
+    MaxIterations: 50
+
+  Checkpoint:
+    Mode: json
+    Path: .fuseraft/checkpoints

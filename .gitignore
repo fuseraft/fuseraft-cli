@@ -1,0 +1,42 @@
+# Build output
+bin/
+site/
+artifacts/
+src/bin/
+src/obj/
+tools/*/bin/
+tools/*/obj/
+
+# dotnet
+*.user
+*.suo
+.vs/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+*.ncrunch*
+
+# NuGet
+.nuget/
+*.nupkg
+
+# Cake bootstrapper packages
+tools/Addins/
+tools/Modules/
+tools/*.dll
+tools/*.pdb
+
+# Session data
+.fuseraft-repl-sessions.json
+.fuseraft-plan.json
+.fuseraft
+
+.env
+*.env
+NOTES*.md
+repo-summary.sh
+tests/FuseraftCli.Tests/obj/**
+.venv/
+analyze.kiwi
+PLAN.md
+DEBUGGING.md
