@@ -172,7 +172,8 @@ Search the filesystem by name or content.
 |----------|-----------|-------------|
 | `search_files` | `pattern`, `directory` (default `"."`), `maxResults` (default 100) | Find files by wildcard/glob pattern. |
 | `search_content` | `query`, `directory` (default `"."`), `filePattern` (default `"*"`), `maxResults` (default 100), `caseSensitive` (default false) | Search file contents by regex or plain text (like grep). |
-| `search_symbol` | `symbol`, `directory` (default `"."`), `extension` (default `""`), `maxResults` (default 50) | Find symbol definitions (class, function, interface, variable, etc.) using language-agnostic patterns. |
+| `search_symbol` | `symbol`, `directory` (default `"."`), `extension` (default `""`), `maxResults` (default 50) | Find symbol definitions (class, function, interface, variable, etc.) using language-agnostic patterns. Results are automatically recorded as `SymbolDefinition` nodes in the evidence graph when `EvidenceStore` is configured. |
+| `search_callers` | `symbol`, `directory` (default `"."`), `extension` (default `""`), `maxResults` (default 100) | Find call sites and usages of a symbol: invocations, constructor calls, type annotations, and inheritance declarations. Excludes definition lines so results contain only references. Results are automatically recorded as `SymbolReference` nodes in the evidence graph when `EvidenceStore` is configured; `TargetFile` is resolved from any existing `SymbolDefinition` nodes for the same symbol. |
 
 ---
 

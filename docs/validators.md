@@ -241,6 +241,69 @@ This closes the loophole where a Developer writes a single helper file to satisf
 
 ---
 
+## RequireRelatedTestsPass
+
+**Used on:** `HANDOFF TO TESTER` or `HANDOFF TO REVIEWER` (blocks handoff until targeted tests for the session's changed files pass)
+
+**What it checks:** Reads the change log to find every file written in the current session, runs `TestSelector.FindRelatedCommand` for each changed file to discover related test targets, then executes only those tests. Falls back to `TestSelector.FullSuiteCommand` when discovery returns nothing.
+
+**Passes if:** The test command (targeted or full-suite fallback) exits 0.
+
+**Fails if:** The discovery command fails, the test runner exits non-zero, or `TestSelector` is not configured.
+
+**Requirements:**
+- `TestSelector.FindRelatedCommand` must be set (template with `{file}` substitution).
+- `TestSelector.FullSuiteCommand` must be set (used as fallback and as the test runner that receives discovered targets as arguments).
+- `ChangeTracking` must be configured so changed files can be resolved.
+
+**Example route config:**
+
+```yaml
+Orchestration:
+  ChangeTracking:
+    Path: .fuseraft/state/changes.json
+
+  TestSelector:
+    FindRelatedCommand: "pytest --collect-only -q {file} 2>/dev/null | grep '::' | head -40"
+    FullSuiteCommand: "pytest"
+
+  Contracts:
+    - Name: TestedChanges
+      Requires:
+        - RelatedTestsPass
+
+  Selection:
+    Type: keyword
+    Routes:
+      - Keyword: "HANDOFF TO REVIEWER"
+        Agent: Reviewer
+        Contracts:
+          - TestedChanges
+        SourceAgents:
+          - Tester
+```
+
+**How target discovery works:**
+
+1. Changed files are read from `changes.json` for the active session (`ActiveSessionId`).
+2. `FindRelatedCommand` is run once per changed file (`{file}` substituted). Each non-empty output line is treated as a test target.
+3. Discovered targets are appended as space-separated arguments to `FullSuiteCommand`.
+4. If discovery produces no targets, `FullSuiteCommand` is run without arguments (full suite fallback).
+
+**Error injected on failure:**
+
+```
+Handoff blocked: targeted tests failed (exit 1).
+
+Command: pytest tests/test_api.py tests/test_auth.py
+
+<test output truncated to 2000 chars>
+```
+
+**Relationship to `RequireShellPass`:** `RequireShellPass` checks whether the agent ran any passing shell command this turn. `RequireRelatedTestsPass` is a contract predicate that the orchestrator runs independently — it does not inspect conversation history, it runs the tests itself. Use `RequireRelatedTestsPass` when you want the framework to enforce test coverage of specific changed files. Use `RequireShellPass` when you want to verify the agent ran a command in its own turn.
+
+---
+
 ## TestReportValid
 
 **Used on:** `HANDOFF TO REVIEWER`
@@ -485,7 +548,7 @@ Orchestration:
 | Reusable across routes | No — attach individually | Yes — reference by name |
 | Supported routing types | Keyword, termination | Keyword, state machine |
 | Evidence source | Conversation history scan | Evidence graph (or `changes.json`) |
-| Custom predicates | No | Yes (FilesWritten, CommandSucceeded, FileExists, TestReport) |
+| Custom predicates | No | Yes (FilesWritten, CommandSucceeded, FileExists, TestReport, RelatedTestsPass) |
 
 Contracts and validators compose: a route may declare both `Validators` and `Contracts`. All must pass (AND semantics).
 
