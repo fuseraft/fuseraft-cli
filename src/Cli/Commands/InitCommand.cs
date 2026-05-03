@@ -93,14 +93,25 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
             }
         }
 
-        var yaml = InitTemplates.Build(templateKey, model, endpoint);
-        var dir  = Path.GetDirectoryName(output);
+        var generated = InitTemplates.Build(templateKey, model, endpoint);
+        var dir       = Path.GetDirectoryName(output) ?? string.Empty;
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        await File.WriteAllTextAsync(output, yaml, cancellationToken);
+        await File.WriteAllTextAsync(output, generated.MainConfig, cancellationToken);
+
+        var configDir = string.IsNullOrEmpty(dir) ? "." : dir;
+        foreach (var (relativePath, content) in generated.AgentFiles)
+        {
+            var fullPath = Path.Combine(configDir, relativePath);
+            var fileDir  = Path.GetDirectoryName(fullPath);
+            if (!string.IsNullOrEmpty(fileDir)) Directory.CreateDirectory(fileDir);
+            await File.WriteAllTextAsync(fullPath, content, cancellationToken);
+        }
 
         var selected        = Array.Find(Templates, t => t.Key == templateKey)!;
         var endpointDisplay = string.IsNullOrWhiteSpace(endpoint) ? "[dim](default)[/]" : Markup.Escape(endpoint);
         AnsiConsole.MarkupLine($"[green]✓[/] Config written → [bold]{Markup.Escape(output)}[/]");
+        foreach (var (relativePath, _) in generated.AgentFiles)
+            AnsiConsole.MarkupLine($"  [green]↳[/] {Markup.Escape(Path.Combine(configDir, relativePath))}");
         AnsiConsole.MarkupLine($"[dim]Template:[/] {selected.Label}   [dim]Model:[/] {model}   [dim]Endpoint:[/] {endpointDisplay}");
         AnsiConsole.WriteLine();
 

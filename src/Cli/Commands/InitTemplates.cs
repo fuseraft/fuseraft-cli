@@ -2,661 +2,1024 @@ using fuseraft.Core;
 
 namespace fuseraft.Cli.Commands;
 
+internal sealed record GeneratedConfig(
+    string MainConfig,
+    IReadOnlyList<(string RelativePath, string Content)> AgentFiles)
+{
+    internal static GeneratedConfig Inline(string yaml) => new(yaml, []);
+}
+
 internal static class InitTemplates
 {
-    internal static string Build(string template, string model, string? endpoint) =>
+    internal static GeneratedConfig Build(string template, string model, string? endpoint) =>
         template switch
         {
-            "research"      => Research(model, endpoint),
-            "devops"        => DevOps(model, endpoint),
-            "content"       => Content(model, endpoint),
-            "minimal"       => Minimal(model, endpoint),
-            "magentic"      => Magentic(model, endpoint),
-            "designer"      => Designer(model, endpoint),
-            "brownfield"    => Brownfield(model, endpoint),
-            _               => DevTeam(model, endpoint),   // "dev-team" + fallback
+            "research"   => Research(model, endpoint),
+            "devops"     => DevOps(model, endpoint),
+            "content"    => Content(model, endpoint),
+            "minimal"    => GeneratedConfig.Inline(Minimal(model, endpoint)),
+            "magentic"   => GeneratedConfig.Inline(Magentic(model, endpoint)),
+            "designer"   => GeneratedConfig.Inline(Designer(model, endpoint)),
+            "brownfield" => Brownfield(model, endpoint),
+            _            => DevTeam(model, endpoint),
         };
 
     // Returns "\n{pad}Endpoint: {endpoint}" when endpoint is set, otherwise empty.
     private static string Ep(string? endpoint, string pad) =>
         string.IsNullOrWhiteSpace(endpoint) ? string.Empty : $"\n{pad}Endpoint: {endpoint}";
 
+    // Endpoint line for agent files (Model: is top-level, ModelId at 2-space indent).
+    private static string EpAgent(string? endpoint) =>
+        string.IsNullOrWhiteSpace(endpoint) ? string.Empty : $"\n  Endpoint: {endpoint}";
+
+    private const string AgentFileOptions = """
+
+        # -- Optional overrides -------------------------------------------------------
+        # ContextWindow:
+        #   TextOnly: true          # strip tool frames from cross-turn history
+        # FunctionChoice: required  # force at least one tool call per turn (auto|required|none)
+        # TrustScore: 0.8           # 0.0–1.0; governs sandbox ring (≥0.8 → ring 1)
+        # MaxToolCallsPerTurn: 20
+        # MaxTokens: 4096
+        # Capabilities:             # per-plugin tool allowlist
+        #   Shell: [shell_run]
+        #   FileSystem: [read_file, list_files]
+        """;
+
     private static string OptionalSections(string model, string? endpoint) => $"""
 
-      # ---------------------------------------------------------------------------
-      # OPTIONAL SECTIONS — uncomment and fill in as needed
-      # ---------------------------------------------------------------------------
-
-      # Named model aliases. Agents reference these by alias so you only need to
-      # change the model ID in one place. Supports any OpenAI-compatible endpoint.
-      # Models:
-      #   fast:
-      #     ModelId: {model}
-      #     Endpoint: {(string.IsNullOrWhiteSpace(endpoint) ? "https://api.openai.com/v1" : endpoint)}
-      #     ApiKeyEnvVar: OPENAI_API_KEY
-      #     MaxContextTokens: 128000
-      #   reasoning:
-      #     ModelId: {model}
-
-      # Sandbox agents to a directory and restrict outbound HTTP hosts.
-      # Security:
-      #   FileSystemSandboxPath: ~/my-project
-      #   HttpAllowedHosts:
-      #     - api.github.com
-      #     - registry.npmjs.org
-
-      # EvidenceStore: structured evidence graph — required for contracts and lossless compaction.
-      # EvidenceStore:
-      #   Path: {FuseraftPaths.LocalEvidence}
-
-      # Contracts: evidence-gated guards on routes or state machine transitions.
-      # Contracts:
-      #   - Name: BriefExists
-      #     Requires:
-      #       - Type: FileExists
-      #         Path: {FuseraftPaths.LocalBrief}
-      #   - Name: ImplementationComplete
-      #     Requires:
-      #       - Type: CommandSucceeded
-      #         Pattern: "build|compile"
-
-      # FailureHandling: targeted correction policy per failure type.
-      # FailureHandling:
-      #   MissingEvidence:
-      #     Action: Reinstruct
-      #     Threshold: 3
-      #   ConflictingEvidence:
-      #     Action: Reinstruct
-      #     Threshold: 2
-
-      # Verifier: meta-agent that audits the evidence graph for inconsistencies.
-      # Verifier:
-      #   AgentName: Verifier          # must match an agent name in Agents
-      #   EveryNTurns: 5
-      #   TriggerOnSuspiciousTransition: true
-      #   FindingsKeyword: INCONSISTENCY
-
-      # Compaction: summarise old turns to prevent context-window overflow.
-      # Compaction:
-      #   TriggerTurnCount: 30
-      #   KeepRecentTurns: 8
-      #   Mode: lossless    # or "hybrid" (reconstruction + LLM narrative), "llm" (default)
-
-      # Checkpoint: save and resume sessions across restarts.
-      # Checkpoint:
-      #   Mode: json
-      #   Path: .fuseraft/checkpoints
-
-      # ChangeTracking: record every file write/delete made by agents.
-      # ChangeTracking:
-      #   Path: {FuseraftPaths.LocalChanges}
-
-      # Validation: paths used by built-in routing validators.
-      # Validation:
-      #   BriefPath: {FuseraftPaths.LocalBrief}
-      #   TestReportPath: {FuseraftPaths.LocalTestReport}
-      #   ChangeLogPath: {FuseraftPaths.LocalChanges}
-
-      Events:
-        Path: {FuseraftPaths.LocalEventsLog}
-
-      # MaxTotalTokens: token budget (input + output combined) — session halts when exceeded.
-      # MaxTotalTokens: 200000
-
-      # McpServers: connect to Model Context Protocol tool servers.
-      # McpServers:
-      #   - Name: my-mcp-server
-      #     Command: npx
-      #     Args: [-y, "@modelcontextprotocol/server-filesystem", "."]
-    """;
-
-    private const string AgentOptions = """
-
-          # ContextWindow:
-          #   TextOnly: true          # strip tool-call frames from cross-turn history
-          # FunctionChoice: required  # force at least one tool call per turn (auto|required|none)
-          # TrustScore: 0.8           # 0.0–1.0; lower scores increase sandbox ring restrictions
-          # MaxTokens: 4096           # override model's default max output tokens
-          # Capabilities:             # per-plugin tool allowlist
-          #   Shell: [shell_run]
-          #   FileSystem: [read_file, list_files]
-      """;
-
-    private static string DevTeam(string model, string? endpoint) => $"""
-        Orchestration:
-          Name: Software Development Team
-          Description: >-
-            Planner → Developer → Tester → Reviewer with state machine routing,
-            evidence contracts, failure handling, and self-verification.
-
-          EvidenceStore:
-            Path: {FuseraftPaths.LocalEvidence}
-
-          ChangeTracking:
-            Path: {FuseraftPaths.LocalChanges}
-
-          Validation:
-            BriefPath: {FuseraftPaths.LocalBrief}
-            TestReportPath: {FuseraftPaths.LocalTestReport}
-            ChangeLogPath: {FuseraftPaths.LocalChanges}
-
-          Contracts:
-            - Name: BriefExists
-              Requires:
-                - Type: FileExists
-                  Path: {FuseraftPaths.LocalBrief}
-
-            - Name: ImplementationComplete
-              Requires:
-                - Type: FilesWritten
-                  Source: {FuseraftPaths.LocalBrief}
-                  Field: files_to_change
-                - Type: CommandSucceeded
-                  Pattern: "build|compile"
-
-            - Name: TestsValid
-              Requires:
-                - Type: FileExists
-                  Path: {FuseraftPaths.LocalTestReport}
-                - Type: TestReport
-                  NoFailures: true
-                  HasAssertions: true
-
-          FailureHandling:
-            MissingEvidence:
-              Action: Reinstruct
-              Threshold: 3
-            ConflictingEvidence:
-              Action: Reinstruct
-              Threshold: 2
-            NoProgress:
-              Action: Abort
-              Threshold: 3
-
-          Verifier:
-            AgentName: Verifier
-            EveryNTurns: 5
-            TriggerOnSuspiciousTransition: true
-            FindingsKeyword: INCONSISTENCY
-
-          Compaction:
-            TriggerTurnCount: 30
-            KeepRecentTurns: 8
-            Mode: lossless
-
-          Events:
-            Path: {FuseraftPaths.LocalEventsLog}
-
-          Agents:
-            - Name: Planner
-              Description: Analyses the task and writes a structured brief.
-              Instructions: |
-                You are a software architect and planner. Your job is to:
-                1. Read and understand the task thoroughly.
-                2. Use sub_agent_explore for broad codebase questions without filling
-                   your context with raw file contents.
-                3. Write a brief to {FuseraftPaths.LocalBrief} with fields:
-                     goal — one-sentence description of what to build
-                     files_to_change — array of file paths to create or modify
-                     acceptance_criteria — array of testable criteria the code must satisfy
-                4. Break work into concrete steps for the Developer.
-                When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
-              Model:
-                ModelId: {model}{Ep(endpoint, "        ")}
-              Plugins:
-                - FileSystem
-                - Search
-                - SubAgent
-                - Handoff
-              FunctionChoice: required
-        {AgentOptions}
-            - Name: Developer
-              Description: Implements the changes described in the brief.
-              Instructions: |
-                You are a senior software engineer. Your job is to:
-                1. Read {FuseraftPaths.LocalBrief} and implement every listed file using write_file.
-                2. Run a build command with shell_run to confirm it compiles.
-                3. Commit your work with git_add and git_commit.
-                When done, call handoff(route_keyword: "HANDOFF TO TESTER").
-                If the plan is unclear, call handoff(route_keyword: "REPLAN REQUIRED").
-              Model:
-                ModelId: {model}{Ep(endpoint, "        ")}
-              Plugins:
-                - FileSystem
-                - Shell
-                - Git
-                - Changes
-                - Handoff
-              FunctionChoice: required
-        {AgentOptions}
-            - Name: Tester
-              Description: Writes and runs tests, produces a structured report.
-              Instructions: |
-                You are a QA engineer. Your job is to:
-                1. Read {FuseraftPaths.LocalBrief} to understand acceptance criteria.
-                2. Write tests and run them with shell_run.
-                3. Write results to {FuseraftPaths.LocalTestReport} with fields:
-                     passed — true or false
-                     results — array of objects, each with name, status (PASS or FAIL), and exit_code
-                If all pass, call handoff(route_keyword: "HANDOFF TO REVIEWER").
-                If any fail, call handoff(route_keyword: "BUGS FOUND").
-              Model:
-                ModelId: {model}{Ep(endpoint, "        ")}
-              Plugins:
-                - FileSystem
-                - Shell
-                - Changes
-                - Handoff
-              FunctionChoice: required
-        {AgentOptions}
-            - Name: Reviewer
-              Description: Reviews implementation and test results; gives final approval.
-              Instructions: |
-                You are a principal engineer. Your job is to:
-                1. Read the implementation and {FuseraftPaths.LocalTestReport}.
-                2. Run at least one acceptance criterion as a spot-check with shell_run.
-                If the code meets all acceptance criteria, call handoff(route_keyword: "APPROVED").
-                If changes are needed, call handoff(route_keyword: "REVISION REQUIRED") and explain what to fix.
-                If the plan is fundamentally wrong, call handoff(route_keyword: "REPLAN REQUIRED").
-              Model:
-                ModelId: {model}{Ep(endpoint, "        ")}
-              Plugins:
-                - FileSystem
-                - Shell
-                - Changes
-                - Handoff
-              FunctionChoice: auto
-              ContextWindow:
-                TextOnly: true
-
-            - Name: Verifier
-              Description: Audits the evidence graph for inconsistencies between claims and recorded actions.
-              Instructions: |
-                You are an evidence auditor. Detect inconsistencies between what agents
-                claim and what is recorded in the change log.
-
-                1. Call changes_read_latest to see what was actually done this session.
-                2. Compare recorded file writes, shell commands, and exit codes against
-                   any claims made in recent conversation messages.
-                3. If consistent: "Evidence verified — no inconsistencies found."
-                4. If inconsistent: "INCONSISTENCY DETECTED: <what was claimed vs what the evidence shows>"
-              Model:
-                ModelId: {model}{Ep(endpoint, "        ")}
-              Plugins:
-                - Changes
-              FunctionChoice: required
-
-          Selection:
-            Type: statemachine
-            StateMachine:
-              Initial: Planning
-
-              States:
-                Planning:
-                  Agent: Planner
-                  Transitions:
-                    - To: Implementation
-                      Signal: "HANDOFF TO DEVELOPER"
-                      Contract: BriefExists
-
-                Implementation:
-                  Agent: Developer
-                  Transitions:
-                    - To: Testing
-                      Signal: "HANDOFF TO TESTER"
-                      Contract: ImplementationComplete
-                    - To: Planning
-                      Signal: "REPLAN REQUIRED"
-
-                Testing:
-                  Agent: Tester
-                  Transitions:
-                    - To: Review
-                      Signal: "HANDOFF TO REVIEWER"
-                      Contract: TestsValid
-                    - To: Implementation
-                      Signal: "BUGS FOUND"
-
-                Review:
-                  Agent: Reviewer
-                  Transitions:
-                    - To: Done
-                      Signal: APPROVED
-                    - To: Implementation
-                      Signal: "REVISION REQUIRED"
-
-                Done:
-                  Agent: Reviewer
-                  Terminal: true
-
-          Termination:
-            Type: composite
-            Strategies:
-              - Type: regex
-                Pattern: "\\bAPPROVED\\b"
-                AgentNames: [Reviewer]
-              - Type: maxiterations
-                MaxIterations: 60
-
           # ---------------------------------------------------------------------------
-          # OPTIONAL EXTRAS — uncomment and fill in as needed
+          # OPTIONAL SECTIONS — uncomment and fill in as needed
           # ---------------------------------------------------------------------------
 
+          # Named model aliases. Agents reference these by alias so you only need to
+          # change the model ID in one place. Supports any OpenAI-compatible endpoint.
+          # Models:
+          #   fast:
+          #     ModelId: {model}
+          #     Endpoint: {(string.IsNullOrWhiteSpace(endpoint) ? "https://api.openai.com/v1" : endpoint)}
+          #     ApiKeyEnvVar: OPENAI_API_KEY
+          #     MaxContextTokens: 128000
+          #   reasoning:
+          #     ModelId: {model}
+
+          # Sandbox agents to a directory and restrict outbound HTTP hosts.
           # Security:
           #   FileSystemSandboxPath: ~/my-project
           #   HttpAllowedHosts:
           #     - api.github.com
+          #     - registry.npmjs.org
 
-          # MaxTotalTokens: 500000
+          # EvidenceStore: structured evidence graph — required for contracts and lossless compaction.
+          # EvidenceStore:
+          #   Path: {FuseraftPaths.LocalEvidence}
 
-          # McpServers:
-          #   - Name: my-mcp-server
-          #     Command: npx
-          #     Args: [-y, "@modelcontextprotocol/server-filesystem", "."]
+          # Contracts: evidence-gated guards on routes or state machine transitions.
+          # Contracts:
+          #   - Name: BriefExists
+          #     Requires:
+          #       - Type: FileExists
+          #         Path: {FuseraftPaths.LocalBrief}
+          #   - Name: ImplementationComplete
+          #     Requires:
+          #       - Type: CommandSucceeded
+          #         Pattern: "build|compile"
 
+          # FailureHandling: targeted correction policy per failure type.
+          # FailureHandling:
+          #   MissingEvidence:
+          #     Action: Reinstruct
+          #     Threshold: 3
+          #   ConflictingEvidence:
+          #     Action: Reinstruct
+          #     Threshold: 2
+
+          # Verifier: meta-agent that audits the evidence graph for inconsistencies.
+          # Verifier:
+          #   AgentName: Verifier          # must match an agent name in Agents
+          #   EveryNTurns: 5
+          #   TriggerOnSuspiciousTransition: true
+          #   FindingsKeyword: INCONSISTENCY
+
+          # Compaction: summarise old turns to prevent context-window overflow.
+          # Compaction:
+          #   TriggerTurnCount: 30
+          #   KeepRecentTurns: 8
+          #   Mode: lossless    # or "hybrid" (reconstruction + LLM narrative), "llm" (default)
+
+          # Checkpoint: save and resume sessions across restarts.
           # Checkpoint:
           #   Mode: json
           #   Path: .fuseraft/checkpoints
 
-          # Models:
-          #   fast:
-          #     ModelId: {model}
-          #   reasoning:
-          #     ModelId: {model}
+          # ChangeTracking: record every file write/delete made by agents.
+          # ChangeTracking:
+          #   Path: {FuseraftPaths.LocalChanges}
+
+          # Validation: paths used by built-in routing validators.
+          # Validation:
+          #   BriefPath: {FuseraftPaths.LocalBrief}
+          #   TestReportPath: {FuseraftPaths.LocalTestReport}
+          #   ChangeLogPath: {FuseraftPaths.LocalChanges}
+
+          Events:
+            Path: {FuseraftPaths.LocalEventsLog}
+
+          # MaxTotalTokens: token budget (input + output combined) — session halts when exceeded.
+          # MaxTotalTokens: 200000
+
+          # McpServers: connect to Model Context Protocol tool servers.
+          # McpServers:
+          #   - Name: my-mcp-server
+          #     Command: npx
+          #     Args: [-y, "@modelcontextprotocol/server-filesystem", "."]
         """;
 
-    private static string Research(string model, string? endpoint) => $"""
-        Orchestration:
-          Name: Research Team
-          Description: >-
-            Researcher gathers information with a verified handoff; Writer synthesises the final document.
+    // ─── DevTeam ────────────────────────────────────────────────────────────────
 
-          EvidenceStore:
-            Path: {FuseraftPaths.LocalEvidence}
+    private static GeneratedConfig DevTeam(string model, string? endpoint)
+    {
+        var planner = $"""
+            Name: Planner
+            Description: Analyses the task and writes a structured brief.
+            Instructions: |
+              You are a software architect and planner. Your job is to:
+              1. Read and understand the task thoroughly.
+              2. Use sub_agent_explore for broad codebase questions without filling
+                 your context with raw file contents.
+              3. Write a brief to {FuseraftPaths.LocalBrief} with fields:
+                   goal — one-sentence description of what to build
+                   files_to_change — array of file paths to create or modify
+                   acceptance_criteria — array of testable criteria the code must satisfy
+              4. Break work into concrete steps for the Developer.
+              When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - FileSystem
+              - Search
+              - SubAgent
+              - Handoff
+            FunctionChoice: required
+            {AgentFileOptions}
+            """;
 
-          Contracts:
-            - Name: ResearchComplete
-              Requires:
-                - Type: FileExists
-                  Path: .fuseraft/research-findings.md
+        var developer = $"""
+            Name: Developer
+            Description: Implements the changes described in the brief.
+            Instructions: |
+              You are a senior software engineer. Your job is to:
+              1. Read {FuseraftPaths.LocalBrief} and implement every listed file using write_file.
+              2. Run a build command with shell_run to confirm it compiles.
+              3. Commit your work with git_add and git_commit.
+              When done, call handoff(route_keyword: "HANDOFF TO TESTER").
+              If the plan is unclear, call handoff(route_keyword: "REPLAN REQUIRED").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - FileSystem
+              - Shell
+              - Git
+              - Changes
+              - Handoff
+            FunctionChoice: required
+            {AgentFileOptions}
+            """;
 
-          Agents:
-            - Name: Researcher
-              Description: Gathers information and writes structured findings to disk.
-              Instructions: |
-                You are a diligent researcher. Your job is to:
-                1. Break the topic into focused questions.
-                2. Search for answers using available tools.
-                3. Write your structured findings to .fuseraft/research-findings.md.
-                When your research is thorough and complete, call handoff(route_keyword: "HANDOFF TO WRITER").
-              Model:
-                ModelId: {model}{Ep(endpoint, "        ")}
-              Plugins:
-                - Http
-                - Search
-                - FileSystem
-                - Handoff
-              FunctionChoice: required
-        {AgentOptions}
-            - Name: Writer
-              Description: Turns research findings into a polished final document.
-              Instructions: |
-                You are a skilled technical writer. Your job is to:
-                1. Read the research findings from .fuseraft/research-findings.md.
-                2. Synthesize a clear, well-structured document that answers the original question.
-                3. Write the final document to .fuseraft/report.md.
-                When done, call handoff(route_keyword: "DOCUMENT COMPLETE").
-              Model:
-                ModelId: {model}{Ep(endpoint, "        ")}
-              Plugins:
-                - FileSystem
-                - Handoff
-              FunctionChoice: required
-        {AgentOptions}
-          Selection:
-            Type: statemachine
-            StateMachine:
-              Initial: Research
+        var tester = $"""
+            Name: Tester
+            Description: Writes and runs tests, produces a structured report.
+            Instructions: |
+              You are a QA engineer. Your job is to:
+              1. Read {FuseraftPaths.LocalBrief} to understand acceptance criteria.
+              2. Write tests and run them with shell_run.
+              3. Write results to {FuseraftPaths.LocalTestReport} with fields:
+                   passed — true or false
+                   results — array of objects, each with name, status (PASS or FAIL), and exit_code
+              If all pass, call handoff(route_keyword: "HANDOFF TO REVIEWER").
+              If any fail, call handoff(route_keyword: "BUGS FOUND").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - FileSystem
+              - Shell
+              - Changes
+              - Handoff
+            FunctionChoice: required
+            {AgentFileOptions}
+            """;
 
-              States:
-                Research:
-                  Agent: Researcher
-                  Transitions:
-                    - To: Writing
-                      Signal: "HANDOFF TO WRITER"
-                      Contract: ResearchComplete
+        var reviewer = $"""
+            Name: Reviewer
+            Description: Reviews implementation and test results; gives final approval.
+            Instructions: |
+              You are a principal engineer. Your job is to:
+              1. Read the implementation and {FuseraftPaths.LocalTestReport}.
+              2. Run at least one acceptance criterion as a spot-check with shell_run.
+              If the code meets all acceptance criteria, call handoff(route_keyword: "APPROVED").
+              If changes are needed, call handoff(route_keyword: "REVISION REQUIRED") and explain what to fix.
+              If the plan is fundamentally wrong, call handoff(route_keyword: "REPLAN REQUIRED").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - FileSystem
+              - Shell
+              - Changes
+              - Handoff
+            FunctionChoice: auto
+            ContextWindow:
+              TextOnly: true
+            {AgentFileOptions}
+            """;
 
-                Writing:
-                  Agent: Writer
-                  Transitions:
-                    - To: Done
-                      Signal: "DOCUMENT COMPLETE"
+        var verifier = $"""
+            Name: Verifier
+            Description: Audits the evidence graph for inconsistencies between claims and recorded actions.
+            Instructions: |
+              You are an evidence auditor. Detect inconsistencies between what agents
+              claim and what is recorded in the change log.
 
-                Done:
-                  Agent: Writer
-                  Terminal: true
+              1. Call changes_read_latest to see what was actually done this session.
+              2. Compare recorded file writes, shell commands, and exit codes against
+                 any claims made in recent conversation messages.
+              3. If consistent: "Evidence verified — no inconsistencies found."
+              4. If inconsistent: "INCONSISTENCY DETECTED: <what was claimed vs what the evidence shows>"
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - Changes
+            FunctionChoice: required
+            {AgentFileOptions}
+            """;
 
-          Termination:
-            Type: composite
-            Strategies:
-              - Type: regex
-                Pattern: DOCUMENT COMPLETE
-                AgentNames: [Writer]
-              - Type: maxiterations
-                MaxIterations: 20
-        {OptionalSections(model, endpoint)}
-        """;
+        var mainConfig = $"""
+            Orchestration:
+              Name: Software Development Team
+              Description: >-
+                Planner → Developer → Tester → Reviewer with state machine routing,
+                evidence contracts, failure handling, and self-verification.
 
-    private static string DevOps(string model, string? endpoint) => $"""
-        Orchestration:
-          Name: DevOps Team
-          Description: >-
-            Planner → Developer → Operator pipeline for infrastructure and deployment tasks.
+              EvidenceStore:
+                Path: {FuseraftPaths.LocalEvidence}
 
-          EvidenceStore:
-            Path: {FuseraftPaths.LocalEvidence}
+              ChangeTracking:
+                Path: {FuseraftPaths.LocalChanges}
 
-          Contracts:
-            - Name: PlanExists
-              Requires:
-                - Type: FileExists
-                  Path: {FuseraftPaths.LocalBrief}
+              Validation:
+                BriefPath: {FuseraftPaths.LocalBrief}
+                TestReportPath: {FuseraftPaths.LocalTestReport}
+                ChangeLogPath: {FuseraftPaths.LocalChanges}
 
-            - Name: ArtifactsReady
-              Requires:
-                - Type: CommandSucceeded
-                  Pattern: "lint|validate|check|test"
+              Contracts:
+                - Name: BriefExists
+                  Requires:
+                    - Type: FileExists
+                      Path: {FuseraftPaths.LocalBrief}
 
-          FailureHandling:
-            MissingEvidence:
-              Action: Reinstruct
-              Threshold: 3
-            NoProgress:
-              Action: Abort
-              Threshold: 3
+                - Name: ImplementationComplete
+                  Requires:
+                    - Type: FilesWritten
+                      Source: {FuseraftPaths.LocalBrief}
+                      Field: files_to_change
+                    - Type: CommandSucceeded
+                      Pattern: "build|compile"
 
-          Agents:
-            - Name: Planner
-              Description: Designs the deployment or infrastructure plan.
-              Instructions: |
-                You are a DevOps architect. Your job is to:
-                1. Understand the infrastructure or deployment task.
-                2. Use sub_agent_explore to survey relevant config files and scripts.
-                3. Write a step-by-step execution plan to {FuseraftPaths.LocalBrief} with fields:
-                     goal — what the deployment achieves
-                     steps — ordered list of execution steps
-                     rollback — steps to undo if something goes wrong
-                When the plan is ready, call handoff(route_keyword: "PLANNING_COMPLETE").
-              Model:
-                ModelId: {model}{Ep(endpoint, "        ")}
-              Plugins:
-                - FileSystem
-                - SubAgent
-                - Handoff
-              FunctionChoice: required
-        {AgentOptions}
-            - Name: Developer
-              Description: Implements scripts, manifests, and config files.
-              Instructions: |
-                You are a DevOps engineer. Your job is to:
-                1. Read the plan from {FuseraftPaths.LocalBrief} and implement all required
-                   scripts, manifests, or config files using write_file.
-                2. Run static analysis or validation with shell_run (e.g. lint, validate, check).
-                3. Commit with git_add and git_commit when ready.
-                When done, call handoff(route_keyword: "DEVELOPMENT_COMPLETE").
-                If the plan is unclear, call handoff(route_keyword: "REPLAN_REQUIRED").
-              Model:
-                ModelId: {model}{Ep(endpoint, "        ")}
-              Plugins:
-                - FileSystem
-                - Shell
-                - Git
-                - Changes
-                - Handoff
-              FunctionChoice: required
-        {AgentOptions}
-            - Name: Operator
-              Description: Executes the deployment and verifies success.
-              Instructions: |
-                You are a site reliability engineer. Your job is to:
-                1. Execute the deployment steps from {FuseraftPaths.LocalBrief} using shell_run.
-                2. Run smoke tests to verify the deployment succeeded.
-                3. Report the outcome clearly with exact command output.
-                If successful, call handoff(route_keyword: "DEPLOYMENT_COMPLETE").
-                If failed, call handoff(route_keyword: "DEPLOYMENT_FAILED") and describe what went wrong.
-              Model:
-                ModelId: {model}{Ep(endpoint, "        ")}
-              Plugins:
-                - Shell
-                - Git
-                - Changes
-                - Handoff
-              FunctionChoice: required
-        {AgentOptions}
-          Selection:
-            Type: statemachine
-            StateMachine:
-              Initial: Planning
+                - Name: TestsValid
+                  Requires:
+                    - Type: FileExists
+                      Path: {FuseraftPaths.LocalTestReport}
+                    - Type: TestReport
+                      NoFailures: true
+                      HasAssertions: true
 
-              States:
-                Planning:
-                  Agent: Planner
-                  Transitions:
-                    - To: Development
-                      Signal: "PLANNING_COMPLETE"
-                      Contract: PlanExists
+              FailureHandling:
+                MissingEvidence:
+                  Action: Reinstruct
+                  Threshold: 3
+                ConflictingEvidence:
+                  Action: Reinstruct
+                  Threshold: 2
+                NoProgress:
+                  Action: Abort
+                  Threshold: 3
 
-                Development:
-                  Agent: Developer
-                  Transitions:
-                    - To: Operations
-                      Signal: "DEVELOPMENT_COMPLETE"
-                      Contract: ArtifactsReady
-                    - To: Planning
-                      Signal: "REPLAN_REQUIRED"
+              Verifier:
+                AgentName: Verifier
+                EveryNTurns: 5
+                TriggerOnSuspiciousTransition: true
+                FindingsKeyword: INCONSISTENCY
 
-                Operations:
-                  Agent: Operator
-                  Transitions:
-                    - To: Done
-                      Signal: "DEPLOYMENT_COMPLETE"
-                    - To: Development
-                      Signal: "DEPLOYMENT_FAILED"
+              Compaction:
+                TriggerTurnCount: 30
+                KeepRecentTurns: 8
+                Mode: lossless
 
-                Done:
-                  Agent: Operator
-                  Terminal: true
+              Events:
+                Path: {FuseraftPaths.LocalEventsLog}
 
-          Termination:
-            Type: composite
-            Strategies:
-              - Type: regex
-                Pattern: DEPLOYMENT_COMPLETE
-                AgentNames: [Operator]
-              - Type: maxiterations
-                MaxIterations: 20
-        {OptionalSections(model, endpoint)}
-        """;
+              # Each agent lives in its own YAML file in agents/ — edit, version, or reuse
+              # them independently across configs. Inline fields override the file at load time.
+              Agents:
+                - AgentFile: agents/planner.yaml
+                - AgentFile: agents/developer.yaml
+                - AgentFile: agents/tester.yaml
+                - AgentFile: agents/reviewer.yaml
+                - AgentFile: agents/verifier.yaml
 
-    private static string Content(string model, string? endpoint) => $"""
-        Orchestration:
-          Name: Content Pipeline
-          Description: >-
-            Writer drafts content with a verified handoff; Editor refines and approves.
+              Selection:
+                Type: statemachine
+                StateMachine:
+                  Initial: Planning
 
-          EvidenceStore:
-            Path: {FuseraftPaths.LocalEvidence}
+                  States:
+                    Planning:
+                      Agent: Planner
+                      Transitions:
+                        - To: Implementation
+                          Signal: "HANDOFF TO DEVELOPER"
+                          Contract: BriefExists
 
-          Contracts:
-            - Name: DraftExists
-              Requires:
-                - Type: FileExists
-                  Path: output/draft.md
+                    Implementation:
+                      Agent: Developer
+                      Transitions:
+                        - To: Testing
+                          Signal: "HANDOFF TO TESTER"
+                          Contract: ImplementationComplete
+                        - To: Planning
+                          Signal: "REPLAN REQUIRED"
 
-          Agents:
-            - Name: Writer
-              Description: Produces a complete first draft and saves it to disk.
-              Instructions: |
-                You are a creative and precise writer. Your job is to:
-                1. Understand the content brief from the task.
-                2. Write a complete draft and save it to output/draft.md using write_file.
-                When the draft is ready for review, call handoff(route_keyword: "DRAFT_COMPLETE").
-              Model:
-                ModelId: {model}{Ep(endpoint, "        ")}
-              Plugins:
-                - FileSystem
-                - Search
-                - Handoff
-              FunctionChoice: required
-        {AgentOptions}
-            - Name: Editor
-              Description: Edits for clarity, accuracy, and style; writes the final version.
-              Instructions: |
-                You are a senior editor. Your job is to:
-                1. Read the draft from output/draft.md.
-                2. Edit for clarity, accuracy, tone, and structure.
-                3. Save the final version to output/final.md using write_file.
-                When editing is complete, call handoff(route_keyword: "CONTENT_APPROVED").
-              Model:
-                ModelId: {model}{Ep(endpoint, "        ")}
-              Plugins:
-                - FileSystem
-                - Handoff
-              FunctionChoice: required
-        {AgentOptions}
-          Selection:
-            Type: statemachine
-            StateMachine:
-              Initial: Writing
+                    Testing:
+                      Agent: Tester
+                      Transitions:
+                        - To: Review
+                          Signal: "HANDOFF TO REVIEWER"
+                          Contract: TestsValid
+                        - To: Implementation
+                          Signal: "BUGS FOUND"
 
-              States:
-                Writing:
-                  Agent: Writer
-                  Transitions:
-                    - To: Editing
-                      Signal: "DRAFT_COMPLETE"
-                      Contract: DraftExists
+                    Review:
+                      Agent: Reviewer
+                      Transitions:
+                        - To: Done
+                          Signal: APPROVED
+                        - To: Implementation
+                          Signal: "REVISION REQUIRED"
 
-                Editing:
-                  Agent: Editor
-                  Transitions:
-                    - To: Done
-                      Signal: "CONTENT_APPROVED"
+                    Done:
+                      Agent: Reviewer
+                      Terminal: true
 
-                Done:
-                  Agent: Editor
-                  Terminal: true
+              Termination:
+                Type: composite
+                Strategies:
+                  - Type: regex
+                    Pattern: "\\bAPPROVED\\b"
+                    AgentNames: [Reviewer]
+                  - Type: maxiterations
+                    MaxIterations: 60
 
-          Termination:
-            Type: composite
-            Strategies:
-              - Type: regex
-                Pattern: CONTENT_APPROVED
-                AgentNames: [Editor]
-              - Type: maxiterations
-                MaxIterations: 10
-        {OptionalSections(model, endpoint)}
-        """;
+              # ---------------------------------------------------------------------------
+              # OPTIONAL EXTRAS — uncomment and fill in as needed
+              # ---------------------------------------------------------------------------
+
+              # Security:
+              #   FileSystemSandboxPath: ~/my-project
+              #   HttpAllowedHosts:
+              #     - api.github.com
+
+              # MaxTotalTokens: 500000
+
+              # McpServers:
+              #   - Name: my-mcp-server
+              #     Command: npx
+              #     Args: [-y, "@modelcontextprotocol/server-filesystem", "."]
+
+              # Checkpoint:
+              #   Mode: json
+              #   Path: .fuseraft/checkpoints
+
+              # Models:
+              #   fast:
+              #     ModelId: {model}
+              #   reasoning:
+              #     ModelId: {model}
+            """;
+
+        return new GeneratedConfig(mainConfig, [
+            ("agents/planner.yaml",   planner),
+            ("agents/developer.yaml", developer),
+            ("agents/tester.yaml",    tester),
+            ("agents/reviewer.yaml",  reviewer),
+            ("agents/verifier.yaml",  verifier),
+        ]);
+    }
+
+    // ─── Research ───────────────────────────────────────────────────────────────
+
+    private static GeneratedConfig Research(string model, string? endpoint)
+    {
+        var researcher = $"""
+            Name: Researcher
+            Description: Gathers information and writes structured findings to disk.
+            Instructions: |
+              You are a diligent researcher. Your job is to:
+              1. Break the topic into focused questions.
+              2. Search for answers using available tools.
+              3. Write your structured findings to .fuseraft/research-findings.md.
+              When your research is thorough and complete, call handoff(route_keyword: "HANDOFF TO WRITER").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - Http
+              - Search
+              - FileSystem
+              - Handoff
+            FunctionChoice: required
+            {AgentFileOptions}
+            """;
+
+        var writer = $"""
+            Name: Writer
+            Description: Turns research findings into a polished final document.
+            Instructions: |
+              You are a skilled technical writer. Your job is to:
+              1. Read the research findings from .fuseraft/research-findings.md.
+              2. Synthesize a clear, well-structured document that answers the original question.
+              3. Write the final document to .fuseraft/report.md.
+              When done, call handoff(route_keyword: "DOCUMENT COMPLETE").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - FileSystem
+              - Handoff
+            FunctionChoice: required
+            {AgentFileOptions}
+            """;
+
+        var mainConfig = $"""
+            Orchestration:
+              Name: Research Team
+              Description: >-
+                Researcher gathers information with a verified handoff; Writer synthesises the final document.
+
+              EvidenceStore:
+                Path: {FuseraftPaths.LocalEvidence}
+
+              Contracts:
+                - Name: ResearchComplete
+                  Requires:
+                    - Type: FileExists
+                      Path: .fuseraft/research-findings.md
+
+              # Each agent lives in its own YAML file in agents/ — edit, version, or reuse
+              # them independently across configs. Inline fields override the file at load time.
+              Agents:
+                - AgentFile: agents/researcher.yaml
+                - AgentFile: agents/writer.yaml
+
+              Selection:
+                Type: statemachine
+                StateMachine:
+                  Initial: Research
+
+                  States:
+                    Research:
+                      Agent: Researcher
+                      Transitions:
+                        - To: Writing
+                          Signal: "HANDOFF TO WRITER"
+                          Contract: ResearchComplete
+
+                    Writing:
+                      Agent: Writer
+                      Transitions:
+                        - To: Done
+                          Signal: "DOCUMENT COMPLETE"
+
+                    Done:
+                      Agent: Writer
+                      Terminal: true
+
+              Termination:
+                Type: composite
+                Strategies:
+                  - Type: regex
+                    Pattern: DOCUMENT COMPLETE
+                    AgentNames: [Writer]
+                  - Type: maxiterations
+                    MaxIterations: 20
+            {OptionalSections(model, endpoint)}
+            """;
+
+        return new GeneratedConfig(mainConfig, [
+            ("agents/researcher.yaml", researcher),
+            ("agents/writer.yaml",     writer),
+        ]);
+    }
+
+    // ─── DevOps ─────────────────────────────────────────────────────────────────
+
+    private static GeneratedConfig DevOps(string model, string? endpoint)
+    {
+        var planner = $"""
+            Name: Planner
+            Description: Designs the deployment or infrastructure plan.
+            Instructions: |
+              You are a DevOps architect. Your job is to:
+              1. Understand the infrastructure or deployment task.
+              2. Use sub_agent_explore to survey relevant config files and scripts.
+              3. Write a step-by-step execution plan to {FuseraftPaths.LocalBrief} with fields:
+                   goal — what the deployment achieves
+                   steps — ordered list of execution steps
+                   rollback — steps to undo if something goes wrong
+              When the plan is ready, call handoff(route_keyword: "PLANNING_COMPLETE").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - FileSystem
+              - SubAgent
+              - Handoff
+            FunctionChoice: required
+            {AgentFileOptions}
+            """;
+
+        var developer = $"""
+            Name: Developer
+            Description: Implements scripts, manifests, and config files.
+            Instructions: |
+              You are a DevOps engineer. Your job is to:
+              1. Read the plan from {FuseraftPaths.LocalBrief} and implement all required
+                 scripts, manifests, or config files using write_file.
+              2. Run static analysis or validation with shell_run (e.g. lint, validate, check).
+              3. Commit with git_add and git_commit when ready.
+              When done, call handoff(route_keyword: "DEVELOPMENT_COMPLETE").
+              If the plan is unclear, call handoff(route_keyword: "REPLAN_REQUIRED").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - FileSystem
+              - Shell
+              - Git
+              - Changes
+              - Handoff
+            FunctionChoice: required
+            {AgentFileOptions}
+            """;
+
+        var operator_ = $"""
+            Name: Operator
+            Description: Executes the deployment and verifies success.
+            Instructions: |
+              You are a site reliability engineer. Your job is to:
+              1. Execute the deployment steps from {FuseraftPaths.LocalBrief} using shell_run.
+              2. Run smoke tests to verify the deployment succeeded.
+              3. Report the outcome clearly with exact command output.
+              If successful, call handoff(route_keyword: "DEPLOYMENT_COMPLETE").
+              If failed, call handoff(route_keyword: "DEPLOYMENT_FAILED") and describe what went wrong.
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - Shell
+              - Git
+              - Changes
+              - Handoff
+            FunctionChoice: required
+            {AgentFileOptions}
+            """;
+
+        var mainConfig = $"""
+            Orchestration:
+              Name: DevOps Team
+              Description: >-
+                Planner → Developer → Operator pipeline for infrastructure and deployment tasks.
+
+              EvidenceStore:
+                Path: {FuseraftPaths.LocalEvidence}
+
+              Contracts:
+                - Name: PlanExists
+                  Requires:
+                    - Type: FileExists
+                      Path: {FuseraftPaths.LocalBrief}
+
+                - Name: ArtifactsReady
+                  Requires:
+                    - Type: CommandSucceeded
+                      Pattern: "lint|validate|check|test"
+
+              FailureHandling:
+                MissingEvidence:
+                  Action: Reinstruct
+                  Threshold: 3
+                NoProgress:
+                  Action: Abort
+                  Threshold: 3
+
+              # Each agent lives in its own YAML file in agents/ — edit, version, or reuse
+              # them independently across configs. Inline fields override the file at load time.
+              Agents:
+                - AgentFile: agents/planner.yaml
+                - AgentFile: agents/developer.yaml
+                - AgentFile: agents/operator.yaml
+
+              Selection:
+                Type: statemachine
+                StateMachine:
+                  Initial: Planning
+
+                  States:
+                    Planning:
+                      Agent: Planner
+                      Transitions:
+                        - To: Development
+                          Signal: "PLANNING_COMPLETE"
+                          Contract: PlanExists
+
+                    Development:
+                      Agent: Developer
+                      Transitions:
+                        - To: Operations
+                          Signal: "DEVELOPMENT_COMPLETE"
+                          Contract: ArtifactsReady
+                        - To: Planning
+                          Signal: "REPLAN_REQUIRED"
+
+                    Operations:
+                      Agent: Operator
+                      Transitions:
+                        - To: Done
+                          Signal: "DEPLOYMENT_COMPLETE"
+                        - To: Development
+                          Signal: "DEPLOYMENT_FAILED"
+
+                    Done:
+                      Agent: Operator
+                      Terminal: true
+
+              Termination:
+                Type: composite
+                Strategies:
+                  - Type: regex
+                    Pattern: DEPLOYMENT_COMPLETE
+                    AgentNames: [Operator]
+                  - Type: maxiterations
+                    MaxIterations: 20
+            {OptionalSections(model, endpoint)}
+            """;
+
+        return new GeneratedConfig(mainConfig, [
+            ("agents/planner.yaml",   planner),
+            ("agents/developer.yaml", developer),
+            ("agents/operator.yaml",  operator_),
+        ]);
+    }
+
+    // ─── Content ────────────────────────────────────────────────────────────────
+
+    private static GeneratedConfig Content(string model, string? endpoint)
+    {
+        var writer = $"""
+            Name: Writer
+            Description: Produces a complete first draft and saves it to disk.
+            Instructions: |
+              You are a creative and precise writer. Your job is to:
+              1. Understand the content brief from the task.
+              2. Write a complete draft and save it to output/draft.md using write_file.
+              When the draft is ready for review, call handoff(route_keyword: "DRAFT_COMPLETE").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - FileSystem
+              - Search
+              - Handoff
+            FunctionChoice: required
+            {AgentFileOptions}
+            """;
+
+        var editor = $"""
+            Name: Editor
+            Description: Edits for clarity, accuracy, and style; writes the final version.
+            Instructions: |
+              You are a senior editor. Your job is to:
+              1. Read the draft from output/draft.md.
+              2. Edit for clarity, accuracy, tone, and structure.
+              3. Save the final version to output/final.md using write_file.
+              When editing is complete, call handoff(route_keyword: "CONTENT_APPROVED").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - FileSystem
+              - Handoff
+            FunctionChoice: required
+            {AgentFileOptions}
+            """;
+
+        var mainConfig = $"""
+            Orchestration:
+              Name: Content Pipeline
+              Description: >-
+                Writer drafts content with a verified handoff; Editor refines and approves.
+
+              EvidenceStore:
+                Path: {FuseraftPaths.LocalEvidence}
+
+              Contracts:
+                - Name: DraftExists
+                  Requires:
+                    - Type: FileExists
+                      Path: output/draft.md
+
+              # Each agent lives in its own YAML file in agents/ — edit, version, or reuse
+              # them independently across configs. Inline fields override the file at load time.
+              Agents:
+                - AgentFile: agents/writer.yaml
+                - AgentFile: agents/editor.yaml
+
+              Selection:
+                Type: statemachine
+                StateMachine:
+                  Initial: Writing
+
+                  States:
+                    Writing:
+                      Agent: Writer
+                      Transitions:
+                        - To: Editing
+                          Signal: "DRAFT_COMPLETE"
+                          Contract: DraftExists
+
+                    Editing:
+                      Agent: Editor
+                      Transitions:
+                        - To: Done
+                          Signal: "CONTENT_APPROVED"
+
+                    Done:
+                      Agent: Editor
+                      Terminal: true
+
+              Termination:
+                Type: composite
+                Strategies:
+                  - Type: regex
+                    Pattern: CONTENT_APPROVED
+                    AgentNames: [Editor]
+                  - Type: maxiterations
+                    MaxIterations: 10
+            {OptionalSections(model, endpoint)}
+            """;
+
+        return new GeneratedConfig(mainConfig, [
+            ("agents/writer.yaml", writer),
+            ("agents/editor.yaml", editor),
+        ]);
+    }
+
+    // ─── Brownfield ─────────────────────────────────────────────────────────────
+
+    private static GeneratedConfig Brownfield(string model, string? endpoint)
+    {
+        var archaeologist = $"""
+            Name: Archaeologist
+            Description: Recons the codebase and writes the discovery brief and convention profile.
+            Instructions: |
+              You are a codebase archaeologist. Your job is to understand an existing project
+              before any changes are made. Follow this procedure:
+
+              1. Read the entry point files listed in the task to orient yourself.
+              2. Use list_files and sub_agent_explore to map the directory structure — do NOT
+                 read every file; focus on understanding the shape of the codebase.
+              3. Identify: primary language and framework, naming conventions (snake_case vs camelCase),
+                 import style, test framework, build system, and key architectural patterns.
+              4. Write the convention profile to {FuseraftPaths.LocalConventions} with fields:
+                   language, framework, naming_convention, import_style, test_framework,
+                   build_command, lint_command, notes (array of key architectural observations).
+              5. Identify the files most likely to need modification for the given task.
+              6. Write the discovery brief to {FuseraftPaths.LocalBrownfieldBrief} with fields:
+                   summary — one paragraph describing the codebase structure
+                   in_scope_files — array of file paths likely relevant to the task
+                   dependencies — key external dependencies to be aware of
+                   risks — array of fragility signals (e.g. no tests, circular deps, god objects)
+
+              When both files are written, call handoff(route_keyword: "RECON COMPLETE").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - FileSystem
+              - Search
+              - SubAgent
+              - Handoff
+            FunctionChoice: required
+            {AgentFileOptions}
+            """;
+
+        var planner = $"""
+            Name: Planner
+            Description: Designs the targeted change based on the discovery brief.
+            Instructions: |
+              You are a software architect working on an existing codebase. Your job is to:
+              1. Read {FuseraftPaths.LocalBrownfieldBrief} to understand the codebase shape and risks.
+              2. Read {FuseraftPaths.LocalConventions} to understand the project's conventions — follow them exactly.
+              3. Use sub_agent_explore for any additional targeted questions about specific files.
+              4. Write a scoped brief to {FuseraftPaths.LocalBrief} with fields:
+                   goal — one-sentence description of the change
+                   findings — summary of relevant existing code to modify
+                   files_to_change — only the files that genuinely need to change
+                   acceptance_criteria — observable code properties the change must satisfy
+                   convention_notes — specific conventions to follow from the profile
+              When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - FileSystem
+              - Search
+              - SubAgent
+              - Handoff
+            FunctionChoice: required
+            {AgentFileOptions}
+            """;
+
+        var developer = $"""
+            Name: Developer
+            Description: Implements the change staying strictly within the scoped file list.
+            Instructions: |
+              You are a developer working carefully inside an existing codebase. Your job is to:
+              1. Read {FuseraftPaths.LocalBrief} — implement ONLY the files listed in files_to_change.
+              2. Read {FuseraftPaths.LocalConventions} — follow the project's naming, import, and style conventions exactly.
+              3. Use read_file to read existing files before modifying them — never overwrite blindly.
+              4. Use patch_file for surgical edits to existing files; use write_file only for new files.
+              5. Run the build command from the convention profile to confirm nothing is broken.
+              6. Commit with git_add and git_commit.
+              When done, call handoff(route_keyword: "HANDOFF TO REVIEWER").
+              If the brief is unclear, call handoff(route_keyword: "REPLAN REQUIRED").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - FileSystem
+              - Shell
+              - Git
+              - Changes
+              - Handoff
+            FunctionChoice: required
+            {AgentFileOptions}
+            """;
+
+        var reviewer = $"""
+            Name: Reviewer
+            Description: Code-review-only inspection against the brief and conventions.
+            Instructions: |
+              You are a principal engineer reviewing a change to an existing codebase. Your job is to:
+              1. Read each file listed in {FuseraftPaths.LocalBrief} under files_to_change.
+              2. Verify every acceptance criterion is satisfied by code inspection.
+              3. Check that the change follows conventions from {FuseraftPaths.LocalConventions}.
+              4. Confirm no files outside files_to_change were modified (use changes_read_latest).
+              Do NOT run shell commands — this is a code-inspection-only review.
+              If the change is correct, call handoff(route_keyword: "APPROVED").
+              If revision is needed, call handoff(route_keyword: "REVISION REQUIRED") and explain what to fix.
+              If the plan needs rethinking, call handoff(route_keyword: "REPLAN REQUIRED").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - FileSystem
+              - Changes
+              - Handoff
+            FunctionChoice: auto
+            ContextWindow:
+              TextOnly: true
+            {AgentFileOptions}
+            """;
+
+        var mainConfig = $"""
+            Orchestration:
+              Name: Brownfield Codebase Pipeline
+              Description: >-
+                Archaeologist recons the existing codebase and writes a discovery brief;
+                Planner designs the targeted change; Developer implements with a scoped change
+                envelope; Reviewer inspects by code review. Conventions detected during recon
+                are automatically injected into every agent's system prompt.
+
+              Security:
+                FileSystemSandboxPath: .   # set to your project root (e.g. ~/projects/myapp)
+                # ChangeEnvelope is seeded automatically from the discovery brief when
+                # Brownfield.SeedEnvelopeFromBrief is true — no need to list files manually.
+
+              Brownfield:
+                EntryPoints:
+                  - src/   # replace with your actual entry points (e.g. cmd/server/main.go)
+                SeedEnvelopeFromBrief: true
+                DiscoveryBriefPath: {FuseraftPaths.LocalBrownfieldBrief}
+                ConventionProfilePath: {FuseraftPaths.LocalConventions}
+
+              EvidenceStore:
+                Path: {FuseraftPaths.LocalEvidence}
+
+              ChangeTracking:
+                Path: {FuseraftPaths.LocalChanges}
+
+              Validation:
+                BriefPath: {FuseraftPaths.LocalBrief}
+                ChangeLogPath: {FuseraftPaths.LocalChanges}
+
+              Contracts:
+                - Name: ReconComplete
+                  Requires:
+                    - Type: FileExists
+                      Path: {FuseraftPaths.LocalBrownfieldBrief}
+                    - Type: FileExists
+                      Path: {FuseraftPaths.LocalConventions}
+
+                - Name: BriefExists
+                  Requires:
+                    - Type: FileExists
+                      Path: {FuseraftPaths.LocalBrief}
+
+                - Name: ImplementationComplete
+                  Requires:
+                    - Type: FilesWritten
+                      Source: {FuseraftPaths.LocalBrief}
+                      Field: files_to_change
+
+              FailureHandling:
+                MissingEvidence:
+                  Action: Reinstruct
+                  Threshold: 3
+                NoProgress:
+                  Action: Abort
+                  Threshold: 3
+
+              Events:
+                Path: {FuseraftPaths.LocalEventsLog}
+
+              # Each agent lives in its own YAML file in agents/ — edit, version, or reuse
+              # them independently across configs. Inline fields override the file at load time.
+              Agents:
+                - AgentFile: agents/archaeologist.yaml
+                - AgentFile: agents/planner.yaml
+                - AgentFile: agents/developer.yaml
+                - AgentFile: agents/reviewer.yaml
+
+              Selection:
+                Type: statemachine
+                StateMachine:
+                  Initial: Recon
+
+                  States:
+                    Recon:
+                      Agent: Archaeologist
+                      Transitions:
+                        - To: Planning
+                          Signal: "RECON COMPLETE"
+                          Contract: ReconComplete
+
+                    Planning:
+                      Agent: Planner
+                      Transitions:
+                        - To: Implementation
+                          Signal: "HANDOFF TO DEVELOPER"
+                          Contract: BriefExists
+
+                    Implementation:
+                      Agent: Developer
+                      Transitions:
+                        - To: Review
+                          Signal: "HANDOFF TO REVIEWER"
+                          Contract: ImplementationComplete
+                        - To: Planning
+                          Signal: "REPLAN REQUIRED"
+
+                    Review:
+                      Agent: Reviewer
+                      Transitions:
+                        - To: Done
+                          Signal: APPROVED
+                        - To: Implementation
+                          Signal: "REVISION REQUIRED"
+                        - To: Planning
+                          Signal: "REPLAN REQUIRED"
+
+                    Done:
+                      Agent: Reviewer
+                      Terminal: true
+
+              Termination:
+                Type: composite
+                Strategies:
+                  - Type: regex
+                    Pattern: "\\bAPPROVED\\b"
+                    AgentNames: [Reviewer]
+                  - Type: maxiterations
+                    MaxIterations: 60
+            """;
+
+        return new GeneratedConfig(mainConfig, [
+            ("agents/archaeologist.yaml", archaeologist),
+            ("agents/planner.yaml",       planner),
+            ("agents/developer.yaml",     developer),
+            ("agents/reviewer.yaml",      reviewer),
+        ]);
+    }
+
+    // ─── Minimal ────────────────────────────────────────────────────────────────
 
     private static string Minimal(string model, string? endpoint) => $"""
         Orchestration:
@@ -674,7 +1037,16 @@ internal static class InitTemplates
               Plugins:
                 - FileSystem
                 - Shell
-        {AgentOptions}
+
+              # ContextWindow:
+              #   TextOnly: true          # strip tool-call frames from cross-turn history
+              # FunctionChoice: required  # force at least one tool call per turn (auto|required|none)
+              # TrustScore: 0.8           # 0.0–1.0; lower scores increase sandbox ring restrictions
+              # MaxTokens: 4096           # override model's default max output tokens
+              # Capabilities:             # per-plugin tool allowlist
+              #   Shell: [shell_run]
+              #   FileSystem: [read_file, list_files]
+
           Selection:
             Type: sequential
 
@@ -684,6 +1056,8 @@ internal static class InitTemplates
             MaxIterations: 20
         {OptionalSections(model, endpoint)}
         """;
+
+    // ─── Magentic ───────────────────────────────────────────────────────────────
 
     private static string Magentic(string model, string? endpoint) => $"""
         Orchestration:
@@ -760,218 +1134,7 @@ internal static class InitTemplates
             Path: {FuseraftPaths.LocalEventsLog}
         """;
 
-    private static string Brownfield(string model, string? endpoint) => $"""
-        Orchestration:
-          Name: Brownfield Codebase Pipeline
-          Description: >-
-            Archaeologist recons the existing codebase and writes a discovery brief;
-            Planner designs the targeted change; Developer implements with a scoped change
-            envelope; Reviewer inspects by code review. Conventions detected during recon
-            are automatically injected into every agent's system prompt.
-
-          Security:
-            FileSystemSandboxPath: .   # set to your project root (e.g. ~/projects/myapp)
-            # ChangeEnvelope is seeded automatically from the discovery brief when
-            # Brownfield.SeedEnvelopeFromBrief is true — no need to list files manually.
-
-          Brownfield:
-            EntryPoints:
-              - src/   # replace with your actual entry points (e.g. cmd/server/main.go)
-            SeedEnvelopeFromBrief: true
-            DiscoveryBriefPath: {FuseraftPaths.LocalBrownfieldBrief}
-            ConventionProfilePath: {FuseraftPaths.LocalConventions}
-
-          EvidenceStore:
-            Path: {FuseraftPaths.LocalEvidence}
-
-          ChangeTracking:
-            Path: {FuseraftPaths.LocalChanges}
-
-          Validation:
-            BriefPath: {FuseraftPaths.LocalBrief}
-            ChangeLogPath: {FuseraftPaths.LocalChanges}
-
-          Contracts:
-            - Name: ReconComplete
-              Requires:
-                - Type: FileExists
-                  Path: {FuseraftPaths.LocalBrownfieldBrief}
-                - Type: FileExists
-                  Path: {FuseraftPaths.LocalConventions}
-
-            - Name: BriefExists
-              Requires:
-                - Type: FileExists
-                  Path: {FuseraftPaths.LocalBrief}
-
-            - Name: ImplementationComplete
-              Requires:
-                - Type: FilesWritten
-                  Source: {FuseraftPaths.LocalBrief}
-                  Field: files_to_change
-
-          FailureHandling:
-            MissingEvidence:
-              Action: Reinstruct
-              Threshold: 3
-            NoProgress:
-              Action: Abort
-              Threshold: 3
-
-          Events:
-            Path: {FuseraftPaths.LocalEventsLog}
-
-          Agents:
-            - Name: Archaeologist
-              Description: Recons the codebase and writes the discovery brief and convention profile.
-              Instructions: |
-                You are a codebase archaeologist. Your job is to understand an existing project
-                before any changes are made. Follow this procedure:
-
-                1. Read the entry point files listed in the task to orient yourself.
-                2. Use list_files and sub_agent_explore to map the directory structure — do NOT
-                   read every file; focus on understanding the shape of the codebase.
-                3. Identify: primary language and framework, naming conventions (snake_case vs camelCase),
-                   import style, test framework, build system, and key architectural patterns.
-                4. Write the convention profile to {FuseraftPaths.LocalConventions} with fields:
-                     language, framework, naming_convention, import_style, test_framework,
-                     build_command, lint_command, notes (array of key architectural observations).
-                5. Identify the files most likely to need modification for the given task.
-                6. Write the discovery brief to {FuseraftPaths.LocalBrownfieldBrief} with fields:
-                     summary — one paragraph describing the codebase structure
-                     in_scope_files — array of file paths likely relevant to the task
-                     dependencies — key external dependencies to be aware of
-                     risks — array of fragility signals (e.g. no tests, circular deps, god objects)
-
-                When both files are written, call handoff(route_keyword: "RECON COMPLETE").
-              Model:
-                ModelId: {model}{Ep(endpoint, "        ")}
-              Plugins:
-                - FileSystem
-                - Search
-                - SubAgent
-                - Handoff
-              FunctionChoice: required
-        {AgentOptions}
-            - Name: Planner
-              Description: Designs the targeted change based on the discovery brief.
-              Instructions: |
-                You are a software architect working on an existing codebase. Your job is to:
-                1. Read {FuseraftPaths.LocalBrownfieldBrief} to understand the codebase shape and risks.
-                2. Read {FuseraftPaths.LocalConventions} to understand the project's conventions — follow them exactly.
-                3. Use sub_agent_explore for any additional targeted questions about specific files.
-                4. Write a scoped brief to {FuseraftPaths.LocalBrief} with fields:
-                     goal — one-sentence description of the change
-                     findings — summary of relevant existing code to modify
-                     files_to_change — only the files that genuinely need to change
-                     acceptance_criteria — observable code properties the change must satisfy
-                     convention_notes — specific conventions to follow from the profile
-                When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
-              Model:
-                ModelId: {model}{Ep(endpoint, "        ")}
-              Plugins:
-                - FileSystem
-                - Search
-                - SubAgent
-                - Handoff
-              FunctionChoice: required
-        {AgentOptions}
-            - Name: Developer
-              Description: Implements the change staying strictly within the scoped file list.
-              Instructions: |
-                You are a developer working carefully inside an existing codebase. Your job is to:
-                1. Read {FuseraftPaths.LocalBrief} — implement ONLY the files listed in files_to_change.
-                2. Read {FuseraftPaths.LocalConventions} — follow the project's naming, import, and style conventions exactly.
-                3. Use read_file to read existing files before modifying them — never overwrite blindly.
-                4. Use patch_file for surgical edits to existing files; use write_file only for new files.
-                5. Run the build command from the convention profile to confirm nothing is broken.
-                6. Commit with git_add and git_commit.
-                When done, call handoff(route_keyword: "HANDOFF TO REVIEWER").
-                If the brief is unclear, call handoff(route_keyword: "REPLAN REQUIRED").
-              Model:
-                ModelId: {model}{Ep(endpoint, "        ")}
-              Plugins:
-                - FileSystem
-                - Shell
-                - Git
-                - Changes
-                - Handoff
-              FunctionChoice: required
-        {AgentOptions}
-            - Name: Reviewer
-              Description: Code-review-only inspection against the brief and conventions.
-              Instructions: |
-                You are a principal engineer reviewing a change to an existing codebase. Your job is to:
-                1. Read each file listed in {FuseraftPaths.LocalBrief} under files_to_change.
-                2. Verify every acceptance criterion is satisfied by code inspection.
-                3. Check that the change follows conventions from {FuseraftPaths.LocalConventions}.
-                4. Confirm no files outside files_to_change were modified (use changes_read_latest).
-                Do NOT run shell commands — this is a code-inspection-only review.
-                If the change is correct, call handoff(route_keyword: "APPROVED").
-                If revision is needed, call handoff(route_keyword: "REVISION REQUIRED") and explain what to fix.
-                If the plan needs rethinking, call handoff(route_keyword: "REPLAN REQUIRED").
-              Model:
-                ModelId: {model}{Ep(endpoint, "        ")}
-              Plugins:
-                - FileSystem
-                - Changes
-                - Handoff
-              FunctionChoice: auto
-              ContextWindow:
-                TextOnly: true
-
-          Selection:
-            Type: statemachine
-            StateMachine:
-              Initial: Recon
-
-              States:
-                Recon:
-                  Agent: Archaeologist
-                  Transitions:
-                    - To: Planning
-                      Signal: "RECON COMPLETE"
-                      Contract: ReconComplete
-
-                Planning:
-                  Agent: Planner
-                  Transitions:
-                    - To: Implementation
-                      Signal: "HANDOFF TO DEVELOPER"
-                      Contract: BriefExists
-
-                Implementation:
-                  Agent: Developer
-                  Transitions:
-                    - To: Review
-                      Signal: "HANDOFF TO REVIEWER"
-                      Contract: ImplementationComplete
-                    - To: Planning
-                      Signal: "REPLAN REQUIRED"
-
-                Review:
-                  Agent: Reviewer
-                  Transitions:
-                    - To: Done
-                      Signal: APPROVED
-                    - To: Implementation
-                      Signal: "REVISION REQUIRED"
-                    - To: Planning
-                      Signal: "REPLAN REQUIRED"
-
-                Done:
-                  Agent: Reviewer
-                  Terminal: true
-
-          Termination:
-            Type: composite
-            Strategies:
-              - Type: regex
-                Pattern: "\\bAPPROVED\\b"
-                AgentNames: [Reviewer]
-              - Type: maxiterations
-                MaxIterations: 60
-        """;
+    // ─── Designer ───────────────────────────────────────────────────────────────
 
     private static string Designer(string model, string? endpoint) => $"""
         Orchestration:
@@ -1018,6 +1181,7 @@ internal static class InitTemplates
                 Capabilities (per-plugin tool filter, e.g. FileSystem: [read_file]),
                 ContextWindow.TextOnly (strip tool frames from history — useful for review agents),
                 MaxToolCallsPerTurn, MaxInTurnContextTokens, EnableMemory, SubAgentModel, SubAgentPlugins,
+                AgentFile (path to a standalone agent YAML — inline fields override the file at load time),
                 RemoteAgent.Url (delegate to remote A2A endpoint — ignores Model/Plugins/FunctionChoice/Capabilities).
 
                 ROUTING:
