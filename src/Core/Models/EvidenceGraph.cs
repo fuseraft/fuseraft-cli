@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using fuseraft.Core;
 
 namespace fuseraft.Core.Models;
 
@@ -140,5 +141,5 @@ public record EvidenceStoreConfig
     /// File path where the evidence graph JSON is written.
     /// Defaults to <c>.fuseraft/evidence.json</c>.
     /// </summary>
-    public string Path { get; init; } = ".fuseraft/evidence.json";
+    public string Path { get; init; } = FuseraftPaths.LocalEvidence;
 }

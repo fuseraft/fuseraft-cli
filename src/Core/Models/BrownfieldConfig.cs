@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using fuseraft.Core;
 
 namespace fuseraft.Core.Models;
 
@@ -19,7 +20,7 @@ public record BrownfieldConfig
     /// Path where the Archaeologist writes the discovery brief JSON.
     /// Defaults to <c>.fuseraft/brief.brownfield.json</c>.
     /// </summary>
-    public string DiscoveryBriefPath { get; init; } = ".fuseraft/brief.brownfield.json";
+    public string DiscoveryBriefPath { get; init; } = FuseraftPaths.LocalBrownfieldBrief;
 
     /// <summary>
     /// Path where the Archaeologist writes the detected convention profile JSON.
@@ -27,7 +28,7 @@ public record BrownfieldConfig
     /// agent's system prompt so agents follow project conventions without re-deriving them.
     /// Defaults to <c>.fuseraft/conventions.json</c>.
     /// </summary>
-    public string ConventionProfilePath { get; init; } = ".fuseraft/conventions.json";
+    public string ConventionProfilePath { get; init; } = FuseraftPaths.LocalConventions;
 
     /// <summary>
     /// When <c>true</c> (default) and <see cref="DiscoveryBriefPath"/> exists,

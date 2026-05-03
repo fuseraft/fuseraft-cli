@@ -8,6 +8,7 @@ using Spectre.Console.Cli;
 using fuseraft.Cli;
 using fuseraft.Cli.Commands;
 using fuseraft.Cli.Commands.Repl;
+using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Plugins;
@@ -52,6 +53,16 @@ var logConfig = new LoggerConfiguration()
     .Enrich.FromLogContext()
     .WriteTo.Console(outputTemplate:
         "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}");
+
+// Always write Warning+ to .fuseraft/logs/app.log so store-corruption and other
+// runtime warnings survive past the terminal session.
+logConfig = logConfig.WriteTo.File(
+    FuseraftPaths.LocalAppLog,
+    restrictedToMinimumLevel: LogEventLevel.Warning,
+    outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}",
+    fileSizeLimitBytes: 5_000_000,
+    rollOnFileSizeLimit: true,
+    retainedFileCountLimit: 3);
 
 // When --verbose and --output are both set, write the debug log to a sidecar file
 // (<output>.debug.log) so the transcript file contains only clean session content.

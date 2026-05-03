@@ -1,15 +1,15 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using fuseraft.Core;
 using fuseraft.Core.Models;
 
 namespace fuseraft.Infrastructure;
 
 public static class UserConfigStore
 {
-    private static readonly string ConfigDir =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".fuseraft");
+    private static string ConfigDir => FuseraftPaths.GlobalRoot;
 
-    public static readonly string ConfigPath = Path.Combine(ConfigDir, "config");
+    public static string ConfigPath => FuseraftPaths.GlobalConfig;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

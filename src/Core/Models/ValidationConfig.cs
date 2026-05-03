@@ -1,3 +1,5 @@
+using fuseraft.Core;
+
 namespace fuseraft.Core.Models;
 
 /// <summary>
@@ -11,13 +13,13 @@ public record ValidationConfig
     /// Path to the brief written by the Planner (absolute or relative to CWD).
     /// Defaults to <c>.fuseraft/brief.json</c>.
     /// </summary>
-    public string BriefPath { get; init; } = ".fuseraft/brief.json";
+    public string BriefPath { get; init; } = FuseraftPaths.LocalBrief;
 
     /// <summary>
     /// Path to the test report written by the Tester (absolute or relative to CWD).
     /// Defaults to <c>.fuseraft/test-report.json</c>.
     /// </summary>
-    public string TestReportPath { get; init; } = ".fuseraft/test-report.json";
+    public string TestReportPath { get; init; } = FuseraftPaths.LocalTestReport;
 
     /// <summary>
     /// Regex patterns that identify real assertion calls in test files.
@@ -43,5 +45,5 @@ public record ValidationConfig
     /// where an agent writes a plausible-looking report without executing anything.
     /// Defaults to <c>.fuseraft/changes.json</c>. Set to null or omit to disable the check.
     /// </summary>
-    public string? ChangeLogPath { get; init; } = ".fuseraft/changes.json";
+    public string? ChangeLogPath { get; init; } = FuseraftPaths.LocalChanges;
 }

@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using fuseraft.Core;
 using fuseraft.Core.Models;
 
 namespace fuseraft.Infrastructure;
@@ -36,16 +37,9 @@ public sealed class MemoryStore
     private readonly string _dir;
     private readonly SemaphoreSlim _lock = new(1, 1);
 
-    public static MemoryStore ForRepl() => new(
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".fuseraft", "memory", "repl"));
+    public static MemoryStore ForRepl() => new(FuseraftPaths.GlobalMemoryRepl);
 
-    public static MemoryStore ForAgent(string agentName) => new(
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".fuseraft", "memory", "agents",
-            SafeFileName(agentName)));
+    public static MemoryStore ForAgent(string agentName) => new(FuseraftPaths.GlobalMemoryAgent(SafeFileName(agentName)));
 
     internal static MemoryStore CreateForTest(string dir) => new(dir);
 

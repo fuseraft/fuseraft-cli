@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using fuseraft.Core;
 
 namespace fuseraft.Infrastructure.KeyStore;
 
@@ -7,9 +8,7 @@ namespace fuseraft.Infrastructure.KeyStore;
 // Prints a warning so users know this is not as secure as a native keychain.
 internal sealed class PlainTextFallbackKeyStore : IApiKeyStore
 {
-    private static readonly string KeyPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".fuseraft", ".key");
+    private static string KeyPath => FuseraftPaths.GlobalKeyFile;
 
     public string StoreName => "plain-text file (~/.fuseraft/.key)";
 
