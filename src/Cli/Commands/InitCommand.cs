@@ -12,7 +12,7 @@ public sealed class InitSettings : CommandSettings
     public string? OutputPath { get; set; }
 
     [CommandOption("-t|--template")]
-    [Description("Team template: dev-team, research, devops, content, minimal, code-research, magentic, brownfield, designer.")]
+    [Description("Team template: dev-team, research, devops, content, minimal, magentic, brownfield, designer.")]
     public string? Template { get; set; }
 
     [CommandOption("-m|--model")]
@@ -48,8 +48,6 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
             "Writer → Editor with state machine routing and draft verification"),
         new("minimal",       "Minimal — Single Agent",
             "One general-purpose agent for simple tasks"),
-        new("code-research", "Code Research & Change",
-            "Planner → Developer → Reviewer for exploratory or targeted code changes — no test execution required"),
         new("magentic",      "Magentic Team",
             "AI-managed team: a manager LLM plans and coordinates participants dynamically"),
         new("brownfield",    "Brownfield Codebase Pipeline",
