@@ -54,6 +54,11 @@ public sealed class ChangeTracker
          "shell_run", "shell_run_script", "shell_run_background",
          "git_commit"];
 
+    // Separate tracking for read-only symbol searches — results go to the evidence
+    // graph as SymbolDefinition nodes but do NOT produce ChangeEntry records.
+    private static readonly string[] SymbolTrackedSubstrings = ["search_symbol"];
+    private readonly ConcurrentQueue<SymbolSearchRecord> _symbolPending = new();
+
     // AIFunctionFactory strips underscores and uses PascalCase (e.g. WriteFileAsync → WriteFile,
     // RunAsync → Run). Normalize both sides by removing underscores before comparing.
     private static bool FunctionNameMatches(string name, string pattern) =>
@@ -156,6 +161,16 @@ public sealed class ChangeTracker
     {
         var records = new List<InvocationRecord>();
         while (_pending.TryDequeue(out var r)) records.Add(r);
+
+        // Symbol nodes are read-only and flush independently of change records so recon
+        // turns (which only call search_symbol) still populate the evidence graph.
+        if (_evidenceStore is not null)
+        {
+            var symRecords = new List<SymbolSearchRecord>();
+            while (_symbolPending.TryDequeue(out var sr)) symRecords.Add(sr);
+            if (symRecords.Count > 0)
+                await EmitSymbolEvidenceNodesAsync(agentName, turnIndex, symRecords, cancellationToken);
+        }
 
         if (records.Count == 0) return;
 
@@ -377,6 +392,82 @@ public sealed class ChangeTracker
         await _evidenceStore!.RecordAsync(nodes, edges, ct);
     }
 
+    // Parses search_symbol output to extract SymbolDefinition nodes for the evidence graph.
+    // Runs independently of FlushTurn's change-entry guard so recon-only turns still record.
+    private async Task EmitSymbolEvidenceNodesAsync(
+        string agentName,
+        int turnIndex,
+        List<SymbolSearchRecord> records,
+        CancellationToken ct)
+    {
+        var nodes = new List<EvidenceNode>();
+        var now   = DateTime.UtcNow;
+
+        foreach (var record in records)
+        {
+            foreach (var (filePath, kind) in ParseSymbolSearchOutput(record.Output))
+            {
+                nodes.Add(new EvidenceNode
+                {
+                    NodeType   = "SymbolDefinition",
+                    Timestamp  = now,
+                    Agent      = agentName,
+                    Turn       = turnIndex,
+                    SessionId  = _sessionId,
+                    Path       = filePath,
+                    SymbolName = record.Symbol,
+                    SymbolKind = kind,
+                });
+            }
+        }
+
+        if (nodes.Count > 0)
+            await _evidenceStore!.RecordAsync(nodes, null, ct);
+    }
+
+    // Parses search_symbol output lines into (filePath, kind) pairs.
+    // Output format per line: "path/to/file.ext:L42  <content>"
+    private static IEnumerable<(string FilePath, string Kind)> ParseSymbolSearchOutput(string output)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var line in output.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith('[')) continue;
+
+            // Locate :L separator — present on every result line
+            var colonL = trimmed.IndexOf(":L", StringComparison.Ordinal);
+            if (colonL <= 0) continue;
+
+            var filePath = trimmed[..colonL].Trim();
+            if (string.IsNullOrEmpty(filePath) || !seen.Add(filePath)) continue;
+
+            // Extract content after the line-number and whitespace
+            var rest     = trimmed[(colonL + 1)..];
+            var spaceIdx = rest.IndexOf("  ", StringComparison.Ordinal);
+            var content  = spaceIdx >= 0 ? rest[(spaceIdx + 2)..] : rest;
+
+            yield return (filePath, InferSymbolKind(content));
+        }
+    }
+
+    // Returns a coarse symbol kind inferred from the definition line content.
+    private static string InferSymbolKind(string content)
+    {
+        var c = content.ToLowerInvariant();
+        if (c.Contains(" class ")    || c.StartsWith("class "))    return "class";
+        if (c.Contains(" interface ") || c.StartsWith("interface ")) return "interface";
+        if (c.Contains(" record ")   || c.StartsWith("record "))   return "record";
+        if (c.Contains(" struct ")   || c.StartsWith("struct "))   return "struct";
+        if (c.Contains(" enum ")     || c.StartsWith("enum "))     return "enum";
+        if (c.Contains(" def ")      || c.StartsWith("def ")   ||
+            c.Contains(" func ")     || c.StartsWith("func ")  ||
+            c.Contains(" fn ")       || c.StartsWith("fn ")    ||
+            c.Contains("function "))                               return "function";
+        return "symbol";
+    }
+
     // MAF function middleware — intercepts every tool call and records tracked ones.
     private async ValueTask<object?> CapturingMiddleware(
         AIAgent agent,
@@ -457,6 +548,16 @@ public sealed class ChangeTracker
                 payload: new { tool = name, arg, ok = succeeded, output = shellOutput });
         }
 
+        // Intercept search_symbol results to populate SymbolDefinition evidence nodes.
+        // Read-only — goes only to the evidence graph, never the flat change log.
+        if (_evidenceStore is not null
+            && succeeded
+            && SymbolTrackedSubstrings.Any(s => FunctionNameMatches(name, s)))
+        {
+            var sym = GetArg(context.Arguments, "symbol") ?? string.Empty;
+            _symbolPending.Enqueue(new SymbolSearchRecord(sym, resultText));
+        }
+
         // Only enqueue state-changing calls to _pending — these feed changes.json and are
         // used by routing validators (RequireShellPass, RequireAllFilesWritten, etc.).
         // Read-only calls (read_file, list_files, search_content) are visible in events
@@ -498,3 +599,6 @@ public sealed record InvocationRecord(
     IReadOnlyDictionary<string, object?>? Args,
     bool Succeeded,
     string? Output = null);
+
+/// <summary>In-memory snapshot of one search_symbol result, pending evidence-graph emission.</summary>
+internal sealed record SymbolSearchRecord(string Symbol, string Output);

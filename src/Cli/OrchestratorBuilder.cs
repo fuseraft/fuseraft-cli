@@ -232,6 +232,22 @@ public static class OrchestratorBuilder
             }
         }
 
+        // Brownfield: when TestSelector is configured, inject the discovery command template into
+        // every agent's system prompt so agents run targeted tests without a tool call to find them.
+        if (config.TestSelector is { FindRelatedCommand.Length: > 0 } tsCfg)
+        {
+            var tsBlock = BuildTestSelectorBlock(tsCfg);
+            config = config with
+            {
+                Agents = config.Agents
+                    .Select(a => a with
+                    {
+                        Instructions = a.Instructions.TrimEnd() + "\n\n" + tsBlock
+                    })
+                    .ToList()
+            };
+        }
+
         // Also emit a startup warning when a change envelope is declared without a sandbox —
         // the envelope is enforced by SandboxEnforcementFilter which requires a sandbox root.
         if (config.Security?.ChangeEnvelope is { Count: > 0 }
@@ -347,6 +363,14 @@ public static class OrchestratorBuilder
             auditLogger.Log(evt.AgentId, action, decision);
         });
 
+        // Reasoning audit: each turn's reasoning block is SHA-256-hashed and appended to the
+        // audit chain so the association between model thinking and actions is tamper-evident
+        // without exposing the full reasoning text in the audit record.
+        if (eventEmitter is not null)
+        {
+            eventEmitter.RegisterHook(new ReasoningAuditHook(auditLogger));
+        }
+
         var identityRegistry  = new IdentityRegistry();
         var providerErrorLog  = config.Events is { } evtPath
             ? Path.Combine(Path.GetDirectoryName(evtPath.Path) ?? FuseraftPaths.LocalLogs, "provider_errors.jsonl")
@@ -460,7 +484,7 @@ public static class OrchestratorBuilder
             compactor = new ConversationCompactor(
                 chatClientFactory.Create(summaryModel), compactionConfig,
                 loggerFactory.CreateLogger<ConversationCompactor>(),
-                resumptionNote, changeLogPath, intentLog);
+                resumptionNote, changeLogPath, intentLog, config.Events?.Path);
         }
 
         // WorkflowOrchestrator uses MAF's phase-based WorkflowBuilder with a hardcoded
@@ -473,7 +497,9 @@ public static class OrchestratorBuilder
         // AgentOrchestrator is the general-purpose path: it drives any selection strategy
         // (sequential, llm, keyword, structured) through StrategyFactory and works with
         // any agent names and any team size.
-        var strategyFactory = new StrategyFactory(chatClientFactory.Create, eventEmitter, loggerFactory, governanceKernel, humanApprovalService, evidenceStore);
+        var resolvedSandbox = config.Security?.FileSystemSandboxPath is { Length: > 0 } sbx
+            ? Path.GetFullPath(ProcessHelper.ExpandHome(sbx)) : null;
+        var strategyFactory = new StrategyFactory(chatClientFactory.Create, eventEmitter, loggerFactory, governanceKernel, humanApprovalService, evidenceStore, config.TestSelector, resolvedSandbox);
 
         bool useWorkflow = !useMagentic
             && config.Selection.Type.Equals("keyword", StringComparison.OrdinalIgnoreCase)
@@ -688,6 +714,18 @@ public static class OrchestratorBuilder
 
         return config
             ?? throw new InvalidOperationException($"File '{configPath}' is missing the top-level 'Orchestration' key.");
+    }
+
+    private static string BuildTestSelectorBlock(TestSelectorConfig ts)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("TEST SELECTOR (incremental test discovery — use this instead of running the full suite):");
+        sb.AppendLine($"  FindRelatedCommand: {ts.FindRelatedCommand}");
+        if (!string.IsNullOrWhiteSpace(ts.FullSuiteCommand))
+            sb.AppendLine($"  FullSuiteCommand:   {ts.FullSuiteCommand}");
+        sb.AppendLine();
+        sb.Append("For each file you changed, substitute its path for {file} in FindRelatedCommand to discover related tests, then run those tests. Fall back to FullSuiteCommand when no related tests are found.");
+        return sb.ToString();
     }
 
     private static string? BuildConventionBlock(ConventionProfile? profile)

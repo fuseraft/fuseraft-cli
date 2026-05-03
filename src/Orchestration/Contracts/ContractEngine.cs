@@ -1,6 +1,8 @@
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using fuseraft.Core.Models;
+using fuseraft.Infrastructure.Plugins;
 using fuseraft.Orchestration.Validation;
 
 namespace fuseraft.Orchestration.Contracts;
@@ -31,6 +33,8 @@ public sealed class ContractEngine
     private readonly IReadOnlyDictionary<string, ContractConfig> _contracts;
     private readonly ValidationConfig? _validationConfig;
     private readonly EvidenceStore? _evidenceStore;
+    private readonly TestSelectorConfig? _testSelector;
+    private readonly string? _sandboxRoot;
 
     private static readonly JsonSerializerOptions JsonOpts =
         new() { PropertyNameCaseInsensitive = true };
@@ -38,14 +42,18 @@ public sealed class ContractEngine
     public ContractEngine(
         IEnumerable<ContractConfig> contracts,
         ValidationConfig? validationConfig = null,
-        EvidenceStore? evidenceStore = null)
+        EvidenceStore? evidenceStore = null,
+        TestSelectorConfig? testSelector = null,
+        string? sandboxRoot = null)
     {
-        _contracts     = contracts.ToDictionary(
+        _contracts        = contracts.ToDictionary(
             c => c.Name,
             c => c,
             StringComparer.OrdinalIgnoreCase);
         _validationConfig = validationConfig;
         _evidenceStore    = evidenceStore;
+        _testSelector     = testSelector;
+        _sandboxRoot      = sandboxRoot;
     }
 
     /// <summary>Names of all contracts known to this engine.</summary>
@@ -86,11 +94,12 @@ public sealed class ContractEngine
     {
         return pred.Type.ToLowerInvariant() switch
         {
-            "fileswritten"     => await EvaluateFilesWrittenAsync(pred, contractName, cancellationToken),
-            "commandsucceeded" => await EvaluateCommandSucceededAsync(pred, contractName, cancellationToken),
-            "fileexists"       => EvaluateFileExists(pred, contractName),
-            "testreport"       => await EvaluateTestReportAsync(pred, contractName, cancellationToken),
-            _ => (false, $"Contract '{contractName}' error: unknown predicate type '{pred.Type}'. Valid: FilesWritten, CommandSucceeded, FileExists, TestReport.")
+            "fileswritten"       => await EvaluateFilesWrittenAsync(pred, contractName, cancellationToken),
+            "commandsucceeded"   => await EvaluateCommandSucceededAsync(pred, contractName, cancellationToken),
+            "fileexists"         => EvaluateFileExists(pred, contractName),
+            "testreport"         => await EvaluateTestReportAsync(pred, contractName, cancellationToken),
+            "relatedtestspass"   => await EvaluateRelatedTestsPassAsync(contractName, cancellationToken),
+            _ => (false, $"Contract '{contractName}' error: unknown predicate type '{pred.Type}'. Valid: FilesWritten, CommandSucceeded, FileExists, TestReport, RelatedTestsPass.")
         };
     }
 
@@ -379,6 +388,93 @@ public sealed class ContractEngine
                string.Join("\n", criteria.Select((c, i) => $"  {i + 1}. {c}"));
     }
 
+    // RelatedTestsPass
+
+    private async Task<(bool, string?)> EvaluateRelatedTestsPassAsync(
+        string contractName,
+        CancellationToken ct)
+    {
+        if (_testSelector is not { FindRelatedCommand.Length: > 0 })
+            return (false,
+                $"Contract '{contractName}' config error: RelatedTestsPass requires " +
+                "TestSelector.FindRelatedCommand to be set at the orchestration level.");
+
+        if (string.IsNullOrWhiteSpace(_testSelector.FullSuiteCommand))
+            return (false,
+                $"Contract '{contractName}' config error: RelatedTestsPass requires " +
+                "TestSelector.FullSuiteCommand so it has a test runner command to execute.");
+
+        // Resolve changed files for the current session.
+        var changedFiles = await LoadChangedFilesAsync(ct);
+
+        // Discover related test targets for each changed file.
+        var targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in changedFiles)
+        {
+            var cmd    = _testSelector.FindRelatedCommand.Replace("{file}", file, StringComparison.Ordinal);
+            var result = await RunShellAsync(cmd, ct);
+            if (!result.Succeeded) continue;
+            foreach (var line in result.Stdout.Split('\n'))
+            {
+                var t = line.Trim();
+                if (t.Length > 0) targets.Add(t);
+            }
+        }
+
+        string testCommand = targets.Count > 0
+            ? _testSelector.FullSuiteCommand.TrimEnd() + " " +
+              string.Join(" ", targets.Select(a => a.Contains(' ') ? $"\"{a}\"" : a))
+            : _testSelector.FullSuiteCommand;
+
+        var testResult = await RunShellAsync(testCommand, ct);
+
+        if (!testResult.Succeeded)
+        {
+            var combined = string.Join("\n", new[] { testResult.Stdout, testResult.Stderr }
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => s.TrimEnd()));
+            const int cap = 2_000;
+            if (combined.Length > cap) combined = combined[..cap] + "\n[output truncated]";
+
+            return (false,
+                $"Contract '{contractName}' failed — targeted tests did not pass (exit {testResult.ExitCode}).\n\n" +
+                $"Command: {testCommand}\n\n{combined}");
+        }
+
+        return (true, null);
+    }
+
+    private async Task<IReadOnlyList<string>> LoadChangedFilesAsync(CancellationToken ct)
+    {
+        var logPath = _validationConfig?.ChangeLogPath;
+        if (logPath is null || !System.IO.File.Exists(logPath)) return [];
+
+        try
+        {
+            var raw = await System.IO.File.ReadAllTextAsync(logPath, ct);
+            var log = JsonSerializer.Deserialize<ChangeLogDoc>(raw, JsonOpts) ?? new ChangeLogDoc();
+            var sessionId = log.ActiveSessionId;
+            var entry = (sessionId is not null
+                ? log.Entries.Where(e => string.Equals(e.SessionId, sessionId, StringComparison.Ordinal))
+                : (IEnumerable<ChangeEntryDoc>)log.Entries)
+                .OrderByDescending(e => e.TurnIndex)
+                .FirstOrDefault();
+            return entry?.FilesWritten ?? [];
+        }
+        catch { return []; }
+    }
+
+    private async Task<ProcessResult> RunShellAsync(string command, CancellationToken ct)
+    {
+        var (shell, flag) = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? ("cmd.exe", "/c") : ("bash", "-c");
+        return await ProcessHelper.RunAsync(
+            shell, $"{flag} {command}",
+            workingDirectory: _sandboxRoot,
+            timeoutSeconds:   120,
+            cancellationToken: ct);
+    }
+
     // Evidence-source helpers (prefer graph, fall back to flat log)
 
     private async Task<HashSet<string>> LoadWrittenFilesAsync(CancellationToken ct)
@@ -466,6 +562,9 @@ public sealed class ContractEngine
     {
         [JsonPropertyName("sessionId")]
         public string? SessionId { get; init; }
+
+        [JsonPropertyName("turnIndex")]
+        public int TurnIndex { get; init; }
 
         [JsonPropertyName("filesWritten")]
         public List<string> FilesWritten { get; init; } = [];

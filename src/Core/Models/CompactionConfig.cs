@@ -62,4 +62,12 @@ public record CompactionConfig
     /// current major model. Ignored by <c>llm</c>, <c>lossless</c>, and <c>hybrid</c> modes.
     /// </summary>
     public int TokenBudget { get; init; } = 80_000;
+
+    /// <summary>
+    /// When <c>true</c>, reasoning excerpts from the compacted turn range are prepended to
+    /// the compaction summary. Each excerpt is truncated to approximately 500 tokens so agents
+    /// resuming after compaction can see the WHY behind prior decisions, not just the artifacts.
+    /// Reads <c>reasoning</c> events from the session's events log. Default: <c>false</c>.
+    /// </summary>
+    public bool IncludeReasoning { get; init; } = false;
 }

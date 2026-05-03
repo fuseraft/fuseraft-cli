@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using fuseraft.Core.Interfaces;
@@ -22,7 +23,8 @@ public sealed class ConversationCompactor(
     ILogger<ConversationCompactor> logger,
     string? resumptionNote = null,
     string? changeLogPath = null,
-    IntentLog? intentLog = null)
+    IntentLog? intentLog = null,
+    string? eventsLogPath = null)
 {
     /// <summary>
     /// Returns true when the current mode is <c>window</c>.
@@ -108,6 +110,10 @@ public sealed class ConversationCompactor(
 
         var mode = (config.Mode ?? "llm").ToLowerInvariant();
 
+        var reasoningExcerpts = await ReadReasoningForRangeAsync(
+            toCompact[0].TurnIndex, toCompact[^1].TurnIndex);
+        var reasoningBlock = BuildReasoningBlock(reasoningExcerpts);
+
         // Intent mode: reconstruct from the intent log — fully deterministic, no LLM call.
         if (mode == "intent")
         {
@@ -116,7 +122,7 @@ public sealed class ConversationCompactor(
                 var intents = await intentLog.GetIntentsForRangeAsync(
                     toCompact[0].TurnIndex, toCompact[^1].TurnIndex, cancellationToken);
                 var intentSummary = BuildIntentDerivedSummary(
-                    toCompact[0].TurnIndex, toCompact[^1].TurnIndex, intents);
+                    toCompact[0].TurnIndex, toCompact[^1].TurnIndex, intents, reasoningBlock);
                 logger.LogInformation(
                     "Intent compaction: {Compacted} turns replaced by intent log reconstruction ({IntentCount} intents).",
                     toCompact.Count, intents.Count);
@@ -133,6 +139,11 @@ public sealed class ConversationCompactor(
         {
             var snapshot      = await snapshotter.SnapshotAsync(cancellationToken);
             var reconstructed = ContextRebuilder.BuildContextMessage(snapshot, toCompact[^1].TurnIndex);
+            if (!string.IsNullOrEmpty(reasoningBlock))
+                reconstructed = reconstructed with
+                {
+                    Content = reasoningBlock + "\n\n---\n\n" + reconstructed.Content
+                };
             logger.LogInformation(
                 "Lossless compaction: {Compacted} turns replaced by evidence reconstruction.",
                 toCompact.Count);
@@ -152,7 +163,7 @@ public sealed class ConversationCompactor(
 
             var hybridContent =
                 reconstructed.Content + "\n\n---\n\n" +
-                FormatSummaryContent(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, summText);
+                FormatSummaryContent(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, summText, reasoningBlock);
 
             var hybridSummary = new AgentMessage
             {
@@ -186,7 +197,7 @@ public sealed class ConversationCompactor(
         var summary = new AgentMessage
         {
             AgentName           = "System",
-            Content             = FormatSummaryContent(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, summaryText),
+            Content             = FormatSummaryContent(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, summaryText, reasoningBlock),
             Role                = "user",
             TurnIndex           = toCompact[^1].TurnIndex,
             IsCompactionSummary = true,
@@ -207,7 +218,8 @@ public sealed class ConversationCompactor(
     private AgentMessage BuildIntentDerivedSummary(
         int firstTurn,
         int lastTurn,
-        IReadOnlyList<fuseraft.Core.Models.IntentEntry> intents)
+        IReadOnlyList<fuseraft.Core.Models.IntentEntry> intents,
+        string reasoningBlock = "")
     {
         var sb = new StringBuilder();
         sb.AppendLine($"[INTENT-DERIVED RECONSTRUCTION — covers turns {firstTurn + 1}–{lastTurn + 1}]");
@@ -253,10 +265,14 @@ public sealed class ConversationCompactor(
         if (resumptionNote is not null)
             sb.Append("\n\n---\n" + resumptionNote);
 
+        var content = sb.ToString().TrimEnd();
+        if (!string.IsNullOrEmpty(reasoningBlock))
+            content = reasoningBlock + "\n\n---\n\n" + content;
+
         return new AgentMessage
         {
             AgentName           = "System",
-            Content             = sb.ToString().TrimEnd(),
+            Content             = content,
             Role                = "user",
             TurnIndex           = lastTurn,
             IsCompactionSummary = true,
@@ -361,12 +377,68 @@ public sealed class ConversationCompactor(
         "(2) changes_read_latest to confirm what is already done, " +
         "(3) do not redo work changes.json confirms is complete.";
 
-    private string FormatSummaryContent(int firstTurn, int lastTurn, string summaryText)
+    private string FormatSummaryContent(int firstTurn, int lastTurn, string summaryText, string reasoningBlock = "")
     {
-        var header = $"[CONVERSATION SUMMARY — covers turns {firstTurn + 1}–{lastTurn + 1}]\n\n{summaryText}";
+        var reasoningSection = !string.IsNullOrEmpty(reasoningBlock)
+            ? reasoningBlock + "\n\n---\n\n"
+            : string.Empty;
+        var header = $"{reasoningSection}[CONVERSATION SUMMARY — covers turns {firstTurn + 1}–{lastTurn + 1}]\n\n{summaryText}";
         return resumptionNote is not null
             ? $"{header}\n\n---\n{resumptionNote}"
             : header;
+    }
+
+    private async Task<IReadOnlyList<(int Turn, string Agent, string Text)>> ReadReasoningForRangeAsync(
+        int firstTurn, int lastTurn)
+    {
+        if (!config.IncludeReasoning || eventsLogPath is null) return [];
+
+        var results = new List<(int, string, string)>();
+        try
+        {
+            if (!File.Exists(eventsLogPath)) return [];
+            foreach (var line in await File.ReadAllLinesAsync(eventsLogPath))
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                try
+                {
+                    using var doc  = JsonDocument.Parse(line);
+                    var root = doc.RootElement;
+                    if (!root.TryGetProperty("event_type", out var et) || et.GetString() != "reasoning") continue;
+                    if (!root.TryGetProperty("turn", out var turnEl) || !turnEl.TryGetInt32(out var turn)) continue;
+                    if (turn < firstTurn || turn > lastTurn) continue;
+                    var text  = root.TryGetProperty("payload", out var payload)
+                        && payload.TryGetProperty("text", out var textEl)
+                        ? textEl.GetString() ?? string.Empty : string.Empty;
+                    if (string.IsNullOrWhiteSpace(text)) continue;
+                    var agent = root.TryGetProperty("agent", out var agentEl)
+                        ? agentEl.GetString() ?? string.Empty : string.Empty;
+                    results.Add((turn, agent, text));
+                }
+                catch { /* skip malformed lines */ }
+            }
+        }
+        catch { /* skip unreadable file */ }
+        return results;
+    }
+
+    private static string BuildReasoningBlock(IReadOnlyList<(int Turn, string Agent, string Text)> excerpts)
+    {
+        if (excerpts.Count == 0) return string.Empty;
+
+        const int MaxCharsPerExcerpt = 2_000; // ~500 tokens
+        var sb = new StringBuilder();
+        sb.AppendLine("[REASONING EXCERPTS — model thinking for compacted turns]");
+        sb.AppendLine();
+        foreach (var (turn, agent, text) in excerpts.OrderBy(e => e.Turn))
+        {
+            var truncated = text.Length > MaxCharsPerExcerpt
+                ? text[..MaxCharsPerExcerpt] + $" [TRUNCATED — {text.Length:N0} chars total]"
+                : text;
+            sb.AppendLine($"Turn {turn + 1} ({agent}): {truncated}");
+            sb.AppendLine();
+        }
+        return sb.ToString().TrimEnd();
     }
 
     private const string SummaryPrompt = """

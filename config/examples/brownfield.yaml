@@ -96,6 +96,7 @@ Orchestration:
         - CommandSucceeded:
             PatternField: verify_command
             Pattern: "build|compile|test|check"
+        - RelatedTestsPass: {}   # runs FindRelatedCommand per changed file, executes targeted tests
 
     - Name: TestsValid
       Requires:
