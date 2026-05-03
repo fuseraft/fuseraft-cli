@@ -712,9 +712,98 @@ public static class OrchestratorBuilder
             throw new InvalidOperationException($"Failed to bind '{configPath}': {ex.Message} Check that all field types match the expected schema.", ex);
         }
 
-        return config
+        config = config
             ?? throw new InvalidOperationException($"File '{configPath}' is missing the top-level 'Orchestration' key.");
+
+        var configDir = Path.GetDirectoryName(Path.GetFullPath(configPath)) ?? ".";
+        return ResolveAgentFiles(config, configDir);
     }
+
+    // Resolves AgentFile references in the Agents list. For each agent that declares
+    // AgentFile, the referenced YAML is loaded as the base AgentConfig and the inline
+    // fields are merged on top (inline wins for non-default values).
+    private static OrchestrationConfig ResolveAgentFiles(OrchestrationConfig config, string configDir)
+    {
+        if (config.Agents.All(a => a.AgentFile is null)) return config;
+
+        var resolved = config.Agents.Select(agent =>
+        {
+            if (agent.AgentFile is null) return agent;
+
+            var filePath = Path.IsPathRooted(agent.AgentFile)
+                ? agent.AgentFile
+                : Path.GetFullPath(Path.Combine(configDir, agent.AgentFile));
+
+            if (!File.Exists(filePath))
+                throw new FileNotFoundException(
+                    $"AgentFile not found: '{filePath}'" +
+                    (string.IsNullOrEmpty(agent.Name) ? "" : $" (agent '{agent.Name}')"));
+
+            var baseAgent = LoadAgentFile(filePath);
+            return MergeAgentConfig(baseAgent, agent);
+        }).ToList();
+
+        return config with { Agents = resolved };
+    }
+
+    // Loads an agent definition from a YAML file. Supports both bare format (whole
+    // file is the AgentConfig object) and wrapped format (top-level "Agent:" key).
+    private static AgentConfig LoadAgentFile(string path)
+    {
+        string yaml;
+        try { yaml = File.ReadAllText(path); }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Cannot read agent file '{path}': {ex.Message}", ex);
+        }
+
+        string json;
+        try { json = YamlConfigLoader.ConvertYamlToJson(yaml); }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Agent file '{path}' has invalid YAML: {ex.Message}", ex);
+        }
+
+        try
+        {
+            using var doc  = JsonDocument.Parse(json);
+            var root       = doc.RootElement;
+            // Unwrap "Agent:" top-level key if present.
+            var agentEl    = root.TryGetProperty("Agent", out var wrapped) ? wrapped : root;
+            return JsonSerializer.Deserialize<AgentConfig>(agentEl.GetRawText(), BrownfieldJsonOpts)
+                ?? throw new InvalidOperationException($"Agent file '{path}' deserialized to null.");
+        }
+        catch (Exception ex) when (ex is not InvalidOperationException)
+        {
+            throw new InvalidOperationException($"Failed to parse agent file '{path}': {ex.Message}", ex);
+        }
+    }
+
+    // Merges an inline AgentConfig on top of a base loaded from AgentFile.
+    // Inline wins when its value differs from the C# default for that field type
+    // (non-empty string, non-empty collection, non-null, non-zero numeric, true bool).
+    // This lets a shared agent file define defaults while individual configs override only
+    // what differs (e.g. a different Model or an extra Plugin).
+    private static AgentConfig MergeAgentConfig(AgentConfig baseConfig, AgentConfig inline) =>
+        baseConfig with
+        {
+            AgentFile              = null,  // resolved — no file reference on the merged result
+            Name                   = !string.IsNullOrEmpty(inline.Name)                 ? inline.Name                   : baseConfig.Name,
+            Instructions           = !string.IsNullOrEmpty(inline.Instructions)         ? inline.Instructions           : baseConfig.Instructions,
+            Description            = inline.Description                                 ?? baseConfig.Description,
+            Model                  = !string.IsNullOrEmpty(inline.Model?.ModelId)       ? inline.Model                  : baseConfig.Model,
+            Plugins                = inline.Plugins.Count > 0                           ? inline.Plugins                : baseConfig.Plugins,
+            FunctionChoice         = inline.FunctionChoice != "auto"                    ? inline.FunctionChoice         : baseConfig.FunctionChoice,
+            TrustScore             = inline.TrustScore     != 0.7                       ? inline.TrustScore             : baseConfig.TrustScore,
+            ContextWindow          = inline.ContextWindow                               ?? baseConfig.ContextWindow,
+            Capabilities           = inline.Capabilities.Count > 0                     ? inline.Capabilities           : baseConfig.Capabilities,
+            MaxToolCallsPerTurn    = inline.MaxToolCallsPerTurn    != 0                 ? inline.MaxToolCallsPerTurn    : baseConfig.MaxToolCallsPerTurn,
+            MaxInTurnContextTokens = inline.MaxInTurnContextTokens != 0                 ? inline.MaxInTurnContextTokens : baseConfig.MaxInTurnContextTokens,
+            EnableMemory           = inline.EnableMemory || baseConfig.EnableMemory,
+            SubAgentModel          = inline.SubAgentModel                               ?? baseConfig.SubAgentModel,
+            SubAgentPlugins        = inline.SubAgentPlugins                             ?? baseConfig.SubAgentPlugins,
+            RemoteAgent            = inline.RemoteAgent                                 ?? baseConfig.RemoteAgent,
+        };
 
     private static string BuildTestSelectorBlock(TestSelectorConfig ts)
     {
