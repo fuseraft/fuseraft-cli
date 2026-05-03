@@ -57,6 +57,8 @@ YAML is often more readable for configs with long agent instructions (block scal
 | `Contracts` | array | — | Named evidence contracts reusable across routes and state machine transitions. See [Evidence contracts](#evidence-contracts). |
 | `FailureHandling` | object | — | Per-failure-type policies (action + threshold) applied when routing validators or contracts block a handoff. See [Failure handling](#failure-handling). |
 | `Verifier` | object | — | Self-verification meta-agent that audits the evidence graph for inconsistencies. See [Verifier](#verifier). |
+| `Brownfield` | object | — | Brownfield-mode settings: recon phase support, change envelope seeding, and convention profile injection. See [Brownfield mode](#brownfield-mode). |
+| `TestSelector` | object | — | Incremental test-selection settings. Exposes a shell command template for finding the minimal test set for a changed file. See [Test selector](#test-selector). |
 
 ---
 
@@ -327,7 +329,7 @@ Selection:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `Type` | string | `"sequential"` | `sequential`, `keyword`, `llm`, `structured`, or `magentic`. |
+| `Type` | string | `"sequential"` | `sequential`, `keyword`, `llm`, `structured`, `statemachine`, or `magentic`. |
 | `Routes` | array | — | Required for `keyword`. List of keyword → agent mappings. |
 | `StructuredRoutes` | array | — | Required for `structured`. List of condition → agent mappings. See [Strategies](strategies.md#structured). |
 | `DefaultAgent` | string | first agent | Fallback agent when no keyword/condition matches (`keyword` and `structured` only). |
@@ -418,6 +420,7 @@ Security:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `FileSystemSandboxPath` | string | — | Restricts FileSystem and Shell plugins to this directory tree. |
+| `ChangeEnvelope` | array | — | Glob patterns (relative to sandbox root) restricting write operations (`write_file`, `patch_file`, `delete_file`). Reads are unaffected. Auto-populated from the brownfield discovery brief when `Brownfield.SeedEnvelopeFromBrief` is true. See [Security → Change envelope](security.md#change-envelope). |
 | `HttpAllowedHosts` | array | `[]` | Hostname allowlist for the Http plugin. Empty = unrestricted (private IPs always blocked). |
 | `AllowPrivateHosts` | bool | `false` | Bypass the private/loopback IP check. For local dev and sandbox environments only — **do not set in production**. |
 | `ReadFileSizeLimit` | int | `20000` | Max characters returned by a single `read_file` call (~5k tokens at default). Raise for large-file workloads; lower for agents with small context windows. |
@@ -886,6 +889,102 @@ Verifier:
 ```
 
 Omit `Verifier` entirely to disable self-verification. The verifier adds LLM calls (one per periodic trigger or suspicious transition), so tune `EveryNTurns` to balance audit frequency against cost.
+
+---
+
+## Brownfield mode
+
+Enables structured recon-phase support for large existing codebases. When configured, fuseraft-cli seeds the change envelope from the Archaeologist agent's discovery brief and injects a detected convention profile into every agent's system prompt — both at session startup, before any agents run.
+
+```yaml
+Brownfield:
+  EntryPoints:
+    - src/cmd/server/main.go
+    - src/internal/billing/charge.go
+  DiscoveryBriefPath: .fuseraft/brief.brownfield.json
+  ConventionProfilePath: .fuseraft/conventions.json
+  SeedEnvelopeFromBrief: true
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `EntryPoints` | array | `[]` | Files or directories that seed the Archaeologist agent's dependency walk. Referenced in agent instructions; not automatically injected into prompts. Relative paths resolve against the sandbox root. |
+| `DiscoveryBriefPath` | string | `.fuseraft/brief.brownfield.json` | Path where the Archaeologist writes the discovery brief JSON. When `SeedEnvelopeFromBrief` is true and this file exists at startup, its `in_scope_files` list is merged into `Security.ChangeEnvelope`. |
+| `ConventionProfilePath` | string | `.fuseraft/conventions.json` | Path where the Archaeologist writes the convention profile JSON. When this file exists at session startup, its contents are formatted and prepended to every agent's system prompt. |
+| `SeedEnvelopeFromBrief` | bool | `true` | When true and `DiscoveryBriefPath` exists, the `in_scope_files` list from the discovery brief is merged into `Security.ChangeEnvelope` at startup. Requires `Security.FileSystemSandboxPath` to be set for enforcement to take effect. |
+
+### Brownfield discovery brief
+
+The Archaeologist agent writes a JSON file to `DiscoveryBriefPath` at the end of the recon phase:
+
+```json
+{
+  "entry_points": ["src/cmd/server/main.go"],
+  "in_scope_files": ["src/internal/billing/charge.go", "src/internal/billing/charge_test.go"],
+  "fragility_signals": [
+    { "file": "src/internal/billing/charge.go", "reason": "12 TODO markers, high churn" }
+  ],
+  "test_coverage_gaps": ["src/internal/billing/retry.go"],
+  "summary": "Billing module depends on the payment gateway client. No retries currently wired."
+}
+```
+
+On the next session start (and on all subsequent runs), `in_scope_files` is automatically merged into `Security.ChangeEnvelope` so the Developer cannot write files outside the declared scope.
+
+### Convention profile
+
+The Archaeologist writes a JSON file to `ConventionProfilePath`:
+
+```json
+{
+  "language": "go",
+  "naming_patterns": ["test files match *_test.go", "exported functions are PascalCase"],
+  "error_handling": ["wrap errors with fmt.Errorf(\"%w\", err)", "never swallow errors silently"],
+  "forbidden_patterns": ["no panic() outside main", "no global mutable state"],
+  "test_patterns": ["table-driven tests with testify/require", "sub-tests via t.Run"],
+  "structural_notes": ["each package has a README.md", "internal/ packages are not public API"],
+  "build_command": "go build ./...",
+  "test_command": "go test ./..."
+}
+```
+
+When this file exists at session startup, the orchestrator formats its contents into a `PROJECT CONVENTIONS` block and appends it to every agent's system prompt. Agents then follow naming rules, error-handling idioms, and forbidden patterns without re-deriving them each session.
+
+### Typical brownfield workflow
+
+1. **First run** — the recon state runs the Archaeologist agent. It surveys the codebase from `EntryPoints`, writes `brief.brownfield.json` and `conventions.json`, then signals `RECON COMPLETE`.
+2. **Subsequent runs** — on startup, the orchestrator seeds `Security.ChangeEnvelope` from `in_scope_files` and injects the convention profile into all agent prompts. The recon state skips immediately (the Archaeologist checks that both files exist and calls `RECON COMPLETE` without re-doing the survey).
+3. **Write attempts outside the envelope** — blocked by `SandboxEnforcementFilter` with a `[DENIED]` tool result. The Developer must call `REPLAN REQUIRED` to request scope expansion.
+
+A complete runnable example is in `config/examples/brownfield.yaml`. See [Examples → Brownfield pipeline](examples.md#brownfield-pipeline).
+
+---
+
+## Test selector
+
+Exposes the shell command template used by agents to discover the minimal test set for a changed file. Providing this in config — rather than hardcoding it in agent instructions — makes it easy to swap language-specific test runners across projects.
+
+```yaml
+TestSelector:
+  FindRelatedCommand: "go test -list . $(go list -f '{{.Dir}}' {file}) 2>/dev/null | head -40"
+  FullSuiteCommand: "go test ./..."
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `FindRelatedCommand` | string | `""` | Shell command template to discover tests covering a specific changed file. `{file}` is replaced with the file path at runtime. The agent runs this command for each changed file and uses the output to select a targeted test run. |
+| `FullSuiteCommand` | string | — | Fallback command run when `FindRelatedCommand` returns no results. When null, the agent falls back to the convention profile's `test_command`. |
+
+**Language examples**
+
+| Language | `FindRelatedCommand` |
+|----------|---------------------|
+| Go | `go test -list . $(go list -f '{{.Dir}}' {file}) 2>/dev/null \| head -40` |
+| Python (pytest) | `pytest --collect-only -q {file} 2>/dev/null \| grep '::' \| head -40` |
+| TypeScript (jest) | `jest --listTests --testPathPattern=$(dirname {file}) 2>/dev/null` |
+| Rust | `cargo test --list 2>/dev/null \| grep $(basename {file} .rs) \| head -20` |
+
+The `TestSelector` block is read by the Tester and Developer agents and referenced in their instructions. It does not automatically wire up a validator — use the convention profile's `test_command` for the `RequireShellPass` validator.
 
 ---
 
