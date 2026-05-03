@@ -644,13 +644,13 @@ fuseraft init [output] [options]
 | `devops` | Three-agent pipeline for infrastructure and deployment tasks |
 | `content` | Two-agent pipeline: Writer drafts, Editor refines and approves |
 | `minimal` | Single general-purpose agent for simple tasks |
-| `code-research` | Three-agent pipeline: Planner explores the codebase, Developer makes targeted changes, Reviewer inspects by code review — no test execution required |
+| `brownfield` | Four-agent pipeline: Archaeologist recons the codebase, Planner designs the change, Developer implements with change-envelope enforcement, Reviewer inspects by code review |
 | `magentic` | Magentic-managed team: a manager LLM plans and coordinates Researcher + Developer agents dynamically |
 | `designer` | Single-agent orchestration that designs, writes, and validates fuseraft configs interactively — describe your use case in plain language and get a ready-to-run YAML config back |
 
 **Model auto-detection**
 
-If `--model` is not provided, `init` inspects environment variables in this order and picks the default model for the first provider that has a key set:
+If `--model` is not provided, `init` first checks the `ModelId` saved in `~/.fuseraft/config`. If no model is saved there, it inspects environment variables in this order and picks the default model for the first provider that has a key set:
 
 | Environment variable | Default model |
 |---------------------|---------------|
@@ -676,9 +676,9 @@ fuseraft init config/my-team.yaml
 fuseraft init --template dev-team --model claude-sonnet-4-6
 fuseraft init --template minimal --no-interactive
 
-# Code research / targeted change — no test execution
-fuseraft init --template code-research
-fuseraft init --template code-research --model gpt-4o --endpoint https://api.openai.com/v1
+# Brownfield codebase — Archaeologist recons first, then plan → implement → review
+fuseraft init --template brownfield
+fuseraft init --template brownfield --model claude-sonnet-4-6 --endpoint https://api.anthropic.com
 
 # Generate a Magentic team config
 fuseraft init --template magentic
