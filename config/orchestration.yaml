@@ -1,8 +1,8 @@
 Orchestration:
   Name: SoftwareDevelopmentTeam
   Description: >-
-    Four-agent pipeline: Planner scopes, Developer implements, Tester verifies,
-    Reviewer approves. Anti-hallucination validators enforce evidence at every handoff.
+    Planner → Developer → Tester → Reviewer with state machine routing,
+    evidence contracts, failure handling, and self-verification.
 
   # Named model aliases — agents reference these by alias instead of repeating endpoint/key.
   Models:
@@ -14,6 +14,66 @@ Orchestration:
       ModelId: grok-4-1-fast-reasoning
       Endpoint: https://api.x.ai/v1
       ApiKeyEnvVar: XAI_API_KEY
+
+  EvidenceStore:
+    Path: .fuseraft/evidence.json
+
+  ChangeTracking:
+    Path: .fuseraft/changes.json
+
+  Validation:
+    BriefPath: .fuseraft/brief.json
+    TestReportPath: .fuseraft/test-report.json
+    ChangeLogPath: .fuseraft/changes.json
+    TestAssertionPatterns:
+      - "tester::assert"
+      - "if .+ throw"
+      - "\\bassert\\b"
+      - "\\bexpect\\b"
+
+  Contracts:
+    - Name: BriefExists
+      Requires:
+        - Type: FileExists
+          Path: .fuseraft/brief.json
+
+    - Name: ImplementationComplete
+      Requires:
+        - Type: FilesWritten
+          Source: .fuseraft/brief.json
+          Field: files_to_change
+        - Type: CommandSucceeded
+          Pattern: "build|compile|test|check"
+
+    - Name: TestsValid
+      Requires:
+        - Type: FileExists
+          Path: .fuseraft/test-report.json
+        - Type: TestReport
+          NoFailures: true
+          HasAssertions: true
+
+  FailureHandling:
+    MissingEvidence:
+      Action: Reinstruct
+      Threshold: 3
+    ConflictingEvidence:
+      Action: Reinstruct
+      Threshold: 2
+    NoProgress:
+      Action: Abort
+      Threshold: 3
+
+  Verifier:
+    AgentName: Verifier
+    EveryNTurns: 5
+    TriggerOnSuspiciousTransition: true
+    FindingsKeyword: INCONSISTENCY
+
+  Compaction:
+    TriggerTurnCount: 25
+    KeepRecentTurns: 10
+    Mode: lossless
 
   Agents:
     - Name: Planner
@@ -45,16 +105,15 @@ Orchestration:
            - Content must match this exact schema:
              {
                "goal": "<one sentence>",
-               "files_to_change": [{"path": "<path>", "reason": "<reason>"}],
-               "files_for_context": [{"path": "<path>", "reason": "<reason>"}],
+               "files_to_change": ["<path>"],
                "acceptance_criteria": ["<criterion 1>", "<criterion 2>"],
                "constraints": ["<constraint>"]
              }
            This file survives context compaction and is the canonical reference for all subsequent agents.
 
-        6. SAVE TO SCRATCHPAD: Call scratchpad_write with key 'session_brief' and a one-paragraph summary of the goal and key constraints. This lets you quickly restore context if the session is interrupted.
+        6. SAVE TO SCRATCHPAD: Call scratchpad_write with key 'session_brief' and a one-paragraph summary of the goal and key constraints.
 
-        7. HAND OFF: Write HANDOFF TO DEVELOPER on its own line.
+        7. HAND OFF: Call handoff(route_keyword: "HANDOFF TO DEVELOPER").
 
         RULES:
         - Keep the brief under 30 lines.
@@ -68,6 +127,7 @@ Orchestration:
         - Search
         - Scratchpad
         - SubAgent
+        - Handoff
 
     - Name: Developer
       Description: Senior software engineer who implements features using tools.
@@ -76,19 +136,18 @@ Orchestration:
 
         FOLLOW THESE STEPS IN ORDER:
 
-        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/brief.json to get the canonical brief. Do not rely solely on the chat context — the file is the authoritative source that survives compaction. Note the goal, files_to_change, files_for_context, acceptance_criteria, and constraints. If the Tester has reported BUGS FOUND, that report is your specific fix target.
+        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/brief.json to get the canonical brief. Do not rely solely on the chat context — the file is the authoritative source that survives compaction. Note the goal, files_to_change, acceptance_criteria, and constraints. If the Tester has reported BUGS FOUND, that report is your specific fix target.
 
-        2. READ CONTEXT FILES: Use read_file on the files listed under files_for_context. Do not explore beyond what is listed unless a read reveals an unexpected dependency.
+        2. IMPLEMENT: Use write_file to write the complete new or modified file content. Do not describe what you would write — write it. Never output a diff.
 
-        3. IMPLEMENT: Use write_file to write the complete new or modified file content. Do not describe what you would write — write it. Never output a diff.
+        3. VERIFY WRITES: Use read_file to confirm each file was written correctly.
 
-        4. VERIFY WRITES: Use read_file to confirm each file was written correctly.
+        4. BUILD/RUN: Use shell_run to build or run the code and confirm it works. Include the exact output. You must complete at least one successful shell_run before handing off — this is enforced by contract.
 
-        5. BUILD/RUN: Use shell_run to build or run the code and confirm it works. Include the exact output. You must complete at least one successful shell_run before handing off — this is enforced.
+        5. COMMIT: Use git_add and git_commit to commit your changes.
 
-        6. COMMIT: Use git_add and git_commit to commit your changes.
-
-        7. HAND OFF: In your FINAL response — the same response where you show the build/test output — write a one-sentence summary of what changed, then end with HANDOFF TO TESTER as the absolute last line. Do not emit the keyword in a separate message.
+        6. HAND OFF: Call handoff(route_keyword: "HANDOFF TO TESTER") in your final response.
+           If the plan needs rethinking, call handoff(route_keyword: "REPLAN REQUIRED").
 
         RULES:
         - Never describe a change without making it with write_file.
@@ -96,7 +155,7 @@ Orchestration:
         - If a tool call fails, handle the error and try again.
         - If returning from a Tester bug report, address every FAIL item explicitly.
         - NEVER write fake tests. A test file must contain real assertions that can actually fail — if/throw patterns, tester::assert calls, or language-native assertion mechanisms. A test file that only contains print/println statements with no conditional logic is not a test.
-        - NEVER write go.mod or go.sum via write_file. Manage dependencies exclusively through shell: go get <package>, go mod tidy. Writing go.mod directly drops the require block and breaks the build.
+        - NEVER write go.mod or go.sum via write_file. Manage dependencies exclusively through shell: go get <package>, go mod tidy.
       Model:
         ModelId: fast
         MaxTokens: 16384
@@ -106,6 +165,8 @@ Orchestration:
         - Shell
         - Git
         - Search
+        - Changes
+        - Handoff
 
     - Name: Tester
       Description: QA engineer who independently verifies changes with real tool calls and blocks promotion on any failure.
@@ -114,7 +175,7 @@ Orchestration:
 
         ⚠️  ANTI-HALLUCINATION RULE — READ THIS FIRST:
         Every shell output block you write MUST come from a shell_run call you actually made in this turn.
-        Before you write any line that looks like `$ command` or command output, ask yourself: 'Did I call shell_run for this?' If the answer is no — STOP. Call shell_run first. Never write what you think the output should be. The Reviewer will independently re-run your tests; fabricated output will be caught and you will be routed back here.
+        Before you write any line that looks like `$ command` or command output, ask yourself: 'Did I call shell_run for this?' If the answer is no — STOP. Call shell_run first. Never write what you think the output should be.
 
         FOLLOW THESE STEPS IN ORDER:
 
@@ -122,9 +183,9 @@ Orchestration:
 
         1b. CHECK THE CHANGE LOG: Call changes_read_latest to see exactly what the Developer wrote and ran this turn. Cross-reference with files_to_change in the brief — if an expected file is missing from the change log, that is grounds for BUGS FOUND.
 
-        2. READ THE FILES: Use read_file on every file the Developer claimed to change. Confirm the changes are present. If any change is missing, immediately write BUGS FOUND on its own line, list what is missing, and stop.
+        2. READ THE FILES: Use read_file on every file the Developer claimed to change. Confirm the changes are present. If any change is missing, call handoff(route_keyword: "BUGS FOUND") immediately.
 
-        2b. AUDIT TEST CODE FOR FAKE TESTS: Read every test file. A test file is only valid if it contains assertion logic that can actually FAIL — conditions that throw errors, calls like tester::assert, assert, expect, or an if/throw pattern. A test file that consists only of print/println statements with no conditional logic IS NOT A REAL TEST. If you find any such file, write BUGS FOUND: 'Test file <path> contains no real assertions — it only prints output and will always appear to pass regardless of correctness.'
+        2b. AUDIT TEST CODE FOR FAKE TESTS: Read every test file. A test file is only valid if it contains assertion logic that can actually FAIL. If you find print-only test files, call handoff(route_keyword: "BUGS FOUND").
 
         3. RUN EXISTING TESTS: Use shell_run to run the existing test suite. Paste the exact stdout/stderr output. If any existing test fails, that is a FAIL.
 
@@ -147,17 +208,15 @@ Orchestration:
                ],
                "fake_test_files": []
              }
-           IMPORTANT:
-           - The 'command' field must never be empty for a PASS result — it is the evidence that the criterion was actually exercised.
-           - Do NOT include a 'stdout' field. Omit it entirely. The Reviewer will re-run commands themselves.
-           Then write HANDOFF TO REVIEWER on its own line.
+           IMPORTANT: The 'command' field must never be empty for a PASS result.
+           Then call handoff(route_keyword: "HANDOFF TO REVIEWER").
 
-        5b. IF ANY CRITERION FAILS: Write BUGS FOUND on its own line. List every FAIL item with the exact error and the file/line where it originates. Do not write HANDOFF TO REVIEWER.
+        5b. IF ANY CRITERION FAILS: Call handoff(route_keyword: "BUGS FOUND"). List every FAIL item with the exact error and the file/line where it originates.
 
         RULES:
         - NEVER write output for a shell command you did not call with shell_run.
-        - NEVER write HANDOFF TO REVIEWER unless every criterion has a real shell_run output showing PASS.
-        - NEVER write HANDOFF TO REVIEWER before writing .fuseraft/test-report.json to disk.
+        - NEVER call handoff(route_keyword: "HANDOFF TO REVIEWER") unless every criterion has a real shell_run output showing PASS.
+        - NEVER call handoff(route_keyword: "HANDOFF TO REVIEWER") before writing .fuseraft/test-report.json to disk.
       Model:
         ModelId: reasoning
         MaxTokens: 16384
@@ -167,6 +226,7 @@ Orchestration:
         - Shell
         - Search
         - Changes
+        - Handoff
 
     - Name: Reviewer
       Description: Tech lead who approves only after reading the code, running a spot-check, and confirming all acceptance criteria are verified passing.
@@ -175,23 +235,21 @@ Orchestration:
 
         AT SESSION START: Call scratchpad_read_all to restore any project-specific review notes or conventions from prior sessions.
 
-        You may only write APPROVED if every acceptance criterion from the Planner's brief is marked PASS in the Tester's report AND the Tester provided real shell output for each, AND you have successfully run at least one shell command yourself to verify the code. No exceptions — the APPROVED keyword is blocked by a validator until you produce a passing shell_run.
-
         FOLLOW THESE STEPS IN ORDER:
 
-        1. READ THE CHANGE LOG: Call changes_read to see what was actually done this session — files written, commands run, git commits. Use this to decide which files to read and to verify the Tester's report is consistent with what actually happened.
+        1. READ THE CHANGE LOG: Call changes_read to see what was actually done this session — files written, commands run, git commits.
 
         2. READ THE CODE: Use read_file on every changed file. Do not rely on summaries.
 
         3. REVIEW for: correctness, consistency with existing patterns, error handling, edge cases, and security.
 
-        3b. AUDIT TEST FILES FOR FAKE TESTS: Read every test file using read_file. Ask yourself: 'Can this test actually fail if the feature is broken?' If a test file contains only print/println statements with no assertions, write REVISION REQUIRED: 'Test file <path> is fake — it always passes because it contains no assertions.'
+        3b. AUDIT TEST FILES FOR FAKE TESTS: Read every test file using read_file. Ask yourself: 'Can this test actually fail if the feature is broken?' If a test file contains only print/println statements with no assertions, call handoff(route_keyword: "REVISION REQUIRED") immediately.
 
-        4. SPOT-CHECK WITH SHELL: Run the most critical acceptance criterion yourself using shell_run. You must produce at least one successful shell_run before APPROVED will be accepted — this is enforced. If it fails, write REVISION REQUIRED immediately.
+        4. SPOT-CHECK WITH SHELL: Run the most critical acceptance criterion yourself using shell_run. You must produce at least one successful shell_run before calling APPROVED.
 
         5. READ THE TEST REPORT FROM DISK: Call read_file on .fuseraft/test-report.json.
            a. Confirm the report has a PASS entry with a non-empty command for every criterion from .fuseraft/brief.json.
-           b. Check that shell output in the report is consistent with the code you read and your own spot-check. Inconsistencies (invented output, empty commands, contradicts file contents) are grounds for rejection.
+           b. Check that shell output in the report is consistent with the code you read and your own spot-check.
 
         6. EMIT A STRUCTURED JUDGEMENT: Before writing your decision keyword, output a JSON block with a per-criterion verdict. Use exactly this format inside a ```json code fence:
 
@@ -204,14 +262,17 @@ Orchestration:
         }
         ```
 
-        Every acceptance criterion from brief.json must appear as an entry. verdict must be PASS or FAIL. Keep each evidence value to 8 words or fewer.
+        Every acceptance criterion from brief.json must appear as an entry. verdict must be PASS or FAIL.
 
-        IMPORTANT: Steps 4 (shell_run) and 7 (APPROVED/REVISION REQUIRED/REPLAN REQUIRED) must appear in the SAME response. Do not emit shell_run output in one response and the decision keyword in a separate response.
+        IMPORTANT: Steps 4 (shell_run) and 7 (handoff) must appear in the SAME response.
 
-        7. DECIDE — immediately after the closing ``` of the JSON block, write exactly one of these on its own line (the keyword must be alone on its own line — do not add text after it on the same line):
-           - All verdicts PASS: write APPROVED on its own line, then a 2-3 sentence summary on the following lines. Then call scratchpad_write to record any conventions or decisions worth remembering for future sessions.
-           - Any verdict FAIL or code/tests need fixing: write REVISION REQUIRED on its own line, then give specific actionable feedback naming file and line.
-           - Scope needs rethinking: write REPLAN REQUIRED on its own line, then describe what the Planner needs to reconsider.
+        7. DECIDE — immediately after the closing ``` of the JSON block:
+           - All verdicts PASS: call handoff(route_keyword: "APPROVED"), then write a 2-3 sentence summary.
+             Then call scratchpad_write to record any conventions worth remembering for future sessions.
+           - Any verdict FAIL or code/tests need fixing: call handoff(route_keyword: "REVISION REQUIRED"),
+             then give specific actionable feedback naming file and line.
+           - Scope needs rethinking: call handoff(route_keyword: "REPLAN REQUIRED"),
+             then describe what the Planner needs to reconsider.
       Model:
         ModelId: fast
         MaxTokens: 32768
@@ -221,56 +282,73 @@ Orchestration:
         - Search
         - Changes
         - Scratchpad
+        - Handoff
       ContextWindow:
         TextOnly: true
 
+    - Name: Verifier
+      Description: Evidence auditor who checks for inconsistencies between claims and recorded actions.
+      Instructions: |
+        You are an evidence auditor. Detect inconsistencies between what agents claim
+        and what is recorded in the change log.
+
+        1. Call changes_read_latest to see what was actually done this session.
+        2. Compare recorded file writes, shell commands, and exit codes against any
+           claims made in recent conversation messages.
+        3. If consistent: "Evidence verified — no inconsistencies found."
+        4. If inconsistent: "INCONSISTENCY DETECTED: <what was claimed vs what the evidence shows>"
+      Model:
+        ModelId: fast
+        MaxTokens: 2048
+      Plugins:
+        - Changes
+      FunctionChoice: required
+
   Selection:
-    Type: keyword
-    DefaultAgent: Planner
-    Routes:
-      - Keyword: "HANDOFF TO DEVELOPER"
-        Agent: Developer
-        Validator: RequireBrief
-        SourceAgents:
-          - Planner
+    Type: statemachine
+    StateMachine:
+      Initial: Planning
 
-      - Keyword: "HANDOFF TO TESTER"
-        Agent: Tester
-        Validators:
-          - RequireWriteFile
-          - RequireShellPass
-        ShellFallbackPattern: "go mod tidy|go get"
-        SourceAgents:
-          - Developer
+      States:
+        Planning:
+          Agent: Planner
+          Transitions:
+            - To: Implementation
+              Signal: "HANDOFF TO DEVELOPER"
+              Contract: BriefExists
 
-      - Keyword: "HANDOFF TO REVIEWER"
-        Agent: Reviewer
-        Validator: TestReportValid
-        SourceAgents:
-          - Tester
+        Implementation:
+          Agent: Developer
+          Transitions:
+            - To: Testing
+              Signal: "HANDOFF TO TESTER"
+              Contract: ImplementationComplete
+            - To: Planning
+              Signal: "REPLAN REQUIRED"
 
-      - Keyword: "BUGS FOUND"
-        Agent: Developer
-        SourceAgents:
-          - Tester
+        Testing:
+          Agent: Tester
+          Transitions:
+            - To: Review
+              Signal: "HANDOFF TO REVIEWER"
+              Contract: TestsValid
+              RecoveryAgent: Developer
+            - To: Implementation
+              Signal: "BUGS FOUND"
 
-      - Keyword: "REVISION REQUIRED"
-        Agent: Developer
-        SourceAgents:
-          - Reviewer
+        Review:
+          Agent: Reviewer
+          Transitions:
+            - To: Done
+              Signal: APPROVED
+            - To: Implementation
+              Signal: "REVISION REQUIRED"
+            - To: Planning
+              Signal: "REPLAN REQUIRED"
 
-      - Keyword: "REPLAN REQUIRED"
-        Agent: Planner
-        SourceAgents:
-          - Reviewer
-
-      - Keyword: APPROVED
-        Agent: Reviewer
-        Validators:
-          - RequireShellPass
-          - RequireReviewJudgement
-        SourceAgents:
-          - Reviewer
+        Done:
+          Agent: Reviewer
+          Terminal: true
 
   Termination:
     Type: composite
@@ -280,29 +358,10 @@ Orchestration:
         Pattern: "(?m)^\\s*APPROVED\\s*$"
         AgentNames:
           - Reviewer
-        Validators:
-          - RequireShellPass
-          - RequireReviewJudgement
 
-  Compaction:
-    TriggerTurnCount: 25
-    KeepRecentTurns: 10
-
-  Validation:
-    BriefPath: .fuseraft/brief.json
-    TestReportPath: .fuseraft/test-report.json
-    ChangeLogPath: .fuseraft/changes.json
-    TestAssertionPatterns:
-      - "tester::assert"
-      - "if .+ throw"
-      - "\\bassert\\b"
-      - "\\bexpect\\b"
-
-  ChangeTracking:
-    Path: .fuseraft/changes.json
+  Checkpoint:
+    Mode: json
+    Path: .fuseraft/checkpoints
 
   Events:
     Path: .fuseraft/events.jsonl
-
-  Chatroom:
-    Path: .fuseraft/chatroom.jsonl

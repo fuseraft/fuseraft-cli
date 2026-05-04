@@ -78,33 +78,33 @@ Orchestration:
   Contracts:
     - Name: ReconComplete
       Requires:
-        - FileExists:
-            Path: .fuseraft/brief.brownfield.json
-        - FileExists:
-            Path: .fuseraft/conventions.json
+        - Type: FileExists
+          Path: .fuseraft/brief.brownfield.json
+        - Type: FileExists
+          Path: .fuseraft/conventions.json
 
     - Name: BriefExists
       Requires:
-        - FileExists:
-            Path: .fuseraft/brief.json
+        - Type: FileExists
+          Path: .fuseraft/brief.json
 
     - Name: ImplementationComplete
       Requires:
-        - FilesWritten:
-            Source: .fuseraft/brief.json
-            Field: files_to_change
-        - CommandSucceeded:
-            PatternField: verify_command
-            Pattern: "build|compile|test|check"
-        - RelatedTestsPass: {}   # runs FindRelatedCommand per changed file, executes targeted tests
+        - Type: FilesWritten
+          Source: .fuseraft/brief.json
+          Field: files_to_change
+        - Type: CommandSucceeded
+          PatternField: verify_command
+          Pattern: "build|compile|test|check"
+        - Type: RelatedTestsPass   # runs FindRelatedCommand per changed file, executes targeted tests
 
     - Name: TestsValid
       Requires:
-        - FileExists:
-            Path: .fuseraft/test-report.json
-        - TestReport:
-            NoFailures: true
-            HasAssertions: true
+        - Type: FileExists
+          Path: .fuseraft/test-report.json
+        - Type: TestReport
+          NoFailures: true
+          HasAssertions: true
 
   FailureHandling:
     MissingEvidence:
