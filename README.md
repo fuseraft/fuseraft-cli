@@ -16,6 +16,14 @@ Pipelines range from a single task-routed assistant:
 
 ![Default four-agent pipeline](docs/.assets/td-basic-yaml-config.png)
 
+...to declarative directed-graph pipelines where back-edges express review cycles without duplicating states:
+
+![Graph pipeline with back-edges](docs/.assets/td-pipeline-with-back-edges.png)
+
+...to parallel fan-out/fan-in where a coordinator spawns concurrent workers that merge into a single downstream node:
+
+![Parallel fan-out / fan-in](docs/.assets/td-parallel-fan-out-fan-in.png)
+
 ...to fully autonomous [Magentic](https://arxiv.org/abs/2411.04468) orchestration where a Manager dynamically selects agents and collects their reports:
 
 <img src="docs/.assets/lr-magentic.png" alt="Magentic: Task → Manager selects/reports Researcher and Developer">
