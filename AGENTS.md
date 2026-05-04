@@ -56,7 +56,7 @@ A turn ends only after the agent produces a final text response. This definition
 | `IAgentSelector` | Picks the next agent each turn | `KeywordSelectionStrategy`, `StateMachineSelectionStrategy`, `LlmSelectionStrategy`, `SequentialSelectionStrategy`, `StructuredSelectionStrategy` |
 | `ITerminationCondition` | Decides when the session ends | `RegexTerminationCondition`, `MaxIterationsTerminationCondition`, `CompositeTerminationCondition` |
 | `IRoutingValidator` | Blocks a handoff unless evidence is present | `RequireBriefValidator`, `HandoffToTesterValidator`, `HandoffToReviewerValidator`, `RequireShellPassValidator`, `RequireAllFilesWrittenValidator`, `RequireReviewJudgementValidator` |
-| `IOrchestrator` | Drives the agent loop | `AgentOrchestrator`, `WorkflowOrchestrator`, `MagenticOrchestrator`, `SagaOrchestrator` (compensating rollback wrapper) |
+| `IOrchestrator` | Drives the agent loop | `AgentOrchestrator`, `GraphOrchestrator`, `MagenticOrchestrator`, `SagaOrchestrator` (compensating rollback wrapper) |
 | `ICompensatingAgent` | Rolls back an agent's work when the saga aborts | Provided by callers; none built-in |
 | `ISessionStore` | Saves/loads checkpoints | `JsonSessionStore`, `InMemorySessionStore` |
 
@@ -66,11 +66,13 @@ A turn ends only after the agent produces a final text response. This definition
 
 `OrchestratorBuilder` picks the orchestrator at startup:
 
-1. `MagenticOrchestrator` — when `Selection.Type == "magentic"`
-2. `WorkflowOrchestrator` — when `Selection.Type == "keyword"` AND agents are exactly `{planner, developer, tester, reviewer}`
-3. `AgentOrchestrator` — everything else (including `statemachine`, `llm`, `sequential`)
+1. `GraphOrchestrator` — when `Selection.Type == "graph"`; drives a declarative directed graph with named nodes, keyword-gated edges, and optional parallel fan-out/fan-in via `Parallel: true` nodes
+2. `MagenticOrchestrator` — when `Selection.Type == "magentic"`
+3. `AgentOrchestrator` — everything else (`keyword`, `statemachine`, `llm`, `sequential`, `structured`, `roundrobin`)
 
-`StateMachineSelectionStrategy` runs inside `AgentOrchestrator`.
+`SagaOrchestrator` wraps whichever orchestrator is selected when `Saga.Enabled == true`.
+
+`StateMachineSelectionStrategy` runs inside `AgentOrchestrator` for the `statemachine` type.
 
 ---
 
@@ -88,7 +90,13 @@ A turn ends only after the agent produces a final text response. This definition
 - `RecoveryAgent` on a `TransitionConfig` works identically to the keyword strategy
 - Uses the same per-line signal matching as the keyword strategy
 
-**Failure classification** (both strategies):
+**`GraphOrchestrator`** (`graph` type — not a selection strategy):
+- Agents are bound to named nodes (`GraphNodeConfig`); directed edges (`GraphEdgeConfig`) carry optional keyword conditions and routing validators
+- Forward edges are wired into a MAF `WorkflowBuilder` phase; back-edges restart the outer phase loop from the target node, enabling cycles
+- Nodes with `Parallel: true` participate in fan-out groups: a source node fans out to all parallel nodes that share the triggering keyword, runs them concurrently with isolated history snapshots, then merges outputs before advancing
+- Terminal nodes end the session after the agent executes once; the node may declare its own `Validators` list
+
+**Failure classification** (keyword and statemachine strategies):
 - `FailureType` enum: `MissingEvidence`, `InvalidTransition`, `ConflictingEvidence`, `NoProgress`
 - `FailureAction` enum: `Reinstruct`, `ActivateRecovery`, `EscalateToHuman`, `Abort`
 - Policy is configured per `FailureType` in `FailureHandlingConfig`
@@ -180,6 +188,10 @@ The canonical style is already established in `KeywordSelectionStrategy.BuildCor
 
 Config is bound via `OrchestratorBuilder.BindConfig` from `OrchestrationConfig`. The top-level key is `Orchestration`. Both JSON and YAML are supported.
 
+**AgentFile**: Agents may be declared inline or loaded from a standalone YAML file via `AgentFile: path/to/agent.yaml`. Inline fields override the file at load time. `OrchestratorBuilder.ResolveAgentFiles` merges them before agents are built.
+
+**ContractPredicate format**: Predicates in `Contracts[].Requires[]` must use the flat `Type:` field (`Type: FileExists`, `Type: FilesWritten`, etc.) — not the object-key style (`FileExists: {Path: ...}`), which does not bind to `ContractPredicate.Type`.
+
 `config/examples/` contains runnable examples. **Keep these in sync** when adding new config fields — they are the primary reference for users and are checked by tests.
 
 When adding a new `FailureAction` or `FailureType` value, update:
@@ -216,10 +228,12 @@ When adding a new `FailureAction` or `FailureType` value, update:
 | Question | Where to look |
 |----------|--------------|
 | How is the next agent selected? | `src/Orchestration/Strategies/KeywordSelectionStrategy.cs`, `StateMachineSelectionStrategy.cs` |
+| How does graph orchestration work? | `src/Orchestration/GraphOrchestrator.cs`, `src/Core/Models/GraphConfig.cs` |
 | How do validators work? | `src/Orchestration/Validation/` |
 | How are contracts evaluated? | `src/Orchestration/Contracts/ContractEngine.cs` |
 | What tools do agents have? | `src/Infrastructure/Plugins/` |
-| How is the config schema defined? | `src/Core/Models/OrchestrationConfig.cs`, `StrategyConfig.cs`, `StateMachineConfig.cs` |
+| How is the config schema defined? | `src/Core/Models/OrchestrationConfig.cs`, `StrategyConfig.cs`, `StateMachineConfig.cs`, `GraphConfig.cs` |
+| How does AgentFile loading work? | `src/Cli/OrchestratorBuilder.cs` → `ResolveAgentFiles` |
 | How does compaction work? | `src/Orchestration/ConversationCompactor.cs` |
 | How does change tracking work? | `src/Orchestration/ChangeTracker.cs` |
 | Full architecture decisions | `docs/design.md` |
