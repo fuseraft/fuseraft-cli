@@ -330,6 +330,125 @@ The `Verifier` agent integrates directly with the state machine: on `Conflicting
 
 ---
 
+### graph
+
+A declarative directed graph where each agent is bound to a named node and edges carry routing keywords. Forward edges (to nodes in later BFS layers) activate the target agent in the current phase. Back-edges (to nodes in equal or earlier BFS layers) break the current phase and restart execution from the target node. Loop-back paths — revision cycles, bug-fix loops, replanning triggers — are explicit in the topology rather than encoded as implicit keyword conventions.
+
+```yaml
+Selection:
+  Type: graph
+  Graph:
+    Entry: planner
+    Nodes:
+      - Id: planner
+        Agent: Planner
+        Edges:
+          - To: developer
+            Keyword: "HANDOFF TO DEVELOPER"
+            Validators:
+              - RequireBrief
+
+      - Id: developer
+        Agent: Developer
+        Edges:
+          - To: tester
+            Keyword: "HANDOFF TO TESTER"
+            Validators:
+              - RequireWriteFile
+              - RequireShellPass
+          - To: planner
+            Keyword: REPLAN REQUIRED
+
+      - Id: tester
+        Agent: Tester
+        Edges:
+          - To: reviewer
+            Keyword: "HANDOFF TO REVIEWER"
+            Validators:
+              - TestReportValid
+          - To: developer
+            Keyword: BUGS FOUND
+
+      - Id: reviewer
+        Agent: Reviewer
+        Edges:
+          - To: approved
+            Keyword: APPROVED
+            Validators:
+              - RequireReviewJudgement
+          - To: developer
+            Keyword: REVISION REQUIRED
+
+      - Id: approved
+        Agent: Reviewer
+        Terminal: true
+```
+
+**How it works**
+
+1. **BFS layer assignment:** at startup, fuseraft computes a BFS layer for every node from the entry node following only forward edges. Edges are classified as *forward* (target layer > source layer) or *back-edges* (target layer ≤ source layer).
+2. **Forward edges** activate the target agent in the current multi-agent phase via normal framework messaging.
+3. **Back-edges** break the current phase. When a back-edge keyword is detected and all validators pass, the orchestrator terminates the active phase and restarts execution from the target node.
+4. **Keyword detection** uses the same rules as keyword routing: the keyword must appear alone on its own line (after stripping `*`/`_` markdown), or be emitted via the `Handoff` plugin (`handoff(route_keyword: "KEYWORD")`). Only the current node's outgoing edges are checked — keywords that belong to other nodes are ignored.
+5. **Terminal nodes** (`Terminal: true`) invoke the termination check before keyword detection. Back-edges on a terminal node are unreachable — if you need a terminal outcome with evidence gating, use a routing node whose forward edge points to a separate terminal node with validators on that edge.
+6. **Unconditional edges** (no `Keyword`) fire automatically after the agent's turn without keyword scanning. Unconditional forward edges hand off immediately; unconditional back-edges break the phase immediately.
+
+**Multi-target back-edges**
+
+A single node may declare back-edges to different target nodes — the key differentiator from keyword routing's loop-back conventions. In the example below the `reviewer` node routes back to two different targets depending on which keyword fires:
+
+```yaml
+- Id: reviewer
+  Agent: Reviewer
+  Edges:
+    - To: approved
+      Keyword: APPROVED
+      Validators:
+        - RequireReviewJudgement
+    - To: developer
+      Keyword: REVISION REQUIRED     # back-edge → developer
+    - To: planner
+      Keyword: REPLAN REQUIRED       # back-edge → planner (different target)
+
+- Id: approved
+  Agent: Reviewer
+  Terminal: true
+```
+
+In keyword routing this pattern requires two separate loop-back routes and depends on keyword scanning order. In graph routing the topology is explicit: each edge has a distinct target.
+
+**`GraphConfig` fields**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `Entry` | string | yes | Node ID of the first node to execute. |
+| `Nodes` | array | yes | Ordered list of `GraphNodeConfig`. At least one node required. |
+
+**`GraphNodeConfig` fields**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `Id` | string | — | Unique node identifier. Referenced by edges' `To` field and by `Entry`. |
+| `Agent` | string | — | Agent name from the `Agents` list to invoke at this node. Multiple nodes may share the same agent. |
+| `Terminal` | bool | `false` | When `true`, the termination check fires before keyword detection. No outgoing edges are evaluated after termination fires. |
+| `Edges` | array | `[]` | Outgoing edges from this node. Empty means the agent runs until the `Termination` strategy fires. |
+
+**`GraphEdgeConfig` fields**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `To` | string | — | Target node ID. Must exist in `Graph.Nodes`. Forward vs. back-edge classification is computed automatically from BFS layer topology. |
+| `Keyword` | string | — | Routing keyword. Must appear alone on its own line. When omitted, the edge is *unconditional* — it fires after the agent's turn without keyword scanning. |
+| `Validator` | string | — | Optional single validator. Blocks the edge until validation passes. |
+| `Validators` | array | — | Optional multiple validators (AND semantics). |
+| `SourceAgents` | array | any | Optional. Edge only fires when the message author is in this list. |
+| `RequiredCommandPattern` | string | — | Used with `RequireShellPass`. The passing command must contain at least one pipe-separated substring. |
+| `ShellFallbackPattern` | string | — | Fallback command pattern if `RequiredCommandPattern` fails. |
+| `RequireHumanApproval` | bool | `false` | When `true`, the operator must explicitly approve (`y`) before this edge fires. If rejected, the source agent is re-invoked with a "route blocked" message. Applies to both forward edges and back-edges. |
+| `RecoveryAgent` | string | — | Optional. Agent to invoke for one intervention turn when a validator has failed two or more consecutive times on this edge. The recovery agent receives a diagnostic message and may fix the blocking issue. Activates at most once per edge per session. |
+
+---
+
 ### llm
 
 An LLM call picks the next agent each turn based on the conversation history. Useful when routing logic is too complex to express as keywords, or when the handoff decision should be context-sensitive.
@@ -533,24 +652,41 @@ Magentic fits naturally when:
 
 Magentic is also more expensive than keyword routing per round: each inner-loop iteration makes at least two manager LLM calls (`magentic_ledger_update` + `magentic_select_speaker`) in addition to the participant's call.
 
+### Graph
+
+Use graph when you need **explicit back-edge topology** — when different failure modes should route back to different prior nodes, or when you want the routing structure to be visible in the config rather than implied by keyword conventions.
+
+Graph fits naturally when:
+
+- A single agent can route backward to **different** targets depending on the outcome (e.g. a Reviewer that sends minor issues back to the Developer but sends scope changes back to the Planner)
+- You want loop-back paths to be unambiguous in the config, not inferred from keyword scan order
+- The pipeline is a directed graph, not a strict linear sequence — phases fan out or converge in ways that are cleaner to express as nodes and edges than as a flat route table
+- You still want validators on individual edges (graph edges support the full `Validators` / `RequiredCommandPattern` surface, the same as keyword routes)
+
+Graph and keyword routing use the same signal mechanism (keyword on own line, or `handoff()` plugin). Migrating an existing keyword config to graph requires mapping agents to node IDs and routes to edges. The main addition is the explicit `Entry` node and the `Id`/`To` structure on each edge.
+
+**What graph trades away:** lossless compaction and Verifier integration. For hallucination-resistant routing where agents cannot route themselves to an unexpected node, state machine remains the stronger choice.
+
 ---
 
-## Choosing between keyword, state machine, and structured
+## Choosing between keyword, state machine, structured, and graph
 
-| | Keyword | State machine | Structured |
-|---|---|---|---|
-| Handoff signal | Keyword on own line | Signal on own line (same matching) | JSON field value |
-| Evidence gating | Validators (per-route) | Contracts (per-transition, typed) | Instructions only |
-| Routing topology | All routes active at once | Only current state's transitions active | All routes active at once |
-| Ghost signals | Possible — any agent can emit any keyword | Impossible — wrong-state signals are ignored | N/A |
-| Lossless compaction | No | Yes (requires EvidenceStore) | No |
-| Verifier integration | No | Yes | No |
-| Failure classification | Yes | Yes | No |
-| Best for | Phased pipelines, dev teams | Same + hallucination-resistant routing | Classifiers, triage |
+| | Keyword | State machine | Structured | Graph |
+|---|---|---|---|---|
+| Handoff signal | Keyword on own line | Signal on own line (same matching) | JSON field value | Keyword on own line (same matching) |
+| Evidence gating | Validators (per-route) | Contracts (per-transition, typed) | Instructions only | Validators (per-edge) |
+| Routing topology | All routes active at once | Only current state's transitions active | All routes active at once | Only current node's edges active |
+| Ghost signals | Possible — any agent can emit any keyword | Impossible — wrong-state signals are ignored | N/A | Reduced — wrong-node keywords are ignored |
+| Multi-target back-edges | Implicit (keyword scan order) | N/A (no back-edges) | N/A | Explicit — each back-edge has a distinct target node |
+| Lossless compaction | No | Yes (requires EvidenceStore) | No | No |
+| Verifier integration | No | Yes | No | No |
+| Failure classification | Yes | Yes | No | Yes |
+| Best for | Phased pipelines, dev teams | Same + hallucination-resistant routing | Classifiers, triage | Explicit multi-target loop-back topology |
 
 For a human-like team of roles (Planner, Developer, Tester, Reviewer):
 - Start with **keyword** if you want a simple, validator-gated pipeline quickly
 - Move to **state machine** when you need hallucination-resistant routing, contracts, lossless compaction, or the Verifier meta-agent
+- Choose **graph** when different failure outcomes must route back to different nodes and you want that topology explicit in the config
 
 For a pipeline where an agent computes a value and routing follows from it, prefer **structured**. The JSON is already the output — the routing field costs nothing to add.
 

@@ -12,7 +12,7 @@ public sealed class InitSettings : CommandSettings
     public string? OutputPath { get; set; }
 
     [CommandOption("-t|--template")]
-    [Description("Team template: dev-team, research, devops, content, minimal, magentic, brownfield, designer.")]
+    [Description("Team template: dev-team, research, devops, content, minimal, magentic, brownfield, designer, graph, brownfield-graph.")]
     public string? Template { get; set; }
 
     [CommandOption("-m|--model")]
@@ -54,6 +54,10 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
             "Archaeologist recons the codebase → Planner → Developer (change-envelope enforced) → Reviewer"),
         new("designer",      "Orchestration Designer",
             "A single agent that helps you design, write, and validate fuseraft orchestration configs"),
+        new("graph",            "Graph Pipeline",
+            "Planner → Developer → Tester → Reviewer as a declarative directed graph with keyword-routed forward and back-edges"),
+        new("brownfield-graph", "Brownfield Graph Pipeline",
+            "Archaeologist → Planner → Developer → Reviewer as a directed graph; Reviewer routes to Developer OR Planner on failure — showcasing multi-target back-edges"),
     ];
 
     private static readonly (string EnvVar, string Model)[] ProviderDefaults =

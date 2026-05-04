@@ -647,6 +647,8 @@ fuseraft init [output] [options]
 | `brownfield` | Four-agent pipeline: Archaeologist recons the codebase, Planner designs the change, Developer implements with change-envelope enforcement, Reviewer inspects by code review |
 | `magentic` | Magentic-managed team: a manager LLM plans and coordinates Researcher + Developer agents dynamically |
 | `designer` | Single-agent orchestration that designs, writes, and validates fuseraft configs interactively — describe your use case in plain language and get a ready-to-run YAML config back |
+| `graph` | Planner → Developer → Tester → Reviewer as a declarative directed graph; forward edges advance the phase, back-edges (REVISION REQUIRED, BUGS FOUND, REPLAN REQUIRED) restart from the target node |
+| `brownfield-graph` | Brownfield codebase pipeline as a directed graph; Archaeologist → Planner → Developer → Reviewer/approved; the Reviewer has two distinct back-edges — REVISION REQUIRED routes to Developer and REPLAN REQUIRED routes to Planner |
 
 **Model auto-detection**
 
@@ -687,6 +689,14 @@ fuseraft init config/magentic-team.yaml --template magentic --model gpt-4o
 # Generate an Orchestration Designer — describe your use case, get a validated config back
 fuseraft init --template designer
 fuseraft init config/designer.yaml --template designer --model claude-sonnet-4-6
+
+# Graph pipeline — explicit directed-graph topology with forward edges and back-edges
+fuseraft init --template graph
+fuseraft init config/graph-team.yaml --template graph --model claude-sonnet-4-6
+
+# Brownfield graph — Archaeologist → Planner → Developer → Reviewer/approved with multi-target back-edges
+fuseraft init --template brownfield-graph
+fuseraft init config/brownfield-graph.yaml --template brownfield-graph --model claude-sonnet-4-6
 
 # CI / scripted usage
 fuseraft init config/ci-team.yaml --template dev-team --model gpt-4o --no-interactive

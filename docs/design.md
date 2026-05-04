@@ -63,6 +63,7 @@ Infrastructure/
 Orchestration/
   AgentOrchestrator.cs    — General-purpose multi-agent loop (any selection strategy)
   MagenticOrchestrator.cs — Magentic-One style two-level manager/participant loop
+  GraphOrchestrator.cs    — Directed-graph orchestrator; BFS-layer topology, forward-edge phases, back-edge phase restarts
   ConversationCompactor.cs — LLM-based history summarization for long sessions
   ChangeTracker.cs        — Intercepts tool calls to record file/shell/git activity
   ContextWindowFilter.cs  — Applies per-agent context window config to conversation history
@@ -189,20 +190,21 @@ Every session is driven by a single JSON or YAML file under the top-level `Orche
 
 ## 6. Orchestrators
 
-`OrchestratorBuilder` selects among three orchestrators based on the config's `Selection.Type` and agent names. The selection order is:
+`OrchestratorBuilder` selects among four orchestrators based on the config's `Selection.Type` and agent names. The selection order is:
 
 1. **`MagenticOrchestrator`** — when `Selection.Type == "magentic"`
-2. **`WorkflowOrchestrator`** — when `Selection.Type == "keyword"` AND agents are exactly `{planner, developer, tester, reviewer}`
-3. **`AgentOrchestrator`** — all other cases
+2. **`GraphOrchestrator`** — when `Selection.Type == "graph"`
+3. **`WorkflowOrchestrator`** — when `Selection.Type == "keyword"` AND agents are exactly `{planner, developer, tester, reviewer}`
+4. **`AgentOrchestrator`** — all other cases
 
-All three implement `IOrchestrator`:
+All four implement `IOrchestrator`:
 
 ```csharp
 Task<OrchestrationResult> RunAsync(string task, IReadOnlyList<AgentMessage>? priorHistory, CancellationToken ct)
 IAsyncEnumerable<AgentMessage> StreamAsync(string task, IReadOnlyList<AgentMessage>? priorHistory, CancellationToken ct)
 void SetSessionId(string sessionId)
 void SetResumeExecutorId(string? executorId)   // WorkflowOrchestrator; consumed once
-void SetResumeStateName(string? stateName)     // AgentOrchestrator + StateMachineSelectionStrategy; consumed once
+void SetResumeStateName(string? stateName)     // AgentOrchestrator + StateMachineSelectionStrategy + GraphOrchestrator; consumed once
 event Action<string>? AgentStarting
 event Action<string, string, string?>? ToolCalling        // (agentName, toolName, argsSummary)
 event Action<string, int, int>? TokenBudgetWarning        // (agentName, inputTokens, warnThreshold)
@@ -319,6 +321,58 @@ START
 
 **Checkpoint state** (`MagenticCheckpointState`): `CurrentPlan`, `RoundIndex`, `StallCount`, `ResetCount`, `AwaitingPlanReview` — enough to resume the inner loop exactly where it paused. Exposed via `CurrentState` so `SessionRunner` can snapshot it after each yielded message.
 
+### 5.4 GraphOrchestrator
+
+A directed-graph orchestrator for `Selection.Type: graph`. Each node in the config binds an agent to a unique `Id`; edges carry routing keywords and optional validators. The topology drives execution: forward edges advance within a phase; back-edges break the phase and restart from the target node.
+
+**BFS layer assignment:** At startup, `ComputeBfsLayers` assigns an integer layer to every node via BFS from the `Entry` node, following only non-back edges (detected by topological order). An edge from node `A` to node `B` is a *forward edge* when `layer(B) > layer(A)` and a *back-edge* when `layer(B) ≤ layer(A)`. Layer assignment uses the node list position as a proxy when the exact DAG has not yet been resolved — accurate for topologically ordered node lists, documented in code for future improvement.
+
+**Route tables:** `BuildNodeRouteTables` constructs an `AgentRouteTable` for every node. Each table holds:
+- `Routes` — forward-edge routes (keyword → `RouteInfo(targetNodeId, agentName, validators)`)
+- `PhaseBreakKeywords` — back-edge destinations (keyword → target node ID)
+- `PhaseBreakValidators` — validators keyed by back-edge keyword
+- `TerminalValidators` — validators on `Terminal: true` nodes (run before keyword detection)
+- `ForeignSendForwardKeywords` — keywords used to re-inject context to the MAF phase's next agent
+- `_unconditionalForwardRoutes` — forward edges with no keyword (fire automatically)
+- `_unconditionalBackEdges` — back-edges with no keyword (fire automatically)
+- `_unconditionalBackEdgeValidators` — validators for unconditional back-edges (stored in a parallel dictionary so they are not silently dropped)
+
+**Phase loop:** `RunPhasesAsync` is the outer `while(true)` loop. Each iteration calls `BuildPhaseWorkflow`, which constructs a fresh MAF DAG containing only the forward edges reachable from the current start node. `InProcessExecution.RunStreamingAsync` drives the phase; `WatchStreamAsync` consumes events. A `WorkflowOutputEvent` signals a phase-break (back-edge keyword or unconditional back-edge). The outer loop reads `lastKeyword` to determine the next start node.
+
+**Keyword detection:** `RunNodeExecutorAsync` runs inside each `FunctionExecutor`. It calls `agent.RunAsync`, then:
+1. Checks whether the node is `Terminal: true` — if so, the termination check fires first.
+2. Scans the response for keywords in the current node's route table only — keywords from other nodes are ignored.
+3. For back-edge matches: validators run; on pass, `YieldOutputAsync` breaks the phase; on fail, a correction is injected and the agent is re-invoked.
+4. For forward-edge matches: validators run; on pass, `SendMessageAsync` advances to the next executor in the phase.
+5. For unconditional edges: `_unconditionalForwardRoutes` / `_unconditionalBackEdges` fire after the agent turn if no keyword matched, optionally running `_unconditionalBackEdgeValidators` before the phase-break.
+6. If no keyword matches and no unconditional edge applies, a correction is injected listing the available keywords.
+
+Synthetic keywords (`__UNCOND_BACK:{nodeId}`) are used internally to track unconditional back-edges through the phase-break path. `RunPhasesAsync` translates them to human-readable `(unconditional handoff from {nodeId})` before injecting into agent history and event emission.
+
+**`DetermineStartNodeId`:** Called at the start of each phase (and on session resume) with an optional hint string. Priority order:
+1. Explicit hint matches a node `Id` exactly → use that node.
+2. Explicit hint matches a node's `Agent` name → use that node's `Id`.
+3. Scan history for the most recent back-edge keyword to determine where the last phase-break targeted.
+4. Use the last agent name seen in history and find the corresponding node.
+5. Fall back to `Entry`.
+
+**Checkpoint and resume:** `SessionRunner` snapshots `go.StateHistory` (list of `AgentState`) into `SessionCheckpoint.StateHistory` after each yielded message, the same as `WorkflowOrchestrator`. On resume, `SetResumeStateName` accepts a node ID or agent name; `DetermineStartNodeId` applies the priority chain above to resolve the correct starting node.
+
+**Execution model:**
+
+```
+START
+  → DetermineStartNodeId
+  → BuildPhaseWorkflow  (MAF DAG of forward edges from start node)
+  → RunStreamingAsync
+  → WatchStreamAsync:
+      → (WorkflowOutputEvent ? InspectKeyword : ContinueTurn)
+  → InspectKeyword → DetermineNextStartNode
+  → (terminal keyword ? END : BuildPhaseWorkflow)
+```
+
+**Why GraphOrchestrator is not WorkflowOrchestrator with a dynamic chain:** `WorkflowOrchestrator` builds a linear `planner → developer → tester → reviewer` chain and encodes loop-back as outer-phase restarts keyed on a fixed keyword set. `GraphOrchestrator` supports arbitrary node topologies, per-node route tables, and multiple back-edges from a single node to different targets. The phase-workflow construction differs (BFS-layered DAG vs. fixed linear chain), and `DetermineStartNodeId`'s hint-fallback chain handles mid-graph resume — none of which fit cleanly into `WorkflowOrchestrator`'s fixed executor model.
+
 ---
 
 ## 7. Selection Strategies
@@ -333,6 +387,7 @@ Built and returned by `StrategyFactory.CreateSelection`. All implement `IAgentSe
 | `statemachine` | Explicit state graph: agents emit signals matched against the current state's outgoing transitions; all declared contracts must pass before a transition fires. Eliminates routing hallucinations — agents emit signals, the machine resolves transitions. |
 | `structured` | Evaluates CEL-like condition expressions per route rather than string keywords |
 | `magentic` | Handled entirely by `MagenticOrchestrator`; `StrategyFactory` throws if this type reaches it |
+| `graph` | Handled entirely by `GraphOrchestrator`; routing is driven by per-node `AgentRouteTable` instances built at startup from the `Graph.Nodes` config. `StrategyFactory` is not involved. |
 
 **`KeywordSelectionStrategy`** is the workhorse for `WorkflowOrchestrator` and structured pipelines. Key behaviors:
 - Keyword matching is strict per-line (not substring): the full trimmed line must equal the keyword
@@ -423,7 +478,7 @@ Every session is backed by a `SessionCheckpoint` persisted after each agent turn
 | `IsComplete` | Set to `true` after the session runs to completion; prevents re-resume |
 | `ResumeExecutorId` | Hint for `WorkflowOrchestrator` — which executor was active when compacted |
 | `MagenticState` | `MagenticCheckpointState` snapshot for Magentic loop resume |
-| `StateHistory` | Ordered list of `AgentState` snapshots produced during the session; `null` for non-`WorkflowOrchestrator` sessions |
+| `StateHistory` | Ordered list of `AgentState` snapshots produced during the session; populated by `WorkflowOrchestrator` and `GraphOrchestrator`; `null` for other orchestrators |
 
 **`AgentMessage` fields:** `AgentName`, `Content`, `Role`, `TurnIndex`, `Timestamp`, `Usage` (tokens + cost), `IsCompactionSummary`, `ToolCalls` (name, args summary, succeeded).
 
@@ -735,13 +790,14 @@ Fuseraft-cli is built on MAF (`Microsoft.Agents.AI`, `Microsoft.Agents.AI.Workfl
 
 | MAF Feature | Reason |
 |---|---|
-| Fan-out / fan-in edges | All current configs are sequential pipelines; no parallel agent execution |
+| `AgentWorkflowBuilder.BuildConcurrent` (Concurrent orchestration) | Fan-out/fan-in via MAF; no per-branch retry loop; branches share the same `AgentContext` (race on mutable history); implemented instead at fuseraft level — see §18 |
 | Conditional edge predicates / `SwitchBuilder` | Routing logic lives inside executors (requires retry loop that graph edges cannot provide) |
 | `StatefulExecutor` | `AgentContext` as a shared context object serves the same purpose without scoped state isolation |
 | `AggregatingExecutor` | No incremental aggregation pattern in any current orchestrator |
 | `RequestPort` (external request handling) | Currently unused; a natural fit for Magentic's HITL plan review loop (see below) |
 | `CheckpointManager` / `FileSystemJsonCheckpointStore` | Framework layer captures workflow execution state; our layer captures conversation semantics — different problems |
 | `GroupChatWorkflowBuilder` | Requires a single shared history; Magentic's two-history model is incompatible (see §5.3) |
+| `AgentWorkflowBuilder.CreateHandoffBuilderWith()` (Handoff orchestration) | Mesh routing via auto-injected handoff tool calls; no correction-injection loop; workflow blocks for human input when an agent does not call the handoff tool; shared history across all participants is incompatible with per-agent `ContextWindow` filtering |
 | `Microsoft.Agents.AI.DevUI` | For hosted agent services with OpenAI-compatible API endpoints; our DevUI serves a different purpose |
 
 **MAF `WorkflowOrchestrator` graph topology:** The graph is always a linear chain — `AddEdge(src, sink)` only. Cycles are implemented via the outer `while(phaseCount < maxPhases)` loop that builds a fresh workflow per phase. This is the correct approach: MAF's `WorkflowBuilder` validates DAG structure and does not support in-graph cycles.
@@ -768,3 +824,29 @@ Not adopted. Each executor sharing `AgentContext` (a single mutable object passe
 
 **Graph-level conditional routing in `WorkflowOrchestrator`**
 Not adopted. MAF edge conditions fire once per message and have no retry semantics. When an agent fails to emit a routing keyword, the executor injects a correction and calls the LLM again. This retry loop must live inside the executor. Moving routing to graph edges would require removing retries, degrading robustness when models do not follow instructions on the first attempt.
+
+**MAF Handoff orchestration (`AgentWorkflowBuilder.CreateHandoffBuilderWith`)**
+Not adopted. MAF Handoff is a mesh topology where routing is driven by auto-injected handoff tool calls — each agent calls the tool to transfer control to the next agent. When an agent does not call the handoff tool, the workflow emits a `request_info` event and blocks, waiting for human input (or auto-continues in the experimental autonomous mode). There is no correction-injection loop: if an agent produces a response without calling the handoff tool, the framework defers to the operator rather than re-invoking the agent.
+
+This is the core incompatibility. Fuseraft's reliability depends on `CorrectionEngine` detecting the missing keyword or tool call, injecting a corrective `ChatRole.User` message, and re-invoking the agent within the same turn. An LLM will routinely fail to emit the expected routing signal on the first attempt; correction + retry is not optional. Removing it in favour of the framework's block-and-wait model would make routing reliability entirely dependent on first-attempt model compliance.
+
+Secondary incompatibilities:
+- **Shared history.** Handoff broadcasts all agent messages to all participants for context synchronisation. Per-agent `ContextWindow` filtering (`ExcludeAgents`, `TextOnly`, `MaxTailMessages`) requires independent history slices per agent and cannot be expressed within that broadcast model.
+- **Interactive-first execution model.** Handoff was designed for server-hosted scenarios where a workflow can park and resume asynchronously on external input. Fuseraft is synchronous CLI execution; the only HITL path is the synchronous `IHumanApprovalService` gate on edge approvals — not a mid-workflow pause primitive.
+- **Already covered by existing components.** `HandoffPlugin` already provides tool-based routing signal detection. `GraphOrchestrator` reads it before keyword scanning. The one thing MAF Handoff adds over this is framework-level routing dispatch — but without the surrounding correction loop it would be less reliable than the current implementation, not more.
+
+**MAF Concurrent orchestration (`AgentWorkflowBuilder.BuildConcurrent`)**
+Not adopted as the parallelism primitive. MAF's `BuildConcurrent` fans out to a set of executors via `Task.WhenAll` at the workflow runtime level and collects results at a join point. The mechanism is correct, but it cannot be used directly for two reasons.
+
+The core incompatibility is **shared mutable history**. All executors in a MAF concurrent group receive the same `AgentContext` instance. Concurrent agents writing to `AgentContext.History` (a plain `List<ChatMessage>`) would produce interleaved, non-deterministic history across branches. Per-agent `ContextWindow` filtering also assumes a coherent, branch-local view of history — a shared list destroys that invariant.
+
+The second incompatibility is **retry semantics**. MAF concurrent branches fire once. When a parallel agent fails to emit its routing keyword, the `CorrectionEngine` must inject a correction message and re-invoke the agent. That loop must live inside the branch's executor, not at the graph-edge level. The concurrent builder has no built-in retry path.
+
+**What we do instead.** Parallel node execution is implemented entirely within `GraphOrchestrator`:
+
+- Nodes marked `Parallel: true` in the graph config participate in a fan-out group. When the source agent emits the group's trigger keyword, `GraphOrchestrator.RunNodeExecutorAsync` forks the `AgentContext` via `ForkContext` — creating isolated `History` snapshots that share only the `MessageSink` (already `SingleWriter = false`).
+- Each parallel worker runs `RunParallelNodeAsync` — a full correction-retry loop identical to `RunNodeExecutorAsync` but without MAF routing calls. Workers run concurrently via `Task.WhenAll`.
+- After all workers complete, `MergeParallelContexts` appends each worker's post-fork messages to the parent history under a labelled section header, aggregates token counts, and takes the maximum turn index.
+- The source node's executor then calls `wfCtx.SendMessageAsync` to the merge-target node, which was registered in the MAF DAG via a bridging edge during `BuildPhaseWorkflow`.
+
+This preserves the full correction-loop guarantee for each parallel branch while keeping parallel execution transparent to the MAF workflow layer.

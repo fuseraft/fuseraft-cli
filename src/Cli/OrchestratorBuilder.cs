@@ -17,7 +17,6 @@ using fuseraft.Infrastructure.Plugins;
 using fuseraft.Orchestration;
 using fuseraft.Orchestration.Saga;
 using fuseraft.Orchestration.Strategies;
-using fuseraft.Orchestration.Workflow;
 
 namespace fuseraft.Cli;
 
@@ -452,11 +451,21 @@ public static class OrchestratorBuilder
                 "The Magentic block will be ignored. Set Selection.Type: magentic to enable it.",
                 config.Selection.Type);
 
+        // Warn when Selection.Graph is configured but Selection.Type is not "graph" —
+        // the Graph block would be silently ignored and the session would run as sequential.
+        if (config.Selection.Graph is not null &&
+            !config.Selection.Type.Equals("graph", StringComparison.OrdinalIgnoreCase))
+            loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
+                "Selection.Graph is configured but Selection.Type is '{Type}', not 'graph'. " +
+                "The Graph block will be ignored. Set Selection.Type: graph to enable it.",
+                config.Selection.Type);
+
         var agentFactory      = new AgentFactory(chatClientFactory, pluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, identityRegistry, eventEmitter, loggerFactory);
-        var wfLogger          = loggerFactory.CreateLogger<WorkflowOrchestrator>();
         var aoLogger          = loggerFactory.CreateLogger<AgentOrchestrator>();
+        var goLogger          = loggerFactory.CreateLogger<GraphOrchestrator>();
 
         bool useMagentic = config.Selection.Type.Equals("magentic", StringComparison.OrdinalIgnoreCase);
+        bool useGraph    = config.Selection.Type.Equals("graph",    StringComparison.OrdinalIgnoreCase);
 
         ConversationCompactor? compactor = null;
         if (config.Compaction is { } compactionConfig)
@@ -487,12 +496,11 @@ public static class OrchestratorBuilder
                 resumptionNote, changeLogPath, intentLog, config.Events?.Path, evidenceStore);
         }
 
-        // WorkflowOrchestrator uses MAF's phase-based WorkflowBuilder with a hardcoded
-        // planner → developer → tester → reviewer agent chain. It is only correct for
-        // keyword-routing configs whose agents match that exact layout.
-        //
         // MagenticOrchestrator handles the "magentic" selection type: a manager LLM drives
         // dynamic planning, speaker selection, and stall detection without hard-coded routing.
+        //
+        // GraphOrchestrator handles the "graph" selection type: declarative directed-graph
+        // execution with per-node agents, keyword-driven edges, and optional back-edges.
         //
         // AgentOrchestrator is the general-purpose path: it drives any selection strategy
         // (sequential, llm, keyword, structured) through StrategyFactory and works with
@@ -500,22 +508,6 @@ public static class OrchestratorBuilder
         var resolvedSandbox = config.Security?.FileSystemSandboxPath is { Length: > 0 } sbx
             ? Path.GetFullPath(ProcessHelper.ExpandHome(sbx)) : null;
         var strategyFactory = new StrategyFactory(chatClientFactory.Create, eventEmitter, loggerFactory, governanceKernel, humanApprovalService, evidenceStore, config.TestSelector, resolvedSandbox);
-
-        bool useWorkflow = !useMagentic
-            && config.Selection.Type.Equals("keyword", StringComparison.OrdinalIgnoreCase)
-            && config.Agents.Select(a => a.Name.ToLowerInvariant())
-                            .All(n => n is "planner" or "developer" or "tester" or "reviewer");
-
-        if (!useMagentic
-            && config.Selection.Type.Equals("keyword", StringComparison.OrdinalIgnoreCase)
-            && !useWorkflow)
-        {
-            loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
-                "Selection.Type is 'keyword' but agent names {Names} do not match the required " +
-                "{{planner, developer, tester, reviewer}} layout — falling back to AgentOrchestrator. " +
-                "WorkflowOrchestrator will not be used.",
-                string.Join(", ", config.Agents.Select(a => a.Name)));
-        }
 
         // Validate verifier config: the named agent must exist in the agent pool.
         if (config.Verifier is { AgentName: { Length: > 0 } verifierAgentName })
@@ -545,9 +537,118 @@ public static class OrchestratorBuilder
             }
         }
 
+        // Validate graph config at startup when the graph strategy is selected.
+        if (useGraph)
+        {
+            if (config.Selection.Graph is null)
+                throw new InvalidOperationException(
+                    "Selection.Type 'graph' requires a 'Selection.Graph' configuration block.");
+
+            var graphCfg   = config.Selection.Graph;
+            var agentNames = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var nodeIds    = graphCfg.Nodes.Select(n => n.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            if (graphCfg.Nodes.Count == 0)
+                throw new InvalidOperationException(
+                    "Selection.Graph.Nodes must contain at least one node.");
+
+            // Validate node agent references and uniqueness.
+            var seenNodeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var node in graphCfg.Nodes)
+            {
+                if (string.IsNullOrWhiteSpace(node.Id))
+                    throw new InvalidOperationException(
+                        "Every node in Selection.Graph.Nodes must have a non-empty 'Id'.");
+                if (!seenNodeIds.Add(node.Id))
+                    throw new InvalidOperationException(
+                        $"Duplicate node Id '{node.Id}' found in Selection.Graph.Nodes. Node Ids must be unique.");
+                if (string.IsNullOrWhiteSpace(node.Agent))
+                    throw new InvalidOperationException(
+                        $"Graph node '{node.Id}' must specify an 'Agent' name.");
+                if (!agentNames.Contains(node.Agent))
+                    throw new InvalidOperationException(
+                        $"Graph node '{node.Id}' references agent '{node.Agent}' " +
+                        $"which is not defined in 'Orchestration.Agents'.");
+            }
+
+            // Validate edge node references.
+            foreach (var edge in graphCfg.Edges)
+            {
+                if (!nodeIds.Contains(edge.From))
+                    throw new InvalidOperationException(
+                        $"Graph edge From='{edge.From}' does not match any node Id in Selection.Graph.Nodes.");
+                if (!nodeIds.Contains(edge.To))
+                    throw new InvalidOperationException(
+                        $"Graph edge To='{edge.To}' does not match any node Id in Selection.Graph.Nodes.");
+            }
+
+            // Validate entry node when explicitly set.
+            if (!string.IsNullOrWhiteSpace(graphCfg.EntryNode) && !nodeIds.Contains(graphCfg.EntryNode))
+                throw new InvalidOperationException(
+                    $"Selection.Graph.EntryNode '{graphCfg.EntryNode}' does not match any node Id in Selection.Graph.Nodes.");
+
+            // GAP-5: Warn about no-keyword edges mixed with keyword edges on the same source node.
+            // When a node has both keyword and no-keyword edges the no-keyword edge is silently ignored
+            // at runtime because the unconditional routing path only activates for all-no-keyword nodes.
+            foreach (var edge in graphCfg.Edges.Where(e => string.IsNullOrEmpty(e.Keyword)))
+            {
+                bool hasOtherKeywordEdges = graphCfg.Edges.Any(e =>
+                    string.Equals(e.From, edge.From, StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrEmpty(e.Keyword));
+                if (hasOtherKeywordEdges)
+                    goLogger.LogWarning(
+                        "[GraphOrchestrator] Node '{From}' has a no-keyword edge to '{To}' alongside " +
+                        "keyword edges — the no-keyword edge will be ignored at runtime. " +
+                        "Add a keyword to use it, or remove all keyword edges to use unconditional routing.",
+                        edge.From, edge.To);
+            }
+
+            // GAP-6: Warn when the same keyword appears on both a forward and a back-edge from the
+            // same source node. The back-edge takes priority at runtime (PhaseBreakKeywords is checked
+            // before Routes), so the forward route for that keyword will never fire.
+            // NOTE: Uses node list index as a BFS-layer proxy. This is accurate when nodes are listed
+            // in topological order (entry node first). If the list order differs from BFS discovery
+            // order, the warning may produce a false positive or miss a real ambiguity.
+            var nodeIndexMap = graphCfg.Nodes
+                .Select((n, i) => (n.Id, i))
+                .ToDictionary(x => x.Id, x => x.i, StringComparer.OrdinalIgnoreCase);
+
+            var keywordEdgeGroups = graphCfg.Edges
+                .Where(e => !string.IsNullOrEmpty(e.Keyword))
+                .GroupBy(e => (From: e.From, Keyword: e.Keyword!), (k, _) => k,
+                    EqualityComparer<(string From, string Keyword)>.Create(
+                        (a, b) => string.Equals(a.From, b.From, StringComparison.OrdinalIgnoreCase)
+                                  && string.Equals(a.Keyword, b.Keyword, StringComparison.OrdinalIgnoreCase),
+                        x => StringComparer.OrdinalIgnoreCase.GetHashCode(x.From)
+                             ^ StringComparer.OrdinalIgnoreCase.GetHashCode(x.Keyword)));
+
+            foreach (var (fromNode, keyword) in keywordEdgeGroups)
+            {
+                var edgesForKw = graphCfg.Edges.Where(e =>
+                    string.Equals(e.From, fromNode, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(e.Keyword, keyword, StringComparison.OrdinalIgnoreCase)).ToList();
+                int fromIdx = nodeIndexMap.GetValueOrDefault(fromNode, 0);
+                bool hasFwd  = edgesForKw.Any(e => nodeIndexMap.GetValueOrDefault(e.To, 0) > fromIdx);
+                bool hasBack = edgesForKw.Any(e => nodeIndexMap.GetValueOrDefault(e.To, 0) <= fromIdx);
+                if (hasFwd && hasBack)
+                    goLogger.LogWarning(
+                        "[GraphOrchestrator] Node '{From}' has keyword '{Keyword}' on both a forward " +
+                        "and a back-edge — the back-edge takes priority at runtime. " +
+                        "The forward route for this keyword will never fire.",
+                        fromNode, keyword);
+            }
+        }
+
         IOrchestrator orchestrator;
 
-        if (useMagentic)
+        if (useGraph)
+        {
+            orchestrator = new GraphOrchestrator(
+                config, agentFactory, goLogger,
+                changeTracker, eventEmitter, governanceKernel,
+                hitlMode ? humanApprovalService : null);
+        }
+        else if (useMagentic)
         {
             var magCfg        = config.Selection.Magentic!;           // validated above
             var managerModel  = chatClientFactory.Resolve(magCfg.Model!);
@@ -558,10 +659,6 @@ public static class OrchestratorBuilder
                 config, agentFactory, managerClient, magLogger,
                 hitlMode ? humanApprovalService : null,
                 changeTracker, eventEmitter, governanceKernel);
-        }
-        else if (useWorkflow)
-        {
-            orchestrator = new WorkflowOrchestrator(config, agentFactory, wfLogger, changeTracker, eventEmitter, governanceKernel);
         }
         else
         {
