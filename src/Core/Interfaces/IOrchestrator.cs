@@ -38,7 +38,7 @@ public interface IOrchestrator
     /// keyword scanning of prior history would otherwise infer.
     /// Used by the CLI after compaction to ensure restarts resume from the correct agent.
     /// The hint is consumed once and cleared after first use.
-    /// Defaults to a no-op; only <c>WorkflowOrchestrator</c> needs to override it.
+    /// Defaults to a no-op; overridden by <c>GraphOrchestrator</c>.
     /// </summary>
     void SetResumeExecutorId(string? executorId) { }
 

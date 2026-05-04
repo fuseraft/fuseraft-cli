@@ -24,7 +24,7 @@ public sealed class ValidateConfigSettings : CommandSettings
     [Description("Print a Mermaid flowchart of the workflow after validation. Paste into https://mermaid.live to render.")]
     public bool Diagram { get; set; }
 
-    [CommandOption("--check-connectivity|-c")]
+    [CommandOption("-c|--check-connectivity")]
     [Description("Make a minimal test call to each unique provider endpoint to verify the API key is valid and the endpoint is reachable. Incurs a small API cost (~1 token per unique endpoint).")]
     public bool CheckConnectivity { get; set; }
 }
@@ -180,7 +180,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
         // Selection strategy
         var selType = config.Selection.Type.ToLowerInvariant();
-        if (selType is not ("sequential" or "roundrobin" or "llm" or "keyword" or "structured" or "magentic" or "statemachine"))
+        if (selType is not ("sequential" or "roundrobin" or "llm" or "keyword" or "structured" or "magentic" or "statemachine" or "graph"))
             issues.Add(("error", $"Unknown selection type: '{config.Selection.Type}'."));
 
         if (selType == "llm" && config.Selection.Model is null)
@@ -194,6 +194,12 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
         if (selType == "magentic")
             ValidateMagenticSelection(config, issues);
+
+        if (selType == "graph")
+            ValidateGraph(config, issues);
+
+        if (selType == "statemachine")
+            ValidateStateMachine(config, issues);
 
         if (selType == "keyword" && config.Selection.Routes is { Count: > 1 })
         {
@@ -405,6 +411,137 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                 "The 'Termination' section is ignored for Selection.Type 'magentic'. " +
                 "Session termination is controlled by MaxRoundCount, MaxStallCount, and MaxResetCount " +
                 "in the 'Selection.Magentic' block."));
+    }
+
+    private static void ValidateGraph(
+        OrchestrationConfig config,
+        List<(string Level, string Message)> issues)
+    {
+        var graph = config.Selection.Graph;
+        if (graph is null)
+        {
+            issues.Add(("error", "Graph selection requires a 'Selection.Graph' configuration block."));
+            return;
+        }
+
+        if (graph.Nodes.Count == 0)
+        {
+            issues.Add(("error", "Selection.Graph: at least one node is required."));
+            return;
+        }
+
+        var agentNames = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Node IDs must be unique and reference valid agents.
+        var nodeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < graph.Nodes.Count; i++)
+        {
+            var node   = graph.Nodes[i];
+            var prefix = $"Selection.Graph.Nodes[{i}]";
+
+            if (string.IsNullOrWhiteSpace(node.Id))
+                issues.Add(("error", $"{prefix}: Id is required."));
+            else if (!nodeIds.Add(node.Id))
+                issues.Add(("error", $"{prefix}: Duplicate node Id '{node.Id}'."));
+
+            if (string.IsNullOrWhiteSpace(node.Agent))
+                issues.Add(("error", $"{prefix} (id='{node.Id}'): Agent is required."));
+            else if (!agentNames.Contains(node.Agent))
+                issues.Add(("error", $"{prefix} (id='{node.Id}'): Agent '{node.Agent}' is not defined in Agents."));
+        }
+
+        // EntryNode must resolve to a declared node.
+        if (graph.EntryNode is { Length: > 0 } entry && !nodeIds.Contains(entry))
+            issues.Add(("error", $"Selection.Graph.EntryNode '{entry}' does not match any declared node Id."));
+
+        // MaxRetries must be positive.
+        if (graph.MaxRetries <= 0)
+            issues.Add(("warning", $"Selection.Graph.MaxRetries should be > 0 (got {graph.MaxRetries})."));
+
+        // Edges must reference valid node IDs.
+        for (int i = 0; i < graph.Edges.Count; i++)
+        {
+            var edge   = graph.Edges[i];
+            var prefix = $"Selection.Graph.Edges[{i}]";
+
+            if (string.IsNullOrWhiteSpace(edge.From))
+                issues.Add(("error", $"{prefix}: From is required."));
+            else if (!nodeIds.Contains(edge.From))
+                issues.Add(("error", $"{prefix}: From '{edge.From}' does not match any declared node Id."));
+
+            if (string.IsNullOrWhiteSpace(edge.To))
+                issues.Add(("error", $"{prefix}: To is required."));
+            else if (!nodeIds.Contains(edge.To))
+                issues.Add(("error", $"{prefix}: To '{edge.To}' does not match any declared node Id."));
+
+            if (edge.SourceAgents is { Count: > 0 })
+                foreach (var src in edge.SourceAgents)
+                    if (!agentNames.Contains(src))
+                        issues.Add(("warning", $"{prefix}: SourceAgent '{src}' is not defined in Agents."));
+
+            if (!string.IsNullOrWhiteSpace(edge.RecoveryAgent) && !agentNames.Contains(edge.RecoveryAgent))
+                issues.Add(("warning", $"{prefix}: RecoveryAgent '{edge.RecoveryAgent}' is not defined in Agents."));
+        }
+    }
+
+    private static void ValidateStateMachine(
+        OrchestrationConfig config,
+        List<(string Level, string Message)> issues)
+    {
+        var sm = config.Selection.StateMachine;
+        if (sm is null)
+        {
+            issues.Add(("error", "StateMachine selection requires a 'Selection.StateMachine' configuration block."));
+            return;
+        }
+
+        if (sm.States.Count == 0)
+        {
+            issues.Add(("error", "Selection.StateMachine: at least one state is required."));
+            return;
+        }
+
+        var agentNames = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var stateNames = sm.States.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Initial state must exist.
+        if (string.IsNullOrWhiteSpace(sm.Initial))
+            issues.Add(("error", "Selection.StateMachine.Initial is required."));
+        else if (!stateNames.Contains(sm.Initial))
+            issues.Add(("error", $"Selection.StateMachine.Initial '{sm.Initial}' does not match any declared state."));
+
+        foreach (var (name, state) in sm.States)
+        {
+            var prefix = $"Selection.StateMachine.States['{name}']";
+
+            if (string.IsNullOrWhiteSpace(state.Agent))
+                issues.Add(("error", $"{prefix}: Agent is required."));
+            else if (!agentNames.Contains(state.Agent))
+                issues.Add(("error", $"{prefix}: Agent '{state.Agent}' is not defined in Agents."));
+
+            for (int ti = 0; ti < state.Transitions.Count; ti++)
+            {
+                var t      = state.Transitions[ti];
+                var tpfx   = $"{prefix}.Transitions[{ti}]";
+
+                if (string.IsNullOrWhiteSpace(t.To))
+                    issues.Add(("error", $"{tpfx}: To is required."));
+                else if (!stateNames.Contains(t.To))
+                    issues.Add(("error", $"{tpfx}: To '{t.To}' does not match any declared state."));
+
+                if (t.SourceAgents is { Count: > 0 })
+                    foreach (var src in t.SourceAgents)
+                        if (!agentNames.Contains(src))
+                            issues.Add(("warning", $"{tpfx}: SourceAgent '{src}' is not defined in Agents."));
+
+                if (!string.IsNullOrWhiteSpace(t.RecoveryAgent) && !agentNames.Contains(t.RecoveryAgent))
+                    issues.Add(("warning", $"{tpfx}: RecoveryAgent '{t.RecoveryAgent}' is not defined in Agents."));
+            }
+
+            // Terminal states should have no transitions — they're unreachable.
+            if (state.Terminal && state.Transitions.Count > 0)
+                issues.Add(("warning", $"{prefix}: Terminal state declares {state.Transitions.Count} transition(s) that will never fire."));
+        }
     }
 
     private static void ValidateStructuredRoutes(

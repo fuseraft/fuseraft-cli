@@ -76,7 +76,7 @@ public record SessionCheckpoint
     /// session, one per successful agent handoff. The first entry is the version-0 seed
     /// created at session start; each subsequent entry is produced by
     /// <see cref="fuseraft.Orchestration.Workflow.StateHandoff.Advance"/>. Null for sessions
-    /// that use orchestrators other than <c>WorkflowOrchestrator</c>.
+    /// that use orchestrators other than <c>GraphOrchestrator</c>.
     /// </summary>
     public IReadOnlyList<AgentState>? StateHistory { get; set; }
 }

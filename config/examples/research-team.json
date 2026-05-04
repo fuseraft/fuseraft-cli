@@ -15,7 +15,7 @@
       {
         "Name": "ResearchComplete",
         "Requires": [
-          { "FileExists": { "Path": "research/raw_data.txt" } }
+          { "Type": "FileExists", "Path": "research/raw_data.txt" }
         ]
       }
     ],

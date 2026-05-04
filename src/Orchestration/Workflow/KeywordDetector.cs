@@ -4,7 +4,7 @@ using fuseraft.Infrastructure.Plugins;
 namespace fuseraft.Orchestration.Workflow;
 
 /// <summary>
-/// Pure keyword-detection helpers extracted from <see cref="WorkflowOrchestrator"/>.
+/// Pure keyword-detection helpers used by <see cref="fuseraft.Orchestration.GraphOrchestrator"/>.
 /// All methods are stateless and side-effect-free.
 /// </summary>
 internal static class KeywordDetector
@@ -19,7 +19,9 @@ internal static class KeywordDetector
         AgentRouteTable routeTable)
     {
         var knownKeywords = new HashSet<string>(
-            routeTable.Routes.Keys.Concat(routeTable.PhaseBreakKeywords),
+            routeTable.Routes.Keys
+                .Concat(routeTable.PhaseBreakKeywords)
+                .Concat(routeTable.ParallelKeywords),
             StringComparer.OrdinalIgnoreCase);
 
         foreach (var msg in messages)
@@ -49,6 +51,12 @@ internal static class KeywordDetector
         // Then check phase-break keywords this executor can emit.
         foreach (var keyword in routeTable.PhaseBreakKeywords)
             if (IsKeywordOnOwnLineStrict(responseText, keyword))
+                found.Add(keyword);
+
+        // Then check parallel fan-out keywords for this node.
+        foreach (var keyword in routeTable.ParallelKeywords)
+            if (!found.Contains(keyword, StringComparer.OrdinalIgnoreCase)
+                && IsKeywordOnOwnLineStrict(responseText, keyword))
                 found.Add(keyword);
 
         return found;
