@@ -44,9 +44,9 @@ Sessions are stored at `~/.fuseraft/sessions/<sessionId>.json` with owner-only r
 | `StartedAt` | UTC timestamp when session was first created |
 | `LastUpdatedAt` | UTC timestamp of the most recent update |
 | `IsComplete` | `true` once the session has run to completion |
-| `ResumeExecutorId` | Hint for `WorkflowOrchestrator` identifying which executor was active when the session was last checkpointed; `null` for non-`WorkflowOrchestrator` sessions |
+| `ResumeExecutorId` | Hint for `GraphOrchestrator` identifying which node was active when the session was last checkpointed; `null` for non-`GraphOrchestrator` sessions |
 | `MagenticState` | `MagenticCheckpointState` snapshot (`CurrentPlan`, `RoundIndex`, `StallCount`, `ResetCount`, `AwaitingPlanReview`) used to resume the Magentic inner loop; `null` for non-Magentic sessions |
-| `StateHistory` | Ordered list of `AgentState` snapshots produced during the session; `null` for non-`WorkflowOrchestrator` sessions |
+| `StateHistory` | Ordered list of `AgentState` snapshots produced during the session; `null` for non-`GraphOrchestrator` sessions |
 | `StructuredTask` | `TaskModel` snapshot (`Goal`, `Constraints`, `ActiveTargets`, `Phase`) injected into agent context at session start. Populated automatically from the task string; can be enriched by the orchestrator as agents write files. |
 
 **Message fields:**
