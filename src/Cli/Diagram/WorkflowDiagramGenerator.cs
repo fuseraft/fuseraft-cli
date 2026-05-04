@@ -41,6 +41,12 @@ public static class WorkflowDiagramGenerator
             case "magentic":
                 RenderMagentic(sb, config);
                 break;
+            case "graph" when config.Selection.Graph is not null:
+                RenderGraph(sb, config.Selection.Graph);
+                break;
+            case "statemachine" when config.Selection.StateMachine is not null:
+                RenderStateMachine(sb, config.Selection.StateMachine);
+                break;
             default:
                 RenderGeneric(sb, config);
                 break;
@@ -184,6 +190,90 @@ public static class WorkflowDiagramGenerator
         {
             sb.AppendLine($"  Manager -->|\"selects\"| {NodeId(agent.Name)}");
             sb.AppendLine($"  {NodeId(agent.Name)} -.->|\"reports\"| Manager");
+        }
+    }
+
+    private static void RenderGraph(StringBuilder sb, GraphConfig graph)
+    {
+        var entryId = graph.EntryNode is { Length: > 0 }
+            ? NodeId(graph.EntryNode)
+            : (graph.Nodes.Count > 0 ? NodeId(graph.Nodes[0].Id) : "start");
+
+        // node declarations
+        sb.AppendLine();
+        sb.AppendLine("  Task([Task])");
+        foreach (var node in graph.Nodes)
+        {
+            var shape = node.Terminal  ? $"  {NodeId(node.Id)}([\"{Esc(node.Id)} ✓\"])"
+                      : node.Parallel ? $"  {NodeId(node.Id)}[\"{Esc(node.Id)} ∥\"]"
+                      :                  $"  {NodeId(node.Id)}[\"{Esc(node.Id)}\"]";
+            sb.AppendLine(shape);
+        }
+
+        // edges
+        sb.AppendLine();
+        sb.AppendLine($"  Task --> {entryId}");
+
+        foreach (var edge in graph.Edges)
+        {
+            var from  = NodeId(edge.From);
+            var to    = NodeId(edge.To);
+            var parts = new List<string>();
+            if (edge.Keyword is { Length: > 0 }) parts.Add(Esc(edge.Keyword));
+
+            var validators = edge.Validators is { Count: > 0 }
+                ? edge.Validators
+                : edge.Validator is { Length: > 0 }
+                    ? [edge.Validator]
+                    : (IEnumerable<string>)[];
+            parts.AddRange(validators.Select(v => Esc(v)));
+
+            if (edge.RequireHumanApproval) parts.Add("⚑ approval");
+
+            var label = parts.Count > 0 ? string.Join("<br/>", parts) : string.Empty;
+            var arrow = label.Length > 0 ? $"-->|\"{label}\"| " : "--> ";
+            sb.AppendLine($"  {from} {arrow}{to}");
+        }
+    }
+
+    private static void RenderStateMachine(StringBuilder sb, StateMachineConfig sm)
+    {
+        // node declarations
+        sb.AppendLine();
+        sb.AppendLine("  Task([Task])");
+        foreach (var (name, state) in sm.States)
+        {
+            var shape = state.Terminal
+                ? $"  {NodeId(name)}([\"{Esc(name)} ✓\"])"
+                : $"  {NodeId(name)}[\"{Esc(name)}\"]";
+            sb.AppendLine(shape);
+        }
+
+        // edges
+        sb.AppendLine();
+        if (sm.Initial is { Length: > 0 })
+            sb.AppendLine($"  Task --> {NodeId(sm.Initial)}");
+
+        foreach (var (name, state) in sm.States)
+        {
+            foreach (var t in state.Transitions)
+            {
+                var from  = NodeId(name);
+                var to    = NodeId(t.To);
+                var parts = new List<string>();
+                if (t.Signal is { Length: > 0 }) parts.Add(Esc(t.Signal));
+
+                var contracts = t.Contracts is { Count: > 0 }
+                    ? t.Contracts
+                    : t.Contract is { Length: > 0 }
+                        ? [t.Contract]
+                        : (IEnumerable<string>)[];
+                parts.AddRange(contracts.Select(c => Esc(c)));
+
+                var label = parts.Count > 0 ? string.Join("<br/>", parts) : string.Empty;
+                var arrow = label.Length > 0 ? $"-->|\"{label}\"| " : "--> ";
+                sb.AppendLine($"  {from} {arrow}{to}");
+            }
         }
     }
 
