@@ -41,7 +41,6 @@ public sealed class RequireAllFilesWrittenValidator(
 
         // 3. Collect required file paths from brief.
         var required = brief?.FilesToChange?
-            .Select(f => f.Path)
             .Where(p => !string.IsNullOrWhiteSpace(p))
             .Select(p => PathHelpers.NormalizePath(p!))
             .ToList() ?? [];
@@ -207,11 +206,5 @@ public sealed class RequireAllFilesWrittenValidator(
 internal sealed record AllFilesWrittenBrief
 {
     [JsonPropertyName("files_to_change")]
-    public List<AllFilesWrittenBriefFile>? FilesToChange { get; init; }
-}
-
-internal sealed record AllFilesWrittenBriefFile
-{
-    [JsonPropertyName("path")]
-    public string? Path { get; init; }
+    public List<string>? FilesToChange { get; init; }
 }
