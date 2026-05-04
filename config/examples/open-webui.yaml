@@ -32,24 +32,24 @@ Orchestration:
   Contracts:
     - Name: BriefExists
       Requires:
-        - FileExists:
-            Path: .fuseraft/brief.json
+        - Type: FileExists
+          Path: .fuseraft/brief.json
 
     - Name: ImplementationComplete
       Requires:
-        - FilesWritten:
-            Source: .fuseraft/brief.json
-            Field: files_to_change
-        - CommandSucceeded:
-            Pattern: "build|compile|run|go test|npm test|cargo test"
+        - Type: FilesWritten
+          Source: .fuseraft/brief.json
+          Field: files_to_change
+        - Type: CommandSucceeded
+          Pattern: "build|compile|run|go test|npm test|cargo test"
 
     - Name: TestsValid
       Requires:
-        - FileExists:
-            Path: .fuseraft/test-report.json
-        - TestReport:
-            NoFailures: true
-            HasAssertions: true
+        - Type: FileExists
+          Path: .fuseraft/test-report.json
+        - Type: TestReport
+          NoFailures: true
+          HasAssertions: true
 
   FailureHandling:
     MissingEvidence:
