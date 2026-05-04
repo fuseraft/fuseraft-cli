@@ -24,7 +24,7 @@ public sealed class ValidateConfigSettings : CommandSettings
     [Description("Print a Mermaid flowchart of the workflow after validation. Paste into https://mermaid.live to render.")]
     public bool Diagram { get; set; }
 
-    [CommandOption("--check-connectivity|-c")]
+    [CommandOption("-c|--check-connectivity")]
     [Description("Make a minimal test call to each unique provider endpoint to verify the API key is valid and the endpoint is reachable. Incurs a small API cost (~1 token per unique endpoint).")]
     public bool CheckConnectivity { get; set; }
 }
