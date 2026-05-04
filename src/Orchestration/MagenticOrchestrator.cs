@@ -494,7 +494,7 @@ public sealed class MagenticOrchestrator(
 
             // Participant context: system instructions + (filtered) shared history + manager instruction.
             // Apply per-agent ContextWindow filter so agents with ExcludeAgents / TextOnly / MaxTailMessages
-            // configured receive the same filtered slice they would in AgentOrchestrator or WorkflowOrchestrator.
+            // configured receive the same filtered slice they would in AgentOrchestrator or GraphOrchestrator.
             bool hasInstructions = agentInstructions.TryGetValue(nextAgent.Name ?? "", out var sysInstructions);
             var agentCfg = agentConfigs.GetValueOrDefault(nextAgent.Name ?? "");
             var filteredHistory = ContextWindowFilter.Apply(sharedHistory, agentCfg?.ContextWindow);

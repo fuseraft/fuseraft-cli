@@ -4,13 +4,22 @@ using fuseraft.Core;
 namespace fuseraft.Orchestration.Workflow;
 
 /// <summary>
-/// Correction-injection helpers used by <see cref="WorkflowOrchestrator"/>.
+/// Correction-injection helpers used by <see cref="fuseraft.Orchestration.GraphOrchestrator"/>.
 /// Each public method appends one or more <see cref="ChatRole.User"/> messages to
 /// <paramref name="history"/> when an agent produces an invalid turn, then returns
 /// so the executor loop can retry.
 /// </summary>
 internal static class CorrectionEngine
 {
+    // Default consecutive-failure limit; matches GraphOrchestrator.DefaultMaxRetries.
+    private const int DefaultMaxRetries = 4;
+
+    // Well-known phase-break keywords used to detect foreign-keyword errors.
+    internal static readonly HashSet<string> PhaseBreakKeywords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "BUGS FOUND", "REVISION REQUIRED", "REPLAN REQUIRED", "APPROVED"
+    };
+
     internal static readonly string[] ToolRefusalPhrases =
     [
         "tool use is disabled", "tools are disabled", "tool use disabled",
@@ -112,7 +121,7 @@ internal static class CorrectionEngine
             : string.Empty;
 
         var errorToInject = consecutiveCount > 1
-            ? $"RETRY {consecutiveCount}/{WorkflowOrchestrator.MaxRetries} — Previous attempt did not resolve this. Do not repeat it.\n\n" +
+            ? $"RETRY {consecutiveCount}/{DefaultMaxRetries} — Previous attempt did not resolve this. Do not repeat it.\n\n" +
               errorMessage + buildDetail
             : errorMessage + buildDetail;
 
@@ -122,18 +131,18 @@ internal static class CorrectionEngine
     }
 
     // -------------------------------------------------------------------------
-    // Shared helpers (internal so WorkflowOrchestrator can reuse BuildValidKeywordList)
+    // Shared helpers (internal so GraphOrchestrator can reuse BuildValidKeywordList)
     // -------------------------------------------------------------------------
 
     /// <summary>
     /// Returns a sorted, quoted, comma-separated list of all keywords valid for
     /// <paramref name="routeTable"/>, or a placeholder when none are configured.
-    /// Used both here and in <see cref="WorkflowOrchestrator"/> timeout/multi-keyword messages.
     /// </summary>
     internal static string BuildValidKeywordList(AgentRouteTable routeTable)
     {
         var keywords = routeTable.Routes.Keys
             .Concat(routeTable.PhaseBreakKeywords)
+            .Concat(routeTable.ParallelKeywords)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
             .Select(k => $"'{k}'")
@@ -208,7 +217,7 @@ internal static class CorrectionEngine
         // that it typically ignores, causing an infinite retry loop.
         string? foreignKeyword = null;
 
-        foreach (var keyword in WorkflowOrchestrator.PhaseBreakKeywords)
+        foreach (var keyword in PhaseBreakKeywords)
         {
             if (!routeTable.PhaseBreakKeywords.Contains(keyword) &&
                 KeywordDetector.IsKeywordOnOwnLineStrict(responseText, keyword))
