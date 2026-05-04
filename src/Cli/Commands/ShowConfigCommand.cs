@@ -11,7 +11,7 @@ public sealed class ShowConfigSettings : CommandSettings
     public string Path { get; set; } = "config/orchestration.yaml";
 
     [CommandOption("-l|--list")]
-    [Description("List all .json config files found under the config/ directory.")]
+    [Description("List all config files (.json, .yaml, .yml) found under the config/ directory.")]
     public bool List { get; set; }
 }
 
