@@ -190,20 +190,19 @@ Every session is driven by a single JSON or YAML file under the top-level `Orche
 
 ## 6. Orchestrators
 
-`OrchestratorBuilder` selects among four orchestrators based on the config's `Selection.Type` and agent names. The selection order is:
+`OrchestratorBuilder` selects among three orchestrators based on the config's `Selection.Type`. The selection order is:
 
-1. **`MagenticOrchestrator`** — when `Selection.Type == "magentic"`
-2. **`GraphOrchestrator`** — when `Selection.Type == "graph"`
-3. **`WorkflowOrchestrator`** — when `Selection.Type == "keyword"` AND agents are exactly `{planner, developer, tester, reviewer}`
-4. **`AgentOrchestrator`** — all other cases
+1. **`GraphOrchestrator`** — when `Selection.Type == "graph"`
+2. **`MagenticOrchestrator`** — when `Selection.Type == "magentic"`
+3. **`AgentOrchestrator`** — all other cases
 
-All four implement `IOrchestrator`:
+All three implement `IOrchestrator`:
 
 ```csharp
 Task<OrchestrationResult> RunAsync(string task, IReadOnlyList<AgentMessage>? priorHistory, CancellationToken ct)
 IAsyncEnumerable<AgentMessage> StreamAsync(string task, IReadOnlyList<AgentMessage>? priorHistory, CancellationToken ct)
 void SetSessionId(string sessionId)
-void SetResumeExecutorId(string? executorId)   // WorkflowOrchestrator; consumed once
+void SetResumeExecutorId(string? executorId)   // GraphOrchestrator; consumed once
 void SetResumeStateName(string? stateName)     // AgentOrchestrator + StateMachineSelectionStrategy + GraphOrchestrator; consumed once
 event Action<string>? AgentStarting
 event Action<string, string, string?>? ToolCalling        // (agentName, toolName, argsSummary)
@@ -240,46 +239,7 @@ START
 
 **Shared history:** All agents read from and write to the same `List<ChatMessage>`. This is intentional — routing strategies (especially `KeywordSelectionStrategy`) read `AuthorName` from the most recent assistant message to determine who just spoke and where they want to route.
 
-### 5.2 WorkflowOrchestrator
-
-A phase-based orchestrator built on MAF's `WorkflowBuilder`. Used only for the classic Planner → Developer → Tester → Reviewer pipeline.
-
-**Phase loop:**
-
-Each phase is a fresh linear MAF workflow built from a slice of the four-agent chain starting at `currentStart`. `InProcessExecution.Default.RunStreamingAsync` drives the workflow; `WatchStreamAsync` consumes events. A `WorkflowOutputEvent` signals phase-break (an agent called `YieldOutputAsync`). The outer `while(phaseCount < maxPhases)` loop inspects `AgentContext.LastKeyword` to determine the next phase's starting executor.
-
-**`AgentContext`** is a shared mutable object threaded through all executors via MAF's message passing:
-- `History` — shared `List<ChatMessage>` for the session
-- `MessageSink` — unbounded `ChannelWriter<AgentMessage>` that decouples executor threads from the caller's async enumerable
-- `LastKeyword` — the phase-break keyword set by the last executor before `YieldOutputAsync`
-- `CumulativeTokens` — session-lifetime token accumulator (input + output combined)
-- `TurnIndex` — monotonic turn counter
-- `CurrentState` — the latest `AgentState` snapshot, advanced by `StateHandoff.Advance` on each successful routing step
-
-**MAF graph topology:** Strictly linear — `AddEdge(src, sink)` only. `WithOutputFrom(tester, reviewer)` restricts phase-break output to the two terminal agents. No fan-in, fan-out, conditional edges, or switches are used (see [§16](#16-microsoft-agent-framework-usage)).
-
-**Routing inside executors:** Each `FunctionExecutor` runs a `while(true)` loop that calls `agent.RunAsync`, scans the response for routing keywords via strict per-line matching, and either:
-- Calls `SendMessageAsync(ctx, routeTarget)` for in-phase send-forward (HANDOFF TO X)
-- Calls `YieldOutputAsync(ctx)` for phase-break (BUGS FOUND, APPROVED, etc.)
-- Injects a correction message and retries when no keyword is detected
-
-**Why routing lives inside executors, not on graph edges:** MAF edge conditions (`AddEdge(src, dst, condition: msg => ...)`) fire once per message — they have no retry loop. When an agent fails to emit a routing keyword, we must inject a correction and call the LLM again in the same turn. This retry semantic requires the routing logic to live inside the executor.
-
-**ResumeExecutorId:** After compaction or a mid-phase process restart, `SetResumeExecutorId` provides a one-time hint telling the orchestrator which executor was active when the session paused. It is consumed on the first `StreamAsync` call and cleared.
-
-**Execution model:**
-
-```
-START
-  → BuildPhaseWorkflow  (linear MAF graph from currentStart)
-  → RunStreamingAsync
-  → WatchStreamAsync:
-      → (WorkflowOutputEvent ? InspectKeyword : ContinueTurn)
-  → InspectKeyword → DetermineNextStart
-  → (terminal keyword ? END : BuildPhaseWorkflow)
-```
-
-### 5.3 MagenticOrchestrator
+### 5.2 MagenticOrchestrator
 
 A Magentic-One style two-level orchestrator. A dedicated manager LLM drives a planning and evaluation loop; participant agents execute tasks on the manager's instructions.
 
@@ -321,7 +281,7 @@ START
 
 **Checkpoint state** (`MagenticCheckpointState`): `CurrentPlan`, `RoundIndex`, `StallCount`, `ResetCount`, `AwaitingPlanReview` — enough to resume the inner loop exactly where it paused. Exposed via `CurrentState` so `SessionRunner` can snapshot it after each yielded message.
 
-### 5.4 GraphOrchestrator
+### 5.3 GraphOrchestrator
 
 A directed-graph orchestrator for `Selection.Type: graph`. Each node in the config binds an agent to a unique `Id`; edges carry routing keywords and optional validators. The topology drives execution: forward edges advance within a phase; back-edges break the phase and restart from the target node.
 
@@ -356,7 +316,7 @@ Synthetic keywords (`__UNCOND_BACK:{nodeId}`) are used internally to track uncon
 4. Use the last agent name seen in history and find the corresponding node.
 5. Fall back to `Entry`.
 
-**Checkpoint and resume:** `SessionRunner` snapshots `go.StateHistory` (list of `AgentState`) into `SessionCheckpoint.StateHistory` after each yielded message, the same as `WorkflowOrchestrator`. On resume, `SetResumeStateName` accepts a node ID or agent name; `DetermineStartNodeId` applies the priority chain above to resolve the correct starting node.
+**Checkpoint and resume:** `SessionRunner` snapshots `go.StateHistory` (list of `AgentState`) into `SessionCheckpoint.StateHistory` after each yielded message. On resume, `SetResumeStateName` accepts a node ID or agent name; `DetermineStartNodeId` applies the priority chain above to resolve the correct starting node.
 
 **Execution model:**
 
@@ -370,8 +330,6 @@ START
   → InspectKeyword → DetermineNextStartNode
   → (terminal keyword ? END : BuildPhaseWorkflow)
 ```
-
-**Why GraphOrchestrator is not WorkflowOrchestrator with a dynamic chain:** `WorkflowOrchestrator` builds a linear `planner → developer → tester → reviewer` chain and encodes loop-back as outer-phase restarts keyed on a fixed keyword set. `GraphOrchestrator` supports arbitrary node topologies, per-node route tables, and multiple back-edges from a single node to different targets. The phase-workflow construction differs (BFS-layered DAG vs. fixed linear chain), and `DetermineStartNodeId`'s hint-fallback chain handles mid-graph resume — none of which fit cleanly into `WorkflowOrchestrator`'s fixed executor model.
 
 ---
 
@@ -389,7 +347,7 @@ Built and returned by `StrategyFactory.CreateSelection`. All implement `IAgentSe
 | `magentic` | Handled entirely by `MagenticOrchestrator`; `StrategyFactory` throws if this type reaches it |
 | `graph` | Handled entirely by `GraphOrchestrator`; routing is driven by per-node `AgentRouteTable` instances built at startup from the `Graph.Nodes` config. `StrategyFactory` is not involved. |
 
-**`KeywordSelectionStrategy`** is the workhorse for `WorkflowOrchestrator` and structured pipelines. Key behaviors:
+**`KeywordSelectionStrategy`** is the workhorse for structured pipelines and `GraphOrchestrator` nodes. Key behaviors:
 - Keyword matching is strict per-line (not substring): the full trimmed line must equal the keyword
 - Source agent filtering: a route can be restricted to fire only when a specific agent authored the last message
 - Routing validators run synchronously before the route fires; failure injects a correction message and re-invokes the current agent (up to the per-type `Threshold` in `FailureHandlingConfig` before `ValidatorStuckException`)
@@ -476,9 +434,9 @@ Every session is backed by a `SessionCheckpoint` persisted after each agent turn
 | `StartedAt` | UTC timestamp of session creation (immutable) |
 | `LastUpdatedAt` | UTC timestamp of last save (set by `SaveAsync`) |
 | `IsComplete` | Set to `true` after the session runs to completion; prevents re-resume |
-| `ResumeExecutorId` | Hint for `WorkflowOrchestrator` — which executor was active when compacted |
+| `ResumeExecutorId` | Hint for `GraphOrchestrator` — which node was active when compacted |
 | `MagenticState` | `MagenticCheckpointState` snapshot for Magentic loop resume |
-| `StateHistory` | Ordered list of `AgentState` snapshots produced during the session; populated by `WorkflowOrchestrator` and `GraphOrchestrator`; `null` for other orchestrators |
+| `StateHistory` | Ordered list of `AgentState` snapshots produced during the session; populated by `GraphOrchestrator`; `null` for other orchestrators |
 
 **`AgentMessage` fields:** `AgentName`, `Content`, `Role`, `TurnIndex`, `Timestamp`, `Usage` (tokens + cost), `IsCompactionSummary`, `ToolCalls` (name, args summary, succeeded).
 
@@ -496,7 +454,7 @@ Every session is backed by a `SessionCheckpoint` persisted after each agent turn
 
 **Resume path** (`RunCommand`): `--resume <sessionId>` loads the checkpoint, validates `IsComplete == false`, rehydrates `priorHistory`, and calls `SetResumeExecutorId` / `SetResumeState` on the orchestrator before the next `StreamAsync` call.
 
-**Why we did not use the MAF framework's checkpointing layer:** The framework's `Checkpoint` type captures MAF workflow execution state — executor queue, edge state, outstanding external requests. Our `SessionCheckpoint` captures conversation semantics — agent messages, token usage, cost, Magentic loop counters. They solve different problems at different levels of abstraction. The framework layer applies only to `WorkflowOrchestrator` (which uses `InProcessExecution`); `AgentOrchestrator` and `MagenticOrchestrator` are manual loops with no MAF workflow graph. Replacing our layer with the framework's would lose agent identity, role, token usage, cost tracking, and Magentic loop state, while gaining sub-turn recovery that provides no practical benefit given our turns are already fine-grained checkpointed.
+**Why we did not use the MAF framework's checkpointing layer:** The framework's `Checkpoint` type captures MAF workflow execution state — executor queue, edge state, outstanding external requests. Our `SessionCheckpoint` captures conversation semantics — agent messages, token usage, cost, Magentic loop counters. They solve different problems at different levels of abstraction. The framework layer applies only to `GraphOrchestrator` (which uses `InProcessExecution`); `AgentOrchestrator` and `MagenticOrchestrator` are manual loops with no MAF workflow graph. Replacing our layer with the framework's would lose agent identity, role, token usage, cost tracking, and Magentic loop state, while gaining sub-turn recovery that provides no practical benefit given our turns are already fine-grained checkpointed.
 
 ---
 
@@ -510,7 +468,7 @@ Every session is backed by a `SessionCheckpoint` persisted after each agent turn
 
 **Change log grounding:** When `ChangeTracking` or `Validation.ChangeLogPath` is configured, the compactor reads the change log at compaction time and includes it in the summary prompt as authoritative ground truth. The prompt instructs the LLM to trust the change log over agent self-reports — if an agent claimed success but the change log records a non-zero exit code or no file write, the summary reflects reality. Sessions without a change log use a standard prompt that summarizes conversation claims only.
 
-**Resume note:** For `WorkflowOrchestrator` sessions, a standard `WorkflowResumptionNote` is appended to the summary prompt instructing agents to re-read the brief and change log (not available from memory alone after compaction). This note is suppressed for Magentic sessions, which have no brief or change log.
+**Resume note:** For non-Magentic sessions, a standard `WorkflowResumptionNote` is appended to the summary prompt instructing agents to re-read the brief and change log (not available from memory alone after compaction). This note is suppressed for Magentic sessions, which have no brief or change log.
 
 **After compaction:** `SessionRunner` captures `ResumeExecutorId` from the last assistant message in the compacted tail, updates the checkpoint, and saves before continuing.
 
@@ -612,7 +570,7 @@ Example — a Reviewer that inspects files and git history but cannot write, del
 
 **Intent log** (`.fuseraft/state/intents.json`): Alongside the change log, `CapturingMiddleware` also writes to an `IntentLog` — one entry per tracked tool call, written *before* the call executes with `Status: Pending`, then updated to `Applied` or `Failed` once the call returns.
 
-- `BeginTurn(agentName, turnIndex)` must be called before each `agent.RunAsync` so middleware has the correct turn index. All three orchestrators (`AgentOrchestrator`, `MagenticOrchestrator`, `WorkflowOrchestrator`) call this immediately after `OnAgentTurnStarting()`.
+- `BeginTurn(agentName, turnIndex)` must be called before each `agent.RunAsync` so middleware has the correct turn index. All orchestrators (`AgentOrchestrator`, `MagenticOrchestrator`, `GraphOrchestrator`) call this immediately after `OnAgentTurnStarting()`.
 - On session resume, any `Pending` entries indicate operations that were in-flight at interruption time.
 - The `"intent"` compaction mode reads from this log to produce a deterministic `✓`/`✗` summary — no LLM call required.
 - If the intent log file is corrupt or unreadable on load, the failure is emitted via `ILogger<IntentLog>` at Warning level and the store resets to empty for the session.
@@ -645,10 +603,10 @@ Event consumers may inject messages, trigger external systems, or enforce additi
 
 | Event | Emitter | Payload |
 |---|---|---|
-| `session_start` | `WorkflowOrchestrator`, `ReplCommand` | Task, agent count |
-| `session_end` | `WorkflowOrchestrator`, `ReplCommand` | Turn count, succeeded |
-| `phase_start` | `WorkflowOrchestrator` | Phase name, starting executor |
-| `phase_end` | `WorkflowOrchestrator` | Phase name, turn count |
+| `session_start` | `GraphOrchestrator`, `ReplCommand` | Task, agent count |
+| `session_end` | `GraphOrchestrator`, `ReplCommand` | Turn count, succeeded |
+| `phase_start` | `GraphOrchestrator` | Phase name, starting executor |
+| `phase_end` | `GraphOrchestrator` | Phase name, turn count |
 | `compaction` | `SessionRunner` | Turn count before/after |
 | `session_error` | `SessionRunner` | Exception message |
 
@@ -656,29 +614,29 @@ Event consumers may inject messages, trigger external systems, or enforce additi
 
 | Event | Emitter | Payload |
 |---|---|---|
-| `turn_start` | `WorkflowOrchestrator` | Agent name, turn index |
-| `turn_end` | `AgentOrchestrator`, `WorkflowOrchestrator`, `MagenticOrchestrator` | Agent name, turn index, input/output tokens |
-| `turn_timeout` | `WorkflowOrchestrator` | Agent name, timeout value |
-| `reasoning` | `WorkflowOrchestrator` | Reasoning token content |
+| `turn_start` | `GraphOrchestrator` | Agent name, turn index |
+| `turn_end` | `AgentOrchestrator`, `GraphOrchestrator`, `MagenticOrchestrator` | Agent name, turn index, input/output tokens |
+| `turn_timeout` | `GraphOrchestrator` | Agent name, timeout value |
+| `reasoning` | `AgentOrchestrator`, `GraphOrchestrator` | Reasoning token content |
 
-*Routing and keyword handling* (`WorkflowOrchestrator`)
+*Routing and keyword handling* (`GraphOrchestrator`)
 
 | Event | Emitter | Payload |
 |---|---|---|
-| `keyword_detected` | `WorkflowOrchestrator` | Keyword, agent routed to |
-| `multi_keyword` | `WorkflowOrchestrator` | All keywords found in the response |
-| `no_keyword` | `WorkflowOrchestrator` | Agent name, turn index |
+| `keyword_detected` | `GraphOrchestrator` | Keyword, agent routed to |
+| `multi_keyword` | `GraphOrchestrator` | All keywords found in the response |
+| `no_keyword` | `GraphOrchestrator` | Agent name, turn index |
 | `keyword_not_found` | `KeywordSelectionStrategy` | Last message author, content excerpt |
-| `agent_routed` | `WorkflowOrchestrator` | From agent, to agent, keyword |
-| `state_advanced` | `WorkflowOrchestrator` | New `AgentState` version, destination executor |
-| `context_cap_warning` | `WorkflowOrchestrator` | Agent name, current message count, soft threshold |
-| `correction_injected` | `WorkflowOrchestrator` | Correction message text, reason |
+| `agent_routed` | `GraphOrchestrator` | From agent, to agent, keyword |
+| `state_advanced` | `GraphOrchestrator` | New `AgentState` version, destination executor |
+| `context_cap_warning` | `GraphOrchestrator` | Agent name, current message count, soft threshold |
+| `correction_injected` | `CorrectionEngine` | Correction message text, reason |
 
 *Validation*
 
 | Event | Emitter | Payload |
 |---|---|---|
-| `validation_fail` | `KeywordSelectionStrategy`, `WorkflowOrchestrator` | Validator name, consecutive failure count, error detail |
+| `validation_fail` | `KeywordSelectionStrategy`, `GraphOrchestrator` | Validator name, consecutive failure count, error detail |
 | `hitl_escalation` | `SessionRunner` | Reason (stuck validator or explicit escalation) |
 
 *Saga / compensating rollback*
@@ -777,7 +735,7 @@ Fuseraft-cli is built on MAF (`Microsoft.Agents.AI`, `Microsoft.Agents.AI.Workfl
 | `AIAgentExtensions` / `ChatClientFactory` | Agent builder helpers |
 | `AnthropicClientExtensions` | Constructs Anthropic-backed `AIAgent` instances |
 | `A2ACardResolver` | Resolves remote agent cards from `{Url}/.well-known/agent.json` and wraps them as `AIAgent` instances (remote agent short-circuit in `AgentFactory`) |
-| `WorkflowBuilder` | Builds linear phase workflows for `WorkflowOrchestrator` |
+| `WorkflowBuilder` | Builds phase workflows for `GraphOrchestrator` |
 | `FunctionExecutor<T>` | Wraps per-agent logic in MAF's executor model |
 | `InProcessExecution.RunStreamingAsync` | Drives the workflow graph; returns an async stream of events |
 | `WatchStreamAsync` | Consumes `WorkflowOutputEvent` and `WorkflowErrorEvent` to drive the phase loop |
@@ -800,7 +758,7 @@ Fuseraft-cli is built on MAF (`Microsoft.Agents.AI`, `Microsoft.Agents.AI.Workfl
 | `AgentWorkflowBuilder.CreateHandoffBuilderWith()` (Handoff orchestration) | Mesh routing via auto-injected handoff tool calls; no correction-injection loop; workflow blocks for human input when an agent does not call the handoff tool; shared history across all participants is incompatible with per-agent `ContextWindow` filtering |
 | `Microsoft.Agents.AI.DevUI` | For hosted agent services with OpenAI-compatible API endpoints; our DevUI serves a different purpose |
 
-**MAF `WorkflowOrchestrator` graph topology:** The graph is always a linear chain — `AddEdge(src, sink)` only. Cycles are implemented via the outer `while(phaseCount < maxPhases)` loop that builds a fresh workflow per phase. This is the correct approach: MAF's `WorkflowBuilder` validates DAG structure and does not support in-graph cycles.
+**MAF `GraphOrchestrator` graph topology:** The graph is always a DAG of forward edges within a phase — `AddEdge(src, sink)` only. Cycles are implemented via the outer phase loop that builds a fresh workflow per phase. This is the correct approach: MAF's `WorkflowBuilder` validates DAG structure and does not support in-graph cycles.
 
 **Future opportunity — `RequestPort` for Magentic HITL:** The framework's `RequestPort` is a pause-and-wait-for-external-input primitive: the workflow halts at a `RequestHaltEvent`, the caller calls `SendResponseAsync(response)` to resume. This maps cleanly onto Magentic's plan review loop (currently a polling `IHumanApprovalService` call). Migrating the plan review to `RequestPort` would require `MagenticOrchestrator` to be backed by a MAF workflow rather than a manual loop, which is a non-trivial refactor but architecturally sound.
 
@@ -814,15 +772,15 @@ A summary of explicit decisions **not** to use certain framework capabilities, w
 Rejected. The framework's group chat model passes the same conversation history to both the manager and participants. `MagenticOrchestrator` requires two entirely separate histories: a private manager context (fact-gather, plan, ledger evaluations) and a shared participant context. Forcing this into `GroupChatManager.UpdateHistoryAsync` would require fabricating the manager's history on every call, which is fragile and defeats the architecture's clarity. The planning phases, stall detection, replan cycles, and HITL plan review also have no equivalent in the framework abstraction.
 
 **MAF framework checkpointing (`CheckpointManager`, `FileSystemJsonCheckpointStore`)**
-Rejected as a replacement for `ISessionStore`. The framework's `Checkpoint` type captures MAF runtime execution state (executor queues, edge state, workflow topology). Our `SessionCheckpoint` captures conversation semantics (agent messages, token usage, cost, Magentic loop state). They operate at different layers of abstraction and solve different problems. Framework checkpointing applies only to `WorkflowOrchestrator` and would not help `AgentOrchestrator` or `MagenticOrchestrator` at all. Sub-turn recovery (the only benefit the framework layer would add to `WorkflowOrchestrator`) is not a practical concern given our turns are already fine-grained checkpointed at the conversation level.
+Rejected as a replacement for `ISessionStore`. The framework's `Checkpoint` type captures MAF runtime execution state (executor queues, edge state, workflow topology). Our `SessionCheckpoint` captures conversation semantics (agent messages, token usage, cost, Magentic loop state). They operate at different layers of abstraction and solve different problems. Framework checkpointing applies only to `GraphOrchestrator` and would not help `AgentOrchestrator` or `MagenticOrchestrator` at all. Sub-turn recovery (the only benefit the framework layer would add to `GraphOrchestrator`) is not a practical concern given our turns are already fine-grained checkpointed at the conversation level.
 
 **`Microsoft.Agents.AI.DevUI`**
 Rejected as a replacement for our `DevUIServer`. The framework's DevUI is designed for hosted ASP.NET Core services exposing OpenAI-compatible Responses and Conversations API endpoints. It presents a chat interface over those endpoints. Fuseraft-cli is a console executable — it has no hosted agent API to point the DevUI at. Our `DevUIServer` visualizes the real-time streaming event flow of a running orchestration session, which is a different problem the framework's DevUI does not address.
 
-**`StatefulExecutor` in `WorkflowOrchestrator`**
+**`StatefulExecutor` in `GraphOrchestrator`**
 Not adopted. Each executor sharing `AgentContext` (a single mutable object passed through MAF's message routing) achieves the same effective state — all agents read from and write to the same conversation history. `StatefulExecutor` would isolate state per executor, which would require explicit merging of histories and break the shared-history invariant that routing strategies depend on.
 
-**Graph-level conditional routing in `WorkflowOrchestrator`**
+**Graph-level conditional routing in `GraphOrchestrator`**
 Not adopted. MAF edge conditions fire once per message and have no retry semantics. When an agent fails to emit a routing keyword, the executor injects a correction and calls the LLM again. This retry loop must live inside the executor. Moving routing to graph edges would require removing retries, degrading robustness when models do not follow instructions on the first attempt.
 
 **MAF Handoff orchestration (`AgentWorkflowBuilder.CreateHandoffBuilderWith`)**
