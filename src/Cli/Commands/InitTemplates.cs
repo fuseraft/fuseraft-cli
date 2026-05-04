@@ -1165,6 +1165,7 @@ internal static class InitTemplates
                       Agent: Reviewer             # routes on keyword — NOT terminal
                     - Id: approved                # terminal node — session ends after this run
                       Agent: Reviewer             # same agent, terminal confirmation
+                      Terminal: true
 
                   # Edges define control flow — first matching edge fires each turn.
                   # Forward edges (target has higher BFS layer) use SendMessage within the
