@@ -202,7 +202,12 @@ Task("Test")
                 NoRestore        = true,
                 ResultsDirectory = testResultsDir,
                 Loggers          = new[] { "trx" },
-                Verbosity        = DotNetVerbosity.Minimal
+                Verbosity        = DotNetVerbosity.Minimal,
+                MSBuildSettings  = new DotNetMSBuildSettings()
+                    .WithProperty("Version",              version)
+                    .WithProperty("InformationalVersion", version)
+                    .WithProperty("SourceRevisionId",     GetGitHash())
+                    .WithProperty("MinVerSkip",           "true")
             });
         }
 
