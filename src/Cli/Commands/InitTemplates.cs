@@ -197,7 +197,9 @@ internal static class InitTemplates
               2. Write tests and run them with shell_run.
               3. Write results to {FuseraftPaths.LocalTestReport} with fields:
                    passed — true or false
-                   results — array of objects, each with name, status (PASS or FAIL), and exit_code
+                   results — array of objects, each with name, status (PASS or FAIL), exit_code, and command
+                   command — the exact shell command you ran to verify this result (required for every PASS)
+              A PASS result with an empty or missing command field is treated as fabricated and will block handoff.
               If all pass, call handoff(route_keyword: "HANDOFF TO REVIEWER").
               If any fail, call handoff(route_keyword: "BUGS FOUND").
             Model:
@@ -1081,7 +1083,9 @@ internal static class InitTemplates
               2. Write tests and run them with shell_run.
               3. Write results to {FuseraftPaths.LocalTestReport} with fields:
                    passed — true or false
-                   results — array of objects, each with name, status (PASS or FAIL), and exit_code
+                   results — array of objects, each with name, status (PASS or FAIL), exit_code, and command
+                   command — the exact shell command you ran to verify this result (required for every PASS)
+              A PASS result with an empty or missing command field is treated as fabricated and will block handoff.
               If all tests pass, call handoff(route_keyword: "HANDOFF TO REVIEWER").
               If any tests fail, call handoff(route_keyword: "BUGS FOUND").
             Model:
