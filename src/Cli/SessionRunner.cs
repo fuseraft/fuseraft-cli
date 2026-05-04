@@ -8,7 +8,6 @@ using fuseraft.Core.Exceptions;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 using fuseraft.Orchestration;
-using fuseraft.Orchestration.Workflow;
 using MagenticOrchestrator = fuseraft.Orchestration.MagenticOrchestrator;
 
 namespace fuseraft.Cli;
@@ -524,7 +523,7 @@ public sealed class SessionRunner(
         if (msg.Role == "assistant") _assistantTurnCount++;
         checkpoint.LastUpdatedAt = DateTime.UtcNow;
         if (orchestrator is MagenticOrchestrator mo) checkpoint.MagenticState = mo.CurrentState;
-        if (orchestrator is WorkflowOrchestrator wf) checkpoint.StateHistory  = [..wf.StateHistory];
+        if (orchestrator is GraphOrchestrator go) checkpoint.StateHistory = [..go.StateHistory];
         await sessionStore.SaveAsync(checkpoint, ct);
         return compactor?.ShouldCompact(_assistantTurnCount) == true;
     }

@@ -63,6 +63,20 @@ public record SelectionStrategyConfig
     /// </para>
     /// </summary>
     public StateMachineConfig? StateMachine { get; init; }
+
+    /// <summary>
+    /// Declarative directed-graph configuration for the <c>graph</c> selection type.
+    /// Required when <see cref="Type"/> is <c>"graph"</c>.
+    ///
+    /// <para>
+    /// Agents are bound to named nodes; directed edges with optional keyword conditions
+    /// and routing validators define control flow. Forward edges are wired into a MAF
+    /// <c>WorkflowBuilder</c> phase; back-edges restart the outer phase loop from the
+    /// target node, enabling cycles without violating the MAF DAG constraint per phase.
+    /// Terminal nodes end the session after the agent executes once.
+    /// </para>
+    /// </summary>
+    public GraphConfig? Graph { get; init; }
 }
 
 /// <summary>

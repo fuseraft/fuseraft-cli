@@ -41,25 +41,25 @@ Orchestration:
   Contracts:
     - Name: BriefExists
       Requires:
-        - FileExists:
-            Path: .fuseraft/brief.json
+        - Type: FileExists
+          Path: .fuseraft/brief.json
 
     - Name: ImplementationComplete
       Requires:
-        - FilesWritten:
-            Source: .fuseraft/brief.json
-            Field: files_to_change
-        - CommandSucceeded:
-            PatternField: verify_command
-            Pattern: "build|compile|test|check"
+        - Type: FilesWritten
+          Source: .fuseraft/brief.json
+          Field: files_to_change
+        - Type: CommandSucceeded
+          PatternField: verify_command
+          Pattern: "build|compile|test|check"
 
     - Name: TestsValid
       Requires:
-        - FileExists:
-            Path: .fuseraft/test-report.json
-        - TestReport:
-            NoFailures: true
-            HasAssertions: true
+        - Type: FileExists
+          Path: .fuseraft/test-report.json
+        - Type: TestReport
+          NoFailures: true
+          HasAssertions: true
 
   FailureHandling:
     MissingEvidence:

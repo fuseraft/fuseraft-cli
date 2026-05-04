@@ -40,29 +40,29 @@ Orchestration:
   Contracts:
     - Name: BriefExists
       Requires:
-        - FileExists:
-            Path: .fuseraft/brief.json
+        - Type: FileExists
+          Path: .fuseraft/brief.json
 
     - Name: ImplementationComplete
       Requires:
-        - FilesWritten:
-            Source: .fuseraft/brief.json
-            Field: files_to_change
-        - CommandSucceeded:
-            # Read the verify command from the Planner's brief so this works for any
-            # runtime — the Planner writes the correct invocation and the contract
-            # checks that the Developer actually ran it.
-            PatternField: verify_command
-            # Fallback literal pattern for configs that omit verify_command from the brief.
-            Pattern: "build|compile|test|check"
+        - Type: FilesWritten
+          Source: .fuseraft/brief.json
+          Field: files_to_change
+        - Type: CommandSucceeded
+          # Read the verify command from the Planner's brief so this works for any
+          # runtime — the Planner writes the correct invocation and the contract
+          # checks that the Developer actually ran it.
+          PatternField: verify_command
+          # Fallback literal pattern for configs that omit verify_command from the brief.
+          Pattern: "build|compile|test|check"
 
     - Name: TestsValid
       Requires:
-        - FileExists:
-            Path: .fuseraft/test-report.json
-        - TestReport:
-            NoFailures: true
-            HasAssertions: true
+        - Type: FileExists
+          Path: .fuseraft/test-report.json
+        - Type: TestReport
+          NoFailures: true
+          HasAssertions: true
 
   FailureHandling:
     MissingEvidence:

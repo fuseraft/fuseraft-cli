@@ -13,7 +13,7 @@ namespace fuseraft.Infrastructure.Plugins;
 /// </para>
 ///
 /// <para>
-/// Both <see cref="fuseraft.Orchestration.Workflow.WorkflowOrchestrator"/> and
+/// Both <see cref="fuseraft.Orchestration.GraphOrchestrator"/> and
 /// <see cref="fuseraft.Orchestration.Strategies.KeywordSelectionStrategy"/> inspect
 /// <c>FunctionCallContent</c> arguments directly from the response or history and use them
 /// as the primary routing signal — before any text-based keyword scanning fires.

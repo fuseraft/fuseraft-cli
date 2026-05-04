@@ -1,6 +1,6 @@
 # Fuseraft CLI
 
-A .NET multi-agent orchestration framework built on [Microsoft Agent Framework](https://github.com/microsoft/agents). Define a team of AI agents in a YAML config and coordinate them via keyword routing, state machine routing, LLM-based selection, or fully autonomous [Magentic](https://arxiv.org/abs/2411.04468) orchestration. Works with Anthropic, xAI, OpenAI, Azure OpenAI, Ollama, and any OpenAI-compatible provider. Agents can be local or remote — the [A2A protocol](https://google.github.io/A2A/) lets you federate agent slots to independently hosted services.
+A .NET multi-agent orchestration framework built on [Microsoft Agent Framework](https://github.com/microsoft/agents). Define a team of AI agents in a YAML config and coordinate them via keyword routing, state machine routing, declarative directed-graph routing, LLM-based selection, or fully autonomous [Magentic](https://arxiv.org/abs/2411.04468) orchestration. Works with Anthropic, xAI, OpenAI, Azure OpenAI, Ollama, and any OpenAI-compatible provider. Agents can be local or remote — the [A2A protocol](https://google.github.io/A2A/) lets you federate agent slots to independently hosted services.
 
 > **Early stage.** Functional but not battle-tested — best suited for experimentation and automation of well-defined tasks.
 
@@ -15,6 +15,14 @@ Pipelines range from a single task-routed assistant:
 ...to multi-agent workflows with conditional keyword routing and anti-hallucination validators enforced at every handoff:
 
 ![Default four-agent pipeline](docs/.assets/td-basic-yaml-config.png)
+
+...to declarative directed-graph pipelines where back-edges express review cycles without duplicating states:
+
+![Graph pipeline with back-edges](docs/.assets/td-pipeline-with-back-edges.png)
+
+...to parallel fan-out/fan-in where a coordinator spawns concurrent workers that merge into a single downstream node:
+
+![Parallel fan-out / fan-in](docs/.assets/td-parallel-fan-out-fan-in.png)
 
 ...to fully autonomous [Magentic](https://arxiv.org/abs/2411.04468) orchestration where a Manager dynamically selects agents and collects their reports:
 
@@ -41,7 +49,8 @@ Pipelines range from a single task-routed assistant:
 
 # Or pick a template directly
 ./bin/fuseraft init --template dev-team --model claude-sonnet-4-6
-./bin/fuseraft init --template designer   # AI-assisted config designer
+./bin/fuseraft init --template graph          # directed-graph pipeline with parallel fan-out
+./bin/fuseraft init --template designer       # AI-assisted config designer
 
 # Run against a YAML config
 ./bin/fuseraft run -c config/orchestration.yaml "Build a REST API in Go with JWT authentication"
@@ -49,15 +58,17 @@ Pipelines range from a single task-routed assistant:
 # Resume the most recent incomplete session
 ./bin/fuseraft run --resume
 
-# Validate a config before running
+# Validate a config before running; --diagram prints a Mermaid flowchart
 ./bin/fuseraft validate config/orchestration.yaml
+./bin/fuseraft validate config/orchestration.yaml --diagram
 ```
 
 ---
 
 ## Features
 
-- Coordinates any number of agents via keyword routing, state machine routing, LLM-based selection, or fully autonomous Magentic orchestration
+- Coordinates any number of agents via keyword routing, state machine routing, declarative directed-graph routing (with parallel fan-out/fan-in), LLM-based selection, or fully autonomous Magentic orchestration
+- Agents can be declared inline or as standalone `AgentFile` YAML files — reuse and version agent definitions independently across configs
 - Gives each agent access to tools: filesystem, shell, git, HTTP, JSON, search, Docker sandboxes, MCP servers, persistent scratchpad, and a shared chatroom
 - Federates agent slots to remote services via the [A2A protocol](https://google.github.io/A2A/) — remote agents participate identically to local ones
 - Checkpoints after every turn so sessions can always be resumed exactly where they left off

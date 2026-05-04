@@ -386,13 +386,14 @@ Selection:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `Type` | string | `"sequential"` | `sequential`, `keyword`, `llm`, `structured`, `statemachine`, or `magentic`. |
+| `Type` | string | `"sequential"` | `sequential`, `keyword`, `llm`, `structured`, `statemachine`, `magentic`, or `graph`. |
 | `Routes` | array | — | Required for `keyword`. List of keyword → agent mappings. |
 | `StructuredRoutes` | array | — | Required for `structured`. List of condition → agent mappings. See [Strategies](strategies.md#structured). |
 | `DefaultAgent` | string | first agent | Fallback agent when no keyword/condition matches (`keyword` and `structured` only). |
 | `Prompt` | string | — | Custom prompt template for `llm` selection. |
 | `Model` | object | — | Required for `llm` selection. |
 | `Magentic` | object | — | Required for `magentic` selection. See [MagenticManagerConfig](#magenticmanagerconfig) below. |
+| `Graph` | object | — | Required for `graph` selection. See [Strategies — graph](strategies.md#graph) for `GraphConfig`, `GraphNodeConfig`, and `GraphEdgeConfig` field references. |
 
 ### KeywordRoute
 

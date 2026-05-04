@@ -15,13 +15,13 @@
       {
         "Name": "PlanExists",
         "Requires": [
-          { "FileExists": { "Path": ".fuseraft/brief.json" } }
+          { "Type": "FileExists", "Path": ".fuseraft/brief.json" }
         ]
       },
       {
         "Name": "ArtifactsReady",
         "Requires": [
-          { "CommandSucceeded": { "Pattern": "lint|validate|check|test|build" } }
+          { "Type": "CommandSucceeded", "Pattern": "lint|validate|check|test|build" }
         ]
       }
     ],
