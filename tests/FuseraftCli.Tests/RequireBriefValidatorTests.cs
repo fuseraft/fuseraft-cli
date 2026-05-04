@@ -49,7 +49,7 @@ public sealed class RequireBriefValidatorTests : IDisposable
     {
         await WriteJson(new
         {
-            files_to_change = new[] { new { path = "a.go", reason = "r" } },
+            files_to_change = new[] { "a.go" },
             acceptance_criteria = new[] { "it compiles" }
         });
 
@@ -65,7 +65,7 @@ public sealed class RequireBriefValidatorTests : IDisposable
         await WriteJson(new
         {
             goal = "   ",
-            files_to_change = new[] { new { path = "a.go", reason = "r" } },
+            files_to_change = new[] { "a.go" },
             acceptance_criteria = new[] { "it compiles" }
         });
 
@@ -114,7 +114,7 @@ public sealed class RequireBriefValidatorTests : IDisposable
         await WriteJson(new
         {
             goal = "build it",
-            files_to_change = new[] { new { path = "a.go", reason = "r" } }
+            files_to_change = new[] { "a.go" }
         });
 
         var result = await Validator().ValidateAsync(NoHistory);
@@ -129,7 +129,7 @@ public sealed class RequireBriefValidatorTests : IDisposable
         await WriteJson(new
         {
             goal = "build it",
-            files_to_change = new[] { new { path = "a.go", reason = "r" } },
+            files_to_change = new[] { "a.go" },
             acceptance_criteria = Array.Empty<string>()
         });
 
@@ -146,9 +146,8 @@ public sealed class RequireBriefValidatorTests : IDisposable
         await WriteJson(new
         {
             goal = "build a todo app",
-            files_to_change = new[] { new { path = "main.go", reason = "entry point" } },
-            acceptance_criteria = new[] { "app starts", "tasks persist" },
-            implementation = new[] { new { file = "main.go", action = "write", content = "package main" } }
+            files_to_change = new[] { "main.go" },
+            acceptance_criteria = new[] { "app starts", "tasks persist" }
         });
 
         var result = await Validator().ValidateAsync(NoHistory);
@@ -163,9 +162,8 @@ public sealed class RequireBriefValidatorTests : IDisposable
         await WriteJson(new
         {
             goal = "build it",
-            files_to_change = new[] { new { path = "a.go", reason = "r" } },
-            acceptance_criteria = new[] { "criterion" },
-            implementation = new[] { new { file = "a.go", action = "write", content = "x" } }
+            files_to_change = new[] { "a.go" },
+            acceptance_criteria = new[] { "criterion" }
         });
         var history = new List<ChatMessage>
         {
