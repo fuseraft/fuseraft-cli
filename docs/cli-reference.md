@@ -639,7 +639,7 @@ fuseraft init [output] [options]
 
 | Template | Description |
 |----------|-------------|
-| `dev-team` | Four-agent pipeline: Planner → Developer → Tester → Reviewer with keyword routing |
+| `dev-team` | Five-agent pipeline: Planner → Developer → Tester → Reviewer with keyword routing, plus a periodic Verifier that audits the evidence graph for inconsistencies |
 | `research` | Two-agent pipeline: Researcher gathers information, Writer produces the final report |
 | `devops` | Three-agent pipeline for infrastructure and deployment tasks |
 | `content` | Two-agent pipeline: Writer drafts, Editor refines and approves |
