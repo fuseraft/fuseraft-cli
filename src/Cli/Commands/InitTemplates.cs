@@ -39,6 +39,9 @@ internal static class InitTemplates
         # -- Optional overrides -------------------------------------------------------
         # ContextWindow:
         #   TextOnly: true          # strip tool frames from cross-turn history
+        #   MaxTurnAge: 10          # keep only the last N agent turns in this agent's context
+        #   MaxTailMessages: 40     # hard cap: keep only the last N messages after other filters
+        #   ExcludeAgents: []       # remove all messages authored by these agents
         # FunctionChoice: required  # force at least one tool call per turn (auto|required|none)
         # TrustScore: 0.8           # 0.0–1.0; governs sandbox ring (≥0.8 → ring 1)
         # MaxToolCallsPerTurn: 20
@@ -195,11 +198,13 @@ internal static class InitTemplates
               You are a QA engineer. Your job is to:
               1. Read {FuseraftPaths.LocalBrief} to understand acceptance criteria.
               2. Write tests and run them with shell_run.
-              3. Write results to {FuseraftPaths.LocalTestReport} with fields:
-                   passed — true or false
-                   results — array of objects, each with name, status (PASS or FAIL), exit_code, and command
-                   command — the exact shell command you ran to verify this result (required for every PASS)
+              3. Write results to {FuseraftPaths.LocalTestReport}:
+                   passed — true if every criterion passes, false otherwise
+                   results — array of objects:
+                     PASS: name, status, exit_code, command (exact shell_run command — required)
+                     FAIL: name, status, exit_code, command, output (relevant stderr/stdout from the failure — required)
               A PASS result with an empty or missing command field is treated as fabricated and will block handoff.
+              Always write the report before routing, even when tests fail.
               If all pass, call handoff(route_keyword: "HANDOFF TO REVIEWER").
               If any fail, call handoff(route_keyword: "BUGS FOUND").
             Model:
@@ -221,7 +226,9 @@ internal static class InitTemplates
               1. Read the implementation and {FuseraftPaths.LocalTestReport}.
               2. Run at least one acceptance criterion as a spot-check with shell_run.
               If the code meets all acceptance criteria, call handoff(route_keyword: "APPROVED").
-              If changes are needed, call handoff(route_keyword: "REVISION REQUIRED") and explain what to fix.
+              If changes are needed, call handoff(route_keyword: "REVISION REQUIRED").
+                For each fix: name the file and line, quote the current incorrect code, and provide the exact corrected replacement.
+                Do not describe the problem in prose — provide the code change.
               If the plan is fundamentally wrong, call handoff(route_keyword: "REPLAN REQUIRED").
             Model:
               ModelId: {model}{EpAgent(endpoint)}
@@ -1081,11 +1088,13 @@ internal static class InitTemplates
               You are a QA engineer. Your job is to:
               1. Read {FuseraftPaths.LocalBrief} to understand the acceptance criteria.
               2. Write tests and run them with shell_run.
-              3. Write results to {FuseraftPaths.LocalTestReport} with fields:
-                   passed — true or false
-                   results — array of objects, each with name, status (PASS or FAIL), exit_code, and command
-                   command — the exact shell command you ran to verify this result (required for every PASS)
+              3. Write results to {FuseraftPaths.LocalTestReport}:
+                   passed — true if every criterion passes, false otherwise
+                   results — array of objects:
+                     PASS: name, status, exit_code, command (exact shell_run command — required)
+                     FAIL: name, status, exit_code, command, output (relevant stderr/stdout from the failure — required)
               A PASS result with an empty or missing command field is treated as fabricated and will block handoff.
+              Always write the report before routing, even when tests fail.
               If all tests pass, call handoff(route_keyword: "HANDOFF TO REVIEWER").
               If any tests fail, call handoff(route_keyword: "BUGS FOUND").
             Model:
@@ -1109,7 +1118,9 @@ internal static class InitTemplates
               3. Emit a JSON review block listing each acceptance criterion with verdict (PASS/FAIL)
                  and evidence before your routing keyword.
               If all criteria pass, call handoff(route_keyword: "APPROVED").
-              If targeted fixes are needed, call handoff(route_keyword: "REVISION REQUIRED") and explain what to fix.
+              If targeted fixes are needed, call handoff(route_keyword: "REVISION REQUIRED").
+                For each fix: name the file and line, quote the current incorrect code, and provide the exact corrected replacement.
+                Do not describe the problem in prose — provide the code change.
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
