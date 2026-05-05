@@ -4,6 +4,11 @@ namespace fuseraft.Cli.Commands;
 
 internal static partial class InitTemplates
 {
+    /// <summary>
+    /// Generates the <c>devops</c> template: Planner → Developer → Operator state-machine pipeline
+    /// for infrastructure and deployment tasks. The Operator executes the deployment and runs smoke
+    /// tests; a <c>DEPLOYMENT_FAILED</c> back-edge returns to Developer for remediation.
+    /// </summary>
     private static GeneratedConfig DevOps(string model, string? endpoint)
     {
         var planner = $"""

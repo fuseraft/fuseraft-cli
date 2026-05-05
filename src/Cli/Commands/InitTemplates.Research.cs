@@ -4,6 +4,11 @@ namespace fuseraft.Cli.Commands;
 
 internal static partial class InitTemplates
 {
+    /// <summary>
+    /// Generates the <c>research</c> template: Researcher → Writer state-machine pipeline
+    /// for information gathering and document synthesis. A <c>ResearchComplete</c> contract
+    /// gates the handoff, ensuring findings are persisted to disk before the Writer begins.
+    /// </summary>
     private static GeneratedConfig Research(string model, string? endpoint)
     {
         var researcher = $"""

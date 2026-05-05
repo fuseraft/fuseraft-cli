@@ -4,6 +4,11 @@ namespace fuseraft.Cli.Commands;
 
 internal static partial class InitTemplates
 {
+    /// <summary>
+    /// Generates the <c>minimal</c> template: a single general-purpose agent for simple,
+    /// self-contained tasks. Uses sequential selection and regex termination on
+    /// <c>TASK_COMPLETE</c>. The starting point for custom configurations.
+    /// </summary>
     private static string Minimal(string model, string? endpoint) => $"""
         Orchestration:
           Name: Minimal Agent

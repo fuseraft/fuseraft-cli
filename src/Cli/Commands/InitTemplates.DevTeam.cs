@@ -4,6 +4,12 @@ namespace fuseraft.Cli.Commands;
 
 internal static partial class InitTemplates
 {
+    /// <summary>
+    /// Generates the default <c>devteam</c> template: Planner → Developer → Tester → Reviewer
+    /// state-machine pipeline with evidence contracts, failure handling, lossless compaction,
+    /// and a periodic Verifier agent that audits the evidence graph for inconsistencies.
+    /// This is the most fully-featured template and serves as the reference implementation.
+    /// </summary>
     private static GeneratedConfig DevTeam(string model, string? endpoint)
     {
         var planner = $"""

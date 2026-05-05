@@ -4,6 +4,12 @@ namespace fuseraft.Cli.Commands;
 
 internal static partial class InitTemplates
 {
+    /// <summary>
+    /// Generates the <c>graph</c> template: Planner → Developer → Tester → Reviewer expressed as a
+    /// declarative directed graph. Back-edges (<c>BUGS FOUND</c>, <c>REVISION REQUIRED</c>,
+    /// <c>REPLAN REQUIRED</c>) return control to earlier nodes without restarting the full pipeline.
+    /// <c>APPROVED</c> routes to a lightweight terminal <c>Approved</c> node that ends the session.
+    /// </summary>
     private static GeneratedConfig Graph(string model, string? endpoint)
     {
         var planner = $"""
