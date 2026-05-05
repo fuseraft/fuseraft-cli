@@ -59,6 +59,7 @@ internal static class YamlConfigLoader
     {
         var deserializer = new DeserializerBuilder()
             .WithNamingConvention(NullNamingConvention.Instance)
+            .WithAttemptingUnquotedStringTypeDeserialization()
             .Build();
 
         var graph = deserializer.Deserialize<object>(yaml);

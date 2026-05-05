@@ -203,6 +203,7 @@ Orchestration:
         RULES:
         - Never call HANDOFF TO REVIEWER before writing .fuseraft/test-report.json.
         - Never fabricate shell output.
+        - A PASS result with an empty or missing command field is treated as fabricated and will block handoff.
       Model:
         ModelId: reasoning
         MaxTokens: 16384

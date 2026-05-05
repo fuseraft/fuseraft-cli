@@ -25,7 +25,6 @@ namespace fuseraft.Orchestration.Validation;
 ///   <item><c>goal</c> field is non-empty.</item>
 ///   <item><c>files_to_change</c> array is non-empty.</item>
 ///   <item><c>acceptance_criteria</c> array is non-empty.</item>
-///   <item><c>implementation</c> array is non-empty.</item>
 /// </list>
 /// </para>
 ///
@@ -51,7 +50,7 @@ public sealed class RequireBriefValidator(string briefPath) : IRoutingValidator
                 $"  1. Identify goal, constraints, acceptance criteria.\n" +
                 $"  2. Explore codebase with list_files/read_file.\n" +
                 $"  3. write_file '{briefPath}':\n" +
-                $"     {{ \"goal\": \"...\", \"files_to_change\": [{{\"path\": \"...\", \"reason\": \"...\"}}], \"acceptance_criteria\": [\"...\"], \"constraints\": [\"...\"], \"implementation\": [{{\"action\": \"write\", \"path\": \"...\", \"content\": \"...\"}}] }}\n" +
+                $"     {{ \"goal\": \"...\", \"files_to_change\": [\"path/to/file\"], \"acceptance_criteria\": [\"...\"], \"constraints\": [\"...\"] }}\n" +
                 $"  4. Call handoff(route_keyword: \"HANDOFF TO DEVELOPER\").");
 
         // 2. JSON validity
@@ -89,26 +88,16 @@ public sealed class RequireBriefValidator(string briefPath) : IRoutingValidator
                 $"HANDOFF TO DEVELOPER blocked: '{briefPath}' missing 'goal'. Add one sentence describing what to build." +
                 currentBriefNote);
 
-        // 4. files_to_change
+        // 4. files_to_change — plain string paths, e.g. ["src/foo.py", "tests/test_foo.py"]
         if (brief.FilesToChange is null or { Count: 0 })
             return RoutingValidationResult.Fail(
-                $"HANDOFF TO DEVELOPER blocked: '{briefPath}' has empty 'files_to_change'. List every file to create or modify." +
+                $"HANDOFF TO DEVELOPER blocked: '{briefPath}' has empty 'files_to_change'. List every file path to create or modify." +
                 currentBriefNote);
 
         // 5. acceptance_criteria
         if (brief.AcceptanceCriteria is null or { Count: 0 })
             return RoutingValidationResult.Fail(
                 $"HANDOFF TO DEVELOPER blocked: '{briefPath}' has empty 'acceptance_criteria'. Add at least one testable criterion." +
-                currentBriefNote);
-
-        // 6. implementation — must be present and non-empty so the Developer has
-        //    an executable spec rather than prose guidance to interpret.
-        if (brief.Implementation is null or { Count: 0 })
-            return RoutingValidationResult.Fail(
-                $"HANDOFF TO DEVELOPER blocked: '{briefPath}' has empty 'implementation'. Provide ordered changes:\n" +
-                $"  - action=write: full content for new/small files.\n" +
-                $"  - action=patch: exact old→new for large files.\n" +
-                $"Cover every file in files_to_change." +
                 currentBriefNote);
 
         return RoutingValidationResult.Pass();
@@ -123,20 +112,8 @@ internal sealed record BriefContent
     public string? Goal { get; init; }
 
     [JsonPropertyName("files_to_change")]
-    public List<BriefFileEntry>? FilesToChange { get; init; }
+    public List<string>? FilesToChange { get; init; }
 
     [JsonPropertyName("acceptance_criteria")]
     public List<string>? AcceptanceCriteria { get; init; }
-
-    [JsonPropertyName("implementation")]
-    public List<object>? Implementation { get; init; }
-}
-
-internal sealed record BriefFileEntry
-{
-    [JsonPropertyName("path")]
-    public string? Path { get; init; }
-
-    [JsonPropertyName("reason")]
-    public string? Reason { get; init; }
 }
