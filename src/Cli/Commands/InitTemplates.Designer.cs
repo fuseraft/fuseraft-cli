@@ -4,8 +4,6 @@ namespace fuseraft.Cli.Commands;
 
 internal static partial class InitTemplates
 {
-    // ─── Designer ───────────────────────────────────────────────────────────────
-
     private static string Designer(string model, string? endpoint) => $"""
         Orchestration:
           Name: Fuseraft Orchestration Designer

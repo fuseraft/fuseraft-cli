@@ -4,8 +4,6 @@ namespace fuseraft.Cli.Commands;
 
 internal static partial class InitTemplates
 {
-    // ─── DevTeam ────────────────────────────────────────────────────────────────
-
     private static GeneratedConfig DevTeam(string model, string? endpoint)
     {
         var planner = $"""

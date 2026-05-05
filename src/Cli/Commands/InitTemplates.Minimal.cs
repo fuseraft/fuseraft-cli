@@ -4,8 +4,6 @@ namespace fuseraft.Cli.Commands;
 
 internal static partial class InitTemplates
 {
-    // ─── Minimal ────────────────────────────────────────────────────────────────
-
     private static string Minimal(string model, string? endpoint) => $"""
         Orchestration:
           Name: Minimal Agent

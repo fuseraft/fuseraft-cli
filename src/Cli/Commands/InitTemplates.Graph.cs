@@ -4,8 +4,6 @@ namespace fuseraft.Cli.Commands;
 
 internal static partial class InitTemplates
 {
-    // ─── Graph ──────────────────────────────────────────────────────────────────
-
     private static GeneratedConfig Graph(string model, string? endpoint)
     {
         var planner = $"""
