@@ -349,7 +349,7 @@ The Tester must write a file at `Validation.TestReportPath` (default `.fuseraft/
 | `results[].status` | yes | `PASS` or `FAIL`. |
 | `results[].command` | yes (for PASS) | The exact shell command that was executed to verify this criterion. An empty command on a PASS result is rejected as fabricated. |
 | `results[].exit_code` | no | The actual exit code. Informational — not validated. |
-| `results[].stdout` | no | Omit this field. The Reviewer re-runs commands themselves; pre-recorded output is not used in validation and adds noise to the history. |
+| `results[].output` | yes (for FAIL) | Relevant stderr/stdout from the failing command. Required on FAIL results so the Developer can diagnose without re-running. Omit on PASS results — the Reviewer re-runs commands themselves and pre-recorded output adds noise to the history. |
 | `fake_test_files` | yes | List of test files that contain no real assertions. Must be empty for handoff to proceed. |
 
 ### Assertion pattern detection
