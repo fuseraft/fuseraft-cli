@@ -1,0 +1,299 @@
+using fuseraft.Core;
+
+namespace fuseraft.Cli.Commands;
+
+internal static partial class InitTemplates
+{
+    // ─── BrownfieldGraph ────────────────────────────────────────────────────────
+
+    /// Brownfield variant using Selection.Type: graph. The key showcase relative to the
+    /// statemachine brownfield template is the Reviewer's two distinct back-edge targets:
+    /// "REVISION REQUIRED" returns to Developer (targeted fix) while "REPLAN REQUIRED"
+    /// returns to Planner (approach rethink). Expressing this in a state machine requires
+    /// an extra state and duplicated transitions; the graph expresses it as two labelled
+    /// edges from a single node.
+    private static GeneratedConfig BrownfieldGraph(string model, string? endpoint)
+    {
+        var archaeologist = $"""
+            Name: Archaeologist
+            Description: Recons the codebase and writes the discovery brief and convention profile.
+            Instructions: |
+              You are a codebase archaeologist. Your job is to understand an existing project
+              before any changes are made. Follow this procedure:
+
+              1. Read the entry point files listed in the task to orient yourself.
+              2. Use list_files and sub_agent_explore to map the directory structure — do NOT
+                 read every file; focus on understanding the shape of the codebase.
+              3. Identify: primary language and framework, naming conventions (snake_case vs camelCase),
+                 import style, test framework, build system, and key architectural patterns.
+              4. Write the convention profile to {FuseraftPaths.LocalConventions} with fields:
+                   language, framework, naming_convention, import_style, test_framework,
+                   build_command, lint_command, notes (array of key architectural observations).
+              5. Identify the files most likely to need modification for the given task.
+              6. Write the discovery brief to {FuseraftPaths.LocalBrownfieldBrief} with fields:
+                   summary — one paragraph describing the codebase structure
+                   in_scope_files — array of file paths likely relevant to the task
+                   dependencies — key external dependencies to be aware of
+                   risks — array of fragility signals (e.g. no tests, circular deps, god objects)
+
+              When both files are written, call handoff(route_keyword: "RECON COMPLETE").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - FileSystem
+              - Search
+              - SubAgent
+              - Handoff
+            FunctionChoice: required
+            {AgentFileOptions}
+            """;
+
+        var planner = $"""
+            Name: Planner
+            Description: Designs the targeted change based on the discovery brief.
+            Instructions: |
+              You are a software architect working on an existing codebase. Your job is to:
+              1. Read {FuseraftPaths.LocalBrownfieldBrief} to understand the codebase shape and risks.
+              2. Read {FuseraftPaths.LocalConventions} to understand the project's conventions — follow them exactly.
+              3. Use sub_agent_explore for any additional targeted questions about specific files.
+              4. Write a scoped brief to {FuseraftPaths.LocalBrief} with fields:
+                   goal — one-sentence description of the change
+                   findings — summary of relevant existing code to modify
+                   files_to_change — only the files that genuinely need to change
+                   acceptance_criteria — observable code properties the change must satisfy
+                   convention_notes — specific conventions to follow from the profile
+              When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - FileSystem
+              - Search
+              - SubAgent
+              - Handoff
+            FunctionChoice: required
+            {AgentFileOptions}
+            """;
+
+        var developer = $"""
+            Name: Developer
+            Description: Implements the change staying strictly within the scoped file list.
+            Instructions: |
+              You are a developer working carefully inside an existing codebase. Your job is to:
+              1. Read {FuseraftPaths.LocalBrief} — implement ONLY the files listed in files_to_change.
+              2. Read {FuseraftPaths.LocalConventions} — follow the project's naming, import, and style conventions exactly.
+              3. Use read_file to read existing files before modifying them — never overwrite blindly.
+              4. Use patch_file for surgical edits to existing files; use write_file only for new files.
+              5. Run the build command from the convention profile to confirm nothing is broken.
+              6. Commit with git_add and git_commit.
+              When done, call handoff(route_keyword: "HANDOFF TO REVIEWER").
+              If the brief is fundamentally unclear or the approach is wrong, call handoff(route_keyword: "REPLAN REQUIRED").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - FileSystem
+              - Shell
+              - Git
+              - Changes
+              - Handoff
+            FunctionChoice: required
+            {AgentFileOptions}
+            """;
+
+        var reviewer = $"""
+            Name: Reviewer
+            Description: Code-review-only inspection; routes to Developer, Planner, or final approval.
+            Instructions: |
+              You are a principal engineer reviewing a change to an existing codebase. Your job is to:
+              1. Read each file listed in {FuseraftPaths.LocalBrief} under files_to_change.
+              2. Verify every acceptance criterion is satisfied by code inspection.
+              3. Check that the change follows conventions from {FuseraftPaths.LocalConventions}.
+              4. Confirm no files outside files_to_change were modified (use changes_read_latest).
+              Do NOT run shell commands — this is a code-inspection-only review.
+              Emit a JSON review block listing each acceptance criterion with verdict (PASS/FAIL)
+              and evidence before your routing keyword.
+              If all criteria pass, call handoff(route_keyword: "APPROVED").
+              If targeted fixes are needed, call handoff(route_keyword: "REVISION REQUIRED") and describe what to fix.
+              If the approach itself is wrong and the brief needs rethinking, call handoff(route_keyword: "REPLAN REQUIRED").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - FileSystem
+              - Changes
+              - Handoff
+            FunctionChoice: auto
+            ContextWindow:
+              TextOnly: true
+            {AgentFileOptions}
+            """;
+
+        var approved = $"""
+            Name: Approved
+            Description: Terminal confirmation node — emits a one-line completion summary.
+            Instructions: |
+              All acceptance criteria have already been verified and approved.
+              Write exactly one sentence confirming the task is complete. Nothing else.
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            FunctionChoice: none
+            {AgentFileOptions}
+            """;
+
+        var mainConfig = $"""
+            Orchestration:
+              Name: Brownfield Graph Pipeline
+              Description: >-
+                Archaeologist → Planner → Developer → Reviewer expressed as a directed graph.
+                The Reviewer has two distinct back-edge targets: "REVISION REQUIRED" returns to
+                Developer for targeted fixes; "REPLAN REQUIRED" returns to Planner when the
+                approach needs rethinking. Multi-target back-edges from a single node are the
+                key advantage of graph routing over state machine for complex review cycles.
+
+              Security:
+                FileSystemSandboxPath: .   # set to your project root (e.g. ~/projects/myapp)
+
+              Brownfield:
+                EntryPoints:
+                  - src/   # replace with your actual entry points (e.g. cmd/server/main.go)
+                SeedEnvelopeFromBrief: true
+                DiscoveryBriefPath: {FuseraftPaths.LocalBrownfieldBrief}
+                ConventionProfilePath: {FuseraftPaths.LocalConventions}
+
+              ChangeTracking:
+                Path: {FuseraftPaths.LocalChanges}
+
+              Validation:
+                BriefPath: {FuseraftPaths.LocalBrief}
+                ChangeLogPath: {FuseraftPaths.LocalChanges}
+
+              Events:
+                Path: {FuseraftPaths.LocalEventsLog}
+
+              # Each agent lives in its own YAML file in agents/ — edit, version, or reuse
+              # them independently across configs. Inline fields override the file at load time.
+              Agents:
+                - AgentFile: agents/archaeologist.yaml
+                - AgentFile: agents/planner.yaml
+                - AgentFile: agents/developer.yaml
+                - AgentFile: agents/reviewer.yaml
+                - AgentFile: agents/approved.yaml
+
+              Selection:
+                Type: graph
+                Graph:
+                  EntryNode: recon
+                  MaxRetries: 4
+
+                  Nodes:
+                    - Id: recon
+                      Agent: Archaeologist
+                    - Id: planner
+                      Agent: Planner
+                    - Id: developer
+                      Agent: Developer
+                    - Id: reviewer
+                      Agent: Reviewer             # routes on keyword — NOT terminal
+                    - Id: approved                # terminal node — session ends after this run
+                      Agent: Approved
+                      Terminal: true
+
+                  # ── Key pattern: Reviewer routes to TWO different back-edge targets ──────
+                  # "REVISION REQUIRED" → developer  (fix is targeted; recon/planning stay valid)
+                  # "REPLAN REQUIRED"   → planner    (approach is wrong; needs a new brief)
+                  # This cannot be expressed in a state machine without duplicating states or
+                  # adding a routing guard — in graph it is simply two labelled edges.
+                  Edges:
+                    # ── Forward edges ──────────────────────────────────────────────────
+                    - From: recon
+                      To: planner
+                      Keyword: "RECON COMPLETE"
+                      Validators: [RequireWriteFile]       # blocks until discovery files are written
+
+                    - From: planner
+                      To: developer
+                      Keyword: "HANDOFF TO DEVELOPER"
+                      Validators: [RequireBrief]           # blocks until brief.json is valid
+
+                    - From: developer
+                      To: reviewer
+                      Keyword: "HANDOFF TO REVIEWER"
+                      Validators: [RequireWriteFile]       # blocks until at least one file is written
+
+                    - From: reviewer
+                      To: approved
+                      Keyword: "APPROVED"
+                      Validators: [RequireReviewJudgement] # blocks until a review JSON block exists
+
+                    # ── Back-edges ──────────────────────────────────────────────────────
+                    - From: reviewer
+                      To: developer
+                      Keyword: "REVISION REQUIRED"         # targeted fix → restart from developer
+
+                    - From: reviewer
+                      To: planner
+                      Keyword: "REPLAN REQUIRED"           # rethink approach → restart from planner
+
+                    - From: developer
+                      To: planner
+                      Keyword: "REPLAN REQUIRED"           # developer can also escalate to planner
+
+              Termination:
+                Type: composite
+                Strategies:
+                  - Type: regex
+                    Pattern: "\\bAPPROVED\\b"
+                    AgentNames: [Reviewer]
+                  - Type: maxiterations
+                    MaxIterations: 60
+
+              # ---------------------------------------------------------------------------
+              # OPTIONAL EXTRAS — uncomment as needed
+              # ---------------------------------------------------------------------------
+
+              # EvidenceStore:
+              #   Path: {FuseraftPaths.LocalEvidence}
+
+              # Contracts:
+              #   - Name: ReconComplete
+              #     Requires:
+              #       - Type: FileExists
+              #         Path: {FuseraftPaths.LocalBrownfieldBrief}
+              #       - Type: FileExists
+              #         Path: {FuseraftPaths.LocalConventions}
+              #   - Name: BriefExists
+              #     Requires:
+              #       - Type: FileExists
+              #         Path: {FuseraftPaths.LocalBrief}
+
+              # FailureHandling:
+              #   MissingEvidence:
+              #     Action: Reinstruct
+              #     Threshold: 3
+              #   NoProgress:
+              #     Action: Abort
+              #     Threshold: 3
+
+              # Compaction:
+              #   TriggerTurnCount: 30
+              #   KeepRecentTurns: 8
+              #   Mode: lossless
+
+              # Checkpoint:
+              #   Mode: json
+              #   Path: .fuseraft/checkpoints
+
+              # Models:
+              #   fast:
+              #     ModelId: {model}
+              #   reasoning:
+              #     ModelId: {model}
+            """;
+
+        return new GeneratedConfig(mainConfig, [
+            ("agents/archaeologist.yaml", archaeologist),
+            ("agents/planner.yaml",       planner),
+            ("agents/developer.yaml",     developer),
+            ("agents/reviewer.yaml",      reviewer),
+            ("agents/approved.yaml",      approved),
+        ]);
+    }
+}
