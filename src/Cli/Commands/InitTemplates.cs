@@ -1123,6 +1123,18 @@ internal static class InitTemplates
             {AgentFileOptions}
             """;
 
+        var approved = $"""
+            Name: Approved
+            Description: Terminal confirmation node — emits a one-line completion summary.
+            Instructions: |
+              All acceptance criteria have already been verified and approved.
+              Write exactly one sentence confirming the task is complete. Nothing else.
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            FunctionChoice: none
+            {AgentFileOptions}
+            """;
+
         var mainConfig = $"""
             Orchestration:
               Name: Graph Pipeline
@@ -1149,6 +1161,7 @@ internal static class InitTemplates
                 - AgentFile: agents/developer.yaml
                 - AgentFile: agents/tester.yaml
                 - AgentFile: agents/reviewer.yaml
+                - AgentFile: agents/approved.yaml
 
               Selection:
                 Type: graph
@@ -1168,7 +1181,7 @@ internal static class InitTemplates
                     - Id: reviewer
                       Agent: Reviewer             # routes on keyword — NOT terminal
                     - Id: approved                # terminal node — session ends after this run
-                      Agent: Reviewer             # same agent, terminal confirmation
+                      Agent: Approved
                       Terminal: true
 
                   # Edges define control flow — first matching edge fires each turn.
@@ -1256,6 +1269,7 @@ internal static class InitTemplates
             ("agents/developer.yaml", developer),
             ("agents/tester.yaml",    tester),
             ("agents/reviewer.yaml",  reviewer),
+            ("agents/approved.yaml",  approved),
         ]);
     }
 
@@ -1383,6 +1397,18 @@ internal static class InitTemplates
             {AgentFileOptions}
             """;
 
+        var approved = $"""
+            Name: Approved
+            Description: Terminal confirmation node — emits a one-line completion summary.
+            Instructions: |
+              All acceptance criteria have already been verified and approved.
+              Write exactly one sentence confirming the task is complete. Nothing else.
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            FunctionChoice: none
+            {AgentFileOptions}
+            """;
+
         var mainConfig = $"""
             Orchestration:
               Name: Brownfield Graph Pipeline
@@ -1420,6 +1446,7 @@ internal static class InitTemplates
                 - AgentFile: agents/planner.yaml
                 - AgentFile: agents/developer.yaml
                 - AgentFile: agents/reviewer.yaml
+                - AgentFile: agents/approved.yaml
 
               Selection:
                 Type: graph
@@ -1437,7 +1464,7 @@ internal static class InitTemplates
                     - Id: reviewer
                       Agent: Reviewer             # routes on keyword — NOT terminal
                     - Id: approved                # terminal node — session ends after this run
-                      Agent: Reviewer             # same agent, terminal confirmation
+                      Agent: Approved
                       Terminal: true
 
                   # ── Key pattern: Reviewer routes to TWO different back-edge targets ──────
@@ -1537,6 +1564,7 @@ internal static class InitTemplates
             ("agents/planner.yaml",       planner),
             ("agents/developer.yaml",     developer),
             ("agents/reviewer.yaml",      reviewer),
+            ("agents/approved.yaml",      approved),
         ]);
     }
 
