@@ -4,8 +4,6 @@ namespace fuseraft.Cli.Commands;
 
 internal static partial class InitTemplates
 {
-    // ─── Magentic ───────────────────────────────────────────────────────────────
-
     private static string Magentic(string model, string? endpoint) => $"""
         Orchestration:
           Name: Magentic Team

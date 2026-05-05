@@ -4,8 +4,6 @@ namespace fuseraft.Cli.Commands;
 
 internal static partial class InitTemplates
 {
-    // ─── BrownfieldGraph ────────────────────────────────────────────────────────
-
     /// Brownfield variant using Selection.Type: graph. The key showcase relative to the
     /// statemachine brownfield template is the Reviewer's two distinct back-edge targets:
     /// "REVISION REQUIRED" returns to Developer (targeted fix) while "REPLAN REQUIRED"

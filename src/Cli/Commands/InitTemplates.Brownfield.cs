@@ -4,8 +4,6 @@ namespace fuseraft.Cli.Commands;
 
 internal static partial class InitTemplates
 {
-    // ─── Brownfield ─────────────────────────────────────────────────────────────
-
     private static GeneratedConfig Brownfield(string model, string? endpoint)
     {
         var archaeologist = $"""

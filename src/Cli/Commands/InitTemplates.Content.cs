@@ -4,8 +4,6 @@ namespace fuseraft.Cli.Commands;
 
 internal static partial class InitTemplates
 {
-    // ─── Content ────────────────────────────────────────────────────────────────
-
     private static GeneratedConfig Content(string model, string? endpoint)
     {
         var writer = $"""
