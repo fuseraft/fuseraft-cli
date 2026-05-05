@@ -4,12 +4,14 @@ namespace fuseraft.Cli.Commands;
 
 internal static partial class InitTemplates
 {
-    /// Brownfield variant using Selection.Type: graph. The key showcase relative to the
-    /// statemachine brownfield template is the Reviewer's two distinct back-edge targets:
-    /// "REVISION REQUIRED" returns to Developer (targeted fix) while "REPLAN REQUIRED"
-    /// returns to Planner (approach rethink). Expressing this in a state machine requires
-    /// an extra state and duplicated transitions; the graph expresses it as two labelled
-    /// edges from a single node.
+    /// <summary>
+    /// Generates the <c>brownfield-graph</c> template: Archaeologist → Planner → Developer → Reviewer
+    /// expressed as a directed graph rather than a state machine.
+    /// The key advantage over the state-machine brownfield template is that the Reviewer has two
+    /// distinct back-edge targets: <c>REVISION REQUIRED</c> returns to Developer (targeted fix) while
+    /// <c>REPLAN REQUIRED</c> returns to Planner (approach rethink). Expressing this in a state machine
+    /// requires an extra state and duplicated transitions; the graph expresses it as two labelled edges.
+    /// </summary>
     private static GeneratedConfig BrownfieldGraph(string model, string? endpoint)
     {
         var archaeologist = $"""

@@ -4,6 +4,12 @@ namespace fuseraft.Cli.Commands;
 
 internal static partial class InitTemplates
 {
+    /// <summary>
+    /// Generates the <c>magentic</c> template: an AI-managed team where a manager LLM dynamically
+    /// selects participants each round, plans the work, and replans when progress stalls.
+    /// Termination is controlled by <c>MaxRoundCount</c>, <c>MaxStallCount</c>, and
+    /// <c>MaxResetCount</c>; the <c>Termination</c> section is ignored for this selection type.
+    /// </summary>
     private static string Magentic(string model, string? endpoint) => $"""
         Orchestration:
           Name: Magentic Team

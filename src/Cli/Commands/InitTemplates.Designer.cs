@@ -4,6 +4,13 @@ namespace fuseraft.Cli.Commands;
 
 internal static partial class InitTemplates
 {
+    /// <summary>
+    /// Generates the <c>designer</c> template: a single-agent interactive assistant that designs,
+    /// writes, and validates fuseraft orchestration configurations. The Designer agent carries
+    /// a comprehensive knowledge base of all available plugins, routing types, termination
+    /// strategies, and common agent patterns, and always validates its output with
+    /// <c>fuseraft validate</c> before presenting it to the user.
+    /// </summary>
     private static string Designer(string model, string? endpoint) => $"""
         Orchestration:
           Name: Fuseraft Orchestration Designer

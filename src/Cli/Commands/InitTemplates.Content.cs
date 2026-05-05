@@ -4,6 +4,11 @@ namespace fuseraft.Cli.Commands;
 
 internal static partial class InitTemplates
 {
+    /// <summary>
+    /// Generates the <c>content</c> template: Writer → Editor state-machine pipeline
+    /// for drafting and refining written content. The Writer saves a first draft to disk
+    /// before handing off; a <c>DraftExists</c> contract gates the transition.
+    /// </summary>
     private static GeneratedConfig Content(string model, string? endpoint)
     {
         var writer = $"""

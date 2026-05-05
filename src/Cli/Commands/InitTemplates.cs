@@ -9,8 +9,18 @@ internal sealed record GeneratedConfig(
     internal static GeneratedConfig Inline(string yaml) => new(yaml, []);
 }
 
+/// <summary>
+/// Factory for <c>fuseraft init</c> template scaffolding. Each template is implemented as a
+/// partial class method in its own file; this file contains the dispatch entry point and
+/// shared helpers used by all templates.
+/// </summary>
 internal static partial class InitTemplates
 {
+    /// <summary>
+    /// Dispatches to the template factory identified by <paramref name="template"/> and returns
+    /// the generated main config YAML together with any agent files to write alongside it.
+    /// Unrecognised template names fall back to <see cref="DevTeam"/>.
+    /// </summary>
     internal static GeneratedConfig Build(string template, string model, string? endpoint) =>
         template switch
         {
@@ -26,11 +36,11 @@ internal static partial class InitTemplates
             _                  => DevTeam(model, endpoint),
         };
 
-    // Returns "\n{pad}Endpoint: {endpoint}" when endpoint is set, otherwise empty.
+    /// <summary>Returns a newline-prefixed <c>Endpoint:</c> line for inline agent blocks, or empty when <paramref name="endpoint"/> is unset.</summary>
     private static string Ep(string? endpoint, string pad) =>
         string.IsNullOrWhiteSpace(endpoint) ? string.Empty : $"\n{pad}Endpoint: {endpoint}";
 
-    // Endpoint line for agent files (Model: is top-level, ModelId at 2-space indent).
+    /// <summary>Returns a newline-prefixed <c>Endpoint:</c> line sized for agent YAML files (two-space indent under <c>Model:</c>), or empty when <paramref name="endpoint"/> is unset.</summary>
     private static string EpAgent(string? endpoint) =>
         string.IsNullOrWhiteSpace(endpoint) ? string.Empty : $"\n  Endpoint: {endpoint}";
 

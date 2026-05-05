@@ -4,6 +4,12 @@ namespace fuseraft.Cli.Commands;
 
 internal static partial class InitTemplates
 {
+    /// <summary>
+    /// Generates the <c>brownfield</c> template: Archaeologist → Planner → Developer → Reviewer
+    /// state-machine pipeline for making targeted changes to an existing codebase.
+    /// The Archaeologist writes a convention profile and discovery brief before any code changes;
+    /// both artifacts are injected into every subsequent agent's context.
+    /// </summary>
     private static GeneratedConfig Brownfield(string model, string? endpoint)
     {
         var archaeologist = $"""
