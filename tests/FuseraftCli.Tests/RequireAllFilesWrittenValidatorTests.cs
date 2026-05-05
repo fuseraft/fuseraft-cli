@@ -25,7 +25,7 @@ public sealed class RequireAllFilesWrittenValidatorTests : IDisposable
         var brief = new
         {
             goal = "build it",
-            files_to_change = filePaths.Select(p => new { path = p, reason = "needed" }),
+            files_to_change = filePaths,
             acceptance_criteria = new[] { "it works" }
         };
         await File.WriteAllTextAsync(BriefPath, JsonSerializer.Serialize(brief));

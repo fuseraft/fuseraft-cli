@@ -208,6 +208,7 @@ Orchestration:
         RULES:
         - NEVER call HANDOFF TO REVIEWER unless every criterion has real shell_run output showing PASS.
         - NEVER call HANDOFF TO REVIEWER before writing .fuseraft/test-report.json to disk.
+        - A PASS result with an empty or missing command field is treated as fabricated and will block handoff.
       Model:
         ModelId: owui-default
         MaxTokens: 16384

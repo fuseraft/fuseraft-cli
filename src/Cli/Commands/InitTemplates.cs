@@ -197,7 +197,9 @@ internal static class InitTemplates
               2. Write tests and run them with shell_run.
               3. Write results to {FuseraftPaths.LocalTestReport} with fields:
                    passed — true or false
-                   results — array of objects, each with name, status (PASS or FAIL), and exit_code
+                   results — array of objects, each with name, status (PASS or FAIL), exit_code, and command
+                   command — the exact shell command you ran to verify this result (required for every PASS)
+              A PASS result with an empty or missing command field is treated as fabricated and will block handoff.
               If all pass, call handoff(route_keyword: "HANDOFF TO REVIEWER").
               If any fail, call handoff(route_keyword: "BUGS FOUND").
             Model:
@@ -1081,7 +1083,9 @@ internal static class InitTemplates
               2. Write tests and run them with shell_run.
               3. Write results to {FuseraftPaths.LocalTestReport} with fields:
                    passed — true or false
-                   results — array of objects, each with name, status (PASS or FAIL), and exit_code
+                   results — array of objects, each with name, status (PASS or FAIL), exit_code, and command
+                   command — the exact shell command you ran to verify this result (required for every PASS)
+              A PASS result with an empty or missing command field is treated as fabricated and will block handoff.
               If all tests pass, call handoff(route_keyword: "HANDOFF TO REVIEWER").
               If any tests fail, call handoff(route_keyword: "BUGS FOUND").
             Model:
@@ -1119,6 +1123,18 @@ internal static class InitTemplates
             {AgentFileOptions}
             """;
 
+        var approved = $"""
+            Name: Approved
+            Description: Terminal confirmation node — emits a one-line completion summary.
+            Instructions: |
+              All acceptance criteria have already been verified and approved.
+              Write exactly one sentence confirming the task is complete. Nothing else.
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            FunctionChoice: none
+            {AgentFileOptions}
+            """;
+
         var mainConfig = $"""
             Orchestration:
               Name: Graph Pipeline
@@ -1145,6 +1161,7 @@ internal static class InitTemplates
                 - AgentFile: agents/developer.yaml
                 - AgentFile: agents/tester.yaml
                 - AgentFile: agents/reviewer.yaml
+                - AgentFile: agents/approved.yaml
 
               Selection:
                 Type: graph
@@ -1164,7 +1181,8 @@ internal static class InitTemplates
                     - Id: reviewer
                       Agent: Reviewer             # routes on keyword — NOT terminal
                     - Id: approved                # terminal node — session ends after this run
-                      Agent: Reviewer             # same agent, terminal confirmation
+                      Agent: Approved
+                      Terminal: true
 
                   # Edges define control flow — first matching edge fires each turn.
                   # Forward edges (target has higher BFS layer) use SendMessage within the
@@ -1251,6 +1269,7 @@ internal static class InitTemplates
             ("agents/developer.yaml", developer),
             ("agents/tester.yaml",    tester),
             ("agents/reviewer.yaml",  reviewer),
+            ("agents/approved.yaml",  approved),
         ]);
     }
 
@@ -1378,6 +1397,18 @@ internal static class InitTemplates
             {AgentFileOptions}
             """;
 
+        var approved = $"""
+            Name: Approved
+            Description: Terminal confirmation node — emits a one-line completion summary.
+            Instructions: |
+              All acceptance criteria have already been verified and approved.
+              Write exactly one sentence confirming the task is complete. Nothing else.
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            FunctionChoice: none
+            {AgentFileOptions}
+            """;
+
         var mainConfig = $"""
             Orchestration:
               Name: Brownfield Graph Pipeline
@@ -1415,6 +1446,7 @@ internal static class InitTemplates
                 - AgentFile: agents/planner.yaml
                 - AgentFile: agents/developer.yaml
                 - AgentFile: agents/reviewer.yaml
+                - AgentFile: agents/approved.yaml
 
               Selection:
                 Type: graph
@@ -1432,7 +1464,7 @@ internal static class InitTemplates
                     - Id: reviewer
                       Agent: Reviewer             # routes on keyword — NOT terminal
                     - Id: approved                # terminal node — session ends after this run
-                      Agent: Reviewer             # same agent, terminal confirmation
+                      Agent: Approved
                       Terminal: true
 
                   # ── Key pattern: Reviewer routes to TWO different back-edge targets ──────
@@ -1532,6 +1564,7 @@ internal static class InitTemplates
             ("agents/planner.yaml",       planner),
             ("agents/developer.yaml",     developer),
             ("agents/reviewer.yaml",      reviewer),
+            ("agents/approved.yaml",      approved),
         ]);
     }
 
