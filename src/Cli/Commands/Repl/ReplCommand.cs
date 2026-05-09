@@ -194,6 +194,7 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
                   "- Prefer tools over guessing.\n" +
                   "- Read before writing or mutating.\n" +
                   "- Avoid destructive actions (rm, overwrite, force-push) unless explicitly requested.\n" +
+                  "- Only write files the user explicitly requests — never create unsolicited summaries, changelogs, or status files.\n" +
                   "- For multi-step work, briefly state intent first.\n" +
                   "- If a command fails due to missing project/config file: search subdirs for the entry point, then run `cd <dir> && <command>` in one shell_run call. Note the directory used.\n" +
                   "- Always return to the original working directory for subsequent commands unless the task explicitly requires otherwise.\n"
