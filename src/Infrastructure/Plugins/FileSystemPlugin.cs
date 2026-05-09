@@ -25,6 +25,11 @@ public sealed class FileSystemPlugin : ITurnResettable
     // content into the model's context.
     private readonly HashSet<string> _readThisTurn = new(StringComparer.OrdinalIgnoreCase);
 
+    // Paths that were successfully patch_file'd this turn. A write_file to any of these
+    // paths is blocked: the write is derived from the agent's stale mental model, not the
+    // current disk state, so it would silently clobber the patch that was just applied.
+    private readonly HashSet<string> _patchedThisTurn = new(StringComparer.OrdinalIgnoreCase);
+
     // Per-turn cumulative read budget (chars). Prevents individual tool calls from
     // individually respecting the per-call size limit while still collectively flooding
     // the in-turn context with hundreds of thousands of chars of file content — the
@@ -48,6 +53,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     void ITurnResettable.BeginTurn()
     {
         _readThisTurn.Clear();
+        _patchedThisTurn.Clear();
         _readBudgetUsed = 0;
     }
 
@@ -287,6 +293,9 @@ public sealed class FileSystemPlugin : ITurnResettable
         // Invalidate the read cache — content has changed.
         _readThisTurn.Remove(resolved);
 
+        // Record that this path was patched so write_file can detect the pattern.
+        _patchedThisTurn.Add(resolved);
+
         var oldLines = normalOld.Split('\n').Length;
         var newLines = normalNew.Split('\n').Length;
         return PluginResult.Ok(
@@ -417,6 +426,15 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         var denial = ResolveSafe(path, out var resolved);
         if (denial is not null) return denial;
+
+        // Block write_file on a path that was already patch_file'd this turn. The agent's
+        // full-file content is derived from its pre-patch mental model and would silently
+        // overwrite the patch that was just applied.
+        if (_patchedThisTurn.Contains(resolved))
+            return PluginResult.Error(
+                $"WRITE BLOCKED — '{resolved}' was already patched this turn. " +
+                $"Calling write_file now would overwrite that patch with stale content. " +
+                $"Use patch_file again for any additional edits.");
 
         // Version conflict check: when baseVersion > 0, reject the write if the current
         // stored version differs so agents cannot silently overwrite concurrent changes.
