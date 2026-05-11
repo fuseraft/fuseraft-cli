@@ -189,7 +189,7 @@ public sealed class ChatClientFactory(
                 if (string.IsNullOrEmpty(apiKey))
                     throw new InvalidOperationException(
                         $"No API key available for Azure deployment '{config.ModelId}' at '{config.Endpoint}'. " +
-                        $"Store one with 'fuseraft key set', or add \"apiKeyEnvVar\": \"<VAR>\" to ~/.fuseraft/config.");
+                        $"Run 'fuseraft repl' and complete the setup wizard, or add \"apiKeyEnvVar\": \"<VAR>\" to ~/.fuseraft/config.");
                 return new AzureOpenAIClient(
                     new Uri(config.Endpoint),
                     new ApiKeyCredential(apiKey),
@@ -212,7 +212,7 @@ public sealed class ChatClientFactory(
                 if (string.IsNullOrEmpty(apiKey))
                     throw new InvalidOperationException(
                         $"No API key available for model '{config.ModelId}' at '{config.Endpoint}'. " +
-                        $"Store one with 'fuseraft key set', or add \"apiKeyEnvVar\": \"<VAR>\" to ~/.fuseraft/config.");
+                        $"Run 'fuseraft repl' and complete the setup wizard, or add \"apiKeyEnvVar\": \"<VAR>\" to ~/.fuseraft/config.");
                 return new OpenAIClient(
                     new ApiKeyCredential(apiKey),
                     new OpenAIClientOptions { Transport = transport, Endpoint = new Uri(config.Endpoint), NetworkTimeout = HttpClientTimeout })
