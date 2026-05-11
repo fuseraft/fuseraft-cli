@@ -190,7 +190,6 @@ public sealed class SessionRunner(
             {
                 succeeded    = false;
                 errorMessage = ex.Message;
-                AnsiConsole.WriteException(ex, ExceptionFormats.ShortenPaths);
                 break;
             }
 
