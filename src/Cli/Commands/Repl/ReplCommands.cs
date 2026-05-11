@@ -30,6 +30,7 @@ internal static class ReplCommands
             case "/events":     await CmdEventsAsync(ctx, arg); return CommandResult.Continue;
             case "/safe-mode":  return await CmdSafeModeAsync(ctx, arg);
             case "/memory":     return await CmdMemoryAsync(ctx, arg, cancellationToken);
+            case "/max-tokens": return CmdMaxTokens(ctx, arg);
             default:
                 AnsiConsole.MarkupLine(
                     $"[yellow]Unknown command:[/] {Markup.Escape(command)}  [dim](type /help for commands)[/]");
@@ -410,6 +411,37 @@ internal static class ReplCommands
         return CommandResult.Continue;
     }
 
+    private static CommandResult CmdMaxTokens(ReplSessionContext ctx, string arg)
+    {
+        if (string.IsNullOrEmpty(arg))
+        {
+            AnsiConsole.MarkupLine(ctx.MaxOutputTokens > 0
+                ? $"[dim]Max output tokens:[/] [bold]{ctx.MaxOutputTokens:N0}[/]"
+                : "[dim]Max output tokens:[/] provider default");
+            AnsiConsole.MarkupLine("[dim]Run[/] [bold]/max-tokens <n>[/] [dim]to set, or[/] [bold]/max-tokens reset[/] [dim]to restore the provider default.[/]");
+            return CommandResult.Continue;
+        }
+
+        if (arg.Equals("reset", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.MaxOutputTokens = 0;
+            ctx.ChatOptions = ctx.BuildChatOptions();
+            AnsiConsole.MarkupLine("[dim]Max output tokens reset to provider default.[/]");
+            return CommandResult.Continue;
+        }
+
+        if (!int.TryParse(arg, out var n) || n <= 0)
+        {
+            AnsiConsole.MarkupLine($"[yellow]Invalid value:[/] {Markup.Escape(arg)}  [dim](must be a positive integer)[/]");
+            return CommandResult.Continue;
+        }
+
+        ctx.MaxOutputTokens = n;
+        ctx.ChatOptions = ctx.BuildChatOptions();
+        AnsiConsole.MarkupLine($"[dim]Max output tokens set to[/] [bold]{n:N0}[/][dim].[/]");
+        return CommandResult.Continue;
+    }
+
     private static async Task CmdEventsAsync(ReplSessionContext ctx, string arg)
     {
         if (!File.Exists(ctx.EventsPath))
@@ -697,6 +729,8 @@ internal static class ReplCommands
         AnsiConsole.MarkupLine("  [bold cyan]/memory show <name>[/]      Show full body of a memory");
         AnsiConsole.MarkupLine("  [bold cyan]/memory delete <name>[/]    Delete a stored memory");
         AnsiConsole.MarkupLine("  [bold cyan]/memory save[/]             Extract and save memories from the current session now");
+        AnsiConsole.MarkupLine("  [bold cyan]/max-tokens <n>[/]          Set max output tokens for each response");
+        AnsiConsole.MarkupLine("  [bold cyan]/max-tokens reset[/]        Restore provider default max output tokens");
         AnsiConsole.MarkupLine("  [bold cyan]/exit[/]                    Exit the REPL (auto-saves memories)");
     }
 

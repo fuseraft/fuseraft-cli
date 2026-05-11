@@ -76,6 +76,9 @@ internal sealed class ReplSessionContext
     public bool             SafeMode;
     public HashSet<string>? PreSafeDisabled;
 
+    // Max output tokens (0 = provider default)
+    public int MaxOutputTokens;
+
     // Context growth tracking
     public int              PrevCtxEstimate;
     public readonly List<int> TurnTokenDeltas = [];
@@ -131,9 +134,13 @@ internal sealed class ReplSessionContext
     public ChatOptions? BuildChatOptions()
     {
         var active = GetActiveTools();
-        return active.Count > 0
-            ? new ChatOptions { Tools = active.Cast<AITool>().ToList() }
-            : null;
+        var hasTools = active.Count > 0;
+        var hasMax   = MaxOutputTokens > 0;
+        if (!hasTools && !hasMax) return null;
+        var opts = new ChatOptions();
+        if (hasTools) opts.Tools = active.Cast<AITool>().ToList();
+        if (hasMax)   opts.MaxOutputTokens = MaxOutputTokens;
+        return opts;
     }
 
     public int EstimateTokens() =>

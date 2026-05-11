@@ -1,3 +1,4 @@
+#nullable enable
 using fuseraft.Core;
 
 namespace fuseraft.Cli.Commands;
