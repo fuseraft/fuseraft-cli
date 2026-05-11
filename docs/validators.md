@@ -164,17 +164,17 @@ The validator checks THIS TURN ONLY — prior-turn runs do not carry forward.
 
 ## RequireWriteFile
 
-**Used on:** `HANDOFF TO TESTER` (or any route where you require the agent to have written a file this turn)
+**Used on:** Any route where the agent must have written at least one file this turn (e.g. `HANDOFF TO TESTER`, `RECON COMPLETE`, `HANDOFF TO REVIEWER`)
 
-**What it checks:** Walks backward through the conversation history looking for completed `write_file` tool calls (`Role=Tool` messages with a `FunctionResultContent` whose function name contains `write_file`). Stops at the most recent user-role message.
+**What it checks:** Walks backward through the conversation history looking for completed `write_file` or `patch_file` tool calls (`Role=Tool` messages with a `FunctionResultContent` whose function name contains either string). Stops at the most recent user-role message.
 
-**Passes if:** At least one `write_file` call completed in the current agent turn.
+**Passes if:** At least one `write_file` or `patch_file` call completed in the current agent turn.
 
-**Fails if:** No `write_file` call is found — meaning the agent described a file write in text but never actually called the tool.
+**Fails if:** Neither tool was called — meaning the agent described a file write in text but never actually called the tool. Text, code blocks, and responses are not saved to disk.
 
 ### ShellFallbackPattern
 
-Some fixes require only a shell command (e.g. a dependency update) and produce no `write_file` call. Set `ShellFallbackPattern` on the route to allow a successful matching `shell_run` to satisfy the validator in place of `write_file`:
+Some fixes require only a shell command (e.g. a dependency update) and produce no file-write call. Set `ShellFallbackPattern` on the route to allow a successful matching `shell_run` to satisfy the validator instead:
 
 ```yaml
 - Keyword: "HANDOFF TO TESTER"
@@ -185,21 +185,17 @@ Some fixes require only a shell command (e.g. a dependency update) and produce n
 
 The pattern is a pipe-separated list of substrings (case-insensitive). The validator passes if the turn contains a successful `shell_run` whose command matches any alternative. A failed shell command (exit code non-zero, `[ERROR]`, `[TIMEOUT]`, `[DENIED]`) is never accepted regardless of the pattern.
 
-When `ShellFallbackPattern` is omitted the validator behaves as before — only `write_file` satisfies it.
+When `ShellFallbackPattern` is omitted the validator behaves as before — only `write_file`, `patch_file`, or `git_commit` satisfy it.
 
 **Error injected on failure:**
 
 ```
-HANDOFF TO TESTER blocked: no evidence of real work this turn
-(no write_file, no git_commit, no shell fallback matched).
+Handoff blocked: no evidence of real work this turn
+(no write_file, no patch_file, no git_commit, no shell fallback matched).
 
-Required before handing off:
-  1. write_file for every changed file.
-  2. shell_run ./build.sh — fix until it passes.
-  3. git_add + git_commit.
-  4. Retry handoff.
-
-All tools available: write_file, shell_run, read_file. Code blocks are NOT saved to disk.
+You must write at least one file before handing off. Use write_file for new files
+or patch_file for surgical edits to existing files. Code blocks in your response
+are NOT saved to disk — you must call the tool.
 ```
 
 ---
