@@ -33,3 +33,7 @@ This is a personal project and a work in progress, suited for experimentation an
 | [Sessions](sessions.md) | Resumption, HITL, cost tracking, compaction |
 | [Context Store](context.md) | Importing reference material for agents |
 | [Examples](examples.md) | Ready-to-use config examples |
+
+## VS Code Extension
+
+The [Fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) brings the CLI into your editor — run tasks, browse sessions, validate configs, and get YAML/JSON IntelliSense, all from the activity bar.
