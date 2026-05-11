@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Serilog;
@@ -12,6 +13,8 @@ using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Plugins;
+
+ConfigureConsoleEncoding();
 
 // Catch crashes on background threads (not covered by Spectre's SetExceptionHandler).
 AppDomain.CurrentDomain.UnhandledException += (_, e) =>
@@ -225,4 +228,13 @@ try
 finally
 {
     await Log.CloseAndFlushAsync();
+}
+
+static void ConfigureConsoleEncoding()
+{
+    try { Console.OutputEncoding = Encoding.UTF8; }
+    catch (Exception ex) when (ex is IOException or NotSupportedException or UnauthorizedAccessException) { }
+
+    try { Console.InputEncoding = Encoding.UTF8; }
+    catch (Exception ex) when (ex is IOException or NotSupportedException or UnauthorizedAccessException) { }
 }
