@@ -516,7 +516,7 @@ fuseraft validate <path> [options]
 12. Agent names referenced in termination strategies exist in the agents list
 13. If `Telemetry` is set: `OtlpEndpoint` is a valid absolute URI
 14. With `--strict`: every plugin name in any agent's `Plugins` list is registered
-15. For every `ApiKeyEnvVar` referenced: the environment variable is set in the current shell (warning if missing)
+15. For every `ApiKeyEnvVar` referenced: the environment variable is set in the current shell (warning if missing). Note: agents that rely on the OS keychain rather than an env var skip this check — keychain auth is verified only when `--check-connectivity` is used.
 
 **Exit codes**
 
@@ -634,7 +634,7 @@ fuseraft init [output] [options]
 |------|---------|-------------|
 | `-t, --template <name>` | interactive | Team template to use. See templates below. |
 | `-m, --model <id>` | auto-detected | Model ID to use for all agents. Auto-detected from your API keys if omitted. |
-| `-e, --endpoint <url>` | `~/.fuseraft/config` | Provider API endpoint URL. Defaults to the endpoint saved in `~/.fuseraft/config` if present. |
+| `-e, --endpoint <url>` | `~/.fuseraft/config` | Provider API endpoint URL. Defaults to the endpoint saved in `~/.fuseraft/config` if present. At run time, agents without an explicit `Endpoint` also inherit this value automatically. |
 | `--no-interactive` | off | Skip all prompts and generate with the supplied options and defaults. |
 
 **Templates**
