@@ -132,8 +132,15 @@ public sealed class ChatClientFactory(
 
         if (detected is null)
         {
-            // If the caller provided at least Provider, we can proceed; otherwise fail fast
-            // with a helpful message rather than a cryptic missing-env-var error later.
+            // A custom Endpoint is an unambiguous signal that the caller knows which
+            // provider to use — treat as OpenAI-compatible and skip the prefix check.
+            // This covers non-standard model IDs (e.g. AWS Bedrock "anthropic.claude-...:0",
+            // Open WebUI deployments) where the endpoint is set via global config or inline.
+            if (!string.IsNullOrEmpty(config.Endpoint))
+                return config with { Provider = string.IsNullOrEmpty(config.Provider) ? "openai" : config.Provider };
+
+            // No endpoint and no detectable prefix — fail fast with a helpful message
+            // rather than a cryptic missing-env-var error later.
             if (string.IsNullOrEmpty(config.Provider))
                 throw new InvalidOperationException(
                     $"Cannot determine the LLM provider for model '{config.ModelId}'. " +
