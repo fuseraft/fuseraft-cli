@@ -759,7 +759,7 @@ public static class OrchestratorBuilder
                 .AddJsonFile(Path.GetFullPath(configPath), optional: false)
                 .Build();
 
-        return ApplyGlobalDefaults(BindConfig(configPath, configuration));
+        return BindConfig(configPath, configuration);
     }
 
     // Resolves the base system prompt prepended to every agent.
