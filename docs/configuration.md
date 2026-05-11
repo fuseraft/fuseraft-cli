@@ -234,7 +234,7 @@ The sub-agent runs to completion and returns a prose summary to the calling agen
 
 ### RemoteAgent
 
-Delegates an agent slot to a remote process that implements the [A2A protocol](https://google.github.io/A2A/). The agent card is fetched from `{Url}/.well-known/agent.json` at session startup and the agent participates in orchestration identically to locally-hosted agents.
+Delegates an agent slot to a remote process that implements the [A2A protocol](https://a2a-protocol.org/). The agent card is fetched from `{Url}/.well-known/agent.json` at session startup and the agent participates in orchestration identically to locally-hosted agents.
 
 ```yaml
 - Name: RemoteReviewer

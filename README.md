@@ -1,6 +1,6 @@
 # Fuseraft CLI
 
-A .NET multi-agent orchestration framework built on [Microsoft Agent Framework](https://github.com/microsoft/agents). Define a team of AI agents in a YAML config and coordinate them via keyword routing, state machine routing, declarative directed-graph routing, LLM-based selection, or fully autonomous [Magentic](https://arxiv.org/abs/2411.04468) orchestration. Works with Anthropic, xAI, OpenAI, Azure OpenAI, Ollama, and any OpenAI-compatible provider. Agents can be local or remote — the [A2A protocol](https://google.github.io/A2A/) lets you federate agent slots to independently hosted services.
+A .NET multi-agent orchestration framework built on [Microsoft Agent Framework](https://github.com/microsoft/agents). Define a team of AI agents in a YAML config and coordinate them via keyword routing, state machine routing, declarative directed-graph routing, LLM-based selection, or fully autonomous [Magentic](https://arxiv.org/abs/2411.04468) orchestration. Works with Anthropic, xAI, OpenAI, Azure OpenAI, Ollama, and any OpenAI-compatible provider. Agents can be local or remote — the [A2A protocol](https://a2a-protocol.org/) lets you federate agent slots to independently hosted services.
 
 > **Early stage.** Functional but not battle-tested — best suited for experimentation and automation of well-defined tasks.
 
@@ -70,7 +70,7 @@ Pipelines range from a single task-routed assistant:
 - Coordinates any number of agents via keyword routing, state machine routing, declarative directed-graph routing (with parallel fan-out/fan-in), LLM-based selection, or fully autonomous Magentic orchestration
 - Agents can be declared inline or as standalone `AgentFile` YAML files — reuse and version agent definitions independently across configs
 - Gives each agent access to tools: filesystem, shell, git, HTTP, JSON, search, Docker sandboxes, MCP servers, persistent scratchpad, and a shared chatroom
-- Federates agent slots to remote services via the [A2A protocol](https://google.github.io/A2A/) — remote agents participate identically to local ones
+- Federates agent slots to remote services via the [A2A protocol](https://a2a-protocol.org/) — remote agents participate identically to local ones
 - Checkpoints after every turn so sessions can always be resumed exactly where they left off
 - Tracks token usage per turn; enforces per-model context caps via `MaxContextTokens` and a session-wide hard stop via `MaxTotalTokens`
 - Blocks handoffs with routing validators unless evidence of real progress is present on disk
