@@ -288,6 +288,8 @@ When the model invokes a tool, a dim `> tool_name(arg)` line is printed and the 
 | `/safe-mode off` | Restore tool categories to their state before safe mode was enabled |
 | `/provider` | Show the current model, endpoint, and API key store |
 | `/provider setup` | Reconfigure provider URL, model ID, and API key; saves immediately |
+| `/max-tokens <n>` | Cap the model's output to `n` tokens per response |
+| `/max-tokens reset` | Restore the provider's default max output tokens |
 | `/exit` | End the session |
 
 When safe mode is active, the prompt gains a `[safe]` prefix as a persistent visual reminder.

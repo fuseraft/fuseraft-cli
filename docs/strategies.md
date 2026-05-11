@@ -71,7 +71,7 @@ Selection:
 
 1. **Tool-call routing (preferred):** If the agent calls `handoff(route_keyword: "...")` via the `Handoff` plugin, the argument is used directly as the routing keyword — no text scanning occurs. This is the most reliable signal because it is a typed function argument, not free text. fuseraft also terminates the agent's tool loop immediately when `handoff` is called, so the agent cannot accidentally call other tools after signalling completion. Add `- Handoff` to an agent's `Plugins` list and instruct it to `call handoff(route_keyword: "KEYWORD")` instead of emitting the keyword as text.
 2. **Text scanning (fallback):** If no `handoff` tool call is present, the response text is scanned for every keyword configured in `Routes`.
-3. **Strict matching** — a text keyword matches only when it appears **alone on its own line** (after stripping markdown formatting characters `*` and `_`). A keyword embedded in a sentence or used as a prose section header (e.g. `BUGS FOUND: 3 failures`) does not match. This prevents accidental routing when agents reference another role's keyword in their output.
+3. **Line matching** — a text keyword matches when it appears **alone on its own line** (exact match) or at the **start of a line followed by whitespace or punctuation** (e.g. `BUGS FOUND: all issues fixed`), after stripping markdown formatting characters `*` and `_`. A keyword embedded mid-sentence does not match. This prevents accidental routing when agents reference another role's keyword in their output.
 4. If **multiple** text keywords appear on their own lines in the same response, the response is rejected as ambiguous and a correction is injected asking the agent to use exactly one keyword. This prevents silent first-match bias from config ordering.
 5. The **single** matched keyword is checked against `SourceAgents` — the route only fires if the message author is in that list (or if `SourceAgents` is omitted).
 6. If a route has validators (`Validator` or `Validators`), they run before the route fires. If validation fails, the source agent is re-invoked with an error message injected.
@@ -267,7 +267,7 @@ Selection:
 6. If no signal is detected, the current state's agent is re-invoked with a nudge listing the available signals.
 7. A `Terminal: true` state re-invokes its agent every turn until the `Termination` strategy fires — it has no outgoing transitions.
 
-**Signal detection rules** are the same as keyword routing: the signal must appear alone on its own line (after stripping `*`/`_` markdown). Agents may also use the `Handoff` plugin (`handoff(route_keyword: "SIGNAL")`) for typed, unambiguous signalling.
+**Signal detection rules** are the same as keyword routing: the signal must appear alone on its own line or at the start of a line followed by whitespace or punctuation (after stripping `*`/`_` markdown). Agents may also use the `Handoff` plugin (`handoff(route_keyword: "SIGNAL")`) for typed, unambiguous signalling.
 
 **`StateMachineConfig` fields**
 
@@ -338,50 +338,50 @@ A declarative directed graph where each agent is bound to a named node and edges
 Selection:
   Type: graph
   Graph:
-    Entry: planner
+    EntryNode: planner
     Nodes:
       - Id: planner
         Agent: Planner
-        Edges:
-          - To: developer
-            Keyword: "HANDOFF TO DEVELOPER"
-            Validators:
-              - RequireBrief
-
       - Id: developer
         Agent: Developer
-        Edges:
-          - To: tester
-            Keyword: "HANDOFF TO TESTER"
-            Validators:
-              - RequireWriteFile
-              - RequireShellPass
-          - To: planner
-            Keyword: REPLAN REQUIRED
-
       - Id: tester
         Agent: Tester
-        Edges:
-          - To: reviewer
-            Keyword: "HANDOFF TO REVIEWER"
-            Validators:
-              - TestReportValid
-          - To: developer
-            Keyword: BUGS FOUND
-
       - Id: reviewer
         Agent: Reviewer
-        Edges:
-          - To: approved
-            Keyword: APPROVED
-            Validators:
-              - RequireReviewJudgement
-          - To: developer
-            Keyword: REVISION REQUIRED
-
       - Id: approved
         Agent: Reviewer
         Terminal: true
+    Edges:
+      - From: planner
+        To: developer
+        Keyword: "HANDOFF TO DEVELOPER"
+        Validators:
+          - RequireBrief
+      - From: developer
+        To: tester
+        Keyword: "HANDOFF TO TESTER"
+        Validators:
+          - RequireWriteFile
+          - RequireShellPass
+      - From: developer
+        To: planner
+        Keyword: REPLAN REQUIRED
+      - From: tester
+        To: reviewer
+        Keyword: "HANDOFF TO REVIEWER"
+        Validators:
+          - TestReportValid
+      - From: tester
+        To: developer
+        Keyword: BUGS FOUND
+      - From: reviewer
+        To: approved
+        Keyword: APPROVED
+        Validators:
+          - RequireReviewJudgement
+      - From: reviewer
+        To: developer
+        Keyword: REVISION REQUIRED
 ```
 
 **How it works**
@@ -389,7 +389,7 @@ Selection:
 1. **BFS layer assignment:** at startup, fuseraft computes a BFS layer for every node from the entry node following only forward edges. Edges are classified as *forward* (target layer > source layer) or *back-edges* (target layer ≤ source layer).
 2. **Forward edges** activate the target agent in the current multi-agent phase via normal framework messaging.
 3. **Back-edges** break the current phase. When a back-edge keyword is detected and all validators pass, the orchestrator terminates the active phase and restarts execution from the target node.
-4. **Keyword detection** uses the same rules as keyword routing: the keyword must appear alone on its own line (after stripping `*`/`_` markdown), or be emitted via the `Handoff` plugin (`handoff(route_keyword: "KEYWORD")`). Only the current node's outgoing edges are checked — keywords that belong to other nodes are ignored.
+4. **Keyword detection** uses strict line matching: the keyword must appear **alone on its own line** with no trailing text (after stripping `*`/`_` markdown), or be emitted via the `Handoff` plugin (`handoff(route_keyword: "KEYWORD")`). This is stricter than keyword routing — a keyword at the start of a line followed by punctuation (e.g. `APPROVED: see notes`) does not match in graph mode. Only the current node's outgoing edges are checked — keywords that belong to other nodes are ignored.
 5. **Terminal nodes** (`Terminal: true`) invoke the termination check before keyword detection. Back-edges on a terminal node are unreachable — if you need a terminal outcome with evidence gating, use a routing node whose forward edge points to a separate terminal node with validators on that edge.
 6. **Unconditional edges** (no `Keyword`) fire automatically after the agent's turn without keyword scanning. Unconditional forward edges hand off immediately; unconditional back-edges break the phase immediately.
 
@@ -398,21 +398,24 @@ Selection:
 A single node may declare back-edges to different target nodes — the key differentiator from keyword routing's loop-back conventions. In the example below the `reviewer` node routes back to two different targets depending on which keyword fires:
 
 ```yaml
-- Id: reviewer
-  Agent: Reviewer
-  Edges:
-    - To: approved
-      Keyword: APPROVED
-      Validators:
-        - RequireReviewJudgement
-    - To: developer
-      Keyword: REVISION REQUIRED     # back-edge → developer
-    - To: planner
-      Keyword: REPLAN REQUIRED       # back-edge → planner (different target)
-
-- Id: approved
-  Agent: Reviewer
-  Terminal: true
+Nodes:
+  - Id: reviewer
+    Agent: Reviewer
+  - Id: approved
+    Agent: Reviewer
+    Terminal: true
+Edges:
+  - From: reviewer
+    To: approved
+    Keyword: APPROVED
+    Validators:
+      - RequireReviewJudgement
+  - From: reviewer
+    To: developer
+    Keyword: REVISION REQUIRED     # back-edge → developer
+  - From: reviewer
+    To: planner
+    Keyword: REPLAN REQUIRED       # back-edge → planner (different target)
 ```
 
 In keyword routing this pattern requires two separate loop-back routes and depends on keyword scanning order. In graph routing the topology is explicit: each edge has a distinct target.
@@ -421,29 +424,33 @@ In keyword routing this pattern requires two separate loop-back routes and depen
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `Entry` | string | yes | Node ID of the first node to execute. |
-| `Nodes` | array | yes | Ordered list of `GraphNodeConfig`. At least one node required. |
+| `EntryNode` | string | no | Node ID of the first node to execute. Defaults to the first node when omitted. |
+| `Nodes` | array | yes | Node definitions. Each binds an agent role to a named position in the graph. |
+| `Edges` | array | yes | Directed edges. Evaluated in declaration order — the first matching edge fires. |
+| `MaxRetries` | int | `4` | Maximum consecutive correction attempts per node before a `ValidatorStuckException` is thrown. |
 
 **`GraphNodeConfig` fields**
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `Id` | string | — | Unique node identifier. Referenced by edges' `To` field and by `Entry`. |
+| `Id` | string | — | Unique node identifier. Referenced by `EntryNode` and by edges' `From`/`To` fields. |
 | `Agent` | string | — | Agent name from the `Agents` list to invoke at this node. Multiple nodes may share the same agent. |
-| `Terminal` | bool | `false` | When `true`, the termination check fires before keyword detection. No outgoing edges are evaluated after termination fires. |
-| `Edges` | array | `[]` | Outgoing edges from this node. Empty means the agent runs until the `Termination` strategy fires. |
+| `Terminal` | bool | `false` | When `true`, the session terminates after the agent executes once. Outgoing edges are not evaluated. |
+| `Parallel` | bool | `false` | When `true`, the node participates in a parallel fan-out group — runs concurrently with other `Parallel` nodes sharing the same triggering keyword. |
+| `Validators` | array | — | Validators that must all pass before a `Terminal` node ends the session. Ignored on non-terminal nodes. |
 
 **`GraphEdgeConfig` fields**
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `To` | string | — | Target node ID. Must exist in `Graph.Nodes`. Forward vs. back-edge classification is computed automatically from BFS layer topology. |
+| `From` | string | — | Source node ID. Must match a `GraphNodeConfig.Id`. |
+| `To` | string | — | Target node ID. Must match a `GraphNodeConfig.Id`. Forward vs. back-edge classification is computed automatically from BFS layer topology. |
 | `Keyword` | string | — | Routing keyword. Must appear alone on its own line. When omitted, the edge is *unconditional* — it fires after the agent's turn without keyword scanning. |
 | `Validator` | string | — | Optional single validator. Blocks the edge until validation passes. |
-| `Validators` | array | — | Optional multiple validators (AND semantics). |
+| `Validators` | array | — | Optional multiple validators (AND semantics). Takes precedence over `Validator` when both are set. |
 | `SourceAgents` | array | any | Optional. Edge only fires when the message author is in this list. |
 | `RequiredCommandPattern` | string | — | Used with `RequireShellPass`. The passing command must contain at least one pipe-separated substring. |
-| `ShellFallbackPattern` | string | — | Fallback command pattern if `RequiredCommandPattern` fails. |
+| `ShellFallbackPattern` | string | — | Used with `RequireWriteFile`. A shell command matching this pattern is accepted in lieu of `write_file`. |
 | `RequireHumanApproval` | bool | `false` | When `true`, the operator must explicitly approve (`y`) before this edge fires. If rejected, the source agent is re-invoked with a "route blocked" message. Applies to both forward edges and back-edges. |
 | `RecoveryAgent` | string | — | Optional. Agent to invoke for one intervention turn when a validator has failed two or more consecutive times on this edge. The recovery agent receives a diagnostic message and may fix the blocking issue. Activates at most once per edge per session. |
 
@@ -663,7 +670,7 @@ Graph fits naturally when:
 - The pipeline is a directed graph, not a strict linear sequence — phases fan out or converge in ways that are cleaner to express as nodes and edges than as a flat route table
 - You still want validators on individual edges (graph edges support the full `Validators` / `RequiredCommandPattern` surface, the same as keyword routes)
 
-Graph and keyword routing use the same signal mechanism (keyword on own line, or `handoff()` plugin). Migrating an existing keyword config to graph requires mapping agents to node IDs and routes to edges. The main addition is the explicit `Entry` node and the `Id`/`To` structure on each edge.
+Graph and keyword routing use the same `handoff()` plugin for typed signalling, but their text-scan rules differ: keyword routing uses relaxed matching (keyword at start of line followed by whitespace or punctuation also fires), while graph uses strict matching (keyword must be alone on its own line, no trailing text). Migrating an existing keyword config to graph requires mapping agents to node IDs and routes to edges. The main addition is the explicit `EntryNode` and the flat `Edges` list with `From`/`To` fields.
 
 **What graph trades away:** lossless compaction and Verifier integration. For hallucination-resistant routing where agents cannot route themselves to an unexpected node, state machine remains the stronger choice.
 
@@ -673,7 +680,7 @@ Graph and keyword routing use the same signal mechanism (keyword on own line, or
 
 | | Keyword | State machine | Structured | Graph |
 |---|---|---|---|---|
-| Handoff signal | Keyword on own line | Signal on own line (same matching) | JSON field value | Keyword on own line (same matching) |
+| Handoff signal | Keyword on own line (relaxed) | Signal on own line (same as keyword) | JSON field value | Keyword alone on own line (strict) |
 | Evidence gating | Validators (per-route) | Contracts (per-transition, typed) | Instructions only | Validators (per-edge) |
 | Routing topology | All routes active at once | Only current state's transitions active | All routes active at once | Only current node's edges active |
 | Ghost signals | Possible — any agent can emit any keyword | Impossible — wrong-state signals are ignored | N/A | Reduced — wrong-node keywords are ignored |

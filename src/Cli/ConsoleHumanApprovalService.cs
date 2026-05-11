@@ -10,13 +10,20 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
 {
     public Task<string?> PromptContinueAsync()
     {
-        AnsiConsole.Markup("[dim]  ↩ Enter to continue  ·  type a message to redirect  ·  q to stop:[/]  ");
+        AnsiConsole.Markup("[dim]  ↩ Enter or y to continue  ·  type a message to redirect  ·  q to stop:[/]  ");
         var input = Console.ReadLine()?.Trim() ?? string.Empty;
 
         if (string.IsNullOrEmpty(input)) return Task.FromResult<string?>(null);
         if (input.Equals("q", StringComparison.OrdinalIgnoreCase) ||
             input.Equals("quit", StringComparison.OrdinalIgnoreCase))
             return Task.FromResult<string?>("\x00");
+
+        // Treat affirmative short inputs as "continue" so that a 'y' typed for
+        // a preceding shell-approval prompt that was consumed before the user could
+        // respond doesn't accidentally inject "y" as a redirect message.
+        if (input.Equals("y", StringComparison.OrdinalIgnoreCase) ||
+            input.Equals("yes", StringComparison.OrdinalIgnoreCase))
+            return Task.FromResult<string?>(null);
 
         return Task.FromResult<string?>(input);
     }
@@ -39,8 +46,7 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
         var input = Console.ReadLine()?.Trim() ?? string.Empty;
         var allowed = input.Equals("y", StringComparison.OrdinalIgnoreCase) ||
                       input.Equals("yes", StringComparison.OrdinalIgnoreCase);
-        if (!allowed)
-            AnsiConsole.MarkupLine("[dim]Command blocked.[/]");
+        AnsiConsole.MarkupLine(allowed ? "[dim]Command allowed.[/]" : "[dim]Command blocked.[/]");
         return Task.FromResult(allowed);
     }
 
