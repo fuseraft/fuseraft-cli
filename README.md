@@ -104,6 +104,18 @@ Pipelines range from a single task-routed assistant:
 
 ---
 
+## VS Code Extension
+
+The [Fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) brings the CLI into your editor:
+
+- Activity bar panel with **Run Task**, **Sessions**, **Configs**, and **Context** views
+- CodeLens on config files — run, validate, or diagram without leaving the editor
+- Command palette integration for all common CLI commands
+- YAML/JSON IntelliSense with schema validation for config files
+- Session transcript viewer and real-time DevUI launcher
+
+---
+
 ## License
 
 MIT
