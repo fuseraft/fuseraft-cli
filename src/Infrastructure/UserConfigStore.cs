@@ -30,9 +30,10 @@ public static class UserConfigStore
 
             var config = new UserConfig
             {
-                ModelId  = onDisk.ModelId  ?? string.Empty,
-                Endpoint = onDisk.Endpoint ?? string.Empty,
-                Provider = onDisk.Provider ?? string.Empty,
+                ModelId      = onDisk.ModelId      ?? string.Empty,
+                Endpoint     = onDisk.Endpoint     ?? string.Empty,
+                Provider     = onDisk.Provider     ?? string.Empty,
+                ApiKeyEnvVar = onDisk.ApiKeyEnvVar ?? string.Empty,
             };
             return (config, onDisk.ApiKey);
         }
@@ -48,9 +49,10 @@ public static class UserConfigStore
         Directory.CreateDirectory(ConfigDir);
         var onDisk = new OnDiskConfig
         {
-            ModelId  = config.ModelId,
-            Endpoint = config.Endpoint,
-            Provider = config.Provider,
+            ModelId      = config.ModelId,
+            Endpoint     = config.Endpoint,
+            Provider     = config.Provider,
+            ApiKeyEnvVar = config.ApiKeyEnvVar,
         };
         File.WriteAllText(ConfigPath, JsonSerializer.Serialize(onDisk, JsonOptions));
     }
@@ -67,6 +69,9 @@ public static class UserConfigStore
 
         [JsonPropertyName("provider")]
         public string? Provider { get; set; }
+
+        [JsonPropertyName("apiKeyEnvVar")]
+        public string? ApiKeyEnvVar { get; set; }
 
         // Present only in configs created before keychain support was added.
         [JsonPropertyName("apiKey")]

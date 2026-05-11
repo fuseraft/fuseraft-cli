@@ -65,6 +65,10 @@ public static class OrchestratorBuilder
         // Expand ${ENV_VAR} tokens in security and API profile config before use.
         config = ExpandEnvVars(config);
 
+        // Fill in Endpoint and ApiKeyEnvVar from ~/.fuseraft/config for any agent
+        // model that doesn't declare them explicitly.
+        config = ApplyGlobalDefaults(config);
+
         // Apply per-config security constraints and API profiles to the security-sensitive plugins.
         var profiles = config.ApiProfiles.Count > 0
             ? (IReadOnlyDictionary<string, ApiProfileConfig>)config.ApiProfiles
@@ -750,7 +754,7 @@ public static class OrchestratorBuilder
                 .AddJsonFile(Path.GetFullPath(configPath), optional: false)
                 .Build();
 
-        return BindConfig(configPath, configuration);
+        return ApplyGlobalDefaults(BindConfig(configPath, configuration));
     }
 
     // Resolves the base system prompt prepended to every agent.
@@ -778,6 +782,39 @@ public static class OrchestratorBuilder
         using var stream = asm.GetManifestResourceStream(name)!;
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd().Trim();
+    }
+
+    // Fills in Endpoint and ApiKeyEnvVar from ~/.fuseraft/config on any model config
+    // that doesn't set them explicitly. This lets the global config act as a default
+    // provider for all agents without requiring every agent file to repeat the values.
+    // Per-agent explicit values always win; only empty fields are filled.
+    private static OrchestrationConfig ApplyGlobalDefaults(OrchestrationConfig config)
+    {
+        var (globalCfg, _) = UserConfigStore.Load();
+        var globalEndpoint   = globalCfg is not null && !string.IsNullOrWhiteSpace(globalCfg.Endpoint)     ? globalCfg.Endpoint     : null;
+        var globalApiKeyEnvVar = globalCfg is not null && !string.IsNullOrWhiteSpace(globalCfg.ApiKeyEnvVar) ? globalCfg.ApiKeyEnvVar : null;
+
+        if (globalEndpoint is null && globalApiKeyEnvVar is null) return config;
+
+        ModelConfig Fill(ModelConfig m) => m with
+        {
+            Endpoint     = string.IsNullOrWhiteSpace(m.Endpoint)     && globalEndpoint     is not null ? globalEndpoint     : m.Endpoint,
+            ApiKeyEnvVar = string.IsNullOrWhiteSpace(m.ApiKeyEnvVar) && globalApiKeyEnvVar is not null ? globalApiKeyEnvVar : m.ApiKeyEnvVar,
+        };
+
+        var agents = config.Agents.Select(a => a with { Model = Fill(a.Model) }).ToList();
+
+        var models = config.Models.ToDictionary(kv => kv.Key, kv => Fill(kv.Value));
+
+        var sel = config.Selection with
+        {
+            Model    = config.Selection.Model    is not null ? Fill(config.Selection.Model)    : null,
+            Magentic = config.Selection.Magentic is not null
+                ? config.Selection.Magentic with { Model = config.Selection.Magentic.Model is not null ? Fill(config.Selection.Magentic.Model) : null }
+                : null,
+        };
+
+        return config with { Agents = agents, Models = models, Selection = sel };
     }
 
     private static ModelConfig ResolveAlias(
