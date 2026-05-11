@@ -14,7 +14,7 @@ using fuseraft.Core.Interfaces;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Plugins;
 
-ConfigureWindowsConsoleEncoding();
+ConfigureConsoleEncoding();
 
 // Catch crashes on background threads (not covered by Spectre's SetExceptionHandler).
 AppDomain.CurrentDomain.UnhandledException += (_, e) =>
@@ -230,21 +230,11 @@ finally
     await Log.CloseAndFlushAsync();
 }
 
-static void ConfigureWindowsConsoleEncoding()
+static void ConfigureConsoleEncoding()
 {
-    if (!OperatingSystem.IsWindows()) return;
+    try { Console.OutputEncoding = Encoding.UTF8; }
+    catch (Exception ex) when (ex is IOException or NotSupportedException or UnauthorizedAccessException) { }
 
-    TrySetConsoleEncoding(() => Console.OutputEncoding = Encoding.UTF8);
-    TrySetConsoleEncoding(() => Console.InputEncoding = Encoding.UTF8);
-}
-
-static void TrySetConsoleEncoding(Action setEncoding)
-{
-    try
-    {
-        setEncoding();
-    }
-    catch (Exception ex) when (ex is IOException or NotSupportedException or UnauthorizedAccessException)
-    {
-    }
+    try { Console.InputEncoding = Encoding.UTF8; }
+    catch (Exception ex) when (ex is IOException or NotSupportedException or UnauthorizedAccessException) { }
 }
