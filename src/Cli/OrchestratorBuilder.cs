@@ -789,20 +789,22 @@ public static class OrchestratorBuilder
         return reader.ReadToEnd().Trim();
     }
 
-    // Fills in Endpoint and ApiKeyEnvVar from ~/.fuseraft/config on any model config
-    // that doesn't set them explicitly. This lets the global config act as a default
-    // provider for all agents without requiring every agent file to repeat the values.
+    // Fills in ModelId, Endpoint, and ApiKeyEnvVar from ~/.fuseraft/config on any model
+    // config that doesn't set them explicitly. This lets the global config act as a
+    // default provider so agent files work without repeating connection details.
     // Per-agent explicit values always win; only empty fields are filled.
     private static OrchestrationConfig ApplyGlobalDefaults(OrchestrationConfig config)
     {
         var (globalCfg, _) = UserConfigStore.Load();
-        var globalEndpoint   = globalCfg is not null && !string.IsNullOrWhiteSpace(globalCfg.Endpoint)     ? globalCfg.Endpoint     : null;
+        var globalModelId      = globalCfg is not null && !string.IsNullOrWhiteSpace(globalCfg.ModelId)      ? globalCfg.ModelId      : null;
+        var globalEndpoint     = globalCfg is not null && !string.IsNullOrWhiteSpace(globalCfg.Endpoint)     ? globalCfg.Endpoint     : null;
         var globalApiKeyEnvVar = globalCfg is not null && !string.IsNullOrWhiteSpace(globalCfg.ApiKeyEnvVar) ? globalCfg.ApiKeyEnvVar : null;
 
-        if (globalEndpoint is null && globalApiKeyEnvVar is null) return config;
+        if (globalModelId is null && globalEndpoint is null && globalApiKeyEnvVar is null) return config;
 
         ModelConfig Fill(ModelConfig m) => m with
         {
+            ModelId      = string.IsNullOrWhiteSpace(m.ModelId)      && globalModelId      is not null ? globalModelId      : m.ModelId,
             Endpoint     = string.IsNullOrWhiteSpace(m.Endpoint)     && globalEndpoint     is not null ? globalEndpoint     : m.Endpoint,
             ApiKeyEnvVar = string.IsNullOrWhiteSpace(m.ApiKeyEnvVar) && globalApiKeyEnvVar is not null ? globalApiKeyEnvVar : m.ApiKeyEnvVar,
         };
