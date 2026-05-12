@@ -30,9 +30,49 @@ Pipelines range from a single task-routed assistant:
 
 ---
 
+## Installation
+
+The prebuilt binaries are self-contained — no .NET installation required.
+
+**Linux / macOS**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.sh | bash
+```
+
+Add `--system` to install to `/usr/local/bin` instead of `~/.local/bin`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.sh | bash -s -- --system
+```
+
+**Windows (PowerShell)**
+
+```powershell
+irm https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.ps1 | iex
+```
+
+Both scripts download the latest release from [GitHub Releases](https://github.com/fuseraft/fuseraft-cli/releases), place the binary on your `PATH`, and print a `fuseraft --version` hint when done.
+
+**Manual download**
+
+Grab the archive for your platform directly from [Releases](https://github.com/fuseraft/fuseraft-cli/releases), extract the `fuseraft` (or `fuseraft.exe`) binary, and place it anywhere on your `PATH`.
+
+**Build from source**
+
+Requires the [.NET 10 SDK](https://dot.net):
+
+```bash
+./build.sh          # Linux / macOS
+.\build.ps1         # Windows
+```
+
+The binary lands in `./bin/`.
+
+---
+
 ## Prerequisites
 
-- [.NET 10 SDK](https://dot.net)
 - An API key for your chosen provider (e.g. `XAI_API_KEY` for xAI)
 
 ---
@@ -40,27 +80,23 @@ Pipelines range from a single task-routed assistant:
 ## Quick start
 
 ```bash
-# Build
-./build.sh          # Linux / macOS
-.\build.ps1         # Windows
-
 # Generate a config from a template (interactive wizard)
-./bin/fuseraft init
+fuseraft init
 
 # Or pick a template directly
-./bin/fuseraft init --template dev-team --model claude-sonnet-4-6
-./bin/fuseraft init --template graph          # directed-graph pipeline with parallel fan-out
-./bin/fuseraft init --template designer       # AI-assisted config designer
+fuseraft init --template dev-team --model claude-sonnet-4-6
+fuseraft init --template graph          # directed-graph pipeline with parallel fan-out
+fuseraft init --template designer       # AI-assisted config designer
 
 # Run against a YAML config
-./bin/fuseraft run -c config/orchestration.yaml "Build a REST API in Go with JWT authentication"
+fuseraft run -c config/orchestration.yaml "Build a REST API in Go with JWT authentication"
 
 # Resume the most recent incomplete session
-./bin/fuseraft run --resume
+fuseraft run --resume
 
 # Validate a config before running; --diagram prints a Mermaid flowchart
-./bin/fuseraft validate config/orchestration.yaml
-./bin/fuseraft validate config/orchestration.yaml --diagram
+fuseraft validate config/orchestration.yaml
+fuseraft validate config/orchestration.yaml --diagram
 ```
 
 ---
