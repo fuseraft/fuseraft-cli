@@ -760,6 +760,15 @@ fuseraft context add ~/specs/ --name specs --description "Product specifications
 fuseraft context add ~/docs/runbook.md --dir ~/projects/my-app
 ```
 
+**Binary document extraction:** When the source is a `.pdf`, `.docx`, `.pptx`, or `.xlsx` file, fuseraft automatically extracts the plain text and stores it as a `.txt` file. Agents read the extracted text via `read_file` — no `Document` plugin required. A note is printed on import:
+
+```
+✓ architecture — 1 file(s), 48.2 KB
+  Extracted from architecture.pdf: PDF — 24 page(s) → architecture.txt
+```
+
+If extraction fails (encrypted file, corrupt format), the binary is stored with a warning and will not be readable by agents via `read_file`.
+
 After importing, agents see an entry like this at the top of their system prompt:
 
 ```

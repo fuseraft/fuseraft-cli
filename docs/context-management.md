@@ -30,11 +30,18 @@ available, and can access the full content with `read_file`.
 ```yaml
 # No config required — populated by CLI before running:
 #   fuseraft context add ~/docs/schema.sql --name db-schema
-#   fuseraft context add ~/specs/ --name specs
+#   fuseraft context add ~/specs/          --name specs
+#   fuseraft context add ~/docs/design.pdf --name design   # text extracted automatically
 ```
 
-**When to use:** Database schemas, API specs, architecture docs, task briefs — anything too
-large to paste into the task argument but that agents should know exists from turn one.
+**When to use:** Database schemas, API specs, architecture docs, slide decks, spreadsheets,
+task briefs — anything too large to paste into the task argument but that agents should know
+exists from turn one.
+
+**Binary documents:** When you import a `.pdf`, `.docx`, `.pptx`, or `.xlsx` file, fuseraft
+extracts the plain text at import time and stores a `.txt` file instead. Agents access it
+via `read_file` with no extra plugin. For documents found *during* a session — or when you
+need individual Excel sheets — use the [`Document` plugin](plugins.md#document) directly.
 
 See [Context Store](context-store.md) for the full CLI reference.
 
