@@ -516,7 +516,7 @@ fuseraft validate <path> [options]
 12. Agent names referenced in termination strategies exist in the agents list
 13. If `Telemetry` is set: `OtlpEndpoint` is a valid absolute URI
 14. With `--strict`: every plugin name in any agent's `Plugins` list is registered
-15. For every `ApiKeyEnvVar` referenced: the environment variable is set in the current shell (warning if missing)
+15. For every `ApiKeyEnvVar` referenced: the environment variable is set in the current shell (warning if missing). Note: agents that rely on the OS keychain rather than an env var skip this check — keychain auth is verified only when `--check-connectivity` is used.
 
 **Exit codes**
 
@@ -634,7 +634,7 @@ fuseraft init [output] [options]
 |------|---------|-------------|
 | `-t, --template <name>` | interactive | Team template to use. See templates below. |
 | `-m, --model <id>` | auto-detected | Model ID to use for all agents. Auto-detected from your API keys if omitted. |
-| `-e, --endpoint <url>` | `~/.fuseraft/config` | Provider API endpoint URL. Defaults to the endpoint saved in `~/.fuseraft/config` if present. |
+| `-e, --endpoint <url>` | `~/.fuseraft/config` | Provider API endpoint URL. Defaults to the endpoint saved in `~/.fuseraft/config` if present. At run time, agents without an explicit `Endpoint` also inherit this value automatically. |
 | `--no-interactive` | off | Skip all prompts and generate with the supplied options and defaults. |
 
 **Templates**
@@ -759,6 +759,15 @@ fuseraft context add ~/specs/ --name specs --description "Product specifications
 # Target a specific project directory
 fuseraft context add ~/docs/runbook.md --dir ~/projects/my-app
 ```
+
+**Binary document extraction:** When the source is a `.pdf`, `.docx`, `.pptx`, or `.xlsx` file, fuseraft automatically extracts the plain text and stores it as a `.txt` file. Agents read the extracted text via `read_file` — no `Document` plugin required. A note is printed on import:
+
+```
+✓ architecture — 1 file(s), 48.2 KB
+  Extracted from architecture.pdf: PDF — 24 page(s) → architecture.txt
+```
+
+If extraction fails (encrypted file, corrupt format), the binary is stored with a warning and will not be readable by agents via `read_file`.
 
 After importing, agents see an entry like this at the top of their system prompt:
 

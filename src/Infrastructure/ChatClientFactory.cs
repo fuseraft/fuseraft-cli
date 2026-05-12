@@ -111,11 +111,12 @@ public sealed class ChatClientFactory(
             && (!string.IsNullOrEmpty(config.ApiKeyEnvVar) || !string.IsNullOrEmpty(config.ApiKey)))
             return config;
 
-        // 2b. Explicit endpoint + literal key (e.g. REPL wizard, custom/enterprise provider).
+        // 2b. Explicit endpoint + any form of auth (literal key or env-var reference).
         // Skip auto-detection and treat as OpenAI-compatible — the user supplied all necessary
         // connection info and auto-detection would only misidentify unusual model ID formats
         // (e.g. AWS Bedrock "anthropic.claude-...:0" being wrongly treated as an Ollama tag).
-        if (!string.IsNullOrEmpty(config.Endpoint) && !string.IsNullOrEmpty(config.ApiKey))
+        if (!string.IsNullOrEmpty(config.Endpoint)
+            && (!string.IsNullOrEmpty(config.ApiKey) || !string.IsNullOrEmpty(config.ApiKeyEnvVar)))
             return config with { Provider = string.IsNullOrEmpty(config.Provider) ? "openai" : config.Provider };
 
         // Ollama tag format: "modelname:tag" where the tag contains at least one letter
@@ -131,8 +132,15 @@ public sealed class ChatClientFactory(
 
         if (detected is null)
         {
-            // If the caller provided at least Provider, we can proceed; otherwise fail fast
-            // with a helpful message rather than a cryptic missing-env-var error later.
+            // A custom Endpoint is an unambiguous signal that the caller knows which
+            // provider to use — treat as OpenAI-compatible and skip the prefix check.
+            // This covers non-standard model IDs (e.g. AWS Bedrock "anthropic.claude-...:0",
+            // Open WebUI deployments) where the endpoint is set via global config or inline.
+            if (!string.IsNullOrEmpty(config.Endpoint))
+                return config with { Provider = string.IsNullOrEmpty(config.Provider) ? "openai" : config.Provider };
+
+            // No endpoint and no detectable prefix — fail fast with a helpful message
+            // rather than a cryptic missing-env-var error later.
             if (string.IsNullOrEmpty(config.Provider))
                 throw new InvalidOperationException(
                     $"Cannot determine the LLM provider for model '{config.ModelId}'. " +
@@ -178,6 +186,10 @@ public sealed class ChatClientFactory(
                 if (string.IsNullOrEmpty(config.Endpoint))
                     throw new InvalidOperationException(
                         $"Provider 'azure' requires Endpoint to be set (deployment: '{config.ModelId}').");
+                if (string.IsNullOrEmpty(apiKey))
+                    throw new InvalidOperationException(
+                        $"No API key available for Azure deployment '{config.ModelId}' at '{config.Endpoint}'. " +
+                        $"Run 'fuseraft repl' and complete the setup wizard, or add \"apiKeyEnvVar\": \"<VAR>\" to ~/.fuseraft/config.");
                 return new AzureOpenAIClient(
                     new Uri(config.Endpoint),
                     new ApiKeyCredential(apiKey),
@@ -197,6 +209,10 @@ public sealed class ChatClientFactory(
                     throw new InvalidOperationException(
                         $"Provider '{provider}' requires Endpoint to be set (model: '{config.ModelId}'). " +
                         $"This should have been filled in by auto-detection — check the model ID prefix.");
+                if (string.IsNullOrEmpty(apiKey))
+                    throw new InvalidOperationException(
+                        $"No API key available for model '{config.ModelId}' at '{config.Endpoint}'. " +
+                        $"Run 'fuseraft repl' and complete the setup wizard, or add \"apiKeyEnvVar\": \"<VAR>\" to ~/.fuseraft/config.");
                 return new OpenAIClient(
                     new ApiKeyCredential(apiKey),
                     new OpenAIClientOptions { Transport = transport, Endpoint = new Uri(config.Endpoint), NetworkTimeout = HttpClientTimeout })

@@ -31,7 +31,8 @@ This is a personal project and a work in progress, suited for experimentation an
 | [Security & Sandbox](security.md) | File and network containment |
 | [Governance](governance.md) | Execution rings, audit log, circuit breaker, SLO tracking |
 | [Sessions](sessions.md) | Resumption, HITL, cost tracking, compaction |
-| [Context Store](context.md) | Importing reference material for agents |
+| [Context Management](context-management.md) | How fuseraft manages context across a long session |
+| [Context Store](context-store.md) | Importing reference material for agents |
 | [Examples](examples.md) | Ready-to-use config examples |
 
 ## VS Code Extension

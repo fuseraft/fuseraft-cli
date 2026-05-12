@@ -387,6 +387,23 @@ Agents:
 
 ---
 
+## Document
+
+Read rich document formats as plain text. All operations are read-only. Sandbox rules apply when `FileSystemSandboxPath` is configured.
+
+| Function | Parameters | Description |
+|----------|-----------|-------------|
+| `document_extract_text` | `path` | Extract full plain text from a PDF, DOCX, PPTX, or XLSX file. Returns a format/size header followed by the extracted text. |
+| `document_get_info` | `path` | Return format metadata (page/sheet count, file size, extracted character count) without returning the full text. Cheaper than `extract_text` for planning. |
+| `document_list_sheets` | `path` | List sheet names in an Excel file (`.xlsx` only). |
+| `document_get_sheet` | `path`, `sheetName`, `maxRows` (default 0 = all) | Extract one sheet from an Excel file as a pipe-delimited text table. |
+
+**Supported formats:** `.pdf`, `.docx`, `.pptx`, `.xlsx`
+
+**Context store integration:** When you run `fuseraft context add` on a supported document, the text is automatically extracted and stored as a `.txt` file at import time. Agents can then access it via `read_file` without needing the `Document` plugin. Use `Document` when you need on-demand extraction inside a session (e.g. processing documents found during a task, or working with individual Excel sheets).
+
+---
+
 ## MCP plugins
 
 In addition to the built-in plugins above, tools from any connected MCP server are available as plugins. The plugin name is the `Name` field from `McpServers` config.

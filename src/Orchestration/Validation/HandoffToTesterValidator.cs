@@ -7,10 +7,10 @@ using fuseraft.Core.Models;
 namespace fuseraft.Orchestration.Validation;
 
 /// <summary>
-/// Blocks <c>HANDOFF TO TESTER</c> unless the source agent completed real work during
-/// the current turn. "Real work" means either:
+/// Blocks a handoff unless the source agent completed real work during the current turn.
+/// "Real work" means at least one of:
 /// <list type="bullet">
-///   <item>At least one <c>write_file</c> tool call completed (the normal path), OR</item>
+///   <item>A <c>write_file</c> or <c>patch_file</c> tool call completed (the normal path), OR</item>
 ///   <item>
 ///     When <paramref name="shellFallbackPattern"/> is supplied: a successful
 ///     <c>shell_run</c> whose command matches at least one of the pipe-separated
@@ -59,7 +59,8 @@ public sealed class HandoffToTesterValidator(
 
                     var funcName = HistoryHelpers.FindFunctionName(history, frc.CallId, i) ?? string.Empty;
 
-                    if (funcName.Contains("write_file", StringComparison.OrdinalIgnoreCase))
+                    if (funcName.Contains("write_file", StringComparison.OrdinalIgnoreCase) ||
+                        funcName.Contains("patch_file", StringComparison.OrdinalIgnoreCase))
                     {
                         hasWriteFile = true;
                         break;
@@ -112,15 +113,12 @@ public sealed class HandoffToTesterValidator(
         {
             var failDetail = BuildFailDetail();
             return RoutingValidationResult.Fail(
-                "HANDOFF TO TESTER blocked: no evidence of real work this turn\n" +
-                "(no write_file, no git_commit, no shell fallback matched).\n\n" +
-                "Required before handing off:\n" +
-                "  1. write_file for every changed file.\n" +
-                "  2. shell_run ./build.sh — fix until it passes.\n" +
-                "  3. git_add + git_commit.\n" +
-                "  4. Retry handoff.\n\n" +
-                failDetail +
-                "All tools available: write_file, shell_run, read_file. Code blocks are NOT saved to disk.");
+                "Handoff blocked: no evidence of real work this turn\n" +
+                "(no write_file, no patch_file, no git_commit, no shell fallback matched).\n\n" +
+                "You must write at least one file before handing off. Use write_file for new files\n" +
+                "or patch_file for surgical edits to existing files. Code blocks in your response\n" +
+                "are NOT saved to disk — you must call the tool.\n\n" +
+                failDetail);
         }
 
         return RoutingValidationResult.Pass();

@@ -72,34 +72,42 @@ public sealed class ContextStore
             Directory.Delete(destDir, recursive: true);
         Directory.CreateDirectory(destDir);
 
-        var files = new List<ContextFileEntry>();
+        var files          = new List<ContextFileEntry>();
+        var extractionNotes = new List<string>();
 
         if (isFile)
         {
-            var fileName = Path.GetFileName(fullSource);
-            File.Copy(fullSource, Path.Combine(destDir, fileName));
-            files.Add(new ContextFileEntry(fileName, new FileInfo(fullSource).Length));
+            var (entry, note) = await StoreFileAsync(fullSource, destDir, ct);
+            files.Add(entry);
+            if (note is not null) extractionNotes.Add(note);
         }
         else
         {
             foreach (var src in Directory.EnumerateFiles(fullSource, "*", SearchOption.AllDirectories))
             {
-                var rel  = Path.GetRelativePath(fullSource, src);
-                var dest = Path.Combine(destDir, rel);
-                Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-                File.Copy(src, dest);
-                files.Add(new ContextFileEntry(rel.Replace('\\', '/'), new FileInfo(src).Length));
+                var rel     = Path.GetRelativePath(fullSource, src);
+                var destSub = Path.Combine(destDir, Path.GetDirectoryName(rel) ?? string.Empty);
+                Directory.CreateDirectory(destSub);
+                var (entry, note) = await StoreFileAsync(src, destSub, ct);
+                var storedRel = Path.Combine(
+                    Path.GetDirectoryName(rel) ?? string.Empty,
+                    entry.RelativePath).Replace('\\', '/').TrimStart('/');
+                files.Add(new ContextFileEntry(storedRel, entry.SizeBytes));
+                if (note is not null) extractionNotes.Add(note);
             }
         }
 
         var index = await LoadIndexAsync(ct);
         index.Items[name] = new ContextItem
         {
-            Name        = name,
-            Description = description,
-            SourcePath  = fullSource,
-            ImportedAt  = DateTime.UtcNow,
-            Files       = files,
+            Name           = name,
+            Description    = description,
+            SourcePath     = fullSource,
+            ImportedAt     = DateTime.UtcNow,
+            Files          = files,
+            ExtractionInfo = extractionNotes.Count > 0
+                ? string.Join("\n", extractionNotes)
+                : null,
         };
         await SaveIndexAsync(index, ct);
     }
@@ -199,6 +207,42 @@ public sealed class ContextStore
         await File.WriteAllTextAsync(indexPath, JsonSerializer.Serialize(index, JsonOpts), ct);
     }
 
+    // If the source file is a supported binary document format, extracts its text and
+    // stores it as a .txt sibling. Otherwise copies the file verbatim. Returns the stored
+    // file entry and an optional human-readable extraction note.
+    private static async Task<(ContextFileEntry Entry, string? Note)> StoreFileAsync(
+        string sourcePath, string destDir, CancellationToken ct)
+    {
+        if (DocumentTextExtractor.IsSupported(sourcePath))
+        {
+            try
+            {
+                var (text, info) = DocumentTextExtractor.Extract(sourcePath);
+                var txtName = Path.GetFileNameWithoutExtension(sourcePath) + ".txt";
+                var txtPath = Path.Combine(destDir, txtName);
+                await File.WriteAllTextAsync(txtPath, text, ct);
+                var size = new FileInfo(txtPath).Length;
+                var note = $"Extracted from {Path.GetFileName(sourcePath)}: {info} → {txtName}";
+                return (new ContextFileEntry(txtName, size), note);
+            }
+            catch (Exception ex)
+            {
+                // Extraction failed — copy the binary so the item is still stored, but warn
+                // that agents will not be able to read it via read_file.
+                var binName = Path.GetFileName(sourcePath);
+                var binPath = Path.Combine(destDir, binName);
+                File.Copy(sourcePath, binPath);
+                var size = new FileInfo(sourcePath).Length;
+                var note = $"Warning: extraction failed for {binName} ({ex.Message}) — binary stored, not readable by agents";
+                return (new ContextFileEntry(binName, size), note);
+            }
+        }
+
+        var fileName = Path.GetFileName(sourcePath);
+        File.Copy(sourcePath, Path.Combine(destDir, fileName));
+        return (new ContextFileEntry(fileName, new FileInfo(sourcePath).Length), null);
+    }
+
     private static bool IsValidName(string name) =>
         !string.IsNullOrWhiteSpace(name) &&
         name.All(c => char.IsLetterOrDigit(c) || c == '-' || c == '_');
@@ -229,6 +273,13 @@ public sealed class ContextItem
 
     [JsonPropertyName("files")]
     public List<ContextFileEntry> Files { get; init; } = [];
+
+    /// <summary>
+    /// Set when one or more source files were binary documents that were converted to
+    /// plain text at import time. Contains one note per extracted file.
+    /// </summary>
+    [JsonPropertyName("extractionInfo")]
+    public string? ExtractionInfo { get; init; }
 }
 
 public sealed record ContextFileEntry(

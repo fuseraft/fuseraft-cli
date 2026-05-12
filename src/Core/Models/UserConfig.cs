@@ -13,6 +13,9 @@ public sealed class UserConfig
     [JsonPropertyName("provider")]
     public string Provider { get; set; } = string.Empty;
 
+    [JsonPropertyName("apiKeyEnvVar")]
+    public string ApiKeyEnvVar { get; set; } = string.Empty;
+
     // Never written to disk — populated at runtime from the OS keychain.
     [JsonIgnore]
     public string ApiKey { get; set; } = string.Empty;

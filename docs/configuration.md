@@ -148,6 +148,7 @@ Per-plugin tool filter. Keys are plugin names; values are arrays of capability t
 | `Git` | `read` (git_status, git_diff, git_log, git_show, git_branch_list, git_stash_list) · `write` (git_add, git_commit, git_checkout, git_create_branch, git_init, git_push, git_pull, git_stash, git_stash_pop, git_reset) |
 | `Http` | `get` · `head` · `post` · `put` · `patch` · `delete` — one per HTTP verb |
 | `Json` | `read` · `write` (json_merge) |
+| `Document` | `read` (document_extract_text, document_get_info, document_list_sheets, document_get_sheet) |
 | `Search` | `read` |
 | `Changes` | `read` |
 | `Scratchpad` | `read` · `write` |
