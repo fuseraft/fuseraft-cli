@@ -68,6 +68,7 @@ public sealed class PluginRegistry : IDisposable
         Register("Http",       () => new HttpPlugin(_sharedHttpClient, logger: _loggerFactory?.CreateLogger<HttpPlugin>()));
         Register("Json",       () => new JsonPlugin());
         Register("Search",     () => new SearchPlugin());
+        Register("Document",   () => new DocumentPlugin());
         Register("Probe",      () => new ProbePlugin());
         Register("CodeExecution", () => new CodeExecutionPlugin());
         Register("Handoff",       () => new HandoffPlugin());
@@ -107,6 +108,7 @@ public sealed class PluginRegistry : IDisposable
         Register("FileSystem", () => new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore));
         Register("Shell",      () => new ShellPlugin(sandboxRoot, shellCommandApprover));
         Register("Http",       () => new HttpPlugin(_sharedHttpClient, allowedHosts, apiProfiles, allowPrivateHosts, _loggerFactory?.CreateLogger<HttpPlugin>()));
+        Register("Document",   () => new DocumentPlugin(sandboxRoot));
         return this;
     }
 

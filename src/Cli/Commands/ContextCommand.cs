@@ -74,6 +74,10 @@ public sealed class ContextAddCommand : AsyncCommand<ContextAddSettings>
                 foreach (var f in item.Files.OrderBy(f => f.RelativePath))
                     AnsiConsole.MarkupLine($"  [dim]{Markup.Escape(f.RelativePath)}[/]");
 
+            if (item.ExtractionInfo is not null)
+                foreach (var note in item.ExtractionInfo.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                    AnsiConsole.MarkupLine($"  [dim]{Markup.Escape(note)}[/]");
+
             AnsiConsole.MarkupLine(
                 $"\n[dim]Agents will see this item listed in their system prompt " +
                 $"and can read it via read_file from " +
