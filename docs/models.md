@@ -62,8 +62,8 @@ Any field left empty falls back to auto-detection.
 |-------|------|---------|-------------|
 | `ModelId` | string | — | Model identifier sent to the API. |
 | `Provider` | string | auto | Connector type: `openai`, `azure`, `google`, `mistral`, `ollama`. Auto-detected from `ModelId` if omitted. |
-| `Endpoint` | string | auto | API base URL. Auto-detected from provider if omitted. Required for `azure`. |
-| `ApiKeyEnvVar` | string | auto | Name of the environment variable holding the API key. Auto-detected from provider if omitted. Leave empty for `ollama`. |
+| `Endpoint` | string | auto | API base URL. Auto-detected from provider if omitted. Required for `azure`. Falls back to `endpoint` in `~/.fuseraft/config` when blank. |
+| `ApiKeyEnvVar` | string | auto | Name of the environment variable holding the API key. Auto-detected from provider if omitted. Leave empty for `ollama`. Falls back to `apiKeyEnvVar` in `~/.fuseraft/config` when blank. |
 | `MaxTokens` | int | `0` | Max tokens per response. `0` = use model default. |
 | `Temperature` | number | — | Sampling temperature (0.0–2.0). Omit for reasoning models that reject this parameter. |
 
@@ -87,6 +87,34 @@ When `Endpoint` and `ApiKeyEnvVar` are not specified, they are filled in based o
 | `name:tag` (colon format) | ollama | `http://localhost:11434` | *(none)* |
 
 For any model not matching the table, specify `Provider`, `Endpoint`, and `ApiKeyEnvVar` explicitly.
+
+---
+
+## Global config defaults
+
+`~/.fuseraft/config` can define a default `endpoint` and `apiKeyEnvVar` that are applied to every agent model (and named alias) that doesn't set those fields itself. This means you only need to configure the provider once — generated agent files work out of the box without repeating the values.
+
+```json
+{
+  "modelId": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+  "endpoint": "http://localhost:3000/api/openai/v1",
+  "apiKeyEnvVar": "OPENWEBUI_API_KEY"
+}
+```
+
+Set this file via `fuseraft repl` (the setup wizard writes it automatically) or edit it directly.
+
+### OS keychain fallback
+
+If an agent model has neither `ApiKey` nor `ApiKeyEnvVar` set after global defaults are applied, fuseraft retrieves the key stored in the OS keychain (set via `fuseraft key set` or the REPL wizard) and injects it as a literal `ApiKey`. This means the full auth resolution order for any agent model is:
+
+1. Explicit `ApiKey` in the agent file (literal value)
+2. `ApiKeyEnvVar` from the agent file (env var lookup)
+3. `apiKeyEnvVar` from `~/.fuseraft/config` (env var lookup)
+4. OS keychain (retrieved once at startup, injected as literal key)
+5. Nothing — Ollama and other unauthenticated providers work without a key
+
+Per-agent values always win; global values only fill in empty fields.
 
 ---
 

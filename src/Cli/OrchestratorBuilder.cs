@@ -13,6 +13,7 @@ using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
+using fuseraft.Infrastructure.KeyStore;
 using fuseraft.Infrastructure.Plugins;
 using fuseraft.Orchestration;
 using fuseraft.Orchestration.Saga;
@@ -64,6 +65,14 @@ public static class OrchestratorBuilder
 
         // Expand ${ENV_VAR} tokens in security and API profile config before use.
         config = ExpandEnvVars(config);
+
+        // Fill in Endpoint and ApiKeyEnvVar from ~/.fuseraft/config for any agent
+        // model that doesn't declare them explicitly.
+        config = ApplyGlobalDefaults(config);
+
+        // For models still missing both ApiKey and ApiKeyEnvVar, inject the key
+        // stored in the OS keychain so users don't have to set an env var at all.
+        config = await ApplyKeychainKeyAsync(config, cancellationToken);
 
         // Apply per-config security constraints and API profiles to the security-sensitive plugins.
         var profiles = config.ApiProfiles.Count > 0
@@ -778,6 +787,78 @@ public static class OrchestratorBuilder
         using var stream = asm.GetManifestResourceStream(name)!;
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd().Trim();
+    }
+
+    // Fills in ModelId, Endpoint, and ApiKeyEnvVar from ~/.fuseraft/config on any model
+    // config that doesn't set them explicitly. This lets the global config act as a
+    // default provider so agent files work without repeating connection details.
+    // Per-agent explicit values always win; only empty fields are filled.
+    private static OrchestrationConfig ApplyGlobalDefaults(OrchestrationConfig config)
+    {
+        var (globalCfg, _) = UserConfigStore.Load();
+        var globalModelId      = globalCfg is not null && !string.IsNullOrWhiteSpace(globalCfg.ModelId)      ? globalCfg.ModelId      : null;
+        var globalEndpoint     = globalCfg is not null && !string.IsNullOrWhiteSpace(globalCfg.Endpoint)     ? globalCfg.Endpoint     : null;
+        var globalApiKeyEnvVar = globalCfg is not null && !string.IsNullOrWhiteSpace(globalCfg.ApiKeyEnvVar) ? globalCfg.ApiKeyEnvVar : null;
+
+        if (globalModelId is null && globalEndpoint is null && globalApiKeyEnvVar is null) return config;
+
+        ModelConfig Fill(ModelConfig m) => m with
+        {
+            ModelId      = string.IsNullOrWhiteSpace(m.ModelId)      && globalModelId      is not null ? globalModelId      : m.ModelId,
+            Endpoint     = string.IsNullOrWhiteSpace(m.Endpoint)     && globalEndpoint     is not null ? globalEndpoint     : m.Endpoint,
+            ApiKeyEnvVar = string.IsNullOrWhiteSpace(m.ApiKeyEnvVar) && globalApiKeyEnvVar is not null ? globalApiKeyEnvVar : m.ApiKeyEnvVar,
+        };
+
+        var agents = config.Agents.Select(a => a with { Model = Fill(a.Model) }).ToList();
+
+        var models = config.Models.ToDictionary(kv => kv.Key, kv => Fill(kv.Value));
+
+        var sel = config.Selection with
+        {
+            Model    = config.Selection.Model    is not null ? Fill(config.Selection.Model)    : null,
+            Magentic = config.Selection.Magentic is not null
+                ? config.Selection.Magentic with { Model = config.Selection.Magentic.Model is not null ? Fill(config.Selection.Magentic.Model) : null }
+                : null,
+        };
+
+        return config with { Agents = agents, Models = models, Selection = sel };
+    }
+
+    // Injects the OS keychain key as a literal ApiKey on every model config that has
+    // neither ApiKey nor ApiKeyEnvVar set. The keychain is read at most once per call.
+    // Models that already have either field set are left untouched.
+    private static async Task<OrchestrationConfig> ApplyKeychainKeyAsync(
+        OrchestrationConfig config,
+        CancellationToken cancellationToken = default)
+    {
+        // Quick check: any model actually needs a key?
+        bool NeedsKey(ModelConfig m) =>
+            string.IsNullOrWhiteSpace(m.ApiKey) && string.IsNullOrWhiteSpace(m.ApiKeyEnvVar);
+
+        bool anyAgentNeedsKey = config.Agents.Any(a => NeedsKey(a.Model))
+            || config.Models.Values.Any(NeedsKey)
+            || (config.Selection.Model    is not null && NeedsKey(config.Selection.Model))
+            || (config.Selection.Magentic?.Model is not null && NeedsKey(config.Selection.Magentic.Model));
+
+        if (!anyAgentNeedsKey) return config;
+
+        var keychainKey = await ApiKeyStoreFactory.Create().RetrieveAsync();
+        if (string.IsNullOrWhiteSpace(keychainKey)) return config;
+
+        ModelConfig Fill(ModelConfig m) =>
+            NeedsKey(m) ? m with { ApiKey = keychainKey } : m;
+
+        var agents = config.Agents.Select(a => a with { Model = Fill(a.Model) }).ToList();
+        var models  = config.Models.ToDictionary(kv => kv.Key, kv => Fill(kv.Value));
+        var sel     = config.Selection with
+        {
+            Model    = config.Selection.Model    is not null ? Fill(config.Selection.Model)    : null,
+            Magentic = config.Selection.Magentic is not null
+                ? config.Selection.Magentic with { Model = config.Selection.Magentic.Model is not null ? Fill(config.Selection.Magentic.Model) : null }
+                : null,
+        };
+
+        return config with { Agents = agents, Models = models, Selection = sel };
     }
 
     private static ModelConfig ResolveAlias(

@@ -45,6 +45,8 @@ nav:
   - Security: security.md
   - Governance: governance.md
   - Sessions: sessions.md
+  - Context Management: context-management.md
+  - Context Store: context-store.md
   - Examples: examples.md
   - Design: design.md
 

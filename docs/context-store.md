@@ -92,13 +92,36 @@ fuseraft context list --dir ~/projects/my-app
 fuseraft context remove runbook --dir ~/projects/my-app
 ```
 
+## Document extraction
+
+When you import a PDF, Word document, PowerPoint presentation, or Excel spreadsheet,
+fuseraft automatically extracts the plain text at import time and stores a `.txt` version
+in the context directory. Agents can then access the extracted text via `read_file` —
+no special plugin required.
+
+```
+fuseraft context add ~/docs/architecture.pdf
+# ✓ architecture — 1 file(s), 48.2 KB
+#   Extracted from architecture.pdf: PDF — 24 page(s) → architecture.txt
+```
+
+**Supported formats:** `.pdf`, `.docx`, `.pptx`, `.xlsx`
+
+If text extraction fails (encrypted document, corrupted file), the original binary is stored
+instead and a warning is printed. Binary files cannot be read by agents via `read_file`.
+
+For working with documents found *during* a session, or reading individual Excel sheets,
+use the [`Document` plugin](plugins.md#document) directly.
+
 ## What to import
 
 The context store works well for:
 
 - **Database schemas** — schema SQL, ERDs, or migration history
 - **API specifications** — OpenAPI/Swagger YAML, Postman collections
-- **Architecture documents** — design docs, ADRs, system diagrams
+- **Architecture documents** — design docs, ADRs, system diagrams (PDF, DOCX)
+- **Slide decks** — PPTX presentations extracted to slide-by-slide text
+- **Spreadsheets** — XLSX workbooks with multiple sheets, each extracted as a table
 - **Reference data** — seed data, sample payloads, fixture files
 - **Task briefs** — detailed specs too long to paste into the task argument
 

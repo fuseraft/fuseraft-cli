@@ -23,6 +23,7 @@ namespace fuseraft.Infrastructure.Plugins;
 ///   <item><term>Git</term><description><c>read</c> (status, diff, log, show, branch_list, stash_list) · <c>write</c> (add, commit, checkout, create_branch, init, push, pull, stash, stash_pop, reset)</description></item>
 ///   <item><term>Http</term><description><c>get</c> · <c>post</c> · <c>put</c> · <c>patch</c> · <c>delete</c> — one per HTTP verb</description></item>
 ///   <item><term>Json</term><description><c>read</c> (format, minify, get, keys, search, to_text, validate) · <c>write</c> (merge)</description></item>
+///   <item><term>Document</term><description><c>read</c> (extract_text, get_info, list_sheets, get_sheet — all read-only)</description></item>
 ///   <item><term>Search</term><description><c>read</c> (all search operations are read-only)</description></item>
 ///   <item><term>Plan</term><description><c>read</c> (plan_get, plan_get_summary) · <c>write</c> (plan_create, plan_update_step, plan_add_step)</description></item>
 ///   <item><term>Changes</term><description><c>read</c> (read, read_latest)</description></item>
@@ -101,6 +102,12 @@ internal static class PluginCapabilityMap
         ["json_to_text"]                   = "read",
         ["json_validate"]                  = "read",
         ["json_merge"]                     = "write",
+
+        // Document (all read-only)
+        ["document_extract_text"]          = "read",
+        ["document_get_info"]              = "read",
+        ["document_list_sheets"]           = "read",
+        ["document_get_sheet"]             = "read",
 
         // Search (all read-only)
         ["search_files"]                   = "read",
