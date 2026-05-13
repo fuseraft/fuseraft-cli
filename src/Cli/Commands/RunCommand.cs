@@ -593,19 +593,23 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
     /// </summary>
     private static IReadOnlyList<string> DiscoverSkills()
     {
-        var names = new List<string>();
+        // Same order as BuildSkillsProvider: local first (takes precedence), built-in second.
         var dirs = new[]
         {
-            Path.Combine(AppContext.BaseDirectory, "skills"),
             Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "skills"),
+            Path.Combine(AppContext.BaseDirectory, "skills"),
         };
+        var seen  = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var names = new List<string>();
         foreach (var dir in dirs)
         {
             if (!Directory.Exists(dir)) continue;
             foreach (var skillDir in Directory.EnumerateDirectories(dir))
             {
-                if (File.Exists(Path.Combine(skillDir, "SKILL.md")))
-                    names.Add(Path.GetFileName(skillDir));
+                if (!File.Exists(Path.Combine(skillDir, "SKILL.md"))) continue;
+                var name = Path.GetFileName(skillDir);
+                if (seen.Add(name))
+                    names.Add(name);
             }
         }
         return names;
