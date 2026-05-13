@@ -98,7 +98,7 @@ _STACKS = [
         "stack": "python",
         "display": "Python",
         "glob_markers": ["*.py"],
-        "exact_markers": ["pyproject.toml", "setup.py", "setup.cfg", "Pipfile"],
+        "exact_markers": ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile"],
         # Python: no scaffold — agent writes a single file directly
         "scaffold_unix": "",
         "scaffold_win": "",

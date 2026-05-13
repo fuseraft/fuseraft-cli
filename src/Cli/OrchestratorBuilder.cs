@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using AgentGovernance;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using AgentGovernance.Audit;
@@ -1071,10 +1072,11 @@ public static class OrchestratorBuilder
 
     private static AgentSkillsProvider? BuildSkillsProvider()
     {
+        // Project-local skills listed first so they take precedence over built-ins on name collision.
         var dirs = new[]
         {
-            Path.Combine(AppContext.BaseDirectory, "skills"),
             Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "skills"),
+            Path.Combine(AppContext.BaseDirectory, "skills"),
         }.Where(Directory.Exists).ToArray();
 
         if (dirs.Length == 0) return null;
@@ -1092,37 +1094,39 @@ public static class OrchestratorBuilder
         CancellationToken cancellationToken)
     {
         var ext = Path.GetExtension(script.FullPath).ToLowerInvariant();
-        var (program, scriptArgs) = ext switch
+        var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+        var program = ext switch
         {
-            ".py" => ("python3", script.FullPath),
-            ".sh" => ("bash",    script.FullPath),
-            ".js" => ("node",    script.FullPath),
-            _     => (null,      null)
+            ".py" => isWindows ? "python" : "python3",
+            ".sh" => "bash",
+            ".js" => "node",
+            _     => null
         };
         if (program is null)
             return $"No runner registered for '{ext}' scripts.";
 
-        var argValues = arguments.Values
-            .Select(v => v?.ToString() ?? "")
-            .Where(s => s.Length > 0);
-        var argLine = string.Join(" ", argValues);
-
         var psi = new ProcessStartInfo
         {
             FileName               = program,
-            Arguments              = $"{scriptArgs} {argLine}".TrimEnd(),
             RedirectStandardOutput = true,
             RedirectStandardError  = true,
             UseShellExecute        = false,
         };
+        psi.ArgumentList.Add(script.FullPath);
+        foreach (var val in arguments.Values.Select(v => v?.ToString() ?? "").Where(s => s.Length > 0))
+            psi.ArgumentList.Add(val);
 
         using var proc = Process.Start(psi)
             ?? throw new InvalidOperationException($"Failed to start {program}");
 
-        var stdout = await proc.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderr = await proc.StandardError.ReadToEndAsync(cancellationToken);
+        // Read stdout and stderr concurrently — sequential reads deadlock if either pipe fills.
+        var stdoutTask = proc.StandardOutput.ReadToEndAsync(cancellationToken);
+        var stderrTask  = proc.StandardError.ReadToEndAsync(cancellationToken);
+        await Task.WhenAll(stdoutTask, stderrTask);
         await proc.WaitForExitAsync(cancellationToken);
 
+        var stdout = await stdoutTask;
+        var stderr  = await stderrTask;
         return string.IsNullOrWhiteSpace(stderr) ? stdout : $"{stdout}\nstderr: {stderr}";
     }
 }

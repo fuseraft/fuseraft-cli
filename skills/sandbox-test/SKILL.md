@@ -33,7 +33,7 @@ Run the `detect_stack` script, passing the project root as the first argument:
 python3 scripts/detect_stack.py /path/to/project
 ```
 
-The script scans for marker files in priority order and returns a JSON object with `stack`, `scaffold`, `build`, `run`, `capture`, and `debug_idiom` fields — everything needed for Steps 2–4. Use these values directly rather than reconstructing them from `references/stack-patterns.md`.
+The script scans for marker files in priority order and returns a JSON object with `stack`, `display`, `markers`, `shell`, `temp_dir`, `scaffold`, `build`, `run`, `cleanup`, and `debug_idiom` fields — everything needed for Steps 2–4. Use these values directly rather than reconstructing them from `references/stack-patterns.md`.
 
 If the script returns `"stack": "unknown"`, read `references/stack-patterns.md` and identify the stack manually from the marker table.
 
@@ -109,4 +109,4 @@ Then:
 
 ## Scripts
 
-- `scripts/detect_stack.py [path]` — Scans `path` (default: cwd) for stack markers and returns a JSON object with `stack`, `scaffold`, `build`, `run`, `capture`, and `debug_idiom` fields ready for use in Steps 2–4
+- `scripts/detect_stack.py [path]` — Scans `path` (default: cwd) for stack markers and returns a JSON object with `stack`, `display`, `markers`, `shell`, `temp_dir`, `scaffold`, `build`, `run`, `cleanup`, and `debug_idiom` fields ready for use in Steps 2–4
