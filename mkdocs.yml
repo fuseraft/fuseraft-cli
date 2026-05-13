@@ -40,6 +40,7 @@ nav:
   - Configuration: configuration.md
   - Models & Providers: models.md
   - Plugins: plugins.md
+  - Skills: skills.md
   - Strategies: strategies.md
   - Validators: validators.md
   - Harness Engineering: harness-engineering.md

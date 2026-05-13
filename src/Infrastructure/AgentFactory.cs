@@ -27,7 +27,8 @@ public sealed class AgentFactory(
     GovernanceKernel? governanceKernel = null,
     IdentityRegistry? identityRegistry = null,
     EventEmitter? eventEmitter = null,
-    ILoggerFactory? loggerFactory = null)
+    ILoggerFactory? loggerFactory = null,
+    AgentSkillsProvider? skillsProvider = null)
 {
     // Maps agent name → DID for the current session. Populated by Create().
     private readonly ConcurrentDictionary<string, AgentIdentity> _identities = new(StringComparer.OrdinalIgnoreCase);
@@ -198,9 +199,16 @@ public sealed class AgentFactory(
             .UseFunctionInvocation(configure: c => c.MaximumIterationsPerRequest = maxIterations)
             .Build();
 
+        // Skills context provider wraps outside the function-invoker so that skill tools
+        // (load_skill, run_skill_script, etc.) are visible to the function-invoker when
+        // the model requests them. AIContextProvider must be the outermost layer.
+        IChatClient agentChatClient = skillsProvider is not null
+            ? functionInvokingClient.AsBuilder().UseAIContextProviders(skillsProvider).Build()
+            : functionInvokingClient;
+
         // Construct the base ChatClientAgent with tools and chat options.
         ChatClientAgent baseAgent = new(
-            chatClient: functionInvokingClient,
+            chatClient: agentChatClient,
             instructions: instructions,
             name: config.Name,
             description: config.Description,

@@ -10,6 +10,7 @@
     <AssemblyTitle>Fuseraft CLI</AssemblyTitle>
     <Description>Production-grade multi-agent orchestration powered by Microsoft Agent Framework.</Description>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <NoWarn>$(NoWarn);MAAI001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

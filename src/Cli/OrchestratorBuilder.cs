@@ -4,6 +4,9 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AgentGovernance;
+using System.Diagnostics;
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 using AgentGovernance.Audit;
 using AgentGovernance.Sre;
 using AgentGovernance.Trust;
@@ -469,7 +472,7 @@ public static class OrchestratorBuilder
                 "The Graph block will be ignored. Set Selection.Type: graph to enable it.",
                 config.Selection.Type);
 
-        var agentFactory      = new AgentFactory(chatClientFactory, pluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, identityRegistry, eventEmitter, loggerFactory);
+        var agentFactory      = new AgentFactory(chatClientFactory, pluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, identityRegistry, eventEmitter, loggerFactory, BuildSkillsProvider());
         var aoLogger          = loggerFactory.CreateLogger<AgentOrchestrator>();
         var goLogger          = loggerFactory.CreateLogger<GraphOrchestrator>();
 
@@ -1064,5 +1067,62 @@ public static class OrchestratorBuilder
             Security    = expandedSecurity,
             ApiProfiles = expandedProfiles,
         };
+    }
+
+    private static AgentSkillsProvider? BuildSkillsProvider()
+    {
+        var dirs = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "skills"),
+            Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "skills"),
+        }.Where(Directory.Exists).ToArray();
+
+        if (dirs.Length == 0) return null;
+
+        return new AgentSkillsProviderBuilder()
+            .UseFileSkills(dirs)
+            .UseFileScriptRunner(RunSkillScriptAsync)
+            .Build();
+    }
+
+    private static async Task<object?> RunSkillScriptAsync(
+        AgentFileSkill skill,
+        AgentFileSkillScript script,
+        AIFunctionArguments arguments,
+        CancellationToken cancellationToken)
+    {
+        var ext = Path.GetExtension(script.FullPath).ToLowerInvariant();
+        var (program, scriptArgs) = ext switch
+        {
+            ".py" => ("python3", script.FullPath),
+            ".sh" => ("bash",    script.FullPath),
+            ".js" => ("node",    script.FullPath),
+            _     => (null,      null)
+        };
+        if (program is null)
+            return $"No runner registered for '{ext}' scripts.";
+
+        var argValues = arguments.Values
+            .Select(v => v?.ToString() ?? "")
+            .Where(s => s.Length > 0);
+        var argLine = string.Join(" ", argValues);
+
+        var psi = new ProcessStartInfo
+        {
+            FileName               = program,
+            Arguments              = $"{scriptArgs} {argLine}".TrimEnd(),
+            RedirectStandardOutput = true,
+            RedirectStandardError  = true,
+            UseShellExecute        = false,
+        };
+
+        using var proc = Process.Start(psi)
+            ?? throw new InvalidOperationException($"Failed to start {program}");
+
+        var stdout = await proc.StandardOutput.ReadToEndAsync(cancellationToken);
+        var stderr = await proc.StandardError.ReadToEndAsync(cancellationToken);
+        await proc.WaitForExitAsync(cancellationToken);
+
+        return string.IsNullOrWhiteSpace(stderr) ? stdout : $"{stdout}\nstderr: {stderr}";
     }
 }

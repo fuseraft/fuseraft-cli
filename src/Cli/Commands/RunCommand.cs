@@ -170,7 +170,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
 
         using var telemetry = FuseraftTelemetry.Create(config.Telemetry, config.Name);
 
-        MessageRenderer.RenderConfigSummary(config);
+        MessageRenderer.RenderConfigSummary(config, DiscoverSkills());
 
         // Validate API keys early so a bad/missing key surfaces before the session starts.
         try
@@ -591,6 +591,26 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
     /// Returns the resolved absolute working directory for the session, or null to keep the CWD.
     /// Priority: --work-dir flag > Security.FileSystemSandboxPath in config > CWD (null = no change).
     /// </summary>
+    private static IReadOnlyList<string> DiscoverSkills()
+    {
+        var names = new List<string>();
+        var dirs = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "skills"),
+            Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "skills"),
+        };
+        foreach (var dir in dirs)
+        {
+            if (!Directory.Exists(dir)) continue;
+            foreach (var skillDir in Directory.EnumerateDirectories(dir))
+            {
+                if (File.Exists(Path.Combine(skillDir, "SKILL.md")))
+                    names.Add(Path.GetFileName(skillDir));
+            }
+        }
+        return names;
+    }
+
     private static string? ResolveWorkDir(string? flagValue, string absoluteConfigPath)
     {
         if (!string.IsNullOrWhiteSpace(flagValue))
