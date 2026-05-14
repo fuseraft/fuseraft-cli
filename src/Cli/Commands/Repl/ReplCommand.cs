@@ -56,7 +56,13 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
         var keyStore = ApiKeyStoreFactory.Create();
         var (userCfg, legacyKey) = UserConfigStore.Load();
 
-        if (!string.IsNullOrEmpty(legacyKey))
+        if (OrchestratorBuilder.VsCodeMode)
+        {
+            // Running from VS Code: API key is in the env var the extension injected.
+            if (userCfg is not null)
+                userCfg.ApiKey = Environment.GetEnvironmentVariable("FUSERAFT_API_KEY") ?? string.Empty;
+        }
+        else if (!string.IsNullOrEmpty(legacyKey))
         {
             await keyStore.StoreAsync(legacyKey);
             userCfg!.ApiKey = legacyKey;

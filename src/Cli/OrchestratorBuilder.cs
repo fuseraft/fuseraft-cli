@@ -31,6 +31,13 @@ namespace fuseraft.Cli;
 /// </summary>
 public static class OrchestratorBuilder
 {
+    /// <summary>
+    /// Set to <c>true</c> by <c>--vscode</c> flag. When true, the API key is read
+    /// from the <c>FUSERAFT_API_KEY</c> environment variable (injected by the VS Code
+    /// extension) instead of the OS keychain.
+    /// </summary>
+    public static bool VsCodeMode { get; set; }
+
     // Shared client for API-key validation probes — created once, never disposed.
     private static readonly HttpClient _validationHttp = new() { Timeout = TimeSpan.FromSeconds(10) };
 
@@ -846,7 +853,9 @@ public static class OrchestratorBuilder
 
         if (!anyAgentNeedsKey) return config;
 
-        var keychainKey = await ApiKeyStoreFactory.Create().RetrieveAsync();
+        var keychainKey = VsCodeMode
+            ? Environment.GetEnvironmentVariable("FUSERAFT_API_KEY")
+            : await ApiKeyStoreFactory.Create().RetrieveAsync();
         if (string.IsNullOrWhiteSpace(keychainKey)) return config;
 
         ModelConfig Fill(ModelConfig m) =>

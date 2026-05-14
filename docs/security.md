@@ -261,6 +261,8 @@ When you configure the REPL via the first-run wizard or `/provider setup`, the A
 
 **Using an environment variable instead.** Setting a provider env var (e.g. `ANTHROPIC_API_KEY`) always works as a fallback. The env var is used when no `~/.fuseraft/config` exists or when the keychain has no entry for `fuseraft-cli`.
 
+**VS Code extension.** When the fuseraft VS Code extension invokes the CLI it always passes `--vscode`. In this mode the CLI reads the API key from the `FUSERAFT_API_KEY` environment variable rather than the OS keychain. The extension stores the key in VS Code's built-in `SecretStorage` (backed by the OS credential store) and injects it into every terminal it opens. No manual configuration is needed — set your key once via **fuseraft: Set Up Provider** and it is available to all commands run through the extension.
+
 ---
 
 ## Crash dumps
