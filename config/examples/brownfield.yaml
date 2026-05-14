@@ -145,7 +145,8 @@ Orchestration:
            If it exists and is non-empty, skip to step 7 immediately.
 
         2. SURVEY ENTRY POINTS:
-           For each entry point in the task description, use sub_agent_explore to answer:
+           For each entry point in the task description, use sub_agent_locate to find where it is
+           defined, then use sub_agent_explore with format="file_list" to answer:
            "What files does <entry_point> directly depend on? List them with paths."
            Expand one hop: for each direct dependency, find its dependencies too.
            Use search_symbol to trace key types and interfaces.
@@ -168,7 +169,7 @@ Orchestration:
         6. DETECT PROJECT CONVENTIONS:
            Determine: language/ecosystem, naming rules, error-handling idioms, forbidden
            patterns, testing style, build command, test command.
-           Examine 3–5 representative files. Use sub_agent_explore for broad questions.
+           Examine 3–5 representative files. Use sub_agent_explore for broad questions, sub_agent_locate for targeted symbol lookups.
 
         7. WRITE DISCOVERY BRIEF:
            Call write_file → .fuseraft/brief.brownfield.json:

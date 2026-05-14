@@ -95,8 +95,7 @@ Orchestration:
 
         1. READ THE TASK: Extract the goal, constraints, and acceptance criteria.
 
-        2. EXPLORE: Use sub_agent_explore for broad codebase questions, or list_files
-           and read_file for targeted reads of 1–2 specific files.
+        2. EXPLORE: Use sub_agent_locate for targeted lookups (symbol definitions, which file declares X). Use sub_agent_explore for broad questions (format="file_list" to get a path list). Use list_files and read_file for targeted reads of 1–2 specific files.
 
         3. IF RETURNING FROM REVIEW (Reviewer feedback in context): Summarize the
            feedback and prepend it to the brief so the Developer addresses it directly.

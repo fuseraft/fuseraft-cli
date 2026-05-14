@@ -322,29 +322,48 @@ When your work is complete, call handoff(route_keyword: "HANDOFF TO TESTER").
 
 ## SubAgent
 
-Delegates codebase exploration to a focused sub-agent that runs its own contained tool loop and returns a concise prose summary. Use this instead of calling `read_file` on many files directly — the caller's context window never sees raw file contents, only the distilled answer.
+Exposes two lightweight sub-agent tools that keep the caller's context window clean. Instead of reading many files directly, the parent agent delegates work to a focused loop that returns only a distilled result.
 
-The sub-agent times out after 8 minutes and caps its response at 2048 tokens.
+Both tools share the same tool set, timeout (8 minutes), and cancellation behaviour — the parent agent's cancellation token is linked so interrupts propagate immediately. The sub-agent's current working directory is automatically injected into its system prompt so it never wastes a tool call discovering it.
 
-**Default tool set:** `read_file`, `list_files`, `grep_file`, `get_file_summary`, `get_file_info`, `search_files`, `search_content`, `search_symbol`, `shell_run`, `shell_get_env`, `shell_which`, `shell_get_working_directory`, `git_status`, `git_diff`, `git_log`, `git_show`, `git_branch_list`. The sub-agent is instructed not to implement, edit, delete, commit, or push anything.
+**Default tool set (read-only):** `read_file`, `list_files`, `grep_file`, `get_file_summary`, `get_file_info`, `search_files`, `search_content`, `search_symbol`, `shell_run`, `shell_get_env`, `shell_which`, `git_status`, `git_diff`, `git_log`, `git_show`, `git_branch_list`, `git_stash_list`. The sub-agent is instructed never to implement, edit, delete, commit, or push anything.
 
 ```yaml
 Plugins:
   - SubAgent
 ```
 
-| Function | Parameters | Description |
-|----------|-----------|-------------|
-| `ExploreAsync` | `query` | Ask the explorer a specific question about the codebase. Returns a prose summary under 600 words. |
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `sub_agent_explore` | `query`, `format` | Multi-hop exploration. Returns a prose summary (≤600 words) or a bulleted file list depending on `format`. Up to 20 iterations by default. |
+| `sub_agent_locate` | `target` | Single-target lookup. Finds where a symbol, type, method, interface, or file is defined. Returns `path:line — description`. Capped at 5 iterations and 512 output tokens — much cheaper than explore for targeted lookups. |
+
+**`format` values for `sub_agent_explore`:**
+
+| Value | Output |
+|-------|--------|
+| `"prose"` (default) | Narrative summary, ≤600 words |
+| `"file_list"` | Markdown bullet list of relevant file paths, each with a one-line role description |
+
+**Tool selection inside the sub-agent loop (enforced by system prompt):**
+
+> `search_symbol` → `search_files` → `search_content` → `get_file_summary` → `grep_file` → `read_file` → `shell_run`
+
+The model is instructed to prefer earlier options when they suffice, reserving `read_file` for when a summary is insufficient and `shell_run` only for verifying a specific hypothesis (build, test) — not for browsing.
 
 **Typical usage:**
 
 ```
-Before implementing a change:
-  ExploreAsync("Which files in src/Parsing/ handle string interpolation and how do they interact?")
+# Broad question — use explore
+sub_agent_explore("Which files in src/Parsing/ handle string interpolation and how do they interact?")
 
-When you need to verify current build state before reporting:
-  ExploreAsync("Does the project build cleanly? If not, what are the errors?")
+# Need a list of paths — use file_list format
+sub_agent_explore("What files does AgentFactory depend on?", format="file_list")
+
+# Single target — use locate (5 iterations, much cheaper)
+sub_agent_locate("IOrchestrationHook")
+sub_agent_locate("AgentFactory.Create")
+sub_agent_locate("EventEmitter.cs")
 ```
 
 ### Sub-agent model override (`SubAgentModel`)
@@ -364,9 +383,23 @@ Agents:
 
 Any model alias or provider model ID accepted by the `Models` config section can be used here.
 
+### Sub-agent iteration cap (`SubAgentMaxToolCalls`)
+
+Controls the maximum number of tool-call iterations inside the `sub_agent_explore` loop. `sub_agent_locate` always uses a hard cap of 5.
+
+```yaml
+Agents:
+  - Name: Archaeologist
+    Plugins:
+      - SubAgent
+    SubAgentMaxToolCalls: 30   # allow deeper exploration for this agent
+```
+
+`0` (default) uses the built-in default of 20.
+
 ### Custom sub-agent plugin list (`SubAgentPlugins`)
 
-To give the sub-agent a different set of plugins from the default, list them under `SubAgentPlugins`. Capability filters from `Capabilities` apply to sub-agent plugins the same way they apply to the parent.
+To give the sub-agent a different set of plugins from the default, list them under `SubAgentPlugins`. Capability filters from `Capabilities` apply to sub-agent plugins the same way they apply to the parent. Unknown plugin names raise an error at session startup (they are not silently ignored).
 
 ```yaml
 Agents:

@@ -276,8 +276,9 @@ public sealed class AgentFactory(
 
                 functions = PluginRegistry.GetFunctionsFromObject(
                     new SubAgentPlugin(subClient, explorerTools,
-                        eventEmitter: eventEmitter,
-                        parentAgentName: config.Name));
+                        eventEmitter:    eventEmitter,
+                        parentAgentName: config.Name,
+                        maxToolCalls:    config.SubAgentMaxToolCalls));
             }
             // "Chatroom" is per-agent (own sender name) but all agents share the same file.
             else if (pluginName.Equals("Chatroom", StringComparison.OrdinalIgnoreCase))
@@ -345,7 +346,9 @@ public sealed class AgentFactory(
                 else if (pluginRegistry.TryGet(name, out var p))
                     fns = PluginRegistry.GetFunctionsFromObject(p);
                 else
-                    continue; // silently skip unknown plugins in sub-agent list
+                    throw new InvalidOperationException(
+                        $"Agent '{config.Name}' references unknown sub-agent plugin '{name}'. " +
+                        $"Registered plugins: {string.Join(", ", pluginRegistry.RegisteredPlugins)}");
 
                 if (config.Capabilities.TryGetValue(name, out var caps) && caps.Count > 0)
                     fns = fns.Where(f => PluginCapabilityMap.IsAllowed(f.Name, caps));
