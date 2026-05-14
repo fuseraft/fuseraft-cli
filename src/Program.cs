@@ -40,9 +40,11 @@ if (args.Any(a => a is "--version" or "-v"))
     return 0;
 }
 
-// Pre-parse --verbose and --output before Spectre so the logger can be
-// configured at the right level and file sink before any services are built.
+// Pre-parse --verbose, --output, and --vscode before Spectre so these flags
+// can configure global state before any services or commands are built.
 bool verbose = args.Any(a => a is "--verbose");
+if (args.Any(a => a is "--vscode"))
+    OrchestratorBuilder.VsCodeMode = true;
 string? outputPath = null;
 for (int i = 0; i < args.Length - 1; i++)
     if (args[i] is "-o" or "--output") { outputPath = args[i + 1]; break; }

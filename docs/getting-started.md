@@ -72,6 +72,12 @@ export ANTHROPIC_API_KEY=<your-key>
 
 For other providers see [Models & Providers](models.md).
 
+### Option C — VS Code extension
+
+The [fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) stores your API key in VS Code's built-in secure storage (backed by the OS credential store on each platform). When the extension launches a terminal or runs a command, it automatically injects the key as `FUSERAFT_API_KEY` and passes `--vscode` to the CLI. The CLI then reads the key from that environment variable instead of the OS keychain.
+
+You do not need to set anything manually — configure your provider once via **fuseraft: Set Up Provider** in the VS Code command palette and the key is available to all fuseraft commands run through the extension.
+
 ## Run your first session
 
 ### Option A — generate a config with `init`

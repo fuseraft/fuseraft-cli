@@ -29,6 +29,7 @@ fuseraft run [task] [options]
 | `--ci` | off | CI mode. After the session ends, reads `.fuseraft/test-report.json` and exits with code `2` if any criterion has `status: FAIL`. Exits `0` if the report is absent or all criteria pass. |
 | `--devui` | off | Start a local web server and print a URL for real-time session visualization. See [DevUI](#devui) below. |
 | `--work-dir <path>` | — | Set the working directory for the session. Priority: flag > `Security.FileSystemSandboxPath` in the config > current directory. |
+| `--vscode` | off | VS Code mode. Reads the API key from the `FUSERAFT_API_KEY` environment variable (injected by the fuseraft VS Code extension) instead of the OS keychain. Automatically passed by the extension — not intended for manual use. |
 
 **Examples**
 
@@ -217,6 +218,7 @@ fuseraft repl [options]
 | `--no-banner` | off | Skip the ASCII banner. |
 | `--no-tools` | off | Disable all built-in tools and start a plain chat session. |
 | `--verbose` | off | Enable debug logging and print estimated token count + tool-call count after each turn. |
+| `--vscode` | off | VS Code mode. Reads the API key from the `FUSERAFT_API_KEY` environment variable (injected by the fuseraft VS Code extension) instead of the OS keychain. Automatically passed by the extension — not intended for manual use. |
 
 **First-time setup**
 
