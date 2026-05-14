@@ -4,7 +4,7 @@
 
 A .NET multi-agent orchestration framework built on [Microsoft Agent Framework](https://github.com/microsoft/agents). Define a team of AI agents in a YAML config and coordinate them via keyword routing, state machine routing, declarative directed-graph routing, LLM-based selection, or fully autonomous [Magentic](https://arxiv.org/abs/2411.04468) orchestration. Works with Anthropic, xAI, OpenAI, Azure OpenAI, Ollama, and any OpenAI-compatible provider. Agents can be local or remote — the [A2A protocol](https://a2a-protocol.org/) lets you federate agent slots to independently hosted services.
 
-> **Early stage.** Functional but not battle-tested — best suited for experimentation and automation of well-defined tasks.
+> **Early adoption.** Actively maintained and in production use. New features ship regularly.
 
 ---
 
