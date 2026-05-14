@@ -133,6 +133,7 @@ internal static class ReplTurn
         var toolCallsThisTurn = new List<string>();
         var toolRounds        = 0;
         var inToolBatch       = false;
+        var textStarted       = false;
         var toolCallQueue     = new Queue<string>();
         const int MaxVisible  = 3;
 
@@ -195,6 +196,24 @@ internal static class ReplTurn
                 if (string.IsNullOrEmpty(text)) continue;
                 inToolBatch = false;
                 sb.Append(text);
+
+                if (!capturePlan)
+                {
+                    if (!textStarted)
+                    {
+                        textStarted = true;
+                        await StopSpinnerAsync();
+                    }
+                    else if (spinning)
+                    {
+                        await StopSpinnerAsync();
+                    }
+                    if (!Console.IsOutputRedirected)
+                    {
+                        var approxTokens = (sb.Length + 3) / 4;
+                        Console.Write($"\r\x1b[2m receiving\u2026 {approxTokens} tokens\x1b[0m  ");
+                    }
+                }
             }
         }
         catch (OperationCanceledException)
@@ -232,6 +251,8 @@ internal static class ReplTurn
 
         if (!capturePlan && responseText.Length > 0)
         {
+            if (!Console.IsOutputRedirected)
+                ClearSpinnerLine();
             AnsiConsole.MarkupLine("[dim]assistant:[/]");
             AnsiConsole.Write(MarkdownRenderer.Render(responseText));
         }
@@ -462,6 +483,22 @@ internal static class ReplTurn
             return steps.Length > 0;
         }
         catch { return false; }
+    }
+
+    // Drip-prints text character by character so large chunks don't pop in all at once.
+    // Skips the delay when output is redirected (e.g. piped to a file).
+    internal static async Task WriteChunkSmoothAsync(string text, CancellationToken ct)
+    {
+        if (Console.IsOutputRedirected || text.Length == 0)
+        {
+            Console.Write(text);
+            return;
+        }
+        foreach (var ch in text)
+        {
+            Console.Write(ch);
+            await Task.Delay(2, ct);
+        }
     }
 
     internal static async Task RunSpinnerAsync(string label, CancellationToken ct)
