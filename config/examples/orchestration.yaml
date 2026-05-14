@@ -96,8 +96,7 @@ Orchestration:
 
         1. READ THE TASK: Identify what is being asked.
 
-        2. EXPLORE: Use sub_agent_explore for broad codebase questions, or list_files
-           and read_file for targeted reads of 1–2 specific files.
+        2. EXPLORE: Use sub_agent_locate for targeted lookups (symbol definitions, which file declares X). Use sub_agent_explore for broad questions (format="file_list" to get a path list). Use list_files and read_file for targeted reads of 1–2 specific files.
 
         3. WRITE THE BRIEF:
            - Goal: one sentence

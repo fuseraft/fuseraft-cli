@@ -123,8 +123,9 @@ Each entry in `Agents` configures one participant in the group chat.
 | `TrustScore` | number | `0.7` | no | Governance trust score (0.0–1.0) used to assign an execution ring. See [Governance](governance.md#execution-rings). |
 | `ContextWindow` | object | — | no | Filters the conversation history before it reaches this agent. See [ContextWindow](#contextwindow). |
 | `EnableMemory` | bool | `false` | no | When `true`, persistent memories from `~/.fuseraft/memory/agents/{Name}/` are prepended to the agent's instructions at session start. See [Memory](#memory). |
-| `SubAgentModel` | string | — | no | Model ID override for the sub-agent spawned by the `SubAgent` plugin. Defaults to the parent agent's model when unset. Useful for running a cheaper model (e.g. Haiku) for exploratory `sub_agent_explore` calls. |
-| `SubAgentPlugins` | array | — | no | Explicit list of plugin names to load into the sub-agent. When unset the sub-agent receives the default read-only set: FileSystem read, Search, Shell read, Git read. |
+| `SubAgentModel` | string | — | no | Model ID override for the sub-agent spawned by the `SubAgent` plugin. Defaults to the parent agent's model when unset. Useful for running a cheaper model (e.g. Haiku) for `sub_agent_explore` / `sub_agent_locate` calls. |
+| `SubAgentPlugins` | array | — | no | Explicit list of plugin names to load into the sub-agent. When unset the sub-agent receives the default read-only set: FileSystem read, Search, Shell read, Git read. Unknown names raise an error at session startup. |
+| `SubAgentMaxToolCalls` | int | `0` | no | Maximum tool-call iterations for `sub_agent_explore`. `0` uses the built-in default of 20. `sub_agent_locate` always uses a hard cap of 5 regardless of this setting. |
 | `RemoteAgent` | object | — | no | Delegates this agent slot to a remote A2A agent. When set, `Model`, `Plugins`, `FunctionChoice`, and `Capabilities` are ignored. See [RemoteAgent](#remoteagent). |
 
 ### Capabilities
@@ -216,7 +217,12 @@ This means: to inherit a field from the file, simply omit it in the inline confi
 
 ### SubAgent
 
-When the `SubAgent` plugin is listed in `Plugins`, the agent gains access to `sub_agent_explore`. By default the sub-agent uses the same model as its parent and receives a read-only tool set. Override either with:
+When the `SubAgent` plugin is listed in `Plugins`, the agent gains access to two tools:
+
+- **`sub_agent_explore`** — multi-hop exploration loop (up to `SubAgentMaxToolCalls` iterations, default 20). Accepts an optional `format` parameter: `"prose"` (default) or `"file_list"` (bulleted path list).
+- **`sub_agent_locate`** — single-target symbol/file lookup, hard-capped at 5 iterations and 512 output tokens.
+
+Both tools inject the current working directory into the sub-agent's system prompt and link the parent's cancellation token so interrupts propagate immediately. The sub-agent does not share the parent's conversation history.
 
 ```yaml
 - Name: Developer
@@ -224,14 +230,13 @@ When the `SubAgent` plugin is listed in `Plugins`, the agent gains access to `su
     - FileSystem
     - Shell
     - SubAgent
-  SubAgentModel: claude-haiku-4-5-20251001
+  SubAgentModel: claude-haiku-4-5-20251001   # cheaper model for sub-agent work
+  SubAgentMaxToolCalls: 25                   # allow deeper explore loops
   SubAgentPlugins:
     - FileSystem
     - Search
     - Git
 ```
-
-The sub-agent runs to completion and returns a prose summary to the calling agent. It does not share the parent's conversation history.
 
 ### RemoteAgent
 
@@ -547,7 +552,7 @@ Each line is a JSON object:
 | `session` | Session ID |
 | `agent` | Agent name (null for session-level events) |
 | `turn` | 1-based turn counter |
-| `event_type` | Event identifier. Session lifecycle: `session_start`, `session_end`, `phase_start`, `phase_end`, `compaction`, `session_error`. Per-turn: `turn_start`, `turn_end`, `turn_timeout`, `reasoning`. Routing: `keyword_detected`, `multi_keyword`, `no_keyword`, `keyword_not_found`, `agent_routed`, `state_advanced`, `context_cap_warning`, `correction_injected`. Validation: `validation_fail`, `hitl_escalation`. Saga: `saga_compensating`, `saga_compensated`. Magentic: `magentic_plan`, `magentic_replan`, `magentic_complete`. Infrastructure: `tool_blocked`, `tool_call`, `circuit_breaker_open`, `http_reasoning`. Sub-agent: `sub_agent_start`, `sub_agent_end`. |
+| `event_type` | Event identifier. Session lifecycle: `session_start`, `session_end`, `phase_start`, `phase_end`, `compaction`, `session_error`. Per-turn: `turn_start`, `turn_end`, `turn_timeout`, `reasoning`. Routing: `keyword_detected`, `multi_keyword`, `no_keyword`, `keyword_not_found`, `agent_routed`, `state_advanced`, `context_cap_warning`, `correction_injected`. Validation: `validation_fail`, `hitl_escalation`. Saga: `saga_compensating`, `saga_compensated`. Magentic: `magentic_plan`, `magentic_replan`, `magentic_complete`. Infrastructure: `tool_blocked`, `tool_call`, `circuit_breaker_open`, `http_reasoning`. Sub-agent: `sub_agent_start`, `sub_agent_tool_call`, `sub_agent_end`. |
 | `payload` | Event-specific JSON object |
 
 **`turn_end` payload:** `{ input_tokens, output_tokens }` — accumulated across all API calls within the turn.

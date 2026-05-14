@@ -177,6 +177,16 @@ public record AgentConfig
     public List<string>? SubAgentPlugins { get; init; }
 
     /// <summary>
+    /// Maximum tool-call iterations allowed inside the sub-agent loop spawned by the
+    /// <c>SubAgent</c> plugin. Maps to
+    /// <see cref="Microsoft.Extensions.AI.FunctionInvokingChatClient.MaximumIterationsPerRequest"/>
+    /// for the sub-agent's inner <c>FunctionInvokingChatClient</c>.
+    /// 0 (default) uses the sub-agent's built-in default of 20.
+    /// Mirrors <see cref="MaxToolCallsPerTurn"/> but applies only inside the sub-agent loop.
+    /// </summary>
+    public int SubAgentMaxToolCalls { get; init; } = 0;
+
+    /// <summary>
     /// When set, this agent is hosted remotely and accessed via the A2A protocol.
     /// <see cref="RemoteAgentConfig.Url"/> is the base URL of the remote agent;
     /// its agent card is fetched from <c>{Url}/.well-known/agent.json</c> at session startup.

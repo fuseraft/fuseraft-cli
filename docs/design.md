@@ -502,7 +502,7 @@ Plugins are `AIFunction`-providing objects registered in `PluginRegistry` and re
 | `Scratchpad` | `scratchpad_read`, `scratchpad_read_all`, `scratchpad_search`, `scratchpad_write`, `scratchpad_delete` — per-agent key-value store |
 | `Chatroom` | `chatroom_send`, `chatroom_read` — shared coordination log |
 | `Handoff` | `handoff` — emits a routing keyword to trigger a state machine or keyword route transition |
-| `SubAgent` | `sub_agent_explore` — spawns a short-lived sub-agent for broad codebase surveys without filling the caller's context. The sub-agent model and plugin set are configurable via `SubAgentModel` and `SubAgentPlugins` on the parent `AgentConfig`. Default tool set: FileSystem read, Search, Shell read, Git read. |
+| `SubAgent` | `sub_agent_explore` (multi-hop exploration, prose or file-list output, configurable iteration cap) · `sub_agent_locate` (single-target symbol/file lookup, 5-iteration hard cap, path:line output) — both run an isolated tool loop and return a distilled result without filling the caller's context. Working directory is injected automatically; the parent's cancellation token is linked. Model and plugin set are configurable via `SubAgentModel`, `SubAgentMaxToolCalls`, and `SubAgentPlugins`. Default tool set: FileSystem read, Search, Shell read, Git read. |
 
 **MCP servers** (`McpSessionManager`): connected at startup via `ModelContextProtocol`. Each server's tools are registered under the server's configured name and are available to any agent that lists that name in `Plugins`. MCP connections are disposed when the session ends.
 
@@ -667,8 +667,9 @@ Event consumers may inject messages, trigger external systems, or enforce additi
 
 | Event | Emitter | Payload |
 |---|---|---|
-| `sub_agent_start` | `SubAgentPlugin` | Agent name, task |
-| `sub_agent_end` | `SubAgentPlugin` | Agent name, succeeded, token count |
+| `sub_agent_start` | `SubAgentPlugin` | Agent name, query (truncated to 120 chars), mode (`explore` \| `locate`) |
+| `sub_agent_tool_call` | `SubAgentPlugin` | Agent name, tool name, args summary |
+| `sub_agent_end` | `SubAgentPlugin` | Agent name, outcome (`completed` \| `cancelled` \| `timeout` \| `error`), summary_chars, mode |
 
 *REPL-specific*
 
