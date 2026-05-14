@@ -2,13 +2,11 @@
 
 <img src="docs/.assets/fuseraft-banner.png" alt="fuseraft — an agent orchestration framework">
 
-fuseraft turns a YAML config into a running multi-agent pipeline. Define a team of AI agents — each with its own role, model, and tools — and describe how they hand off to each other. Then give them a task.
+fuseraft turns a YAML config into a running multi-agent pipeline. Define a team of AI agents — each with its own role, model, skills, and tools — and describe how they hand off to each other. Then give them a task.
 
 Build a software development team that plans, writes, tests, and reviews its own code. A research pipeline that fans out to specialists and synthesizes their findings. A decision workflow with a human approval gate at every critical step. Whatever you can describe, fuseraft can coordinate.
 
 Works with Anthropic, xAI, OpenAI, Azure OpenAI, Ollama, and any OpenAI-compatible provider. Agents can be local or remote — the [A2A protocol](https://a2a-protocol.org/) lets you federate agent slots to independently deployed services. Built on [Microsoft Agent Framework](https://github.com/microsoft/agents).
-
-> Actively maintained and in production use. New features ship regularly.
 
 ---
 
@@ -215,13 +213,29 @@ The binary lands in `./bin/`.
 
 ## VS Code Extension
 
-The [fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) brings the CLI into your editor:
+The [fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) brings the full CLI experience into your editor.
 
-- Activity bar panel with **Run Task**, **Sessions**, **Configs**, and **Context** views
-- CodeLens on config files — run, validate, or diagram without leaving the editor
-- Command palette integration for all common CLI commands
-- YAML/JSON IntelliSense with schema validation for config files
-- Session transcript viewer and real-time DevUI launcher
+**Activity bar panel** — four persistent views:
+- **Run Task** — compose a task, pick a config, set flags (`--hitl`, `--tools`, `--verbose`, `--devui`), and launch. Each task opens in its own named terminal; multiple tasks can run simultaneously.
+- **Sessions** — lists sessions scoped to your workspace with status, age, and task preview. Click to resume; preview icon opens a formatted transcript with per-turn token usage and cost.
+- **Configs** — auto-discovers every fuseraft config in your workspace. Click to open, or hit **+** to run the Initialize Config wizard.
+- **Context** — manages reference material agents can access during sessions. Import files or folders; they're stored in `.fuseraft/context/` and available to any session in the workspace.
+
+**CodeLens on config files** — three inline actions appear above the first line of any config:
+
+```
+▶ Run Task   ✓ Validate   ⎇ Diagram
+```
+
+**Task files** — right-click any `.md` or `.txt` file in the explorer or editor to run it directly as a fuseraft task. Write your task as a markdown spec, then run it without copying anything.
+
+**REPL** — `fuseraft: Open REPL` starts an interactive single-agent chat session without a config file. Good for quick experiments.
+
+**Set Up Provider** — a guided first-run panel for configuring your binary path, provider, model, endpoint, and API key. Runs automatically when the binary isn't found; available any time from the command palette.
+
+**YAML / JSON IntelliSense** — full JSON Schema for fuseraft configs ships with the extension. Autocomplete, inline docs, and validation for every field — agents, models, plugins, routes, contracts, security, and more.
+
+**Status bar** — a persistent `fuseraft` button always visible at the bottom of the editor. Click to run a task.
 
 ---
 
