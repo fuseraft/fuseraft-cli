@@ -1,14 +1,18 @@
-# fuseraft CLI
+# fuseraft
 
 <img src="docs/.assets/fuseraft-banner.png" alt="fuseraft — an agent orchestration framework">
 
-A .NET multi-agent orchestration framework built on [Microsoft Agent Framework](https://github.com/microsoft/agents). Define a team of AI agents in a YAML config and coordinate them via keyword routing, state machine routing, declarative directed-graph routing, LLM-based selection, or fully autonomous [Magentic](https://arxiv.org/abs/2411.04468) orchestration. Works with Anthropic, xAI, OpenAI, Azure OpenAI, Ollama, and any OpenAI-compatible provider. Agents can be local or remote — the [A2A protocol](https://a2a-protocol.org/) lets you federate agent slots to independently hosted services.
+fuseraft turns a YAML config into a running multi-agent pipeline. Define a team of AI agents — each with its own role, model, and tools — and describe how they hand off to each other. Then give them a task.
 
-> **Early adoption.** Actively maintained and in production use. New features ship regularly.
+Build a software development team that plans, writes, tests, and reviews its own code. A research pipeline that fans out to specialists and synthesizes their findings. A decision workflow with a human approval gate at every critical step. Whatever you can describe, fuseraft can coordinate.
+
+Works with Anthropic, xAI, OpenAI, Azure OpenAI, Ollama, and any OpenAI-compatible provider. Agents can be local or remote — the [A2A protocol](https://a2a-protocol.org/) lets you federate agent slots to independently deployed services. Built on [Microsoft Agent Framework](https://github.com/microsoft/agents).
+
+> Actively maintained and in production use. New features ship regularly.
 
 ---
 
-## Architecture
+## What you can build
 
 Pipelines range from a single task-routed assistant:
 
@@ -90,9 +94,32 @@ flowchart LR
 
 ---
 
-## Installation
+## Quick start
 
-The prebuilt binaries are self-contained — no .NET installation required.
+```bash
+# Interactive wizard — describe your use case and get a config back
+fuseraft init
+
+# Or start from a built-in template
+fuseraft init --template dev-team --model claude-sonnet-4-6
+fuseraft init --template graph          # directed-graph pipeline with parallel fan-out
+fuseraft init --template designer       # AI-assisted config designer
+
+# Run a session
+fuseraft run -c config/orchestration.yaml "Build a REST API in Go with JWT authentication"
+
+# Resume the most recent incomplete session
+fuseraft run --resume
+
+# Validate a config — add --diagram for a Mermaid flowchart preview
+fuseraft validate config/orchestration.yaml --diagram
+```
+
+---
+
+## Install
+
+Prebuilt binaries are self-contained — no .NET installation required.
 
 **Linux / macOS**
 
@@ -112,11 +139,11 @@ curl -fsSL https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.
 irm https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.ps1 | iex
 ```
 
-Both scripts download the latest release from [GitHub Releases](https://github.com/fuseraft/fuseraft-cli/releases), place the binary on your `PATH`, and print a `fuseraft --version` hint when done.
+Both scripts download the latest release from [GitHub Releases](https://github.com/fuseraft/fuseraft-cli/releases), place the binary on your `PATH`, and confirm with a `fuseraft --version` on completion.
 
 **Manual download**
 
-Grab the archive for your platform directly from [Releases](https://github.com/fuseraft/fuseraft-cli/releases), extract the `fuseraft` (or `fuseraft.exe`) binary, and place it anywhere on your `PATH`.
+Grab the archive for your platform from [Releases](https://github.com/fuseraft/fuseraft-cli/releases), extract the binary, and place it on your `PATH`.
 
 **Build from source**
 
@@ -131,50 +158,36 @@ The binary lands in `./bin/`.
 
 ---
 
-## Prerequisites
-
-- An API key for your chosen provider (e.g. `XAI_API_KEY` for xAI)
-
----
-
-## Quick start
-
-```bash
-# Generate a config from a template (interactive wizard)
-fuseraft init
-
-# Or pick a template directly
-fuseraft init --template dev-team --model claude-sonnet-4-6
-fuseraft init --template graph          # directed-graph pipeline with parallel fan-out
-fuseraft init --template designer       # AI-assisted config designer
-
-# Run against a YAML config
-fuseraft run -c config/orchestration.yaml "Build a REST API in Go with JWT authentication"
-
-# Resume the most recent incomplete session
-fuseraft run --resume
-
-# Validate a config before running; --diagram prints a Mermaid flowchart
-fuseraft validate config/orchestration.yaml
-fuseraft validate config/orchestration.yaml --diagram
-```
-
----
-
 ## Features
 
-- Coordinates any number of agents via keyword routing, state machine routing, declarative directed-graph routing (with parallel fan-out/fan-in), LLM-based selection, or fully autonomous Magentic orchestration
-- Agents can be declared inline or as standalone `AgentFile` YAML files — reuse and version agent definitions independently across configs
-- Gives each agent access to tools: filesystem, shell, git, HTTP, JSON, search, Docker sandboxes, MCP servers, persistent scratchpad, and a shared chatroom
-- Federates agent slots to remote services via the [A2A protocol](https://a2a-protocol.org/) — remote agents participate identically to local ones
-- Checkpoints after every turn so sessions can always be resumed exactly where they left off
-- Tracks token usage per turn; enforces per-model context caps via `MaxContextTokens` and a session-wide hard stop via `MaxTotalTokens`
-- Blocks handoffs with routing validators unless evidence of real progress is present on disk
-- Sandboxes agent file and shell access to a configured directory tree
-- Applies per-agent execution rings, prompt injection detection, circuit breaker, and a hash-chain audit log via the Agent Governance Toolkit
-- Supports mixing any combination of LLM providers per agent
-- Streams agent turns to a browser-based DevUI (`--devui`) for real-time session visualization
-- Includes an interactive **Orchestration Designer** (`fuseraft init --template designer`) — describe your use case and get a validated config back
+**Orchestration**
+- Five routing modes: keyword, state machine, declarative directed graph (with parallel fan-out/fan-in), LLM-based selection, and fully autonomous Magentic
+- Routing validators that block handoffs unless real evidence is present on disk — no hallucinated progress
+- Saga orchestration wraps any pipeline with compensating rollback if a step fails
+
+**Agents**
+- Declare agents inline or as standalone `AgentFile` YAML — reuse and version agent definitions across configs
+- Mix any combination of LLM providers within a single pipeline
+- Federate agent slots to remote services via the [A2A protocol](https://a2a-protocol.org/) — remote agents participate identically to local ones
+
+**Tools**
+- Built-in plugins: filesystem, shell, git, HTTP, JSON, search, Docker sandboxes, MCP servers, persistent scratchpad, and a shared chatroom
+- Connect any MCP server — its tools are automatically registered and available to agents
+
+**Reliability**
+- Checkpoints after every turn — sessions can always be resumed exactly where they left off
+- Token tracking per turn; enforce per-model context caps and a session-wide hard spending limit
+- Conversation compaction keeps long sessions within context window limits
+
+**Governance**
+- Per-agent execution rings, prompt injection detection, circuit breaker, and a hash-chain audit log
+- Sandbox file and shell access to a configured directory tree
+- Human-in-the-loop support at any point in a pipeline
+
+**Developer experience**
+- Browser-based DevUI (`--devui`) for real-time session visualization
+- Interactive **Orchestration Designer** (`fuseraft init --template designer`) — describe your use case, get a validated config back
+- VS Code extension with CodeLens, IntelliSense, and a session viewer
 
 ---
 
@@ -189,11 +202,11 @@ fuseraft validate config/orchestration.yaml --diagram
 | [Plugins](docs/plugins.md) | All built-in tools agents can call |
 | [Strategies](docs/strategies.md) | Selection and termination strategies |
 | [Routing Validators](docs/validators.md) | Anti-hallucination handoff guards |
-| [Harness Engineering](docs/harness-engineering.md) | Designing orchestration configs that enforce real progress mechanically |
+| [Harness Engineering](docs/harness-engineering.md) | Designing configs that enforce real progress mechanically |
 | [MCP Integration](docs/mcp.md) | Connecting external MCP servers |
 | [Security & Sandbox](docs/security.md) | File and network containment |
 | [Governance](docs/governance.md) | Execution rings, audit log, circuit breaker, SLO tracking |
-| [Context Store](docs/context.md) | Importing files and directories into the session context |
+| [Context Store](docs/context-store.md) | Importing files and directories into the session context |
 | [Sessions](docs/sessions.md) | Resumption, HITL, cost tracking, compaction |
 | [Examples](docs/examples.md) | Ready-to-use config examples |
 | [Design](docs/design.md) | Architecture, layer map, MAF usage, and decision log |
@@ -202,13 +215,19 @@ fuseraft validate config/orchestration.yaml --diagram
 
 ## VS Code Extension
 
-The [Fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) brings the CLI into your editor:
+The [fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) brings the CLI into your editor:
 
 - Activity bar panel with **Run Task**, **Sessions**, **Configs**, and **Context** views
 - CodeLens on config files — run, validate, or diagram without leaving the editor
 - Command palette integration for all common CLI commands
 - YAML/JSON IntelliSense with schema validation for config files
 - Session transcript viewer and real-time DevUI launcher
+
+---
+
+## Contributing
+
+Contributions are welcome — bug fixes, new plugins, config examples, documentation, and new ideas. See [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 
 ---
 
