@@ -1,8 +1,4 @@
-<p align="center">
-  <img src="docs/.assets/icon.png" alt="fuseraft" width="96">
-</p>
-
-# Fuseraft CLI
+# fuseraft CLI
 
 <img src="docs/.assets/fuseraft-banner.png" alt="fuseraft — an agent orchestration framework">
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fuseraft CLI installer — Linux and macOS
+# fuseraft CLI installer — Linux and macOS
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.sh | bash

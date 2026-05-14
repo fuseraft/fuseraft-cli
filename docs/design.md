@@ -1,4 +1,4 @@
-# Fuseraft CLI — Design Document
+# fuseraft CLI — Design Document
 
 This document describes the architecture and design decisions behind fuseraft-cli. It is meant to be a living reference for contributors and for future conversations with AI assistants working in this codebase.
 
@@ -29,7 +29,7 @@ This document describes the architecture and design decisions behind fuseraft-cl
 
 ## 1. What It Is
 
-Fuseraft-cli is a production-grade multi-agent orchestration CLI built on the Microsoft Agent Framework (MAF). It drives teams of LLM agents through configurable workflows — software development pipelines, research tasks, general automation — with built-in governance, budget control, session persistence, and human-in-the-loop support.
+fuseraft-cli is a multi-agent orchestration CLI built on the Microsoft Agent Framework (MAF). It drives teams of LLM agents through configurable workflows — software development pipelines, research tasks, general automation — with built-in governance, budget control, session persistence, and human-in-the-loop support.
 
 A session is started with a natural-language task. The CLI selects which agents speak, validates routing decisions against deterministic rules, persists the conversation to disk after every turn, and streams output to the terminal and an optional browser-based DevUI.
 

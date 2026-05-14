@@ -78,7 +78,7 @@ string GetGitHash()
 Setup(ctx =>
 {
     Information("╔══════════════════════════════════════════════════════╗");
-    Information("║      Fuseraft CLI · Multi-Agent Orchestration        ║");
+    Information("║      fuseraft CLI · Multi-Agent Orchestration        ║");
     Information("╠══════════════════════════════════════════════════════╣");
     Information($"║  Version        {version,-37}║");
     Information($"║  Configuration  {configuration,-37}║");

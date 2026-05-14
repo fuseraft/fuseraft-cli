@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Fuseraft CLI build bootstrapper (Windows PowerShell / pwsh)
+    fuseraft CLI build bootstrapper (Windows PowerShell / pwsh)
 
 .DESCRIPTION
     Restores the cake.tool local tool and runs the Cake build script.

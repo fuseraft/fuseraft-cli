@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Fuseraft CLI installer for Windows.
+    fuseraft CLI installer for Windows.
 
 .DESCRIPTION
     Downloads the latest fuseraft release from GitHub and installs it to
