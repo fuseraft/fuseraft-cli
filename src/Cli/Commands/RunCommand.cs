@@ -593,10 +593,15 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
     /// </summary>
     private static IReadOnlyList<string> DiscoverSkills()
     {
-        // Same order as BuildSkillsProvider: local first (takes precedence), built-in second.
+        // Same order as BuildSkillsProvider: project-native → project cross-client →
+        // user-native → user cross-client → built-in.
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var dirs = new[]
         {
             Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "skills"),
+            Path.Combine(Directory.GetCurrentDirectory(), ".agents",   "skills"),
+            Path.Combine(home, ".fuseraft", "skills"),
+            Path.Combine(home, ".agents",   "skills"),
             Path.Combine(AppContext.BaseDirectory, "skills"),
         };
         var seen  = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
