@@ -1,6 +1,6 @@
 ---
 name: sandbox-test
-description: Test a code change in an isolated throwaway harness before touching production source files. Use this skill whenever a logic fix or behavioral change is uncertain, involves non-obvious side effects, or requires iterating on behavior before committing. Trigger when: debugging a defect, verifying a hypothesis, testing edge-case handling, or any time confidence in a change must be established mechanically before applying it to real code.
+description: "Test a code change in an isolated throwaway harness before touching production source files. Use this skill whenever a logic fix or behavioral change is uncertain, involves non-obvious side effects, or requires iterating on behavior before committing. Trigger when: debugging a defect, verifying a hypothesis, testing edge-case handling, or any time confidence in a change must be established mechanically before applying it to real code."
 ---
 
 # Sandbox Test
