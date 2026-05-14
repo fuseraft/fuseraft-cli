@@ -7,7 +7,7 @@
 | `main` (latest) | ✅ Yes |
 | Older tags | ❌ No — please upgrade |
 
-Fuseraft CLI is early-stage software. Only the latest commit on `main` and the most recent published release receive security fixes.
+fuseraft CLI is early-stage software. Only the latest commit on `main` and the most recent published release receive security fixes.
 
 ---
 

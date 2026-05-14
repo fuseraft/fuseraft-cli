@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fuseraft CLI build bootstrapper (Linux/macOS)
+# fuseraft CLI build bootstrapper (Linux/macOS)
 #
 # Usage:
 #   ./build.sh                           # Run Default target (Publish)

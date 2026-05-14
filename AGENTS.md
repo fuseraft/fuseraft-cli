@@ -1,4 +1,4 @@
-# AGENTS.md — Fuseraft CLI
+# AGENTS.md — fuseraft CLI
 
 Guide for AI coding assistants working in this repository. Read this before making changes.
 
