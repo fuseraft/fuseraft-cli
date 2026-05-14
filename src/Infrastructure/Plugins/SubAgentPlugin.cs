@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text;
 using Microsoft.Extensions.AI;
 using fuseraft.Orchestration;
 
@@ -88,6 +89,36 @@ public sealed class SubAgentPlugin(
             "locate",
             cancellationToken);
 
+    // Streaming variants — not registered as model tools (no [Description]).
+    // onChunk is called for each text token as the final answer arrives.
+
+    public Task<string> ExploreStreamingAsync(
+        string query,
+        Func<string, Task> onChunk,
+        string format = "prose",
+        CancellationToken cancellationToken = default)
+        => RunLoopAsync(
+            BuildExplorePrompt(_tools, _effectiveMaxToolCalls, format),
+            query,
+            _effectiveMaxToolCalls,
+            maxOutputTokens,
+            "explore",
+            cancellationToken,
+            onChunk);
+
+    public Task<string> LocateStreamingAsync(
+        string target,
+        Func<string, Task> onChunk,
+        CancellationToken cancellationToken = default)
+        => RunLoopAsync(
+            BuildLocatePrompt(_tools),
+            $"Locate: {target}",
+            LocateMaxToolCalls,
+            LocateMaxOutputTokens,
+            "locate",
+            cancellationToken,
+            onChunk);
+
     // --- Core loop (shared by both tools) ---
 
     private async Task<string> RunLoopAsync(
@@ -96,7 +127,8 @@ public sealed class SubAgentPlugin(
         int maxIterations,
         int outputTokens,
         string mode,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string, Task>? onChunk = null)
     {
         if (chatClient is null)
             return "[SubAgent] No chat client configured — this is a stub instance. " +
@@ -131,10 +163,28 @@ public sealed class SubAgentPlugin(
         string outcome = "completed";
         try
         {
-            var response = await loopClient.GetResponseAsync(messages, options, cts.Token);
-            var result   = string.IsNullOrWhiteSpace(response.Text)
-                ? "Sub-agent produced no text output."
-                : response.Text;
+            string result;
+            if (onChunk is not null)
+            {
+                var sb = new StringBuilder();
+                await foreach (var update in loopClient.GetStreamingResponseAsync(messages, options, cts.Token))
+                {
+                    var text = update.Text;
+                    if (!string.IsNullOrEmpty(text))
+                    {
+                        sb.Append(text);
+                        await onChunk(text);
+                    }
+                }
+                result = sb.Length > 0 ? sb.ToString() : "Sub-agent produced no text output.";
+            }
+            else
+            {
+                var response = await loopClient.GetResponseAsync(messages, options, cts.Token);
+                result = string.IsNullOrWhiteSpace(response.Text)
+                    ? "Sub-agent produced no text output."
+                    : response.Text;
+            }
 
             if (eventEmitter is not null)
                 await eventEmitter.EmitAsync("sub_agent_end",

@@ -102,6 +102,7 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
 
         var toolsByCategory = new Dictionary<string, List<AIFunction>>(StringComparer.OrdinalIgnoreCase);
         using ShellPlugin? shellPlugin = settings.NoTools ? null : new ShellPlugin();
+        SubAgentPlugin? subAgent = null;
         if (!settings.NoTools)
         {
             toolsByCategory["FileSystem"] = PluginRegistry.GetFunctionsFromObject(new FileSystemPlugin()).ToList();
@@ -109,6 +110,19 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
             toolsByCategory["Search"]     = PluginRegistry.GetFunctionsFromObject(new SearchPlugin()).ToList();
             toolsByCategory["Git"]        = PluginRegistry.GetFunctionsFromObject(new GitPlugin()).ToList();
             toolsByCategory["Http"]       = PluginRegistry.GetFunctionsFromObject(new HttpPlugin()).ToList();
+
+            var fsReadOps    = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                { "read_file", "list_files", "grep_file", "get_file_summary", "get_file_info" };
+            var shellReadOps = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                { "shell_run", "shell_get_env", "shell_which", "shell_get_working_directory" };
+            var gitReadOps   = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                { "git_status", "git_diff", "git_log", "git_show", "git_branch_list", "git_stash_list" };
+            var explorerTools = toolsByCategory["FileSystem"].Where(f => fsReadOps.Contains(f.Name))
+                .Concat(toolsByCategory["Search"])
+                .Concat(toolsByCategory["Shell"].Where(f => shellReadOps.Contains(f.Name)))
+                .Concat(toolsByCategory["Git"].Where(f => gitReadOps.Contains(f.Name)))
+                .ToList();
+            subAgent = new SubAgentPlugin(factory.Create(modelConfig), explorerTools);
         }
 
         var initialTools = toolsByCategory.Values.SelectMany(v => v).ToList();
@@ -134,6 +148,8 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
                 $"[dim](type[/] [bold]/exit[/] [dim]or Ctrl+C to quit)[/]");
         else
             AnsiConsole.MarkupLine($"[dim](type[/] [bold]/exit[/] [dim]or Ctrl+C to quit)[/]");
+        if (subAgent is not null)
+            AnsiConsole.MarkupLine($"[dim]SubAgent:[/] [dim]/explore <query>  /locate <symbol>[/]");
         AnsiConsole.MarkupLine($"[dim]Events:[/] [dim]{Markup.Escape(eventsPath)}[/]");
         AnsiConsole.WriteLine();
 
@@ -161,7 +177,7 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
             cwd, sessionId, modelId, modelConfig, userCfg, client,
             factory, keyStore, emitter, eventsPath,
             memoryStore, toolsByCategory, systemPrompt, pendingSave,
-            verbose: settings.Verbose);
+            verbose: settings.Verbose, subAgent: subAgent);
 
         await ReplTurn.RunAsync(ctx, cancellationToken);
 

@@ -2,6 +2,7 @@ using Microsoft.Extensions.AI;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.KeyStore;
+using fuseraft.Infrastructure.Plugins;
 using fuseraft.Orchestration;
 
 namespace fuseraft.Cli.Commands.Repl;
@@ -37,6 +38,7 @@ internal sealed class ReplSessionContext
     public readonly ChatClientFactory   Factory;
     public readonly IApiKeyStore        KeyStore;
     public readonly Dictionary<string, List<AIFunction>> ToolsByCategory;
+    public readonly SubAgentPlugin?     SubAgent;
     public readonly bool                Verbose;
 
     // Mutable provider state (may be replaced by /provider setup)
@@ -97,7 +99,8 @@ internal sealed class ReplSessionContext
         UserConfig? userCfg, IChatClient client, ChatClientFactory factory,
         IApiKeyStore keyStore, EventEmitter emitter, string eventsPath,
         MemoryStore memoryStore, Dictionary<string, List<AIFunction>> toolsByCategory,
-        string systemPrompt, bool pendingSave, bool verbose = false)
+        string systemPrompt, bool pendingSave, bool verbose = false,
+        SubAgentPlugin? subAgent = null)
     {
         Cwd             = cwd;
         SessionId       = sessionId;
@@ -111,6 +114,7 @@ internal sealed class ReplSessionContext
         EventsPath      = eventsPath;
         MemoryStore     = memoryStore;
         ToolsByCategory = toolsByCategory;
+        SubAgent        = subAgent;
         PendingSave     = pendingSave;
         Verbose         = verbose;
         History         = [new ChatMessage(ChatRole.System, systemPrompt)];

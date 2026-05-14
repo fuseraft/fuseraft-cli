@@ -31,6 +31,8 @@ internal static class ReplCommands
             case "/safe-mode":  return await CmdSafeModeAsync(ctx, arg);
             case "/memory":     return await CmdMemoryAsync(ctx, arg, cancellationToken);
             case "/max-tokens": return CmdMaxTokens(ctx, arg);
+            case "/explore":    return await CmdExploreAsync(ctx, arg, cancellationToken);
+            case "/locate":     return await CmdLocateAsync(ctx, arg, cancellationToken);
             default:
                 AnsiConsole.MarkupLine(
                     $"[yellow]Unknown command:[/] {Markup.Escape(command)}  [dim](type /help for commands)[/]");
@@ -694,6 +696,131 @@ internal static class ReplCommands
         return CommandResult.Continue;
     }
 
+    private static async Task<CommandResult> CmdExploreAsync(
+        ReplSessionContext ctx, string arg, CancellationToken cancellationToken)
+    {
+        if (ctx.SubAgent is null)
+        {
+            AnsiConsole.MarkupLine("[dim]Sub-agent not available (started with --no-tools).[/]");
+            return CommandResult.Continue;
+        }
+        if (string.IsNullOrWhiteSpace(arg))
+        {
+            AnsiConsole.MarkupLine("[yellow]Usage: /explore <query>[/]");
+            return CommandResult.Continue;
+        }
+
+        var spinCts       = new CancellationTokenSource();
+        var spinTask      = ReplTurn.RunSpinnerAsync("exploring…", spinCts.Token);
+        bool spinStopped  = false;
+        bool headerPrinted = false;
+
+        async Task StopSpinner()
+        {
+            if (spinStopped) return;
+            spinStopped = true;
+            spinCts.Cancel();
+            await spinTask;
+            ReplTurn.ClearSpinnerLine();
+        }
+
+        try
+        {
+            await ctx.SubAgent.ExploreStreamingAsync(arg,
+                async chunk =>
+                {
+                    if (!headerPrinted)
+                    {
+                        headerPrinted = true;
+                        await StopSpinner();
+                        AnsiConsole.MarkupLine("[dim]assistant:[/]");
+                    }
+                    Console.Write(chunk);
+                },
+                cancellationToken: cancellationToken);
+
+            await StopSpinner();
+            if (headerPrinted) AnsiConsole.WriteLine();
+            else AnsiConsole.MarkupLine("[dim](no output)[/]");
+            await ctx.Emitter.EmitAsync("command", payload: new { command = "/explore", query = arg });
+        }
+        catch (OperationCanceledException)
+        {
+            await StopSpinner();
+            AnsiConsole.MarkupLine("[dim](cancelled)[/]");
+        }
+        catch (Exception ex)
+        {
+            await StopSpinner();
+            AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(ex.Message)}[/]");
+        }
+
+        AnsiConsole.WriteLine();
+        return CommandResult.Continue;
+    }
+
+    private static async Task<CommandResult> CmdLocateAsync(
+        ReplSessionContext ctx, string arg, CancellationToken cancellationToken)
+    {
+        if (ctx.SubAgent is null)
+        {
+            AnsiConsole.MarkupLine("[dim]Sub-agent not available (started with --no-tools).[/]");
+            return CommandResult.Continue;
+        }
+        if (string.IsNullOrWhiteSpace(arg))
+        {
+            AnsiConsole.MarkupLine("[yellow]Usage: /locate <symbol>[/]");
+            return CommandResult.Continue;
+        }
+
+        var spinCts      = new CancellationTokenSource();
+        var spinTask     = ReplTurn.RunSpinnerAsync("locating…", spinCts.Token);
+        bool spinStopped = false;
+        bool gotOutput   = false;
+
+        async Task StopSpinner()
+        {
+            if (spinStopped) return;
+            spinStopped = true;
+            spinCts.Cancel();
+            await spinTask;
+            ReplTurn.ClearSpinnerLine();
+        }
+
+        try
+        {
+            await ctx.SubAgent.LocateStreamingAsync(arg,
+                async chunk =>
+                {
+                    if (!gotOutput)
+                    {
+                        gotOutput = true;
+                        await StopSpinner();
+                    }
+                    Console.Write(chunk);
+                },
+                cancellationToken: cancellationToken);
+
+            await StopSpinner();
+            if (gotOutput) AnsiConsole.WriteLine();
+            else AnsiConsole.MarkupLine("[dim](not found)[/]");
+            await ctx.Emitter.EmitAsync("command", payload: new { command = "/locate", target = arg });
+        }
+        catch (OperationCanceledException)
+        {
+            await StopSpinner();
+            AnsiConsole.MarkupLine("[dim](cancelled)[/]");
+        }
+        catch (Exception ex)
+        {
+            await StopSpinner();
+            AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(ex.Message)}[/]");
+        }
+
+        AnsiConsole.WriteLine();
+        return CommandResult.Continue;
+    }
+
     // -------------------------------------------------------------------------
     // Display utilities used by command handlers
     // -------------------------------------------------------------------------
@@ -731,6 +858,8 @@ internal static class ReplCommands
         AnsiConsole.MarkupLine("  [bold cyan]/memory save[/]             Extract and save memories from the current session now");
         AnsiConsole.MarkupLine("  [bold cyan]/max-tokens <n>[/]          Set max output tokens for each response");
         AnsiConsole.MarkupLine("  [bold cyan]/max-tokens reset[/]        Restore provider default max output tokens");
+        AnsiConsole.MarkupLine("  [bold cyan]/explore <query>[/]         Run a sub-agent exploration loop and return a prose summary");
+        AnsiConsole.MarkupLine("  [bold cyan]/locate <symbol>[/]         Run a sub-agent symbol lookup; returns path:line result");
         AnsiConsole.MarkupLine("  [bold cyan]/exit[/]                    Exit the REPL (auto-saves memories)");
     }
 
