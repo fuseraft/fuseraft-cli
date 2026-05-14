@@ -1,4 +1,10 @@
+<p align="center">
+  <img src="docs/.assets/icon.png" alt="fuseraft" width="96">
+</p>
+
 # Fuseraft CLI
+
+<img src="docs/.assets/fuseraft-banner.png" alt="fuseraft — an agent orchestration framework">
 
 A .NET multi-agent orchestration framework built on [Microsoft Agent Framework](https://github.com/microsoft/agents). Define a team of AI agents in a YAML config and coordinate them via keyword routing, state machine routing, declarative directed-graph routing, LLM-based selection, or fully autonomous [Magentic](https://arxiv.org/abs/2411.04468) orchestration. Works with Anthropic, xAI, OpenAI, Azure OpenAI, Ollama, and any OpenAI-compatible provider. Agents can be local or remote — the [A2A protocol](https://a2a-protocol.org/) lets you federate agent slots to independently hosted services.
 
@@ -10,23 +16,81 @@ A .NET multi-agent orchestration framework built on [Microsoft Agent Framework](
 
 Pipelines range from a single task-routed assistant:
 
-<img src="docs/.assets/lr-task-assistant.png" alt="Single-agent: Task → Assistant">
+```mermaid
+flowchart LR
+    Task((Task)) --> Assistant[Assistant]
+```
 
 ...to multi-agent workflows with conditional keyword routing and anti-hallucination validators enforced at every handoff:
 
-![Default four-agent pipeline](docs/.assets/td-basic-yaml-config.png)
+```mermaid
+flowchart TD
+    Task((Task))
+    Planner[Planner]
+    Developer[Developer]
+    Tester[Tester]
+    Reviewer[Reviewer]
+    Done(["✓ Done"])
+
+    Task --> Planner
+    Planner      -->|"HANDOFF TO DEVELOPER · RequireBrief"| Developer
+    Developer    -->|"HANDOFF TO TESTER · RequireWriteFile · RequireShellPass"| Tester
+    Tester       -->|"HANDOFF TO REVIEWER · TestReportValid"| Reviewer
+    Reviewer     -->|"APPROVED"| Done
+    Reviewer     -->|"REVISION REQUIRED"| Developer
+    Reviewer     -->|"REPLAN REQUIRED"| Planner
+    Tester       -->|"BUGS FOUND"| Developer
+```
 
 ...to declarative directed-graph pipelines where back-edges express review cycles without duplicating states:
 
-![Graph pipeline with back-edges](docs/.assets/td-pipeline-with-back-edges.png)
+```mermaid
+flowchart TD
+    Planner([Planner])
+    Developer([Developer])
+    Tester([Tester])
+    Reviewer([Reviewer])
+    Terminal(["Reviewer\n✓ terminal"])
+
+    Planner   -->|"HANDOFF TO DEVELOPER · RequireBrief"| Developer
+    Developer -->|"HANDOFF TO TESTER · RequireWriteFile"| Tester
+    Tester    -->|"HANDOFF TO REVIEWER · TestReportValid"| Reviewer
+    Reviewer  -->|"APPROVED · RequireReviewJudgement"| Terminal
+    Reviewer  -->|"REPLAN REQUIRED"| Planner
+    Tester    -->|"BUGS FOUND"| Developer
+    Reviewer  -->|"REVISION REQUIRED"| Developer
+```
 
 ...to parallel fan-out/fan-in where a coordinator spawns concurrent workers that merge into a single downstream node:
 
-![Parallel fan-out / fan-in](docs/.assets/td-parallel-fan-out-fan-in.png)
+```mermaid
+flowchart TD
+    Coordinator([Coordinator])
+    AnalyzerA(["Analyzer A\nparallel"])
+    AnalyzerB(["Analyzer B\nparallel"])
+    Synthesizer(["Synthesizer\n✓ terminal"])
+
+    Coordinator -->|"BEGIN PARALLEL ANALYSIS"| AnalyzerA
+    Coordinator -->|"BEGIN PARALLEL ANALYSIS"| AnalyzerB
+    AnalyzerA   -->|"ANALYSIS COMPLETE"| Synthesizer
+    AnalyzerB   -->|"ANALYSIS COMPLETE"| Synthesizer
+```
 
 ...to fully autonomous [Magentic](https://arxiv.org/abs/2411.04468) orchestration where a Manager dynamically selects agents and collects their reports:
 
-<img src="docs/.assets/lr-magentic.png" alt="Magentic: Task → Manager selects/reports Researcher and Developer">
+```mermaid
+flowchart LR
+    Task((Task))
+    Manager([Manager])
+    Researcher[Researcher]
+    Developer[Developer]
+
+    Task       --> Manager
+    Manager    -->|"selects"| Researcher
+    Manager    -->|"selects"| Developer
+    Researcher -.->|"reports"| Manager
+    Developer  -.->|"reports"| Manager
+```
 
 ---
 

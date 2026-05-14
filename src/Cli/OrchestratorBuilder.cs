@@ -4,6 +4,10 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AgentGovernance;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 using AgentGovernance.Audit;
 using AgentGovernance.Sre;
 using AgentGovernance.Trust;
@@ -469,7 +473,7 @@ public static class OrchestratorBuilder
                 "The Graph block will be ignored. Set Selection.Type: graph to enable it.",
                 config.Selection.Type);
 
-        var agentFactory      = new AgentFactory(chatClientFactory, pluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, identityRegistry, eventEmitter, loggerFactory);
+        var agentFactory      = new AgentFactory(chatClientFactory, pluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, identityRegistry, eventEmitter, loggerFactory, BuildSkillsProvider());
         var aoLogger          = loggerFactory.CreateLogger<AgentOrchestrator>();
         var goLogger          = loggerFactory.CreateLogger<GraphOrchestrator>();
 
@@ -1064,5 +1068,69 @@ public static class OrchestratorBuilder
             Security    = expandedSecurity,
             ApiProfiles = expandedProfiles,
         };
+    }
+
+    private static AgentSkillsProvider? BuildSkillsProvider()
+    {
+        // Project-native → project cross-client → user-native → user cross-client → built-in.
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var dirs = new[]
+        {
+            Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "skills"),
+            Path.Combine(Directory.GetCurrentDirectory(), ".agents",   "skills"),
+            Path.Combine(home, ".fuseraft", "skills"),
+            Path.Combine(home, ".agents",   "skills"),
+            Path.Combine(AppContext.BaseDirectory, "skills"),
+        }.Where(Directory.Exists).ToArray();
+
+        if (dirs.Length == 0) return null;
+
+        return new AgentSkillsProviderBuilder()
+            .UseFileSkills(dirs)
+            .UseFileScriptRunner(RunSkillScriptAsync)
+            .Build();
+    }
+
+    private static async Task<object?> RunSkillScriptAsync(
+        AgentFileSkill skill,
+        AgentFileSkillScript script,
+        AIFunctionArguments arguments,
+        CancellationToken cancellationToken)
+    {
+        var ext = Path.GetExtension(script.FullPath).ToLowerInvariant();
+        var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+        var program = ext switch
+        {
+            ".py" => isWindows ? "python" : "python3",
+            ".sh" => "bash",
+            ".js" => "node",
+            _     => null
+        };
+        if (program is null)
+            return $"No runner registered for '{ext}' scripts.";
+
+        var psi = new ProcessStartInfo
+        {
+            FileName               = program,
+            RedirectStandardOutput = true,
+            RedirectStandardError  = true,
+            UseShellExecute        = false,
+        };
+        psi.ArgumentList.Add(script.FullPath);
+        foreach (var val in arguments.Values.Select(v => v?.ToString() ?? "").Where(s => s.Length > 0))
+            psi.ArgumentList.Add(val);
+
+        using var proc = Process.Start(psi)
+            ?? throw new InvalidOperationException($"Failed to start {program}");
+
+        // Read stdout and stderr concurrently — sequential reads deadlock if either pipe fills.
+        var stdoutTask = proc.StandardOutput.ReadToEndAsync(cancellationToken);
+        var stderrTask  = proc.StandardError.ReadToEndAsync(cancellationToken);
+        await Task.WhenAll(stdoutTask, stderrTask);
+        await proc.WaitForExitAsync(cancellationToken);
+
+        var stdout = await stdoutTask;
+        var stderr  = await stderrTask;
+        return string.IsNullOrWhiteSpace(stderr) ? stdout : $"{stdout}\nstderr: {stderr}";
     }
 }

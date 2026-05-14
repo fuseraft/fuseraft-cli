@@ -8,8 +8,10 @@
     <RootNamespace>fuseraft</RootNamespace>
     <AssemblyName>fuseraft</AssemblyName>
     <AssemblyTitle>Fuseraft CLI</AssemblyTitle>
+    <ApplicationIcon>fuseraft.ico</ApplicationIcon>
     <Description>Production-grade multi-agent orchestration powered by Microsoft Agent Framework.</Description>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <NoWarn>$(NoWarn);MAAI001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

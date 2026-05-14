@@ -295,6 +295,24 @@ A dump is written only for genuine crashes. Normal exits, user cancellation (Ctr
 
 ---
 
+## Skills execution trust model
+
+Skills loaded from `~/.fuseraft/skills/`, `~/.agents/skills/`, or the built-in `<binary>/skills/` directory are operator-controlled and treated as trusted. Scripts bundled in those skills execute as OS subprocesses and inherit the process environment, including any API keys in env vars.
+
+Project-scoped skills — loaded from `<cwd>/.fuseraft/skills/` and `<cwd>/.agents/skills/` — carry additional risk: **they travel with the repository**. A repo checked out from an untrusted source may contain a `.agents/skills/` directory with malicious scripts. Those scripts are auto-discovered and advertised to agents at session start, with no prompt to the user.
+
+### Risk: untrusted project skills
+
+If `fuseraft run --work-dir` points at a directory you did not author, any skill scripts in that directory will be available for agents to execute. Because script execution inherits the process environment, a malicious script can read API keys, tokens, and other credentials available as env vars.
+
+**Mitigations:**
+
+- Only run `fuseraft` in working directories you trust. Treat `.agents/skills/` and `.fuseraft/skills/` in a cloned repo the same way you would treat a `Makefile` or `package.json` postinstall script.
+- For higher assurance, run fuseraft inside a Docker container (`CodeExecution` plugin) where the host environment is not exposed.
+- `UseScriptApproval` support is planned — when enabled it will require explicit user confirmation before any skill script executes. Until then, script execution is automatic once a skill is loaded.
+
+---
+
 ## Security notes
 
 - The path sandbox and ring system are enforced at the agent middleware layer, not at the OS level. A compromised plugin bypass (e.g. a malicious MCP server) could potentially circumvent them.

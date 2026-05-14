@@ -35,7 +35,7 @@ public static class MessageRenderer
 
     // Config summary
 
-    public static void RenderConfigSummary(OrchestrationConfig config)
+    public static void RenderConfigSummary(OrchestrationConfig config, IReadOnlyList<string>? skills = null)
     {
         var table = new Table()
             .Border(TableBorder.Rounded)
@@ -63,6 +63,10 @@ public static class MessageRenderer
         AnsiConsole.MarkupLine(
             $"[dim]Selection:[/] {config.Selection.Type}  " +
             $"[dim]Termination:[/] {(config.Termination is not null ? DescribeTermination(config.Termination) : "default")}");
+
+        if (skills is { Count: > 0 })
+            AnsiConsole.MarkupLine($"[dim]Skills:[/] {Markup.Escape(string.Join(", ", skills))}");
+
         AnsiConsole.WriteLine();
     }
 
