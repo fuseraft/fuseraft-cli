@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/fuseraft/fuseraft-cli/tree/main/docs
+    about: Browse the docs before opening an issue — your question may already be answered.
+  - name: Security vulnerability
+    url: https://github.com/fuseraft/fuseraft-cli/security/advisories/new
+    about: Report a security vulnerability privately via GitHub Security Advisories.
