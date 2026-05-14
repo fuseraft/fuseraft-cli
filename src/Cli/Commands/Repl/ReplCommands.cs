@@ -735,7 +735,7 @@ internal static class ReplCommands
                         await StopSpinner();
                         AnsiConsole.MarkupLine("[dim]assistant:[/]");
                     }
-                    Console.Write(chunk);
+                    await ReplTurn.WriteChunkSmoothAsync(chunk, cancellationToken);
                 },
                 cancellationToken: cancellationToken);
 
@@ -797,7 +797,7 @@ internal static class ReplCommands
                         gotOutput = true;
                         await StopSpinner();
                     }
-                    Console.Write(chunk);
+                    await ReplTurn.WriteChunkSmoothAsync(chunk, cancellationToken);
                 },
                 cancellationToken: cancellationToken);
 
