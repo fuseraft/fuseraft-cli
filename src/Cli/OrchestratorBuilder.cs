@@ -1072,10 +1072,14 @@ public static class OrchestratorBuilder
 
     private static AgentSkillsProvider? BuildSkillsProvider()
     {
-        // Project-local skills listed first so they take precedence over built-ins on name collision.
+        // Project-native → project cross-client → user-native → user cross-client → built-in.
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var dirs = new[]
         {
             Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "skills"),
+            Path.Combine(Directory.GetCurrentDirectory(), ".agents",   "skills"),
+            Path.Combine(home, ".fuseraft", "skills"),
+            Path.Combine(home, ".agents",   "skills"),
             Path.Combine(AppContext.BaseDirectory, "skills"),
         }.Where(Directory.Exists).ToArray();
 

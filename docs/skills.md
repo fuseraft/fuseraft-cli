@@ -126,31 +126,50 @@ Substitute `<name>`, `<ts>`, and `<harness_dir>` with the actual values when con
 
 ---
 
-## Adding skills to a project
+## Adding skills
 
-Skills can be installed per working directory by placing them in `.fuseraft/skills/`. fuseraft discovers this directory automatically alongside the built-in `skills/` directory shipped with the binary, so any skill dropped there is immediately available to agents running in that working directory.
+fuseraft scans five locations at startup, in precedence order (earlier entries win on name collision):
+
+| Scope | Path | Notes |
+|-------|------|-------|
+| Project — fuseraft-native | `<project>/.fuseraft/skills/` | Highest precedence |
+| Project — cross-client | `<project>/.agents/skills/` | Shared with other Agent Skills–compatible tools |
+| User — fuseraft-native | `~/.fuseraft/skills/` | Available across all projects |
+| User — cross-client | `~/.agents/skills/` | Shared with other Agent Skills–compatible tools |
+| Built-in | `<binary>/skills/` | Shipped with fuseraft; lowest precedence |
+
+### Project-scoped skills
+
+Install skills under `.fuseraft/skills/` (fuseraft-native) or `.agents/skills/` (visible to any Agent Skills–compatible client) in your working directory:
 
 ```
 my-project/
-└── .fuseraft/
+├── .fuseraft/
+│   └── skills/
+│       └── my-skill/
+│           └── SKILL.md
+└── .agents/
     └── skills/
-        ├── expense-report/
-        │   └── SKILL.md
-        └── my-custom-skill/
-            ├── SKILL.md
-            ├── scripts/
-            └── references/
+        └── shared-skill/
+            └── SKILL.md
 ```
 
-This is the recommended location for:
+Use `.fuseraft/skills/` for:
 
-- **Third-party skills** downloaded from [agentskills.io](https://agentskills.io) or other sources
 - **Project-specific skills** that encode team conventions, schemas, or workflows for this codebase
 - **Experimental skills** you're iterating on before publishing
 
-Skills in `.fuseraft/skills/` are local to that working directory and not committed to the repository unless you choose to include `.fuseraft/skills/` in version control. If a skill should be shared across a team, commit the `skills/` directory at the project root instead.
+Use `.agents/skills/` for skills you want available in Claude Code, Cursor, GitHub Copilot, or any other Agent Skills–compatible tool running in the same directory.
 
-**Name conflicts:** If a skill in `.fuseraft/skills/` has the same `name` as a built-in skill, the local version takes precedence.
+Neither directory is committed to version control unless you choose to include it. To share a skill across a team, commit the skill directory at the project root (`.agents/skills/` is the recommended location for that).
+
+> **Trust warning:** Project-scoped skills travel with the repository. If you open a directory from an untrusted source, any scripts bundled under `.agents/skills/` or `.fuseraft/skills/` will be auto-discovered and made available to agents. Treat these directories the same way you would a `Makefile` or `package.json` postinstall script — only run fuseraft in working directories you trust. See [Security — Skills execution trust model](security.md#skills-execution-trust-model).
+
+### User-scoped skills
+
+Install skills under `~/.fuseraft/skills/` or `~/.agents/skills/` to make them available in every fuseraft session regardless of working directory. User-scoped skills are overridden by any project-scoped skill with the same name.
+
+**Name conflicts:** If two skills share the same `name`, the one in the higher-precedence location wins. A warning is logged when a skill is shadowed.
 
 ### Writing a skill
 
@@ -188,15 +207,19 @@ skills-ref validate .fuseraft/skills/my-skill
 
 ## MAF integration
 
-Skills are provided to agents via MAF's `AgentSkillsProvider`. fuseraft discovers both skill directories at startup and builds a single merged provider:
+Skills are provided to agents via MAF's `AgentSkillsProvider`. fuseraft scans all discovery locations at startup and builds a single merged provider:
 
 ```csharp
 using Microsoft.Agents.AI;
 
+var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 var dirs = new[]
 {
-    Path.Combine(AppContext.BaseDirectory, "skills"),        // built-in
-    Path.Combine(workingDirectory, ".fuseraft", "skills"),   // project-local
+    Path.Combine(workingDirectory, ".fuseraft", "skills"),  // project-native (highest precedence)
+    Path.Combine(workingDirectory, ".agents",   "skills"),  // project cross-client
+    Path.Combine(home, ".fuseraft", "skills"),              // user-native
+    Path.Combine(home, ".agents",   "skills"),              // user cross-client
+    Path.Combine(AppContext.BaseDirectory, "skills"),        // built-in (lowest precedence)
 }.Where(Directory.Exists).ToArray();
 
 var skillsProvider = new AgentSkillsProviderBuilder()

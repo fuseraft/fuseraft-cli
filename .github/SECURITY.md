@@ -69,6 +69,7 @@ The following areas are in scope for security reports:
 | **Shell plugin** | Command injection, sandbox bypass, `sudo` protection bypass |
 | **FileSystem plugin** | Path traversal, sandbox escape |
 | **HTTP plugin** | SSRF, allowlist bypass, private-IP filter bypass |
+| **Skills execution** | Malicious scripts in project-scoped skill directories (`<cwd>/.agents/skills/`, `<cwd>/.fuseraft/skills/`) executing without user consent; credential exfiltration via subprocess env inheritance |
 | **Prompt injection** | Adversarial tool results that override agent instructions |
 | **Session files** | Permission issues in `~/.fuseraft/sessions/` or `repl_events.jsonl` |
 | **MCP server integration** | Malicious tool schemas, argument injection from connected servers |
