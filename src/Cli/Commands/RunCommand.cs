@@ -67,6 +67,10 @@ public sealed class RunSettings : CommandSettings
     [CommandOption("--work-dir")]
     [Description("Set the working directory for this session. Falls back to the sandbox path in the config, or the current directory if neither is set.")]
     public string? WorkDir { get; set; }
+
+    [CommandOption("--context-file")]
+    [Description("Attach a file as context — its content is appended to the task. Repeatable.")]
+    public string[]? ContextFiles { get; set; }
 }
 
 /// <summary>
@@ -222,6 +226,32 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
 
             if (string.IsNullOrWhiteSpace(task))
                 task = DefaultDemoTask;
+        }
+
+        if (checkpoint is null && settings.ContextFiles is { Length: > 0 } && !string.IsNullOrWhiteSpace(task))
+        {
+            var sb = new System.Text.StringBuilder(task);
+            sb.Append("\n\n---\nAttached files:\n");
+            foreach (var contextPath in settings.ContextFiles)
+            {
+                var absPath = Path.IsPathRooted(contextPath) ? contextPath : Path.GetFullPath(contextPath);
+                if (!File.Exists(absPath))
+                {
+                    AnsiConsole.MarkupLine($"[yellow]⚠ Context file not found:[/] {Markup.Escape(absPath)}");
+                    continue;
+                }
+                try
+                {
+                    var content = await File.ReadAllTextAsync(absPath);
+                    var ext = Path.GetExtension(absPath).TrimStart('.');
+                    sb.Append($"\n### {Path.GetFileName(absPath)}\n```{ext}\n{content}\n```");
+                }
+                catch (Exception ex)
+                {
+                    AnsiConsole.MarkupLine($"[yellow]⚠ Could not read context file:[/] {Markup.Escape(ex.Message)}");
+                }
+            }
+            task = sb.ToString();
         }
 
         MessageRenderer.RenderTask(task);
