@@ -242,8 +242,20 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
                 }
                 try
                 {
-                    var content = await File.ReadAllTextAsync(absPath);
-                    var ext = Path.GetExtension(absPath).TrimStart('.');
+                    string content;
+                    string ext;
+                    if (DocumentTextExtractor.IsSupported(absPath))
+                    {
+                        var (text, info) = DocumentTextExtractor.Extract(absPath);
+                        content = text;
+                        ext     = "txt";
+                        AnsiConsole.MarkupLine($"[dim]Extracted {Markup.Escape(Path.GetFileName(absPath))}: {Markup.Escape(info)}[/]");
+                    }
+                    else
+                    {
+                        content = await File.ReadAllTextAsync(absPath);
+                        ext     = Path.GetExtension(absPath).TrimStart('.');
+                    }
                     sb.Append($"\n### {Path.GetFileName(absPath)}\n```{ext}\n{content}\n```");
                 }
                 catch (Exception ex)
