@@ -45,3 +45,4 @@ tests/FuseraftCli.Tests/obj/**
 analyze.kiwi
 PLAN.md
 DEBUGGING.md
+*.lscache
