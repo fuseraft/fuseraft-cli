@@ -29,6 +29,7 @@ fuseraft run [task] [options]
 | `--ci` | off | CI mode. After the session ends, reads `.fuseraft/test-report.json` and exits with code `2` if any criterion has `status: FAIL`. Exits `0` if the report is absent or all criteria pass. |
 | `--devui` | off | Start a local web server and print a URL for real-time session visualization. See [DevUI](#devui) below. |
 | `--work-dir <path>` | — | Set the working directory for the session. Priority: flag > `Security.FileSystemSandboxPath` in the config > current directory. |
+| `--context-file <path>` | — | Attach a file as context. Its content is appended to the task. PDF, DOCX, PPTX, and XLSX files are extracted to plain text automatically; other files are read as UTF-8. Repeatable — specify once per file. Ignored when resuming. |
 | `--vscode` | off | VS Code mode. Reads the API key from the `FUSERAFT_API_KEY` environment variable (injected by the fuseraft VS Code extension) instead of the OS keychain. Automatically passed by the extension — not intended for manual use. |
 
 **Examples**
@@ -70,19 +71,31 @@ fuseraft run --work-dir ~/github/fuseraft/kiwi -c kiwi-dev.yaml "Add a string in
 
 # Work-dir is also inferred automatically from Security.FileSystemSandboxPath in the config
 fuseraft run -c kiwi-dev.yaml "Add a string interpolation function to lib/string.kiwi"
+
+# Attach a source file as context — content is appended to the task
+fuseraft run --context-file src/Button.tsx "Fix the button accessibility issues"
+
+# Attach multiple files (repeat the flag once per file)
+fuseraft run --context-file schema.sql --context-file openapi.yaml "Add a /users endpoint"
+
+# Binary documents are extracted to plain text automatically
+fuseraft run --context-file requirements.pdf "Implement the auth flow described in the requirements"
+fuseraft run --context-file design.docx --context-file data-model.xlsx "Generate the API layer"
 ```
 
 **Task input priority**
 
 When multiple task inputs are provided, the following order applies:
 
-1. **Session checkpoint** — when resuming, the original task is always used; `[task]` and `--task-file` are ignored with a warning
+1. **Session checkpoint** — when resuming, the original task is always used; `[task]`, `--task-file`, and `--context-file` are ignored with a warning
 2. **`--task-file`** — if supplied, the file contents are used as the task
 3. **`[task]`** — the positional argument
 4. **Interactive prompt** — if nothing is supplied, you are asked to type a task
 5. **Built-in demo** — if the prompt is left blank, a default demo task runs
 
 The task file is read as plain UTF-8 text. Leading and trailing whitespace is trimmed. The file can contain any content — Markdown, plain prose, bullet lists, structured specs.
+
+`--context-file` is a modifier on top of whatever task source is used: after the task text is resolved, each context file's content is appended as a fenced code block under an `--- Attached files:` section. PDF, DOCX, PPTX, and XLSX files are automatically extracted to plain text; all other files are appended as UTF-8. Files that cannot be found or read emit a warning and are skipped without aborting the run.
 
 ### Human-in-the-loop controls
 
