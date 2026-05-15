@@ -127,6 +127,27 @@ The context store works well for:
 
 For very large files (tens of MB), consider summarising or splitting the content first. The full file is injected into the prompt summary as a path reference — the actual content is only loaded when an agent calls `read_file`.
 
+## One-shot context with `--context-file`
+
+For files you only need for a single run — without adding them permanently to the context store — use the `--context-file` flag on `fuseraft run`:
+
+```bash
+fuseraft run --context-file requirements.pdf "Implement the described auth flow"
+fuseraft run --context-file schema.sql --context-file openapi.yaml "Add a /users endpoint"
+```
+
+Each file's content is appended to the task as a fenced code block before the session starts. PDF, DOCX, PPTX, and XLSX are extracted to plain text automatically (the same extractor used by `context add`). Other file types are read as UTF-8 text.
+
+**When to use `--context-file` vs `context add`:**
+
+| | `--context-file` | `context add` |
+|---|---|---|
+| Scope | Single run only | Persists across all sessions in the project |
+| Storage | None — content is inlined into the task | Copied to `.fuseraft/context/<name>/` |
+| Agent access | Inline in task text | Via `read_file` from the context directory |
+| Binary extraction | ✓ (PDF, DOCX, PPTX, XLSX) | ✓ (PDF, DOCX, PPTX, XLSX) |
+| Best for | One-off reference, quick context | Shared specs, schemas, architecture docs |
+
 ## CLI reference
 
 See [CLI Reference — fuseraft context](cli-reference.md#fuseraft-context) for the full command specification.
