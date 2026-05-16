@@ -234,6 +234,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             sb.Append("\n\n---\nAttached files:\n");
             foreach (var contextPath in settings.ContextFiles)
             {
+                if (string.IsNullOrWhiteSpace(contextPath)) { continue; }
                 var absPath = Path.IsPathRooted(contextPath) ? contextPath : Path.GetFullPath(contextPath);
                 if (!File.Exists(absPath))
                 {
