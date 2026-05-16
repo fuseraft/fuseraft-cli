@@ -362,7 +362,8 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         var runner = new SessionRunner(
             orchestrator, compactor, activeStore, approvalService,
             eventEmitter, telemetry, modelIdByAgent, devUI, configPath,
-            maxIterations: config.Termination?.ResolveMaxIterations() ?? 0);
+            maxIterations: config.Termination?.ResolveMaxIterations() ?? 0,
+            contextBudget: config.ContextBudget);
 
         var result = await runner.RunAsync(task, checkpoint, settings.HumanInTheLoop, settings.ShowTools, cts.Token);
 

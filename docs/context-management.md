@@ -15,6 +15,7 @@ Each agent turn
 
 History too long
   └─ Layer 4: Compaction         → replace old turns with a summary
+  └─ Layer 5: Context Budget     → token-based compaction trigger per agent
 ```
 
 Each layer is optional and independently configured. Most sessions need only one or two.
@@ -277,6 +278,30 @@ no LLM cost at compaction time.
 
 ---
 
+## Layer 5: Context Budget (per-agent token trigger)
+
+While Layer 4 Compaction fires on *turn count*, the Context Budget fires on *cumulative input tokens* — a more direct measure of context pressure. Each agent's input token consumption is tracked independently across turns, and two thresholds can be configured:
+
+```yaml
+ContextBudget:
+  WarnAt: 80000      # warn when any agent exceeds this
+  CutoverAt: 120000  # compact when any agent exceeds this
+```
+
+**Why input tokens?** Turn count is a coarse proxy — a single tool-heavy turn can consume as many tokens as ten brief turns. Tracking cumulative input tokens catches context rot directly, regardless of turn count.
+
+**Warn phase (`WarnAt`):** when a single agent's cumulative input tokens since the last compaction reach `WarnAt`, a yellow warning is printed to the console and a `context_budget_warn` event is emitted. This is a signal that compaction is coming soon. The warning fires at most once per agent per compaction cycle so it doesn't spam.
+
+**Cutover phase (`CutoverAt`):** when a single agent's cumulative input tokens reach `CutoverAt`, compaction triggers immediately (same as if turn-count compaction had fired). The per-agent counters reset after compaction, so the next context window starts with a fresh budget — allowing the session to run indefinitely.
+
+**Relationship to turn-count compaction:** both triggers are active simultaneously. Whichever fires first wins. If turn-count compaction fires, the context budget counters reset too. The two mechanisms complement each other: turn count protects against verbose-but-sparse sessions; token budget protects against dense, token-heavy turns.
+
+**Requires `Compaction`:** `CutoverAt` cannot fire without a configured compactor. `fuseraft validate` reports an error if `CutoverAt > 0` without a `Compaction` section.
+
+See [Configuration — Context budget](configuration.md#context-budget) for the full field reference.
+
+---
+
 ## How the layers fit together
 
 Here is the full sequence from session start through a long-running session:
@@ -298,9 +323,12 @@ Here is the full sequence from session start through a long-running session:
       ├─ (llm/intent/lossless/hybrid) assistant-turn count ≥ TriggerTurnCount?
       │     YES → compact oldest (Count − KeepRecentTurns) turns into one message
       │           save checkpoint with compacted history → continue
-      └─ (window) estimated token count > TokenBudget?
-            YES → drop oldest user+assistant pairs until within budget
-                  (pinned summaries are never dropped)
+      ├─ (window) estimated token count > TokenBudget?
+      │     YES → drop oldest user+assistant pairs until within budget
+      │           (pinned summaries are never dropped)
+      └─ (ContextBudget) any agent's cumulative input tokens ≥ CutoverAt?
+            YES → compact (same as turn-count trigger)
+                  reset per-agent token counters → continue
 ```
 
 ---
@@ -359,3 +387,20 @@ Agents:
         - Tester
       MaxTailMessages: 20
 ```
+
+**For sessions where turns vary wildly in token size** (e.g. a Developer that runs large shell
+commands or reads big files), add `ContextBudget` so compaction tracks actual context pressure
+rather than a coarse turn count:
+
+```yaml
+ContextBudget:
+  WarnAt: 80000
+  CutoverAt: 120000
+
+Compaction:
+  TriggerTurnCount: 40
+  KeepRecentTurns: 8
+  Mode: intent
+```
+
+Both triggers are active simultaneously — whichever fires first wins.

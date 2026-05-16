@@ -193,6 +193,13 @@ internal static partial class InitTemplates
                 KeepRecentTurns: 8
                 Mode: lossless
 
+              # ContextBudget: per-agent cumulative input-token thresholds. Warns before
+              # context rot sets in, then triggers compaction automatically. Counters reset
+              # after each compaction cycle so the session can run indefinitely.
+              # ContextBudget:
+              #   WarnAt: 80000
+              #   CutoverAt: 120000
+
               Events:
                 Path: {FuseraftPaths.LocalEventsLog}
 
