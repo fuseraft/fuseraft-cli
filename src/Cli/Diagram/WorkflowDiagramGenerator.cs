@@ -243,9 +243,15 @@ public static class WorkflowDiagramGenerator
         sb.AppendLine("  Task([Task])");
         foreach (var (name, state) in sm.States)
         {
+            // Include the agent name when it differs from the state name so the
+            // diagram communicates which agent is active in each state.
+            var labelText = state.Agent is { Length: > 0 } &&
+                            !string.Equals(state.Agent, name, StringComparison.OrdinalIgnoreCase)
+                ? $"{Esc(name)}<br/>[{Esc(state.Agent)}]"
+                : Esc(name);
             var shape = state.Terminal
-                ? $"  {NodeId(name)}([\"{Esc(name)} ✓\"])"
-                : $"  {NodeId(name)}[\"{Esc(name)}\"]";
+                ? $"  {NodeId(name)}([\"{labelText} ✓\"])"
+                : $"  {NodeId(name)}[\"{labelText}\"]";
             sb.AppendLine(shape);
         }
 
