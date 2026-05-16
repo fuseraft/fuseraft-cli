@@ -242,6 +242,12 @@ internal static partial class InitTemplates
               #   KeepRecentTurns: 8
               #   Mode: lossless
 
+              # ContextBudget: per-agent cumulative input-token thresholds. Warns before
+              # context rot sets in, then triggers compaction automatically. Requires Compaction.
+              # ContextBudget:
+              #   WarnAt: 80000
+              #   CutoverAt: 120000
+
               # Checkpoint:
               #   Mode: json
               #   Path: .fuseraft/checkpoints

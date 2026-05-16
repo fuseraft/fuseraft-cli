@@ -37,9 +37,12 @@ public sealed class SessionRunner(
     IReadOnlyDictionary<string, string> modelIdByAgent,
     DevUIServer? devUI = null,
     string? configPath = null,
-    int maxIterations = 0)
+    int maxIterations = 0,
+    ContextBudgetConfig? contextBudget = null)
 {
     private int _assistantTurnCount;
+    private readonly Dictionary<string, int> _perAgentCumulativeInputTokens = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _warnedAgents = new(StringComparer.OrdinalIgnoreCase);
 
     public async Task<SessionResult> RunAsync(
         string task,
@@ -212,6 +215,10 @@ public sealed class SessionRunner(
                 try
                 {
                     checkpoint = await ApplyCompactionAsync(task, checkpoint, compactor!, cancellationToken);
+
+                    // Reset per-agent budget counters so the next stream window starts clean.
+                    _perAgentCumulativeInputTokens.Clear();
+                    _warnedAgents.Clear();
                 }
                 catch (OperationCanceledException)
                 {
@@ -524,7 +531,45 @@ public sealed class SessionRunner(
         if (orchestrator is MagenticOrchestrator mo) checkpoint.MagenticState = mo.CurrentState;
         if (orchestrator is GraphOrchestrator go) checkpoint.StateHistory = [..go.StateHistory];
         await sessionStore.SaveAsync(checkpoint, ct);
-        return compactor?.ShouldCompact(_assistantTurnCount) == true;
+
+        if (compactor?.ShouldCompact(_assistantTurnCount) == true)
+            return true;
+
+        // Per-agent context budget: accumulate input tokens and check warn/cutover thresholds.
+        if (contextBudget is not null && msg.Usage?.InputTokens is > 0 and var inputToks)
+        {
+            var agentName = msg.AgentName ?? "Unknown";
+            _perAgentCumulativeInputTokens[agentName] =
+                _perAgentCumulativeInputTokens.GetValueOrDefault(agentName) + inputToks;
+            var cumulative = _perAgentCumulativeInputTokens[agentName];
+
+            if (contextBudget.WarnAt > 0 && cumulative >= contextBudget.WarnAt
+                && _warnedAgents.Add(agentName))
+            {
+                AnsiConsole.MarkupLine(
+                    $"[yellow]  ⚠ {Markup.Escape(agentName)} has accumulated {cumulative:N0} cumulative " +
+                    $"input tokens (warn_at: {contextBudget.WarnAt:N0}). " +
+                    $"Context rot risk — compaction will trigger at {contextBudget.CutoverAt:N0} tokens.[/]");
+                if (eventEmitter is not null)
+                    await eventEmitter.EmitAsync("context_budget_warn",
+                        agent: agentName,
+                        payload: new { cumulative_input_tokens = cumulative, warn_at = contextBudget.WarnAt, cutover_at = contextBudget.CutoverAt });
+            }
+
+            if (contextBudget.CutoverAt > 0 && cumulative >= contextBudget.CutoverAt)
+            {
+                AnsiConsole.MarkupLine(
+                    $"[yellow]  ⚡ {Markup.Escape(agentName)} reached context budget cutover " +
+                    $"({cumulative:N0} ≥ {contextBudget.CutoverAt:N0} input tokens). Compacting history...[/]");
+                if (eventEmitter is not null)
+                    await eventEmitter.EmitAsync("context_budget_cutover",
+                        agent: agentName,
+                        payload: new { cumulative_input_tokens = cumulative, cutover_at = contextBudget.CutoverAt });
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async Task InjectAndSaveHumanMessageAsync(

@@ -78,6 +78,26 @@ public record OrchestrationConfig
     public int WarnTurnTokens { get; init; } = 300_000;
 
     /// <summary>
+    /// Optional per-agent context budget enforcement. Tracks cumulative input tokens per
+    /// agent across turns; warns at <see cref="ContextBudgetConfig.WarnAt"/> tokens and
+    /// triggers automatic compaction at <see cref="ContextBudgetConfig.CutoverAt"/> tokens,
+    /// keeping the session alive rather than halting. Counters reset after each compaction
+    /// cycle so a session can run indefinitely with compaction enabled.
+    ///
+    /// <para>
+    /// Unlike <see cref="MaxTotalTokens"/> (hard stop, counts input+output across all agents),
+    /// <c>ContextBudget</c> counts input tokens per agent independently and responds with
+    /// compaction rather than termination.
+    /// </para>
+    ///
+    /// <para>
+    /// <see cref="ContextBudgetConfig.CutoverAt"/> requires a <see cref="Compaction"/>
+    /// configuration to be present. Null (default) disables per-agent context budget tracking.
+    /// </para>
+    /// </summary>
+    public ContextBudgetConfig? ContextBudget { get; init; }
+
+    /// <summary>
     /// MCP servers to connect to at session startup. Each server's tools are registered
     /// under <see cref="McpServerConfig.Name"/> and can be referenced from agent <c>Plugins</c>
     /// lists alongside the built-in plugins.

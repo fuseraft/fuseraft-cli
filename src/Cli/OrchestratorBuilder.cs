@@ -516,6 +516,21 @@ public static class OrchestratorBuilder
                 resumptionNote, changeLogPath, intentLog, config.Events?.Path, evidenceStore);
         }
 
+        // Validate context budget config.
+        if (config.ContextBudget is { CutoverAt: > 0 } cb)
+        {
+            if (compactor is null)
+                throw new InvalidOperationException(
+                    "ContextBudget.CutoverAt requires a Compaction configuration. " +
+                    "Add a Compaction section to your orchestration config so the compactor " +
+                    "is available when the context budget triggers.");
+
+            if (cb.WarnAt > 0 && cb.WarnAt >= cb.CutoverAt)
+                throw new InvalidOperationException(
+                    $"ContextBudget.WarnAt ({cb.WarnAt:N0}) must be less than " +
+                    $"CutoverAt ({cb.CutoverAt:N0}).");
+        }
+
         // MagenticOrchestrator handles the "magentic" selection type: a manager LLM drives
         // dynamic planning, speaker selection, and stall detection without hard-coded routing.
         //

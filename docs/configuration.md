@@ -44,6 +44,7 @@ YAML is often more readable for configs with long agent instructions (block scal
 | `Termination` | object | 10 iterations | Controls when the run ends. See [Strategies](strategies.md). |
 | `Security` | object | unrestricted | Sandbox constraints for plugins. See [Security](security.md). |
 | `MaxTotalTokens` | integer | — | Token budget (input + output combined). Run stops before the next turn if exceeded. |
+| `ContextBudget` | object | — | Per-agent cumulative input-token budget. Warns and triggers compaction rather than terminating. Requires `Compaction` when `CutoverAt` is set. See [Context budget](#context-budget). |
 | `McpServers` | array | `[]` | External MCP servers to connect at startup. See [MCP](mcp.md). |
 | `Compaction` | object | — | Automatic history summarization. See [Sessions](sessions.md). |
 | `ChangeTracking` | object | — | Cross-agent change log. Enables the `Changes` plugin and validator cross-reference checks. See [Change tracking](#change-tracking). |
@@ -503,6 +504,46 @@ The run stops before the next agent turn if the cumulative token count (input + 
 
 ---
 
+## Context budget
+
+Per-agent cumulative input-token budget enforcement. Unlike `MaxTotalTokens` (which counts combined input + output across all agents and terminates the session), `ContextBudget` counts input tokens per agent independently and responds with automatic compaction rather than termination — keeping long sessions alive indefinitely.
+
+```yaml
+ContextBudget:
+  WarnAt: 80000    # warn when any agent accumulates this many input tokens
+  CutoverAt: 120000  # compact when any agent accumulates this many input tokens
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `WarnAt` | int | `0` | Cumulative input-token threshold per agent that triggers a warning. When an agent's accumulated input tokens since the last compaction reach this value, a `⚠` warning is printed to the console and a `context_budget_warn` event is emitted. Fires at most once per agent per compaction cycle. `0` disables the warning. |
+| `CutoverAt` | int | `0` | Cumulative input-token threshold per agent that triggers automatic compaction. When reached, compaction runs before the next agent turn and the per-agent counters reset so the next window starts clean. **Requires `Compaction` to be configured** — compaction cannot fire without a compactor. `WarnAt`, when set, must be less than `CutoverAt`. `0` disables token-based cutover. |
+
+**How it differs from `MaxTotalTokens`**
+
+| | `MaxTotalTokens` | `ContextBudget` |
+|---|---|---|
+| Counts | input + output, all agents combined | input tokens per agent independently |
+| Response | terminates the session | triggers compaction, session continues |
+| Resets | never | after each compaction cycle |
+
+**Counter reset:** after each compaction cycle, all per-agent cumulative-input-token counters reset to zero. A session with `Compaction` configured can therefore run indefinitely — each new context window starts with a fresh budget.
+
+**Validation:** `fuseraft validate` reports an error if `CutoverAt > 0` without a `Compaction` section, or if `WarnAt >= CutoverAt` when both are non-zero.
+
+**Events emitted:**
+
+| Event | When |
+|-------|------|
+| `context_budget_warn` | Agent's cumulative input tokens ≥ `WarnAt` (once per agent per cycle) |
+| `context_budget_cutover` | Agent's cumulative input tokens ≥ `CutoverAt` (immediately before compaction fires) |
+
+Both events include `{ cumulative_input_tokens, warn_at, cutover_at }` in the payload.
+
+**Omit** `ContextBudget` entirely to disable per-agent token tracking. Use `MaxTotalTokens` instead when you want a hard stop rather than transparent recovery.
+
+---
+
 ## Change tracking
 
 ```yaml
@@ -552,7 +593,7 @@ Each line is a JSON object:
 | `session` | Session ID |
 | `agent` | Agent name (null for session-level events) |
 | `turn` | 1-based turn counter |
-| `event_type` | Event identifier. Session lifecycle: `session_start`, `session_end`, `phase_start`, `phase_end`, `compaction`, `session_error`. Per-turn: `turn_start`, `turn_end`, `turn_timeout`, `reasoning`. Routing: `keyword_detected`, `multi_keyword`, `no_keyword`, `keyword_not_found`, `agent_routed`, `state_advanced`, `context_cap_warning`, `correction_injected`. Validation: `validation_fail`, `hitl_escalation`. Saga: `saga_compensating`, `saga_compensated`. Magentic: `magentic_plan`, `magentic_replan`, `magentic_complete`. Infrastructure: `tool_blocked`, `tool_call`, `circuit_breaker_open`, `http_reasoning`. Sub-agent: `sub_agent_start`, `sub_agent_tool_call`, `sub_agent_end`. |
+| `event_type` | Event identifier. Session lifecycle: `session_start`, `session_end`, `phase_start`, `phase_end`, `compaction`, `session_error`. Per-turn: `turn_start`, `turn_end`, `turn_timeout`, `reasoning`. Routing: `keyword_detected`, `multi_keyword`, `no_keyword`, `keyword_not_found`, `agent_routed`, `state_advanced`, `context_cap_warning`, `correction_injected`. Validation: `validation_fail`, `hitl_escalation`. Context budget: `context_budget_warn`, `context_budget_cutover`. Saga: `saga_compensating`, `saga_compensated`. Magentic: `magentic_plan`, `magentic_replan`, `magentic_complete`. Infrastructure: `tool_blocked`, `tool_call`, `circuit_breaker_open`, `http_reasoning`. Sub-agent: `sub_agent_start`, `sub_agent_tool_call`, `sub_agent_end`. |
 | `payload` | Event-specific JSON object |
 
 **`turn_end` payload:** `{ input_tokens, output_tokens }` — accumulated across all API calls within the turn.
