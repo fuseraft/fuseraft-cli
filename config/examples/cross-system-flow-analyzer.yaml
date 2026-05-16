@@ -1,0 +1,373 @@
+## Cross-system data flow analyzer: Archaeologist → SQLAnalyst → APIAnalyst → DocAnalyst → Synthesizer → DiagramBuilder
+##
+## Designed for large workspaces that span multiple code repositories, SQL stored procedures,
+## REST APIs, and binary documentation (PDF, PPTX, DOCX, XLSX, CSV, etc.).
+##
+## Workflow:
+##   1. Archaeologist maps the territory: entry points, high-level purpose, relevant
+##      SQL/API/doc paths. Writes .fuseraft/recon.md.
+##   2. SQLAnalyst reads recon.md for relevant paths, deep-reads stored procedures and
+##      schema, builds a call graph. Writes .fuseraft/sql-findings.md.
+##   3. APIAnalyst reads recon.md and sql-findings.md, deep-reads API source files.
+##      Writes .fuseraft/api-findings.md.
+##   4. DocAnalyst reads recon.md for document paths, extracts signal from binary files.
+##      Writes .fuseraft/doc-findings.md.
+##   5. Synthesizer reads all four findings files and builds an exhaustive data-flow model.
+##      Writes .fuseraft/flow-model.md.
+##   6. DiagramBuilder reads flow-model.md and produces a DrawIO XML diagram at
+##      output/data-flow.drawio.
+##
+## ─────────────────────────────────────────────────────────────────────────────
+## WORKSPACE SETUP — update these before running, then run the context add commands
+## ─────────────────────────────────────────────────────────────────────────────
+##
+## 1. Subsystem directories (the integration code repositories or modules to analyze):
+##      SUBSYSTEM_A: integration-a/
+##      SUBSYSTEM_B: integration-b/
+##      SUBSYSTEM_C: integration-c/
+##    Update in: Archaeologist → Instructions (the "Workspace layout" block below)
+##
+## 2. Stored procedures directory:
+##      SQL_DIR: stored-procedures/
+##    Update in: Archaeologist → Instructions (the "Workspace layout" block below)
+##
+## 3. API source directory:
+##      API_DIR: api/
+##    Update in: Archaeologist → Instructions (the "Workspace layout" block below)
+##
+## 4. Database schema directory (loaded into context store — agents don't re-read it):
+##      SCHEMA_DIR: schema/
+##    Update the fuseraft context add command below.
+##
+## 5. API spec file (loaded into context store):
+##      API_SPEC: api/openapi.yaml
+##    Update the fuseraft context add command below.
+##
+## 6. Architecture overview document (loaded into context store):
+##      ARCH_DOC: docs/architecture.pdf
+##    Update the fuseraft context add command below.
+##
+## Pre-session setup (run once to load stable reference material into the context store):
+##   fuseraft context add schema/               --name db-schema    # ← update path
+##   fuseraft context add api/openapi.yaml      --name api-spec     # ← update path
+##   fuseraft context add docs/architecture.pdf --name arch-overview # ← update path
+##
+## Run:      fuseraft run --config config/examples/cross-system-flow-analyzer.yaml
+## Validate: fuseraft validate config/examples/cross-system-flow-analyzer.yaml
+
+Orchestration:
+  Name: CrossSystemFlowAnalyzer
+  Description: >
+    Maps data flows, API/DB interactions, and integration patterns across
+    subsystems. Produces a DrawIO diagram of the end-to-end flow.
+
+  Models:
+    heavy:
+      ModelId: claude-opus-4-7
+    scout:
+      ModelId: claude-haiku-4-5-20251001
+
+  Security:
+    FileSystemSandboxPath: .
+    ReadFileSizeLimit: 60000   # default 20k truncates large SQL files
+
+  ChangeTracking:
+    Path: .fuseraft/state/changes.json
+    IntentLogPath: .fuseraft/state/intents.json
+
+  EvidenceStore:
+    Path: .fuseraft/state/evidence.json
+
+  Compaction:
+    TriggerTurnCount: 40
+    KeepRecentTurns: 8
+    Mode: intent   # deterministic intent-log reconstruction — clean resumption if interrupted
+
+  ContextBudget:
+    WarnAt: 100000
+    CutoverAt: 160000   # SQL/API reading is token-dense; fire compaction before context rot sets in
+
+  Events:
+    Path: .fuseraft/logs/events.jsonl
+
+  Checkpoint:
+    Mode: json
+    Path: .fuseraft/checkpoints
+
+  Agents:
+
+    ## Phase 1: map the territory — orient without deep-reading files
+    ## ── The only agent with hardcoded workspace paths. Update the "Workspace layout"
+    ##    block below; all downstream agents derive their paths from .fuseraft/recon.md.
+    - Name: Archaeologist
+      Instructions: |
+        You are a codebase cartographer. Your job is to map the territory, not read everything.
+
+        ## ── WORKSPACE LAYOUT ──────────────────────────────────────────────────────────
+        ## Update these paths for your workspace before running, then delete this block.
+        Subsystem directories : integration-a/  integration-b/  integration-c/
+        Stored procedures     : stored-procedures/
+        API source            : api/
+        ## Context store entries available (do not re-read these via tool calls):
+        ##   db-schema    — database schema
+        ##   api-spec     — API specification
+        ##   arch-overview — architecture overview document
+        ## ──────────────────────────────────────────────────────────────────────────────
+
+        Given the task, identify:
+        1. Entry points in each subsystem directory listed above (config files, main class/function)
+        2. What each subsystem does at a high level — README and top-level comments only
+        3. Which stored procedures, API routes, and schema objects are most relevant to
+           the requested flow (names and paths only — do not read full file content)
+        4. Which documentation files exist and what they likely cover (list paths only)
+
+        Use sub_agent_explore for directory dives. Consult the context store entries
+        before making any tool calls — they may already answer your questions.
+
+        Write a structured map to .fuseraft/recon.md with these sections:
+          - Subsystems: name, directory, one-sentence purpose
+          - Stored procedures: names and paths relevant to the flow
+          - API routes: paths and route names relevant to the flow
+          - Schema objects: table/view names relevant to the flow
+          - Documents: paths and likely content for each doc file found
+
+        Keep your own replies short — let sub-agents do the reading.
+
+        When done, write on its own line: RECON COMPLETE
+      Model: heavy
+      Plugins:
+        - FileSystem
+        - Search
+        - SubAgent
+        - Scratchpad
+      Capabilities:
+        FileSystem: [read, write]
+      FunctionChoice: required
+      SubAgentModel: scout
+      SubAgentMaxToolCalls: 30
+      SubAgentPlugins:
+        - FileSystem
+        - Search
+
+    ## Phase 2: deep-read the SQL layer
+    ## Paths come from recon.md — no workspace-specific edits needed here.
+    - Name: SQLAnalyst
+      Instructions: |
+        You are a SQL expert. Begin by reading .fuseraft/recon.md — it lists the exact
+        stored procedure paths and schema objects relevant to this flow. The database
+        schema is also in your context store (db-schema); consult it before tool calls.
+
+        For each stored procedure listed in recon.md:
+        - Inputs, outputs, tables read/written
+        - Calls to other procedures (build the call graph)
+        - Business logic: conditions, transformations, error handling
+
+        Use sub_agent_explore to read groups of related files without polluting main
+        context. Write precise findings to .fuseraft/sql-findings.md — include exact
+        procedure names, parameter names, and table names. The Synthesizer cannot
+        re-read source files, so be thorough.
+
+        When done, write on its own line: SQL ANALYSIS COMPLETE
+      Model: heavy
+      Plugins:
+        - FileSystem
+        - Search
+        - SubAgent
+        - Scratchpad
+      Capabilities:
+        FileSystem: [read, write]
+      FunctionChoice: required
+      SubAgentModel: scout
+      SubAgentMaxToolCalls: 40
+      SubAgentPlugins:
+        - FileSystem
+        - Search
+      ContextWindow:
+        TextOnly: true   # Archaeologist's tool frames are noise; only need its text summary
+        MaxTurnAge: 5
+
+    ## Phase 3: deep-read the API layer, cross-reference SQL
+    ## Paths come from recon.md — no workspace-specific edits needed here.
+    - Name: APIAnalyst
+      Instructions: |
+        You are a web API expert. Begin by reading .fuseraft/recon.md and
+        .fuseraft/sql-findings.md. The recon.md lists exact API route paths; the API
+        spec is also in your context store (api-spec).
+
+        For each API route listed in recon.md:
+        - Route, HTTP method, request/response shape
+        - Every DB call, stored procedure call, or downstream API call it makes
+        - Auth, middleware, transformation logic
+        - Cross-reference: which SQL objects from sql-findings.md does this route touch?
+
+        Use sub_agent_explore for deep reads. Write findings to .fuseraft/api-findings.md.
+
+        When done, write on its own line: API ANALYSIS COMPLETE
+      Model: heavy
+      Plugins:
+        - FileSystem
+        - Search
+        - SubAgent
+        - Scratchpad
+        - Changes
+      Capabilities:
+        FileSystem: [read, write]
+      FunctionChoice: required
+      SubAgentModel: scout
+      SubAgentMaxToolCalls: 40
+      SubAgentPlugins:
+        - FileSystem
+        - Search
+      ContextWindow:
+        TextOnly: true
+        MaxTurnAge: 3   # only needs recon + its own turns
+
+    ## Phase 4: extract signal from binary docs
+    ## Paths come from recon.md — no workspace-specific edits needed here.
+    - Name: DocAnalyst
+      Instructions: |
+        You are a technical documentation analyst. Begin by reading .fuseraft/recon.md
+        for the list of document paths. Use document_extract_text for each one
+        (PDF, PPTX, DOCX, XLSX, CSV). The arch-overview entry in your context store
+        may already cover the main architecture document — check it first.
+
+        Find information relevant to the data flow:
+        - Architecture diagrams described in text
+        - Integration specs, API contracts, data dictionaries
+        - Business rules, transformation logic, field mapping tables
+
+        Write findings to .fuseraft/doc-findings.md. Quote relevant passages — do not
+        summarize away precision. Note the source file and section for each finding.
+
+        When done, write on its own line: DOC ANALYSIS COMPLETE
+      Model: heavy
+      Plugins:
+        - FileSystem
+        - Document
+        - Search
+        - Scratchpad
+      Capabilities:
+        FileSystem: [read, write]
+      FunctionChoice: required
+      ContextWindow:
+        TextOnly: true
+        MaxTurnAge: 3
+
+    ## Phase 5: connect the dots — this agent sees only text, never tool frames
+    - Name: Synthesizer
+      Instructions: |
+        You are a systems integration architect. Read all findings files:
+          .fuseraft/recon.md
+          .fuseraft/sql-findings.md
+          .fuseraft/api-findings.md
+          .fuseraft/doc-findings.md
+
+        Build a complete, exhaustive model of the requested data flow:
+        1. End-to-end sequence: what triggers the flow, what calls what, in what order
+        2. Every API→DB, API→stored procedure, and procedure→procedure call
+        3. Data transformations at each hop (field mappings, type conversions, business rules)
+        4. Conditions and branching (if X then Y, error paths, retries)
+        5. Constraints (FK relationships, validation rules, auth gates, rate limits)
+
+        Begin the document with a "Subsystems" section that names each subsystem exactly
+        as it appears in recon.md — DiagramBuilder will use these names for swim lanes.
+
+        Write the model to .fuseraft/flow-model.md as a structured, exhaustive document.
+        The DiagramBuilder cannot re-read source files — be complete.
+
+        When done, write on its own line: SYNTHESIS COMPLETE
+      Model: heavy
+      Plugins:
+        - FileSystem
+        - Changes
+        - Scratchpad
+      Capabilities:
+        FileSystem: [read, write]
+      FunctionChoice: required
+      ContextWindow:
+        TextOnly: true   # only needs text summaries from all prior agents — no tool frames
+        MaxTurnAge: 10
+
+    ## Phase 6: produce the artifact
+    - Name: DiagramBuilder
+      Instructions: |
+        You are a DrawIO expert. Read .fuseraft/flow-model.md.
+
+        The flow model's "Subsystems" section lists the subsystem names — create one
+        swim lane per subsystem using those exact names.
+
+        Produce a DrawIO XML file at output/data-flow.drawio:
+        - Swim lanes: one per subsystem (names from flow-model.md)
+        - API endpoints: rounded rectangles
+        - Stored procedures: cylinder shapes
+        - DB tables: table shapes
+        - External systems: cloud shapes
+        - Labeled arrows for every call: method, key parameters, return data
+        - Decision diamonds for conditions and branching
+        - Annotation boxes for transformation logic and business rules
+        - A legend
+
+        Use standard DrawIO mxGraph XML. The file must open correctly in draw.io.
+
+        When done, write on its own line: DIAGRAM COMPLETE
+      Model: heavy
+      Plugins:
+        - FileSystem
+        - Scratchpad
+      Capabilities:
+        FileSystem: [read, write]
+      FunctionChoice: required
+      ContextWindow:
+        TextOnly: true
+        MaxTurnAge: 2   # only needs the Synthesizer's single output turn
+
+  Selection:
+    Type: statemachine
+    StateMachine:
+      Initial: Recon
+
+      States:
+        Recon:
+          Agent: Archaeologist
+          Transitions:
+            - To: SQLAnalysis
+              Signal: "RECON COMPLETE"
+
+        SQLAnalysis:
+          Agent: SQLAnalyst
+          Transitions:
+            - To: APIAnalysis
+              Signal: "SQL ANALYSIS COMPLETE"
+
+        APIAnalysis:
+          Agent: APIAnalyst
+          Transitions:
+            - To: DocAnalysis
+              Signal: "API ANALYSIS COMPLETE"
+
+        DocAnalysis:
+          Agent: DocAnalyst
+          Transitions:
+            - To: Synthesis
+              Signal: "DOC ANALYSIS COMPLETE"
+
+        Synthesis:
+          Agent: Synthesizer
+          Transitions:
+            - To: DiagramGeneration
+              Signal: "SYNTHESIS COMPLETE"
+
+        DiagramGeneration:
+          Agent: DiagramBuilder
+          Transitions:
+            - To: DiagramGeneration
+              Signal: "DIAGRAM COMPLETE"
+
+  Termination:
+    Type: composite
+    MaxIterations: 60   # safety cap: 6 phases × ~10 turns each
+    Strategies:
+      - Type: regex
+        Pattern: "DIAGRAM COMPLETE"
+        AgentNames:
+          - DiagramBuilder
