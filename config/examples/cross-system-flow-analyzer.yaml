@@ -218,7 +218,11 @@ Orchestration:
           - Dynamic SQL patterns and their runtime table targets
 
         ## ── TRACE IDs ────────────────────────────────────────────────────────────────
-        Assign a unique trace ID to every finding: [TRACE:SQL-001], [TRACE:SQL-002], ...
+        Assign a deterministic trace ID to every finding using the fully-qualified entity name:
+          [TRACE:SQL:dbo.GetCustomerOrders]   (stored procedure)
+          [TRACE:SQL:dbo.Customers]            (table reference)
+          [TRACE:SQL:dynamic:<descriptor>]     (dynamic SQL with runtime-determined target)
+        Use fully-qualified names (schema.object). IDs must be stable across reruns.
         The Synthesizer will reference these IDs to cross-link the flow model.
         ## ───────────────────────────────────────────────────────────────────────────────
 
@@ -226,6 +230,12 @@ Orchestration:
         For each finding record:
           Confidence: High | Medium | Low
           Basis: explicit code | inferred naming | documentation | schema relationship
+        ## ───────────────────────────────────────────────────────────────────────────────
+
+        ## ── FINDINGS VERBOSITY RULES ─────────────────────────────────────────────────
+        Use structured headings; keep evidence blocks concise.
+        Do not restate procedure signatures or schema definitions more than once.
+        Reference prior trace IDs instead of duplicating explanations.
         ## ───────────────────────────────────────────────────────────────────────────────
 
         Use sub_agent_explore to read groups of related files without polluting main
@@ -286,14 +296,23 @@ Orchestration:
           - Cross-reference: which SQL objects from sql-findings.md does this route touch?
 
         ## ── TRACE IDs ────────────────────────────────────────────────────────────────
-        Assign a unique trace ID to every finding: [TRACE:API-001], [TRACE:API-002], ...
-        Reference SQL trace IDs (e.g. [TRACE:SQL-014]) where cross-references exist.
+        Assign a deterministic trace ID to every finding using HTTP method + path:
+          [TRACE:API:POST:/orders]
+          [TRACE:API:GET:/customers/{id}]
+        Reference SQL trace IDs by entity name (e.g. [TRACE:SQL:dbo.GetOrders]).
+        IDs must be stable across reruns — do not use sequential numbers.
         ## ───────────────────────────────────────────────────────────────────────────────
 
         ## ── CONFIDENCE SCORING ───────────────────────────────────────────────────────
         For each finding record:
           Confidence: High | Medium | Low
           Basis: explicit code | inferred naming | documentation | schema relationship
+        ## ───────────────────────────────────────────────────────────────────────────────
+
+        ## ── FINDINGS VERBOSITY RULES ─────────────────────────────────────────────────
+        Use structured headings; keep evidence blocks concise.
+        Do not restate route signatures or request/response shapes more than once.
+        Reference prior trace IDs instead of duplicating explanations.
         ## ───────────────────────────────────────────────────────────────────────────────
 
         Use sub_agent_explore for deep reads. Write findings to .fuseraft/api-findings.md.
@@ -333,11 +352,19 @@ Orchestration:
         - Business rules, transformation logic, field mapping tables
         - Async/event-driven boundaries described in architecture docs
 
-        Write findings to .fuseraft/doc-findings.md. Quote relevant passages — do not
-        summarize away precision. Note the source file and section for each finding.
+        Write findings to .fuseraft/doc-findings.md. For each finding:
+          - Note the source file and section
+          - Quote only the minimum text necessary to preserve precision; prefer
+            structured extraction (tables, lists, field definitions) over large
+            verbatim prose excerpts
+          - Never quote the same passage twice — reference its trace ID instead
+          - Do not restate context already captured in recon.md
 
         ## ── TRACE IDs ────────────────────────────────────────────────────────────────
-        Assign a unique trace ID to every finding: [TRACE:DOC-001], [TRACE:DOC-002], ...
+        Assign a deterministic trace ID using filename + section anchor:
+          [TRACE:DOC:architecture.pdf#integration-spec]
+          [TRACE:DOC:data-dictionary.xlsx#customer-fields]
+        IDs must be stable across reruns.
         ## ───────────────────────────────────────────────────────────────────────────────
 
         When done, write on its own line: DOC ANALYSIS COMPLETE
@@ -355,6 +382,10 @@ Orchestration:
         MaxTurnAge: 3
 
     ## Phase 5: canonicalize all findings into a unified machine-readable model
+    ## ── NOTE: For very large repos this phase carries the highest cognitive density
+    ##    (dedup + alias resolution + provenance + async merging). If context budgets
+    ##    are hit here in practice, consider decomposing into EntityNormalizer →
+    ##    RelationshipNormalizer → AsyncFlowNormalizer → CanonicalAssembler.
     - Name: Normalizer
       Instructions: |
         You are a data normalization specialist. Read all four findings files:
@@ -383,16 +414,22 @@ Orchestration:
             "procedures": [ {
               "canonical_name": "...", "aliases": [...], "path": "...",
               "inputs": [...], "outputs": [...], "tables_read": [...], "tables_written": [...],
-              "calls": [...], "trace_ids": [...], "confidence": "High|Medium|Low"
+              "calls": [...], "trace_ids": [...], "confidence": "High|Medium|Low",
+              "sources": [ { "agent": "SQLAnalyst", "trace_id": "...", "source_file": "..." } ]
             } ],
             "routes": [ {
               "canonical_name": "...", "method": "...", "path": "...",
-              "access_type": "direct_sql|orm|mediator|message_bus|async_workflow|downstream_call",
-              "sync": true|false, "sql_refs": [...], "trace_ids": [...], "confidence": "High|Medium|Low"
+              "access_patterns": [
+                { "type": "direct_sql|orm|mediator|message_bus|async_workflow|downstream_call|grpc",
+                  "target": "...", "sync": true }
+              ],
+              "sql_refs": [...], "trace_ids": [...], "confidence": "High|Medium|Low",
+              "sources": [ { "agent": "APIAnalyst", "trace_id": "...", "source_file": "..." } ]
             } ],
             "tables": [ {
               "canonical_name": "...", "schema_verified": true|false,
-              "pk": "...", "fks": [...], "inferred_only": true|false
+              "pk": "...", "fks": [...], "inferred_only": true|false,
+              "sources": [ { "agent": "...", "trace_id": "...", "source_file": "..." } ]
             } ],
             "async_flows": [ {
               "type": "queue|topic|scheduler|workflow", "broker": "...",
@@ -400,6 +437,9 @@ Orchestration:
             } ],
             "swim_lanes": [ "subsystem names for DiagramBuilder" ]
           }
+
+        Note: A single route commonly exercises multiple access patterns simultaneously
+        (e.g. ORM read + Kafka publish + Hangfire enqueue). Record all of them.
         ## ───────────────────────────────────────────────────────────────────────────────
 
         When done, write on its own line: NORMALIZATION COMPLETE
@@ -440,8 +480,46 @@ Orchestration:
         ## ───────────────────────────────────────────────────────────────────────────────
 
         ## ── TRACE ID REFERENCES ──────────────────────────────────────────────────────
-        Reference trace IDs from the findings (e.g. [TRACE:SQL-014], [TRACE:API-003])
-        wherever evidence supports a claim. Cite the trace ID inline.
+        Reference trace IDs from findings by entity name (e.g. [TRACE:SQL:dbo.GetOrders],
+        [TRACE:API:POST:/orders]) wherever evidence supports a claim. Cite inline.
+        ## ───────────────────────────────────────────────────────────────────────────────
+
+        ## ── STABLE NODE IDS ──────────────────────────────────────────────────────────
+        Node IDs in flow-model.json must be deterministic and stable across reruns:
+          api:POST:/orders           (API endpoint)
+          proc:dbo.GetOrders         (stored procedure)
+          table:dbo.Customers        (database table)
+          queue:order-created        (message queue/topic)
+          svc:PaymentService         (downstream service)
+        These IDs become diagram cell IDs and must survive partial reruns.
+        ## ───────────────────────────────────────────────────────────────────────────────
+
+        ## ── CYCLE DETECTION ──────────────────────────────────────────────────────────
+        Explicitly detect and annotate cyclic flows — do not assume DAG topology:
+          - Retry loops (caller retries the same target on failure)
+          - Dead-letter / compensating reprocessing flows
+          - Recursive stored procedure chains
+          - Bidirectional pub/sub synchronization
+          - Polling loops
+
+        Assign a stable cycle ID to each detected cycle: cycle:retry-order-submit
+        Mark the back-edge in the graph with "cycle_id": "..." so layout engines
+        can suppress or annotate it rather than exploding.
+        ## ───────────────────────────────────────────────────────────────────────────────
+
+        ## ── UNCERTAINTY PROPAGATION ──────────────────────────────────────────────────
+        If any flow segment depends on a Low-confidence finding, mark that segment:
+          Confidence: Low
+        Propagate: a segment is only High if all its constituent findings are High.
+        Do not synthesize certainty — downstream consumers must know what is inferred.
+        ## ───────────────────────────────────────────────────────────────────────────────
+
+        ## ── PARTIAL WORKSPACE HANDLING ───────────────────────────────────────────────
+        If a referenced system, service, or schema is unavailable or missing:
+          - Mark the dependency as "unresolved": true in the flow graph
+          - Preserve the inferred topology (the edge and nodes still appear)
+          - Do not fabricate implementation details
+          - Label the node with: [UNRESOLVED: system name]
         ## ───────────────────────────────────────────────────────────────────────────────
 
         Begin the document with a "Subsystems" section that lists swim_lanes from
@@ -453,9 +531,20 @@ Orchestration:
           .fuseraft/flow-model.json — machine-readable graph for DiagramBuilder:
             {
               "swim_lanes": [...],
-              "nodes": [ { "id": "...", "type": "api|procedure|table|service|queue", "label": "...", "lane": "..." } ],
-              "edges": [ { "from": "...", "to": "...", "label": "...", "sync": true|false } ],
-              "decisions": [ { "id": "...", "condition": "...", "true_branch": "...", "false_branch": "..." } ]
+              "nodes": [ {
+                "id": "api:POST:/orders",
+                "type": "api|procedure|table|service|queue",
+                "label": "...", "lane": "...",
+                "unresolved": false
+              } ],
+              "edges": [ {
+                "from": "...", "to": "...", "label": "...",
+                "type": "http|sql|procedure_call|event_publish|event_consume|scheduler|workflow|grpc",
+                "sync": true|false,
+                "cycle_id": "cycle:..." (omit if not a back-edge)
+              } ],
+              "decisions": [ { "id": "...", "condition": "...", "true_branch": "...", "false_branch": "..." } ],
+              "cycles": [ { "id": "cycle:...", "description": "...", "back_edge": { "from": "...", "to": "..." } } ]
             }
         ## ───────────────────────────────────────────────────────────────────────────────
 
@@ -478,7 +567,14 @@ Orchestration:
     - Name: DiagramBuilder
       Instructions: |
         You are a DrawIO expert. Read .fuseraft/flow-model.json (machine-readable graph)
-        and .fuseraft/flow-model.md (for annotation prose).
+        and .fuseraft/flow-model.md (supplemental annotation only).
+
+        ## ── TOPOLOGY AUTHORITY ───────────────────────────────────────────────────────
+        flow-model.json is the authoritative source for topology.
+        flow-model.md provides annotation and prose context only.
+        Never infer new nodes or edges from prose that are absent from flow-model.json.
+        If prose and JSON disagree on structure, follow the JSON.
+        ## ───────────────────────────────────────────────────────────────────────────────
 
         The flow-model.json "swim_lanes" array lists the subsystem names — create one
         swim lane per entry using those exact names.
@@ -550,6 +646,16 @@ Orchestration:
           - All procedures in canonical-model.json appear in at least one flow edge
           - All tables marked schema_verified: false are called out in the report
           - All findings with Confidence: Low are listed for human review
+
+        Flow integrity:
+          - Every entrypoint node (no incoming edges, not a queue consumer) reaches
+            at least one terminal node (no outgoing edges, or explicit exit point)
+          - No disconnected subgraphs exist unless explicitly marked "isolated": true
+          - Every async publish edge (type: event_publish) has at least one corresponding
+            event_consume edge or a DLQ node reachable from it
+          - Every decision node has both true_branch and false_branch connected to
+            existing nodes
+          - All cycle back-edges reference a declared cycle ID in the cycles array
         ## ───────────────────────────────────────────────────────────────────────────────
 
         If any check fails, write the failure details clearly with the affected IDs.
