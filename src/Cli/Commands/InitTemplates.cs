@@ -2,11 +2,11 @@ using fuseraft.Core;
 
 namespace fuseraft.Cli.Commands;
 
-internal sealed record GeneratedConfig(
+public sealed record GeneratedConfig(
     string MainConfig,
     IReadOnlyList<(string RelativePath, string Content)> AgentFiles)
 {
-    internal static GeneratedConfig Inline(string yaml) => new(yaml, []);
+    public static GeneratedConfig Inline(string yaml) => new(yaml, []);
 }
 
 /// <summary>
@@ -14,14 +14,14 @@ internal sealed record GeneratedConfig(
 /// partial class method in its own file; this file contains the dispatch entry point and
 /// shared helpers used by all templates.
 /// </summary>
-internal static partial class InitTemplates
+public static partial class InitTemplates
 {
     /// <summary>
     /// Dispatches to the template factory identified by <paramref name="template"/> and returns
     /// the generated main config YAML together with any agent files to write alongside it.
     /// Unrecognised template names fall back to <see cref="DevTeam"/>.
     /// </summary>
-    internal static GeneratedConfig Build(string template, string model, string? endpoint) =>
+    public static GeneratedConfig Build(string template, string model, string? endpoint) =>
         template switch
         {
             "research"   => Research(model, endpoint),

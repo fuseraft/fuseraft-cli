@@ -2,7 +2,7 @@ using fuseraft.Core;
 
 namespace fuseraft.Cli.Commands;
 
-internal static partial class InitTemplates
+public static partial class InitTemplates
 {
     /// <summary>
     /// Generates the <c>content</c> template: Writer → Editor state-machine pipeline
