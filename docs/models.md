@@ -70,6 +70,8 @@ Any field left empty falls back to auto-detection.
 | `MaxTokens` | int | `0` | Max tokens per response. `0` = use model default. |
 | `MaxContextTokens` | int | `0` | Input context window limit (≈85% of the model's advertised maximum). Requests that would exceed this value are rejected before the API call — prevents expensive failures on models with hard limits. `0` disables the check. |
 | `Temperature` | number | — | Sampling temperature (0.0–2.0). Omit for reasoning models that reject this parameter. |
+| `FalloverModels` | array | — | Ordered list of fallover models to try when this model fails with a classifiable error. Each entry supports the same shorthand as `ModelId` (a plain string in YAML). See [Fallover chain](#fallover-chain). |
+| `FalloverOn` | array | — | Error reasons that trigger fallover. Defaults to all recoverable reasons: `RateLimit`, `ContextExceeded`, `QuotaExceeded`, `ServerError`. `AuthError` is never fallover-able. Only relevant when `FalloverModels` is set. |
 
 ---
 
@@ -312,6 +314,79 @@ Agents:
 ```
 
 All agents that reference the same alias share the same `KeyPoolChatClient` instance, so rotation state is shared across agents. Cooldowns from one agent's 429 apply to all agents using that pool for the duration of the cooldown window.
+
+---
+
+## Fallover chain
+
+When a provider call fails with a classifiable error (rate limit, context exceeded, quota exhausted, or server error), fuseraft-cli can automatically retry on a different model. Configure an ordered `FalloverModels` list on any `ModelConfig` and the primary model is tried first; on failure the next entry is tried, and so on until one succeeds or all are exhausted.
+
+```yaml
+Model:
+  ModelId: claude-opus-4-7
+  FalloverModels:
+    - gpt-4o           # tried if Anthropic returns 429 or 5xx
+    - gemini-2.0-flash # final fallback
+```
+
+Each fallover entry supports the same shorthand as `ModelId` (a plain string) and goes through the full model resolution pipeline — including its own key pool if you configure `ApiKeys` or `ApiKeyEnvVars` on the fallover model.
+
+### How it works
+
+1. The primary model is tried first.
+2. If it throws an exception whose cause is in `FalloverOn`, the error is logged to stderr and the next model in the chain is tried.
+3. For streaming responses, fallover only fires before the first chunk is delivered — mid-stream exceptions propagate as-is (the caller has already received partial output).
+4. If all models in the chain fail, the last exception is re-thrown.
+
+### Fallover reasons
+
+| Reason | HTTP status | Trigger condition |
+|--------|-------------|-------------------|
+| `RateLimit` | 429 | Request-rate limit hit (not billing-related). |
+| `ContextExceeded` | 400 | Prompt exceeded the model's context window. |
+| `QuotaExceeded` | 429 + quota/billing message | Account-level quota or billing limit reached. |
+| `ServerError` | 5xx | Provider-side server error after all per-request retries. |
+| `AuthError` | 401 / 403 | Invalid or missing credentials — **not** fallover-able by default. |
+
+The default `FalloverOn` value covers all four recoverable reasons. Override it to restrict fallover to specific conditions:
+
+```yaml
+Model:
+  ModelId: gpt-4o
+  FalloverModels:
+    - gemini-2.0-flash
+  FalloverOn:
+    - ContextExceeded   # only fallover when the prompt is too long
+```
+
+### Combining with credential pool rotation
+
+`FalloverModels` and [credential pool rotation](#credential-pool-rotation) work independently and compose well. The key pool rotates between API keys for the **same model**; the fallover chain switches to a **different model** when all keys on the primary are exhausted:
+
+```yaml
+Model:
+  ModelId: claude-opus-4-7
+  ApiKeyEnvVar: ANTHROPIC_KEY_1
+  ApiKeyEnvVars:
+    - ANTHROPIC_KEY_2     # rotated to on 429
+  FalloverModels:
+    - gpt-4o              # tried after all Anthropic keys are rate-limited
+```
+
+### Named alias with a fallover chain
+
+```yaml
+Models:
+  robust:
+    ModelId: claude-opus-4-7
+    FalloverModels:
+      - gpt-4o
+      - gemini-2.0-flash
+
+Agents:
+  - Name: Developer
+    Model: robust
+```
 
 ---
 
