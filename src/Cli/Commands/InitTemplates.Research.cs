@@ -2,7 +2,7 @@ using fuseraft.Core;
 
 namespace fuseraft.Cli.Commands;
 
-internal static partial class InitTemplates
+public static partial class InitTemplates
 {
     /// <summary>
     /// Generates the <c>research</c> template: Researcher → Writer state-machine pipeline

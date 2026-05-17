@@ -2,7 +2,7 @@ using fuseraft.Core;
 
 namespace fuseraft.Cli.Commands;
 
-internal static partial class InitTemplates
+public static partial class InitTemplates
 {
     /// <summary>
     /// Generates the <c>magentic</c> template: an AI-managed team where a manager LLM dynamically
