@@ -46,18 +46,23 @@ Cli/
 
 Core/
   Interfaces/       — IOrchestrator, ISessionStore, IAgentSelector, ITerminationCondition,
-                      IRoutingValidator, IHumanApprovalService, ICompensatingAgent
+                      IRoutingValidator, IHumanApprovalService, ICompensatingAgent,
+                      IMemoryProvider
   Models/           — OrchestrationConfig, AgentConfig, SessionCheckpoint, AgentMessage,
                       AgentState, SagaConfig, TokenUsage, StrategyConfig,
-                      ValidationConfig, ...
+                      ValidationConfig, MemoryConfig, ...
   Exceptions/       — BudgetExceededException, ValidatorStuckException
 
 Infrastructure/
   AgentFactory.cs         — Builds MAF AIAgent instances from AgentConfig
   ChatClientFactory.cs    — Resolves model aliases; constructs IChatClient per provider
+  FalloverChatClient.cs   — IChatClient wrapper that retries on classifiable provider errors
   InMemorySessionStore.cs — In-process checkpoint store (no persistence)
   JsonSessionStore.cs     — File-backed checkpoint store (~/.fuseraft/sessions/)
+  LocalMemoryProvider.cs  — IMemoryProvider backed by per-agent MemoryStore (file-based)
   McpSessionManager.cs    — Connects to MCP servers; registers their tools at startup
+  MemoryManager.cs        — Aggregates IMemoryProvider instances; pre/post-turn hooks
+  WebhookMemoryProvider.cs — IMemoryProvider that delegates to an HTTP endpoint
   Plugins/                — Built-in tool plugins (FileSystem, Shell, Git, Http, ...)
 
 Orchestration/
