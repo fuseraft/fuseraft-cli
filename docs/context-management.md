@@ -8,9 +8,10 @@ lifetime:
 ```
 Session start
   └─ Layer 1: Context Store      → files imported before the session
-  └─ Layer 2: Persistent Memory  → facts recalled from prior sessions
+  └─ Layer 2: Persistent Memory  → facts recalled from prior sessions (EnableMemory)
 
 Each agent turn
+  └─ Layer 2b: Memory Provider   → fresh context fetched from pluggable store (Memory:)
   └─ Layer 3: ContextWindow      → per-agent history filter (every turn)
 
 History too long
@@ -88,6 +89,26 @@ automatically at the end of each session and scoped to the working directory via
 then name; entries that would exceed the cap are dropped (header only is kept for visibility).
 
 See [Configuration — Memory](configuration.md#memory) for the full field reference.
+
+---
+
+## Layer 2b: Memory provider (per-turn)
+
+The `Memory:` top-level config key activates a live provider that runs pre- and post-turn hooks around every agent turn. Unlike `EnableMemory` (one-shot at session start), the provider fetches a fresh context block before each turn and can persist the accumulated history after each turn.
+
+```yaml
+Memory:
+  Provider: local    # or "webhook"
+```
+
+Two built-in providers are available:
+
+- **`local`** — re-reads from the same file-backed `MemoryStore` as `EnableMemory`, but refreshes every turn rather than once at startup. Useful when another process is writing new memories during the session.
+- **`webhook`** — delegates load and save to an HTTP endpoint you control (vector store, knowledge graph, managed memory service).
+
+`EnableMemory` and `Memory:` are additive: the `EnableMemory` block is baked into the agent's static instructions at creation time; the `Memory:` block is prepended at turn time. Both can be active simultaneously.
+
+See [Configuration — Pluggable memory provider](configuration.md#pluggable-memory-provider) for the full reference.
 
 ---
 
@@ -363,6 +384,7 @@ Here is the full sequence from session start through a long-running session:
    └─ Persistent Memory  → prepended to each agent's instructions (if EnableMemory: true)
 
 2. Each agent turn
+   ├─ Memory provider pre-turn → fresh block prepended to instructions (if Memory: set)
    └─ ContextWindow filter applied to conversation history
       ├─ TextOnly / ExcludeAgents strip tool noise
       ├─ MaxTurnAge semantic cut
