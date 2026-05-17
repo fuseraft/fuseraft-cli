@@ -180,10 +180,22 @@ public sealed class ChatClientFactory(
                       $"(model: '{config.ModelId}', provider: '{config.Provider}').");
 
         // Build a key pool when multiple keys are configured
-        var pool = BuildPool(config, primaryKey);
-        if (pool is not null) return pool;
+        var primary = BuildPool(config, primaryKey) ?? CreateCore(config, primaryKey);
 
-        return CreateCore(config, primaryKey);
+        // Wrap with a fallover chain when one or more fallover models are configured.
+        // Each fallover entry goes through the full Create() pipeline (including its own
+        // key pool), so per-entry ApiKeys and ApiKeyEnvVars are fully supported.
+        if (config.FalloverModels is { Count: > 0 })
+        {
+            var chain = new IChatClient[config.FalloverModels.Count + 1];
+            chain[0] = primary;
+            for (int i = 0; i < config.FalloverModels.Count; i++)
+                chain[i + 1] = Create(config.FalloverModels[i]);
+            var falloverOn = ProviderErrorClassifier.ParseFalloverOn(config.FalloverOn);
+            return new FalloverChatClient(chain, falloverOn);
+        }
+
+        return primary;
     }
 
     // Collects all unique API keys from the config (primary + ApiKeys list + ApiKeyEnvVars list).

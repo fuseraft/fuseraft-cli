@@ -90,6 +90,21 @@ public record ModelConfig
     /// Omit (or set to null) for reasoning models that reject this parameter.
     /// </summary>
     public double? Temperature { get; init; } = null;
+
+    /// <summary>
+    /// Ordered list of fallover models to try when this model fails with a classifiable error.
+    /// Each entry supports the same shorthand as <see cref="ModelId"/> (a plain string in YAML).
+    /// The primary model is always tried first; fallover models are tried in order.
+    /// </summary>
+    public List<ModelConfig>? FalloverModels { get; init; }
+
+    /// <summary>
+    /// Error reasons that trigger a fallover attempt. When omitted, all recoverable reasons
+    /// are used: <c>RateLimit</c>, <c>ContextExceeded</c>, <c>QuotaExceeded</c>, <c>ServerError</c>.
+    /// <c>AuthError</c> is never fallover-able — it indicates a permanent configuration problem.
+    /// Only relevant when <see cref="FalloverModels"/> is set.
+    /// </summary>
+    public List<string>? FalloverOn { get; init; }
 }
 
 /// <summary>
