@@ -28,6 +28,9 @@ public sealed class ConversationCompactor(
     string? eventsLogPath = null,
     EvidenceStore? evidenceStore = null)
 {
+    // Tracks savings ratios from the last AntiThrashWindow compactions so we can detect
+    // conversations that are thrashing (repeatedly compacting but saving very little).
+    private readonly Queue<double> _recentSavings = new();
     /// <summary>
     /// Returns true when the current mode is <c>window</c>.
     /// In window mode compaction is token-budget-based; no LLM call is made.
@@ -45,6 +48,7 @@ public sealed class ConversationCompactor(
     {
         if (IsWindowMode)
             return messages.Sum(m => (m.Content?.Length ?? 0) / 4) > config.TokenBudget;
+        if (IsAntiThrashed()) return false;
         return messages.Count(m => m.Role == "assistant") >= config.TriggerTurnCount;
     }
 
@@ -52,8 +56,12 @@ public sealed class ConversationCompactor(
     /// Overload for callers that maintain a running assistant-turn counter,
     /// avoiding a full list scan. Only valid when not in window mode.
     /// </summary>
-    public bool ShouldCompact(int assistantTurnCount) =>
-        !IsWindowMode && assistantTurnCount >= config.TriggerTurnCount;
+    public bool ShouldCompact(int assistantTurnCount)
+    {
+        if (IsWindowMode) return false;
+        if (IsAntiThrashed()) return false;
+        return assistantTurnCount >= config.TriggerTurnCount;
+    }
 
     /// <summary>
     /// Drops the oldest user+assistant pairs from <paramref name="messages"/> until
@@ -105,6 +113,10 @@ public sealed class ConversationCompactor(
         var keepCount  = Math.Clamp(config.KeepRecentTurns, 1, messages.Count - 1);
         var toCompact  = messages.Take(messages.Count - keepCount).ToList();
         var toRetain   = messages.Skip(messages.Count - keepCount).ToList();
+
+        // Record savings ratio now so it's captured regardless of which compaction path we take.
+        // toCompact.Count messages become 1 summary; net reduction = toCompact.Count - 1.
+        RecordSavings((toCompact.Count - 1.0) / messages.Count);
 
         logger.LogInformation(
             "Compacting {Compacted} turns (0–{LastCompacted}) into a summary; retaining {Kept} recent turns.",
@@ -160,31 +172,42 @@ public sealed class ConversationCompactor(
             var snapshot      = await snapshotter.SnapshotAsync(cancellationToken);
             var reconstructed = ContextRebuilder.BuildContextMessage(snapshot, toCompact[^1].TurnIndex);
 
-            var histText = BuildHistoryText(toCompact);
-            var clText   = ReadChangeLog();
-            var (summText, summUsage) = await GenerateSummaryAsync(
-                task, histText, clText, toCompact.Count, cancellationToken);
-
-            var hybridContent =
-                reconstructed.Content + "\n\n---\n\n" +
-                FormatSummaryContent(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, summText, prefixBlock);
-
-            var hybridSummary = new AgentMessage
+            try
             {
-                AgentName           = "System",
-                Content             = hybridContent,
-                Role                = "user",
-                TurnIndex           = toCompact[^1].TurnIndex,
-                IsCompactionSummary = true,
-                Usage               = summUsage is not null
-                    ? new TokenUsage(summUsage.InputTokens, summUsage.OutputTokens)
-                    : null
-            };
+                var histText = BuildHistoryText(toCompact, config.MaxCharsPerHistoryMessage);
+                var clText   = ReadChangeLog();
+                var (summText, summUsage) = await GenerateSummaryAsync(
+                    task, histText, clText, toCompact.Count, cancellationToken);
 
-            logger.LogInformation(
-                "Hybrid compaction complete. Turns 0–{Last} replaced by evidence reconstruction + LLM summary.",
-                toCompact[^1].TurnIndex);
-            return (hybridSummary, toRetain);
+                var hybridContent =
+                    reconstructed.Content + "\n\n---\n\n" +
+                    FormatSummaryContent(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, summText, prefixBlock);
+
+                var hybridSummary = new AgentMessage
+                {
+                    AgentName           = "System",
+                    Content             = hybridContent,
+                    Role                = "user",
+                    TurnIndex           = toCompact[^1].TurnIndex,
+                    IsCompactionSummary = true,
+                    Usage               = summUsage is not null
+                        ? new TokenUsage(summUsage.InputTokens, summUsage.OutputTokens)
+                        : null
+                };
+
+                logger.LogInformation(
+                    "Hybrid compaction complete. Turns 0–{Last} replaced by evidence reconstruction + LLM summary.",
+                    toCompact[^1].TurnIndex);
+                return (hybridSummary, toRetain);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                // LLM summary failed; return the lossless reconstruction alone so the session survives.
+                logger.LogError(ex,
+                    "Hybrid compaction: LLM summary call failed — returning lossless reconstruction only.");
+                return (reconstructed, toRetain);
+            }
         }
 
         // LLM mode (default) — existing behaviour.
@@ -193,28 +216,40 @@ public sealed class ConversationCompactor(
                 "Compaction mode is '{Mode}' but no snapshotter or intent log is available — falling back to LLM mode.",
                 mode);
 
-        var historyText   = BuildHistoryText(toCompact);
+        var historyText   = BuildHistoryText(toCompact, config.MaxCharsPerHistoryMessage);
         var changeLogText = ReadChangeLog();
-        var (summaryText, summaryUsage) = await GenerateSummaryAsync(
-            task, historyText, changeLogText, toCompact.Count, cancellationToken);
 
-        var summary = new AgentMessage
+        try
         {
-            AgentName           = "System",
-            Content             = FormatSummaryContent(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, summaryText, prefixBlock),
-            Role                = "user",
-            TurnIndex           = toCompact[^1].TurnIndex,
-            IsCompactionSummary = true,
-            Usage               = summaryUsage is not null
-                ? new TokenUsage(summaryUsage.InputTokens, summaryUsage.OutputTokens)
-                : null
-        };
+            var (summaryText, summaryUsage) = await GenerateSummaryAsync(
+                task, historyText, changeLogText, toCompact.Count, cancellationToken);
 
-        logger.LogInformation(
-            "Compaction complete. Turns 0–{Last} replaced by summary.",
-            toCompact[^1].TurnIndex);
+            var summary = new AgentMessage
+            {
+                AgentName           = "System",
+                Content             = FormatSummaryContent(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, summaryText, prefixBlock),
+                Role                = "user",
+                TurnIndex           = toCompact[^1].TurnIndex,
+                IsCompactionSummary = true,
+                Usage               = summaryUsage is not null
+                    ? new TokenUsage(summaryUsage.InputTokens, summaryUsage.OutputTokens)
+                    : null
+            };
 
-        return (summary, toRetain);
+            logger.LogInformation(
+                "Compaction complete. Turns 0–{Last} replaced by summary.",
+                toCompact[^1].TurnIndex);
+
+            return (summary, toRetain);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "LLM compaction failed; inserting fallback marker for turns {First}–{Last}.",
+                toCompact[0].TurnIndex, toCompact[^1].TurnIndex);
+            return (BuildFallbackSummary(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, ex.Message), toRetain);
+        }
     }
 
     // Internals
@@ -356,7 +391,7 @@ public sealed class ConversationCompactor(
         return new TokenUsage(inputTokens, outputTokens);
     }
 
-    private static string BuildHistoryText(IReadOnlyList<AgentMessage> messages)
+    private static string BuildHistoryText(IReadOnlyList<AgentMessage> messages, int maxCharsPerMessage)
     {
         var sb = new StringBuilder();
         foreach (var msg in messages)
@@ -366,10 +401,71 @@ public sealed class ConversationCompactor(
                 : $"[{(msg.Role == "user" ? "Human" : msg.AgentName)} — Turn {msg.TurnIndex + 1}]";
 
             sb.AppendLine(label);
-            sb.AppendLine(msg.Content);
+            sb.AppendLine(PruneContent(msg, maxCharsPerMessage));
             sb.AppendLine();
         }
         return sb.ToString();
+    }
+
+    // Truncates long message content before passing it to the LLM summarizer so a single
+    // verbose turn cannot dominate the history text. Compaction summaries are never truncated.
+    // When tool calls were recorded for the turn, appends a compact call list so the summarizer
+    // still knows what operations were attempted even after truncation.
+    private static string PruneContent(AgentMessage msg, int maxChars)
+    {
+        if (msg.IsCompactionSummary || maxChars <= 0 || msg.Content.Length <= maxChars)
+            return msg.Content;
+
+        var truncated = msg.Content[..maxChars] + $" [TRUNCATED — {msg.Content.Length:N0} chars total]";
+
+        if (msg.ToolCalls is { Count: > 0 } calls)
+        {
+            var toolList = string.Join(", ", calls.Select(tc =>
+                $"{(tc.Succeeded ? "✓" : "✗")} {tc.Name}" +
+                (tc.ArgsSummary is not null ? $"({tc.ArgsSummary})" : string.Empty)));
+            truncated += $"\n  [Tool calls: {toolList}]";
+        }
+
+        return truncated;
+    }
+
+    // Returns true when every entry in the recent-savings window is below the configured
+    // minimum ratio, signalling that repeated compactions are not meaningfully reducing size.
+    private bool IsAntiThrashed()
+    {
+        if (config.AntiThrashWindow <= 0 || config.AntiThrashMinSavingsRatio <= 0) return false;
+        if (_recentSavings.Count < config.AntiThrashWindow) return false;
+        return _recentSavings.All(r => r < config.AntiThrashMinSavingsRatio);
+    }
+
+    private void RecordSavings(double ratio)
+    {
+        _recentSavings.Enqueue(ratio);
+        while (_recentSavings.Count > Math.Max(1, config.AntiThrashWindow))
+            _recentSavings.Dequeue();
+    }
+
+    private AgentMessage BuildFallbackSummary(int firstTurn, int lastTurn, string errorMessage)
+    {
+        var content =
+            $"[COMPACTION FAILED — covers turns {firstTurn + 1}–{lastTurn + 1}]\n\n" +
+            $"Summary generation failed: {errorMessage}\n\n" +
+            "Context for this turn range could not be preserved. Before acting:\n" +
+            "• Read current file state directly — do not assume prior work was completed.\n" +
+            "• Check the change log for ground truth of what was actually written.\n" +
+            "• Re-derive your next step from observable disk state, not from memory.";
+
+        if (resumptionNote is not null)
+            content += "\n\n---\n" + resumptionNote;
+
+        return new AgentMessage
+        {
+            AgentName           = "System",
+            Content             = content,
+            Role                = "user",
+            TurnIndex           = lastTurn,
+            IsCompactionSummary = true,
+        };
     }
 
     /// <summary>

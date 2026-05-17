@@ -89,4 +89,29 @@ public record CompactionConfig
     /// <c>## Completed</c>, <c>## Open Questions</c>, <c>## Remaining Work</c>, <c>## Key Findings</c>.
     /// </summary>
     public string? SummaryTemplate { get; init; }
+
+    /// <summary>
+    /// Maximum characters to include from any single message when building the history text
+    /// passed to the LLM summarizer. Messages longer than this are truncated and annotated with
+    /// a <c>[TRUNCATED]</c> marker; tool-call records are appended as a compact list so the
+    /// summarizer still knows what happened. Set to <c>0</c> to disable truncation (legacy
+    /// behaviour). Default: <c>8000</c> (~2 000 tokens).
+    /// </summary>
+    public int MaxCharsPerHistoryMessage { get; init; } = 8_000;
+
+    /// <summary>
+    /// Minimum savings ratio (0–1) that a compaction must achieve to be considered effective.
+    /// If the last <see cref="AntiThrashWindow"/> compactions all saved less than this fraction
+    /// of the conversation, <see cref="ConversationCompactor.ShouldCompact"/> returns
+    /// <c>false</c> until the conversation grows past the trigger again.
+    /// Default: <c>0.10</c> (10 %). Set to <c>0</c> to disable the anti-thrash check.
+    /// </summary>
+    public double AntiThrashMinSavingsRatio { get; init; } = 0.10;
+
+    /// <summary>
+    /// Number of recent compaction outcomes to examine for the anti-thrash guard.
+    /// Only suppresses compaction once this many outcomes have been recorded.
+    /// Default: <c>3</c>. Set to <c>0</c> to disable the anti-thrash check.
+    /// </summary>
+    public int AntiThrashWindow { get; init; } = 3;
 }

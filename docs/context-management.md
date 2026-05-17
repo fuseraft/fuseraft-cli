@@ -263,6 +263,57 @@ Compaction:
   IncludeSymbolGraph: true
 ```
 
+### History pre-pruning
+
+Before passing conversation history to the LLM summarizer, fuseraft truncates any single
+message whose content exceeds `MaxCharsPerHistoryMessage` (default 8 000 characters, ≈2 000
+tokens). Long messages receive a `[TRUNCATED — N chars total]` suffix, and any tool calls
+recorded for that turn are appended as a compact one-line list so the summarizer still knows
+what operations were attempted.
+
+This prevents a single verbose agent turn — a large shell output or a file read embedded in the
+reply — from dominating the summary prompt and inflating LLM cost.
+
+```yaml
+Compaction:
+  TriggerTurnCount: 50
+  KeepRecentTurns: 10
+  MaxCharsPerHistoryMessage: 4000   # stricter; ~1 000 tokens per message max
+```
+
+Set to `0` to disable truncation and restore the previous behaviour (full content verbatim).
+
+### Anti-thrash protection
+
+If repeated compactions save very little — for example, a conversation that is near the trigger
+threshold but whose LLM summary is nearly as long as the history it replaced — fuseraft
+suppresses further compaction until the history grows meaningfully.
+
+The guard tracks the savings ratio of the last `AntiThrashWindow` compactions (default 3). If
+every entry in that window is below `AntiThrashMinSavingsRatio` (default 10%), `ShouldCompact`
+returns `false`. The guard resets automatically as new turns extend the conversation past the
+trigger again.
+
+```yaml
+Compaction:
+  TriggerTurnCount: 20
+  KeepRecentTurns: 5
+  AntiThrashMinSavingsRatio: 0.15   # suppress if saving less than 15%
+  AntiThrashWindow: 4               # look at last 4 compactions
+```
+
+Set either field to `0` to disable the guard entirely.
+
+### Failure resilience
+
+When the LLM summary call fails (network error, rate limit, model timeout), fuseraft no longer
+crashes the session. Instead it injects a `[COMPACTION FAILED]` marker message that tells agents
+the history for that range could not be preserved, and instructs them to read disk state directly
+rather than relying on memory. The session then continues from the retained tail.
+
+For `hybrid` mode specifically, if the LLM call fails the session falls back to the lossless
+reconstruction alone — still useful, just without the narrative summary layer.
+
 ### Change log grounding
 
 When `ChangeTracking` or `Validation.ChangeLogPath` is configured, `llm` and `hybrid`
