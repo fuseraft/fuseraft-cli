@@ -308,7 +308,10 @@ public sealed class ConversationCompactor(
               """
             : string.Empty;
 
-        var prompt = SummaryPrompt
+        var template = !string.IsNullOrWhiteSpace(config.SummaryTemplate)
+            ? config.SummaryTemplate
+            : SummaryPrompt;
+        var prompt = template
             .Replace("{{$task}}",        task)
             .Replace("{{$turn_count}}",  turnCount.ToString())
             .Replace("{{$change_log}}", changeLogBlock)
@@ -548,13 +551,24 @@ public sealed class ConversationCompactor(
 
         {{$history}}
 
-        Write a thorough summary retaining every detail an agent needs to continue without the original turns:
-        - Decisions made and their rationale
-        - Work completed: exact file paths written, commands run and exit codes, git commits
-        - Errors encountered and how each was resolved (if unresolved, say so explicitly)
-        - Current state: what is done, what is partially done, what failed
-        - Pending items, open questions, blockers
+        Write a structured summary using EXACTLY these four sections. Nothing omitted here can be
+        recovered later — do not paraphrase away specifics (exact file paths, exit codes, commit messages).
 
-        Do not paraphrase away specifics. Nothing omitted here can be recovered later.
+        ## Completed
+        Every piece of work that is fully done: files written (exact paths), commands run with exit
+        codes, git commits made, decisions finalized. Nothing listed here will be repeated.
+
+        ## Open Questions
+        Every question raised but not yet answered, every ambiguity unresolved, every decision
+        deferred. If none, write "None."
+
+        ## Remaining Work
+        Everything started but not finished, and everything not yet started that the task requires.
+        Include the exact next step for anything in-progress. If all work is complete, write "None."
+
+        ## Key Findings
+        Discoveries, constraints, error patterns, or facts that will affect future decisions:
+        unexpected behavior found, workarounds applied, architectural decisions made, known
+        limitations. If none, write "None."
         """;
 }

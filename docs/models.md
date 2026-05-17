@@ -63,8 +63,12 @@ Any field left empty falls back to auto-detection.
 | `ModelId` | string | — | Model identifier sent to the API. |
 | `Provider` | string | auto | Connector type: `openai`, `azure`, `google`, `mistral`, `ollama`. Auto-detected from `ModelId` if omitted. |
 | `Endpoint` | string | auto | API base URL. Auto-detected from provider if omitted. Required for `azure`. Falls back to `endpoint` in `~/.fuseraft/config` when blank. |
-| `ApiKeyEnvVar` | string | auto | Name of the environment variable holding the API key. Auto-detected from provider if omitted. Leave empty for `ollama`. Falls back to `apiKeyEnvVar` in `~/.fuseraft/config` when blank. |
+| `ApiKeyEnvVar` | string | auto | Name of the environment variable holding the primary API key. Auto-detected from provider if omitted. Leave empty for `ollama`. Falls back to `apiKeyEnvVar` in `~/.fuseraft/config` when blank. |
+| `ApiKey` | string | — | Literal API key. Takes precedence over `ApiKeyEnvVar`. Used by the REPL wizard; not recommended in YAML configs. |
+| `ApiKeys` | array | — | Additional literal API keys for pool rotation. See [Credential pool rotation](#credential-pool-rotation). |
+| `ApiKeyEnvVars` | array | — | Additional environment variable names each holding an API key, for pool rotation. See [Credential pool rotation](#credential-pool-rotation). |
 | `MaxTokens` | int | `0` | Max tokens per response. `0` = use model default. |
+| `MaxContextTokens` | int | `0` | Input context window limit (≈85% of the model's advertised maximum). Requests that would exceed this value are rejected before the API call — prevents expensive failures on models with hard limits. `0` disables the check. |
 | `Temperature` | number | — | Sampling temperature (0.0–2.0). Omit for reasoning models that reject this parameter. |
 
 ---
@@ -244,6 +248,70 @@ Agents:
 ```
 
 Each agent's API calls are made with its own key and endpoint. Token costs are tracked and summed across all agents.
+
+---
+
+---
+
+## Credential pool rotation
+
+When multiple API keys are available for the same provider, fuseraft-cli automatically rotates between them on 429 Too Many Requests responses. This keeps long sessions alive when a single API key hits its rate limit.
+
+### How it works
+
+1. All keys from `ApiKey`, `ApiKeyEnvVar`, `ApiKeys`, and `ApiKeyEnvVars` are collected and deduplicated at session start.
+2. Requests use the current slot (round-robin starting at 0).
+3. When a 429 is returned — after [`TransientRetryHandler`](https://github.com/fuseraft/fuseraft-cli) exhausts its own per-request retries — the slot is marked with a 60-second cooldown and the next available slot is tried.
+4. If all slots are simultaneously rate-limited, the session surfaces the error rather than busy-waiting.
+5. Single-key configs (the common case) are unaffected: `KeyPoolChatClient` is only activated when more than one distinct key resolves.
+
+### Configuration
+
+```yaml
+Model:
+  ModelId: gpt-4o
+  ApiKeyEnvVar: OPENAI_API_KEY_1       # primary key (env var)
+  ApiKeyEnvVars:
+    - OPENAI_API_KEY_2                 # rotated to on 429
+    - OPENAI_API_KEY_3
+
+# Or mix literal keys:
+Model:
+  ModelId: claude-sonnet-4-6
+  ApiKeyEnvVar: ANTHROPIC_API_KEY
+  ApiKeys:
+    - sk-ant-...second-key...
+    - sk-ant-...third-key...
+```
+
+Keys can also be sourced entirely from env vars:
+
+```yaml
+Model:
+  ModelId: gpt-4o
+  ApiKeyEnvVars:
+    - OPENAI_KEY_TEAM_1
+    - OPENAI_KEY_TEAM_2
+    - OPENAI_KEY_TEAM_3
+```
+
+### Named alias with a pool
+
+```yaml
+Models:
+  gpt4-pool:
+    ModelId: gpt-4o
+    ApiKeyEnvVar: OPENAI_API_KEY_1
+    ApiKeyEnvVars:
+      - OPENAI_API_KEY_2
+      - OPENAI_API_KEY_3
+
+Agents:
+  - Name: Developer
+    Model: gpt4-pool
+```
+
+All agents that reference the same alias share the same `KeyPoolChatClient` instance, so rotation state is shared across agents. Cooldowns from one agent's 429 apply to all agents using that pool for the duration of the cooldown window.
 
 ---
 

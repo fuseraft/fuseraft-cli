@@ -162,13 +162,15 @@ public sealed class ChatClientFactory(
     /// <summary>
     /// Builds an <see cref="IChatClient"/> from the supplied model config.
     /// Any empty fields are resolved first via <see cref="Resolve"/>.
+    /// When multiple API keys are configured (via <c>ApiKeys</c> / <c>ApiKeyEnvVars</c>),
+    /// returns a <see cref="KeyPoolChatClient"/> that rotates keys on 429.
     /// </summary>
     public IChatClient Create(ModelConfig config)
     {
         config = Resolve(config);
 
-        // API key — optional for Ollama. Literal ApiKey takes precedence over env-var lookup.
-        var apiKey = !string.IsNullOrEmpty(config.ApiKey)
+        // Primary API key — optional for Ollama. Literal ApiKey takes precedence over env-var lookup.
+        var primaryKey = !string.IsNullOrEmpty(config.ApiKey)
             ? config.ApiKey
             : string.IsNullOrEmpty(config.ApiKeyEnvVar)
                 ? string.Empty
@@ -177,6 +179,42 @@ public sealed class ChatClientFactory(
                       $"API key environment variable '{config.ApiKeyEnvVar}' is not set " +
                       $"(model: '{config.ModelId}', provider: '{config.Provider}').");
 
+        // Build a key pool when multiple keys are configured
+        var pool = BuildPool(config, primaryKey);
+        if (pool is not null) return pool;
+
+        return CreateCore(config, primaryKey);
+    }
+
+    // Collects all unique API keys from the config (primary + ApiKeys list + ApiKeyEnvVars list).
+    // Returns a KeyPoolChatClient when >1 distinct key is available; null otherwise.
+    private KeyPoolChatClient? BuildPool(ModelConfig config, string primaryKey)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var keys = new List<string>();
+
+        void Add(string? k)
+        {
+            if (!string.IsNullOrWhiteSpace(k) && seen.Add(k!))
+                keys.Add(k!);
+        }
+
+        Add(primaryKey);
+        if (config.ApiKeys is not null)
+            foreach (var k in config.ApiKeys) Add(k);
+        if (config.ApiKeyEnvVars is not null)
+            foreach (var varName in config.ApiKeyEnvVars)
+                Add(Environment.GetEnvironmentVariable(varName));
+
+        if (keys.Count <= 1) return null;
+
+        var slots = keys.Select(k => CreateCore(config, k)).ToArray();
+        return new KeyPoolChatClient(slots);
+    }
+
+    // Builds a single IChatClient for a resolved config + explicit apiKey string.
+    private IChatClient CreateCore(ModelConfig config, string apiKey)
+    {
         var provider = config.Provider.Trim().ToLowerInvariant();
         var transport = new HttpClientPipelineTransport(_httpClient);
 

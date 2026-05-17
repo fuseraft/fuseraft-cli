@@ -841,3 +841,207 @@ fuseraft context remove specs --dir ~/projects/my-app
 ```
 
 When the last item is removed the `index.json` file is also deleted, leaving the context directory clean.
+
+---
+
+## `fuseraft schedule`
+
+Create, list, remove, and run scheduled fuseraft sessions using cron expressions. Jobs are stored as YAML files in `~/.fuseraft/schedule/`. No daemon is required — `fuseraft schedule run` is designed to be called by `cron`, `systemd.timer`, or any periodic scheduler.
+
+### `fuseraft schedule add`
+
+Create a new scheduled job.
+
+```
+fuseraft schedule add <name> --cron <expr> --task <description> [options]
+```
+
+**Arguments**
+
+| Argument | Description |
+|----------|-------------|
+| `<name>` | Unique job name, used as the YAML filename slug (e.g. `nightly-audit` → `~/.fuseraft/schedule/nightly-audit.yaml`). |
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--cron <expr>` | — | **Required.** Standard 5-field cron expression (minute hour day month weekday). Example: `"0 2 * * *"` for 2 AM UTC daily. |
+| `-t, --task <text>` | — | **Required.** Task description passed to `fuseraft run` as the session goal. |
+| `-c, --config <path>` | `config/orchestration.yaml` | Path to the orchestration config YAML used for this job. |
+| `--work-dir <path>` | — | Working directory passed to `fuseraft run --work-dir`. |
+| `-o, --output <path>` | — | Output transcript path template. Supports `{name}`, `{date}` (`yyyy-MM-dd`), and `{time}` (`HHmm`) substitutions. `~` is expanded. Example: `~/.fuseraft/logs/{name}-{date}.txt`. |
+| `-d, --description <text>` | — | Human-readable description shown in `fuseraft schedule list`. |
+
+**Examples**
+
+```bash
+# Run a security audit every night at 2 AM UTC
+fuseraft schedule add nightly-audit \
+  --cron "0 2 * * *" \
+  --task "Run a security audit of the codebase and report findings" \
+  --config config/security-team.yaml \
+  --output "~/.fuseraft/logs/nightly-audit-{date}.txt"
+
+# Generate a weekly status report every Monday at 9 AM UTC
+fuseraft schedule add weekly-report \
+  --cron "0 9 * * 1" \
+  --task "Generate a weekly status report" \
+  --config config/report.yaml \
+  --description "Weekly stakeholder report"
+
+# Run in a specific working directory
+fuseraft schedule add dependency-check \
+  --cron "0 6 * * *" \
+  --task "Check for outdated dependencies and open a PR if any are found" \
+  --work-dir ~/projects/my-app
+```
+
+The job file is written to `~/.fuseraft/schedule/{slug}.yaml`. The next scheduled run time is computed and saved immediately.
+
+---
+
+### `fuseraft schedule list`
+
+List all scheduled jobs.
+
+```
+fuseraft schedule list
+```
+
+Displays a table with name, cron expression, next run time (UTC), last run time, and enabled status. Jobs that are currently due are highlighted in yellow with a `(due)` indicator.
+
+**Examples**
+
+```bash
+fuseraft schedule list
+```
+
+```
+╭──────────────────┬─────────────┬──────────────────────┬──────────────────────┬─────────╮
+│ Name             │ Cron        │ Next Run (UTC)        │ Last Run (UTC)       │ Enabled │
+├──────────────────┼─────────────┼──────────────────────┼──────────────────────┼─────────┤
+│ nightly-audit    │ 0 2 * * *   │ 2026-05-18 02:00      │ 2026-05-17 02:00     │ yes     │
+│ weekly-report    │ 0 9 * * 1   │ 2026-05-18 09:00      │ never                │ yes     │
+╰──────────────────┴─────────────┴──────────────────────┴──────────────────────┴─────────╯
+```
+
+---
+
+### `fuseraft schedule remove`
+
+Remove a scheduled job.
+
+```
+fuseraft schedule remove <name>
+```
+
+**Arguments**
+
+| Argument | Description |
+|----------|-------------|
+| `<name>` | Name of the job to remove. |
+
+Deletes the YAML file and any associated `.lock` file.
+
+**Examples**
+
+```bash
+fuseraft schedule remove nightly-audit
+```
+
+---
+
+### `fuseraft schedule run`
+
+Execute all due jobs, or force-run a specific job by name.
+
+```
+fuseraft schedule run [options]
+```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-n, --name <name>` | — | Force-run a specific job, ignoring its schedule and enabled status. Omit to tick all due jobs. |
+| `--dry-run` | off | Show which jobs would execute without actually running them. |
+
+**How it works**
+
+For each due job (or the named job when `-n` is used):
+
+1. A `.lock` file (`{slug}.lock`) is created to prevent concurrent execution. If the lock already exists, the job is skipped with a warning.
+2. The session is launched via `fuseraft run <task> --no-banner [--config …] [--work-dir …]`, capturing output to the configured `OutputPath` (or stdout if none is set).
+3. After the run completes, `last_run` is set to the current UTC time and `next_run` is computed from the cron expression. The job YAML is updated atomically.
+4. The lock file is removed.
+
+**Examples**
+
+```bash
+# Tick all due jobs (designed to be called by cron every minute)
+fuseraft schedule run
+
+# Preview what would run without executing anything
+fuseraft schedule run --dry-run
+
+# Force-run a specific job now, regardless of schedule
+fuseraft schedule run --name nightly-audit
+```
+
+**Setting up system cron**
+
+Add a crontab entry that calls `fuseraft schedule run` every minute:
+
+```
+# m h dom mon dow command
+* * * * * /usr/local/bin/fuseraft schedule run --no-banner >> ~/.fuseraft/logs/schedule.log 2>&1
+```
+
+Or use `systemd.timer` for finer control:
+
+```ini
+# ~/.config/systemd/user/fuseraft-schedule.service
+[Unit]
+Description=fuseraft scheduled session runner
+
+[Service]
+ExecStart=/usr/local/bin/fuseraft schedule run --no-banner
+```
+
+```ini
+# ~/.config/systemd/user/fuseraft-schedule.timer
+[Unit]
+Description=Run fuseraft schedule every minute
+
+[Timer]
+OnCalendar=minutely
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+systemctl --user enable --now fuseraft-schedule.timer
+```
+
+**Job YAML format**
+
+Each job is stored as a plain YAML file in `~/.fuseraft/schedule/`:
+
+```yaml
+name: nightly-audit
+description: Nightly security audit
+cron: 0 2 * * *
+task: Run a security audit of the codebase and report findings
+config: config/security-team.yaml
+work_dir: ~/projects/my-app
+output_path: ~/.fuseraft/logs/nightly-audit-{date}.txt
+enabled: true
+created_at: 2026-05-17T10:00:00+00:00
+last_run: 2026-05-17T02:00:00+00:00
+next_run: 2026-05-18T02:00:00+00:00
+```
+
+Jobs can be edited by hand — `fuseraft schedule run` reads the YAML fresh on each tick. Set `enabled: false` to temporarily pause a job without removing it.

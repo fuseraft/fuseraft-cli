@@ -80,4 +80,13 @@ public record CompactionConfig
     /// Default: <c>false</c>.
     /// </summary>
     public bool IncludeSymbolGraph { get; init; } = false;
+
+    /// <summary>
+    /// Optional custom prompt template for LLM-mode compaction. When set, replaces the
+    /// built-in structured summary prompt entirely. Use the same placeholders as the default:
+    /// <c>{{$task}}</c>, <c>{{$turn_count}}</c>, <c>{{$change_log}}</c>, <c>{{$history}}</c>.
+    /// When null or empty, the default four-section template is used:
+    /// <c>## Completed</c>, <c>## Open Questions</c>, <c>## Remaining Work</c>, <c>## Key Findings</c>.
+    /// </summary>
+    public string? SummaryTemplate { get; init; }
 }

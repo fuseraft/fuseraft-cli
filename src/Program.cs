@@ -105,6 +105,10 @@ services.AddTransient<ContextAddCommand>();
 services.AddTransient<ContextListCommand>();
 services.AddTransient<ContextRemoveCommand>();
 services.AddTransient<ReplCommand>();
+services.AddTransient<ScheduleAddCommand>();
+services.AddTransient<ScheduleListCommand>();
+services.AddTransient<ScheduleRemoveCommand>();
+services.AddTransient<ScheduleRunCommand>();
 
 // Use CommandApp<RunCommand> so `fuseraft` with no subcommand defaults to run.
 var registrar = new ServiceCollectionRegistrar(services);
@@ -220,6 +224,30 @@ app.Configure(cfg =>
         branch.AddCommand<ContextRemoveCommand>("remove")
             .WithDescription("Remove a context item and delete its copied files.")
             .WithExample(["context", "remove", "db-schema"]);
+    });
+
+    cfg.AddBranch("schedule", branch =>
+    {
+        branch.SetDescription("Create and run scheduled fuseraft sessions via cron expressions.");
+
+        branch.AddCommand<ScheduleAddCommand>("add")
+            .WithDescription("Create a new scheduled job.")
+            .WithExample(["schedule", "add", "nightly-audit", "--cron", "0 2 * * *", "--task", "Run a security audit and report findings"])
+            .WithExample(["schedule", "add", "weekly-report", "--cron", "0 9 * * 1", "--task", "Generate a weekly status report", "--config", "config/report.yaml"]);
+
+        branch.AddCommand<ScheduleListCommand>("list")
+            .WithDescription("List all scheduled jobs.")
+            .WithExample(["schedule", "list"]);
+
+        branch.AddCommand<ScheduleRemoveCommand>("remove")
+            .WithDescription("Remove a scheduled job.")
+            .WithExample(["schedule", "remove", "nightly-audit"]);
+
+        branch.AddCommand<ScheduleRunCommand>("run")
+            .WithDescription("Execute all due jobs, or force-run a specific job by name.")
+            .WithExample(["schedule", "run"])
+            .WithExample(["schedule", "run", "--name", "nightly-audit"])
+            .WithExample(["schedule", "run", "--dry-run"]);
     });
 });
 

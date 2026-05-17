@@ -205,6 +205,64 @@ skills-ref validate .fuseraft/skills/my-skill
 
 ---
 
+## Skill index
+
+fuseraft maintains a SQLite FTS5 full-text index of all skills in the user-scoped library (`~/.fuseraft/skills/`). The index enables fast keyword search across skill names, descriptions, and bodies — the same search used to inject relevant skills at session start.
+
+**Index location:** `~/.fuseraft/skills/index.db` (configurable via `SkillCuration.IndexPath`).
+
+**What is indexed:** the slug (directory name), path, description (from `SKILL.md` frontmatter), and full body text of each skill.
+
+**Search behavior:** FTS5 with the porter ASCII stemmer. Queries are tokenized into individual words ≥ 2 characters with FTS5 special characters stripped, then matched against indexed content. Results are ranked by relevance and include a `snippet()` excerpt.
+
+### Searching the index
+
+The index is searched automatically at session start when `SkillCuration.IndexTopN > 0`. You can also populate or rebuild the index manually:
+
+```bash
+# The index is updated automatically after each curated skill is written.
+# To force a rebuild (e.g. after manually adding skills to ~/.fuseraft/skills/):
+fuseraft run "task"   # index is rebuilt at next curation run
+```
+
+The skill index is a user-global resource — it spans all projects and sessions, accumulating knowledge over time.
+
+---
+
+## Skill curation
+
+Skill curation is the automated process of turning a completed session into a reusable skill. When `SkillCuration.Enabled: true` is set in the config, fuseraft makes one LLM call at the end of each qualifying session and writes a `SKILL.md` if the session produced learnable, portable knowledge.
+
+**When curation runs:** after the session's main orchestration loop completes (success or validation failure — not on hard crashes), when the session has at least `MinTurns` turns.
+
+**What gets curated:** procedures, workflows, debugging patterns, and problem-solving approaches that generalise beyond the current task. Trivial or highly project-specific sessions typically produce no skill output.
+
+**Output path:** `{LibraryPath}/{slug}/SKILL.md`, where `slug` is the URL-safe version of the `name:` field in the generated frontmatter.
+
+**Example curated skill**
+
+A session that debugged a memory leak in a Go service might produce:
+
+```markdown
+---
+name: go-memory-leak-diagnosis
+description: Diagnose and fix memory leaks in Go services using pprof and escape analysis. Triggers when agents need to investigate growing RSS or heap usage in a Go binary.
+---
+
+# Go memory leak diagnosis
+
+1. Add a `/debug/pprof` handler and hit `/debug/pprof/heap` to capture a heap profile.
+2. Use `go tool pprof -http :6060 <profile>` to inspect allocation sites.
+3. Check for goroutine leaks with `/debug/pprof/goroutine?debug=2`.
+4. Run `go build -gcflags='-m'` to see escape analysis decisions for hot paths.
+```
+
+The curator never overwrites an existing skill — if a skill with the same slug already exists, the session result is discarded without error.
+
+See [Configuration → Skill curation](configuration.md#skill-curation) for the full config reference.
+
+---
+
 ## MAF integration
 
 Skills are provided to agents via MAF's `AgentSkillsProvider`. fuseraft scans all discovery locations at startup and builds a single merged provider:

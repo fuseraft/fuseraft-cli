@@ -148,12 +148,13 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         ChangeTracker? changeTracker;
         EventEmitter? eventEmitter;
         AgentGovernance.GovernanceKernel governanceKernel;
+        SkillCurator? skillCurator;
 
         var approvalService = new ConsoleHumanApprovalService();
 
         try
         {
-            (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel) =
+            (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator) =
                 await OrchestratorBuilder.BuildAsync(configPath, loggerFactory, pluginRegistry, approvalService, settings.HumanInTheLoop);
         }
         catch (Exception ex)
@@ -326,6 +327,12 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             AnsiConsole.MarkupLine("[dim]History compacted before resuming.[/]");
         }
 
+        // Inject relevant skills from the index into fresh sessions (not resumptions).
+        // This tells agents which skills are most applicable to the current task so they
+        // can invoke them without scanning the full library.
+        if (config.SkillCuration?.Enabled == true && checkpoint.Messages.Count == 0)
+            await InjectSkillContextAsync(task, config.SkillCuration, checkpoint, cancellationToken);
+
         // If the checkpoint carries an explicit resume executor hint (written before a prior
         // compaction or crash), push it to the orchestrator so the first StreamAsync starts
         // from the correct agent.  This covers the --resume path as well as in-session restarts.
@@ -376,6 +383,23 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             await activeStore.SaveAsync(checkpoint, CancellationToken.None);
         }
 
+        // Post-session skill curation (best-effort — never fails the run)
+        if (skillCurator is not null && result.Succeeded)
+        {
+            try
+            {
+                var (created, slug, skillPath) = await skillCurator.RunAsync(
+                    checkpoint, result.Messages, CancellationToken.None);
+                if (created && slug is not null)
+                    AnsiConsole.MarkupLine(
+                        $"[green]✓ Skill curated:[/] [bold]{Markup.Escape(slug)}[/]  [dim]{Markup.Escape(skillPath!)}[/]");
+            }
+            catch (Exception ex)
+            {
+                AnsiConsole.MarkupLine($"[dim yellow]Skill curation failed:[/] {Markup.Escape(ex.Message)}");
+            }
+        }
+
         // Summary
         MessageRenderer.RenderSummary(result.Messages, result.Succeeded, result.Elapsed, result.ErrorMessage);
 
@@ -422,6 +446,59 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
     }
 
     // Helpers
+
+    /// <summary>
+    /// Searches the skill index for skills relevant to the current task and prepends
+    /// a context message to the checkpoint so agents know which skills to invoke.
+    /// No-op when the index is empty or the query matches nothing.
+    /// </summary>
+    private static async Task InjectSkillContextAsync(
+        string task,
+        fuseraft.Core.Models.SkillCurationConfig curationConfig,
+        SessionCheckpoint checkpoint,
+        CancellationToken ct)
+    {
+        try
+        {
+            var indexPath = string.IsNullOrWhiteSpace(curationConfig.IndexPath)
+                ? fuseraft.Core.FuseraftPaths.GlobalSkillsIndex
+                : curationConfig.IndexPath;
+
+            if (!File.Exists(indexPath)) return;
+
+            await using var index = new SkillIndex(indexPath);
+            var matches = await index.SearchAsync(task, curationConfig.IndexTopN, ct);
+            if (matches.Count == 0) return;
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("SKILLS RELEVANT TO THIS TASK:");
+            sb.AppendLine();
+            for (var i = 0; i < matches.Count; i++)
+            {
+                var m = matches[i];
+                sb.Append($"{i + 1}. **{m.Slug}**");
+                if (!string.IsNullOrWhiteSpace(m.Description))
+                    sb.Append($" — {m.Description}");
+                sb.AppendLine();
+                if (!string.IsNullOrWhiteSpace(m.Excerpt))
+                    sb.AppendLine($"   _{m.Excerpt}_");
+            }
+            sb.AppendLine();
+            sb.AppendLine("Invoke a skill with the load_skill tool using its slug name.");
+
+            checkpoint.Messages.Add(new AgentMessage
+            {
+                AgentName = "System",
+                Content   = sb.ToString().TrimEnd(),
+                Role      = "user",
+                TurnIndex = 0,
+            });
+        }
+        catch (Exception)
+        {
+            // Index lookup is best-effort — never fail the run
+        }
+    }
 
     /// <summary>
     /// Builds the active session store for a run command.

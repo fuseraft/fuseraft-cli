@@ -55,6 +55,7 @@ YAML is often more readable for configs with long agent instructions (block scal
 | `ApiProfiles` | object | `{}` | Named API endpoint profiles (base URL, auth headers, timeout) for the `Http` plugin. See [ApiProfiles](#apiprofiles). |
 | `Saga` | object | — | Compensating rollback settings. When `Enabled: true`, wraps execution with `SagaOrchestrator` for automatic compensation on failure. |
 | `EvidenceStore` | object | — | Structured evidence graph alongside `changes.json`. Required for evidence contracts and lossless compaction. See [Evidence store](#evidence-store). |
+| `SkillCuration` | object | — | Automatically author a reusable skill from each completed session. See [Skill curation](#skill-curation). |
 | `Contracts` | array | — | Named evidence contracts reusable across routes and state machine transitions. See [Evidence contracts](#evidence-contracts). |
 | `FailureHandling` | object | — | Per-failure-type policies (action + threshold) applied when routing validators or contracts block a handoff. See [Failure handling](#failure-handling). |
 | `Verifier` | object | — | Self-verification meta-agent that audits the evidence graph for inconsistencies. See [Verifier](#verifier). |
@@ -624,6 +625,7 @@ Compaction:
 | `TokenBudget` | int | `80000` | Estimated token budget for `window` mode. Oldest message pairs are dropped until the total estimated token count (characters ÷ 4) falls within this limit. Ignored by all other modes. |
 | `IncludeReasoning` | bool | `false` | When `true`, reasoning excerpts from the compacted turns are prepended to the summary as a `[REASONING EXCERPTS]` block. Each excerpt is truncated to ~500 tokens so agents resuming after compaction can see the WHY behind prior decisions. Reads `reasoning` events from the session events log (`Events.Path`). Has no effect when `Events` is not configured. |
 | `IncludeSymbolGraph` | bool | `false` | When `true`, a `[SYMBOL DEPENDENCY GRAPH]` block is prepended to the summary (before `[REASONING EXCERPTS]` when both are enabled). The block lists every `SymbolDefinition` and `SymbolReference` node in the evidence graph for files written during the session, giving agents an explicit map of what symbols were in scope. Requires `EvidenceStore` and `ChangeTracking` to be configured. |
+| `SummaryTemplate` | string | built-in | Custom Liquid-style template for the LLM summary prompt. Supports `{{$task}}`, `{{$turn_count}}`, `{{$change_log}}`, and `{{$history}}` substitutions. When omitted, the built-in structured template is used — see [Compaction summary template](#compaction-summary-template). |
 
 **Compaction modes**
 
@@ -640,6 +642,94 @@ Compaction:
 `intent` mode requires `ChangeTracking` to be configured. It reads from the intent log which records every tracked tool call before and after execution. Unlike `lossless`, it works with any selection strategy, not just state machines.
 
 When `ChangeTracking` or `Validation.ChangeLogPath` is also configured, the `llm` and `hybrid` compactors automatically read `changes.json` and include it in the summary prompt as authoritative ground truth. See [Sessions](sessions.md) for full detail.
+
+### Compaction summary template
+
+The default summary prompt instructs the LLM to produce four sections that agents can reliably parse after a compaction boundary:
+
+| Section | Content |
+|---------|---------|
+| `## Completed` | Exact file paths written, shell commands with exit codes, git commits — ground truth derived from the change log. |
+| `## Open Questions` | Unresolved ambiguities the agent should address next. `"None."` when none exist. |
+| `## Remaining Work` | In-progress and not-yet-started items from the original task. `"None."` when the task is done. |
+| `## Key Findings` | Discoveries, constraints, and workarounds surfaced during the session. `"None."` when none exist. |
+
+This structure ensures agents always recover open threads and pending work after a compaction boundary — a common failure mode with free-form summary prompts.
+
+To override with a custom prompt:
+
+```yaml
+Compaction:
+  TriggerTurnCount: 30
+  KeepRecentTurns: 8
+  SummaryTemplate: |
+    Summarize the following {{$turn_count}} turns for task: {{$task}}
+
+    Change log:
+    {{$change_log}}
+
+    History:
+    {{$history}}
+
+    Produce: a short narrative paragraph followed by a bullet list of open items.
+```
+
+The substitution tokens are:
+
+| Token | Replaced with |
+|-------|---------------|
+| `{{$task}}` | The session task description |
+| `{{$turn_count}}` | Number of turns being compacted |
+| `{{$change_log}}` | Contents of `changes.json` (if `ChangeTracking` is configured), otherwise empty |
+| `{{$history}}` | Formatted conversation history being compacted |
+
+---
+
+## Skill curation
+
+Automatically authors a reusable `SKILL.md` from each completed session. When enabled, fuseraft makes one LLM call after the session ends to evaluate whether the session produced learnable, portable knowledge, and writes a skill to the configured library path if it did.
+
+```yaml
+SkillCuration:
+  Enabled: true
+  LibraryPath: ~/.fuseraft/skills    # default
+  IndexTopN: 5
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `Enabled` | bool | `false` | Enable post-session skill curation. |
+| `LibraryPath` | string | `~/.fuseraft/skills` | Directory where curated skills are written. Each skill gets its own `{slug}/SKILL.md` subdirectory. |
+| `Model` | string or object | first agent's model | Model used for the curation LLM call. A faster, cheaper model is recommended (e.g. `gpt-4o-mini`). |
+| `MinTurns` | int | `5` | Minimum number of session turns required before curation runs. Short sessions are skipped. |
+| `DigestTurns` | int | `30` | Maximum number of recent turns included in the curation prompt. Limits token cost for very long sessions. |
+| `IndexPath` | string | `~/.fuseraft/skills/index.db` | Path to the SQLite FTS5 skill index. Updated automatically after each new skill is written. |
+| `IndexTopN` | int | `5` | Number of skills injected into the session context at startup (retrieved by full-text search against the task description). `0` disables injection. |
+
+**How curation works**
+
+1. After the session completes, the curator reads the last `DigestTurns` turns and the session evidence.
+2. It makes one LLM call with a system prompt that instructs the model to output a `<SKILL>…</SKILL>` block in SKILL.md format, or nothing if no portable skill is warranted.
+3. If a skill block is detected, the `name:` field from the frontmatter is converted to a slug and the file is written to `{LibraryPath}/{slug}/SKILL.md`.
+4. The SQLite FTS5 skill index at `IndexPath` is updated automatically.
+5. At the start of the **next** session, fuseraft searches the index with keywords from the task description and injects the top-N matching skills as a context message.
+
+Curation is best-effort: any failure (LLM error, write failure, index error) is logged and swallowed without affecting the session result.
+
+**Skill injection at session start**
+
+When `IndexTopN > 0` and the index contains skills, fuseraft searches for skills relevant to the current task before the first agent turn. Matching skill bodies are injected as a system context message:
+
+```
+## Relevant Skills
+
+### my-skill
+…SKILL.md body…
+```
+
+This makes accumulated cross-session knowledge available to agents without requiring them to call any skill tools themselves.
+
+See [Skills](skills.md) for the full `SKILL.md` format reference and the skill index details.
 
 ---
 
