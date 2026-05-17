@@ -711,7 +711,8 @@ public static class OrchestratorBuilder
         }
         else
         {
-            orchestrator = new AgentOrchestrator(config, agentFactory, strategyFactory, aoLogger, changeTracker, eventEmitter, governanceKernel);
+            var memoryManager = MemoryManager.FromConfig(config.Memory);
+            orchestrator = new AgentOrchestrator(config, agentFactory, strategyFactory, aoLogger, changeTracker, eventEmitter, governanceKernel, memoryManager);
         }
 
         // Wrap with SagaOrchestrator when the saga pattern is enabled.
