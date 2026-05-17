@@ -346,6 +346,64 @@ When the session ends, the model is asked to extract new memories from the conve
 
 ---
 
+## Pluggable memory provider
+
+The `Memory` top-level key activates a live memory provider that runs pre- and post-turn hooks around every agent turn. Unlike the static `EnableMemory` flag (which loads once at session start), the pluggable provider fetches fresh context before each turn and can persist the full accumulated history after each turn.
+
+### Providers
+
+#### `local` (default)
+
+Reads from the file-backed per-agent `MemoryStore` at `~/.fuseraft/memory/agents/{Name}/` before every turn. Save is a no-op — the REPL's memory extractor handles writing new facts in interactive sessions.
+
+```yaml
+Memory:
+  Provider: local
+```
+
+#### `webhook`
+
+Delegates load and save to an HTTP endpoint you control. Useful for integrating external vector stores, knowledge graphs, or managed memory services.
+
+```yaml
+Memory:
+  Provider: webhook
+  Webhook:
+    LoadUrl: https://memory.example.com/load
+    SaveUrl: https://memory.example.com/save
+    Headers:
+      Authorization: "Bearer ${MEMORY_TOKEN}"
+    TimeoutSeconds: 10
+    SaveEveryNTurns: 10
+```
+
+**Load request** — POST `{"agent": "<name>"}`, expected response `{"block": "<text>"}`. When `block` is null or empty, nothing is prepended.
+
+**Save request** — POST `{"agent": "<name>", "history": [{"role": "...", "content": "..."}]}`. Fire-and-forget; errors are logged but do not interrupt the session.
+
+`SaveEveryNTurns` throttles save calls (default 10) to avoid flooding the endpoint on long sessions.
+
+### WebhookMemoryConfig fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `LoadUrl` | string | — | URL for the pre-turn load POST. Omit to skip loading. |
+| `SaveUrl` | string | — | URL for the post-turn save POST. Omit to skip saving. |
+| `Headers` | object | `{}` | HTTP headers merged into every request. Values support `${ENV_VAR}` expansion. |
+| `TimeoutSeconds` | int | `10` | Per-request HTTP timeout. |
+| `SaveEveryNTurns` | int | `10` | Save only every Nth turn; 1 = every turn. |
+
+### Relationship to `EnableMemory`
+
+`EnableMemory: true` on an agent and a top-level `Memory:` provider are independent:
+
+- `EnableMemory` loads memories once at agent creation time (synchronous, from disk).
+- `Memory:` loads fresh context before each turn via the provider (async, per-turn).
+
+Both can be active simultaneously. The injected blocks are additive — the `EnableMemory` block is baked into the agent's static instructions; the `Memory:` block is prepended at turn time.
+
+---
+
 ## Selection strategy
 
 ```yaml

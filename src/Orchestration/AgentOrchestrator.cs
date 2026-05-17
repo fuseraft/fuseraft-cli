@@ -26,7 +26,8 @@ public sealed class AgentOrchestrator(
     ILogger<AgentOrchestrator> logger,
     ChangeTracker? changeTracker = null,
     EventEmitter? eventEmitter = null,
-    GovernanceKernel? governanceKernel = null) : IOrchestrator
+    GovernanceKernel? governanceKernel = null,
+    fuseraft.Infrastructure.MemoryManager? memoryManager = null) : IOrchestrator
 {
     // IOrchestrator
 
@@ -296,6 +297,10 @@ public sealed class AgentOrchestrator(
             // Prepend this agent's system instruction so the LLM knows its role and routing keywords.
             bool hasInstructions = agentInstructions.TryGetValue(agent.Name ?? "", out var instructions);
 
+            // Augment system instructions with the memory block for this agent (if any).
+            if (memoryManager is not null)
+                instructions = await memoryManager.AugmentInstructionsAsync(agent.Name ?? "", instructions, cancellationToken);
+
             // Apply the agent's ContextWindow filter before building the context slice.
             // This lets downstream agents (e.g. Reviewer) strip tool-call noise accumulated
             // by earlier agents, dramatically reducing input-token count without changing the
@@ -303,7 +308,7 @@ public sealed class AgentOrchestrator(
             var agentCfg = agentConfigs.GetValueOrDefault(agent.Name ?? "");
             var filtered = ContextWindowFilter.Apply(history, agentCfg?.ContextWindow);
 
-            IEnumerable<ChatMessage> context = hasInstructions
+            IEnumerable<ChatMessage> context = (hasInstructions || memoryManager is not null) && instructions is not null
                 ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
                 : filtered;
 
@@ -418,6 +423,10 @@ public sealed class AgentOrchestrator(
                 }
             }
 
+            // Offer the accumulated history to the memory provider for persistence.
+            if (memoryManager is not null)
+                await memoryManager.PostTurnAsync(agentMessage.AgentName, [..history], cancellationToken);
+
             // Periodic verifier: run the meta-agent every N turns to audit evidence.
             // Skipped when the verifier itself just ran to prevent self-loops.
             if (config.Verifier is { EveryNTurns: > 0 } verCfg
@@ -433,7 +442,9 @@ public sealed class AgentOrchestrator(
                 var vAgentCfg = agentConfigs.GetValueOrDefault(verifierAgent.Name ?? "");
                 var vFiltered = ContextWindowFilter.Apply(history, vAgentCfg?.ContextWindow);
                 bool vHasInstr = agentInstructions.TryGetValue(verifierAgent.Name ?? "", out var vInstr);
-                IEnumerable<ChatMessage> vContext = vHasInstr
+                if (memoryManager is not null)
+                    vInstr = await memoryManager.AugmentInstructionsAsync(verifierAgent.Name ?? "", vInstr, cancellationToken);
+                IEnumerable<ChatMessage> vContext = (vHasInstr || memoryManager is not null) && vInstr is not null
                     ? [new ChatMessage(ChatRole.System, vInstr), .. vFiltered]
                     : vFiltered;
 
