@@ -196,13 +196,13 @@ internal static partial class InitTemplates
                       Agent: Approved
                       Terminal: true
 
-                  # ── Key pattern: Reviewer routes to TWO different back-edge targets ──────
+                  # Key pattern: Reviewer routes to TWO different back-edge targets
                   # "REVISION REQUIRED" → developer  (fix is targeted; recon/planning stay valid)
                   # "REPLAN REQUIRED"   → planner    (approach is wrong; needs a new brief)
                   # This cannot be expressed in a state machine without duplicating states or
                   # adding a routing guard — in graph it is simply two labelled edges.
                   Edges:
-                    # ── Forward edges ──────────────────────────────────────────────────
+                    # Forward edges
                     - From: recon
                       To: planner
                       Keyword: "RECON COMPLETE"
@@ -223,7 +223,7 @@ internal static partial class InitTemplates
                       Keyword: "APPROVED"
                       Validators: [RequireReviewJudgement] # blocks until a review JSON block exists
 
-                    # ── Back-edges ──────────────────────────────────────────────────────
+                    # Back-edges
                     - From: reviewer
                       To: developer
                       Keyword: "REVISION REQUIRED"         # targeted fix → restart from developer

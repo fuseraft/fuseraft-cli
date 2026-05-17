@@ -238,6 +238,13 @@ public record OrchestrationConfig
     /// profile or their own instructions.
     /// </summary>
     public TestSelectorConfig? TestSelector { get; init; }
+
+    /// <summary>
+    /// Optional post-session skill curation. When enabled, a curator reviews each
+    /// successful session and writes reusable procedural knowledge to the skills library
+    /// as SKILL.md files. Null (default) disables curation.
+    /// </summary>
+    public SkillCurationConfig? SkillCuration { get; init; }
 }
 
 /// <summary>

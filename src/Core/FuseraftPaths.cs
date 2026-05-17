@@ -5,7 +5,7 @@ namespace fuseraft.Core;
 /// </summary>
 public static class FuseraftPaths
 {
-    // ── Global (~/.fuseraft/) ─────────────────────────────────────────────────
+    // Global (~/.fuseraft/)
     private static string Home => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
     public static string GlobalRoot       => Path.Combine(Home, ".fuseraft");
@@ -14,10 +14,13 @@ public static class FuseraftPaths
     public static string GlobalSessions   => Path.Combine(GlobalRoot, "sessions");
     public static string GlobalCrashDumps => Path.Combine(GlobalRoot, "crashdump");
     public static string GlobalScratchpad => Path.Combine(GlobalRoot, "scratchpad");
+    public static string GlobalSkills      => Path.Combine(GlobalRoot, "skills");
+    public static string GlobalSkillsIndex => Path.Combine(GlobalRoot, "skills", "index.db");
+    public static string GlobalSchedule    => Path.Combine(GlobalRoot, "schedule");
     public static string GlobalMemoryRepl => Path.Combine(GlobalRoot, "memory", "repl");
     public static string GlobalMemoryAgent(string name) => Path.Combine(GlobalRoot, "memory", "agents", name);
 
-    // ── Local (.fuseraft/ relative to CWD) ───────────────────────────────────
+    // Local (.fuseraft/ relative to CWD)
     public const string LocalRoot = ".fuseraft";
 
     // logs/ — append-only diagnostic and observability files

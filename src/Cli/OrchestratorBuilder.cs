@@ -52,7 +52,7 @@ public static class OrchestratorBuilder
     /// and returns a configured orchestrator together with the active session manager.
     /// The caller is responsible for disposing <paramref name="mcpManager"/> (via <c>await using</c>).
     /// </summary>
-    public static async Task<(IOrchestrator Orchestrator, OrchestrationConfig Config, McpSessionManager McpManager, ConversationCompactor? Compactor, ChangeTracker? ChangeTracker, EventEmitter? EventEmitter, GovernanceKernel GovernanceKernel)> BuildAsync(
+    public static async Task<(IOrchestrator Orchestrator, OrchestrationConfig Config, McpSessionManager McpManager, ConversationCompactor? Compactor, ChangeTracker? ChangeTracker, EventEmitter? EventEmitter, GovernanceKernel GovernanceKernel, SkillCurator? SkillCurator)> BuildAsync(
         string configPath,
         ILoggerFactory loggerFactory,
         PluginRegistry pluginRegistry,
@@ -516,6 +516,20 @@ public static class OrchestratorBuilder
                 resumptionNote, changeLogPath, intentLog, config.Events?.Path, evidenceStore);
         }
 
+        // Build the post-session skill curator when curation is enabled.
+        SkillCurator? skillCurator = null;
+        if (config.SkillCuration?.Enabled == true)
+        {
+            var curatorModelCfg = config.SkillCuration.Model is { Length: > 0 } m
+                ? chatClientFactory.Resolve(new ModelConfig { ModelId = m })
+                : config.Agents[0].Model;
+            skillCurator = new SkillCurator(
+                chatClientFactory.Create(curatorModelCfg),
+                config.SkillCuration,
+                evidenceStore,
+                loggerFactory.CreateLogger<SkillCurator>());
+        }
+
         // Validate context budget config.
         if (config.ContextBudget is { CutoverAt: > 0 } cb)
         {
@@ -706,7 +720,7 @@ public static class OrchestratorBuilder
         if (config.Saga?.Enabled == true)
             orchestrator = new SagaOrchestrator(orchestrator, config.Saga, compensators: null, eventEmitter);
 
-        return (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel);
+        return (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator);
     }
 
     /// <summary>

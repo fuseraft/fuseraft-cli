@@ -697,7 +697,7 @@ public sealed class GraphOrchestrator(
             // responseText is used by both the terminal validator path and keyword detection.
             var responseText = response.Text ?? string.Empty;
 
-            // ── Terminal node: validate then end the session. ─────────────────
+            // Terminal node: validate then end the session.
             if (isTerminal)
             {
                 if (routeTable.TerminalValidators.Count > 0)
@@ -748,7 +748,7 @@ public sealed class GraphOrchestrator(
                 return;
             }
 
-            // ── Unconditional-only node: skip keyword detection entirely ─────
+            // Unconditional-only node: skip keyword detection entirely
             // When the node has no keyword-based edges at all, route automatically
             // without requiring the agent to emit any handoff keyword.
             bool hasKeywordRoutes = routeTable.Routes.Count > 0 || routeTable.PhaseBreakKeywords.Count > 0;
@@ -856,7 +856,7 @@ public sealed class GraphOrchestrator(
                     nodeId, agentName);
             }
 
-            // ── Keyword detection ────────────────────────────────────────────
+            // Keyword detection
 
             var handoffArgKeyword = KeywordDetector.ExtractHandoffToolCallKeyword(response.Messages, routeTable);
             var allKeywords       = handoffArgKeyword is not null
@@ -895,7 +895,7 @@ public sealed class GraphOrchestrator(
                     turn:    agentMsg.TurnIndex,
                     payload: new { keyword = foundKeyword });
 
-            // ── Back-edge keyword (phase-break): validate then yield to restart outer loop. ─
+            // Back-edge keyword (phase-break): validate then yield to restart outer loop.
 
             if (foundKeyword is not null && routeTable.PhaseBreakKeywords.Contains(foundKeyword))
             {
@@ -988,7 +988,7 @@ public sealed class GraphOrchestrator(
                 return;
             }
 
-            // ── Parallel fan-out keyword ─────────────────────────────────────────
+            // Parallel fan-out keyword
 
             var pgKey = $"{nodeId}::{foundKeyword}";
             if (foundKeyword is not null && _parallelGroups.TryGetValue(pgKey, out var parallelGroup))
@@ -1087,7 +1087,7 @@ public sealed class GraphOrchestrator(
                 return;
             }
 
-            // ── Forward-edge keyword: validate and route. ─────────────────────
+            // Forward-edge keyword: validate and route.
 
             if (foundKeyword is not null && routeTable.Routes.TryGetValue(foundKeyword, out var route))
             {
@@ -1183,7 +1183,7 @@ public sealed class GraphOrchestrator(
                 continue;
             }
 
-            // ── No keyword matched. ───────────────────────────────────────────
+            // No keyword matched.
 
             consecutiveFails++;
 

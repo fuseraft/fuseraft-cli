@@ -178,7 +178,7 @@ internal static partial class InitTemplates
                   # current MAF phase. Back-edges (lower layer) yield and restart the phase
                   # loop from the target node, enabling cycles without a DAG violation.
                   Edges:
-                    # ── Forward edges ──────────────────────────────────────────────
+                    # Forward edges
                     - From: planner
                       To: developer
                       Keyword: "HANDOFF TO DEVELOPER"
@@ -199,7 +199,7 @@ internal static partial class InitTemplates
                       Keyword: "APPROVED"
                       Validators: [RequireReviewJudgement]  # gate on edge; terminal node runs clean
 
-                    # ── Back-edges (cycles) ─────────────────────────────────────────
+                    # Back-edges (cycles)
                     - From: tester
                       To: developer
                       Keyword: "BUGS FOUND"           # test failures → back to developer

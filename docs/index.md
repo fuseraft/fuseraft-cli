@@ -14,6 +14,9 @@ fuseraft-cli is actively maintained and in production use. New features ship reg
 - Sandboxes agent file and shell access to a configured directory tree
 - Applies per-agent execution rings, prompt injection detection, and a hash-chain audit log via the Agent Governance Toolkit
 - Supports mixing any combination of LLM providers per agent
+- Auto-curates reusable skills from completed sessions and injects relevant ones at session start via a SQLite FTS5 index
+- Schedules recurring sessions via cron expressions (`fuseraft schedule add/list/run`)
+- Rotates API keys automatically on 429 rate-limit responses when a key pool is configured
 
 ## Guides
 
@@ -33,6 +36,7 @@ fuseraft-cli is actively maintained and in production use. New features ship reg
 | [Sessions](sessions.md) | Resumption, HITL, cost tracking, compaction |
 | [Context Management](context-management.md) | How fuseraft manages context across a long session |
 | [Context Store](context-store.md) | Importing reference material for agents |
+| [Skills](skills.md) | Portable skill packages, skill curation, and the cross-session skill index |
 | [Examples](examples.md) | Ready-to-use config examples |
 
 ## VS Code Extension

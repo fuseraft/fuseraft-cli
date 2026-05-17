@@ -59,6 +59,19 @@ public record ModelConfig
     public string ApiKey { get; init; } = string.Empty;
 
     /// <summary>
+    /// Additional literal API keys for round-robin pool rotation.
+    /// When more than one key is available (across <see cref="ApiKey"/>, <see cref="ApiKeyEnvVar"/>,
+    /// <c>ApiKeys</c>, and <c>ApiKeyEnvVars</c>), a 429 on one key automatically rotates to the next.
+    /// </summary>
+    public List<string>? ApiKeys { get; init; }
+
+    /// <summary>
+    /// Additional environment variable names each holding an API key, for pool rotation.
+    /// Resolved at request time; duplicates (same resolved value as other sources) are skipped.
+    /// </summary>
+    public List<string>? ApiKeyEnvVars { get; init; }
+
+    /// <summary>
     /// Maximum tokens to generate per response. 0 = use model default.
     /// </summary>
     public int MaxTokens { get; init; } = 0;
