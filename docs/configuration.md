@@ -1,6 +1,6 @@
 # Configuration Reference
 
-All orchestration settings live in a single config file (default: `config/orchestration.yaml`). Both **YAML** and **JSON** formats are supported. The file must have a top-level `Orchestration` key.
+All orchestration settings live in a single config file (default: `.fuseraft/config/orchestration.yaml`). Both **YAML** and **JSON** formats are supported. The file must have a top-level `Orchestration` key.
 
 **JSON**:
 ```json
@@ -22,8 +22,8 @@ Orchestration:
 Use any file extension and pass the path explicitly:
 
 ```bash
-fuseraft run --config config/my-team.yaml
-fuseraft validate config/my-team.yaml
+fuseraft run --config .fuseraft/config/my-team.yaml
+fuseraft validate .fuseraft/config/my-team.yaml
 ```
 
 YAML is often more readable for configs with long agent instructions (block scalars avoid JSON escape sequences) or complex routing tables. Both formats bind to the same schema — every field documented below works identically in either format. See `config/examples/orchestration.yaml` for a complete YAML example.

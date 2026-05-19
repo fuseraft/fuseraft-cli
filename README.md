@@ -104,13 +104,13 @@ fuseraft init --template graph          # directed-graph pipeline with parallel 
 fuseraft init --template designer       # AI-assisted config designer
 
 # Run a session
-fuseraft run -c config/orchestration.yaml "Build a REST API in Go with JWT authentication"
+fuseraft run -c .fuseraft/config/orchestration.yaml "Build a REST API in Go with JWT authentication"
 
 # Resume the most recent incomplete session
 fuseraft run --resume
 
 # Validate a config — add --diagram for a Mermaid flowchart preview
-fuseraft validate config/orchestration.yaml --diagram
+fuseraft validate .fuseraft/config/orchestration.yaml --diagram
 ```
 
 ---

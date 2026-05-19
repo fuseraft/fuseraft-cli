@@ -91,21 +91,21 @@ The fastest way to get started is `fuseraft init`. It walks you through a short 
 You'll be prompted to pick a team template, confirm a model (auto-detected from your API keys), confirm a provider URL (defaults to the endpoint saved in `~/.fuseraft/config`), and choose an output path. Then:
 
 ```bash
-./bin/fuseraft run -c config/orchestration.yaml "Add a hello-world endpoint to this project"
+./bin/fuseraft run -c .fuseraft/config/orchestration.yaml "Add a hello-world endpoint to this project"
 ```
 
 For non-interactive or CI use:
 
 ```bash
 ./bin/fuseraft init --template minimal --no-interactive
-./bin/fuseraft run -c config/orchestration.yaml "Your task here"
+./bin/fuseraft run -c .fuseraft/config/orchestration.yaml "Your task here"
 ```
 
 ### Option B — copy an example config
 
 ```bash
-cp config/examples/orchestration.yaml config/orchestration.yaml
-./bin/fuseraft run -c config/orchestration.yaml "Add a hello-world endpoint to this project"
+cp config/examples/orchestration.yaml .fuseraft/config/orchestration.yaml
+./bin/fuseraft run -c .fuseraft/config/orchestration.yaml "Add a hello-world endpoint to this project"
 ```
 
 ---
@@ -113,7 +113,7 @@ cp config/examples/orchestration.yaml config/orchestration.yaml
 If no task is given you are prompted interactively:
 
 ```bash
-./bin/fuseraft run -c config/orchestration.yaml
+./bin/fuseraft run -c .fuseraft/config/orchestration.yaml
 ```
 
 The orchestrator loads the config, prints a summary of the team, and streams agent responses as they arrive.
@@ -146,14 +146,14 @@ You are shown a list of incomplete sessions; select one and the run picks up exa
 Before running an unfamiliar config:
 
 ```bash
-./bin/fuseraft validate config/orchestration.yaml
+./bin/fuseraft validate .fuseraft/config/orchestration.yaml
 ```
 
 This checks field types, agent names, strategy references, and plugin names without making any API calls.
 
 ## Next steps
 
-- Edit `config/orchestration.yaml` to change agent instructions, models, or plugins
+- Edit `.fuseraft/config/orchestration.yaml` to change agent instructions, models, or plugins
 - Read [Configuration](configuration.md) for the complete schema reference
 - Read [Plugins](plugins.md) for every tool agents can call
 - Read [Examples](examples.md) for ready-to-use team configs

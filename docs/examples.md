@@ -1015,7 +1015,7 @@ fuseraft run "I need a two-agent pipeline: a Researcher that searches the web an
 
 **Key features:**
 - Asks one focused clarifying question if the use case is ambiguous
-- Writes the config to the path you specify, defaults to `config/orchestration.yaml`
+- Writes the config to the path you specify, defaults to `.fuseraft/config/orchestration.yaml`
 - Runs `fuseraft validate <path>` after every write — you never get a broken config
 - Reads `config/examples/` as style reference when generating unfamiliar patterns
 - Can iterate — ask it to add an agent, change the routing strategy, or tighten termination
@@ -1023,7 +1023,7 @@ fuseraft run "I need a two-agent pipeline: a Researcher that searches the web an
 The static config lives at `config/examples/fuseraft-designer.yaml`. Generate it with:
 
 ```
-fuseraft init --template designer config/my-designer.yaml
+fuseraft init --template designer .fuseraft/config/my-designer.yaml
 ```
 
 Use a strong reasoning model (`claude-sonnet-4-6`, `gpt-4o`, `gemini-2.5-pro`) for best results — the Designer reasons about schema trade-offs, not just field names.

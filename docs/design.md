@@ -555,7 +555,7 @@ Example — a Reviewer that inspects files and git history but cannot write, del
 | Circuit breaker | Wraps `agent.RunAsync` calls; trips after 5 failures, resets after 30s, half-open with 1 probe call |
 | SLO engine | Tracks routing validator compliance rate over a 1-hour rolling window; 95% target; burn-rate alerts at 2× (warning) and 5× (critical) over 600s |
 
-**Policy files:** If `config/policies/default.yaml` exists alongside the config file, it is loaded as a governance policy and applied to all agents in the session.
+**Policy files:** If `policies/default.yaml` exists in the same directory as the config file (e.g. `.fuseraft/config/policies/default.yaml`), it is loaded as a governance policy and applied to all agents in the session.
 
 **Event bridge:** `GovernanceEventType.ToolCallBlocked` events (from sandbox + injection checks) are forwarded to the `EventEmitter` as `tool_blocked` JSONL events. `PolicyViolation` events are emitted directly by `KeywordSelectionStrategy` with richer per-turn context.
 
