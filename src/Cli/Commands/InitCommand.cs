@@ -8,7 +8,7 @@ namespace fuseraft.Cli.Commands;
 public sealed class InitSettings : CommandSettings
 {
     [CommandArgument(0, "[output]")]
-    [Description("Path to write the generated config (default: .fuseraft/orchestration.yaml).")]
+    [Description("Path to write the generated config (default: .fuseraft/config/orchestration.yaml).")]
     public string? OutputPath { get; set; }
 
     [CommandOption("-t|--template")]
@@ -191,7 +191,7 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
 
     private static string ResolveOutputPath(InitSettings settings)
     {
-        var defaultPath = settings.OutputPath ?? ".fuseraft/orchestration.yaml";
+        var defaultPath = settings.OutputPath ?? ".fuseraft/config/orchestration.yaml";
         if (settings.NoInteractive || settings.OutputPath is not null) return defaultPath;
 
         var path = AnsiConsole.Prompt(
