@@ -8,7 +8,7 @@ namespace fuseraft.Cli.Commands;
 public sealed class InitSettings : CommandSettings
 {
     [CommandArgument(0, "[output]")]
-    [Description("Path to write the generated config (default: config/orchestration.yaml).")]
+    [Description("Path to write the generated config (default: .fuseraft/orchestration.yaml).")]
     public string? OutputPath { get; set; }
 
     [CommandOption("-t|--template")]
@@ -111,6 +111,8 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
             await File.WriteAllTextAsync(fullPath, content, cancellationToken);
         }
 
+        await EnsureGitignoreEntryAsync(cancellationToken);
+
         var selected        = Array.Find(Templates, t => t.Key == templateKey)!;
         var endpointDisplay = string.IsNullOrWhiteSpace(endpoint) ? "[dim](default)[/]" : Markup.Escape(endpoint);
         AnsiConsole.MarkupLine($"[green]✓[/] Config written → [bold]{Markup.Escape(output)}[/]");
@@ -189,7 +191,7 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
 
     private static string ResolveOutputPath(InitSettings settings)
     {
-        var defaultPath = settings.OutputPath ?? "config/orchestration.yaml";
+        var defaultPath = settings.OutputPath ?? ".fuseraft/orchestration.yaml";
         if (settings.NoInteractive || settings.OutputPath is not null) return defaultPath;
 
         var path = AnsiConsole.Prompt(
@@ -197,6 +199,19 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
                 .DefaultValue(defaultPath)
                 .AllowEmpty());
         return string.IsNullOrWhiteSpace(path) ? defaultPath : path;
+    }
+
+    private static async Task EnsureGitignoreEntryAsync(CancellationToken cancellationToken)
+    {
+        const string entry = ".fuseraft";
+        var gitignorePath = Path.Combine(Directory.GetCurrentDirectory(), ".gitignore");
+        if (!File.Exists(gitignorePath)) return;
+
+        var lines = await File.ReadAllLinesAsync(gitignorePath, cancellationToken);
+        if (lines.Any(l => l.Trim() == entry)) return;
+
+        await File.AppendAllTextAsync(gitignorePath, $"{Environment.NewLine}{entry}{Environment.NewLine}", cancellationToken);
+        AnsiConsole.MarkupLine($"[green]✓[/] Added [bold]{entry}[/] to .gitignore");
     }
 
     private static string DetectDefaultModel()
