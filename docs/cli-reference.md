@@ -18,7 +18,7 @@ fuseraft run [task] [options]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-c, --config <path>` | `config/orchestration.yaml` | Path to the orchestration config file. YAML (`.yaml` / `.yml`) and JSON (`.json`) are both accepted. |
+| `-c, --config <path>` | `.fuseraft/config/orchestration.yaml` | Path to the orchestration config file. YAML (`.yaml` / `.yml`) and JSON (`.json`) are both accepted. |
 | `-f, --task-file <path>` | — | Read the task from a plain-text file instead of the command line. Useful for long or multi-line tasks. Ignored when resuming. |
 | `-r, --resume [sessionId]` | — | Resume an incomplete session. Omit the ID to choose from a list. |
 | `--hitl` | off | Human-in-the-loop mode. Pauses after every agent turn; you can inject a message, press Enter to continue, or type `q` to quit. |
@@ -543,8 +543,8 @@ fuseraft validate <path> [options]
 After all static checks, makes a 1-token chat request to each unique provider endpoint. Providers are deduplicated by `(endpoint, modelId, apiKey)` so a config with five agents on the same Claude model only hits Anthropic once. Covers all model slots: agent models, LLM/Magentic selection models, and the compaction model.
 
 ```bash
-fuseraft validate config/orchestration.yaml --check-connectivity
-fuseraft validate config/orchestration.yaml -c
+fuseraft validate .fuseraft/config/orchestration.yaml --check-connectivity
+fuseraft validate .fuseraft/config/orchestration.yaml -c
 ```
 
 Sample output:
@@ -563,7 +563,7 @@ Models with no resolvable API key (env var unset and no literal `ApiKey`) are sk
 Prints a Mermaid `flowchart LR` to stdout after the validation result. Each keyword route becomes a labelled edge; validators appear as additional lines in the label. Terminal routes (the self-routing convention, e.g. `APPROVED` from Reviewer → Reviewer) point to a `Done` node rather than looping back.
 
 ```bash
-fuseraft validate config/orchestration.yaml --diagram
+fuseraft validate .fuseraft/config/orchestration.yaml --diagram
 fuseraft validate config/examples/orchestration.yaml --diagram
 ```
 
@@ -606,13 +606,13 @@ fuseraft config [path] [options]
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `[path]` | `config/orchestration.yaml` | Config file to display. |
+| `[path]` | `.fuseraft/config/orchestration.yaml` | Config file to display. |
 
 **Options**
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-l, --list` | off | List all `.json`, `.yaml`, and `.yml` files found under `config/` instead of displaying a single file. |
+| `-l, --list` | off | List all `.json`, `.yaml`, and `.yml` files found under `.fuseraft/config/` instead of displaying a single file. |
 
 **Examples**
 
@@ -641,7 +641,7 @@ fuseraft init [output] [options]
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `[output]` | `config/orchestration.yaml` | Path to write the generated config. |
+| `[output]` | `.fuseraft/config/orchestration.yaml` | Path to write the generated config. |
 
 **Options**
 
@@ -689,7 +689,7 @@ If no key is set, `gpt-4o` is used as the fallback default.
 fuseraft init
 
 # Write to a custom path
-fuseraft init config/my-team.yaml
+fuseraft init .fuseraft/config/my-team.yaml
 
 # Non-interactive with explicit template and model
 fuseraft init --template dev-team --model claude-sonnet-4-6
@@ -701,30 +701,30 @@ fuseraft init --template brownfield --model claude-sonnet-4-6 --endpoint https:/
 
 # Generate a Magentic team config
 fuseraft init --template magentic
-fuseraft init config/magentic-team.yaml --template magentic --model gpt-4o
+fuseraft init .fuseraft/config/magentic-team.yaml --template magentic --model gpt-4o
 
 # Generate an Orchestration Designer — describe your use case, get a validated config back
 fuseraft init --template designer
-fuseraft init config/designer.yaml --template designer --model claude-sonnet-4-6
+fuseraft init .fuseraft/config/designer.yaml --template designer --model claude-sonnet-4-6
 
 # Graph pipeline — explicit directed-graph topology with forward edges and back-edges
 fuseraft init --template graph
-fuseraft init config/graph-team.yaml --template graph --model claude-sonnet-4-6
+fuseraft init .fuseraft/config/graph-team.yaml --template graph --model claude-sonnet-4-6
 
 # Brownfield graph — Archaeologist → Planner → Developer → Reviewer/approved with multi-target back-edges
 fuseraft init --template brownfield-graph
-fuseraft init config/brownfield-graph.yaml --template brownfield-graph --model claude-sonnet-4-6
+fuseraft init .fuseraft/config/brownfield-graph.yaml --template brownfield-graph --model claude-sonnet-4-6
 
 # CI / scripted usage
-fuseraft init config/ci-team.yaml --template dev-team --model gpt-4o --no-interactive
+fuseraft init .fuseraft/config/ci-team.yaml --template dev-team --model gpt-4o --no-interactive
 ```
 
 After generating, `init` prints the next steps:
 
 ```
-Review:   fuseraft config config/orchestration.yaml
-Validate: fuseraft validate config/orchestration.yaml
-Run:      fuseraft run --config config/orchestration.yaml "Your task"
+Review:   fuseraft config .fuseraft/config/orchestration.yaml
+Validate: fuseraft validate .fuseraft/config/orchestration.yaml
+Run:      fuseraft run --config .fuseraft/config/orchestration.yaml "Your task"
 ```
 
 ---
@@ -868,7 +868,7 @@ fuseraft schedule add <name> --cron <expr> --task <description> [options]
 |------|---------|-------------|
 | `--cron <expr>` | — | **Required.** Standard 5-field cron expression (minute hour day month weekday). Example: `"0 2 * * *"` for 2 AM UTC daily. |
 | `-t, --task <text>` | — | **Required.** Task description passed to `fuseraft run` as the session goal. |
-| `-c, --config <path>` | `config/orchestration.yaml` | Path to the orchestration config YAML used for this job. |
+| `-c, --config <path>` | `.fuseraft/config/orchestration.yaml` | Path to the orchestration config YAML used for this job. |
 | `--work-dir <path>` | — | Working directory passed to `fuseraft run --work-dir`. |
 | `-o, --output <path>` | — | Output transcript path template. Supports `{name}`, `{date}` (`yyyy-MM-dd`), and `{time}` (`HHmm`) substitutions. `~` is expanded. Example: `~/.fuseraft/logs/{name}-{date}.txt`. |
 | `-d, --description <text>` | — | Human-readable description shown in `fuseraft schedule list`. |
@@ -880,14 +880,14 @@ fuseraft schedule add <name> --cron <expr> --task <description> [options]
 fuseraft schedule add nightly-audit \
   --cron "0 2 * * *" \
   --task "Run a security audit of the codebase and report findings" \
-  --config config/security-team.yaml \
+  --config .fuseraft/config/security-team.yaml \
   --output "~/.fuseraft/logs/nightly-audit-{date}.txt"
 
 # Generate a weekly status report every Monday at 9 AM UTC
 fuseraft schedule add weekly-report \
   --cron "0 9 * * 1" \
   --task "Generate a weekly status report" \
-  --config config/report.yaml \
+  --config .fuseraft/config/report.yaml \
   --description "Weekly stakeholder report"
 
 # Run in a specific working directory
@@ -1035,7 +1035,7 @@ name: nightly-audit
 description: Nightly security audit
 cron: 0 2 * * *
 task: Run a security audit of the codebase and report findings
-config: config/security-team.yaml
+config: .fuseraft/config/security-team.yaml
 work_dir: ~/projects/my-app
 output_path: ~/.fuseraft/logs/nightly-audit-{date}.txt
 enabled: true

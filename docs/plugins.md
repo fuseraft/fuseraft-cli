@@ -124,7 +124,7 @@ All HTTP functions accept an optional `profile` parameter. When provided, the pl
 - **Timeout** — the profile's `TimeoutSeconds` is used when the caller does not supply an explicit timeout (i.e. when `timeoutSeconds` equals the default of 30).
 
 ```yaml
-# config/orchestration.yaml snippet
+# .fuseraft/config/orchestration.yaml snippet
 ApiProfiles:
   snow:
     BaseUrl: "https://mycompany.service-now.com/api/now"

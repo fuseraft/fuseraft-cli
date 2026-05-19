@@ -203,15 +203,36 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
 
     private static async Task EnsureGitignoreEntryAsync(CancellationToken cancellationToken)
     {
-        const string entry = ".fuseraft";
         var gitignorePath = Path.Combine(Directory.GetCurrentDirectory(), ".gitignore");
         if (!File.Exists(gitignorePath)) return;
 
         var lines = await File.ReadAllLinesAsync(gitignorePath, cancellationToken);
-        if (lines.Any(l => l.Trim() == entry)) return;
 
-        await File.AppendAllTextAsync(gitignorePath, $"{Environment.NewLine}{entry}{Environment.NewLine}", cancellationToken);
-        AnsiConsole.MarkupLine($"[green]✓[/] Added [bold]{entry}[/] to .gitignore");
+        // If the old blanket entry exists, replace it with the selective block.
+        var blanketIndex = Array.FindIndex(lines, l => l.Trim() == ".fuseraft");
+        if (blanketIndex >= 0)
+        {
+            var updated = lines.ToList();
+            updated.RemoveAt(blanketIndex);
+            await File.WriteAllLinesAsync(gitignorePath, updated, cancellationToken);
+            lines = [.. updated];
+        }
+
+        // Already has the selective block — nothing to do.
+        if (lines.Any(l => l.Trim() == ".fuseraft/*")) return;
+
+        const string block = """
+
+            # fuseraft runtime artifacts — config/ and context/ remain tracked
+            .fuseraft/*
+            !.fuseraft/config/
+            !.fuseraft/config/**
+            !.fuseraft/context/
+            !.fuseraft/context/**
+            """;
+
+        await File.AppendAllTextAsync(gitignorePath, block + Environment.NewLine, cancellationToken);
+        AnsiConsole.MarkupLine("[green]✓[/] Updated [bold].gitignore[/] — [dim].fuseraft/config/[/] and [dim].fuseraft/context/[/] will be tracked");
     }
 
     private static string DetectDefaultModel()

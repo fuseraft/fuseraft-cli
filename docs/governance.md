@@ -122,7 +122,7 @@ DIDs are regenerated fresh for each `StreamAsync` call (each session). They are 
 YAML policy files extend or override the default governance rules. When a file exists at `policies/default.yaml` in the same directory as the orchestration config, it is loaded automatically.
 
 ```
-config/
+.fuseraft/config/
   orchestration.yaml
   policies/
     default.yaml
