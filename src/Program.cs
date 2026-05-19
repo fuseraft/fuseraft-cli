@@ -179,13 +179,13 @@ app.Configure(cfg =>
         .WithDescription("Display an orchestration configuration as rich tables.")
         .WithAlias("show-config")
         .WithExample(["config"])
-        .WithExample(["config", "config/examples/devops-team.json"])
+        .WithExample(["config", ".fuseraft/config/examples/devops-team.json"])
         .WithExample(["config", "--list"]);
 
     cfg.AddCommand<ValidateConfigCommand>("validate")
         .WithDescription("Validate a configuration file and report all issues.")
-        .WithExample(["validate", "config/orchestration.yaml"])
-        .WithExample(["validate", "config/my-team.json", "--strict"]);
+        .WithExample(["validate", ".fuseraft/config/orchestration.yaml"])
+        .WithExample(["validate", ".fuseraft/config/my-team.json", "--strict"]);
 
     cfg.AddCommand<SessionsCommand>("sessions")
         .WithDescription("List, inspect, or delete persisted session checkpoints.")
@@ -197,7 +197,7 @@ app.Configure(cfg =>
     cfg.AddCommand<InitCommand>("init")
         .WithDescription("Generate a ready-to-run orchestration config from an interactive wizard.")
         .WithExample(["init"])
-        .WithExample(["init", "config/my-team.json"])
+        .WithExample(["init", ".fuseraft/config/my-team.json"])
         .WithExample(["init", "--template", "dev-team", "--model", "claude-sonnet-4-5"])
         .WithExample(["init", "--template", "minimal", "--no-interactive"]);
 

@@ -89,7 +89,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         // Determine the config path early so we can build the right session store before
         // loading the full config. When resuming, checkpoint.ConfigPath will refine this later.
         // Resolve to absolute immediately so it stays valid after a potential CWD change below.
-        var configPath = Path.GetFullPath(settings.ConfigPath ?? "config/orchestration.yaml");
+        var configPath = Path.GetFullPath(settings.ConfigPath ?? ".fuseraft/config/orchestration.yaml");
 
         // Resolve the effective working directory: --work-dir > config sandbox path > CWD.
         // This must happen before BuildActiveStore so that all subsequent relative-path

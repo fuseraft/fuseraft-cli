@@ -7,11 +7,11 @@ namespace fuseraft.Cli.Commands;
 public sealed class ShowConfigSettings : CommandSettings
 {
     [CommandArgument(0, "[path]")]
-    [Description("Config file to display. Defaults to config/orchestration.yaml.")]
-    public string Path { get; set; } = "config/orchestration.yaml";
+    [Description("Config file to display. Defaults to .fuseraft/config/orchestration.yaml.")]
+    public string Path { get; set; } = ".fuseraft/config/orchestration.yaml";
 
     [CommandOption("-l|--list")]
-    [Description("List all config files (.json, .yaml, .yml) found under the config/ directory.")]
+    [Description("List all config files (.json, .yaml, .yml) found under .fuseraft/config/.")]
     public bool List { get; set; }
 }
 
@@ -32,10 +32,10 @@ public sealed class ShowConfigCommand : Command<ShowConfigSettings>
 
     private static int ListConfigs()
     {
-        var configDir = "config";
+        var configDir = ".fuseraft/config";
         if (!Directory.Exists(configDir))
         {
-            AnsiConsole.MarkupLine("[yellow]No config/ directory found.[/]");
+            AnsiConsole.MarkupLine("[yellow]No .fuseraft/config/ directory found.[/]");
             return 1;
         }
 
@@ -48,7 +48,7 @@ public sealed class ShowConfigCommand : Command<ShowConfigSettings>
 
         if (files.Count == 0)
         {
-            AnsiConsole.MarkupLine("[yellow]No config files in config/.[/]");
+            AnsiConsole.MarkupLine("[yellow]No config files in .fuseraft/config/.[/]");
             return 0;
         }
 
