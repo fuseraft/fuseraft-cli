@@ -750,7 +750,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (dstDenial is not null) return dstDenial;
 
         if (!File.Exists(resolvedSrc))
-            return PluginResult.Error($"Source file not found: {resolvedSrc}");
+            return PluginResult.Error($"Source not found: {resolvedSrc}");
 
         if (!overwrite && File.Exists(resolvedDst))
             return PluginResult.Error($"Destination already exists: {resolvedDst}. Set overwrite=true to replace it.");
