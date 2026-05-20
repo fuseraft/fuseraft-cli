@@ -28,6 +28,14 @@ else
 fi
 
 ###############################################################################
+# Dependency checks
+###############################################################################
+if ! command -v tar >/dev/null 2>&1; then
+  echo "ERROR: tar is required." >&2
+  exit 1
+fi
+
+###############################################################################
 # Platform detection
 ###############################################################################
 OS="$(uname -s)"
@@ -56,55 +64,80 @@ esac
 RID="${OS_TAG}-${ARCH_TAG}"
 
 ###############################################################################
-# Resolve latest release version
+# Downloader — array avoids command-string quoting pitfalls
 ###############################################################################
-echo "Fetching latest release from github.com/${REPO}..."
-
-if command -v curl &>/dev/null; then
-  FETCH="curl -fsSL"
-elif command -v wget &>/dev/null; then
-  FETCH="wget -qO-"
+if command -v curl >/dev/null 2>&1; then
+  FETCH_CMD=(curl -fsSL --retry 3 --retry-delay 1 --retry-connrefused)
+elif command -v wget >/dev/null 2>&1; then
+  FETCH_CMD=(wget -qO-)
 else
   echo "ERROR: curl or wget is required." >&2
   exit 1
 fi
 
-API_URL="https://api.github.com/repos/${REPO}/releases/latest"
-RELEASE_JSON=$($FETCH "$API_URL")
+###############################################################################
+# Resolve latest release
+###############################################################################
+echo "Fetching latest release from github.com/${REPO}..."
 
-# Extract tag_name with basic sed/grep (no jq dependency)
-TAG=$(echo "$RELEASE_JSON" | grep '"tag_name"' | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+API_URL="https://api.github.com/repos/${REPO}/releases/latest"
+RELEASE_JSON="$("${FETCH_CMD[@]}" "$API_URL")"
+
+TAG="$(printf '%s\n' "$RELEASE_JSON" | grep '"tag_name"' | head -n1 | \
+  sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
 if [[ -z "$TAG" ]]; then
   echo "ERROR: Could not determine the latest release tag." >&2
   echo "       Check https://github.com/${REPO}/releases" >&2
   exit 1
 fi
 
-VERSION="${TAG#v}"   # strip leading 'v'
+VERSION="${TAG#v}"
 ARCHIVE="fuseraft-${VERSION}-${RID}.tar.gz"
+
+# Validate the expected asset exists in the release metadata
+if ! printf '%s\n' "$RELEASE_JSON" | grep -qF "\"${ARCHIVE}\""; then
+  echo "ERROR: Release asset '${ARCHIVE}' not found in release ${TAG}." >&2
+  exit 1
+fi
+
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${TAG}/${ARCHIVE}"
 
-echo "Installing fuseraft ${VERSION} (${RID})..."
+# UX: show current version when updating
+if command -v "$BINARY" >/dev/null 2>&1; then
+  CURRENT_VERSION="$("$BINARY" --version 2>/dev/null || true)"
+  echo "Updating${CURRENT_VERSION:+ from ${CURRENT_VERSION}} to fuseraft ${VERSION} (${RID})..."
+else
+  echo "Installing fuseraft ${VERSION} (${RID})..."
+fi
 
 ###############################################################################
 # Download and extract
 ###############################################################################
-TMP_DIR="$(mktemp -d)"
+TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t fuseraft)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 echo "Downloading ${ARCHIVE}..."
-$FETCH "$DOWNLOAD_URL" > "${TMP_DIR}/${ARCHIVE}"
+"${FETCH_CMD[@]}" "$DOWNLOAD_URL" > "${TMP_DIR}/${ARCHIVE}"
 
 echo "Extracting..."
 tar -xzf "${TMP_DIR}/${ARCHIVE}" -C "$TMP_DIR"
 
+# Locate the binary regardless of archive folder layout
+BIN_PATH="$(find "$TMP_DIR" -type f -name "$BINARY" | head -n 1)"
+if [[ -z "$BIN_PATH" ]]; then
+  echo "ERROR: ${BINARY} not found in archive. The release may be malformed." >&2
+  exit 1
+fi
+
 ###############################################################################
-# Install
+# Atomic install: write .new then move into place
 ###############################################################################
+TMP_TARGET="${INSTALL_DIR}/${BINARY}.new"
+
 if $SYSTEM_INSTALL; then
   SUDO=""
   if [[ "$(id -u)" -ne 0 ]]; then
-    if command -v sudo &>/dev/null; then
+    if command -v sudo >/dev/null 2>&1; then
       SUDO="sudo"
     else
       echo "ERROR: --system install requires root or sudo." >&2
@@ -112,26 +145,33 @@ if $SYSTEM_INSTALL; then
     fi
   fi
   $SUDO mkdir -p "$INSTALL_DIR"
-  $SUDO install -m 755 "${TMP_DIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
+  $SUDO install -m 755 "$BIN_PATH" "$TMP_TARGET"
+  $SUDO mv -f "$TMP_TARGET" "${INSTALL_DIR}/${BINARY}"
 else
   mkdir -p "$INSTALL_DIR"
-  install -m 755 "${TMP_DIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
+  install -m 755 "$BIN_PATH" "$TMP_TARGET"
+  mv -f "$TMP_TARGET" "${INSTALL_DIR}/${BINARY}"
 fi
 
 echo ""
 echo "  fuseraft ${VERSION} installed to ${INSTALL_DIR}/${BINARY}"
 
 ###############################################################################
-# PATH hint
+# PATH hint — case avoids regex metacharacter false positives
 ###############################################################################
-if ! echo ":${PATH}:" | grep -q ":${INSTALL_DIR}:"; then
-  echo ""
-  echo "  NOTE: ${INSTALL_DIR} is not in your PATH."
-  echo "  Add the following line to your shell profile (~/.bashrc, ~/.zshrc, etc.):"
-  echo ""
-  echo "    export PATH=\"\$PATH:${INSTALL_DIR}\""
-  echo ""
-fi
+case ":${PATH}:" in
+  *":${INSTALL_DIR}:"*)
+    ;;
+  *)
+    SHELL_NAME="$(basename "${SHELL:-sh}")"
+    echo ""
+    echo "  NOTE: ${INSTALL_DIR} is not in your PATH."
+    echo "  Add the following line to your ~/.${SHELL_NAME}rc (or equivalent):"
+    echo ""
+    echo "    export PATH=\"\$PATH:${INSTALL_DIR}\""
+    echo ""
+    ;;
+esac
 
 echo "  Run 'fuseraft --version' to verify the installation."
 echo ""
