@@ -90,6 +90,26 @@ flowchart LR
     Developer  -.->|"reports"| Manager
 ```
 
+...to adversarial pipelines where generator agents produce artifacts and critic agents review them with fresh, isolated context windows — no shared history, no inherited blind spots:
+
+```mermaid
+flowchart TD
+    Task((Task))
+    Planner["Planner\ngenerator"]
+    PlanReviewer["PlanReviewer\ncritic · isolated context"]
+    Developer["Developer\ngenerator"]
+    CodeReviewer["CodeReviewer\ncritic · isolated context"]
+    Done(["✓ Done"])
+
+    Task         --> Planner
+    Planner      -->|artifact| PlanReviewer
+    PlanReviewer -->|"APPROVED"| Developer
+    PlanReviewer -.->|revise| Planner
+    Developer    -->|artifact| CodeReviewer
+    CodeReviewer -->|"APPROVED"| Done
+    CodeReviewer -.->|revise| Developer
+```
+
 ---
 
 ## Quick start
@@ -101,6 +121,7 @@ fuseraft init
 # Or start from a built-in template
 fuseraft init --template dev-team --model claude-sonnet-4-6
 fuseraft init --template graph          # directed-graph pipeline with parallel fan-out
+fuseraft init --template adversarial    # GAN-style generate → critique → revise pipeline
 fuseraft init --template designer       # AI-assisted config designer
 
 # Run a session
@@ -159,7 +180,7 @@ The binary lands in `./bin/`.
 ## Features
 
 **Orchestration**
-- Five routing modes: keyword, state machine, declarative directed graph (with parallel fan-out/fan-in), LLM-based selection, and fully autonomous Magentic
+- Six routing modes: keyword, state machine, declarative directed graph (with parallel fan-out/fan-in), LLM-based selection, fully autonomous Magentic, and adversarial generate→critique→revise pipelines
 - Routing validators that block handoffs unless real evidence is present on disk — no hallucinated progress
 - Saga orchestration wraps any pipeline with compensating rollback if a step fails
 
