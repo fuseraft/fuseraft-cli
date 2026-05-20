@@ -418,6 +418,56 @@ public static class OrchestratorBuilder
             }
         }
 
+        // Eagerly validate the adversarial config when that strategy is selected.
+        if (config.Selection.Type.Equals("adversarial", StringComparison.OrdinalIgnoreCase))
+        {
+            if (config.Selection.Adversarial is null)
+                throw new InvalidOperationException(
+                    "Selection.Type 'adversarial' requires a 'Selection.Adversarial' configuration block.");
+
+            var advCfg = config.Selection.Adversarial;
+
+            if (advCfg.Stages.Count == 0)
+                throw new InvalidOperationException(
+                    "Selection.Adversarial.Stages must contain at least one stage.");
+
+            if (advCfg.Rounds < 1)
+                throw new InvalidOperationException(
+                    $"Selection.Adversarial.Rounds must be at least 1 (got {advCfg.Rounds}).");
+
+            if (string.IsNullOrWhiteSpace(advCfg.PassKeyword))
+                throw new InvalidOperationException(
+                    "Selection.Adversarial.PassKeyword must be a non-empty string.");
+
+            var agentNames = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            for (int si = 0; si < advCfg.Stages.Count; si++)
+            {
+                var stage = advCfg.Stages[si];
+                if (string.IsNullOrWhiteSpace(stage.Generator))
+                    throw new InvalidOperationException(
+                        $"Selection.Adversarial.Stages[{si}]: Generator must be a non-empty agent name.");
+                if (!agentNames.Contains(stage.Generator))
+                    throw new InvalidOperationException(
+                        $"Selection.Adversarial.Stages[{si}].Generator '{stage.Generator}' " +
+                        "is not defined in 'Orchestration.Agents'.");
+                if (string.IsNullOrWhiteSpace(stage.Critic))
+                    throw new InvalidOperationException(
+                        $"Selection.Adversarial.Stages[{si}]: Critic must be a non-empty agent name.");
+                if (!agentNames.Contains(stage.Critic))
+                    throw new InvalidOperationException(
+                        $"Selection.Adversarial.Stages[{si}].Critic '{stage.Critic}' " +
+                        "is not defined in 'Orchestration.Agents'.");
+            }
+        }
+
+        // Warn when Selection.Adversarial is configured but Selection.Type is not "adversarial".
+        if (config.Selection.Adversarial is not null &&
+            !config.Selection.Type.Equals("adversarial", StringComparison.OrdinalIgnoreCase))
+            loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
+                "Selection.Adversarial is configured but Selection.Type is '{Type}', not 'adversarial'. " +
+                "The Adversarial block will be ignored. Set Selection.Type: adversarial to enable it.",
+                config.Selection.Type);
+
         // Eagerly validate the Magentic manager model and loop-counter config when that strategy is selected.
         if (config.Selection.Type.Equals("magentic", StringComparison.OrdinalIgnoreCase))
         {
@@ -484,8 +534,9 @@ public static class OrchestratorBuilder
         var aoLogger          = loggerFactory.CreateLogger<AgentOrchestrator>();
         var goLogger          = loggerFactory.CreateLogger<GraphOrchestrator>();
 
-        bool useMagentic = config.Selection.Type.Equals("magentic", StringComparison.OrdinalIgnoreCase);
-        bool useGraph    = config.Selection.Type.Equals("graph",    StringComparison.OrdinalIgnoreCase);
+        bool useMagentic    = config.Selection.Type.Equals("magentic",    StringComparison.OrdinalIgnoreCase);
+        bool useGraph       = config.Selection.Type.Equals("graph",       StringComparison.OrdinalIgnoreCase);
+        bool useAdversarial = config.Selection.Type.Equals("adversarial", StringComparison.OrdinalIgnoreCase);
 
         ConversationCompactor? compactor = null;
         if (config.Compaction is { } compactionConfig)
@@ -505,10 +556,11 @@ public static class OrchestratorBuilder
                     $"less than Compaction.TriggerTurnCount ({compactionConfig.TriggerTurnCount}).");
 
             var summaryModel = compactionConfig.Model ?? config.Agents[0].Model;
-            // Magentic sessions have no brief.json or change log, so the workflow-specific
-            // resumption note is suppressed to avoid agents wasting tokens on missing files.
-            var resumptionNote = useMagentic ? null : ConversationCompactor.WorkflowResumptionNote;
-            var changeLogPath  = useMagentic ? null
+            // Magentic and adversarial sessions have no brief.json or change log, so the
+            // workflow-specific resumption note is suppressed to avoid wasting tokens.
+            bool suppressResumptionNote = useMagentic || useAdversarial;
+            var resumptionNote = suppressResumptionNote ? null : ConversationCompactor.WorkflowResumptionNote;
+            var changeLogPath  = suppressResumptionNote ? null
                 : (config.Validation?.ChangeLogPath ?? config.ChangeTracking?.Path);
             compactor = new ConversationCompactor(
                 chatClientFactory.Create(summaryModel), compactionConfig,
@@ -550,6 +602,9 @@ public static class OrchestratorBuilder
         //
         // GraphOrchestrator handles the "graph" selection type: declarative directed-graph
         // execution with per-node agents, keyword-driven edges, and optional back-edges.
+        //
+        // AdversarialOrchestrator handles the "adversarial" selection type: GAN-style
+        // generate → critique → revise loops where critics receive isolated context windows.
         //
         // AgentOrchestrator is the general-purpose path: it drives any selection strategy
         // (sequential, llm, keyword, structured) through StrategyFactory and works with
@@ -694,6 +749,14 @@ public static class OrchestratorBuilder
         {
             orchestrator = new GraphOrchestrator(
                 config, agentFactory, goLogger,
+                changeTracker, eventEmitter, governanceKernel,
+                hitlMode ? humanApprovalService : null);
+        }
+        else if (useAdversarial)
+        {
+            var advLogger = loggerFactory.CreateLogger<AdversarialOrchestrator>();
+            orchestrator  = new AdversarialOrchestrator(
+                config, agentFactory, advLogger,
                 changeTracker, eventEmitter, governanceKernel,
                 hitlMode ? humanApprovalService : null);
         }
