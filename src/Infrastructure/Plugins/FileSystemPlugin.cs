@@ -455,7 +455,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         // would corrupt the file. Instead, return an error so the agent knows to use a
         // targeted edit tool (sed -i, or shell_run with a patch) rather than a full rewrite.
         //
-        // Threshold: if the existing file is > 400 lines AND the new content has fewer than
+        // Threshold: if the existing file is > 50 lines AND the new content has fewer than
         // 60 % of the existing line count, reject the write.
         if (File.Exists(resolved))
         {
