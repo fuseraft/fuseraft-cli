@@ -47,6 +47,9 @@ public static class WorkflowDiagramGenerator
             case "statemachine" when config.Selection.StateMachine is not null:
                 RenderStateMachine(sb, config.Selection.StateMachine);
                 break;
+            case "adversarial" when config.Selection.Adversarial is not null:
+                RenderAdversarial(sb, config.Selection.Adversarial);
+                break;
             default:
                 RenderGeneric(sb, config);
                 break;
@@ -280,6 +283,39 @@ public static class WorkflowDiagramGenerator
                 var arrow = label.Length > 0 ? $"-->|\"{label}\"| " : "--> ";
                 sb.AppendLine($"  {from} {arrow}{to}");
             }
+        }
+    }
+
+    private static void RenderAdversarial(StringBuilder sb, fuseraft.Core.Models.AdversarialConfig adv)
+    {
+        sb.AppendLine();
+        sb.AppendLine("  Task([Task])");
+
+        for (int i = 0; i < adv.Stages.Count; i++)
+        {
+            var stage   = adv.Stages[i];
+            var label   = stage.Label ?? $"{stage.Generator} → {stage.Critic}";
+            var genId   = $"gen{i}";
+            var critId  = $"crit{i}";
+            var passId  = $"pass{i}";
+
+            sb.AppendLine($"  {genId}[\"{Esc(stage.Generator)}\"]");
+            sb.AppendLine($"  {critId}[\"{Esc(stage.Critic)}\n(critic)\"]");
+            sb.AppendLine($"  {passId}([\"{Esc(label)} approved\"])");
+
+            if (i == 0)
+                sb.AppendLine($"  Task --> {genId}");
+            else
+                sb.AppendLine($"  pass{i - 1} --> {genId}");
+
+            sb.AppendLine($"  {genId} -->|artifact| {critId}");
+            sb.AppendLine($"  {critId} -->|\"{adv.PassKeyword}\"| {passId}");
+            sb.AppendLine($"  {critId} -->|revise| {genId}");
+        }
+
+        if (adv.Stages.Count > 0)
+        {
+            sb.AppendLine($"  pass{adv.Stages.Count - 1} --> Done([Done])");
         }
     }
 

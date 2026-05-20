@@ -77,6 +77,19 @@ public record SelectionStrategyConfig
     /// </para>
     /// </summary>
     public GraphConfig? Graph { get; init; }
+
+    /// <summary>
+    /// Adversarial pipeline configuration for the <c>adversarial</c> selection type.
+    /// Required when <see cref="Type"/> is <c>"adversarial"</c>.
+    ///
+    /// <para>
+    /// Each stage pairs a generator agent with a critic agent. The critic always receives
+    /// a fresh, isolated context window — it sees only the artifact under review, never the
+    /// generator's reasoning history. Stages run sequentially; the approved artifact from
+    /// each stage feeds the next generator.
+    /// </para>
+    /// </summary>
+    public AdversarialConfig? Adversarial { get; init; }
 }
 
 /// <summary>

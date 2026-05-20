@@ -526,6 +526,78 @@ For `Selection.Type: magentic`, the entire `Termination` section is ignored. Ses
 
 ---
 
+### adversarial
+
+A GAN-inspired pipeline where generator agents produce artifacts and critic agents review them in fully isolated context windows. Each stage runs a tight generate → critique → revise loop before the approved artifact is passed to the next stage.
+
+The defining property is the **context firewall**: the critic never sees the generator's reasoning chain, prior shared history, or any other session state. It receives only its own system instructions and the artifact under review. This produces independent feedback rather than rubber-stamping — the same mechanism that makes a fresh code reviewer more effective than an author self-reviewing their own work.
+
+```yaml
+Selection:
+  Type: adversarial
+  Adversarial:
+    Rounds: 3          # critique rounds per stage (generator gets Rounds-1 revision opportunities)
+    PassKeyword: "APPROVED"
+    Stages:
+      - Generator: Planner
+        Critic: PlanReviewer
+        Label: Planning
+
+      - Generator: Developer
+        Critic: CodeReviewer
+        Label: Implementation
+```
+
+**How it works**
+
+1. **Stage loop:** stages execute sequentially. The approved artifact from each stage is appended to a shared history that subsequent generators receive as prior context. Critics never see this history.
+2. **Initial generation:** the generator is invoked with its system instructions, any prior-stage artifacts, and the original task.
+3. **Critique round:** the critic is invoked with a fresh context — only its system instructions and the artifact. No shared history, no generator reasoning.
+4. **Pass check:** if the critic emits `PassKeyword` (default `APPROVED`) on its own line, the stage exits early and the artifact is promoted.
+5. **Revision:** if the critic rejects and rounds remain, the generator is re-invoked with its previous artifact and the critique injected as a user message. A new critique round follows.
+6. **Exhaustion:** if all `Rounds` are consumed without approval, the last reviewed artifact is promoted anyway (with a warning log and event) so the pipeline does not stall.
+
+**Rounds semantics**
+
+`Rounds` is the number of critique rounds per stage. With `Rounds: 3`:
+
+- Round 1 → critique → revise (round 1 < 3)
+- Round 2 → critique → revise (round 2 < 3)
+- Round 3 → critique → **no revision** (final round — the last critiqued artifact is promoted)
+
+The generator receives `Rounds - 1` revision opportunities. The promoted artifact is always the most recent one that was actually reviewed — not an unreviewed revision.
+
+**Agent instructions**
+
+Critic agents should be instructed to either approve or provide specific, actionable feedback — and nothing in between. The default template ships critics with instructions like:
+
+```
+If the artifact meets all requirements, respond with exactly:
+APPROVED
+
+Otherwise, list specific, actionable defects. Be precise — describe what is wrong and why.
+```
+
+Generator agents work as normal. On revision turns the orchestrator injects the critique as a user message so the generator knows exactly what to address.
+
+**`AdversarialConfig` fields**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `Stages` | array | — | **Required.** Ordered list of generator/critic stage pairs. |
+| `Rounds` | int | `3` | Maximum critique rounds per stage. Generator gets `Rounds - 1` revision opportunities. Must be ≥ 1. |
+| `PassKeyword` | string | `"APPROVED"` | Keyword the critic emits on its own line to approve the artifact and exit the stage early. Case-insensitive. |
+
+**`AdversarialStageConfig` fields**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `Generator` | string | — | **Required.** Name of the agent that produces and revises artifacts. Must match an agent name in `Agents`. |
+| `Critic` | string | — | **Required.** Name of the agent that reviews with a fresh context window. Must match an agent name in `Agents`. Must be distinct from `Generator`. |
+| `Label` | string | `"{Generator} → {Critic}"` | Human-readable label shown in event logs and message tags. |
+
+---
+
 ## Termination strategies
 
 Configured under `Termination.Type`. The run stops when any enabled strategy fires.
@@ -659,6 +731,21 @@ Magentic fits naturally when:
 
 Magentic is also more expensive than keyword routing per round: each inner-loop iteration makes at least two manager LLM calls (`magentic_ledger_update` + `magentic_select_speaker`) in addition to the participant's call.
 
+### Adversarial
+
+Use adversarial when **output quality matters more than throughput** and you want independent review rather than self-review. The context firewall is the key mechanism — because the critic receives no shared history, it cannot be influenced by the generator's framing or reasoning, and it approaches the artifact the way a real independent reviewer would.
+
+Adversarial fits naturally when:
+
+- You have a linear pipeline where each phase produces a discrete artifact (plan, code, document) that should be verified before the next phase begins
+- You want to catch issues that single-pass generation consistently misses: phantom dependencies, incomplete error handling, architectural deviations, placeholder tests
+- The quality of later stages depends heavily on the quality of earlier stages — adversarial stages enforce that dependency by only promoting approved artifacts
+- You can afford the additional LLM calls (each stage uses at least 2 calls per round: one generate, one critique)
+
+**What adversarial trades away:** dynamic routing and self-correction. The pipeline is fixed at config time — stages always execute in order. There are no loop-back edges between stages, no validator-gated handoffs, and no mechanism for a stage to signal that a prior stage needs to restart. Each stage is isolated. If a critic's feedback reveals a fundamental problem with a previous stage's artifact, the orchestrator has no mechanism to restart that stage — it promotes the best artifact the current stage produced and continues.
+
+Adversarial is also not a substitute for running real tests. A critic LLM reviewing code is a heuristic check, not a compiler or test suite. Use it alongside `RequireShellPass` validators in a keyword or graph pipeline if you need evidence-gated progression.
+
 ### Graph
 
 Use graph when you need **explicit back-edge topology** — when different failure modes should route back to different prior nodes, or when you want the routing structure to be visible in the config rather than implied by keyword conventions.
@@ -676,19 +763,20 @@ Graph and keyword routing use the same `handoff()` plugin for typed signalling, 
 
 ---
 
-## Choosing between keyword, state machine, structured, and graph
+## Choosing between keyword, state machine, structured, graph, and adversarial
 
-| | Keyword | State machine | Structured | Graph |
-|---|---|---|---|---|
-| Handoff signal | Keyword on own line (relaxed) | Signal on own line (same as keyword) | JSON field value | Keyword alone on own line (strict) |
-| Evidence gating | Validators (per-route) | Contracts (per-transition, typed) | Instructions only | Validators (per-edge) |
-| Routing topology | All routes active at once | Only current state's transitions active | All routes active at once | Only current node's edges active |
-| Ghost signals | Possible — any agent can emit any keyword | Impossible — wrong-state signals are ignored | N/A | Reduced — wrong-node keywords are ignored |
-| Multi-target back-edges | Implicit (keyword scan order) | N/A (no back-edges) | N/A | Explicit — each back-edge has a distinct target node |
-| Lossless compaction | No | Yes (requires EvidenceStore) | No | No |
-| Verifier integration | No | Yes | No | No |
-| Failure classification | Yes | Yes | No | Yes |
-| Best for | Phased pipelines, dev teams | Same + hallucination-resistant routing | Classifiers, triage | Explicit multi-target loop-back topology |
+| | Keyword | State machine | Structured | Graph | Adversarial |
+|---|---|---|---|---|---|
+| Handoff signal | Keyword on own line (relaxed) | Signal on own line (same as keyword) | JSON field value | Keyword alone on own line (strict) | PassKeyword from critic |
+| Evidence gating | Validators (per-route) | Contracts (per-transition, typed) | Instructions only | Validators (per-edge) | None (critic LLM only) |
+| Routing topology | All routes active at once | Only current state's transitions active | All routes active at once | Only current node's edges active | Fixed sequential stages |
+| Ghost signals | Possible — any agent can emit any keyword | Impossible — wrong-state signals are ignored | N/A | Reduced — wrong-node keywords are ignored | N/A — critic approval is the only signal |
+| Multi-target back-edges | Implicit (keyword scan order) | N/A (no back-edges) | N/A | Explicit — each back-edge has a distinct target node | No back-edges between stages |
+| Critic context isolation | No | No | No | No | Yes — critics receive no shared history |
+| Lossless compaction | No | Yes (requires EvidenceStore) | No | No | No |
+| Verifier integration | No | Yes | No | No | No |
+| Failure classification | Yes | Yes | No | Yes | No |
+| Best for | Phased pipelines, dev teams | Same + hallucination-resistant routing | Classifiers, triage | Explicit multi-target loop-back topology | Quality gates on discrete artifacts |
 
 For a human-like team of roles (Planner, Developer, Tester, Reviewer):
 - Start with **keyword** if you want a simple, validator-gated pipeline quickly
@@ -696,6 +784,8 @@ For a human-like team of roles (Planner, Developer, Tester, Reviewer):
 - Choose **graph** when different failure outcomes must route back to different nodes and you want that topology explicit in the config
 
 For a pipeline where an agent computes a value and routing follows from it, prefer **structured**. The JSON is already the output — the routing field costs nothing to add.
+
+For a linear pipeline where each phase produces a discrete artifact (plan, code, document) and you want independent review between phases, prefer **adversarial**. The context firewall is the key mechanism — critics approach the artifact with no inherited assumptions from the generator.
 
 ---
 

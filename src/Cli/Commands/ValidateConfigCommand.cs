@@ -180,7 +180,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
         // Selection strategy
         var selType = config.Selection.Type.ToLowerInvariant();
-        if (selType is not ("sequential" or "roundrobin" or "llm" or "keyword" or "structured" or "magentic" or "statemachine" or "graph"))
+        if (selType is not ("sequential" or "roundrobin" or "llm" or "keyword" or "structured" or "magentic" or "statemachine" or "graph" or "adversarial"))
             issues.Add(("error", $"Unknown selection type: '{config.Selection.Type}'."));
 
         if (selType == "llm" && config.Selection.Model is null)
@@ -200,6 +200,9 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
         if (selType == "statemachine")
             ValidateStateMachine(config, issues);
+
+        if (selType == "adversarial")
+            ValidateAdversarialSelection(config, issues);
 
         if (selType == "keyword" && config.Selection.Routes is { Count: > 1 })
         {
@@ -481,6 +484,56 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
             if (!string.IsNullOrWhiteSpace(edge.RecoveryAgent) && !agentNames.Contains(edge.RecoveryAgent))
                 issues.Add(("warning", $"{prefix}: RecoveryAgent '{edge.RecoveryAgent}' is not defined in Agents."));
+        }
+    }
+
+    private static void ValidateAdversarialSelection(
+        OrchestrationConfig config,
+        List<(string Level, string Message)> issues)
+    {
+        var adv = config.Selection.Adversarial;
+
+        if (adv is null)
+        {
+            issues.Add(("error",
+                "Selection.Type 'adversarial' requires a 'Selection.Adversarial' configuration block."));
+            return;
+        }
+
+        if (adv.Stages.Count == 0)
+        {
+            issues.Add(("error", "Selection.Adversarial.Stages must contain at least one stage."));
+            return;
+        }
+
+        if (adv.Rounds < 1)
+            issues.Add(("error",
+                $"Selection.Adversarial.Rounds must be at least 1 (got {adv.Rounds})."));
+
+        if (string.IsNullOrWhiteSpace(adv.PassKeyword))
+            issues.Add(("error", "Selection.Adversarial.PassKeyword must be a non-empty string."));
+
+        var agentNames = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        for (int si = 0; si < adv.Stages.Count; si++)
+        {
+            var stage  = adv.Stages[si];
+            var prefix = $"Selection.Adversarial.Stages[{si}]";
+
+            if (string.IsNullOrWhiteSpace(stage.Generator))
+                issues.Add(("error", $"{prefix}: Generator is required."));
+            else if (!agentNames.Contains(stage.Generator))
+                issues.Add(("error", $"{prefix}.Generator '{stage.Generator}' is not defined in Orchestration.Agents."));
+
+            if (string.IsNullOrWhiteSpace(stage.Critic))
+                issues.Add(("error", $"{prefix}: Critic is required."));
+            else if (!agentNames.Contains(stage.Critic))
+                issues.Add(("error", $"{prefix}.Critic '{stage.Critic}' is not defined in Orchestration.Agents."));
+
+            if (!string.IsNullOrWhiteSpace(stage.Generator) && !string.IsNullOrWhiteSpace(stage.Critic) &&
+                string.Equals(stage.Generator, stage.Critic, StringComparison.OrdinalIgnoreCase))
+                issues.Add(("warning",
+                    $"{prefix}: Generator and Critic are the same agent ('{stage.Generator}'). " +
+                    "Self-critique defeats the context firewall — use two distinct agents."));
         }
     }
 
