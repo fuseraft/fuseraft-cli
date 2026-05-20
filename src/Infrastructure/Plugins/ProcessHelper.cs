@@ -221,11 +221,22 @@ internal readonly record struct ProcessResult(string Stdout, string Stderr, int 
 /// </summary>
 internal static class PluginResult
 {
-    public static string Ok(string message)       => $"[OK] {message}";
-    public static string Error(string message)    => $"[ERROR] {message}";
-    public static string Info(string message)     => $"[INFO] {message}";
-    public static string Denied(string message)   => $"[DENIED] {message}";
+    public static string Ok(string message) => $"[OK] {message}";
+
+    /// <summary>
+    /// Return an actionable usage or request error caused by the current tool call, such as
+    /// invalid arguments, unsupported inputs, or missing session state the caller can fix.
+    /// </summary>
+    public static string Error(string message) => $"[ERROR] {message}";
+
+    public static string Info(string message) => $"[INFO] {message}";
+    public static string Denied(string message) => $"[DENIED] {message}";
     public static string NotFound(string message) => $"[NOT FOUND] {message}";
-    public static string Timeout(string message)  => $"[TIMEOUT] {message}";
-    public static string Fail(string message)     => $"[FAIL] {message}";
+    public static string Timeout(string message) => $"[TIMEOUT] {message}";
+
+    /// <summary>
+    /// Return an environment or dependency failure where the request itself is valid but the
+    /// runtime cannot complete it until an external prerequisite is fixed.
+    /// </summary>
+    public static string Fail(string message) => $"[FAIL] {message}";
 }
