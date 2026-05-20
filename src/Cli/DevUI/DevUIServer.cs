@@ -20,8 +20,8 @@ namespace fuseraft.Cli.DevUI;
 /// </summary>
 public sealed class DevUIServer : IAsyncDisposable
 {
-    private const    int                        MaxHistoryEvents = 1_000;
-    private readonly Lock                      _lock    = new();
+    private const int MaxHistoryEvents = 1_000;
+    private readonly Lock _lock = new();
     private readonly List<string>              _history = [];
     private readonly List<ChannelWriter<string>> _clients = [];
 
