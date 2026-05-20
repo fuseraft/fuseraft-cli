@@ -33,6 +33,7 @@ public static partial class InitTemplates
             "brownfield" => Brownfield(model, endpoint),
             "graph"            => Graph(model, endpoint),
             "brownfield-graph" => BrownfieldGraph(model, endpoint),
+            "adversarial"      => GeneratedConfig.Inline(Adversarial(model, endpoint)),
             _                  => DevTeam(model, endpoint),
         };
 
