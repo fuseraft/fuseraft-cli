@@ -9,6 +9,7 @@ namespace fuseraft.Core.Models;
 /// </summary>
 public record ChangeLog
 {
+    /// <summary>All persisted per-turn change entries in chronological order.</summary>
     public List<ChangeEntry> Entries { get; init; } = [];
 
     /// <summary>
@@ -25,8 +26,11 @@ public record ChangeLog
 /// </summary>
 public record ChangeEntry
 {
+    /// <summary>Name of the agent that produced the recorded tool activity.</summary>
     public string Agent { get; init; } = string.Empty;
+    /// <summary>Zero-based turn index for the agent response that produced this entry.</summary>
     public int TurnIndex { get; init; }
+    /// <summary>UTC timestamp when the entry was recorded.</summary>
     public DateTime Timestamp { get; init; }
 
     /// <summary>Session that produced this entry. Null for entries written before session-ID stamping was introduced.</summary>
@@ -47,6 +51,7 @@ public record ChangeEntry
 
 public record CommandRecord
 {
+    /// <summary>Exact shell command that was executed.</summary>
     public string Command { get; init; } = string.Empty;
 
     [JsonPropertyName("succeeded")]
