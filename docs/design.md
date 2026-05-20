@@ -66,9 +66,10 @@ Infrastructure/
   Plugins/                — Built-in tool plugins (FileSystem, Shell, Git, Http, ...)
 
 Orchestration/
-  AgentOrchestrator.cs    — General-purpose multi-agent loop (any selection strategy)
-  MagenticOrchestrator.cs — Magentic-One style two-level manager/participant loop
-  GraphOrchestrator.cs    — Directed-graph orchestrator; BFS-layer topology, forward-edge phases, back-edge phase restarts
+  AgentOrchestrator.cs       — General-purpose multi-agent loop (any selection strategy)
+  MagenticOrchestrator.cs    — Magentic-One style two-level manager/participant loop
+  GraphOrchestrator.cs       — Directed-graph orchestrator; BFS-layer topology, forward-edge phases, back-edge phase restarts
+  AdversarialOrchestrator.cs — GAN-style adversarial loop; paired generator/critic stages; context firewall isolates the critic
   ConversationCompactor.cs — LLM-based history summarization for long sessions
   ChangeTracker.cs        — Intercepts tool calls to record file/shell/git activity
   ContextWindowFilter.cs  — Applies per-agent context window config to conversation history
@@ -122,7 +123,7 @@ All paths are configurable via their corresponding config keys. The table above 
 
 ---
 
-## 5. Configuration
+## 4. Configuration
 
 Every session is driven by a single JSON or YAML file under the top-level `Orchestration` key. The file is loaded by `OrchestratorBuilder.BuildAsync` and bound to `OrchestrationConfig`.
 
@@ -168,7 +169,7 @@ Every session is driven by a single JSON or YAML file under the top-level `Orche
 
 ---
 
-## 6. Agent Construction
+## 5. Agent Construction
 
 `AgentFactory.Create(AgentConfig)` produces a fully configured `AIAgent` ready for use by any orchestrator.
 
@@ -195,11 +196,12 @@ Every session is driven by a single JSON or YAML file under the top-level `Orche
 
 ## 6. Orchestrators
 
-`OrchestratorBuilder` selects among three orchestrators based on the config's `Selection.Type`. The selection order is:
+`OrchestratorBuilder` selects among four orchestrators based on the config's `Selection.Type`. The selection order is:
 
 1. **`GraphOrchestrator`** — when `Selection.Type == "graph"`
-2. **`MagenticOrchestrator`** — when `Selection.Type == "magentic"`
-3. **`AgentOrchestrator`** — all other cases
+2. **`AdversarialOrchestrator`** — when `Selection.Type == "adversarial"`
+3. **`MagenticOrchestrator`** — when `Selection.Type == "magentic"`
+4. **`AgentOrchestrator`** — all other cases
 
 All three implement `IOrchestrator`:
 
@@ -214,7 +216,7 @@ event Action<string, string, string?>? ToolCalling        // (agentName, toolNam
 event Action<string, int, int>? TokenBudgetWarning        // (agentName, inputTokens, warnThreshold)
 ```
 
-### 5.1 AgentOrchestrator
+### 6.1 AgentOrchestrator
 
 The general-purpose path. Drives any selection strategy through a single `while(true)` loop:
 
@@ -244,7 +246,7 @@ START
 
 **Shared history:** All agents read from and write to the same `List<ChatMessage>`. This is intentional — routing strategies (especially `KeywordSelectionStrategy`) read `AuthorName` from the most recent assistant message to determine who just spoke and where they want to route.
 
-### 5.2 MagenticOrchestrator
+### 6.2 MagenticOrchestrator
 
 A Magentic-One style two-level orchestrator. A dedicated manager LLM drives a planning and evaluation loop; participant agents execute tasks on the manager's instructions.
 
@@ -286,7 +288,7 @@ START
 
 **Checkpoint state** (`MagenticCheckpointState`): `CurrentPlan`, `RoundIndex`, `StallCount`, `ResetCount`, `AwaitingPlanReview` — enough to resume the inner loop exactly where it paused. Exposed via `CurrentState` so `SessionRunner` can snapshot it after each yielded message.
 
-### 5.3 GraphOrchestrator
+### 6.3 GraphOrchestrator
 
 A directed-graph orchestrator for `Selection.Type: graph`. Each node in the config binds an agent to a unique `Id`; edges carry routing keywords and optional validators. The topology drives execution: forward edges advance within a phase; back-edges break the phase and restart from the target node.
 
@@ -336,6 +338,45 @@ START
   → (terminal keyword ? END : BuildPhaseWorkflow)
 ```
 
+### 6.4 AdversarialOrchestrator
+
+A GAN-style adversarial orchestrator for `Selection.Type: adversarial`. Each `AdversarialStageConfig` pairs a generator agent with a critic agent. Stages run sequentially; the approved artifact from each stage is appended to a shared history that subsequent generators receive as prior context.
+
+**Context firewall (the core invariant):** The critic always receives a fresh context containing only its own system instructions and the artifact under review — never the generator's reasoning chain or prior shared history. This produces genuine independent review rather than rubber-stamping.
+
+**Stage loop:** Within each stage the orchestrator runs up to `Rounds` generate/critique cycles:
+
+1. The generator produces an artifact from its instructions, the accumulated prior-stage `sharedHistory`, and the task.
+2. The critic evaluates the artifact in isolation. If it emits `PassKeyword` on its own line, the stage exits early and the artifact is promoted.
+3. If not approved and rounds remain, the generator receives its previous artifact plus the critique and revises.
+4. If all rounds are exhausted without approval, the last artifact is promoted anyway so the pipeline continues.
+
+After each stage the final artifact is appended to `sharedHistory` as an assistant message so subsequent stages have accumulated context.
+
+**`AdversarialConfig` fields:**
+
+| Field | Purpose |
+|---|---|
+| `Stages` | Ordered list of `AdversarialStageConfig` (`Generator`, `Critic`, optional `Label`) |
+| `Rounds` | Maximum generate/critique cycles per stage (≥ 1) |
+| `PassKeyword` | String the critic emits on its own line to signal approval |
+
+**Execution model:**
+
+```
+START
+  → For each Stage:
+      → GenerateArtifact  (generator: instructions + sharedHistory + task)
+      → For each Round (1..Rounds):
+          → CritiqueArtifact  (critic: fresh context — instructions + artifact only)
+          → (PassKeyword found ? PromoteArtifact → next Stage)
+          → (rounds remain ? ReviseArtifact → repeat CritiqueArtifact)
+      → (rounds exhausted ? PromoteArtifact anyway)
+  → END
+```
+
+**Why the context firewall matters:** If the critic saw the generator's reasoning chain it would be primed by the same assumptions and more likely to ratify flawed outputs. The fresh-context invariant is what makes adversarial critique structurally independent — violating it turns the orchestrator into a consensus loop rather than a quality gate.
+
 ---
 
 ## 7. Selection Strategies
@@ -349,6 +390,7 @@ Built and returned by `StrategyFactory.CreateSelection`. All implement `IAgentSe
 | `keyword` | Scans the last assistant message for configured keywords; each keyword routes to a named agent. Optional validators gate the route before it fires. |
 | `statemachine` | Explicit state graph: agents emit signals matched against the current state's outgoing transitions; all declared contracts must pass before a transition fires. Eliminates routing hallucinations — agents emit signals, the machine resolves transitions. |
 | `structured` | Evaluates CEL-like condition expressions per route rather than string keywords |
+| `adversarial` | Handled entirely by `AdversarialOrchestrator`; agents are paired as generator/critic per stage. `StrategyFactory` is not involved. |
 | `magentic` | Handled entirely by `MagenticOrchestrator`; `StrategyFactory` throws if this type reaches it |
 | `graph` | Handled entirely by `GraphOrchestrator`; routing is driven by per-node `AgentRouteTable` instances built at startup from the `Graph.Nodes` config. `StrategyFactory` is not involved. |
 
@@ -407,6 +449,7 @@ Validators implement `IRoutingValidator` and run synchronously before a route or
 | `RequireBrief` | Brief file exists and is non-empty |
 | `RequireAllFilesWritten` | All files listed in the brief's deliverables section have been written per the change log |
 | `RequireReviewJudgement` | Last reviewer message contains an explicit APPROVED or REJECTED keyword |
+| `RequireRelatedTestsPass` | Resolves changed files from the change log, discovers related test targets via a configurable `FindRelatedCommand` (with `{file}` substitution), runs them — falling back to `FullSuiteCommand` when discovery returns nothing — and passes only when the test command exits 0 |
 
 When a validator fails, the route is blocked: the source agent is re-invoked with an injected error message tailored to the failure type (`MissingEvidence`, `InvalidTransition`, `ConflictingEvidence`, `NoProgress`). The response policy is controlled by `FailureHandlingConfig` — `Reinstruct` (default) injects a correction and retries; `ActivateRecovery` routes to the route's `RecoveryAgent` on the first request; `EscalateToHuman` throws immediately; `Abort` escalates after the configured per-type `Threshold` consecutive failures. When the threshold is reached, `ValidatorStuckException` is thrown and the session escalates to HITL.
 
@@ -495,11 +538,12 @@ Plugins are `AIFunction`-providing objects registered in `PluginRegistry` and re
 
 | Plugin | Tools |
 |---|---|
-| `FileSystem` | `read_file`, `grep_file`, `get_file_summary`, `get_file_info`, `save_file_summary`, `list_files`, `write_file`, `patch_file`, `create_directory`, `copy_file`, `move_file`, `set_permissions`, `delete_file`, `delete_directory` |
+| `FileSystem` | `read_file`, `grep_file`, `stat_file`, `get_file_summary`, `get_file_info`, `save_file_summary`, `list_files`, `list_directory`, `path_exists`, `write_file`, `patch_file`, `create_directory`, `copy_file`, `move_file`, `set_permissions`, `delete_file`, `delete_directory` |
 | `Shell` | `shell_run`, `shell_run_script`, `shell_run_background`, `shell_set_env`, `shell_get_env`, `shell_get_job_status`, `shell_get_job_output`, `shell_kill_job`, `shell_which`, `shell_get_working_directory` |
 | `Git` | `git_status`, `git_diff`, `git_log`, `git_show`, `git_branch_list`, `git_stash_list`, `git_add`, `git_commit`, `git_checkout`, `git_create_branch`, `git_init`, `git_push`, `git_pull`, `git_stash`, `git_stash_pop`, `git_reset` |
 | `Http` | `http_get`, `http_head`, `http_post`, `http_put`, `http_patch`, `http_delete` — uses named `ApiProfiles` |
 | `Json` | `json_format`, `json_minify`, `json_get`, `json_keys`, `json_search`, `json_to_text`, `json_validate`, `json_merge` |
+| `Document` | `document_extract_text`, `document_get_info`, `document_list_sheets`, `document_get_sheet` |
 | `Search` | `search_files`, `search_content`, `search_symbol` |
 | `CodeExecution` | `code_execution_check_docker`, `code_execution_sandbox_run`, `code_execution_repl_start`, `code_execution_repl_exec`, `code_execution_repl_reset`, `code_execution_repl_stop` — Docker-sandboxed execution |
 | `Changes` | `changes_read`, `changes_read_latest` — read the JSONL change log for observability by downstream agents |
@@ -517,11 +561,12 @@ Plugins are `AIFunction`-providing objects registered in `PluginRegistry` and re
 
 | Plugin | Capabilities |
 |---|---|
-| `FileSystem` | `read` (read_file, grep_file, get_file_summary, get_file_info, list_files) · `write` (write_file, patch_file, save_file_summary, create_directory, copy_file, move_file, set_permissions) · `delete` (delete_file, delete_directory) |
+| `FileSystem` | `read` (read_file, grep_file, get_file_summary, get_file_info, list_files) · `write` (write_file, patch_file, save_file_summary, create_directory, copy_file, move_file, set_permissions) · `delete` (delete_file, delete_directory). `stat_file`, `path_exists`, and `list_directory` are not in the capability map and always pass through unfiltered regardless of declared capabilities. |
 | `Shell` | `read` (shell_get_env, shell_get_job_status, shell_get_job_output, shell_which, shell_get_working_directory) · `run` (shell_run, shell_run_script, shell_run_background, shell_set_env, shell_kill_job) |
 | `Git` | `read` (git_status, git_diff, git_log, git_show, git_branch_list, git_stash_list) · `write` (git_add, git_commit, git_checkout, git_create_branch, git_init, git_push, git_pull, git_stash, git_stash_pop, git_reset) |
-| `Http` | `get` · `head` · `post` · `put` · `patch` · `delete` — one per HTTP verb |
+| `Http` | `get` (http_get, http_head) · `post` · `put` · `patch` · `delete` — `http_head` maps to the `get` capability, not a separate `head` capability |
 | `Json` | `read` · `write` (merge) |
+| `Document` | `read` (document_extract_text, document_get_info, document_list_sheets, document_get_sheet) |
 | `Search` | `read` |
 | `Changes` | `read` |
 | `Scratchpad` | `read` · `write` |
@@ -659,6 +704,15 @@ Event consumers may inject messages, trigger external systems, or enforce additi
 | `magentic_replan` | `MagenticOrchestrator` | Round index, stall count, replan reason |
 | `magentic_complete` | `MagenticOrchestrator` | Round count, final answer excerpt |
 
+*Adversarial*
+
+| Event | Emitter | Payload |
+|---|---|---|
+| `adversarial_stage_start` | `AdversarialOrchestrator` | Stage index, label, generator agent, critic agent |
+| `adversarial_stage_pass` | `AdversarialOrchestrator` | Stage index, label, round at which the critic approved |
+| `adversarial_stage_timeout` | `AdversarialOrchestrator` | Stage index, label, rounds exhausted (artifact promoted without approval) |
+| `adversarial_complete` | `AdversarialOrchestrator` | Total stage count |
+
 *Tools and infrastructure*
 
 | Event | Emitter | Payload |
@@ -760,7 +814,7 @@ Fuseraft-cli is built on MAF (`Microsoft.Agents.AI`, `Microsoft.Agents.AI.Workfl
 | `AggregatingExecutor` | No incremental aggregation pattern in any current orchestrator |
 | `RequestPort` (external request handling) | Currently unused; a natural fit for Magentic's HITL plan review loop (see below) |
 | `CheckpointManager` / `FileSystemJsonCheckpointStore` | Framework layer captures workflow execution state; our layer captures conversation semantics — different problems |
-| `GroupChatWorkflowBuilder` | Requires a single shared history; Magentic's two-history model is incompatible (see §5.3) |
+| `GroupChatWorkflowBuilder` | Requires a single shared history; Magentic's two-history model is incompatible (see §6.2) |
 | `AgentWorkflowBuilder.CreateHandoffBuilderWith()` (Handoff orchestration) | Mesh routing via auto-injected handoff tool calls; no correction-injection loop; workflow blocks for human input when an agent does not call the handoff tool; shared history across all participants is incompatible with per-agent `ContextWindow` filtering |
 | `Microsoft.Agents.AI.DevUI` | For hosted agent services with OpenAI-compatible API endpoints; our DevUI serves a different purpose |
 
