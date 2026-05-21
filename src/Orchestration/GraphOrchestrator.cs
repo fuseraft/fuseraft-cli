@@ -444,8 +444,17 @@ public sealed class GraphOrchestrator(
                     break; // Terminal node reached — session complete.
 
                 // Inject a phase-transition marker so the next node has explicit context.
-                agentCtx.History.Add(new ChatMessage(ChatRole.User,
-                    $"[fuseraft: {displayKeyword} → {nextStart} — new phase. {nextStart}: continue from where you left off.]"));
+                // When a rejection keyword (REVISION REQUIRED, BUGS FOUND, etc.) drives the
+                // transition, also embed the prior agent's last diagnostic content so the
+                // incoming agent knows WHAT was rejected even after context compression strips
+                // earlier turns from its visible window.
+                var rejectionContext = ExtractLastAgentFeedback(agentCtx.History, maxChars: 700);
+                var phaseTransitionText = rejectionContext is not null
+                    ? $"[fuseraft: {displayKeyword} → {nextStart} — new phase]\n\n" +
+                      $"Feedback from prior phase:\n{rejectionContext}\n\n" +
+                      $"{nextStart}: address the above issues before handing off."
+                    : $"[fuseraft: {displayKeyword} → {nextStart} — new phase. {nextStart}: continue from where you left off.]";
+                agentCtx.History.Add(new ChatMessage(ChatRole.User, phaseTransitionText));
 
                 agentCtx.LastKeyword = null; // reset for next phase
                 currentStart         = nextStart;
@@ -1908,7 +1917,13 @@ public sealed class GraphOrchestrator(
                 "testreportvalid"         => config.Validation is not null
                                                  ? new HandoffToReviewerValidator(config.Validation)
                                                  : null,
-                "requirereviewjudgement"  => new RequireReviewJudgementValidator(),
+                "requirereviewjudgement"  => new RequireReviewJudgementValidator(
+                                                 config.Validation?.BriefPath),
+                "requireacceptancecriteriapassed" => config.Validation is not null
+                                                 ? new RequireAcceptanceCriteriaPassedValidator(
+                                                       config.Validation.BriefPath,
+                                                       config.Validation.ChangeLogPath)
+                                                 : null,
                 "requirerelatedtestspass" => config.TestSelector is not null
                                                  ? new RequireRelatedTestsPassValidator(
                                                        config.TestSelector,
@@ -2126,6 +2141,71 @@ public sealed class GraphOrchestrator(
 
         // Priority 4: configured entry node.
         return defaultEntryNode;
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase-transition helpers
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Scans backward through <paramref name="history"/> to find the last assistant
+    /// text message and returns a truncated excerpt to embed in the phase-transition
+    /// injection, giving the incoming agent concrete context about what was rejected.
+    /// Strips trailing routing keywords so only the diagnostic content survives.
+    /// Returns null when no meaningful content is found.
+    /// </summary>
+    private static string? ExtractLastAgentFeedback(List<ChatMessage> history, int maxChars)
+    {
+        for (int i = history.Count - 1; i >= 0; i--)
+        {
+            if (history[i].Role != ChatRole.Assistant) continue;
+
+            var text = history[i].Text;
+            if (string.IsNullOrWhiteSpace(text)) continue;
+
+            // Strip trailing routing keyword lines (REVISION REQUIRED, APPROVED, etc.)
+            // so the injection contains only the diagnostic reasoning, not the signal.
+            var lines = text.Split('\n');
+            var lastContent = lines
+                .Reverse()
+                .SkipWhile(l => string.IsNullOrWhiteSpace(l) ||
+                                CorrectionEngine.PhaseBreakKeywords.Contains(l.Trim()))
+                .Reverse()
+                .ToList();
+
+            if (lastContent.Count == 0) continue;
+
+            var content = string.Join('\n', lastContent).Trim();
+            if (string.IsNullOrWhiteSpace(content)) continue;
+
+            // Strip JSON review blocks — they're structural, not human-readable feedback.
+            // Keep only lines outside of ``` fences.
+            var stripped = StripCodeFences(content).Trim();
+            if (string.IsNullOrWhiteSpace(stripped)) stripped = content;
+
+            return stripped.Length > maxChars
+                ? stripped[..maxChars].TrimEnd() + "…"
+                : stripped;
+        }
+
+        return null;
+    }
+
+    // Removes ``` code-fenced blocks from a string, keeping surrounding prose.
+    private static string StripCodeFences(string text)
+    {
+        var sb   = new System.Text.StringBuilder();
+        bool in_ = false;
+        foreach (var line in text.Split('\n'))
+        {
+            if (line.TrimStart().StartsWith("```", StringComparison.Ordinal))
+            {
+                in_ = !in_;
+                continue;
+            }
+            if (!in_) sb.AppendLine(line);
+        }
+        return sb.ToString();
     }
 
     // -------------------------------------------------------------------------

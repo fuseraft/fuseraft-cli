@@ -17,6 +17,9 @@ Each agent turn
 History too long
   └─ Layer 4: Compaction         → replace old turns with a summary
   └─ Layer 5: Context Budget     → token-based compaction trigger per agent
+
+After each run
+  └─ Visualization               → HTML chart of cumulative input tokens per agent
 ```
 
 Each layer is optional and independently configured. Most sessions need only one or two.
@@ -374,6 +377,38 @@ See [Configuration — Context budget](configuration.md#context-budget) for the 
 
 ---
 
+## Context window visualization
+
+After every `fuseraft run`, fuseraft automatically writes a Chart.js HTML file that shows
+how each agent's cumulative input token count grew turn by turn.
+
+**Files written to `.fuseraft/logs/`:**
+
+| File | Contents |
+|------|----------|
+| `ctx_snapshots_{sessionId}.jsonl` | Raw per-turn snapshots (one JSON line per turn) |
+| `ctx_viz_{sessionId}.html` | Self-contained Chart.js visualization |
+
+The path to the HTML file is printed at the end of the run:
+
+```
+Context viz → .fuseraft/logs/ctx_viz_abc123.html
+```
+
+Open the file in a browser. It requires internet access for the Chart.js CDN.
+
+**What the chart shows:**
+
+- One line per agent — cumulative input tokens on the Y axis, turn number on the X axis.
+- **Compaction events** appear as vertical dashed grey lines labelled `⚡ compact`.
+- **`warn_at` threshold** appears as a horizontal dashed yellow line (when `ContextBudget.WarnAt` is set).
+- **`cutover_at` threshold** appears as a horizontal dashed red line (when `ContextBudget.CutoverAt` is set).
+- Hovering a point shows the turn's per-turn input and output token counts alongside the cumulative total.
+
+**Why it's useful:** Visual inspection quickly reveals which agent is consuming the most context, whether compaction is firing at the right threshold, and whether any single turn caused a spike that warrants `TextOnly` or `MaxTurnAge` tuning on that agent.
+
+---
+
 ## How the layers fit together
 
 Here is the full sequence from session start through a long-running session:
@@ -402,6 +437,9 @@ Here is the full sequence from session start through a long-running session:
       └─ (ContextBudget) any agent's cumulative input tokens ≥ CutoverAt?
             YES → compact (same as turn-count trigger)
                   reset per-agent token counters → continue
+
+4. After run completes
+   └─ Context window visualization rendered to .fuseraft/logs/ctx_viz_{sessionId}.html
 ```
 
 ---

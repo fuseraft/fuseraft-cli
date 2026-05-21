@@ -38,7 +38,8 @@ public sealed class SessionRunner(
     DevUIServer? devUI = null,
     string? configPath = null,
     int maxIterations = 0,
-    ContextBudgetConfig? contextBudget = null)
+    ContextBudgetConfig? contextBudget = null,
+    ContextWindowRecorder? contextWindowRecorder = null)
 {
     private int _assistantTurnCount;
     private readonly Dictionary<string, int> _perAgentCumulativeInputTokens = new(StringComparer.OrdinalIgnoreCase);
@@ -219,6 +220,8 @@ public sealed class SessionRunner(
                     // Reset per-agent budget counters so the next stream window starts clean.
                     _perAgentCumulativeInputTokens.Clear();
                     _warnedAgents.Clear();
+                    if (contextWindowRecorder is not null)
+                        await contextWindowRecorder.RecordCompactionAsync(_assistantTurnCount);
                 }
                 catch (OperationCanceledException)
                 {
@@ -535,37 +538,51 @@ public sealed class SessionRunner(
         if (compactor?.ShouldCompact(_assistantTurnCount) == true)
             return true;
 
-        // Per-agent context budget: accumulate input tokens and check warn/cutover thresholds.
-        if (contextBudget is not null && msg.Usage?.InputTokens is > 0 and var inputToks)
+        // Always accumulate per-agent cumulative input tokens — needed for both budget
+        // enforcement and context window recording even when no budget is configured.
+        if (msg.Usage?.InputTokens is > 0 and var inputToks)
         {
             var agentName = msg.AgentName ?? "Unknown";
             _perAgentCumulativeInputTokens[agentName] =
                 _perAgentCumulativeInputTokens.GetValueOrDefault(agentName) + inputToks;
             var cumulative = _perAgentCumulativeInputTokens[agentName];
 
-            if (contextBudget.WarnAt > 0 && cumulative >= contextBudget.WarnAt
-                && _warnedAgents.Add(agentName))
-            {
-                AnsiConsole.MarkupLine(
-                    $"[yellow]  ⚠ {Markup.Escape(agentName)} has accumulated {cumulative:N0} cumulative " +
-                    $"input tokens (warn_at: {contextBudget.WarnAt:N0}). " +
-                    $"Context rot risk — compaction will trigger at {contextBudget.CutoverAt:N0} tokens.[/]");
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("context_budget_warn",
-                        agent: agentName,
-                        payload: new { cumulative_input_tokens = cumulative, warn_at = contextBudget.WarnAt, cutover_at = contextBudget.CutoverAt });
-            }
+            if (contextWindowRecorder is not null)
+                await contextWindowRecorder.RecordAsync(
+                    agentName:             agentName,
+                    turn:                  msg.TurnIndex,
+                    turnInputTokens:       inputToks,
+                    turnOutputTokens:      msg.Usage.OutputTokens,
+                    cumulativeInputTokens: cumulative,
+                    warnAt:                contextBudget?.WarnAt,
+                    cutoverAt:             contextBudget?.CutoverAt);
 
-            if (contextBudget.CutoverAt > 0 && cumulative >= contextBudget.CutoverAt)
+            if (contextBudget is not null)
             {
-                AnsiConsole.MarkupLine(
-                    $"[yellow]  ⚡ {Markup.Escape(agentName)} reached context budget cutover " +
-                    $"({cumulative:N0} ≥ {contextBudget.CutoverAt:N0} input tokens). Compacting history...[/]");
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("context_budget_cutover",
-                        agent: agentName,
-                        payload: new { cumulative_input_tokens = cumulative, cutover_at = contextBudget.CutoverAt });
-                return true;
+                if (contextBudget.WarnAt > 0 && cumulative >= contextBudget.WarnAt
+                    && _warnedAgents.Add(agentName))
+                {
+                    AnsiConsole.MarkupLine(
+                        $"[yellow]  ⚠ {Markup.Escape(agentName)} has accumulated {cumulative:N0} cumulative " +
+                        $"input tokens (warn_at: {contextBudget.WarnAt:N0}). " +
+                        $"Context rot risk — compaction will trigger at {contextBudget.CutoverAt:N0} tokens.[/]");
+                    if (eventEmitter is not null)
+                        await eventEmitter.EmitAsync("context_budget_warn",
+                            agent: agentName,
+                            payload: new { cumulative_input_tokens = cumulative, warn_at = contextBudget.WarnAt, cutover_at = contextBudget.CutoverAt });
+                }
+
+                if (contextBudget.CutoverAt > 0 && cumulative >= contextBudget.CutoverAt)
+                {
+                    AnsiConsole.MarkupLine(
+                        $"[yellow]  ⚡ {Markup.Escape(agentName)} reached context budget cutover " +
+                        $"({cumulative:N0} ≥ {contextBudget.CutoverAt:N0} input tokens). Compacting history...[/]");
+                    if (eventEmitter is not null)
+                        await eventEmitter.EmitAsync("context_budget_cutover",
+                            agent: agentName,
+                            payload: new { cumulative_input_tokens = cumulative, cutover_at = contextBudget.CutoverAt });
+                    return true;
+                }
             }
         }
 
