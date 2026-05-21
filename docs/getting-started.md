@@ -154,6 +154,7 @@ This checks field types, agent names, strategy references, and plugin names with
 ## Next steps
 
 - Edit `.fuseraft/config/orchestration.yaml` to change agent instructions, models, or plugins
+- Read [Writing Effective Tasks](writing-tasks.md) to learn how to write task descriptions that produce correct, verifiable results
 - Read [Configuration](configuration.md) for the complete schema reference
 - Read [Plugins](plugins.md) for every tool agents can call
 - Read [Examples](examples.md) for ready-to-use team configs
