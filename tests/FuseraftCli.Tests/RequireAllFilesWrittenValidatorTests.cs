@@ -363,16 +363,18 @@ public sealed class RequireAllFilesWrittenValidatorTests : IDisposable
     }
 
     [Fact]
-    public async Task PreExistingFile_NotWrittenThisSession_Passes()
+    public async Task PreExistingFile_NotWrittenThisSession_Fails()
     {
-        // File already exists on disk from a prior session; not touched this session → must pass.
+        // Listing a file in files_to_change is a promise to modify it.
+        // A pre-existing file not written this session must fail even though it exists on disk.
         var existingFile = Path.Combine(_dir, "existing.go");
         await File.WriteAllTextAsync(existingFile, "package main");
         await WriteBrief(existingFile);
 
         var outcome = await Validator().ValidateAsync([UserMsg()]);
 
-        Assert.True(outcome.IsValid);
+        Assert.False(outcome.IsValid);
+        Assert.Contains(NormalizePath(existingFile), outcome.ErrorMessage!);
     }
 
     [Fact]
@@ -390,11 +392,11 @@ public sealed class RequireAllFilesWrittenValidatorTests : IDisposable
     }
 
     [Fact]
-    public async Task Mixed_NewFileMissing_PreExistingNotWritten_FailsOnlyForNewFile()
+    public async Task Mixed_NewFileMissing_PreExistingNotWritten_BothFail()
     {
-        // Brief lists two files:
-        //   - brand_new.go: does not exist on disk, not written → must appear in error
-        //   - pre_existing.go: exists on disk, not written → must NOT appear in error
+        // Brief lists two files, neither written this session:
+        //   - brand_new.go: does not exist on disk → must appear in error
+        //   - pre_existing.go: exists on disk but not written → must also appear in error
         var newFile      = Path.Combine(_dir, "brand_new.go");
         var existingFile = Path.Combine(_dir, "pre_existing.go");
         await File.WriteAllTextAsync(existingFile, "package main");
@@ -404,7 +406,7 @@ public sealed class RequireAllFilesWrittenValidatorTests : IDisposable
 
         Assert.False(outcome.IsValid);
         Assert.Contains(NormalizePath(newFile),      outcome.ErrorMessage!);
-        Assert.DoesNotContain(NormalizePath(existingFile), outcome.ErrorMessage!);
+        Assert.Contains(NormalizePath(existingFile), outcome.ErrorMessage!);
     }
 
     [Fact]

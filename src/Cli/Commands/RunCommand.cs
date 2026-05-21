@@ -306,6 +306,12 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             ConfigPath = configPath
         };
 
+        // Set up the context window recorder — appends per-turn snapshots for post-run visualization.
+        var ctxSnapshotsPath = Path.Combine(fuseraft.Core.FuseraftPaths.LocalLogs,
+            $"ctx_snapshots_{checkpoint.SessionId}.jsonl");
+        using var ctxRecorder = new fuseraft.Orchestration.ContextWindowRecorder(ctxSnapshotsPath);
+        ctxRecorder.SetSessionId(checkpoint.SessionId);
+
         // Stamp the session ID on the change tracker so check 8 in TestReportValid filters
         // to only commands recorded in this session, preventing prior-session contamination.
         if (changeTracker is not null)
@@ -370,7 +376,8 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             orchestrator, compactor, activeStore, approvalService,
             eventEmitter, telemetry, modelIdByAgent, devUI, configPath,
             maxIterations: config.Termination?.ResolveMaxIterations() ?? 0,
-            contextBudget: config.ContextBudget);
+            contextBudget: config.ContextBudget,
+            contextWindowRecorder: ctxRecorder);
 
         var result = await runner.RunAsync(task, checkpoint, settings.HumanInTheLoop, settings.ShowTools, cts.Token);
 
@@ -399,6 +406,12 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
                 AnsiConsole.MarkupLine($"[dim yellow]Skill curation failed:[/] {Markup.Escape(ex.Message)}");
             }
         }
+
+        // Context window visualization — render after the run so all snapshot data is flushed.
+        var ctxVizPath = Path.Combine(fuseraft.Core.FuseraftPaths.LocalLogs,
+            $"ctx_viz_{checkpoint.SessionId}.html");
+        if (await fuseraft.Cli.Display.ContextWindowRenderer.RenderAsync(ctxSnapshotsPath, ctxVizPath, checkpoint.SessionId))
+            AnsiConsole.MarkupLine($"[dim]Context viz → {Markup.Escape(ctxVizPath)}[/]");
 
         // Summary
         MessageRenderer.RenderSummary(result.Messages, result.Succeeded, result.Elapsed, result.ErrorMessage);

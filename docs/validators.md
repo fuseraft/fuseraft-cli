@@ -208,6 +208,17 @@ are NOT saved to disk — you must call the tool.
 
 This closes the loophole where a Developer writes a single helper file to satisfy `RequireWriteFile` while leaving the important implementation files unwritten.
 
+**`files_to_change` format:** Both plain strings and objects are supported:
+
+```json
+"files_to_change": [
+  "src/api/users.py",
+  { "path": "tests/test_users.py", "reason": "Add pagination tests" }
+]
+```
+
+The validator extracts the path from both forms automatically.
+
 **Two sources are checked:**
 
 1. **Current turn** — scans `Role=Tool` messages backward to the most recent user message, collecting the `path` argument of each successful `write_file` call (matched via `FunctionCallContent.Id` / `FunctionResultContent.CallId`).
@@ -215,7 +226,21 @@ This closes the loophole where a Developer writes a single helper file to satisf
 
 **Passes if:** Every path in `brief.json`'s `files_to_change` is covered by at least one source.
 
-**Fails if:** One or more required files have not been written, with each missing path listed in the error.
+**Fails if:** One or more required files have not been written, with each missing path listed in the error and two remediation options:
+
+```
+Handoff blocked: these files from brief.json were not written this session:
+
+  ✗ src/api/users.py
+  ✗ tests/test_users.py
+
+To resolve, either:
+  A. Modify each missing file with write_file or patch_file.
+  B. If a file does not actually need changes, update brief.json to remove it
+     from files_to_change, then retry the handoff.
+```
+
+> **Important:** Every file listed in `files_to_change` must be written this session — including files that already exist on disk. Listing a file in `files_to_change` is a commitment to modify it. If the file turns out not to need changes, remove it from the brief rather than leaving it unwritten.
 
 **Path matching** is case-insensitive and normalises leading `./` so `./src/main.go` and `src/main.go` are treated as the same file. Absolute/relative mismatches (e.g. `/project/src/main.go` vs `src/main.go`) are handled via suffix matching.
 
@@ -410,11 +435,16 @@ Commands recorded in changes.json for this session:
 
 **Used on:** The `APPROVED` route in `Selection.Routes` (blocks session completion until the Reviewer has produced a structured per-criterion judgement)
 
-**What it checks:** Scans the Reviewer's last assistant message in the current turn for a `{"review":[...]}` JSON block. The block may appear inside a ` ```json ``` ` code fence (preferred) or as a bare JSON object anywhere in the message.
+**What it checks:** Scans the Reviewer's last assistant message in the current turn for a `{"review":[...]}` JSON block and enforces four rules:
 
-**Passes if:** The message contains a `review` array with at least one entry where `criterion`, `verdict`, and `evidence` are all non-empty.
+1. The block exists and has at least one entry with non-empty `criterion`, `verdict`, and `evidence`.
+2. No entry has `verdict: FAIL` — a FAIL means the change is incomplete and must be routed back.
+3. When `Validation.BriefPath` is set, the review must have at least as many entries as the brief's `acceptance_criteria` array — every criterion must be explicitly addressed.
+4. When any entry has `verdict: PASS`, at least one successful `shell_run` must have been called this turn — code inspection alone is not sufficient to claim PASS.
 
-**Fails if:** No matching JSON block is found, the `review` array is empty, or every entry is missing at least one required field.
+**Passes if:** All four rules are satisfied.
+
+**Fails with a specific error for each rule.**
 
 ### Expected format
 
@@ -429,43 +459,160 @@ The Reviewer should emit the block inside a ` ```json ``` ` fence before writing
 }
 ```
 
-`verdict` must be `PASS` or `FAIL`. Every acceptance criterion from the brief should appear as an entry.
+`verdict` must be `PASS` or `FAIL`. Every acceptance criterion from the brief must appear as an entry when `Validation.BriefPath` is configured.
 
-**Error injected on failure:**
+**Errors injected on failure:**
 
+*No review block:*
 ```
 APPROVED blocked: response has no structured review block.
 
 Add a ```json block before APPROVED:
-
-```json
 { "review": [{ "criterion": "...", "verdict": "PASS", "evidence": "..." }] }
-```
 
 Cover every acceptance criterion. Use PASS or FAIL. Then write APPROVED on its own line.
 ```
 
-Every acceptance criterion from the brief must appear as an entry.
-Use verdict PASS or FAIL. Then write APPROVED on its own line.
+*FAIL verdict present:*
+```
+APPROVED blocked: review contains FAIL verdict(s).
+
+Fix the failing criteria before writing APPROVED, or route
+REVISION REQUIRED so the developer can address them.
+
+Failing:
+  ✗ <criterion text>
 ```
 
-**Typical config (combined with `RequireShellPass`):**
+*Coverage gap (when BriefPath is set):*
+```
+APPROVED blocked: the review covers 2 criterion/criteria but brief.json lists 4.
+
+Add one review entry per acceptance criterion — every criterion must be explicitly
+addressed with its own verdict and evidence.
+```
+
+*No shell run for PASS verdict:*
+```
+APPROVED blocked: review contains PASS verdicts but no shell command was
+successfully run this turn.
+
+Code inspection alone is not sufficient — the Reviewer must execute something
+to confirm behavioral correctness:
+
+  1. Run a verification command with shell_run:
+       • Build:  shell_run("dotnet build") / etc.
+       • Tests:  shell_run("dotnet test") / etc.
+       • Run-it: shell_run("kiwi test.ki") or equivalent.
+  2. Update 'evidence' fields to describe what you ran and what you observed.
+  3. Re-emit the ```json review block followed by APPROVED on its own line.
+```
+
+**Typical config (combined with `RequireShellPass` and `BriefPath`):**
 
 ```yaml
-- Keyword: APPROVED
-  Agent: Reviewer
-  Validators:
-    - RequireShellPass
-    - RequireReviewJudgement
-  SourceAgents:
-    - Reviewer
+Validation:
+  BriefPath: .fuseraft/brief.json
+
+Selection:
+  Type: keyword
+  Routes:
+    - Keyword: APPROVED
+      Agent: Reviewer
+      Validators:
+        - RequireShellPass
+        - RequireReviewJudgement
+      SourceAgents:
+        - Reviewer
 ```
 
-Both validators must pass. `RequireShellPass` ensures the Reviewer ran a real shell command. `RequireReviewJudgement` ensures the Reviewer produced a structured per-criterion verdict. The session ends only when both checks pass.
+`RequireShellPass` and the shell-run check in `RequireReviewJudgement` are complementary: `RequireShellPass` blocks the route if *no* shell command ran at all; `RequireReviewJudgement`'s inner check additionally requires a shell run specifically when the review claims PASS verdicts. Setting `Validation.BriefPath` activates coverage enforcement.
 
-> **Note:** `APPROVED` must be declared in `Selection.Routes` (as above) for the routing engine to recognize it when the Reviewer emits it. Adding it only to `Termination.Strategies` is insufficient — route ownership is read exclusively from `Selection.Routes`.
+> **Note:** `APPROVED` must be declared in `Selection.Routes` for the routing engine to recognize it. Adding it only to `Termination.Strategies` is insufficient — route ownership is read exclusively from `Selection.Routes`.
 
-> **Note:** `RequireReviewJudgement` does not require the `Validation` section — it inspects the conversation history directly.
+> **Note:** When `Validation.BriefPath` is omitted, the coverage check is skipped. The other three checks always run.
+
+---
+
+## RequireAcceptanceCriteriaPassedValidator
+
+**Used on:** The `developer → reviewer` handoff edge, and optionally the `reviewer → approved` edge for defence in depth.
+
+**What it checks:** Reads `brief.json` from `Validation.BriefPath` and finds every acceptance criterion that has an `expected_output_contains` field. For each such criterion, it scans the session's shell history in `changes.json` (filtered to the current `ActiveSessionId`) and verifies that at least one successful command produced output containing that sentinel string. Criteria without `expected_output_contains` are skipped — they remain subject to the Reviewer's judgement.
+
+**Passes if:** Every machine-testable criterion has been satisfied by a real command run that produced the expected output.
+
+**Fails if:** Any testable criterion has no matching successful command output this session.
+
+### Testable criterion format
+
+Write acceptance criteria as objects with `expected_output_contains` to make them machine-verifiable:
+
+```json
+"acceptance_criteria": [
+  {
+    "criterion": "x = include 'lib/math'; x.sqrt(16) prints 4.0",
+    "test_command": "kiwi test_include.ki",
+    "expected_output_contains": "4.0"
+  },
+  {
+    "criterion": "build.sh succeeds",
+    "test_command": "./build.sh",
+    "expected_output_contains": "BUILD SUCCEEDED"
+  }
+]
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `criterion` | yes | Human-readable description of the expected behavior. |
+| `expected_output_contains` | yes (to be machine-testable) | Sentinel string that must appear in a successful command's output. Case-insensitive. |
+| `test_command` | no | The command the Developer should run. Shown in the error message when the criterion is unsatisfied. Not executed by the validator itself. |
+
+Plain-string criteria and object criteria without `expected_output_contains` are ignored by this validator.
+
+**Error injected on failure:**
+
+```
+Handoff blocked: the following acceptance criteria have not been verified by a passing shell command this session:
+
+  ✗ x = include 'lib/math'; x.sqrt(16) prints 4.0
+    Run: kiwi test_include.ki
+    Expected in output: "4.0"
+
+Run the indicated command(s), confirm the expected output appears, then retry the handoff.
+```
+
+**Example route config:**
+
+```yaml
+Validation:
+  BriefPath:     .fuseraft/brief.json
+  ChangeLogPath: .fuseraft/changes.json
+
+Selection:
+  Type: keyword
+  Routes:
+    - Keyword: "HANDOFF TO REVIEWER"
+      Agent: Reviewer
+      Validators:
+        - RequireAllFilesWritten
+        - RequireAcceptanceCriteriaPassedValidator
+      SourceAgents:
+        - Developer
+    - Keyword: APPROVED
+      Agent: Reviewer
+      Validators:
+        - RequireShellPass
+        - RequireReviewJudgement
+        - RequireAcceptanceCriteriaPassedValidator  # defence in depth
+      SourceAgents:
+        - Reviewer
+```
+
+> **Note:** `RequireAcceptanceCriteriaPassedValidator` requires `Validation.BriefPath` to be set (it reads acceptance criteria from the brief). `Validation.ChangeLogPath` is required to read command outputs from the session history — without it the validator passes immediately (nothing to check against).
+
+**Relationship to `RequireReviewJudgement`:** `RequireReviewJudgement` checks that the Reviewer wrote a structured verdict block. `RequireAcceptanceCriteriaPassedValidator` checks that the Developer (or the Reviewer) actually *ran* commands whose output matched the brief's sentinels. Use both together for maximum coverage: the former enforces a structured narrative review; the latter enforces that the feature was mechanically verified.
 
 ---
 
