@@ -242,6 +242,11 @@ public static partial class InitTemplates
                     AgentNames: [Reviewer]
                   - Type: maxiterations
                     MaxIterations: 60
+
+              Compaction:
+                TriggerTurnCount: 30
+                KeepRecentTurns: 8
+                Mode: lossless
             """;
 
         return new GeneratedConfig(mainConfig, [
