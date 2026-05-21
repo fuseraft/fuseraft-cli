@@ -117,11 +117,10 @@ public static partial class InitTemplates
           #   TriggerOnSuspiciousTransition: true
           #   FindingsKeyword: INCONSISTENCY
 
-          # Compaction: summarise old turns to prevent context-window overflow.
-          # Compaction:
-          #   TriggerTurnCount: 30
-          #   KeepRecentTurns: 8
-          #   Mode: lossless    # or "hybrid" (reconstruction + LLM narrative), "llm" (default)
+          Compaction:
+            TriggerTurnCount: 30
+            KeepRecentTurns: 8
+            Mode: lossless
 
           # Checkpoint: save and resume sessions across restarts.
           # Checkpoint:

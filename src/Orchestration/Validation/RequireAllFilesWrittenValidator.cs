@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.AI;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
@@ -40,10 +41,12 @@ public sealed class RequireAllFilesWrittenValidator(
         }
 
         // 3. Collect required file paths from brief.
-        var required = brief?.FilesToChange?
+        // files_to_change can be either plain strings ["src/foo.cs"] or objects
+        // [{"path": "src/foo.cs", "reason": "..."}] — extract paths from both forms.
+        var required = ExtractFilePaths(brief?.FilesToChangeRaw)
             .Where(p => !string.IsNullOrWhiteSpace(p))
             .Select(p => PathHelpers.NormalizePath(p!))
-            .ToList() ?? [];
+            .ToList();
 
         // Nothing to check — pass immediately.
         if (required.Count == 0)
@@ -71,9 +74,13 @@ public sealed class RequireAllFilesWrittenValidator(
             allWritten = writtenThisTurn.ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
 
+        // Every file listed in files_to_change must appear in the session write log —
+        // regardless of whether it pre-existed on disk.  Listing a file in files_to_change
+        // is a promise that it will be modified; the !File.Exists exemption that was here
+        // before silently passed all brownfield files, making the validator a no-op for the
+        // most common use case.
         var missing = required
             .Where(req => !allWritten.Any(w => PathHelpers.PathsMatch(w, req)))
-            .Where(req => !File.Exists(req))      // pre-existing files are not the validator's concern
             .ToList();
 
         if (missing.Count == 0)
@@ -86,7 +93,11 @@ public sealed class RequireAllFilesWrittenValidator(
         return RoutingValidationResult.Fail(
             "Handoff blocked: these files from brief.json were not written this session:\n\n" +
             string.Join("\n", missing.Select(f => $"  ✗ {f}")) +
-            "\n\nCreate them with write_file. Written this session:\n" +
+            "\n\nTo resolve, either:\n" +
+            "  A. Modify each missing file with write_file or patch_file.\n" +
+            "  B. If a file does not actually need changes, update brief.json to remove it\n" +
+            "     from files_to_change, then retry the handoff.\n\n" +
+            "Written this session:\n" +
             writtenList);
     }
 
@@ -199,6 +210,25 @@ public sealed class RequireAllFilesWrittenValidator(
         return null;
     }
 
+    // Handles both plain-string and object-with-path forms of files_to_change.
+    private static IEnumerable<string> ExtractFilePaths(JsonNode? node)
+    {
+        if (node is not JsonArray arr) yield break;
+        foreach (var item in arr)
+        {
+            if (item is JsonValue v && v.TryGetValue<string>(out var s) && s is not null)
+            {
+                yield return s;
+            }
+            else if (item is JsonObject obj &&
+                     obj.TryGetPropertyValue("path", out var pathNode) &&
+                     pathNode?.GetValue<string>() is { } path)
+            {
+                yield return path;
+            }
+        }
+    }
+
 }
 
 // Internal DTOs
@@ -206,5 +236,5 @@ public sealed class RequireAllFilesWrittenValidator(
 internal sealed record AllFilesWrittenBrief
 {
     [JsonPropertyName("files_to_change")]
-    public List<string>? FilesToChange { get; init; }
+    public JsonNode? FilesToChangeRaw { get; init; }
 }
