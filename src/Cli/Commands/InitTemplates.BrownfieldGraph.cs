@@ -101,23 +101,27 @@ public static partial class InitTemplates
 
         var reviewer = $"""
             Name: Reviewer
-            Description: Code-review-only inspection; routes to Developer, Planner, or final approval.
+            Description: Verifies the change via code inspection and runtime execution; routes to Developer, Planner, or final approval.
             Instructions: |
               You are a principal engineer reviewing a change to an existing codebase. Your job is to:
               1. Read each file listed in {FuseraftPaths.LocalBrief} under files_to_change.
-              2. Verify every acceptance criterion is satisfied by code inspection.
+              2. Inspect the code against every acceptance criterion.
               3. Check that the change follows conventions from {FuseraftPaths.LocalConventions}.
               4. Confirm no files outside files_to_change were modified (use changes_read_latest).
-              Do NOT run shell commands — this is a code-inspection-only review.
-              Emit a JSON review block listing each acceptance criterion with verdict (PASS/FAIL)
-              and evidence before your routing keyword.
-              If all criteria pass, call handoff(route_keyword: "APPROVED").
+              5. Run the build command from the convention profile (e.g. shell_run("dotnet build"),
+                 shell_run("cargo build"), shell_run("make"), etc.) to confirm the project compiles.
+              6. Run the test command (e.g. shell_run("dotnet test"), shell_run("cargo test"),
+                 shell_run("pytest"), etc.) to confirm the test suite passes.
+              Emit a JSON review block covering every acceptance criterion with verdict (PASS/FAIL)
+              and evidence — including what you ran and what you observed — before your routing keyword.
+              If all criteria pass and the tests pass, call handoff(route_keyword: "APPROVED").
               If targeted fixes are needed, call handoff(route_keyword: "REVISION REQUIRED") and describe what to fix.
               If the approach itself is wrong and the brief needs rethinking, call handoff(route_keyword: "REPLAN REQUIRED").
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
               - FileSystem
+              - Shell
               - Changes
               - Handoff
             FunctionChoice: auto
@@ -272,10 +276,10 @@ public static partial class InitTemplates
               #     Action: Abort
               #     Threshold: 3
 
-              # Compaction:
-              #   TriggerTurnCount: 30
-              #   KeepRecentTurns: 8
-              #   Mode: lossless
+              Compaction:
+                TriggerTurnCount: 30
+                KeepRecentTurns: 8
+                Mode: lossless
 
               # ContextBudget: per-agent cumulative input-token thresholds. Warns before
               # context rot sets in, then triggers compaction automatically. Requires Compaction.

@@ -237,10 +237,10 @@ public static partial class InitTemplates
               # Security:
               #   FileSystemSandboxPath: ~/my-project
 
-              # Compaction:
-              #   TriggerTurnCount: 30
-              #   KeepRecentTurns: 8
-              #   Mode: lossless
+              Compaction:
+                TriggerTurnCount: 30
+                KeepRecentTurns: 8
+                Mode: lossless
 
               # ContextBudget: per-agent cumulative input-token thresholds. Warns before
               # context rot sets in, then triggers compaction automatically. Requires Compaction.
