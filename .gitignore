@@ -46,3 +46,10 @@ analyze.kiwi
 PLAN.md
 DEBUGGING.md
 *.lscache
+
+# fuseraft runtime artifacts — config/ and context/ remain tracked
+.fuseraft/*
+!.fuseraft/config/
+!.fuseraft/config/**
+!.fuseraft/context/
+!.fuseraft/context/**
