@@ -15,11 +15,11 @@ internal static class ReplCommands
         switch (command)
         {
             case "/exit":       return CommandResult.Exit;
-            case "/help":       PrintHelp(); return CommandResult.Continue;
+            case "/help":       PrintHelp(ctx.JsonMode); return CommandResult.Continue;
             case "/clear":      return await CmdClearAsync(ctx);
             case "/system":     return CmdSystem(ctx, arg);
             case "/tools":      return await CmdToolsAsync(ctx, arg);
-            case "/paste":      return CmdPaste();
+            case "/paste":      return CmdPaste(ctx.JsonMode);
             case "/save":       return await CmdSaveAsync(ctx, arg);
             case "/history":    CmdHistory(ctx); return CommandResult.Continue;
             case "/context":    await CmdContextAsync(ctx); return CommandResult.Continue;
@@ -150,8 +150,16 @@ internal static class ReplCommands
         return CommandResult.Continue;
     }
 
-    private static CommandResult CmdPaste()
+    private static CommandResult CmdPaste(bool jsonMode)
     {
+        if (jsonMode)
+        {
+            // Paste mode reads raw stdin lines which would corrupt the JSONL bridge.
+            // The VS Code panel textarea already supports Shift+Enter for multi-line input.
+            Console.WriteLine("Paste mode is not available in the VS Code panel.\n\nUse **Shift+Enter** in the input box to enter multi-line messages.");
+            return CommandResult.Continue;
+        }
+
         AnsiConsole.MarkupLine("[dim]Paste your content below. Type[/] [bold]EOF[/] [dim]on its own line when done.[/]");
         var lines = new List<string>();
         while (true)
@@ -206,10 +214,58 @@ internal static class ReplCommands
         var toolTok  = active.Sum(t => t.JsonSchema.GetRawText().Length / 4);
         var total    = sysTok + userTok + asstTok + toolTok;
         var pct      = (double)total / ReplTurn.ContextTokenBudget * 100;
+
+        if (ctx.JsonMode)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("## Context Usage\n");
+            var deltaNote = ctx.PrevCtxEstimate > 0
+                ? (total - ctx.PrevCtxEstimate is var d and >= 0
+                    ? $" *(+{d:N0} since last check)*"
+                    : $" *({total - ctx.PrevCtxEstimate:N0} since last check)*")
+                : string.Empty;
+            sb.AppendLine($"**~{total:N0} / {ReplTurn.ContextTokenBudget:N0} tokens** — {pct:F1}%{deltaNote}");
+            sb.AppendLine();
+            sb.AppendLine($"**{ctx.TurnIndex} turn{(ctx.TurnIndex != 1 ? "s" : "")}** " +
+                $"({ctx.History.Count} messages — " +
+                $"system: {ctx.History.Count(m => m.Role == ChatRole.System)}, " +
+                $"user: {ctx.History.Count(m => m.Role == ChatRole.User)}, " +
+                $"assistant: {ctx.History.Count(m => m.Role == ChatRole.Assistant)})");
+            sb.AppendLine();
+            sb.AppendLine("**Breakdown**");
+            if (sysTok > 0)
+                sb.AppendLine($"- System prompt: {sysTok:N0} tok ({(double)sysTok / total * 100:F1}%)");
+            if (active.Count > 0)
+                sb.AppendLine($"- Tools ({active.Count}): {toolTok:N0} tok ({(double)toolTok / total * 100:F1}%) *(per request)*");
+            sb.AppendLine($"- User messages: {userTok:N0} tok ({(double)userTok / total * 100:F1}%)");
+            sb.AppendLine($"- Assistant messages: {asstTok:N0} tok ({(double)asstTok / total * 100:F1}%)");
+            if (ctx.TurnTokenDeltas.Count >= 1)
+            {
+                var avg = (int)Math.Round(ctx.TurnTokenDeltas.Average());
+                if (avg > 0)
+                {
+                    var proj = (ReplTurn.ContextTokenBudget - total) / avg;
+                    sb.AppendLine();
+                    sb.AppendLine($"*~{proj:N0} turns remaining (avg +{avg:N0} tok/turn)*");
+                }
+            }
+            Console.Write(sb.ToString());
+            ctx.PrevCtxEstimate = total;
+            await ctx.Emitter.EmitAsync("command", payload: new
+            {
+                command = "/context",
+                estimated_tokens = total,
+                token_budget = ReplTurn.ContextTokenBudget,
+                turns = ctx.TurnIndex,
+                breakdown = new { system = sysTok, tools = toolTok, user = userTok, assistant = asstTok }
+            });
+            return;
+        }
+
         var bar      = new string('█', (int)(pct / 5)).PadRight(20, '░');
         var deltaStr = ctx.PrevCtxEstimate > 0
-            ? (total - ctx.PrevCtxEstimate is var d and >= 0
-                ? $"  [dim](+{d:N0} since last check)[/]"
+            ? (total - ctx.PrevCtxEstimate is var d2 and >= 0
+                ? $"  [dim](+{d2:N0} since last check)[/]"
                 : $"  [dim]({total - ctx.PrevCtxEstimate:N0} since last check)[/]")
             : string.Empty;
 
@@ -276,6 +332,12 @@ internal static class ReplCommands
             AnsiConsole.MarkupLine($"[yellow]Unknown /provider subcommand:[/] {Markup.Escape(arg)}");
             AnsiConsole.MarkupLine("[dim]Usage: /provider          — show current settings[/]");
             AnsiConsole.MarkupLine("[dim]       /provider setup     — reconfigure provider, model, and API key[/]");
+            return CommandResult.Continue;
+        }
+
+        if (ctx.JsonMode)
+        {
+            Console.WriteLine("Provider setup requires an interactive terminal and is not available in the VS Code panel.\n\nRun **`fuseraft repl`** in a terminal to reconfigure your provider, model, and API key.");
             return CommandResult.Continue;
         }
 
@@ -1023,8 +1085,63 @@ internal static class ReplCommands
     // Display utilities used by command handlers
     // -------------------------------------------------------------------------
 
-    private static void PrintHelp()
+    private static void PrintHelp(bool jsonMode = false)
     {
+        if (jsonMode)
+        {
+            Console.WriteLine("## REPL Commands\n");
+
+            Console.WriteLine("### Session");
+            Console.WriteLine("- `/help` — Show this help");
+            Console.WriteLine("- `/sessions` — List resumable sessions with IDs and turn counts");
+            Console.WriteLine("- `/clear` — Clear conversation history (keeps system prompt)");
+            Console.WriteLine("- `/history` — Show condensed conversation history");
+            Console.WriteLine("- `/assist` — Diagnose the conversation and inject a corrective message");
+            Console.WriteLine("- `/exit` — Exit the REPL (auto-saves memories)\n");
+
+            Console.WriteLine("### Planning");
+            Console.WriteLine("- `/plan <task>` — Create a structured plan (JSON steps, no tool calls)");
+            Console.WriteLine("- `/plan` — Show the current stored plan");
+            Console.WriteLine("- `/execute` — Run each plan step sequentially with postcondition checks");
+            Console.WriteLine("- `/resume` — Retry the halted step and continue remaining steps");
+            Console.WriteLine("- `/recover` — Inject failure context and retry the halted step with agent awareness\n");
+
+            Console.WriteLine("### Tools & modes");
+            Console.WriteLine("- `/tools` — List active tools by category");
+            Console.WriteLine("- `/tools disable <category>` — Disable a tool category (FileSystem Shell Search Git Http)");
+            Console.WriteLine("- `/tools enable <category>` — Re-enable a disabled tool category");
+            Console.WriteLine("- `/safe-mode` — Show safe mode status");
+            Console.WriteLine("- `/safe-mode on` — Disable Shell, Git, Http tools to prevent mutations");
+            Console.WriteLine("- `/safe-mode off` — Restore tool categories");
+            Console.WriteLine("- `/adversarial` — Show adversarial mode status");
+            Console.WriteLine("- `/adversarial on` — Enable critic agent to review each `/execute` step");
+            Console.WriteLine("- `/adversarial off` — Disable critic agent\n");
+
+            Console.WriteLine("### Context & model");
+            Console.WriteLine("- `/context` — Show estimated context window usage and per-category breakdown");
+            Console.WriteLine("- `/compact` — Summarise conversation into a handoff doc and reset history");
+            Console.WriteLine("- `/compact <focus>` — Same, but tailor the summary toward the next session's focus");
+            Console.WriteLine("- `/max-tokens <n>` — Set max output tokens for each response");
+            Console.WriteLine("- `/max-tokens reset` — Restore provider default max output tokens");
+            Console.WriteLine("- `/system` — Show current system prompt");
+            Console.WriteLine("- `/system <prompt>` — Set a new system prompt");
+            Console.WriteLine("- `/provider` — Show current provider, model, and API key\n");
+
+            Console.WriteLine("### Memory");
+            Console.WriteLine("- `/memory` — List all stored memories");
+            Console.WriteLine("- `/memory show <name>` — Show full body of a memory");
+            Console.WriteLine("- `/memory delete <name>` — Delete a stored memory");
+            Console.WriteLine("- `/memory save` — Extract and save memories from the current session now\n");
+
+            Console.WriteLine("### I/O & events");
+            Console.WriteLine("- `/save` — Save transcript to `repl-<id>.md` in the current directory");
+            Console.WriteLine("- `/save <file>` — Save transcript to the specified file");
+            Console.WriteLine("- `/events` — Show session event stats (turns, tool calls, top tools)");
+            Console.WriteLine("- `/explore <query>` — Run a sub-agent exploration loop and return a prose summary");
+            Console.WriteLine("- `/locate <symbol>` — Run a sub-agent symbol lookup; returns `path:line` result");
+            return;
+        }
+
         AnsiConsole.MarkupLine("[bold]REPL commands[/]");
         AnsiConsole.WriteLine();
 
