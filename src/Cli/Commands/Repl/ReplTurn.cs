@@ -13,8 +13,8 @@ internal static class ReplTurn
         ? ["-", "\\", "|", "/"]
         : ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-    internal const int ContextTokenBudget  = 80_000;
-    internal const int StepIterationLimit  = 5;
+    internal const int ContextTokenBudget = 80_000;
+    internal const int StepIterationLimit = 5;
 
     // -------------------------------------------------------------------------
     // REPL loop
@@ -71,9 +71,13 @@ internal static class ReplTurn
                 continue;
             }
 
-            AnsiConsole.Markup(ctx.SafeMode ? "[dim][[safe]][/] [bold cyan]>[/] " : "[bold cyan]>[/] ");
+            var turnLabel = (ctx.TurnIndex + 1).ToString();
+            AnsiConsole.Markup(ctx.SafeMode
+                ? $"[dim][[safe]] {turnLabel}[/][bold cyan]>[/] "
+                : $"[dim]{turnLabel}[/][bold cyan]>[/] ");
+
             string? raw;
-            try   { raw = Console.ReadLine(); }
+            try   { raw = ctx.LineReader.ReadLine(); }
             catch (OperationCanceledException) { break; }
 
             if (raw is null) break;
@@ -135,14 +139,12 @@ internal static class ReplTurn
         var toolRounds        = 0;
         var inToolBatch       = false;
         var textStarted       = false;
-        var toolCallQueue     = new Queue<string>();
-        const int MaxVisible  = 3;
 
-        var reqCts   = new CancellationTokenSource();
+        var reqCts    = new CancellationTokenSource();
         ctx.ActiveCts = reqCts;
-        var spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
-        var spinTask = RunSpinnerAsync(capturePlan ? "planning…" : "thinking…", spinCts.Token);
-        var spinning = true;
+        var spinCts   = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
+        var spinTask  = RunSpinnerAsync(capturePlan ? "planning…" : "thinking…", spinCts.Token);
+        var spinning  = true;
 
         // Cancels and awaits the spinner; caller disposes spinCts.
         async Task StopSpinnerAsync()
@@ -164,31 +166,16 @@ internal static class ReplTurn
                 if (funcCall is not null)
                 {
                     if (!inToolBatch) { toolRounds++; inToolBatch = true; }
-                    await StopSpinnerAsync();
-                    var argSummary = fuseraft.Infrastructure.ToolCallHelper.SummarizeArgs(funcCall.Arguments);
-                    var toolLine   = argSummary is not null
-                        ? $"  > {funcCall.Name}({argSummary})"
-                        : $"  > {funcCall.Name}()";
-                    if (!Console.IsOutputRedirected && toolCallQueue.Count >= MaxVisible)
-                    {
-                        Console.Write($"\x1b[{MaxVisible}A");
-                        toolCallQueue.Dequeue();
-                        toolCallQueue.Enqueue(toolLine);
-                        foreach (var line in toolCallQueue)
-                        {
-                            Console.Write("\x1b[2K\r");
-                            AnsiConsole.MarkupLine($"[dim]{Markup.Escape(line)}[/]");
-                        }
-                    }
-                    else
-                    {
-                        AnsiConsole.MarkupLine($"[dim]{Markup.Escape(toolLine)}[/]");
-                        toolCallQueue.Enqueue(toolLine);
-                    }
                     toolCallsThisTurn.Add(funcCall.Name);
+
+                    // Update spinner label to show the accumulating tool chain live.
+                    var chain = toolCallsThisTurn.Count <= 4
+                        ? string.Join(" → ", toolCallsThisTurn)
+                        : string.Join(" → ", toolCallsThisTurn.TakeLast(4)) +
+                          $" (+{toolCallsThisTurn.Count - 4})";
                     spinCts.Dispose();
                     spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
-                    spinTask = RunSpinnerAsync("conjuring…", spinCts.Token);
+                    spinTask = RunSpinnerAsync($"conjuring…  {chain}", spinCts.Token);
                     spinning = true;
                     continue;
                 }
@@ -204,6 +191,10 @@ internal static class ReplTurn
                     {
                         textStarted = true;
                         await StopSpinnerAsync();
+                        // Print compact tool-call chain before the response starts.
+                        if (toolCallsThisTurn.Count > 0 && !Console.IsOutputRedirected)
+                            AnsiConsole.MarkupLine(
+                                $"  [dim]⚙  {Markup.Escape(string.Join(" → ", toolCallsThisTurn))}[/]");
                     }
                     else if (spinning)
                     {
@@ -212,7 +203,7 @@ internal static class ReplTurn
                     if (!Console.IsOutputRedirected)
                     {
                         var approxTokens = (sb.Length + 3) / 4;
-                        Console.Write($"\r\x1b[2m receiving\u2026 {approxTokens} tokens\x1b[0m  ");
+                        Console.Write($"\r\x1b[2m receiving… {approxTokens} tokens\x1b[0m  ");
                     }
                 }
             }
@@ -299,11 +290,22 @@ internal static class ReplTurn
             ctx.TurnTokenDeltas.Add(postEst - ctx.PrevTurnTokenEstimate);
         ctx.PrevTurnTokenEstimate = postEst;
 
+        // Compact status line after each free-form response.
+        if (!isStepRequest && !capturePlan && responseText.Length > 0 && !Console.IsOutputRedirected)
+        {
+            var toolStr = toolCallsThisTurn.Count > 0
+                ? $" · {toolCallsThisTurn.Count} tool{(toolCallsThisTurn.Count == 1 ? "" : "s")}"
+                : string.Empty;
+            AnsiConsole.MarkupLine(
+                $"[dim]  ── turn {ctx.TurnIndex + 1} · ~{postEst:N0} tok{toolStr}[/]");
+        }
+
         if (TrimHistory(ctx.History))
             AnsiConsole.MarkupLine("[dim]  (old messages trimmed to fit context window)[/]");
 
         if (ctx.Verbose)
-            AnsiConsole.MarkupLine($"[dim]  tokens (est.): {postEst:N0} / {ContextTokenBudget:N0}  tool calls: {toolCallsThisTurn.Count}[/]");
+            AnsiConsole.MarkupLine(
+                $"[dim]  tokens (est.): {postEst:N0} / {ContextTokenBudget:N0}  rounds: {toolRounds}  tool calls: {toolCallsThisTurn.Count}[/]");
 
         foreach (var tool in toolCallsThisTurn)
             await ctx.Emitter.EmitAsync("tool_call", turn: ctx.TurnIndex, payload: new { tool_name = tool });
