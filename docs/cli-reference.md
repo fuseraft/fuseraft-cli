@@ -320,6 +320,7 @@ Use `/tools` to see the full list at runtime.
 | `/execute` | Run each plan step as a separate turn. After each step the REPL verifies postconditions (tool called, artifact created) and halts with a warning if a step fails. |
 | `/resume` | Retry the halted step and continue the remaining steps as-is. Use this after manually fixing the issue. |
 | `/recover` | Inject a failure context hint into the step prompt and retry from the halted step. The agent is told which tool was expected, which tools were actually called, and why the step failed — giving it a better chance of self-correcting. |
+| `/assist` | Diagnose a stalled or broken conversation. A sub-agent reads the history, identifies the root cause, and injects a corrective instruction to redirect the REPL agent. |
 | `/memory` | List all stored memories (name, type, description) |
 | `/memory list` | Same as `/memory` |
 | `/memory show <name>` | Show the full body of a stored memory |
@@ -331,9 +332,14 @@ Use `/tools` to see the full list at runtime.
 | `/context` | Show estimated context window usage: token count vs. budget, explicit budget label, completed turn count, per-role message counts, per-category breakdown, delta since last check, and projected turns remaining after 2+ turns |
 | `/events` | Show event stats for the current session: turns, total tool calls, per-turn tool breakdown, and top tools by frequency |
 | `/events stats` | Same as `/events` |
+| `/explore <query>` | Run a sub-agent exploration loop over the codebase and return a prose summary. The sub-agent uses read-only tools and runs in an isolated context with no shared history from the main session. |
+| `/locate <symbol>` | Run a sub-agent symbol lookup and return a `path:line` result. Faster and more targeted than `/explore` for single-symbol lookups. |
 | `/safe-mode` | Show current safe mode status |
 | `/safe-mode on` | Disable Shell, Git, and Http tool categories to prevent mutations |
 | `/safe-mode off` | Restore tool categories to their state before safe mode was enabled |
+| `/adversarial` | Show adversarial mode status |
+| `/adversarial on` | Enable a critic agent that reviews each `/execute` step after postconditions pass. The critic judges whether the step was completed correctly and halts the plan if it disagrees. |
+| `/adversarial off` | Disable the critic agent |
 | `/provider` | Show the current model, endpoint, and API key store |
 | `/provider setup` | Reconfigure provider URL, model ID, and API key; saves immediately |
 | `/max-tokens <n>` | Cap the model's output to `n` tokens per response |
@@ -438,6 +444,49 @@ When a step fails the REPL preserves the halted step and all remaining steps. Yo
 ```
 
 If the retry fails again the plan halts a second time and both `/recover` and `/resume` remain available. `/clear` discards halted state along with the rest of the session.
+
+**Adversarial mode**
+
+Enable adversarial mode with `/adversarial on` to add a critic agent as an extra gate on each `/execute` step. After the deterministic postcondition check passes (tool called, file created), the critic receives an isolated view of the step — its description, the tools called, and the agent's response — and judges whether the step was actually completed correctly.
+
+If the critic approves, execution continues. If it rejects, the plan halts just as a postcondition failure would, with the critic's reason stored as a recovery hint. Running `/recover` then injects that reason into the retry prompt so the agent knows exactly what the critic found wrong.
+
+```
+> /adversarial on
+  Adversarial mode on: critic agent will review each /execute step.
+
+> /execute
+  Executing 4-step plan…
+
+  ⚙  patch_file
+  assistant: Updated the handler.
+  ✗ Critic rejected step 2: The patch changed `HandleRequest(HttpContext)` but the
+    interface expects `HandleRequest(HttpContext, CancellationToken)`.
+  Plan halted. Run /recover to let the agent diagnose and retry, or /resume to retry directly.
+
+> /recover
+  Recovery context set. Retrying from step 2…
+  ✓ Step 2 complete.  2 steps remaining.
+```
+
+The critic runs in an isolated context with no shared history from the main session — the same sub-agent infrastructure used by `/explore` and `/locate`. It requires tools to be active; `/adversarial on` will warn if `--no-tools` was set at startup. On timeout or error the critic degrades to approved so a transient failure never blocks execution.
+
+**Getting unstuck with /assist**
+
+When a session has stalled — the agent keeps making the same mistake, misunderstood the task early on, or is caught in a loop — run `/assist`. A sub-agent reads the conversation history, identifies the root cause, and writes a corrective instruction addressed to the REPL agent. That instruction is shown to you and then injected into the conversation as a user message, redirecting the main agent without requiring you to diagnose the problem yourself.
+
+```
+> /assist
+  diagnosing…
+  assist →
+  You have been repeatedly patching src/Auth/Handler.cs but the interface mismatch is
+  in src/Auth/IHandler.cs. Update the interface definition first, then re-patch the
+  implementation to match.
+
+  assistant: You're right — I missed the interface. Let me fix IHandler.cs first...
+```
+
+`/assist` does not modify the plan queue or halted state. It injects one message and then the session continues normally. Use it at any point — during plan execution, after a halt, or in a free-form conversation that has drifted off track.
 
 **Memory commands**
 

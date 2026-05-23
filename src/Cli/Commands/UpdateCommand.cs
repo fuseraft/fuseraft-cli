@@ -153,10 +153,12 @@ public sealed class UpdateCommand : AsyncCommand<UpdateSettings>
         try
         {
             await File.WriteAllBytesAsync(tmpPath, newBinary, ct);
+#pragma warning disable CA1416
             File.SetUnixFileMode(tmpPath,
                 UnixFileMode.UserRead  | UnixFileMode.UserWrite  | UnixFileMode.UserExecute  |
                 UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
                 UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+#pragma warning restore CA1416
             File.Move(tmpPath, binaryPath, overwrite: true);
         }
         catch (Exception ex)
