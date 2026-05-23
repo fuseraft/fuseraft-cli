@@ -4,6 +4,12 @@ using Microsoft.Extensions.AI;
 
 namespace fuseraft.Core.Models;
 
+/// <summary>A single step in a /plan.</summary>
+public sealed record PlanStep(int Step, string Description, string? Tool, string? Creates);
+
+/// <summary>A queue entry pairing a step with the total step count for display.</summary>
+public sealed record PlanStepEntry(PlanStep Step, int Total);
+
 /// <summary>
 /// Snapshot of a REPL session written to disk after every user turn so the session can be resumed.
 /// </summary>
@@ -25,18 +31,38 @@ public sealed record ReplSessionSnapshot
 
     public List<ReplSerializedMessage> History { get; init; } = [];
 
+    // Plan execution state — persisted so a crash mid-plan can be recovered on --resume.
+    public PlanStep[]?      PendingPlan     { get; init; }
+    public PlanStepEntry[]? ExecutionQueue  { get; init; }
+    public PlanStepEntry?   HaltedAt        { get; init; }
+    public PlanStepEntry[]? HaltedRemaining { get; init; }
+    public string[]?        HaltedToolCalls { get; init; }
+    public string?          RecoveryHint    { get; init; }
+
     // -------------------------------------------------------------------------
 
     public static ReplSessionSnapshot Capture(
         string sessionId, string modelId, string cwd,
-        int turnIndex, IReadOnlyList<ChatMessage> history, DateTime startedAt) => new()
+        int turnIndex, IReadOnlyList<ChatMessage> history, DateTime startedAt,
+        PlanStep[]?      currentPlan     = null,
+        PlanStepEntry[]? executionQueue  = null,
+        PlanStepEntry?   haltedAt        = null,
+        PlanStepEntry[]? haltedRemaining = null,
+        string[]?        haltedToolCalls = null,
+        string?          recoveryHint    = null) => new()
     {
-        SessionId = sessionId,
-        ModelId   = modelId,
-        Cwd       = cwd,
-        StartedAt = startedAt,
-        TurnIndex = turnIndex,
-        History   = [.. history.Select(ReplSerializedMessage.From)],
+        SessionId       = sessionId,
+        ModelId         = modelId,
+        Cwd             = cwd,
+        StartedAt       = startedAt,
+        TurnIndex       = turnIndex,
+        History         = [.. history.Select(ReplSerializedMessage.From)],
+        PendingPlan     = currentPlan,
+        ExecutionQueue  = executionQueue,
+        HaltedAt        = haltedAt,
+        HaltedRemaining = haltedRemaining,
+        HaltedToolCalls = haltedToolCalls,
+        RecoveryHint    = recoveryHint,
     };
 
     /// <summary>Restores the serialized history as live ChatMessage objects.</summary>
