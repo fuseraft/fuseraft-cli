@@ -124,7 +124,8 @@ internal static class ReplTurn
         bool capturePlan,
         PlanStep? activeStep,
         CancellationToken cancellationToken,
-        int stepTotal = 0)
+        int stepTotal = 0,
+        bool isCorrectionTurn = false)
     {
         await ctx.Emitter.EmitAsync("user_input", turn: ctx.TurnIndex, payload: new { content = input });
         ctx.History.Add(new ChatMessage(ChatRole.User, input));
@@ -266,6 +267,32 @@ internal static class ReplTurn
         bool stepPassed = true;
         if (isStepRequest && activeStep is not null)
             stepPassed = HandleStepResult(ctx, activeStep, stepTotal, toolCallsThisTurn, hitIterationCap: toolRounds >= StepIterationLimit);
+
+        // Free-form turns: if the response claims a mutation but no write tool was called,
+        // auto-inject a correction so the agent is required to actually call the tool.
+        // On the correction turn itself fall back to a warning to avoid infinite recursion.
+        if (!isStepRequest && !capturePlan && responseText.Length > 0 &&
+            !toolCallsThisTurn.Any(t => MutationTools.Contains(t)) &&
+            ContainsMutationClaim(responseText))
+        {
+            if (!isCorrectionTurn)
+            {
+                AnsiConsole.MarkupLine("[dim]  ↺ mutation claimed without write tool — injecting correction[/]");
+                const string correctionMsg =
+                    "You described changes above but did not call any write tool. " +
+                    "Please call write_file or patch_file now to actually apply the changes. " +
+                    "Do not re-describe the changes — just call the tool.";
+                await ExecuteAsync(
+                    ctx, correctionMsg,
+                    isStepRequest: false, capturePlan: false, activeStep: null,
+                    cancellationToken, isCorrectionTurn: true);
+            }
+            else
+            {
+                AnsiConsole.MarkupLine(
+                    "[yellow]  ⚠ No write tool called after correction — verify the agent did not fabricate this result.[/]");
+            }
+        }
 
         var postEst = ctx.EstimateTokens();
         if (ctx.PrevTurnTokenEstimate > 0)
@@ -451,6 +478,32 @@ internal static class ReplTurn
         "git_status", "git_log", "git_diff",
         "get_env", "which",
     };
+
+    // Write-class tools whose presence confirms the agent actually mutated state.
+    // When none appear in a turn that contains mutation-claim language the agent may
+    // have fabricated output — see the post-turn check in ExecuteAsync.
+    private static readonly HashSet<string> MutationTools = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "write_file", "patch_file", "create_directory", "delete_file",
+        "move_file", "copy_file", "set_permissions", "shell_run",
+        "git_commit", "git_add",
+    };
+
+    private static readonly string[] MutationClaimVerbs =
+        ["updated", "created", "fixed", "modified", "patched", "deleted", "saved", "written"];
+
+    private static bool ContainsMutationClaim(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        var lower = text.ToLowerInvariant();
+        if (!MutationClaimVerbs.Any(v => lower.Contains(v))) return false;
+        // Require a file-like reference to reduce false positives on conversational text.
+        return lower.Contains('/') ||
+               lower.Contains(".md") || lower.Contains(".cs") || lower.Contains(".py") ||
+               lower.Contains(".js") || lower.Contains(".ts") || lower.Contains(".json") ||
+               lower.Contains(".xml") || lower.Contains(".yaml") || lower.Contains(".txt") ||
+               lower.Contains(".drawio") || lower.Contains(".sh") || lower.Contains(".toml");
+    }
 
     internal static bool VerifyStep(PlanStep step, List<string> toolCalls, string cwd)
     {
