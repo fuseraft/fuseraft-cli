@@ -1215,3 +1215,33 @@ fuseraft skills remove <slug>
 ```bash
 fuseraft skills remove handoff
 ```
+
+---
+
+## `fuseraft update`
+
+Fetch the latest release from GitHub and atomically replace the running binary.
+
+```
+fuseraft update [options]
+```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--check` | off | Report whether a newer release is available without downloading or installing anything. |
+
+The command detects the current platform and architecture, downloads the matching release archive (`fuseraft-<version>-<rid>.tar.gz`), extracts the binary, and replaces the running binary in place. The install is atomic — the new binary is written to a `.new` sidecar file and moved over the original only after a successful extraction.
+
+If the current version already matches or exceeds the latest release the command exits immediately with no changes.
+
+**Examples**
+
+```bash
+# Check whether an update is available
+fuseraft update --check
+
+# Download and install the latest release
+fuseraft update
+```
