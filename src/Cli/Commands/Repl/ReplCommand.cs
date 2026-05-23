@@ -147,16 +147,9 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
         var sessionId  = GenerateSessionId();
         var eventsPath = Path.Combine(cwd, FuseraftPaths.LocalReplEventsLog);
 
-        AnsiConsole.MarkupLine($"[dim]Model:[/] [bold]{Markup.Escape(modelId)}[/]");
-        if (initialTools.Count > 0)
-            AnsiConsole.MarkupLine(
-                $"[dim]Tools:[/] [dim]{string.Join(" ", toolsByCategory.Keys)}[/]  " +
-                $"[dim](type[/] [bold]/exit[/] [dim]or Ctrl+C to quit)[/]");
-        else
-            AnsiConsole.MarkupLine($"[dim](type[/] [bold]/exit[/] [dim]or Ctrl+C to quit)[/]");
-        if (subAgent is not null)
-            AnsiConsole.MarkupLine($"[dim]SubAgent:[/] [dim]/explore <query>  /locate <symbol>[/]");
-        AnsiConsole.MarkupLine($"[dim]Events:[/] [dim]{Markup.Escape(eventsPath)}[/]");
+        AnsiConsole.Write(new Rule($"[bold cyan]{Markup.Escape(modelId)}[/]")
+            .LeftJustified()
+            .RuleStyle(new Spectre.Console.Style(Spectre.Console.Color.Grey)));
         AnsiConsole.WriteLine();
 
         using var emitter = new EventEmitter(eventsPath);
@@ -176,14 +169,19 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
         if (skillsCatalog is not null)
             systemPrompt += $"\n\n{skillsCatalog}";
 
-        if (File.Exists(Path.Combine(cwd, "AGENTS.md")))
-            AnsiConsole.MarkupLine("[dim]AGENTS.md loaded.[/]");
-
-        if (memoryBlock is not null)
-            AnsiConsole.MarkupLine("[dim]Memory loaded.  Type[/] [bold]/memory[/] [dim]to manage.[/]");
-
-        if (skillsPlugin is not null)
-            AnsiConsole.MarkupLine($"[dim]Skills:[/] [dim]{skillsPlugin.Count} loaded.  Type[/] [bold]/tools[/] [dim]to see.[/]");
+        // Single compact info line.
+        var infoParts = new List<string>();
+        if (toolsByCategory.Count > 0)
+            infoParts.Add(string.Join("  ", toolsByCategory.Keys));
+        if (File.Exists(Path.Combine(cwd, "AGENTS.md"))) infoParts.Add("agents");
+        if (memoryBlock is not null)                      infoParts.Add("memory");
+        if (skillsPlugin is not null)                     infoParts.Add($"{skillsPlugin.Count} skills");
+        if (subAgent is not null)                         infoParts.Add("/explore  /locate");
+        infoParts.Add("/help");
+        AnsiConsole.MarkupLine($"[dim]  {Markup.Escape(string.Join("  ·  ", infoParts))}[/]");
+        if (settings.Verbose)
+            AnsiConsole.MarkupLine($"[dim]  events: {Markup.Escape(eventsPath)}[/]");
+        AnsiConsole.WriteLine();
 
         var ctx = new ReplSessionContext(
             cwd, sessionId, modelId, modelConfig, userCfg, client,
