@@ -72,6 +72,9 @@ internal sealed class ReplSessionContext
     public List<string>                               HaltedToolCalls = [];
     public string?                                    RecoveryHint;
 
+    // JSON bridge mode (set when running inside VS Code webview panel)
+    public bool JsonMode;
+
     // Safe mode
     public bool             SafeMode;
     public HashSet<string>? PreSafeDisabled;
