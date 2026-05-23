@@ -115,6 +115,9 @@ flowchart TD
 ## Quick start
 
 ```bash
+# Open an interactive REPL session — no config needed
+fuseraft
+
 # Interactive wizard — describe your use case and get a config back
 fuseraft init
 
@@ -163,6 +166,17 @@ Both scripts download the latest release from [GitHub Releases](https://github.c
 **Manual download**
 
 Grab the archive for your platform from [Releases](https://github.com/fuseraft/fuseraft-cli/releases), extract the binary, and place it on your `PATH`.
+
+**Updates**
+
+Once installed, keep fuseraft current with:
+
+```bash
+fuseraft update          # download and install the latest release
+fuseraft update --check  # check without installing
+```
+
+On Windows, `fuseraft update` launches a separate `fuseraft-update.exe` process (included in the release archive) that waits for running fuseraft instances to exit before replacing the binary. On Linux and macOS the replacement is atomic and happens in place.
 
 **Build from source**
 
