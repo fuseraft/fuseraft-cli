@@ -254,6 +254,26 @@ Task("Publish")
 
         DotNetPublish(projectFile, settings);
 
+        // On Windows builds, also publish the updater helper alongside the main binary.
+        if (!string.IsNullOrEmpty(runtime) && runtime.StartsWith("win"))
+        {
+            var updaterProject = "src/FuseraftUpdate/FuseraftUpdate.csproj";
+            var updaterSettings = new DotNetPublishSettings
+            {
+                Configuration   = configuration,
+                OutputDirectory = publishDir,
+                Runtime         = runtime,
+                SelfContained   = true,
+                Verbosity       = DotNetVerbosity.Minimal,
+                MSBuildSettings = new DotNetMSBuildSettings()
+                    .WithProperty("PublishSingleFile",             "true")
+                    .WithProperty("EnableCompressionInSingleFile", "true")
+                    .WithProperty("MinVerSkip",                    "true")
+            };
+            DotNetPublish(updaterProject, updaterSettings);
+            Information("fuseraft-update published alongside fuseraft.exe.");
+        }
+
         Information($"Publish complete → {publishDir}");
     });
 

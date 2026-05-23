@@ -140,17 +140,23 @@ public sealed class UpdateCommand : AsyncCommand<UpdateSettings>
             return 1;
         }
 
+        return RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? await InstallViaUpdaterAsync(newBinary, binaryPath, latestVersion, tag, cancellationToken)
+            : await InstallInPlaceAsync(newBinary, binaryPath, latestVersion, cancellationToken);
+    }
+
+    // Linux / macOS: atomic rename works on a running binary.
+    private static async Task<int> InstallInPlaceAsync(
+        byte[] newBinary, string binaryPath, string latestVersion, CancellationToken ct)
+    {
         var tmpPath = binaryPath + ".new";
         try
         {
-            await File.WriteAllBytesAsync(tmpPath, newBinary, cancellationToken);
-
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                File.SetUnixFileMode(tmpPath,
-                    UnixFileMode.UserRead  | UnixFileMode.UserWrite  | UnixFileMode.UserExecute  |
-                    UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
-                    UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-
+            await File.WriteAllBytesAsync(tmpPath, newBinary, ct);
+            File.SetUnixFileMode(tmpPath,
+                UnixFileMode.UserRead  | UnixFileMode.UserWrite  | UnixFileMode.UserExecute  |
+                UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
             File.Move(tmpPath, binaryPath, overwrite: true);
         }
         catch (Exception ex)
@@ -161,6 +167,47 @@ public sealed class UpdateCommand : AsyncCommand<UpdateSettings>
         }
 
         AnsiConsole.MarkupLine($"[green]✓ fuseraft updated to {Markup.Escape(latestVersion)}.[/]");
+        return 0;
+    }
+
+    // Windows: can't overwrite a running executable. Write a pending binary then
+    // hand off to fuseraft-update.exe which waits for all fuseraft instances to exit.
+    private static async Task<int> InstallViaUpdaterAsync(
+        byte[] newBinary, string binaryPath, string latestVersion, string tag, CancellationToken ct)
+    {
+        var binaryDir   = Path.GetDirectoryName(binaryPath)!;
+        var updaterPath = Path.Combine(binaryDir, "fuseraft-update.exe");
+
+        if (!File.Exists(updaterPath))
+        {
+            AnsiConsole.MarkupLine("[red]✗ fuseraft-update.exe not found alongside the running binary.[/]");
+            AnsiConsole.MarkupLine($"[dim]Download it from https://github.com/{Repo}/releases/tag/{Markup.Escape(tag)}[/]");
+            return 1;
+        }
+
+        // Write the new binary to a pending file in the same directory (same drive = fast atomic move).
+        var pendingPath = Path.Combine(binaryDir, "fuseraft.exe.pending");
+        try
+        {
+            await File.WriteAllBytesAsync(pendingPath, newBinary, ct);
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]✗ Could not write pending binary:[/] {Markup.Escape(ex.Message)}");
+            return 1;
+        }
+
+        // Launch the updater in a new console window, then exit so it can replace this process's file.
+        Process.Start(new ProcessStartInfo
+        {
+            FileName        = updaterPath,
+            Arguments       = $"\"{pendingPath}\" \"{binaryPath}\"",
+            UseShellExecute = true,
+            CreateNoWindow  = false,
+        });
+
+        AnsiConsole.MarkupLine($"[cyan]Updater launched[/] [dim](fuseraft → {Markup.Escape(latestVersion)}).[/]");
+        AnsiConsole.MarkupLine("[dim]Follow the instructions in the fuseraft-update window to complete the installation.[/]");
         return 0;
     }
 
