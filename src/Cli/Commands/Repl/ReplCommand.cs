@@ -103,6 +103,8 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
         var toolsByCategory = new Dictionary<string, List<AIFunction>>(StringComparer.OrdinalIgnoreCase);
         using ShellPlugin? shellPlugin = settings.NoTools ? null : new ShellPlugin();
         SubAgentPlugin? subAgent = null;
+        SkillsPlugin?   skillsPlugin   = null;
+        string?         skillsCatalog  = null;
         if (!settings.NoTools)
         {
             toolsByCategory["FileSystem"] = PluginRegistry.GetFunctionsFromObject(new FileSystemPlugin()).ToList();
@@ -123,6 +125,10 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
                 .Concat(toolsByCategory["Git"].Where(f => gitReadOps.Contains(f.Name)))
                 .ToList();
             subAgent = new SubAgentPlugin(factory.Create(modelConfig), explorerTools);
+
+            (skillsPlugin, skillsCatalog) = ReplSkillsLoader.BuildSkills();
+            if (skillsPlugin is not null)
+                toolsByCategory["Skills"] = PluginRegistry.GetFunctionsFromObject(skillsPlugin).ToList();
         }
 
         var initialTools = toolsByCategory.Values.SelectMany(v => v).ToList();
@@ -167,11 +173,17 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
         var memoryBlock  = await memoryStore.BuildPromptBlockAsync(cwd);
         var systemPrompt = BuildSystemPrompt(settings.SystemPrompt, initialTools.Count, cwd, memoryBlock);
 
+        if (skillsCatalog is not null)
+            systemPrompt += $"\n\n{skillsCatalog}";
+
         if (File.Exists(Path.Combine(cwd, "AGENTS.md")))
             AnsiConsole.MarkupLine("[dim]AGENTS.md loaded.[/]");
 
         if (memoryBlock is not null)
             AnsiConsole.MarkupLine("[dim]Memory loaded.  Type[/] [bold]/memory[/] [dim]to manage.[/]");
+
+        if (skillsPlugin is not null)
+            AnsiConsole.MarkupLine($"[dim]Skills:[/] [dim]{skillsPlugin.Count} loaded.  Type[/] [bold]/tools[/] [dim]to see.[/]");
 
         var ctx = new ReplSessionContext(
             cwd, sessionId, modelId, modelConfig, userCfg, client,
