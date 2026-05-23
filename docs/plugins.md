@@ -296,6 +296,37 @@ Each entry shows the agent name, turn index, timestamp, files written/deleted, c
 
 ---
 
+## Session
+
+Gives REPL agents first-class access to their own session metadata, saved-session history, and diagnostic log files. Always available in the REPL when tools are enabled; not applicable to `fuseraft run` orchestrations.
+
+| Function | Parameters | Description |
+|----------|-----------|-------------|
+| `repl_session_current` | — | Return the current session's ID, model, start time, working directory, snapshot path, and log file locations. |
+| `repl_session_list` | — | List all saved REPL sessions newest-first. The active session is marked with `◄ current`. |
+| `repl_session_read_event_log` | `targetSessionId` (optional), `maxLines` (default 50) | Read entries from `repl_events.jsonl` filtered to a session. Defaults to the current session. |
+| `repl_session_read_log` | `logName` (default `"repl_events"`), `maxLines` (default 100) | Read the tail of a named diagnostic log. Valid names: `repl_events`, `events`, `provider_errors`, `app`. |
+
+**Session context in system prompt:** The current session ID, start time, snapshot path, and event log path are injected into the system prompt automatically — the agent always knows its session without needing to call a tool first.
+
+**Typical usage:**
+
+```
+# Find my session ID and log locations
+repl_session_current()
+
+# Compare this session with past ones
+repl_session_list()
+
+# Debug what happened in the last 20 events
+repl_session_read_event_log(maxLines=20)
+
+# Check for provider errors
+repl_session_read_log(logName="provider_errors")
+```
+
+---
+
 ## Compaction
 
 Lets an agent request a history compaction flush on demand — the same path as the automatic
