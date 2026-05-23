@@ -37,7 +37,7 @@ internal static class ReplCommands
             case "/compact":    return await CmdCompactAsync(ctx, arg, cancellationToken);
             case "/explore":    return await CmdExploreAsync(ctx, arg, cancellationToken);
             case "/locate":     return await CmdLocateAsync(ctx, arg, cancellationToken);
-            case "/sessions":   await CmdSessionsAsync(cancellationToken); return CommandResult.Continue;
+            case "/sessions":   await CmdSessionsAsync(ctx.JsonMode, cancellationToken); return CommandResult.Continue;
             default:
                 AnsiConsole.MarkupLine(
                     $"[yellow]Unknown command:[/] {Markup.Escape(command)}  [dim](type /help for commands)[/]");
@@ -196,6 +196,20 @@ internal static class ReplCommands
             AnsiConsole.MarkupLine("[dim]No history yet.[/]");
             return;
         }
+
+        if (ctx.JsonMode)
+        {
+            Console.WriteLine($"## History ({turns.Count} message{(turns.Count == 1 ? "" : "s")})\n");
+            foreach (var m in turns)
+            {
+                var preview = (m.Text ?? string.Empty).Replace('\n', ' ').Trim();
+                if (preview.Length > 120) preview = preview[..120] + "…";
+                var label = m.Role == ChatRole.User ? "**You**" : "**Assistant**";
+                Console.WriteLine($"- {label}: {preview}");
+            }
+            return;
+        }
+
         foreach (var m in turns)
         {
             var preview = (m.Text ?? string.Empty).Replace('\n', ' ').Trim();
@@ -719,14 +733,15 @@ internal static class ReplCommands
             return CommandResult.Continue;
         }
 
-        var spinCts  = new CancellationTokenSource();
-        var spinTask = ReplTurn.RunSpinnerAsync("diagnosing…", spinCts.Token);
+        // Spinner pollutes the captured JSON-mode output — skip it entirely there.
+        var spinCts  = ctx.JsonMode ? null : new CancellationTokenSource();
+        var spinTask = spinCts is not null
+            ? ReplTurn.RunSpinnerAsync("diagnosing…", spinCts.Token)
+            : Task.CompletedTask;
         try
         {
             var correction = await ctx.SubAgent.DiagnoseAsync(ctx.History, cancellationToken);
-            spinCts.Cancel();
-            await spinTask;
-            ReplTurn.ClearSpinnerLine();
+            if (spinCts is not null) { spinCts.Cancel(); await spinTask; ReplTurn.ClearSpinnerLine(); }
 
             if (correction is null)
             {
@@ -734,25 +749,26 @@ internal static class ReplCommands
                 return CommandResult.Continue;
             }
 
-            AnsiConsole.MarkupLine("[dim]assist →[/]");
-            AnsiConsole.WriteLine(correction);
-            AnsiConsole.WriteLine();
+            // In JSON mode the correction text is injected silently; the webview will see the
+            // AI's streamed response as a fresh assistant bubble via the SendInput path.
+            if (!ctx.JsonMode)
+            {
+                AnsiConsole.MarkupLine("[dim]assist →[/]");
+                AnsiConsole.WriteLine(correction);
+                AnsiConsole.WriteLine();
+            }
             await ctx.Emitter.EmitAsync("command", payload: new { command = "/assist" });
             return CommandResult.Send(correction);
         }
         catch (OperationCanceledException)
         {
-            spinCts.Cancel();
-            await spinTask;
-            ReplTurn.ClearSpinnerLine();
+            if (spinCts is not null) { spinCts.Cancel(); await spinTask; ReplTurn.ClearSpinnerLine(); }
             AnsiConsole.MarkupLine("[dim](cancelled)[/]");
             return CommandResult.Continue;
         }
         catch (Exception ex)
         {
-            spinCts.Cancel();
-            await spinTask;
-            ReplTurn.ClearSpinnerLine();
+            if (spinCts is not null) { spinCts.Cancel(); await spinTask; ReplTurn.ClearSpinnerLine(); }
             AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(ex.Message)}[/]");
             return CommandResult.Continue;
         }
@@ -822,14 +838,14 @@ internal static class ReplCommands
             }
             else
             {
-                AnsiConsole.Markup("[dim]extracting memories…[/]");
+                if (!ctx.JsonMode) AnsiConsole.Markup("[dim]extracting memories…[/]");
                 try
                 {
                     var mc = ctx.Factory.Create(ctx.ModelConfig);
                     using var _ = mc as IDisposable;
                     var existing             = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd);
                     var (saved, parseFailed) = await new MemoryExtractor(mc).ExtractAsync([.. ctx.History], existing);
-                    Console.Write($"\r{new string(' ', 30)}\r");
+                    if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 30)}\r");
                     foreach (var m in saved) await ctx.MemoryStore.SaveAsync(m, ctx.Cwd);
                     AnsiConsole.MarkupLine(parseFailed
                         ? "[dim](extraction returned unparseable output — memories may not have been saved)[/]"
@@ -842,7 +858,7 @@ internal static class ReplCommands
                 }
                 catch (Exception ex)
                 {
-                    Console.Write($"\r{new string(' ', 30)}\r");
+                    if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 30)}\r");
                     AnsiConsole.MarkupLine($"[red]Memory extraction failed:[/] {Markup.Escape(ex.Message)}");
                 }
             }
@@ -869,7 +885,7 @@ internal static class ReplCommands
             return CommandResult.Continue;
         }
 
-        AnsiConsole.Markup("[dim]compacting…[/]");
+        if (!ctx.JsonMode) AnsiConsole.Markup("[dim]compacting…[/]");
 
         var focus = string.IsNullOrWhiteSpace(arg) ? string.Empty : $"\n\nFocus for the next session: {arg}";
         var compactionPrompt =
@@ -891,7 +907,7 @@ internal static class ReplCommands
             using var _  = mc as IDisposable;
             var response = await mc.GetResponseAsync(messages, cancellationToken: cancellationToken);
             summary      = response.Text ?? string.Empty;
-            Console.Write($"\r{new string(' ', 30)}\r");
+            if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 30)}\r");
 
             if (string.IsNullOrWhiteSpace(summary))
             {
@@ -901,13 +917,13 @@ internal static class ReplCommands
         }
         catch (OperationCanceledException)
         {
-            Console.Write($"\r{new string(' ', 30)}\r");
+            if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 30)}\r");
             AnsiConsole.MarkupLine("[dim](cancelled)[/]");
             return CommandResult.Continue;
         }
         catch (Exception ex)
         {
-            Console.Write($"\r{new string(' ', 30)}\r");
+            if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 30)}\r");
             AnsiConsole.MarkupLine($"[red]✗ Compaction failed:[/] {Markup.Escape(ex.Message)}");
             return CommandResult.Continue;
         }
@@ -941,14 +957,16 @@ internal static class ReplCommands
             return CommandResult.Continue;
         }
 
-        var spinCts       = new CancellationTokenSource();
-        var spinTask      = ReplTurn.RunSpinnerAsync("exploring…", spinCts.Token);
+        var spinCts       = ctx.JsonMode ? null : new CancellationTokenSource();
+        var spinTask      = spinCts is not null
+            ? ReplTurn.RunSpinnerAsync("exploring…", spinCts.Token)
+            : Task.CompletedTask;
         bool spinStopped  = false;
         bool headerPrinted = false;
 
         async Task StopSpinner()
         {
-            if (spinStopped) return;
+            if (spinStopped || spinCts is null) return;
             spinStopped = true;
             spinCts.Cancel();
             await spinTask;
@@ -964,14 +982,14 @@ internal static class ReplCommands
                     {
                         headerPrinted = true;
                         await StopSpinner();
-                        AnsiConsole.MarkupLine("[dim]assistant:[/]");
+                        if (!ctx.JsonMode) AnsiConsole.MarkupLine("[dim]assistant:[/]");
                     }
                     await ReplTurn.WriteChunkSmoothAsync(chunk, cancellationToken);
                 },
                 cancellationToken: cancellationToken);
 
             await StopSpinner();
-            if (headerPrinted) AnsiConsole.WriteLine();
+            if (headerPrinted) { if (!ctx.JsonMode) AnsiConsole.WriteLine(); }
             else AnsiConsole.MarkupLine("[dim](no output)[/]");
             await ctx.Emitter.EmitAsync("command", payload: new { command = "/explore", query = arg });
         }
@@ -986,7 +1004,7 @@ internal static class ReplCommands
             AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(ex.Message)}[/]");
         }
 
-        AnsiConsole.WriteLine();
+        if (!ctx.JsonMode) AnsiConsole.WriteLine();
         return CommandResult.Continue;
     }
 
@@ -1004,14 +1022,16 @@ internal static class ReplCommands
             return CommandResult.Continue;
         }
 
-        var spinCts      = new CancellationTokenSource();
-        var spinTask     = ReplTurn.RunSpinnerAsync("locating…", spinCts.Token);
+        var spinCts      = ctx.JsonMode ? null : new CancellationTokenSource();
+        var spinTask     = spinCts is not null
+            ? ReplTurn.RunSpinnerAsync("locating…", spinCts.Token)
+            : Task.CompletedTask;
         bool spinStopped = false;
         bool gotOutput   = false;
 
         async Task StopSpinner()
         {
-            if (spinStopped) return;
+            if (spinStopped || spinCts is null) return;
             spinStopped = true;
             spinCts.Cancel();
             await spinTask;
@@ -1033,7 +1053,7 @@ internal static class ReplCommands
                 cancellationToken: cancellationToken);
 
             await StopSpinner();
-            if (gotOutput) AnsiConsole.WriteLine();
+            if (gotOutput) { if (!ctx.JsonMode) AnsiConsole.WriteLine(); }
             else AnsiConsole.MarkupLine("[dim](not found)[/]");
             await ctx.Emitter.EmitAsync("command", payload: new { command = "/locate", target = arg });
         }
@@ -1048,11 +1068,11 @@ internal static class ReplCommands
             AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(ex.Message)}[/]");
         }
 
-        AnsiConsole.WriteLine();
+        if (!ctx.JsonMode) AnsiConsole.WriteLine();
         return CommandResult.Continue;
     }
 
-    private static async Task CmdSessionsAsync(CancellationToken cancellationToken)
+    private static async Task CmdSessionsAsync(bool jsonMode, CancellationToken cancellationToken)
     {
         var sessions = await ReplSessionSnapshot.ListAsync(cancellationToken);
         if (sessions.Count == 0)
@@ -1060,6 +1080,25 @@ internal static class ReplCommands
             AnsiConsole.MarkupLine("[dim]No saved sessions found.[/]");
             return;
         }
+
+        if (jsonMode)
+        {
+            Console.WriteLine($"## Saved Sessions ({sessions.Count})\n");
+            foreach (var s in sessions)
+            {
+                var age   = DateTime.UtcNow - s.LastUpdatedAt;
+                var label = age.TotalDays >= 1 ? $"{(int)age.TotalDays}d ago"
+                          : age.TotalHours >= 1 ? $"{(int)age.TotalHours}h ago"
+                          : $"{(int)age.TotalMinutes}m ago";
+                var turns = $"{s.TurnIndex} turn{(s.TurnIndex == 1 ? "" : "s")}";
+                Console.WriteLine(
+                    $"- **`{s.SessionId}`** — {s.ModelId}, {turns}, {label} *({Path.GetFileName(s.Cwd)})*");
+            }
+            Console.WriteLine();
+            Console.WriteLine("Resume a session with `/resume` if it's already loaded, or restart the panel and select the session.");
+            return;
+        }
+
         AnsiConsole.MarkupLine($"[dim]Saved sessions ({sessions.Count}):[/]");
         AnsiConsole.WriteLine();
         foreach (var s in sessions)
