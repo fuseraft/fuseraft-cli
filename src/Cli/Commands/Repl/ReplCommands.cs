@@ -31,6 +31,7 @@ internal static class ReplCommands
             case "/safe-mode":  return await CmdSafeModeAsync(ctx, arg);
             case "/memory":     return await CmdMemoryAsync(ctx, arg, cancellationToken);
             case "/max-tokens": return CmdMaxTokens(ctx, arg);
+            case "/compact":    return await CmdCompactAsync(ctx, arg, cancellationToken);
             case "/explore":    return await CmdExploreAsync(ctx, arg, cancellationToken);
             case "/locate":     return await CmdLocateAsync(ctx, arg, cancellationToken);
             default:
@@ -696,6 +697,74 @@ internal static class ReplCommands
         return CommandResult.Continue;
     }
 
+    private static async Task<CommandResult> CmdCompactAsync(
+        ReplSessionContext ctx, string arg, CancellationToken cancellationToken)
+    {
+        var nonSystem = ctx.History.Where(m => m.Role != ChatRole.System).ToList();
+        if (nonSystem.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[dim]Nothing to compact — no conversation turns yet.[/]");
+            return CommandResult.Continue;
+        }
+
+        AnsiConsole.Markup("[dim]compacting…[/]");
+
+        var focus = string.IsNullOrWhiteSpace(arg) ? string.Empty : $"\n\nFocus for the next session: {arg}";
+        var compactionPrompt =
+            "Write a concise handoff document summarising this conversation so a fresh session can continue the work. " +
+            "Include: what was being worked on, key decisions and findings, current state, and what comes next. " +
+            "Reference file paths and symbols by name rather than quoting their full content. " +
+            "Redact any sensitive values such as API keys or passwords." +
+            focus;
+
+        var messages = new List<ChatMessage>(ctx.History)
+        {
+            new ChatMessage(ChatRole.User, compactionPrompt)
+        };
+
+        string summary;
+        try
+        {
+            var mc       = ctx.Factory.Create(ctx.ModelConfig);
+            using var _  = mc as IDisposable;
+            var response = await mc.GetResponseAsync(messages, cancellationToken: cancellationToken);
+            summary      = response.Text ?? string.Empty;
+            Console.Write($"\r{new string(' ', 30)}\r");
+
+            if (string.IsNullOrWhiteSpace(summary))
+            {
+                AnsiConsole.MarkupLine("[yellow]Compaction returned empty output — history unchanged.[/]");
+                return CommandResult.Continue;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Write($"\r{new string(' ', 30)}\r");
+            AnsiConsole.MarkupLine("[dim](cancelled)[/]");
+            return CommandResult.Continue;
+        }
+        catch (Exception ex)
+        {
+            Console.Write($"\r{new string(' ', 30)}\r");
+            AnsiConsole.MarkupLine($"[red]✗ Compaction failed:[/] {Markup.Escape(ex.Message)}");
+            return CommandResult.Continue;
+        }
+
+        var sys = ctx.History.FirstOrDefault(m => m.Role == ChatRole.System);
+        ctx.History.Clear();
+        if (sys is not null) ctx.History.Add(sys);
+        ctx.History.Add(new ChatMessage(ChatRole.User, $"[Compacted context from previous session]\n\n{summary}"));
+
+        ctx.TurnIndex             = 0;
+        ctx.PrevTurnTokenEstimate = 0;
+        ctx.TurnTokenDeltas.Clear();
+        ctx.ResetPlanState();
+
+        AnsiConsole.MarkupLine("[dim]Session compacted — history replaced with handoff summary.[/]");
+        await ctx.Emitter.EmitAsync("command", payload: new { command = "/compact", arg });
+        return CommandResult.Continue;
+    }
+
     private static async Task<CommandResult> CmdExploreAsync(
         ReplSessionContext ctx, string arg, CancellationToken cancellationToken)
     {
@@ -858,6 +927,8 @@ internal static class ReplCommands
         AnsiConsole.MarkupLine("  [bold cyan]/memory save[/]             Extract and save memories from the current session now");
         AnsiConsole.MarkupLine("  [bold cyan]/max-tokens <n>[/]          Set max output tokens for each response");
         AnsiConsole.MarkupLine("  [bold cyan]/max-tokens reset[/]        Restore provider default max output tokens");
+        AnsiConsole.MarkupLine("  [bold cyan]/compact[/]                  Summarise conversation into a handoff doc and reset history");
+        AnsiConsole.MarkupLine("  [bold cyan]/compact <focus>[/]          Same, but tailor the summary toward the next session's focus");
         AnsiConsole.MarkupLine("  [bold cyan]/explore <query>[/]         Run a sub-agent exploration loop and return a prose summary");
         AnsiConsole.MarkupLine("  [bold cyan]/locate <symbol>[/]         Run a sub-agent symbol lookup; returns path:line result");
         AnsiConsole.MarkupLine("  [bold cyan]/exit[/]                    Exit the REPL (auto-saves memories)");
