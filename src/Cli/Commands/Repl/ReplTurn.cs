@@ -257,7 +257,8 @@ internal static class ReplTurn
 
         bool stepPassed = true;
         if (isStepRequest && activeStep is not null)
-            stepPassed = HandleStepResult(ctx, activeStep, stepTotal, toolCallsThisTurn, hitIterationCap: toolRounds >= StepIterationLimit);
+            stepPassed = await HandleStepResult(ctx, activeStep, stepTotal, toolCallsThisTurn,
+                hitIterationCap: toolRounds >= StepIterationLimit, responseText, cancellationToken);
 
         // Free-form turns: if the response claims a mutation but no write tool was called,
         // auto-inject a correction so the agent is required to actually call the tool.
@@ -347,11 +348,28 @@ internal static class ReplTurn
         }
     }
 
-    internal static bool HandleStepResult(
-        ReplSessionContext ctx, PlanStep activeStep, int total, List<string> toolCallsThisTurn, bool hitIterationCap)
+    internal static async Task<bool> HandleStepResult(
+        ReplSessionContext ctx, PlanStep activeStep, int total, List<string> toolCallsThisTurn, bool hitIterationCap,
+        string responseText = "", CancellationToken cancellationToken = default)
     {
         var passed    = VerifyStep(activeStep, toolCallsThisTurn, ctx.Cwd);
         var stepsLeft = ctx.ExecutionQueue.Count;
+
+        // When deterministic checks pass and adversarial mode is on, ask the critic.
+        if (passed && ctx.AdversarialMode && ctx.SubAgent is not null)
+        {
+            AnsiConsole.Markup("[dim]  critic reviewing…[/]");
+            var (approved, reason) = await ctx.SubAgent.CriticReviewAsync(
+                activeStep.Description, activeStep.Tool, toolCallsThisTurn, responseText, cancellationToken);
+            Console.Write($"\r{new string(' ', 40)}\r");
+            if (!approved)
+            {
+                passed = false;
+                ctx.RecoveryHint = $"[Critic] Step {activeStep.Step} rejected: {reason}";
+                AnsiConsole.MarkupLine(
+                    $"[yellow]  ✗ Critic rejected step {activeStep.Step}: {Markup.Escape(reason ?? "no reason given")}[/]");
+            }
+        }
         if (passed)
         {
             var zeroCallSkip  = activeStep.Tool is not null && toolCallsThisTurn.Count == 0;

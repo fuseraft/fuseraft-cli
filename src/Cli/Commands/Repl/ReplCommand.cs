@@ -176,7 +176,7 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
         if (File.Exists(Path.Combine(cwd, "AGENTS.md"))) infoParts.Add("agents");
         if (memoryBlock is not null)                      infoParts.Add("memory");
         if (skillsPlugin is not null)                     infoParts.Add($"{skillsPlugin.Count} skill{(skillsPlugin.Count == 1 ? "" : "s")}");
-        if (subAgent is not null)                         infoParts.Add("/explore  /locate");
+        if (subAgent is not null)                         infoParts.Add("/explore  /locate  /adversarial");
         infoParts.Add("/help");
         AnsiConsole.MarkupLine($"[dim]  {Markup.Escape(string.Join("  ·  ", infoParts))}[/]");
         if (settings.Verbose)
