@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
+using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 
 namespace fuseraft.Cli.Commands.Repl;
@@ -36,6 +37,7 @@ internal static class ReplCommands
             case "/compact":    return await CmdCompactAsync(ctx, arg, cancellationToken);
             case "/explore":    return await CmdExploreAsync(ctx, arg, cancellationToken);
             case "/locate":     return await CmdLocateAsync(ctx, arg, cancellationToken);
+            case "/sessions":   await CmdSessionsAsync(cancellationToken); return CommandResult.Continue;
             default:
                 AnsiConsole.MarkupLine(
                     $"[yellow]Unknown command:[/] {Markup.Escape(command)}  [dim](type /help for commands)[/]");
@@ -988,6 +990,35 @@ internal static class ReplCommands
         return CommandResult.Continue;
     }
 
+    private static async Task CmdSessionsAsync(CancellationToken cancellationToken)
+    {
+        var sessions = await ReplSessionSnapshot.ListAsync(cancellationToken);
+        if (sessions.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[dim]No saved sessions found.[/]");
+            return;
+        }
+        AnsiConsole.MarkupLine($"[dim]Saved sessions ({sessions.Count}):[/]");
+        AnsiConsole.WriteLine();
+        foreach (var s in sessions)
+        {
+            var age   = DateTime.UtcNow - s.LastUpdatedAt;
+            var label = age.TotalDays >= 1
+                ? $"{(int)age.TotalDays}d ago"
+                : age.TotalHours >= 1
+                    ? $"{(int)age.TotalHours}h ago"
+                    : $"{(int)age.TotalMinutes}m ago";
+            AnsiConsole.MarkupLine(
+                $"  [bold cyan]{Markup.Escape(s.SessionId)}[/]  " +
+                $"[dim]{Markup.Escape(s.ModelId)}  " +
+                $"{s.TurnIndex} turn{(s.TurnIndex == 1 ? "" : "s")}  " +
+                $"{Markup.Escape(label)}  " +
+                $"{Markup.Escape(Path.GetFileName(s.Cwd))}[/]");
+        }
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[dim]  Resume with:[/] [bold]fuseraft repl --resume <id>[/]");
+    }
+
     // -------------------------------------------------------------------------
     // Display utilities used by command handlers
     // -------------------------------------------------------------------------
@@ -999,6 +1030,7 @@ internal static class ReplCommands
 
         AnsiConsole.MarkupLine("  [dim]Session[/]");
         AnsiConsole.MarkupLine("  [bold cyan]/help[/]                     Show this help");
+        AnsiConsole.MarkupLine("  [bold cyan]/sessions[/]                 List resumable sessions with IDs and turn counts");
         AnsiConsole.MarkupLine("  [bold cyan]/clear[/]                    Clear conversation history (keeps system prompt)");
         AnsiConsole.MarkupLine("  [bold cyan]/history[/]                  Show condensed conversation history");
         AnsiConsole.MarkupLine("  [bold cyan]/assist[/]                   Diagnose the conversation and inject a corrective message");

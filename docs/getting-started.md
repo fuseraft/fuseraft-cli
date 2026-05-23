@@ -128,6 +128,16 @@ fuseraft
 
 No config file needed. The REPL auto-detects your provider from the API key stored in `~/.fuseraft/config` (or runs the setup wizard on first use). Type a message and press Enter. Use `/help` inside the session to see available commands.
 
+Every session is auto-saved after each turn. Resume a previous session at any time:
+
+```bash
+# List resumable sessions from inside the REPL
+/sessions
+
+# Resume by ID (shown in the header at startup)
+fuseraft repl --resume a87569bcd7b0
+```
+
 ---
 
 ## Understand the output

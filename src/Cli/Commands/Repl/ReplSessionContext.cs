@@ -90,6 +90,7 @@ internal sealed class ReplSessionContext
     public int              PrevTurnTokenEstimate;
 
     // Session lifecycle
+    public readonly DateTime StartedAt;
     public int  TurnIndex              = 0;
     public int  LastExtractedTurnIndex = -1;
     public bool PendingSave;
@@ -101,7 +102,7 @@ internal sealed class ReplSessionContext
     public readonly ReplLineReader LineReader = new();
 
     public ReplSessionContext(
-        string cwd, string sessionId, string modelId, ModelConfig modelConfig,
+        string cwd, string sessionId, DateTime startedAt, string modelId, ModelConfig modelConfig,
         UserConfig? userCfg, IChatClient client, ChatClientFactory factory,
         IApiKeyStore keyStore, EventEmitter emitter, string eventsPath,
         MemoryStore memoryStore, Dictionary<string, List<AIFunction>> toolsByCategory,
@@ -110,6 +111,7 @@ internal sealed class ReplSessionContext
     {
         Cwd             = cwd;
         SessionId       = sessionId;
+        StartedAt       = startedAt;
         ModelId         = modelId;
         ModelConfig     = modelConfig;
         UserCfg         = userCfg;
