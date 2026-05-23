@@ -203,6 +203,8 @@ internal static class ReplTurn
                         ? string.Join(" → ", toolCallsThisTurn)
                         : string.Join(" → ", toolCallsThisTurn.TakeLast(4)) +
                           $" (+{toolCallsThisTurn.Count - 4})";
+                    spinCts.Cancel();
+                    await spinTask;
                     spinCts.Dispose();
                     spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
                     spinTask = RunSpinnerAsync($"conjuring…  {chain}", spinCts.Token);
