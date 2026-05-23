@@ -218,7 +218,12 @@ fuseraft run --devui --ci -c my-team.yaml "Add integration tests"
 
 Start an interactive chat session with a single model. No config file needed. Includes built-in tools for filesystem access, shell execution, code search, git, and HTTP.
 
+Running `fuseraft` with no subcommand is equivalent to `fuseraft repl`.
+
+The assistant identifies itself as the fuseraft assistant and knows which model it is running on, so asking "who are you?" or "what model are you?" will give an accurate answer.
+
 ```
+fuseraft [options]
 fuseraft repl [options]
 ```
 
@@ -228,10 +233,23 @@ fuseraft repl [options]
 |------|---------|-------------|
 | `-m, --model <id>` | see below | Model ID to use (e.g. `gpt-4o`, `claude-sonnet-4-6`). Overrides `~/.fuseraft/config` when set. |
 | `-s, --system <prompt>` | — | System prompt. Defaults to a coding/research prompt when tools are enabled. |
+| `--resume <id>` | — | Resume a previous REPL session by its session ID. Use `/sessions` inside the REPL to list resumable sessions. |
 | `--no-banner` | off | Skip the ASCII banner. |
 | `--no-tools` | off | Disable all built-in tools and start a plain chat session. |
-| `--verbose` | off | Enable debug logging and print estimated token count + tool-call count after each turn. |
+| `--verbose` | off | Enable debug logging: prints per-turn detail (token estimate, tool-round count, total tool calls) and shows the event log path at startup. |
 | `--vscode` | off | VS Code mode. Reads the API key from the `FUSERAFT_API_KEY` environment variable (injected by the fuseraft VS Code extension) instead of the OS keychain. Automatically passed by the extension — not intended for manual use. |
+
+**Startup display**
+
+On launch a compact header shows the model name, a single info line listing active tool categories, loaded context (agents/memory/skills), and available sub-agent commands, and the session ID:
+
+```
+── claude-sonnet-4-6 ─────────────────────────────────────
+  FileSystem  Shell  Search  Git  Http  ·  memory  ·  3 skills  ·  /help
+  session: a87569bcd7b0
+```
+
+The session ID is shown on every startup so you can note it down for later resumption with `--resume`. The event log path is only shown with `--verbose`.
 
 **First-time setup**
 
@@ -269,13 +287,28 @@ Unless `--no-tools` is passed, the REPL gives the model access to:
 | Http | `http_get`, `http_post` |
 | Skills | `load_skill`, `run_skill_script` (only when skills are installed — see [Skills](skills.md)) |
 
-When the model invokes a tool, a dim `> tool_name(arg)` line is printed and the spinner changes to `running…` while the tool executes, then resumes `thinking…` when the model processes the result. Use `/tools` to see the full list at runtime.
+When the model invokes tools, the spinner label updates live to show the accumulating chain:
+
+```
+⠋ conjuring…  read_file → grep_file → write_file
+```
+
+Once the model begins streaming its response, the spinner clears and a compact summary of all tools called this turn is printed before the reply:
+
+```
+  ⚙  read_file → grep_file → write_file
+assistant:
+…
+```
+
+Use `/tools` to see the full list at runtime.
 
 **Slash commands**
 
 | Command | Description |
 |---------|-------------|
 | `/help` | Show all slash commands |
+| `/sessions` | List resumable REPL sessions with their IDs, model, turn count, and age. Resume with `fuseraft repl --resume <id>`. |
 | `/clear` | Clear conversation history (system prompt is kept) |
 | `/compact` | Ask the model to summarise the session into a handoff document, then replace history with that summary. The system prompt and tools/skills catalog are kept; everything else is discarded. Use this when context is filling up but you want to continue in the same session. |
 | `/compact <focus>` | Same as `/compact`, but passes a focus hint to the model so the summary is tailored toward the next task (e.g. `/compact fix the auth bug next`) |
@@ -290,6 +323,7 @@ When the model invokes a tool, a dim `> tool_name(arg)` line is printed and the 
 | `/execute` | Run each plan step as a separate turn. After each step the REPL verifies postconditions (tool called, artifact created) and halts with a warning if a step fails. |
 | `/resume` | Retry the halted step and continue the remaining steps as-is. Use this after manually fixing the issue. |
 | `/recover` | Inject a failure context hint into the step prompt and retry from the halted step. The agent is told which tool was expected, which tools were actually called, and why the step failed — giving it a better chance of self-correcting. |
+| `/assist` | Diagnose a stalled or broken conversation. A sub-agent reads the history, identifies the root cause, and injects a corrective instruction to redirect the REPL agent. |
 | `/memory` | List all stored memories (name, type, description) |
 | `/memory list` | Same as `/memory` |
 | `/memory show <name>` | Show the full body of a stored memory |
@@ -301,23 +335,64 @@ When the model invokes a tool, a dim `> tool_name(arg)` line is printed and the 
 | `/context` | Show estimated context window usage: token count vs. budget, explicit budget label, completed turn count, per-role message counts, per-category breakdown, delta since last check, and projected turns remaining after 2+ turns |
 | `/events` | Show event stats for the current session: turns, total tool calls, per-turn tool breakdown, and top tools by frequency |
 | `/events stats` | Same as `/events` |
+| `/explore <query>` | Run a sub-agent exploration loop over the codebase and return a prose summary. The sub-agent uses read-only tools and runs in an isolated context with no shared history from the main session. |
+| `/locate <symbol>` | Run a sub-agent symbol lookup and return a `path:line` result. Faster and more targeted than `/explore` for single-symbol lookups. |
 | `/safe-mode` | Show current safe mode status |
 | `/safe-mode on` | Disable Shell, Git, and Http tool categories to prevent mutations |
 | `/safe-mode off` | Restore tool categories to their state before safe mode was enabled |
+| `/adversarial` | Show adversarial mode status |
+| `/adversarial on` | Enable a critic agent that reviews each `/execute` step after postconditions pass. The critic judges whether the step was completed correctly and halts the plan if it disagrees. |
+| `/adversarial off` | Disable the critic agent |
 | `/provider` | Show the current model, endpoint, and API key store |
 | `/provider setup` | Reconfigure provider URL, model ID, and API key; saves immediately |
 | `/max-tokens <n>` | Cap the model's output to `n` tokens per response |
 | `/max-tokens reset` | Restore the provider's default max output tokens |
 | `/exit` | End the session |
 
-When safe mode is active, the prompt gains a `[safe]` prefix as a persistent visual reminder.
+**Prompt format**
+
+The prompt displays the current turn number followed by `>`:
+
+```
+1> your message here
+```
+
+When safe mode is active it gains a `[safe]` prefix:
+
+```
+[safe] 1> your message here
+```
+
+After each response a compact status line is printed showing the turn number, estimated token usage, and the number of tool calls made:
+
+```
+  ── turn 1 · ~3,200 tok · 2 tools
+```
+
+**Input and line editing**
+
+The REPL prompt supports history navigation and in-line editing without any external dependencies:
+
+| Key | Action |
+|-----|--------|
+| Up / Down arrow | Navigate through input history for the current session |
+| Left / Right arrow | Move cursor one character |
+| Ctrl+Left / Ctrl+Right | Jump one word left or right |
+| Home / Ctrl+A | Move to the beginning of the line |
+| End / Ctrl+E | Move to the end of the line |
+| Backspace | Delete the character before the cursor |
+| Delete / Ctrl+D | Delete the character under the cursor (Ctrl+D on an empty line exits) |
+| Ctrl+U | Kill (delete) from the cursor to the start of the line |
+| Ctrl+K | Kill from the cursor to the end of the line |
+| Ctrl+W | Kill the word before the cursor |
+| Ctrl+C | Cancel the current line and exit the session |
 
 **Plan / execute workflow**
 
 `/plan` and `/execute` give you explicit control over when the model thinks versus when it acts.
 
 ```
-> /plan create a Hello World C# console app in ./hello
+1> /plan create a Hello World C# console app in ./hello
   planning…
   Plan (3 steps). Review, then run /execute.
 
@@ -328,11 +403,12 @@ When safe mode is active, the prompt gains a `[safe]` prefix as a persistent vis
   3. Write hello.csproj targeting net10.0
      tool: WriteFile  creates: hello/hello.csproj
 
-> /execute
+2> /execute
   Executing 3-step plan…
 
   Execute step 1 of 3: Create the project directory
-  > CreateDirectory(hello/)  running…
+  ⠋ conjuring…  create_directory
+  ⚙  create_directory
   assistant: Directory created.
   ✓ Step 1 complete.  2 steps remaining.
 
@@ -371,6 +447,49 @@ When a step fails the REPL preserves the halted step and all remaining steps. Yo
 ```
 
 If the retry fails again the plan halts a second time and both `/recover` and `/resume` remain available. `/clear` discards halted state along with the rest of the session.
+
+**Adversarial mode**
+
+Enable adversarial mode with `/adversarial on` to add a critic agent as an extra gate on each `/execute` step. After the deterministic postcondition check passes (tool called, file created), the critic receives an isolated view of the step — its description, the tools called, and the agent's response — and judges whether the step was actually completed correctly.
+
+If the critic approves, execution continues. If it rejects, the plan halts just as a postcondition failure would, with the critic's reason stored as a recovery hint. Running `/recover` then injects that reason into the retry prompt so the agent knows exactly what the critic found wrong.
+
+```
+> /adversarial on
+  Adversarial mode on: critic agent will review each /execute step.
+
+> /execute
+  Executing 4-step plan…
+
+  ⚙  patch_file
+  assistant: Updated the handler.
+  ✗ Critic rejected step 2: The patch changed `HandleRequest(HttpContext)` but the
+    interface expects `HandleRequest(HttpContext, CancellationToken)`.
+  Plan halted. Run /recover to let the agent diagnose and retry, or /resume to retry directly.
+
+> /recover
+  Recovery context set. Retrying from step 2…
+  ✓ Step 2 complete.  2 steps remaining.
+```
+
+The critic runs in an isolated context with no shared history from the main session — the same sub-agent infrastructure used by `/explore` and `/locate`. It requires tools to be active; `/adversarial on` will warn if `--no-tools` was set at startup. On timeout or error the critic degrades to approved so a transient failure never blocks execution.
+
+**Getting unstuck with /assist**
+
+When a session has stalled — the agent keeps making the same mistake, misunderstood the task early on, or is caught in a loop — run `/assist`. A sub-agent reads the conversation history, identifies the root cause, and writes a corrective instruction addressed to the REPL agent. That instruction is shown to you and then injected into the conversation as a user message, redirecting the main agent without requiring you to diagnose the problem yourself.
+
+```
+> /assist
+  diagnosing…
+  assist →
+  You have been repeatedly patching src/Auth/Handler.cs but the interface mismatch is
+  in src/Auth/IHandler.cs. Update the interface definition first, then re-patch the
+  implementation to match.
+
+  assistant: You're right — I missed the interface. Let me fix IHandler.cs first...
+```
+
+`/assist` does not modify the plan queue or halted state. It injects one message and then the session continues normally. Use it at any point — during plan execution, after a halt, or in a free-form conversation that has drifted off track.
 
 **Memory commands**
 
@@ -435,7 +554,8 @@ Every session appends structured JSONL events to `.fuseraft/repl_events.jsonl` i
 **Examples**
 
 ```bash
-# Start a REPL with auto-detected model and built-in tools
+# Start a REPL with auto-detected model and built-in tools (both forms are equivalent)
+fuseraft
 fuseraft repl
 
 # Use a specific model
@@ -448,7 +568,7 @@ fuseraft repl --model grok-4-1-fast-reasoning --no-tools
 fuseraft repl --model grok-code-fast-1 --system "You are a Rust expert."
 ```
 
-Press Ctrl+C during a streaming response to cancel that request and return to the prompt. Press Ctrl+C at the prompt (no active request) or type `/exit` to end the session.
+Press Ctrl+C during a streaming response to cancel that request and return to the prompt. Press Ctrl+C at the prompt or type `/exit` to end the session. The readline layer intercepts Ctrl+C at the prompt so the process exits cleanly rather than abruptly.
 
 ---
 
@@ -1146,4 +1266,45 @@ fuseraft skills remove <slug>
 
 ```bash
 fuseraft skills remove handoff
+```
+
+---
+
+## `fuseraft update`
+
+Fetch the latest release from GitHub and atomically replace the running binary.
+
+```
+fuseraft update [options]
+```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--check` | off | Report whether a newer release is available without downloading or installing anything. |
+
+The command detects the current platform and architecture, downloads the matching release archive (`fuseraft-<version>-<rid>.tar.gz`), and installs the new binary.
+
+**Linux / macOS** — the new binary is written to a `.new` sidecar file and atomically renamed over the original. This works even while fuseraft is running because `rename()` is inode-level.
+
+**Windows** — Windows locks the running executable and cannot rename it in place. `fuseraft update` instead writes the new binary as `fuseraft.exe.pending` in the same directory, then launches `fuseraft-update.exe` in a new console window and exits. The updater:
+1. Waits a moment for the calling fuseraft process to exit.
+2. Checks for any remaining fuseraft instances and asks whether to kill them.
+3. Renames `fuseraft.exe` → `fuseraft.exe.backup` (blocks new launches during the swap).
+4. Moves `fuseraft.exe.pending` → `fuseraft.exe`.
+5. Deletes the backup and reports success.
+
+`fuseraft-update.exe` must be present alongside `fuseraft.exe`. It is included in every Windows release archive published by CI.
+
+If the current version already matches or exceeds the latest release the command exits immediately with no changes.
+
+**Examples**
+
+```bash
+# Check whether an update is available
+fuseraft update --check
+
+# Download and install the latest release
+fuseraft update
 ```
