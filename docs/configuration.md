@@ -91,6 +91,21 @@ Orchestration:
 
 `fuseraft validate` reports an error if `SystemPromptPath` is set but the file does not exist.
 
+**Full injection order** — `OrchestratorBuilder` assembles each agent's final system prompt in this sequence before the session starts:
+
+| # | Block | Source |
+|---|-------|--------|
+| 1 | Base prompt | `SystemPromptPath` → `SystemPrompt` → embedded `FUSERAFT.md` |
+| 2 | Agent `Instructions` | Per-agent field in the config |
+| 3 | `.fuseraft/` folder orientation | Auto-injected from `FuseraftPaths.BuildFolderOrientationBlock()` — gives every agent a compact manifest of the runtime directory so they never call `list_files` on `.fuseraft/` to discover it. See [Directory layout](design.md#3-directory-layout). |
+| 4 | Context store summary | Appended when `.fuseraft/context/index.json` has entries (see [Context store](context-store.md)) |
+| 5 | Convention profile | Appended when `.fuseraft/conventions.json` exists (Brownfield mode) |
+| 6 | Test selector hint | Appended when `TestSelector.FindRelatedCommand` is configured |
+
+In **REPL mode** the same folder orientation is injected (blocks 3 onward), but the log-file entries are omitted from the manifest because the session section of the REPL system prompt already lists them and directs the agent to the `repl_session_*` tools for log access.
+
+`SubAgentPlugin` (used by `sub_agent_explore` and `sub_agent_locate`) receives a single-line skip directive instead of the full manifest, since its system prompt is tightly budgeted.
+
 ---
 
 ## Agent configuration

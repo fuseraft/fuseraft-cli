@@ -356,6 +356,7 @@ public sealed class SubAgentPlugin(
             Aim to answer within {maxToolCalls} tool calls using targeted queries.
             Do NOT implement, edit, delete, commit, or push anything.
             Never run mutating shell commands (no git add, git commit, rm, mv, write_file, etc.).
+            Skip .fuseraft/ — it is fuseraft-cli runtime metadata, not application code.
             {outputInstructions}
             """;
     }
@@ -381,6 +382,7 @@ public sealed class SubAgentPlugin(
             4. read_file      — only to confirm the exact line number once the file is known.
 
             Use at most {LocateMaxToolCalls} tool calls.
+            Skip .fuseraft/ — it is fuseraft-cli runtime metadata, not application code.
             Reply in EXACTLY this format (one line per result):
               {cwd}/relative/path/to/file.ext:{lineToken} — brief description
             If not found after exhausting available tools, reply: "Not found."

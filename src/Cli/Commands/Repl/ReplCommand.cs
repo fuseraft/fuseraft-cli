@@ -376,6 +376,13 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
                 $"Use the repl_session_* tools to inspect session metadata, list past sessions, or read log files.";
         }
 
+        // Orient the REPL agent to the local .fuseraft/ folder so it never
+        // wastes context scanning the directory to discover what is in it.
+        // Logs are excluded here — the session block above already lists them
+        // and directs the agent to use the repl_session_* tools for log access.
+        if (toolCount > 0)
+            prompt += $"\n\n{FuseraftPaths.BuildFolderOrientationBlock(includeLogs: false)}";
+
         var agentsBlock = ReadAgentsMd(cwd);
         if (agentsBlock is not null)
             prompt += $"\n\n{agentsBlock}";
