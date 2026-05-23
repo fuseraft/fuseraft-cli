@@ -29,6 +29,19 @@ public sealed class FileSystemPluginTests : IDisposable
         await File.ReadAllTextAsync(TempPath(filename));
 
     // -----------------------------------------------------------------------
+    // Content null guard: missing content parameter
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task WriteFile_NullContent_ReturnsError()
+    {
+        // Simulates a model call that omits the 'content' argument entirely.
+        var result = await _plugin.WriteFileAsync(TempPath("foo.txt"), null!);
+        Assert.StartsWith("[ERROR]", result);
+        Assert.Contains("content", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // -----------------------------------------------------------------------
     // Path guard: newline embedded in path argument
     // -----------------------------------------------------------------------
 
