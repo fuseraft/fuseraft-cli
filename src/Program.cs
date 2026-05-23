@@ -113,9 +113,9 @@ services.AddTransient<SkillsAddCommand>();
 services.AddTransient<SkillsListCommand>();
 services.AddTransient<SkillsRemoveCommand>();
 
-// Use CommandApp<RunCommand> so `fuseraft` with no subcommand defaults to run.
+// Use CommandApp<ReplCommand> so bare `fuseraft` drops straight into the REPL.
 var registrar = new ServiceCollectionRegistrar(services);
-var app = new CommandApp<RunCommand>(registrar);
+var app = new CommandApp<ReplCommand>(registrar);
 
 // MinVer stamps the full semver (including pre-release and git hash) into
 // AssemblyInformationalVersionAttribute at build time — no manual file needed.

@@ -32,10 +32,10 @@ Other targets:
 
 ### Option A — user config (recommended)
 
-`fuseraft repl` detects first-time usage and walks you through a short setup wizard before starting the session. It asks for a model ID, provider URL, and API key, then stores them in `~/.fuseraft/config` (without the key) and your OS keychain (for the key):
+`fuseraft` (or `fuseraft repl`) detects first-time usage and walks you through a short setup wizard before starting the session. It asks for a model ID, provider URL, and API key, then stores them in `~/.fuseraft/config` (without the key) and your OS keychain (for the key):
 
 ```
-$ fuseraft repl
+$ fuseraft
 No configuration found at ~/.fuseraft/config
 
 Provider setup
@@ -48,7 +48,7 @@ API Key:      ••••••••
 >
 ```
 
-The config is saved after the first successful reply. Once saved, subsequent `fuseraft repl` invocations start immediately using those defaults. Use `/provider setup` inside the REPL to change settings at any time.
+The config is saved after the first successful reply. Once saved, subsequent `fuseraft` invocations start immediately using those defaults. Use `/provider setup` inside the REPL to change settings at any time.
 
 The API key is stored in the OS keychain — never in the config file on disk:
 

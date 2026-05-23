@@ -164,7 +164,7 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
 
         var memoryStore  = MemoryStore.ForRepl();
         var memoryBlock  = await memoryStore.BuildPromptBlockAsync(cwd);
-        var systemPrompt = BuildSystemPrompt(settings.SystemPrompt, initialTools.Count, cwd, memoryBlock);
+        var systemPrompt = BuildSystemPrompt(settings.SystemPrompt, initialTools.Count, cwd, memoryBlock, modelId);
 
         if (skillsCatalog is not null)
             systemPrompt += $"\n\n{skillsCatalog}";
@@ -175,7 +175,7 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
             infoParts.Add(string.Join("  ", toolsByCategory.Keys));
         if (File.Exists(Path.Combine(cwd, "AGENTS.md"))) infoParts.Add("agents");
         if (memoryBlock is not null)                      infoParts.Add("memory");
-        if (skillsPlugin is not null)                     infoParts.Add($"{skillsPlugin.Count} skills");
+        if (skillsPlugin is not null)                     infoParts.Add($"{skillsPlugin.Count} skill{(skillsPlugin.Count == 1 ? "" : "s")}");
         if (subAgent is not null)                         infoParts.Add("/explore  /locate");
         infoParts.Add("/help");
         AnsiConsole.MarkupLine($"[dim]  {Markup.Escape(string.Join("  ·  ", infoParts))}[/]");
@@ -214,13 +214,16 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
     }
 
     private static string BuildSystemPrompt(
-        string? settingsPrompt, int toolCount, string cwd, string? memoryBlock)
+        string? settingsPrompt, int toolCount, string cwd, string? memoryBlock, string? modelId = null)
     {
         string prompt;
         if (string.IsNullOrWhiteSpace(settingsPrompt))
         {
+            var identity = modelId is not null
+                ? $"You are the fuseraft assistant, running on {modelId}."
+                : "You are the fuseraft assistant.";
             prompt = toolCount > 0
-                ? "You are a precise coding and research assistant with tools for files, shell, code search, git, and HTTP.\n" +
+                ? $"{identity} You are a precise coding and research assistant with tools for files, shell, code search, git, and HTTP.\n" +
                   $"\nCurrent working directory: {cwd}\n" +
                   "\nGuidelines:\n" +
                   "- Prefer tools over guessing.\n" +
@@ -231,7 +234,7 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
                   "- For multi-step work, briefly state intent first.\n" +
                   "- If a command fails due to missing project/config file: search subdirs for the entry point, then run `cd <dir> && <command>` in one shell_run call. Note the directory used.\n" +
                   "- Always return to the original working directory for subsequent commands unless the task explicitly requires otherwise.\n"
-                : $"The current working directory is: {cwd}.";
+                : $"{identity} The current working directory is: {cwd}.";
         }
         else
         {

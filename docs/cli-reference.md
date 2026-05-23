@@ -218,7 +218,12 @@ fuseraft run --devui --ci -c my-team.yaml "Add integration tests"
 
 Start an interactive chat session with a single model. No config file needed. Includes built-in tools for filesystem access, shell execution, code search, git, and HTTP.
 
+Running `fuseraft` with no subcommand is equivalent to `fuseraft repl`.
+
+The assistant identifies itself as the fuseraft assistant and knows which model it is running on, so asking "who are you?" or "what model are you?" will give an accurate answer.
+
 ```
+fuseraft [options]
 fuseraft repl [options]
 ```
 
@@ -497,7 +502,8 @@ Every session appends structured JSONL events to `.fuseraft/repl_events.jsonl` i
 **Examples**
 
 ```bash
-# Start a REPL with auto-detected model and built-in tools
+# Start a REPL with auto-detected model and built-in tools (both forms are equivalent)
+fuseraft
 fuseraft repl
 
 # Use a specific model
