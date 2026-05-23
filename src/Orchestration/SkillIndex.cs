@@ -137,6 +137,18 @@ public sealed class SkillIndex(string? dbPath = null) : IAsyncDisposable
         return results;
     }
 
+    /// <summary>Removes the skill with the given <paramref name="slug"/> from the index.</summary>
+    public async Task RemoveAsync(string slug, CancellationToken ct = default)
+    {
+        if (!File.Exists(_path)) return;
+
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM skills_fts WHERE slug = $slug";
+        cmd.Parameters.AddWithValue("$slug", slug);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     /// <summary>
     /// Scans <paramref name="dir"/> for <c>SKILL.md</c> files and indexes any that are
     /// missing or out of date. Useful for bootstrapping the index from an existing library.

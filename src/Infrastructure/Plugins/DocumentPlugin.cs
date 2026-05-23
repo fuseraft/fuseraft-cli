@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using fuseraft.Core;
 using fuseraft.Infrastructure;
 
 namespace fuseraft.Infrastructure.Plugins;
@@ -11,7 +12,7 @@ namespace fuseraft.Infrastructure.Plugins;
 public sealed class DocumentPlugin(string? sandboxRoot = null)
 {
     private readonly string? _sandboxRoot = sandboxRoot is not null
-        ? Path.GetFullPath(ProcessHelper.ExpandHome(sandboxRoot))
+        ? FuseraftPaths.ExpandPath(sandboxRoot)
         : null;
 
     [Description("Extract plain text from a document. Supports PDF, DOCX, PPTX, XLSX.")]

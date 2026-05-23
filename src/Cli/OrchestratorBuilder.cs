@@ -101,7 +101,7 @@ public static class OrchestratorBuilder
         // of the working directory from which fuseraft was invoked.
         if (config.Security?.FileSystemSandboxPath is { } rawSandbox)
         {
-            var sandboxRoot = Path.GetFullPath(ProcessHelper.ExpandHome(rawSandbox));
+            var sandboxRoot = FuseraftPaths.ExpandPath(rawSandbox);
 
             static string Resolve(string path, string root) =>
                 Path.IsPathRooted(ProcessHelper.ExpandHome(path))
@@ -130,7 +130,7 @@ public static class OrchestratorBuilder
         // sandbox root when a sandbox is configured, mirroring how validation paths are treated.
         if (config.Brownfield is { } bf && config.Security?.FileSystemSandboxPath is { } bfSandbox)
         {
-            var bfRoot = Path.GetFullPath(ProcessHelper.ExpandHome(bfSandbox));
+            var bfRoot = FuseraftPaths.ExpandPath(bfSandbox);
 
             static string BfResolve(string path, string root) =>
                 Path.IsPathRooted(ProcessHelper.ExpandHome(path))
@@ -176,8 +176,8 @@ public static class OrchestratorBuilder
         // configured, they must resolve to the same file.
         if (config.ChangeTracking is { } ctPathCheck && config.Validation?.ChangeLogPath is { } vlPathCheck)
         {
-            var ctNorm = Path.GetFullPath(ProcessHelper.ExpandHome(ctPathCheck.Path));
-            var vlNorm = Path.GetFullPath(ProcessHelper.ExpandHome(vlPathCheck));
+            var ctNorm = FuseraftPaths.ExpandPath(ctPathCheck.Path);
+            var vlNorm = FuseraftPaths.ExpandPath(vlPathCheck);
             if (!string.Equals(ctNorm, vlNorm, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException(
                     $"ChangeTracking.Path ('{ctPathCheck.Path}') and Validation.ChangeLogPath ('{vlPathCheck}') " +
@@ -610,7 +610,7 @@ public static class OrchestratorBuilder
         // (sequential, llm, keyword, structured) through StrategyFactory and works with
         // any agent names and any team size.
         var resolvedSandbox = config.Security?.FileSystemSandboxPath is { Length: > 0 } sbx
-            ? Path.GetFullPath(ProcessHelper.ExpandHome(sbx)) : null;
+            ? FuseraftPaths.ExpandPath(sbx) : null;
         var strategyFactory = new StrategyFactory(chatClientFactory.Create, eventEmitter, loggerFactory, governanceKernel, humanApprovalService, evidenceStore, config.TestSelector, resolvedSandbox);
 
         // Validate verifier config: the named agent must exist in the agent pool.

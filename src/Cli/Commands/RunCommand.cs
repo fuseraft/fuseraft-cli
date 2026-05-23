@@ -757,7 +757,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
     private static string? ResolveWorkDir(string? flagValue, string absoluteConfigPath)
     {
         if (!string.IsNullOrWhiteSpace(flagValue))
-            return Path.GetFullPath(ProcessHelper.ExpandHome(flagValue));
+            return FuseraftPaths.ExpandPath(flagValue);
 
         // Fall back to the sandbox path declared in the config (lightweight load).
         if (File.Exists(absoluteConfigPath))
@@ -766,7 +766,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             {
                 var sandboxPath = OrchestratorBuilder.LoadConfig(absoluteConfigPath).Security?.FileSystemSandboxPath;
                 if (!string.IsNullOrWhiteSpace(sandboxPath))
-                    return Path.GetFullPath(ProcessHelper.ExpandHome(sandboxPath));
+                    return FuseraftPaths.ExpandPath(sandboxPath);
             }
             catch { /* errors surface later in full BuildAsync */ }
         }

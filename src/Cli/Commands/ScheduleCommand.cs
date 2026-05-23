@@ -375,11 +375,10 @@ public sealed class ScheduleRunCommand : AsyncCommand<ScheduleRunSettings>
 
     private static string? ResolveOutputPath(ScheduledJob job, DateTimeOffset now) =>
         job.OutputPath is { Length: > 0 } template
-            ? template
+            ? FuseraftPaths.ExpandPath(template
                 .Replace("{name}", job.Name)
                 .Replace("{date}", now.ToString("yyyy-MM-dd"))
-                .Replace("{time}", now.ToString("HHmm"))
-                .Replace("~", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))
+                .Replace("{time}", now.ToString("HHmm")))
             : null;
 }
 

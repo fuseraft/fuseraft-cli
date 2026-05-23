@@ -1893,7 +1893,7 @@ public sealed class GraphOrchestrator(
 
         // Resolve sandbox root the same way OrchestratorBuilder does.
         var sandboxRoot = config.Security?.FileSystemSandboxPath is { Length: > 0 } sbx
-            ? Path.GetFullPath(ProcessHelper.ExpandHome(sbx))
+            ? FuseraftPaths.ExpandPath(sbx)
             : null;
 
         foreach (var name in names)

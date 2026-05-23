@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using fuseraft.Core;
 using fuseraft.Infrastructure.Plugins;
 
 namespace fuseraft.Infrastructure;
@@ -59,7 +60,7 @@ public sealed class ContextStore
             throw new ArgumentException(
                 $"Invalid name '{name}'. Use only letters, digits, hyphens, and underscores.");
 
-        var fullSource = Path.GetFullPath(ProcessHelper.ExpandHome(sourcePath));
+        var fullSource = FuseraftPaths.ExpandPath(sourcePath);
         bool isFile = File.Exists(fullSource);
         bool isDir  = !isFile && Directory.Exists(fullSource);
 

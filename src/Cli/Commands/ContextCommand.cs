@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using fuseraft.Core;
 using fuseraft.Infrastructure;
 
 namespace fuseraft.Cli.Commands;
@@ -36,7 +37,7 @@ public sealed class ContextAddCommand : AsyncCommand<ContextAddSettings>
         var name = settings.Name?.Trim();
         if (string.IsNullOrWhiteSpace(name))
         {
-            var expanded = ContextHelpers.ExpandSource(settings.Source);
+            var expanded = FuseraftPaths.ExpandPath(settings.Source);
             name = File.Exists(expanded)
                 ? Path.GetFileNameWithoutExtension(expanded)
                 : Path.GetFileName(expanded.TrimEnd(Path.DirectorySeparatorChar,
@@ -195,18 +196,6 @@ file static class ContextHelpers
             ? Directory.GetCurrentDirectory()
             : Path.GetFullPath(dir);
         return Path.Combine(baseDir, ContextStore.DefaultContextDir);
-    }
-
-    internal static string ExpandSource(string source)
-    {
-        if (source.StartsWith("~/") || source == "~")
-        {
-            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            return source.Length > 2
-                ? Path.Combine(home, source[2..])
-                : home;
-        }
-        return Path.GetFullPath(source);
     }
 
     internal static string FormatSize(long bytes) => bytes switch

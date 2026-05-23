@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
+using fuseraft.Core;
 
 namespace fuseraft.Infrastructure.Plugins;
 
@@ -37,10 +38,7 @@ public sealed class ScratchpadPlugin
     public ScratchpadPlugin(string agentName, string basePath)
     {
         _agentName = agentName;
-        // Expand ~ so paths work on any platform without shell expansion.
-        _basePath = basePath.Replace(
-            "~", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            StringComparison.Ordinal);
+        _basePath = FuseraftPaths.ExpandPath(basePath);
     }
 
     // Write

@@ -1045,3 +1045,80 @@ next_run: 2026-05-18T02:00:00+00:00
 ```
 
 Jobs can be edited by hand — `fuseraft schedule run` reads the YAML fresh on each tick. Set `enabled: false` to temporarily pause a job without removing it.
+
+---
+
+## `fuseraft skills`
+
+Install, list, and remove global skills available to all agent sessions. Skills are stored in `~/.fuseraft/skills/` and registered in an FTS5 search index so fuseraft can automatically identify which ones are relevant to a given task.
+
+See [Skills](skills.md) for an overview of how skills work and how to write them.
+
+### `fuseraft skills add`
+
+Copy a skill into `~/.fuseraft/skills/` and add it to the search index.
+
+```
+fuseraft skills add <source>
+```
+
+**Arguments**
+
+| Argument | Description |
+|----------|-------------|
+| `<source>` | Path to a skill directory (containing `SKILL.md`) or directly to a `SKILL.md` file. Supports `~` expansion. |
+
+The slug is derived from the `name:` field in the `SKILL.md` frontmatter. If no `name:` field is present, the source directory name is used. If a skill with the same slug already exists it is updated in place.
+
+**Examples**
+
+```bash
+# Install a skill from a sibling repository
+fuseraft skills add ../skills/productivity/handoff
+
+# Install from a personal skills library
+fuseraft skills add ~/my-skills/triage
+
+# Point directly at a SKILL.md file
+fuseraft skills add ~/my-skills/triage/SKILL.md
+```
+
+---
+
+### `fuseraft skills list`
+
+List all installed global skills.
+
+```
+fuseraft skills list
+```
+
+Displays a table with the slug and description for each skill found under `~/.fuseraft/skills/`.
+
+**Examples**
+
+```bash
+fuseraft skills list
+```
+
+---
+
+### `fuseraft skills remove`
+
+Remove an installed global skill and drop it from the search index.
+
+```
+fuseraft skills remove <slug>
+```
+
+**Arguments**
+
+| Argument | Description |
+|----------|-------------|
+| `<slug>` | Slug of the skill to remove, as shown by `fuseraft skills list`. |
+
+**Examples**
+
+```bash
+fuseraft skills remove handoff
+```
