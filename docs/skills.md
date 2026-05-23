@@ -1,6 +1,6 @@
 # Skills
 
-Skills give agents specialized knowledge and step-by-step procedures for specific types of tasks. When you start a session, fuseraft automatically identifies which installed skills are relevant and loads them for the agent.
+Skills give agents specialized knowledge and step-by-step procedures for specific types of tasks. At REPL startup fuseraft scans your skill directories, injects a catalog of available skills into the system prompt, and exposes two tools the model can call to use them.
 
 ---
 
@@ -15,6 +15,25 @@ fuseraft loads skills from five locations, in precedence order (earlier entries 
 | User (fuseraft) | `~/.fuseraft/skills/` |
 | User (shared) | `~/.agents/skills/` |
 | Built-in | shipped with fuseraft |
+
+---
+
+## How skills work in the REPL
+
+fuseraft uses a progressive-disclosure pattern to keep context lean:
+
+1. **Catalog injection** — At session start, the names and descriptions of all discovered skills are appended to the system prompt so the model knows what is available without loading every full body.
+2. **On-demand load** — When the model decides a skill is relevant, it calls `load_skill("<slug>")` to retrieve the full `SKILL.md` content, then follows those step-by-step instructions using its other tools.
+3. **Script execution** — If a skill bundles executable scripts alongside its `SKILL.md`, the model can run them with `run_skill_script("<slug>", "<filename>")`.
+
+The startup line `Skills: N loaded.  Type /tools to see.` confirms how many skills were found. Type `/tools` to see each tool in the `Skills` category.
+
+| Tool | Description |
+|------|-------------|
+| `load_skill` | Load the full `SKILL.md` for a skill by slug. |
+| `run_skill_script` | Run a script bundled with a skill (`.sh`, `.py`, `.js`). |
+
+If `--no-tools` is passed, skills are disabled for that session.
 
 ---
 
