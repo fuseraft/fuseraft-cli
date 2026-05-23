@@ -33,6 +33,10 @@ public sealed class ReplSettings : CommandSettings
     [CommandOption("--verbose")]
     [Description("Show debug-level log output.")]
     public bool Verbose { get; set; }
+
+    [CommandOption("--resume")]
+    [Description("Resume a previous REPL session by ID (e.g. --resume abc123ef).")]
+    public string? Resume { get; set; }
 }
 
 public sealed class ReplCommand : AsyncCommand<ReplSettings>
@@ -144,19 +148,27 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
         }
 
         var cwd        = Directory.GetCurrentDirectory();
-        var sessionId  = GenerateSessionId();
         var eventsPath = Path.Combine(cwd, FuseraftPaths.LocalReplEventsLog);
 
-        AnsiConsole.MarkupLine($"[dim]Model:[/] [bold]{Markup.Escape(modelId)}[/]");
-        if (initialTools.Count > 0)
-            AnsiConsole.MarkupLine(
-                $"[dim]Tools:[/] [dim]{string.Join(" ", toolsByCategory.Keys)}[/]  " +
-                $"[dim](type[/] [bold]/exit[/] [dim]or Ctrl+C to quit)[/]");
-        else
-            AnsiConsole.MarkupLine($"[dim](type[/] [bold]/exit[/] [dim]or Ctrl+C to quit)[/]");
-        if (subAgent is not null)
-            AnsiConsole.MarkupLine($"[dim]SubAgent:[/] [dim]/explore <query>  /locate <symbol>[/]");
-        AnsiConsole.MarkupLine($"[dim]Events:[/] [dim]{Markup.Escape(eventsPath)}[/]");
+        // Load snapshot when --resume is specified.
+        ReplSessionSnapshot? snapshot = null;
+        if (!string.IsNullOrWhiteSpace(settings.Resume))
+        {
+            snapshot = await ReplSessionSnapshot.LoadAsync(settings.Resume.Trim());
+            if (snapshot is null)
+            {
+                AnsiConsole.MarkupLine($"[red]✗ No saved session found with ID '[/][bold]{Markup.Escape(settings.Resume.Trim())}[/][red]'.[/]");
+                AnsiConsole.MarkupLine("[dim]  Use /sessions inside the REPL to list resumable sessions.[/]");
+                return 1;
+            }
+        }
+
+        var sessionId  = snapshot?.SessionId ?? GenerateSessionId();
+        var startedAt  = snapshot?.StartedAt  ?? DateTime.UtcNow;
+
+        AnsiConsole.Write(new Rule($"[bold cyan]{Markup.Escape(modelId)}[/]")
+            .LeftJustified()
+            .RuleStyle(new Spectre.Console.Style(Spectre.Console.Color.Grey)));
         AnsiConsole.WriteLine();
 
         using var emitter = new EventEmitter(eventsPath);
@@ -167,29 +179,51 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
             cwd,
             tools_enabled = !settings.NoTools,
             tool_count    = initialTools.Count,
+            resumed       = snapshot is not null,
         });
 
         var memoryStore  = MemoryStore.ForRepl();
         var memoryBlock  = await memoryStore.BuildPromptBlockAsync(cwd);
-        var systemPrompt = BuildSystemPrompt(settings.SystemPrompt, initialTools.Count, cwd, memoryBlock);
+        var systemPrompt = BuildSystemPrompt(settings.SystemPrompt, initialTools.Count, cwd, memoryBlock, modelId);
 
         if (skillsCatalog is not null)
             systemPrompt += $"\n\n{skillsCatalog}";
 
-        if (File.Exists(Path.Combine(cwd, "AGENTS.md")))
-            AnsiConsole.MarkupLine("[dim]AGENTS.md loaded.[/]");
-
-        if (memoryBlock is not null)
-            AnsiConsole.MarkupLine("[dim]Memory loaded.  Type[/] [bold]/memory[/] [dim]to manage.[/]");
-
-        if (skillsPlugin is not null)
-            AnsiConsole.MarkupLine($"[dim]Skills:[/] [dim]{skillsPlugin.Count} loaded.  Type[/] [bold]/tools[/] [dim]to see.[/]");
+        // Single compact info line.
+        var infoParts = new List<string>();
+        if (toolsByCategory.Count > 0)
+            infoParts.Add(string.Join("  ", toolsByCategory.Keys));
+        if (File.Exists(Path.Combine(cwd, "AGENTS.md"))) infoParts.Add("agents");
+        if (memoryBlock is not null)                      infoParts.Add("memory");
+        if (skillsPlugin is not null)                     infoParts.Add($"{skillsPlugin.Count} skill{(skillsPlugin.Count == 1 ? "" : "s")}");
+        if (subAgent is not null)                         infoParts.Add("/explore  /locate  /adversarial");
+        infoParts.Add("/help");
+        AnsiConsole.MarkupLine($"[dim]  {Markup.Escape(string.Join("  ·  ", infoParts))}[/]");
+        AnsiConsole.MarkupLine($"[dim]  session: {Markup.Escape(sessionId)}[/]");
+        if (settings.Verbose)
+            AnsiConsole.MarkupLine($"[dim]  events: {Markup.Escape(eventsPath)}[/]");
+        AnsiConsole.WriteLine();
 
         var ctx = new ReplSessionContext(
-            cwd, sessionId, modelId, modelConfig, userCfg, client,
+            cwd, sessionId, startedAt, modelId, modelConfig, userCfg, client,
             factory, keyStore, emitter, eventsPath,
             memoryStore, toolsByCategory, systemPrompt, pendingSave,
             verbose: settings.Verbose, subAgent: subAgent);
+
+        if (snapshot is not null)
+        {
+            var restored = snapshot.RestoreHistory();
+            // Keep system prompt current (updated memories / AGENTS.md).
+            if (restored.Count > 0 && restored[0].Role == ChatRole.System)
+                restored[0] = new ChatMessage(ChatRole.System, systemPrompt);
+            ctx.History.Clear();
+            ctx.History.AddRange(restored);
+            ctx.TurnIndex = snapshot.TurnIndex;
+            AnsiConsole.MarkupLine(
+                $"[dim]  Resuming session [bold]{Markup.Escape(sessionId)}[/] · {snapshot.TurnIndex} turn{(snapshot.TurnIndex == 1 ? "" : "s")} · " +
+                $"started {Markup.Escape(snapshot.StartedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"))}[/]");
+            AnsiConsole.WriteLine();
+        }
 
         await ReplTurn.RunAsync(ctx, cancellationToken);
 
@@ -216,13 +250,16 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
     }
 
     private static string BuildSystemPrompt(
-        string? settingsPrompt, int toolCount, string cwd, string? memoryBlock)
+        string? settingsPrompt, int toolCount, string cwd, string? memoryBlock, string? modelId = null)
     {
         string prompt;
         if (string.IsNullOrWhiteSpace(settingsPrompt))
         {
+            var identity = modelId is not null
+                ? $"You are the fuseraft assistant, running on {modelId}."
+                : "You are the fuseraft assistant.";
             prompt = toolCount > 0
-                ? "You are a precise coding and research assistant with tools for files, shell, code search, git, and HTTP.\n" +
+                ? $"{identity} You are a precise coding and research assistant with tools for files, shell, code search, git, and HTTP.\n" +
                   $"\nCurrent working directory: {cwd}\n" +
                   "\nGuidelines:\n" +
                   "- Prefer tools over guessing.\n" +
@@ -233,7 +270,7 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
                   "- For multi-step work, briefly state intent first.\n" +
                   "- If a command fails due to missing project/config file: search subdirs for the entry point, then run `cd <dir> && <command>` in one shell_run call. Note the directory used.\n" +
                   "- Always return to the original working directory for subsequent commands unless the task explicitly requires otherwise.\n"
-                : $"The current working directory is: {cwd}.";
+                : $"{identity} The current working directory is: {cwd}.";
         }
         else
         {
