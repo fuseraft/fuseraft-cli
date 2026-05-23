@@ -573,7 +573,6 @@ internal static class ReplTurn
 
     internal static void ClearSpinnerLine()
     {
-        var width = Console.IsOutputRedirected ? 80 : Math.Max(Console.WindowWidth - 1, 80);
-        Console.Write($"\r{new string(' ', width)}\r");
+        Console.Write("\r\x1b[2K");
     }
 }
