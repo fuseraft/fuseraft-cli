@@ -70,9 +70,19 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
 
         if (OrchestratorBuilder.VsCodeMode)
         {
-            // Running from VS Code: API key is in the env var the extension injected.
+            // Running from VS Code. Prefer an API key explicitly injected by the
+            // extension (FUSERAFT_API_KEY), then fall back to any legacy plaintext
+            // key still in the config file, then to the OS keychain.  The env-var
+            // path exists for future use; most users will hit the keychain fallback.
             if (userCfg is not null)
-                userCfg.ApiKey = Environment.GetEnvironmentVariable("FUSERAFT_API_KEY") ?? string.Empty;
+            {
+                var envKey = Environment.GetEnvironmentVariable("FUSERAFT_API_KEY");
+                userCfg.ApiKey = !string.IsNullOrEmpty(envKey)
+                    ? envKey
+                    : !string.IsNullOrEmpty(legacyKey)
+                        ? legacyKey
+                        : await keyStore.RetrieveAsync() ?? string.Empty;
+            }
         }
         else if (!string.IsNullOrEmpty(legacyKey))
         {
