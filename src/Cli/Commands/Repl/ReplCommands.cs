@@ -214,8 +214,11 @@ internal static class ReplCommands
             $"[{(pct >= 90 ? "red" : pct >= 70 ? "yellow" : "green")}]{Markup.Escape(bar)}[/]  " +
             $"[dim]{pct:F1}%[/]{deltaStr}");
         AnsiConsole.MarkupLine(
-            $"  [dim]Messages:[/]     {ctx.History.Count}  " +
-            $"[dim](system: {ctx.History.Count(m => m.Role == ChatRole.System)}, " +
+            $"  [dim]Budget:[/]       [bold]{ReplTurn.ContextTokenBudget:N0}[/]  [dim](context window ceiling)[/]");
+        AnsiConsole.MarkupLine(
+            $"  [dim]Turns:[/]        [bold]{ctx.TurnIndex}[/]  " +
+            $"[dim](messages: {ctx.History.Count} — " +
+            $"system: {ctx.History.Count(m => m.Role == ChatRole.System)}, " +
             $"user: {ctx.History.Count(m => m.Role == ChatRole.User)}, " +
             $"assistant: {ctx.History.Count(m => m.Role == ChatRole.Assistant)})[/]");
         AnsiConsole.WriteLine();
@@ -242,6 +245,8 @@ internal static class ReplCommands
         {
             command = "/context",
             estimated_tokens = total,
+            token_budget = ReplTurn.ContextTokenBudget,
+            turns = ctx.TurnIndex,
             breakdown = new { system = sysTok, tools = toolTok, user = userTok, assistant = asstTok }
         });
     }
