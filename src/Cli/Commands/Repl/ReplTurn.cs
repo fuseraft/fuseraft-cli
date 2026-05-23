@@ -75,12 +75,13 @@ internal static class ReplTurn
             }
 
             var turnLabel = (ctx.TurnIndex + 1).ToString();
-            AnsiConsole.Markup(ctx.SafeMode
-                ? $"[dim][[safe]] {turnLabel}[/][bold cyan]>[/] "
-                : $"[dim]{turnLabel}[/][bold cyan]>[/] ");
+            if (!ctx.JsonMode)
+                AnsiConsole.Markup(ctx.SafeMode
+                    ? $"[dim][[safe]] {turnLabel}[/][bold cyan]>[/] "
+                    : $"[dim]{turnLabel}[/][bold cyan]>[/] ");
 
             string? raw;
-            try   { raw = ctx.LineReader.ReadLine(); }
+            try   { raw = ctx.JsonMode ? ReplJsonBridge.ReadInput() : ctx.LineReader.ReadLine(); }
             catch (OperationCanceledException) { break; }
 
             if (raw is null) break;
@@ -94,10 +95,15 @@ internal static class ReplTurn
                 var arg     = parts.Length > 1 ? parts[1] : string.Empty;
 
                 var result = await ReplCommands.HandleAsync(ctx, command, arg, cancellationToken);
-                AnsiConsole.WriteLine();
+                if (!ctx.JsonMode) AnsiConsole.WriteLine();
 
-                if (result.Outcome == CommandOutcome.Exit)     break;
-                if (result.Outcome == CommandOutcome.Continue) continue;
+                if (result.Outcome == CommandOutcome.Exit) break;
+                if (result.Outcome == CommandOutcome.Continue)
+                {
+                    if (ctx.JsonMode)
+                        ReplJsonBridge.Emit(new { type = "message_end", turnIndex = ctx.TurnIndex, toolCalls = Array.Empty<string>() });
+                    continue;
+                }
 
                 await ExecuteAsync(
                     ctx,
@@ -173,8 +179,10 @@ internal static class ReplTurn
         var reqCts    = new CancellationTokenSource();
         ctx.ActiveCts = reqCts;
         var spinCts   = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
-        var spinTask  = RunSpinnerAsync(capturePlan ? "planning…" : "thinking…", spinCts.Token);
-        var spinning  = true;
+        var spinTask  = ctx.JsonMode
+            ? Task.CompletedTask
+            : RunSpinnerAsync(capturePlan ? "planning…" : "thinking…", spinCts.Token);
+        var spinning  = !ctx.JsonMode;
 
         // Cancels and awaits the spinner; caller disposes spinCts.
         async Task StopSpinnerAsync()
@@ -198,17 +206,24 @@ internal static class ReplTurn
                     if (!inToolBatch) { toolRounds++; inToolBatch = true; }
                     toolCallsThisTurn.Add(funcCall.Name);
 
-                    // Update spinner label to show the accumulating tool chain live.
-                    var chain = toolCallsThisTurn.Count <= 4
-                        ? string.Join(" → ", toolCallsThisTurn)
-                        : string.Join(" → ", toolCallsThisTurn.TakeLast(4)) +
-                          $" (+{toolCallsThisTurn.Count - 4})";
-                    spinCts.Cancel();
-                    await spinTask;
-                    spinCts.Dispose();
-                    spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
-                    spinTask = RunSpinnerAsync($"conjuring…  {chain}", spinCts.Token);
-                    spinning = true;
+                    if (ctx.JsonMode)
+                    {
+                        ReplJsonBridge.Emit(new { type = "tool_call", name = funcCall.Name });
+                    }
+                    else
+                    {
+                        // Update spinner label to show the accumulating tool chain live.
+                        var chain = toolCallsThisTurn.Count <= 4
+                            ? string.Join(" → ", toolCallsThisTurn)
+                            : string.Join(" → ", toolCallsThisTurn.TakeLast(4)) +
+                              $" (+{toolCallsThisTurn.Count - 4})";
+                        spinCts.Cancel();
+                        await spinTask;
+                        spinCts.Dispose();
+                        spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
+                        spinTask = RunSpinnerAsync($"conjuring…  {chain}", spinCts.Token);
+                        spinning = true;
+                    }
                     continue;
                 }
 
@@ -219,23 +234,30 @@ internal static class ReplTurn
 
                 if (!capturePlan)
                 {
-                    if (!textStarted)
+                    if (ctx.JsonMode)
                     {
-                        textStarted = true;
-                        await StopSpinnerAsync();
-                        // Print compact tool-call chain before the response starts.
-                        if (toolCallsThisTurn.Count > 0 && !Console.IsOutputRedirected)
-                            AnsiConsole.MarkupLine(
-                                $"  [dim]⚙  {Markup.Escape(string.Join(" → ", toolCallsThisTurn))}[/]");
+                        ReplJsonBridge.Emit(new { type = "token", text });
                     }
-                    else if (spinning)
+                    else
                     {
-                        await StopSpinnerAsync();
-                    }
-                    if (!Console.IsOutputRedirected)
-                    {
-                        var approxTokens = (sb.Length + 3) / 4;
-                        Console.Write($"\r\x1b[2m receiving… {approxTokens} tokens\x1b[0m  ");
+                        if (!textStarted)
+                        {
+                            textStarted = true;
+                            await StopSpinnerAsync();
+                            // Print compact tool-call chain before the response starts.
+                            if (toolCallsThisTurn.Count > 0 && !Console.IsOutputRedirected)
+                                AnsiConsole.MarkupLine(
+                                    $"  [dim]⚙  {Markup.Escape(string.Join(" → ", toolCallsThisTurn))}[/]");
+                        }
+                        else if (spinning)
+                        {
+                            await StopSpinnerAsync();
+                        }
+                        if (!Console.IsOutputRedirected)
+                        {
+                            var approxTokens = (sb.Length + 3) / 4;
+                            Console.Write($"\r\x1b[2m receiving… {approxTokens} tokens\x1b[0m  ");
+                        }
                     }
                 }
             }
@@ -244,11 +266,14 @@ internal static class ReplTurn
         {
             await StopSpinnerAsync();
             spinCts.Dispose();
-            AnsiConsole.MarkupLine("[dim](cancelled)[/]");
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new { type = "cancelled" });
+            else
+                AnsiConsole.MarkupLine("[dim](cancelled)[/]");
             if (ctx.History.Count > 0 && ctx.History[^1].Role == ChatRole.User)
                 ctx.History.RemoveAt(ctx.History.Count - 1);
             ctx.ExecutionQueue.Clear();
-            AnsiConsole.WriteLine();
+            if (!ctx.JsonMode) AnsiConsole.WriteLine();
             reqCts.Dispose();
             ctx.ActiveCts = null;
             return false;
@@ -257,7 +282,10 @@ internal static class ReplTurn
         {
             await StopSpinnerAsync();
             spinCts.Dispose();
-            AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(ex.Message)}[/]");
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new { type = "error", text = ex.Message });
+            else
+                AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(ex.Message)}[/]");
             if (ctx.History.Count > 0 && ctx.History[^1].Role == ChatRole.User)
                 ctx.History.RemoveAt(ctx.History.Count - 1);
             ctx.ExecutionQueue.Clear();
@@ -273,14 +301,14 @@ internal static class ReplTurn
 
         var responseText = sb.ToString();
 
-        if (!capturePlan && responseText.Length > 0)
+        if (!capturePlan && responseText.Length > 0 && !ctx.JsonMode)
         {
             if (!Console.IsOutputRedirected)
                 ClearSpinnerLine();
             AnsiConsole.MarkupLine("[dim]assistant:[/]");
             AnsiConsole.Write(MarkdownRenderer.Render(responseText));
         }
-        AnsiConsole.WriteLine();
+        if (!ctx.JsonMode) AnsiConsole.WriteLine();
         if (responseText.Length > 0)
             ctx.History.Add(new ChatMessage(ChatRole.Assistant, responseText));
 
@@ -301,7 +329,8 @@ internal static class ReplTurn
         {
             if (!isCorrectionTurn)
             {
-                AnsiConsole.MarkupLine("[dim]  ↺ mutation claimed without write tool — injecting correction[/]");
+                if (!ctx.JsonMode)
+                    AnsiConsole.MarkupLine("[dim]  ↺ mutation claimed without write tool — injecting correction[/]");
                 const string correctionMsg =
                     "You described changes above but did not call any write tool. " +
                     "Please call write_file or patch_file now to actually apply the changes. " +
@@ -313,8 +342,9 @@ internal static class ReplTurn
             }
             else
             {
-                AnsiConsole.MarkupLine(
-                    "[yellow]  ⚠ No write tool called after correction — verify the agent did not fabricate this result.[/]");
+                if (!ctx.JsonMode)
+                    AnsiConsole.MarkupLine(
+                        "[yellow]  ⚠ No write tool called after correction — verify the agent did not fabricate this result.[/]");
             }
         }
 
@@ -324,7 +354,7 @@ internal static class ReplTurn
         ctx.PrevTurnTokenEstimate = postEst;
 
         // Compact status line after each free-form response.
-        if (!isStepRequest && !capturePlan && responseText.Length > 0 && !Console.IsOutputRedirected)
+        if (!ctx.JsonMode && !isStepRequest && !capturePlan && responseText.Length > 0 && !Console.IsOutputRedirected)
         {
             var toolStr = toolCallsThisTurn.Count > 0
                 ? $" · {toolCallsThisTurn.Count} tool{(toolCallsThisTurn.Count == 1 ? "" : "s")}"
@@ -334,9 +364,12 @@ internal static class ReplTurn
         }
 
         if (TrimHistory(ctx.History))
-            AnsiConsole.MarkupLine("[dim]  (old messages trimmed to fit context window)[/]");
+        {
+            if (!ctx.JsonMode)
+                AnsiConsole.MarkupLine("[dim]  (old messages trimmed to fit context window)[/]");
+        }
 
-        if (ctx.Verbose)
+        if (!ctx.JsonMode && ctx.Verbose)
             AnsiConsole.MarkupLine(
                 $"[dim]  tokens (est.): {postEst:N0} / {ContextTokenBudget:N0}  rounds: {toolRounds}  tool calls: {toolCallsThisTurn.Count}[/]");
 
@@ -347,10 +380,16 @@ internal static class ReplTurn
         if (ctx.PendingSave && responseText.Length > 0)
         {
             UserConfigStore.Save(ctx.UserCfg!);
-            AnsiConsole.MarkupLine($"[dim]Settings saved to[/] [bold]{Markup.Escape(UserConfigStore.ConfigPath)}[/]");
-            AnsiConsole.MarkupLine($"[dim]API key stored in[/] [bold]{Markup.Escape(ctx.KeyStore.StoreName)}[/]");
+            if (!ctx.JsonMode)
+            {
+                AnsiConsole.MarkupLine($"[dim]Settings saved to[/] [bold]{Markup.Escape(UserConfigStore.ConfigPath)}[/]");
+                AnsiConsole.MarkupLine($"[dim]API key stored in[/] [bold]{Markup.Escape(ctx.KeyStore.StoreName)}[/]");
+            }
             ctx.PendingSave = false;
         }
+
+        if (ctx.JsonMode)
+            ReplJsonBridge.Emit(new { type = "message_end", turnIndex = ctx.TurnIndex, toolCalls = toolCallsThisTurn.ToArray() });
 
         ctx.TurnIndex++;
         return stepPassed;
@@ -361,22 +400,34 @@ internal static class ReplTurn
         if (TryParsePlan(responseText, out var steps) && steps.Length > 0)
         {
             ctx.CurrentPlan = steps;
-            AnsiConsole.MarkupLine($"[dim]Plan ({steps.Length} steps). Review, then run[/] [bold]/execute[/][dim].[/]");
-            AnsiConsole.WriteLine();
-            foreach (var ps in steps)
+            if (ctx.JsonMode)
             {
-                AnsiConsole.MarkupLine($"  [bold]{ps.Step}.[/] {Markup.Escape(ps.Description)}");
-                if (ps.Tool    is not null) AnsiConsole.MarkupLine($"       [dim]tool: {Markup.Escape(ps.Tool)}[/]");
-                if (ps.Creates is not null) AnsiConsole.MarkupLine($"       [dim]creates: {Markup.Escape(ps.Creates)}[/]");
+                ReplJsonBridge.Emit(new { type = "plan", steps });
             }
-            AnsiConsole.WriteLine();
+            else
+            {
+                AnsiConsole.MarkupLine($"[dim]Plan ({steps.Length} steps). Review, then run[/] [bold]/execute[/][dim].[/]");
+                AnsiConsole.WriteLine();
+                foreach (var ps in steps)
+                {
+                    AnsiConsole.MarkupLine($"  [bold]{ps.Step}.[/] {Markup.Escape(ps.Description)}");
+                    if (ps.Tool    is not null) AnsiConsole.MarkupLine($"       [dim]tool: {Markup.Escape(ps.Tool)}[/]");
+                    if (ps.Creates is not null) AnsiConsole.MarkupLine($"       [dim]creates: {Markup.Escape(ps.Creates)}[/]");
+                }
+                AnsiConsole.WriteLine();
+            }
         }
         else
         {
-            AnsiConsole.MarkupLine("[yellow]⚠ Could not parse plan JSON. Raw response:[/]");
-            Console.WriteLine(responseText);
-            AnsiConsole.MarkupLine("[dim]Try /plan again.[/]");
-            AnsiConsole.WriteLine();
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new { type = "error", text = "Could not parse plan JSON from response." });
+            else
+            {
+                AnsiConsole.MarkupLine("[yellow]⚠ Could not parse plan JSON. Raw response:[/]");
+                Console.WriteLine(responseText);
+                AnsiConsole.MarkupLine("[dim]Try /plan again.[/]");
+                AnsiConsole.WriteLine();
+            }
         }
     }
 
@@ -408,45 +459,57 @@ internal static class ReplTurn
             var inspectSkip   = activeStep.Tool is not null && toolCallsThisTurn.Count > 0 &&
                                 toolCallsThisTurn.All(t => InspectTools.Contains(t));
             var skipped       = zeroCallSkip || inspectSkip;
-            var icon          = skipped ? "↷" : "✓";
-            var label         = skipped ? "skipped" : "complete";
-            AnsiConsole.MarkupLine(stepsLeft > 0
-                ? $"[dim]  {icon} Step {activeStep.Step} {label}.  {stepsLeft} step{(stepsLeft == 1 ? "" : "s")} remaining.[/]"
-                : $"[dim]  {icon} Step {activeStep.Step} {label}.  Plan finished.[/]");
-            if (hitIterationCap)
-                AnsiConsole.MarkupLine(
-                    $"[dim]  ↯ Step {activeStep.Step} reached the {StepIterationLimit}-round limit; later calls in this step may have been cut short.[/]");
-            // A write-tool step with zero tool calls is suspicious: the agent may have fabricated output.
-            if (zeroCallSkip && activeStep.Tool is not null && !InspectTools.Contains(activeStep.Tool))
-                AnsiConsole.MarkupLine(
-                    $"[yellow]  ⚠ Step {activeStep.Step}: '{Markup.Escape(activeStep.Tool)}' was not called — verify the agent did not fabricate this result.[/]");
+            if (ctx.JsonMode)
+            {
+                ReplJsonBridge.Emit(new { type = "step_status", step = activeStep.Step, total, status = skipped ? "skipped" : "complete", stepsLeft });
+            }
+            else
+            {
+                var icon  = skipped ? "↷" : "✓";
+                var label = skipped ? "skipped" : "complete";
+                AnsiConsole.MarkupLine(stepsLeft > 0
+                    ? $"[dim]  {icon} Step {activeStep.Step} {label}.  {stepsLeft} step{(stepsLeft == 1 ? "" : "s")} remaining.[/]"
+                    : $"[dim]  {icon} Step {activeStep.Step} {label}.  Plan finished.[/]");
+                if (hitIterationCap)
+                    AnsiConsole.MarkupLine(
+                        $"[dim]  ↯ Step {activeStep.Step} reached the {StepIterationLimit}-round limit; later calls in this step may have been cut short.[/]");
+                if (zeroCallSkip && activeStep.Tool is not null && !InspectTools.Contains(activeStep.Tool))
+                    AnsiConsole.MarkupLine(
+                        $"[yellow]  ⚠ Step {activeStep.Step}: '{Markup.Escape(activeStep.Tool)}' was not called — verify the agent did not fabricate this result.[/]");
+            }
         }
         else
         {
-            if (activeStep.Tool is not null &&
-                !toolCallsThisTurn.Any(t => t.Equals(activeStep.Tool, StringComparison.OrdinalIgnoreCase)))
+            if (!ctx.JsonMode)
             {
-                if (hitIterationCap)
+                if (activeStep.Tool is not null &&
+                    !toolCallsThisTurn.Any(t => t.Equals(activeStep.Tool, StringComparison.OrdinalIgnoreCase)))
+                {
+                    if (hitIterationCap)
+                        AnsiConsole.MarkupLine(
+                            $"[yellow]  ⚠ Step {activeStep.Step}: hit the {StepIterationLimit}-round limit before " +
+                            $"'{Markup.Escape(activeStep.Tool)}' was called — step may be too broad, consider splitting it.[/]");
+                    else
+                        AnsiConsole.MarkupLine(
+                            $"[yellow]  ⚠ Step {activeStep.Step}: expected tool '{Markup.Escape(activeStep.Tool)}' was not called.[/]");
+                }
+                if (activeStep.Creates is not null &&
+                    !File.Exists(Path.Combine(ctx.Cwd, activeStep.Creates)) &&
+                    !Directory.Exists(Path.Combine(ctx.Cwd, activeStep.Creates)))
                     AnsiConsole.MarkupLine(
-                        $"[yellow]  ⚠ Step {activeStep.Step}: hit the {StepIterationLimit}-round limit before " +
-                        $"'{Markup.Escape(activeStep.Tool)}' was called — step may be too broad, consider splitting it.[/]");
-                else
-                    AnsiConsole.MarkupLine(
-                        $"[yellow]  ⚠ Step {activeStep.Step}: expected tool '{Markup.Escape(activeStep.Tool)}' was not called.[/]");
+                        $"[yellow]  ⚠ Step {activeStep.Step}: expected '{Markup.Escape(activeStep.Creates)}' was not created.[/]");
             }
-            if (activeStep.Creates is not null &&
-                !File.Exists(Path.Combine(ctx.Cwd, activeStep.Creates)) &&
-                !Directory.Exists(Path.Combine(ctx.Cwd, activeStep.Creates)))
-                AnsiConsole.MarkupLine(
-                    $"[yellow]  ⚠ Step {activeStep.Step}: expected '{Markup.Escape(activeStep.Creates)}' was not created.[/]");
             ctx.HaltedAt = (activeStep, total);
             ctx.HaltedRemaining.Clear();
             foreach (var item in ctx.ExecutionQueue) ctx.HaltedRemaining.Enqueue(item);
             ctx.HaltedToolCalls = [.. toolCallsThisTurn];
             ctx.ExecutionQueue.Clear();
-            AnsiConsole.MarkupLine("[yellow]  Plan halted. Run /recover to let the agent diagnose and retry, or /resume to retry directly.[/]");
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new { type = "step_status", step = activeStep.Step, total, status = "halted", stepsLeft = 0 });
+            else
+                AnsiConsole.MarkupLine("[yellow]  Plan halted. Run /recover to let the agent diagnose and retry, or /resume to retry directly.[/]");
         }
-        AnsiConsole.WriteLine();
+        if (!ctx.JsonMode) AnsiConsole.WriteLine();
         return passed;
     }
 
@@ -455,22 +518,25 @@ internal static class ReplTurn
         if (ctx.TurnIndex == 0 || ctx.LastExtractedTurnIndex == ctx.TurnIndex) return;
         try
         {
-            AnsiConsole.Markup("[dim]saving memory…[/]");
+            if (!ctx.JsonMode) AnsiConsole.Markup("[dim]saving memory…[/]");
             var mc = ctx.Factory.Create(ctx.ModelConfig);
             using var _ = mc as IDisposable;
             var existing = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd);
             var (saved, parseFailed) = await new MemoryExtractor(mc).ExtractAsync([.. ctx.History], existing);
-            Console.Write($"\r{new string(' ', 30)}\r");
+            if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 30)}\r");
             foreach (var m in saved) await ctx.MemoryStore.SaveAsync(m, ctx.Cwd);
-            if (parseFailed)
-                AnsiConsole.MarkupLine("[dim](memory extraction returned unparseable output)[/]");
-            else if (saved.Count > 0)
-                AnsiConsole.MarkupLine(
-                    $"[dim]Memory: {saved.Count} entr{(saved.Count == 1 ? "y" : "ies")} saved.[/]");
+            if (!ctx.JsonMode)
+            {
+                if (parseFailed)
+                    AnsiConsole.MarkupLine("[dim](memory extraction returned unparseable output)[/]");
+                else if (saved.Count > 0)
+                    AnsiConsole.MarkupLine(
+                        $"[dim]Memory: {saved.Count} entr{(saved.Count == 1 ? "y" : "ies")} saved.[/]");
+            }
         }
         catch
         {
-            Console.Write($"\r{new string(' ', 30)}\r");
+            if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 30)}\r");
         }
     }
 
