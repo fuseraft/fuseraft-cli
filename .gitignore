@@ -9,6 +9,7 @@ site/
 artifacts/
 src/bin/
 src/obj/
+src/*/obj/
 tools/*/bin/
 tools/*/obj/
 

@@ -15,6 +15,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="FuseraftUpdate/**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Microsoft Agent Framework -->
     <PackageReference Include="Cronos" Version="0.9.0" />
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.3.0" />

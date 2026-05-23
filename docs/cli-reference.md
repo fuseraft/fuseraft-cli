@@ -1232,7 +1232,18 @@ fuseraft update [options]
 |------|---------|-------------|
 | `--check` | off | Report whether a newer release is available without downloading or installing anything. |
 
-The command detects the current platform and architecture, downloads the matching release archive (`fuseraft-<version>-<rid>.tar.gz`), extracts the binary, and replaces the running binary in place. The install is atomic — the new binary is written to a `.new` sidecar file and moved over the original only after a successful extraction.
+The command detects the current platform and architecture, downloads the matching release archive (`fuseraft-<version>-<rid>.tar.gz`), and installs the new binary.
+
+**Linux / macOS** — the new binary is written to a `.new` sidecar file and atomically renamed over the original. This works even while fuseraft is running because `rename()` is inode-level.
+
+**Windows** — Windows locks the running executable and cannot rename it in place. `fuseraft update` instead writes the new binary as `fuseraft.exe.pending` in the same directory, then launches `fuseraft-update.exe` in a new console window and exits. The updater:
+1. Waits a moment for the calling fuseraft process to exit.
+2. Checks for any remaining fuseraft instances and asks whether to kill them.
+3. Renames `fuseraft.exe` → `fuseraft.exe.backup` (blocks new launches during the swap).
+4. Moves `fuseraft.exe.pending` → `fuseraft.exe`.
+5. Deletes the backup and reports success.
+
+`fuseraft-update.exe` must be present alongside `fuseraft.exe`. It is included in every Windows release archive published by CI.
 
 If the current version already matches or exceeds the latest release the command exits immediately with no changes.
 
