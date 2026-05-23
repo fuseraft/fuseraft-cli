@@ -173,7 +173,7 @@ public sealed class PluginRegistry : IDisposable
     // names are already self-describing (e.g. ReadFile, WriteFile). Adding "file_system_"
     // would break all existing tool references in agent instructions.
     private static readonly HashSet<string> NoPrefixPlugins =
-        new(StringComparer.OrdinalIgnoreCase) { "FileSystem", "Handoff" };
+        new(StringComparer.OrdinalIgnoreCase) { "FileSystem", "Handoff", "Skills" };
 
     /// <summary>
     /// Builds <see cref="AIFunction"/> instances from a plugin object by reflecting over
