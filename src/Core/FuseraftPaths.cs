@@ -15,6 +15,22 @@ public static class FuseraftPaths
     public static string GlobalCrashDumps => Path.Combine(GlobalRoot, "crashdump");
     public static string GlobalScratchpad => Path.Combine(GlobalRoot, "scratchpad");
     public static string GlobalSkills      => Path.Combine(GlobalRoot, "skills");
+
+    // Path utilities
+
+    /// <summary>
+    /// Expands a leading <c>~</c> to the user home directory and returns an absolute,
+    /// normalized path. Equivalent to <c>Path.GetFullPath(ExpandHome(path))</c>.
+    /// </summary>
+    public static string ExpandPath(string path)
+    {
+        if (path.StartsWith("~/") || path == "~")
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            return Path.GetFullPath(path.Length > 2 ? Path.Combine(home, path[2..]) : home);
+        }
+        return Path.GetFullPath(path);
+    }
     public static string GlobalSkillsIndex => Path.Combine(GlobalRoot, "skills", "index.db");
     public static string GlobalSchedule    => Path.Combine(GlobalRoot, "schedule");
     public static string GlobalMemoryRepl => Path.Combine(GlobalRoot, "memory", "repl");

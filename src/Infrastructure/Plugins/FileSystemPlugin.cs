@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Microsoft.Extensions.AI;
+using fuseraft.Core;
 using fuseraft.Infrastructure;
 
 namespace fuseraft.Infrastructure.Plugins;
@@ -41,7 +42,7 @@ public sealed class FileSystemPlugin : ITurnResettable
 
     public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null)
     {
-        _sandboxRoot       = sandboxRoot is not null ? Path.GetFullPath(ProcessHelper.ExpandHome(sandboxRoot)) : null;
+        _sandboxRoot       = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _readFileSizeLimit = readFileSizeLimit > 0 ? readFileSizeLimit : 20_000;
         _readBudgetPerTurn = readBudgetPerTurn > 0 ? readBudgetPerTurn : 150_000;
         var baseDir        = _sandboxRoot ?? Directory.GetCurrentDirectory();

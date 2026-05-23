@@ -4,6 +4,7 @@ using AgentGovernance.Security;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.FileSystemGlobbing;
+using fuseraft.Core;
 
 namespace fuseraft.Infrastructure.Plugins;
 
@@ -82,7 +83,7 @@ public sealed class SandboxEnforcementFilter
         ExecutionRing ring = ExecutionRing.Ring2,
         IReadOnlyList<string>? changeEnvelope = null)
     {
-        _sandboxRoot       = Path.GetFullPath(ProcessHelper.ExpandHome(sandboxRoot));
+        _sandboxRoot       = FuseraftPaths.ExpandPath(sandboxRoot);
         _injectionDetector = injectionDetector;
         _ring              = ring;
         _limits            = RingResourceLimits.Defaults[ring];

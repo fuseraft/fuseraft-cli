@@ -109,6 +109,9 @@ services.AddTransient<ScheduleAddCommand>();
 services.AddTransient<ScheduleListCommand>();
 services.AddTransient<ScheduleRemoveCommand>();
 services.AddTransient<ScheduleRunCommand>();
+services.AddTransient<SkillsAddCommand>();
+services.AddTransient<SkillsListCommand>();
+services.AddTransient<SkillsRemoveCommand>();
 
 // Use CommandApp<RunCommand> so `fuseraft` with no subcommand defaults to run.
 var registrar = new ServiceCollectionRegistrar(services);
@@ -248,6 +251,24 @@ app.Configure(cfg =>
             .WithExample(["schedule", "run"])
             .WithExample(["schedule", "run", "--name", "nightly-audit"])
             .WithExample(["schedule", "run", "--dry-run"]);
+    });
+
+    cfg.AddBranch("skills", branch =>
+    {
+        branch.SetDescription("Manage global skills available to all agent sessions.");
+
+        branch.AddCommand<SkillsAddCommand>("add")
+            .WithDescription("Copy a skill into ~/.fuseraft/skills and add it to the search index.")
+            .WithExample(["skills", "add", "../skills/productivity/handoff"])
+            .WithExample(["skills", "add", "~/my-skills/triage"]);
+
+        branch.AddCommand<SkillsListCommand>("list")
+            .WithDescription("List all installed global skills.")
+            .WithExample(["skills", "list"]);
+
+        branch.AddCommand<SkillsRemoveCommand>("remove")
+            .WithDescription("Remove a global skill and drop it from the search index.")
+            .WithExample(["skills", "remove", "handoff"]);
     });
 });
 

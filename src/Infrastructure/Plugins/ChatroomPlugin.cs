@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using fuseraft.Core;
 
 namespace fuseraft.Infrastructure.Plugins;
 
@@ -33,9 +34,7 @@ public sealed class ChatroomPlugin
     public ChatroomPlugin(string agentName, string chatPath)
     {
         _agentName = agentName;
-        _chatPath  = chatPath.Replace(
-            "~", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            StringComparison.Ordinal);
+        _chatPath  = FuseraftPaths.ExpandPath(chatPath);
     }
 
     // Send
