@@ -118,6 +118,18 @@ If no task is given you are prompted interactively:
 
 The orchestrator loads the config, prints a summary of the team, and streams agent responses as they arrive.
 
+## Start a REPL session
+
+For quick questions or single-model chat, run fuseraft with no subcommand:
+
+```bash
+fuseraft
+```
+
+No config file needed. The REPL auto-detects your provider from the API key stored in `~/.fuseraft/config` (or runs the setup wizard on first use). Type a message and press Enter. Use `/help` inside the session to see available commands.
+
+---
+
 ## Understand the output
 
 Each agent turn is prefixed with its name:
@@ -150,6 +162,17 @@ Before running an unfamiliar config:
 ```
 
 This checks field types, agent names, strategy references, and plugin names without making any API calls.
+
+## Keep up to date
+
+If you installed a prebuilt binary, keep it current with:
+
+```bash
+fuseraft update          # download and install the latest release
+fuseraft update --check  # check for a newer release without installing
+```
+
+On Linux and macOS the binary is replaced atomically in place. On Windows a separate `fuseraft-update.exe` process (bundled in the release archive) handles the swap after all fuseraft instances exit. See [CLI Reference — fuseraft update](cli-reference.md#fuseraft-update) for full details.
 
 ## Next steps
 
