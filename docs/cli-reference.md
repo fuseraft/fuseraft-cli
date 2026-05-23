@@ -277,6 +277,8 @@ When the model invokes a tool, a dim `> tool_name(arg)` line is printed and the 
 |---------|-------------|
 | `/help` | Show all slash commands |
 | `/clear` | Clear conversation history (system prompt is kept) |
+| `/compact` | Ask the model to summarise the session into a handoff document, then replace history with that summary. The system prompt and tools/skills catalog are kept; everything else is discarded. Use this when context is filling up but you want to continue in the same session. |
+| `/compact <focus>` | Same as `/compact`, but passes a focus hint to the model so the summary is tailored toward the next task (e.g. `/compact fix the auth bug next`) |
 | `/history` | Show a condensed view of the conversation (role + preview of each message) |
 | `/system` | Print the current system prompt |
 | `/system <prompt>` | Replace the system prompt for the rest of the session |
@@ -403,6 +405,28 @@ At session start, scoped memories are injected into the system prompt. When the 
 ```
 
 Each memory file lives at `~/.fuseraft/memory/repl/memory_{guid}.md`. Use `/memory save` mid-session if you want to capture facts before the session ends naturally.
+
+**Compacting a session**
+
+As a conversation grows, token usage climbs and the model's effective context window shrinks. Use `/compact` to reset history without losing continuity:
+
+1. The model summarises the entire conversation into a handoff document — what was being worked on, key decisions, current state, and what comes next.
+2. The full history is discarded and replaced with that single summary message. The system prompt, tools, and skills catalog are kept intact.
+3. The session continues as if it had just started, but with the summary as its opening context.
+
+Pass an optional focus hint to steer the summary toward the next task:
+
+```
+> /compact fix the auth middleware next
+  compacting…
+  Session compacted — history replaced with handoff summary.
+
+> What was the last thing we did?
+  assistant: Based on the compacted context: we finished wiring the JWT validation
+  middleware and left off on ...
+```
+
+Use `/context` before compacting to see how full the window is. `/compact` is additive with the [handoff skill](skills.md) — the skill writes a doc to disk for handing off to a *different* session, while `/compact` resets the *current* session in place.
 
 **Event log**
 
