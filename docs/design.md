@@ -121,6 +121,8 @@ All runtime artifacts are written under `.fuseraft/` in the current working dire
 
 All paths are configurable via their corresponding config keys. The table above shows defaults.
 
+**Folder orientation for agents** — `FuseraftPaths.BuildFolderOrientationBlock()` generates a compact manifest of the local `.fuseraft/` directory and is appended to every agent's instructions by `OrchestratorBuilder` at session start. This means agents never need to call `list_files` on `.fuseraft/` to discover its layout — they already have it. In REPL mode the log-file entries are omitted (the session section already covers them; agents are directed to the `repl_session_*` tools). `SubAgentPlugin` prompts receive a one-line skip directive instead of the full manifest to keep their system prompts compact.
+
 ---
 
 ## 4. Configuration
