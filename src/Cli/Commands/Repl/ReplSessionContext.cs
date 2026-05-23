@@ -8,8 +8,6 @@ using fuseraft.Orchestration;
 namespace fuseraft.Cli.Commands.Repl;
 
 // Shared types used by ReplSession, ReplCommands, and ReplTurn.
-internal sealed record PlanStep(int Step, string Description, string? Tool, string? Creates);
-
 internal enum CommandOutcome { Continue, Exit, SendInput }
 
 internal readonly record struct CommandResult(
