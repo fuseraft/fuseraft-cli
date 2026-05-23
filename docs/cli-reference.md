@@ -233,6 +233,7 @@ fuseraft repl [options]
 |------|---------|-------------|
 | `-m, --model <id>` | see below | Model ID to use (e.g. `gpt-4o`, `claude-sonnet-4-6`). Overrides `~/.fuseraft/config` when set. |
 | `-s, --system <prompt>` | — | System prompt. Defaults to a coding/research prompt when tools are enabled. |
+| `--resume <id>` | — | Resume a previous REPL session by its session ID. Use `/sessions` inside the REPL to list resumable sessions. |
 | `--no-banner` | off | Skip the ASCII banner. |
 | `--no-tools` | off | Disable all built-in tools and start a plain chat session. |
 | `--verbose` | off | Enable debug logging: prints per-turn detail (token estimate, tool-round count, total tool calls) and shows the event log path at startup. |
@@ -240,14 +241,15 @@ fuseraft repl [options]
 
 **Startup display**
 
-On launch a compact header shows the model name and a single info line listing active tool categories, loaded context (agents/memory/skills), and available sub-agent commands:
+On launch a compact header shows the model name, a single info line listing active tool categories, loaded context (agents/memory/skills), and available sub-agent commands, and the session ID:
 
 ```
 ── claude-sonnet-4-6 ─────────────────────────────────────
   FileSystem  Shell  Search  Git  Http  ·  memory  ·  3 skills  ·  /help
+  session: a87569bcd7b0
 ```
 
-The event log path is only shown with `--verbose`.
+The session ID is shown on every startup so you can note it down for later resumption with `--resume`. The event log path is only shown with `--verbose`.
 
 **First-time setup**
 
@@ -306,6 +308,7 @@ Use `/tools` to see the full list at runtime.
 | Command | Description |
 |---------|-------------|
 | `/help` | Show all slash commands |
+| `/sessions` | List resumable REPL sessions with their IDs, model, turn count, and age. Resume with `fuseraft repl --resume <id>`. |
 | `/clear` | Clear conversation history (system prompt is kept) |
 | `/compact` | Ask the model to summarise the session into a handoff document, then replace history with that summary. The system prompt and tools/skills catalog are kept; everything else is discarded. Use this when context is filling up but you want to continue in the same session. |
 | `/compact <focus>` | Same as `/compact`, but passes a focus hint to the model so the summary is tailored toward the next task (e.g. `/compact fix the auth bug next`) |

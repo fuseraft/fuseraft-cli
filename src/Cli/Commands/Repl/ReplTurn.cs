@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
 using fuseraft.Cli.Display;
+using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 
 namespace fuseraft.Cli.Commands.Repl;
@@ -103,6 +104,7 @@ internal static class ReplTurn
                     capturePlan:   result.CapturePlan,
                     activeStep:    null,
                     cancellationToken);
+                _ = SaveSnapshotAsync(ctx);
                 continue;
             }
 
@@ -114,7 +116,20 @@ internal static class ReplTurn
                 ctx, raw,
                 isStepRequest: false, capturePlan: false, activeStep: null,
                 cancellationToken);
+            _ = SaveSnapshotAsync(ctx);
         }
+    }
+
+    internal static async Task SaveSnapshotAsync(ReplSessionContext ctx)
+    {
+        try
+        {
+            var snap = ReplSessionSnapshot.Capture(
+                ctx.SessionId, ctx.ModelId, ctx.Cwd,
+                ctx.TurnIndex, ctx.History, ctx.StartedAt);
+            await ReplSessionSnapshot.SaveAsync(snap);
+        }
+        catch { }
     }
 
     // -------------------------------------------------------------------------
