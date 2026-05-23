@@ -78,6 +78,9 @@ internal sealed class ReplSessionContext
     public bool             SafeMode;
     public HashSet<string>? PreSafeDisabled;
 
+    // Adversarial mode — critic agent reviews each /execute step result
+    public bool AdversarialMode;
+
     // Max output tokens (0 = provider default)
     public int MaxOutputTokens;
 
