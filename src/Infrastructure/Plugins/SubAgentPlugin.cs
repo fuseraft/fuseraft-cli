@@ -89,6 +89,57 @@ public sealed class SubAgentPlugin(
             "locate",
             cancellationToken);
 
+    // Single-turn critic review — not a model tool (no [Description]).
+    // Returns (true, null) when the step is approved, (false, reason) when rejected.
+    // Degrades gracefully on timeout or error so a critic failure never blocks execution.
+    public async Task<(bool Approved, string? Reason)> CriticReviewAsync(
+        string stepDescription,
+        string? expectedTool,
+        IReadOnlyList<string> toolsCalled,
+        string agentResponse,
+        CancellationToken cancellationToken = default)
+    {
+        if (chatClient is null)
+            return (true, null);
+
+        const string criticSystem =
+            "You are a strict plan-step critic. You receive a step description, the tools the " +
+            "agent called, and the agent's response. Judge whether the step was completed " +
+            "correctly and completely.\n" +
+            "If it was, respond with exactly:\nAPPROVED\n\n" +
+            "Otherwise, describe the specific defect in one or two sentences. Be precise — " +
+            "state what is wrong or missing, not just that something is wrong.";
+
+        var toolsStr     = toolsCalled.Count > 0 ? string.Join(", ", toolsCalled) : "(none)";
+        var expectedStr  = expectedTool is not null ? $"\nExpected tool: {expectedTool}" : string.Empty;
+        var userMsg      =
+            $"Step: {stepDescription}{expectedStr}\n" +
+            $"Tools called: {toolsStr}\n\n" +
+            $"Agent response:\n{agentResponse}";
+
+        var messages = new List<ChatMessage>
+        {
+            new(ChatRole.System, criticSystem),
+            new(ChatRole.User,   userMsg),
+        };
+        var options = new ChatOptions { MaxOutputTokens = 256 };
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromMinutes(2));
+        try
+        {
+            var response = await chatClient.GetResponseAsync(messages, options, cts.Token);
+            var text     = (response.Text ?? string.Empty).Trim();
+            return text.StartsWith("APPROVED", StringComparison.OrdinalIgnoreCase)
+                ? (true, null)
+                : (false, string.IsNullOrEmpty(text) ? "Critic returned no feedback." : text);
+        }
+        catch
+        {
+            return (true, null);
+        }
+    }
+
     // Streaming variants — not registered as model tools (no [Description]).
     // onChunk is called for each text token as the final answer arrives.
 

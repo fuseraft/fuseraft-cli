@@ -28,7 +28,8 @@ internal static class ReplCommands
             case "/resume":     return CmdResume(ctx);
             case "/recover":    return CmdRecover(ctx);
             case "/events":     await CmdEventsAsync(ctx, arg); return CommandResult.Continue;
-            case "/safe-mode":  return await CmdSafeModeAsync(ctx, arg);
+            case "/safe-mode":    return await CmdSafeModeAsync(ctx, arg);
+            case "/adversarial":  return CmdAdversarial(ctx, arg);
             case "/memory":     return await CmdMemoryAsync(ctx, arg, cancellationToken);
             case "/max-tokens": return CmdMaxTokens(ctx, arg);
             case "/compact":    return await CmdCompactAsync(ctx, arg, cancellationToken);
@@ -601,6 +602,44 @@ internal static class ReplCommands
         return CommandResult.Continue;
     }
 
+    private static CommandResult CmdAdversarial(ReplSessionContext ctx, string arg)
+    {
+        if (string.IsNullOrEmpty(arg))
+        {
+            AnsiConsole.MarkupLine(ctx.AdversarialMode
+                ? "[dim]Adversarial mode:[/] [green]on[/]  [dim](critic agent reviews each /execute step)[/]"
+                : "[dim]Adversarial mode:[/] [dim]off[/]");
+            AnsiConsole.MarkupLine("[dim]Run[/] [bold]/adversarial on[/] [dim]or[/] [bold]/adversarial off[/][dim].[/]");
+            return CommandResult.Continue;
+        }
+
+        if (arg.Equals("on", StringComparison.OrdinalIgnoreCase))
+        {
+            if (ctx.SubAgent is null)
+            {
+                AnsiConsole.MarkupLine("[yellow]Adversarial mode requires tools (started with --no-tools).[/]");
+                return CommandResult.Continue;
+            }
+            ctx.AdversarialMode = true;
+            AnsiConsole.MarkupLine("[dim]Adversarial mode[/] [green]on[/][dim]: critic agent will review each /execute step.[/]");
+            _ = ctx.Emitter.EmitAsync("command", payload: new { command = "/adversarial on" });
+        }
+        else if (arg.Equals("off", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.AdversarialMode = false;
+            AnsiConsole.MarkupLine("[dim]Adversarial mode[/] [dim]off[/][dim].[/]");
+            _ = ctx.Emitter.EmitAsync("command", payload: new { command = "/adversarial off" });
+        }
+        else
+        {
+            AnsiConsole.MarkupLine($"[yellow]Unknown /adversarial argument:[/] {Markup.Escape(arg)}");
+            AnsiConsole.MarkupLine("[dim]Usage: /adversarial     — show current status[/]");
+            AnsiConsole.MarkupLine("[dim]       /adversarial on  — enable critic agent for /execute steps[/]");
+            AnsiConsole.MarkupLine("[dim]       /adversarial off — disable critic agent[/]");
+        }
+        return CommandResult.Continue;
+    }
+
     private static async Task<CommandResult> CmdMemoryAsync(
         ReplSessionContext ctx, string arg, CancellationToken cancellationToken)
     {
@@ -902,41 +941,62 @@ internal static class ReplCommands
     private static void PrintHelp()
     {
         AnsiConsole.MarkupLine("[bold]REPL commands[/]");
-        AnsiConsole.MarkupLine("  [bold cyan]/help[/]                    Show this help");
-        AnsiConsole.MarkupLine("  [bold cyan]/clear[/]                   Clear conversation history (keeps system prompt)");
-        AnsiConsole.MarkupLine("  [bold cyan]/history[/]                 Show condensed conversation history");
-        AnsiConsole.MarkupLine("  [bold cyan]/system[/]                  Show current system prompt");
-        AnsiConsole.MarkupLine("  [bold cyan]/system <prompt>[/]         Set a new system prompt");
-        AnsiConsole.MarkupLine("  [bold cyan]/tools[/]                   List active tools by category");
+        AnsiConsole.WriteLine();
+
+        AnsiConsole.MarkupLine("  [dim]Session[/]");
+        AnsiConsole.MarkupLine("  [bold cyan]/help[/]                     Show this help");
+        AnsiConsole.MarkupLine("  [bold cyan]/clear[/]                    Clear conversation history (keeps system prompt)");
+        AnsiConsole.MarkupLine("  [bold cyan]/history[/]                  Show condensed conversation history");
+        AnsiConsole.MarkupLine("  [bold cyan]/exit[/]                     Exit the REPL (auto-saves memories)");
+        AnsiConsole.WriteLine();
+
+        AnsiConsole.MarkupLine("  [dim]Planning[/]");
+        AnsiConsole.MarkupLine("  [bold cyan]/plan <task>[/]              Create a structured plan (JSON steps, no tool calls)");
+        AnsiConsole.MarkupLine("  [bold cyan]/plan[/]                     Show the current stored plan");
+        AnsiConsole.MarkupLine("  [bold cyan]/execute[/]                  Run each plan step sequentially with postcondition checks");
+        AnsiConsole.MarkupLine("  [bold cyan]/resume[/]                   Retry the halted step and continue remaining steps");
+        AnsiConsole.MarkupLine("  [bold cyan]/recover[/]                  Inject failure context and retry the halted step with agent awareness");
+        AnsiConsole.WriteLine();
+
+        AnsiConsole.MarkupLine("  [dim]Tools & modes[/]");
+        AnsiConsole.MarkupLine("  [bold cyan]/tools[/]                    List active tools by category");
         AnsiConsole.MarkupLine("  [bold cyan]/tools disable <category>[/] Disable a tool category (FileSystem Shell Search Git Http)");
         AnsiConsole.MarkupLine("  [bold cyan]/tools enable <category>[/]  Re-enable a disabled tool category");
-        AnsiConsole.MarkupLine("  [bold cyan]/paste[/]                   Enter paste mode (multi-line input; type EOF to finish)");
-        AnsiConsole.MarkupLine("  [bold cyan]/save[/]                    Save transcript to repl-<id>.md in the current directory");
-        AnsiConsole.MarkupLine("  [bold cyan]/save <file>[/]             Save transcript to the specified file");
-        AnsiConsole.MarkupLine("  [bold cyan]/plan <task>[/]             Create a structured plan (JSON steps, no tool calls)");
-        AnsiConsole.MarkupLine("  [bold cyan]/plan[/]                    Show the current stored plan");
-        AnsiConsole.MarkupLine("  [bold cyan]/execute[/]                 Run each plan step sequentially with postcondition checks");
-        AnsiConsole.MarkupLine("  [bold cyan]/resume[/]                  Retry the halted step and continue remaining steps");
-        AnsiConsole.MarkupLine("  [bold cyan]/recover[/]                 Inject failure context and retry the halted step with agent awareness");
-        AnsiConsole.MarkupLine("  [bold cyan]/context[/]                 Show estimated context window usage and per-category breakdown");
-        AnsiConsole.MarkupLine("  [bold cyan]/events[/]                  Show session event stats (turns, tool calls, top tools)");
-        AnsiConsole.MarkupLine("  [bold cyan]/events stats[/]            Same as /events");
-        AnsiConsole.MarkupLine("  [bold cyan]/safe-mode[/]               Show safe mode status");
-        AnsiConsole.MarkupLine("  [bold cyan]/safe-mode on[/]            Disable Shell, Git, Http tools to prevent mutations");
-        AnsiConsole.MarkupLine("  [bold cyan]/safe-mode off[/]           Restore tool categories");
-        AnsiConsole.MarkupLine("  [bold cyan]/provider[/]                Show current provider, model, and API key");
-        AnsiConsole.MarkupLine("  [bold cyan]/provider setup[/]          Reconfigure provider, model, and API key");
-        AnsiConsole.MarkupLine("  [bold cyan]/memory[/]                  List all stored memories");
-        AnsiConsole.MarkupLine("  [bold cyan]/memory show <name>[/]      Show full body of a memory");
-        AnsiConsole.MarkupLine("  [bold cyan]/memory delete <name>[/]    Delete a stored memory");
-        AnsiConsole.MarkupLine("  [bold cyan]/memory save[/]             Extract and save memories from the current session now");
-        AnsiConsole.MarkupLine("  [bold cyan]/max-tokens <n>[/]          Set max output tokens for each response");
-        AnsiConsole.MarkupLine("  [bold cyan]/max-tokens reset[/]        Restore provider default max output tokens");
+        AnsiConsole.MarkupLine("  [bold cyan]/safe-mode[/]                Show safe mode status");
+        AnsiConsole.MarkupLine("  [bold cyan]/safe-mode on[/]             Disable Shell, Git, Http tools to prevent mutations");
+        AnsiConsole.MarkupLine("  [bold cyan]/safe-mode off[/]            Restore tool categories");
+        AnsiConsole.MarkupLine("  [bold cyan]/adversarial[/]              Show adversarial mode status");
+        AnsiConsole.MarkupLine("  [bold cyan]/adversarial on[/]           Enable critic agent to review each /execute step");
+        AnsiConsole.MarkupLine("  [bold cyan]/adversarial off[/]          Disable critic agent");
+        AnsiConsole.WriteLine();
+
+        AnsiConsole.MarkupLine("  [dim]Context & model[/]");
+        AnsiConsole.MarkupLine("  [bold cyan]/context[/]                  Show estimated context window usage and per-category breakdown");
         AnsiConsole.MarkupLine("  [bold cyan]/compact[/]                  Summarise conversation into a handoff doc and reset history");
         AnsiConsole.MarkupLine("  [bold cyan]/compact <focus>[/]          Same, but tailor the summary toward the next session's focus");
-        AnsiConsole.MarkupLine("  [bold cyan]/explore <query>[/]         Run a sub-agent exploration loop and return a prose summary");
-        AnsiConsole.MarkupLine("  [bold cyan]/locate <symbol>[/]         Run a sub-agent symbol lookup; returns path:line result");
-        AnsiConsole.MarkupLine("  [bold cyan]/exit[/]                    Exit the REPL (auto-saves memories)");
+        AnsiConsole.MarkupLine("  [bold cyan]/max-tokens <n>[/]           Set max output tokens for each response");
+        AnsiConsole.MarkupLine("  [bold cyan]/max-tokens reset[/]         Restore provider default max output tokens");
+        AnsiConsole.MarkupLine("  [bold cyan]/system[/]                   Show current system prompt");
+        AnsiConsole.MarkupLine("  [bold cyan]/system <prompt>[/]          Set a new system prompt");
+        AnsiConsole.MarkupLine("  [bold cyan]/provider[/]                 Show current provider, model, and API key");
+        AnsiConsole.MarkupLine("  [bold cyan]/provider setup[/]           Reconfigure provider, model, and API key");
+        AnsiConsole.WriteLine();
+
+        AnsiConsole.MarkupLine("  [dim]Memory[/]");
+        AnsiConsole.MarkupLine("  [bold cyan]/memory[/]                   List all stored memories");
+        AnsiConsole.MarkupLine("  [bold cyan]/memory show <name>[/]       Show full body of a memory");
+        AnsiConsole.MarkupLine("  [bold cyan]/memory delete <name>[/]     Delete a stored memory");
+        AnsiConsole.MarkupLine("  [bold cyan]/memory save[/]              Extract and save memories from the current session now");
+        AnsiConsole.WriteLine();
+
+        AnsiConsole.MarkupLine("  [dim]I/O & events[/]");
+        AnsiConsole.MarkupLine("  [bold cyan]/paste[/]                    Enter paste mode (multi-line input; type EOF to finish)");
+        AnsiConsole.MarkupLine("  [bold cyan]/save[/]                     Save transcript to repl-<id>.md in the current directory");
+        AnsiConsole.MarkupLine("  [bold cyan]/save <file>[/]              Save transcript to the specified file");
+        AnsiConsole.MarkupLine("  [bold cyan]/events[/]                   Show session event stats (turns, tool calls, top tools)");
+        AnsiConsole.MarkupLine("  [bold cyan]/events stats[/]             Same as /events");
+        AnsiConsole.MarkupLine("  [bold cyan]/explore <query>[/]          Run a sub-agent exploration loop and return a prose summary");
+        AnsiConsole.MarkupLine("  [bold cyan]/locate <symbol>[/]          Run a sub-agent symbol lookup; returns path:line result");
     }
 
     private static void SaveTranscript(List<ChatMessage> history, string modelId, string path)
