@@ -25,6 +25,7 @@ namespace fuseraft.Infrastructure.Plugins;
 ///   <item><term>Scratchpad</term><description>Per-agent persistent key-value store that survives across sessions. Registered here with a stub; per-agent instances with real paths are created in <see cref="fuseraft.Infrastructure.AgentFactory"/>.</description></item>
 ///   <item><term>Chatroom</term><description>Shared append-only JSONL message log for agent-to-agent coordination. Registered here with a stub; per-agent instances with real paths are created in <see cref="fuseraft.Infrastructure.AgentFactory"/>.</description></item>
 ///   <item><term>Changes</term><description>Read-only view of the session change log. Registered here with a stub; the real instance is registered by OrchestratorBuilder when ChangeTracking is configured.</description></item>
+///   <item><term>Session</term><description>REPL session metadata, saved-session list, and log file access. Registered here with a stub; ReplCommand replaces it with a real instance bound to the live session.</description></item>
 /// </list>
 ///
 /// Add custom plugins via <see cref="Register"/> before the DI host is built.
@@ -88,6 +89,9 @@ public sealed class PluginRegistry : IDisposable
         Register("SubAgent", () => new SubAgentPlugin(chatClient: null, explorerTools: []));
 
         Register("Compaction", () => new CompactionPlugin());
+
+        // Stub — ReplCommand replaces this with a real instance bound to the live session.
+        Register("Session", () => new ReplSessionPlugin("stub", DateTime.UtcNow, "unknown", Directory.GetCurrentDirectory()));
         return this;
     }
 
