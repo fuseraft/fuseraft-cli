@@ -267,6 +267,7 @@ Unless `--no-tools` is passed, the REPL gives the model access to:
 | Search | `search_files`, `search_content`, `search_symbol` |
 | Git | `git_status`, `git_diff`, `git_log`, `git_commit`, and more |
 | Http | `http_get`, `http_post` |
+| Skills | `load_skill`, `run_skill_script` (only when skills are installed — see [Skills](skills.md)) |
 
 When the model invokes a tool, a dim `> tool_name(arg)` line is printed and the spinner changes to `running…` while the tool executes, then resumes `thinking…` when the model processes the result. Use `/tools` to see the full list at runtime.
 
@@ -280,7 +281,7 @@ When the model invokes a tool, a dim `> tool_name(arg)` line is printed and the 
 | `/system` | Print the current system prompt |
 | `/system <prompt>` | Replace the system prompt for the rest of the session |
 | `/tools` | List active tools grouped by category, with enabled/disabled status |
-| `/tools disable <category>` | Disable a tool category for the rest of the session (`FileSystem`, `Shell`, `Search`, `Git`, `Http`) |
+| `/tools disable <category>` | Disable a tool category for the rest of the session (`FileSystem`, `Shell`, `Search`, `Git`, `Http`, `Skills`) |
 | `/tools enable <category>` | Re-enable a previously disabled tool category |
 | `/plan <task>` | Ask the model to produce a structured JSON plan (no tool calls). Each step has a description, an expected tool name, and an optional expected artifact path. |
 | `/plan` | Show the currently stored plan |

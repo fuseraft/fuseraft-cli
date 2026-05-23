@@ -437,6 +437,19 @@ Read rich document formats as plain text. All operations are read-only. Sandbox 
 
 ---
 
+## Skills
+
+Exposes installed skills as callable tools in the REPL. Only present when at least one skill is found at startup — see [Skills](skills.md) for how discovery works.
+
+Unlike other plugins, Skills is not listed in an agent's `Plugins` config. It is registered automatically by the REPL based on what is installed on the filesystem.
+
+| Function | Parameters | Description |
+|----------|-----------|-------------|
+| `load_skill` | `name` | Load the full `SKILL.md` body for a skill by slug. The model calls this when the catalog entry indicates the skill is relevant to the current task. |
+| `run_skill_script` | `skill`, `script`, `args` (optional) | Run a script bundled with a skill. `script` is the filename inside the skill directory (e.g. `transform.py`). `args` is a space-separated argument string. Supported extensions: `.sh`, `.py`, `.js`. |
+
+---
+
 ## MCP plugins
 
 In addition to the built-in plugins above, tools from any connected MCP server are available as plugins. The plugin name is the `Name` field from `McpServers` config.
