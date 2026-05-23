@@ -237,7 +237,7 @@ fuseraft repl [options]
 | `--no-banner` | off | Skip the ASCII banner. |
 | `--no-tools` | off | Disable all built-in tools and start a plain chat session. |
 | `--verbose` | off | Enable debug logging: prints per-turn detail (token estimate, tool-round count, total tool calls) and shows the event log path at startup. |
-| `--vscode` | off | VS Code mode. Reads the API key from the `FUSERAFT_API_KEY` environment variable (injected by the fuseraft VS Code extension) instead of the OS keychain. Automatically passed by the extension — not intended for manual use. |
+| `--vscode` | off | VS Code mode. When stdin is also redirected (the process is spawned by the fuseraft VS Code extension's REPL panel), switches to JSON bridge mode: all output is emitted as JSONL events to stdout and input is read as JSONL from stdin. In this mode the ASCII banner, ANSI prompts, spinner, and status lines are suppressed; the API key is read from `FUSERAFT_API_KEY` instead of the OS keychain. Automatically passed by the extension — not intended for manual use. |
 
 **Startup display**
 
@@ -250,6 +250,23 @@ On launch a compact header shows the model name, a single info line listing acti
 ```
 
 The session ID is shown on every startup so you can note it down for later resumption with `--resume`. The event log path is only shown with `--verbose`.
+
+> **VS Code webview panel** — When the fuseraft VS Code extension opens a REPL panel it spawns the CLI with `--vscode --no-banner` and piped stdin/stdout. The CLI detects the redirected stdin and switches to JSON bridge mode automatically. In this mode the startup header and all ANSI output are suppressed; the session communicates over a JSONL protocol instead:
+>
+> | Direction | Event | Payload fields |
+> |-----------|-------|----------------|
+> | CLI → VS Code | `ready` | `sessionId`, `model` |
+> | CLI → VS Code | `token` | `text` (streaming chunk) |
+> | CLI → VS Code | `tool_call` | `name` |
+> | CLI → VS Code | `message_end` | `turnIndex`, `toolCalls[]` |
+> | CLI → VS Code | `cancelled` | — |
+> | CLI → VS Code | `error` | `text` |
+> | CLI → VS Code | `plan` | `steps[]` |
+> | CLI → VS Code | `step_status` | `step`, `total`, `status`, `stepsLeft` |
+> | CLI → VS Code | `session_end` | — |
+> | VS Code → CLI | `user_input` | `text` |
+>
+> Non-JSON lines emitted by the CLI (e.g. from slash-command output) are silently ignored by the extension.
 
 **First-time setup**
 
