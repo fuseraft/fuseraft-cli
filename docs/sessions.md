@@ -41,6 +41,32 @@ Sessions are never automatically deleted. Remove old ones manually from `~/.fuse
 
 ---
 
+## Session self-inspection (REPL agents)
+
+REPL agents can inspect their own session and diagnostic logs using the built-in `repl_session_*` tools. The current session ID, start time, snapshot path, and event log path are also injected into the system prompt so the agent can orient itself immediately.
+
+**Tools available to the agent:**
+
+| Tool | What it returns |
+|------|----------------|
+| `repl_session_current` | Session ID, model, start time, working directory, snapshot path, and all log file locations |
+| `repl_session_list` | All saved sessions newest-first — the active session is marked `◄ current` |
+| `repl_session_read_event_log` | Entries from `repl_events.jsonl` filtered to a session (current by default) |
+| `repl_session_read_log` | Tail of any diagnostic log: `repl_events`, `events`, `provider_errors`, or `app` |
+
+**Log files written per working directory:**
+
+| Log name | Path | Contents |
+|----------|------|----------|
+| `repl_events` | `.fuseraft/logs/repl_events.jsonl` | REPL lifecycle events (session start/end, each turn) tagged with session ID |
+| `events` | `.fuseraft/logs/events.jsonl` | Orchestration events from `fuseraft run` sessions |
+| `provider_errors` | `.fuseraft/logs/provider_errors.jsonl` | Provider API errors and retry attempts |
+| `app` | `.fuseraft/logs/app.log` | Application diagnostic log |
+
+All REPL events are tagged with the session ID (`session` field in the JSONL), so the agent can distinguish events from different sessions in the same log file.
+
+---
+
 ## Orchestration sessions (`fuseraft run`)
 
 ## How sessions work

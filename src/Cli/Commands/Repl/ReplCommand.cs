@@ -166,6 +166,10 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
         var sessionId  = snapshot?.SessionId ?? GenerateSessionId();
         var startedAt  = snapshot?.StartedAt  ?? DateTime.UtcNow;
 
+        if (!settings.NoTools)
+            toolsByCategory["Session"] = PluginRegistry.GetFunctionsFromObject(
+                new ReplSessionPlugin(sessionId, startedAt, modelId, cwd)).ToList();
+
         AnsiConsole.Write(new Rule($"[bold cyan]{Markup.Escape(modelId)}[/]")
             .LeftJustified()
             .RuleStyle(new Spectre.Console.Style(Spectre.Console.Color.Grey)));
@@ -184,7 +188,7 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
 
         var memoryStore  = MemoryStore.ForRepl();
         var memoryBlock  = await memoryStore.BuildPromptBlockAsync(cwd);
-        var systemPrompt = BuildSystemPrompt(settings.SystemPrompt, initialTools.Count, cwd, memoryBlock, modelId);
+        var systemPrompt = BuildSystemPrompt(settings.SystemPrompt, initialTools.Count, cwd, memoryBlock, modelId, sessionId, startedAt);
 
         if (skillsCatalog is not null)
             systemPrompt += $"\n\n{skillsCatalog}";
@@ -277,7 +281,8 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
     }
 
     private static string BuildSystemPrompt(
-        string? settingsPrompt, int toolCount, string cwd, string? memoryBlock, string? modelId = null)
+        string? settingsPrompt, int toolCount, string cwd, string? memoryBlock,
+        string? modelId = null, string? sessionId = null, DateTime? startedAt = null)
     {
         string prompt;
         if (string.IsNullOrWhiteSpace(settingsPrompt))
@@ -302,6 +307,23 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
         else
         {
             prompt = settingsPrompt + $"\n\nThe current working directory is: {cwd}.";
+        }
+
+        if (sessionId is not null)
+        {
+            var snapshotPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".fuseraft", "repl-sessions", $"repl-{sessionId}.json");
+            var sessionStarted = startedAt.HasValue
+                ? startedAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz")
+                : "unknown";
+            prompt +=
+                $"\n\n# Current session\n" +
+                $"Session ID: {sessionId}\n" +
+                $"Started:    {sessionStarted}\n" +
+                $"Snapshot:   {snapshotPath}\n" +
+                $"Event log:  {Path.Combine(cwd, FuseraftPaths.LocalReplEventsLog)}\n" +
+                $"Use the repl_session_* tools to inspect session metadata, list past sessions, or read log files.";
         }
 
         var agentsBlock = ReadAgentsMd(cwd);
