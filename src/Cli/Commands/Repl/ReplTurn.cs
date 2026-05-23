@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
 using fuseraft.Cli.Display;
@@ -94,8 +95,41 @@ internal static class ReplTurn
                 var command = parts[0].ToLowerInvariant();
                 var arg     = parts.Length > 1 ? parts[1] : string.Empty;
 
-                var result = await ReplCommands.HandleAsync(ctx, command, arg, cancellationToken);
-                if (!ctx.JsonMode) AnsiConsole.WriteLine();
+                CommandResult result;
+                if (ctx.JsonMode)
+                {
+                    // In JSON mode stdout must be a clean JSONL stream, so we
+                    // redirect both Console.Out and AnsiConsole to a StringWriter
+                    // while the command runs, then emit the captured text as a
+                    // token event so the webview can render it.
+                    using var capture    = new StringWriter();
+                    var savedOut         = Console.Out;
+                    var savedAnsiConsole = AnsiConsole.Console;
+                    Console.SetOut(capture);
+                    AnsiConsole.Console  = AnsiConsole.Create(new AnsiConsoleSettings
+                    {
+                        Out         = new AnsiConsoleOutput(capture),
+                        ColorSystem = ColorSystemSupport.NoColors,
+                        Ansi        = AnsiSupport.No,
+                    });
+                    try
+                    {
+                        result = await ReplCommands.HandleAsync(ctx, command, arg, cancellationToken);
+                    }
+                    finally
+                    {
+                        Console.SetOut(savedOut);
+                        AnsiConsole.Console = savedAnsiConsole;
+                        var captured = StripAnsi(capture.ToString()).Trim();
+                        if (!string.IsNullOrWhiteSpace(captured))
+                            ReplJsonBridge.Emit(new { type = "token", text = captured });
+                    }
+                }
+                else
+                {
+                    result = await ReplCommands.HandleAsync(ctx, command, arg, cancellationToken);
+                    AnsiConsole.WriteLine();
+                }
 
                 if (result.Outcome == CommandOutcome.Exit) break;
                 if (result.Outcome == CommandOutcome.Continue)
@@ -691,4 +725,13 @@ internal static class ReplTurn
     {
         Console.Write("\r\x1b[2K");
     }
+
+    // Strips ANSI escape sequences (CSI colour codes, OSC sequences, etc.)
+    // from text captured while AnsiConsole runs in no-colour mode.  The
+    // pattern is intentionally broad so residual escape bytes do not leak
+    // into the JSON token emitted to the webview.
+    private static readonly Regex _ansiPattern =
+        new(@"\x1b(?:\[[^m]*m|\][^\x07]*\x07|[()][AB012]|[=>])", RegexOptions.Compiled);
+
+    internal static string StripAnsi(string text) => _ansiPattern.Replace(text, string.Empty);
 }
