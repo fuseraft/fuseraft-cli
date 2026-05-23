@@ -202,9 +202,10 @@ Compaction:
   KeepRecentTurns: 10    # keep this many turns verbatim; compact the rest
 ```
 
-Compaction fires in two situations:
+Compaction fires in three situations:
 - Before a session stream starts, when resuming a checkpoint already over the threshold.
 - Mid-session, after each checkpoint save, once the live history crosses the threshold.
+- On demand, when an agent calls `compact_conversation` via the [`Compaction` plugin](plugins.md#compaction).
 
 `TriggerTurnCount` must be greater than `KeepRecentTurns`.
 
@@ -434,9 +435,11 @@ Here is the full sequence from session start through a long-running session:
       ├─ (window) estimated token count > TokenBudget?
       │     YES → drop oldest user+assistant pairs until within budget
       │           (pinned summaries are never dropped)
-      └─ (ContextBudget) any agent's cumulative input tokens ≥ CutoverAt?
+      ├─ (ContextBudget) any agent's cumulative input tokens ≥ CutoverAt?
+      │     YES → compact (same as turn-count trigger)
+      │           reset per-agent token counters → continue
+      └─ (Compaction plugin) agent called compact_conversation()?
             YES → compact (same as turn-count trigger)
-                  reset per-agent token counters → continue
 
 4. After run completes
    └─ Context window visualization rendered to .fuseraft/logs/ctx_viz_{sessionId}.html
