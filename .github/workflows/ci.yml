@@ -7,6 +7,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read   # minimum needed for actions/checkout on all jobs
+
 jobs:
   # Build & Test — runs on every push and PR
   build:
