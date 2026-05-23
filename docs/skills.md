@@ -53,6 +53,21 @@ You don't need to invoke this skill explicitly — it activates on its own when 
 
 ---
 
+## Built-in skill: `handoff`
+
+The `handoff` skill writes a handoff document to the OS temp directory so a fresh agent session can pick up where the current one left off. It is intended for cross-session handoffs — passing context to a different session or a different agent entirely.
+
+When invoked (`load_skill("handoff")`), the agent will:
+
+1. Summarise what was being worked on, key decisions, current state, and what comes next.
+2. Include a "suggested skills" section recommending skills for the next session.
+3. Redact any sensitive values (API keys, passwords, PII).
+4. Write the document to the OS temp directory and report the path.
+
+**Relationship to `/compact`:** If your goal is to continue in the *same* REPL session after freeing up context, use the `/compact` command instead. `/compact` generates the same style of summary, discards the old history in place, and injects the summary as the new opening context — no file is written and no new session is needed. Use `handoff` when you want a doc to carry to a *different* session; use `/compact` when you want to reclaim context window in the current one.
+
+---
+
 ## Installing skills
 
 ### For a single project
