@@ -203,6 +203,19 @@ public static class OrchestratorBuilder
             };
         }
 
+        // Orient every agent to the local .fuseraft/ folder layout so they never
+        // scan it with list_files to discover what is there — they already know.
+        var folderOrientationBlock = FuseraftPaths.BuildFolderOrientationBlock();
+        config = config with
+        {
+            Agents = config.Agents
+                .Select(a => a with
+                {
+                    Instructions = a.Instructions.TrimEnd() + "\n\n" + folderOrientationBlock
+                })
+                .ToList()
+        };
+
         // Inject context items into every agent's system prompt so agents know what
         // reference material is available without burning a tool call on discovery.
         var contextStore = new fuseraft.Infrastructure.ContextStore();
