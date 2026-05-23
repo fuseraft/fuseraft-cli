@@ -78,6 +78,9 @@ internal sealed class ReplSessionContext
     public bool             SafeMode;
     public HashSet<string>? PreSafeDisabled;
 
+    // Adversarial mode — critic agent reviews each /execute step result
+    public bool AdversarialMode;
+
     // Max output tokens (0 = provider default)
     public int MaxOutputTokens;
 
@@ -87,6 +90,7 @@ internal sealed class ReplSessionContext
     public int              PrevTurnTokenEstimate;
 
     // Session lifecycle
+    public readonly DateTime StartedAt;
     public int  TurnIndex              = 0;
     public int  LastExtractedTurnIndex = -1;
     public bool PendingSave;
@@ -94,8 +98,11 @@ internal sealed class ReplSessionContext
     // Ctrl+C interception for in-flight requests only
     public CancellationTokenSource? ActiveCts;
 
+    // History-aware line reader (shared across turns so history persists)
+    public readonly ReplLineReader LineReader = new();
+
     public ReplSessionContext(
-        string cwd, string sessionId, string modelId, ModelConfig modelConfig,
+        string cwd, string sessionId, DateTime startedAt, string modelId, ModelConfig modelConfig,
         UserConfig? userCfg, IChatClient client, ChatClientFactory factory,
         IApiKeyStore keyStore, EventEmitter emitter, string eventsPath,
         MemoryStore memoryStore, Dictionary<string, List<AIFunction>> toolsByCategory,
@@ -104,6 +111,7 @@ internal sealed class ReplSessionContext
     {
         Cwd             = cwd;
         SessionId       = sessionId;
+        StartedAt       = startedAt;
         ModelId         = modelId;
         ModelConfig     = modelConfig;
         UserCfg         = userCfg;

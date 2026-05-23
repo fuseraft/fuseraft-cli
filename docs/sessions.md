@@ -1,5 +1,48 @@
 # Sessions
 
+## REPL sessions
+
+REPL sessions (`fuseraft repl`) are automatically saved after every user turn to `~/.fuseraft/repl-sessions/repl-<id>.json`. No configuration is needed — every session is resumable by default.
+
+**Starting and resuming**
+
+```bash
+# Start a new session — session ID is shown in the header
+fuseraft repl
+
+# List your resumable sessions from inside the REPL
+/sessions
+
+# Resume a specific session by ID
+fuseraft repl --resume a87569bcd7b0
+```
+
+When resuming:
+
+- The full conversation history (text, tool calls, tool results) is restored.
+- The system prompt is refreshed to pick up any new memories or `AGENTS.md` changes.
+- The turn counter continues from where it left off.
+
+**Session files**
+
+REPL snapshots are stored at `~/.fuseraft/repl-sessions/repl-<id>.json` with owner-only permissions (Unix mode 0600). Each file contains:
+
+| Field | Description |
+|-------|-------------|
+| `SessionId` | 12-character hex identifier shown in the REPL header |
+| `ModelId` | Model used for the session |
+| `Cwd` | Working directory when the session was started |
+| `StartedAt` | UTC timestamp when the session was first created |
+| `LastUpdatedAt` | UTC timestamp of the most recent save |
+| `TurnIndex` | Number of completed turns |
+| `History` | Full serialized conversation (text, function calls, function results) |
+
+Sessions are never automatically deleted. Remove old ones manually from `~/.fuseraft/repl-sessions/` when no longer needed.
+
+---
+
+## Orchestration sessions (`fuseraft run`)
+
 ## How sessions work
 
 A session begins when you run `fuseraft run`. The orchestrator:

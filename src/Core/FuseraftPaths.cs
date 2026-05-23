@@ -11,7 +11,8 @@ public static class FuseraftPaths
     public static string GlobalRoot       => Path.Combine(Home, ".fuseraft");
     public static string GlobalConfig     => Path.Combine(GlobalRoot, "config");
     public static string GlobalKeyFile    => Path.Combine(GlobalRoot, ".key");
-    public static string GlobalSessions   => Path.Combine(GlobalRoot, "sessions");
+    public static string GlobalSessions     => Path.Combine(GlobalRoot, "sessions");
+    public static string GlobalReplSessions => Path.Combine(GlobalRoot, "repl-sessions");
     public static string GlobalCrashDumps => Path.Combine(GlobalRoot, "crashdump");
     public static string GlobalScratchpad => Path.Combine(GlobalRoot, "scratchpad");
     public static string GlobalSkills      => Path.Combine(GlobalRoot, "skills");

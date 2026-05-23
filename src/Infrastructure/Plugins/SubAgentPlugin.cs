@@ -89,6 +89,110 @@ public sealed class SubAgentPlugin(
             "locate",
             cancellationToken);
 
+    // Single-turn session diagnosis — not a model tool (no [Description]).
+    // Reads the REPL conversation history, identifies where things are going wrong, and returns
+    // a corrective instruction addressed to the REPL agent for injection as a user message.
+    // Returns null when the diagnoser produces no output or the call fails/times out.
+    public async Task<string?> DiagnoseAsync(
+        IReadOnlyList<ChatMessage> history,
+        CancellationToken cancellationToken = default)
+    {
+        if (chatClient is null) return null;
+
+        const string diagnosticSystem =
+            "You are a session diagnostician. You will receive a transcript of a conversation " +
+            "between a user and an AI coding assistant that has stalled or gone off track.\n\n" +
+            "Identify the root cause: repeated failures, fabricated tool output, " +
+            "misunderstood task, wrong approach, stuck in a loop, or anything else explaining " +
+            "why progress has stalled.\n\n" +
+            "Write a short, direct corrective instruction addressed TO the assistant — not to " +
+            "the user. Tell it exactly what it is doing wrong and what to do differently. " +
+            "Be specific and concrete. Reference file paths or symbols where relevant.\n\n" +
+            "Output ONLY the corrective instruction. No preamble, no diagnosis header, " +
+            "no explanation to the user — just the message to inject.";
+
+        const int msgCap = 800;
+        var transcript = new StringBuilder();
+        foreach (var m in history)
+        {
+            var role    = m.Role == ChatRole.System    ? "system"
+                        : m.Role == ChatRole.User      ? "user"
+                        : "assistant";
+            var text    = m.Text ?? string.Empty;
+            var excerpt = text.Length > msgCap ? text[..msgCap] + "…" : text;
+            transcript.AppendLine($"[{role}]: {excerpt}");
+            transcript.AppendLine();
+        }
+
+        var messages = new List<ChatMessage>
+        {
+            new(ChatRole.System, diagnosticSystem),
+            new(ChatRole.User,   $"Conversation transcript:\n\n{transcript}"),
+        };
+        var options = new ChatOptions { MaxOutputTokens = 512 };
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromMinutes(2));
+        try
+        {
+            var response = await chatClient.GetResponseAsync(messages, options, cts.Token);
+            var text     = (response.Text ?? string.Empty).Trim();
+            return string.IsNullOrEmpty(text) ? null : text;
+        }
+        catch { return null; }
+    }
+
+    // Single-turn critic review — not a model tool (no [Description]).
+    // Returns (true, null) when the step is approved, (false, reason) when rejected.
+    // Degrades gracefully on timeout or error so a critic failure never blocks execution.
+    public async Task<(bool Approved, string? Reason)> CriticReviewAsync(
+        string stepDescription,
+        string? expectedTool,
+        IReadOnlyList<string> toolsCalled,
+        string agentResponse,
+        CancellationToken cancellationToken = default)
+    {
+        if (chatClient is null)
+            return (true, null);
+
+        const string criticSystem =
+            "You are a strict plan-step critic. You receive a step description, the tools the " +
+            "agent called, and the agent's response. Judge whether the step was completed " +
+            "correctly and completely.\n" +
+            "If it was, respond with exactly:\nAPPROVED\n\n" +
+            "Otherwise, describe the specific defect in one or two sentences. Be precise — " +
+            "state what is wrong or missing, not just that something is wrong.";
+
+        var toolsStr     = toolsCalled.Count > 0 ? string.Join(", ", toolsCalled) : "(none)";
+        var expectedStr  = expectedTool is not null ? $"\nExpected tool: {expectedTool}" : string.Empty;
+        var userMsg      =
+            $"Step: {stepDescription}{expectedStr}\n" +
+            $"Tools called: {toolsStr}\n\n" +
+            $"Agent response:\n{agentResponse}";
+
+        var messages = new List<ChatMessage>
+        {
+            new(ChatRole.System, criticSystem),
+            new(ChatRole.User,   userMsg),
+        };
+        var options = new ChatOptions { MaxOutputTokens = 256 };
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromMinutes(2));
+        try
+        {
+            var response = await chatClient.GetResponseAsync(messages, options, cts.Token);
+            var text     = (response.Text ?? string.Empty).Trim();
+            return text.StartsWith("APPROVED", StringComparison.OrdinalIgnoreCase)
+                ? (true, null)
+                : (false, string.IsNullOrEmpty(text) ? "Critic returned no feedback." : text);
+        }
+        catch
+        {
+            return (true, null);
+        }
+    }
+
     // Streaming variants — not registered as model tools (no [Description]).
     // onChunk is called for each text token as the final answer arrives.
 

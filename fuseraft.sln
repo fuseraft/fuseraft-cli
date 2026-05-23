@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FuseraftCli", "src\Fuseraft
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FuseraftCli.Tests", "tests\FuseraftCli.Tests\FuseraftCli.Tests.csproj", "{E7C574F7-83AF-4652-A8F4-2C63A47AEFEE}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FuseraftUpdate", "src\FuseraftUpdate\FuseraftUpdate.csproj", "{FE939493-BB07-4A9D-9AE2-1113FA5F1B48}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -43,6 +45,18 @@ Global
 		{E7C574F7-83AF-4652-A8F4-2C63A47AEFEE}.Release|x64.Build.0 = Release|Any CPU
 		{E7C574F7-83AF-4652-A8F4-2C63A47AEFEE}.Release|x86.ActiveCfg = Release|Any CPU
 		{E7C574F7-83AF-4652-A8F4-2C63A47AEFEE}.Release|x86.Build.0 = Release|Any CPU
+		{FE939493-BB07-4A9D-9AE2-1113FA5F1B48}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FE939493-BB07-4A9D-9AE2-1113FA5F1B48}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FE939493-BB07-4A9D-9AE2-1113FA5F1B48}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{FE939493-BB07-4A9D-9AE2-1113FA5F1B48}.Debug|x64.Build.0 = Debug|Any CPU
+		{FE939493-BB07-4A9D-9AE2-1113FA5F1B48}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{FE939493-BB07-4A9D-9AE2-1113FA5F1B48}.Debug|x86.Build.0 = Debug|Any CPU
+		{FE939493-BB07-4A9D-9AE2-1113FA5F1B48}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FE939493-BB07-4A9D-9AE2-1113FA5F1B48}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FE939493-BB07-4A9D-9AE2-1113FA5F1B48}.Release|x64.ActiveCfg = Release|Any CPU
+		{FE939493-BB07-4A9D-9AE2-1113FA5F1B48}.Release|x64.Build.0 = Release|Any CPU
+		{FE939493-BB07-4A9D-9AE2-1113FA5F1B48}.Release|x86.ActiveCfg = Release|Any CPU
+		{FE939493-BB07-4A9D-9AE2-1113FA5F1B48}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -50,5 +64,6 @@ Global
 	GlobalSection(NestedProjects) = preSolution
 		{FB40317D-F8E0-4FA8-9E45-8D63584E1B52} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{E7C574F7-83AF-4652-A8F4-2C63A47AEFEE} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{FE939493-BB07-4A9D-9AE2-1113FA5F1B48} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

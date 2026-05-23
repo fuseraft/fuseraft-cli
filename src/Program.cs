@@ -112,10 +112,11 @@ services.AddTransient<ScheduleRunCommand>();
 services.AddTransient<SkillsAddCommand>();
 services.AddTransient<SkillsListCommand>();
 services.AddTransient<SkillsRemoveCommand>();
+services.AddTransient<UpdateCommand>();
 
-// Use CommandApp<RunCommand> so `fuseraft` with no subcommand defaults to run.
+// Use CommandApp<ReplCommand> so bare `fuseraft` drops straight into the REPL.
 var registrar = new ServiceCollectionRegistrar(services);
-var app = new CommandApp<RunCommand>(registrar);
+var app = new CommandApp<ReplCommand>(registrar);
 
 // MinVer stamps the full semver (including pre-release and git hash) into
 // AssemblyInformationalVersionAttribute at build time — no manual file needed.
@@ -270,6 +271,11 @@ app.Configure(cfg =>
             .WithDescription("Remove a global skill and drop it from the search index.")
             .WithExample(["skills", "remove", "handoff"]);
     });
+
+    cfg.AddCommand<UpdateCommand>("update")
+        .WithDescription("Fetch the latest fuseraft release from GitHub and replace the running binary.")
+        .WithExample(["update"])
+        .WithExample(["update", "--check"]);
 });
 
 try
