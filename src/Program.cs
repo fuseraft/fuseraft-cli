@@ -112,6 +112,7 @@ services.AddTransient<ScheduleRunCommand>();
 services.AddTransient<SkillsAddCommand>();
 services.AddTransient<SkillsListCommand>();
 services.AddTransient<SkillsRemoveCommand>();
+services.AddTransient<UpdateCommand>();
 
 // Use CommandApp<ReplCommand> so bare `fuseraft` drops straight into the REPL.
 var registrar = new ServiceCollectionRegistrar(services);
@@ -270,6 +271,11 @@ app.Configure(cfg =>
             .WithDescription("Remove a global skill and drop it from the search index.")
             .WithExample(["skills", "remove", "handoff"]);
     });
+
+    cfg.AddCommand<UpdateCommand>("update")
+        .WithDescription("Fetch the latest fuseraft release from GitHub and replace the running binary.")
+        .WithExample(["update"])
+        .WithExample(["update", "--check"]);
 });
 
 try
