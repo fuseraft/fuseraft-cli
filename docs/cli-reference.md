@@ -230,8 +230,19 @@ fuseraft repl [options]
 | `-s, --system <prompt>` | — | System prompt. Defaults to a coding/research prompt when tools are enabled. |
 | `--no-banner` | off | Skip the ASCII banner. |
 | `--no-tools` | off | Disable all built-in tools and start a plain chat session. |
-| `--verbose` | off | Enable debug logging and print estimated token count + tool-call count after each turn. |
+| `--verbose` | off | Enable debug logging: prints per-turn detail (token estimate, tool-round count, total tool calls) and shows the event log path at startup. |
 | `--vscode` | off | VS Code mode. Reads the API key from the `FUSERAFT_API_KEY` environment variable (injected by the fuseraft VS Code extension) instead of the OS keychain. Automatically passed by the extension — not intended for manual use. |
+
+**Startup display**
+
+On launch a compact header shows the model name and a single info line listing active tool categories, loaded context (agents/memory/skills), and available sub-agent commands:
+
+```
+── claude-sonnet-4-6 ─────────────────────────────────────
+  FileSystem  Shell  Search  Git  Http  ·  memory  ·  3 skills  ·  /help
+```
+
+The event log path is only shown with `--verbose`.
 
 **First-time setup**
 
@@ -269,7 +280,21 @@ Unless `--no-tools` is passed, the REPL gives the model access to:
 | Http | `http_get`, `http_post` |
 | Skills | `load_skill`, `run_skill_script` (only when skills are installed — see [Skills](skills.md)) |
 
-When the model invokes a tool, a dim `> tool_name(arg)` line is printed and the spinner changes to `running…` while the tool executes, then resumes `thinking…` when the model processes the result. Use `/tools` to see the full list at runtime.
+When the model invokes tools, the spinner label updates live to show the accumulating chain:
+
+```
+⠋ conjuring…  read_file → grep_file → write_file
+```
+
+Once the model begins streaming its response, the spinner clears and a compact summary of all tools called this turn is printed before the reply:
+
+```
+  ⚙  read_file → grep_file → write_file
+assistant:
+…
+```
+
+Use `/tools` to see the full list at runtime.
 
 **Slash commands**
 
@@ -310,14 +335,50 @@ When the model invokes a tool, a dim `> tool_name(arg)` line is printed and the 
 | `/max-tokens reset` | Restore the provider's default max output tokens |
 | `/exit` | End the session |
 
-When safe mode is active, the prompt gains a `[safe]` prefix as a persistent visual reminder.
+**Prompt format**
+
+The prompt displays the current turn number followed by `>`:
+
+```
+1> your message here
+```
+
+When safe mode is active it gains a `[safe]` prefix:
+
+```
+[safe] 1> your message here
+```
+
+After each response a compact status line is printed showing the turn number, estimated token usage, and the number of tool calls made:
+
+```
+  ── turn 1 · ~3,200 tok · 2 tools
+```
+
+**Input and line editing**
+
+The REPL prompt supports history navigation and in-line editing without any external dependencies:
+
+| Key | Action |
+|-----|--------|
+| Up / Down arrow | Navigate through input history for the current session |
+| Left / Right arrow | Move cursor one character |
+| Ctrl+Left / Ctrl+Right | Jump one word left or right |
+| Home / Ctrl+A | Move to the beginning of the line |
+| End / Ctrl+E | Move to the end of the line |
+| Backspace | Delete the character before the cursor |
+| Delete / Ctrl+D | Delete the character under the cursor (Ctrl+D on an empty line exits) |
+| Ctrl+U | Kill (delete) from the cursor to the start of the line |
+| Ctrl+K | Kill from the cursor to the end of the line |
+| Ctrl+W | Kill the word before the cursor |
+| Ctrl+C | Cancel the current line and exit the session |
 
 **Plan / execute workflow**
 
 `/plan` and `/execute` give you explicit control over when the model thinks versus when it acts.
 
 ```
-> /plan create a Hello World C# console app in ./hello
+1> /plan create a Hello World C# console app in ./hello
   planning…
   Plan (3 steps). Review, then run /execute.
 
@@ -328,11 +389,12 @@ When safe mode is active, the prompt gains a `[safe]` prefix as a persistent vis
   3. Write hello.csproj targeting net10.0
      tool: WriteFile  creates: hello/hello.csproj
 
-> /execute
+2> /execute
   Executing 3-step plan…
 
   Execute step 1 of 3: Create the project directory
-  > CreateDirectory(hello/)  running…
+  ⠋ conjuring…  create_directory
+  ⚙  create_directory
   assistant: Directory created.
   ✓ Step 1 complete.  2 steps remaining.
 
@@ -448,7 +510,7 @@ fuseraft repl --model grok-4-1-fast-reasoning --no-tools
 fuseraft repl --model grok-code-fast-1 --system "You are a Rust expert."
 ```
 
-Press Ctrl+C during a streaming response to cancel that request and return to the prompt. Press Ctrl+C at the prompt (no active request) or type `/exit` to end the session.
+Press Ctrl+C during a streaming response to cancel that request and return to the prompt. Press Ctrl+C at the prompt or type `/exit` to end the session. The readline layer intercepts Ctrl+C at the prompt so the process exits cleanly rather than abruptly.
 
 ---
 

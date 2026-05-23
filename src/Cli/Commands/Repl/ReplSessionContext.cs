@@ -94,6 +94,9 @@ internal sealed class ReplSessionContext
     // Ctrl+C interception for in-flight requests only
     public CancellationTokenSource? ActiveCts;
 
+    // History-aware line reader (shared across turns so history persists)
+    public readonly ReplLineReader LineReader = new();
+
     public ReplSessionContext(
         string cwd, string sessionId, string modelId, ModelConfig modelConfig,
         UserConfig? userCfg, IChatClient client, ChatClientFactory factory,
