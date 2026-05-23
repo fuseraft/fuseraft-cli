@@ -222,6 +222,33 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
             AnsiConsole.MarkupLine(
                 $"[dim]  Resuming session [bold]{Markup.Escape(sessionId)}[/] · {snapshot.TurnIndex} turn{(snapshot.TurnIndex == 1 ? "" : "s")} · " +
                 $"started {Markup.Escape(snapshot.StartedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"))}[/]");
+
+            // Restore plan execution state so a crash mid-plan is transparent on resume.
+            if (snapshot.ExecutionQueue is { Length: > 0 })
+            {
+                foreach (var e in snapshot.ExecutionQueue)
+                    ctx.ExecutionQueue.Enqueue((e.Step, e.Total));
+                AnsiConsole.MarkupLine(
+                    $"[dim]  Plan in progress: {snapshot.ExecutionQueue.Length} step{(snapshot.ExecutionQueue.Length == 1 ? "" : "s")} queued — resuming automatically[/]");
+            }
+            else if (snapshot.PendingPlan is { Length: > 0 })
+            {
+                ctx.CurrentPlan = snapshot.PendingPlan;
+                AnsiConsole.MarkupLine(
+                    $"[dim]  Pending plan restored ({snapshot.PendingPlan.Length} step{(snapshot.PendingPlan.Length == 1 ? "" : "s")}). Run /execute to start.[/]");
+            }
+            if (snapshot.HaltedAt is not null)
+            {
+                ctx.HaltedAt = (snapshot.HaltedAt.Step, snapshot.HaltedAt.Total);
+                if (snapshot.HaltedRemaining is { Length: > 0 })
+                    foreach (var e in snapshot.HaltedRemaining)
+                        ctx.HaltedRemaining.Enqueue((e.Step, e.Total));
+                ctx.HaltedToolCalls = [.. snapshot.HaltedToolCalls ?? []];
+                ctx.RecoveryHint    = snapshot.RecoveryHint;
+                AnsiConsole.MarkupLine(
+                    $"[yellow]  ⚠ Plan halted at step {snapshot.HaltedAt.Step.Step} of {snapshot.HaltedAt.Total}. Run /recover or /resume.[/]");
+            }
+
             AnsiConsole.WriteLine();
         }
 

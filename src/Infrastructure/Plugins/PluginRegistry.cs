@@ -86,6 +86,8 @@ public sealed class PluginRegistry : IDisposable
         // SubAgent stub — AgentFactory replaces this with a real instance that has a
         // live IChatClient and sandboxed FileSystem + Search tools for the sub-agent loop.
         Register("SubAgent", () => new SubAgentPlugin(chatClient: null, explorerTools: []));
+
+        Register("Compaction", () => new CompactionPlugin());
         return this;
     }
 
@@ -173,7 +175,7 @@ public sealed class PluginRegistry : IDisposable
     // names are already self-describing (e.g. ReadFile, WriteFile). Adding "file_system_"
     // would break all existing tool references in agent instructions.
     private static readonly HashSet<string> NoPrefixPlugins =
-        new(StringComparer.OrdinalIgnoreCase) { "FileSystem", "Handoff", "Skills" };
+        new(StringComparer.OrdinalIgnoreCase) { "FileSystem", "Handoff", "Skills", "Compaction" };
 
     /// <summary>
     /// Builds <see cref="AIFunction"/> instances from a plugin object by reflecting over

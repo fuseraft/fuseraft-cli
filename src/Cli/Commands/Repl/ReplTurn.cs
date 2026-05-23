@@ -69,6 +69,8 @@ internal static class ReplTurn
                     ctx.History.Add(new ChatMessage(ChatRole.User,
                         $"[Step {step.Step} of {total} complete] {step.Description}"));
                 }
+                // Checkpoint after every step so a crash mid-plan can be recovered on --resume.
+                await SaveSnapshotAsync(ctx);
                 continue;
             }
 
@@ -126,7 +128,20 @@ internal static class ReplTurn
         {
             var snap = ReplSessionSnapshot.Capture(
                 ctx.SessionId, ctx.ModelId, ctx.Cwd,
-                ctx.TurnIndex, ctx.History, ctx.StartedAt);
+                ctx.TurnIndex, ctx.History, ctx.StartedAt,
+                currentPlan:     ctx.CurrentPlan,
+                executionQueue:  ctx.ExecutionQueue.Count > 0
+                                 ? [.. ctx.ExecutionQueue.Select(x => new PlanStepEntry(x.Step, x.Total))]
+                                 : null,
+                haltedAt:        ctx.HaltedAt is null ? null
+                                 : new PlanStepEntry(ctx.HaltedAt.Value.Step, ctx.HaltedAt.Value.Total),
+                haltedRemaining: ctx.HaltedRemaining.Count > 0
+                                 ? [.. ctx.HaltedRemaining.Select(x => new PlanStepEntry(x.Step, x.Total))]
+                                 : null,
+                haltedToolCalls: ctx.HaltedToolCalls.Count > 0
+                                 ? [.. ctx.HaltedToolCalls]
+                                 : null,
+                recoveryHint:    ctx.RecoveryHint);
             await ReplSessionSnapshot.SaveAsync(snap);
         }
         catch { }

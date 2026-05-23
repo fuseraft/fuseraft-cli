@@ -296,6 +296,34 @@ Each entry shows the agent name, turn index, timestamp, files written/deleted, c
 
 ---
 
+## Compaction
+
+Lets an agent request a history compaction flush on demand — the same path as the automatic
+turn-count and token-budget triggers, using whatever compaction mode is configured.
+
+**Availability:** Only effective when `Compaction` is present in the orchestration config.
+Calling `compact_conversation` without a configured compactor is a no-op.
+
+```yaml
+Plugins:
+  - Compaction
+```
+
+```
+# In agent instructions:
+When your context is growing large and you need to free up space, call compact_conversation().
+```
+
+| Function | Parameters | Description |
+|----------|-----------|-------------|
+| `compact_conversation` | — | Compact conversation history using the configured compaction mode. |
+
+**How it works:** The tool returns immediately. The runner detects the call at the end of the
+turn and triggers `ApplyCompactionAsync` before the next stream starts — identical to the
+automatic threshold trigger.
+
+---
+
 ## Handoff
 
 Provides a single `handoff` tool for deterministic, type-safe routing. Agents call `handoff(route_keyword: "...")` instead of emitting a keyword in free text. The tool-call argument is parsed by the model's function-calling infrastructure — far more reliable than expecting an exact string on its own line in an open-ended prose response.
