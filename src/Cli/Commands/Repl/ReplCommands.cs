@@ -30,6 +30,7 @@ internal static class ReplCommands
             case "/events":     await CmdEventsAsync(ctx, arg); return CommandResult.Continue;
             case "/safe-mode":    return await CmdSafeModeAsync(ctx, arg);
             case "/adversarial":  return CmdAdversarial(ctx, arg);
+            case "/assist":       return await CmdAssistAsync(ctx, cancellationToken);
             case "/memory":     return await CmdMemoryAsync(ctx, arg, cancellationToken);
             case "/max-tokens": return CmdMaxTokens(ctx, arg);
             case "/compact":    return await CmdCompactAsync(ctx, arg, cancellationToken);
@@ -640,6 +641,59 @@ internal static class ReplCommands
         return CommandResult.Continue;
     }
 
+    private static async Task<CommandResult> CmdAssistAsync(
+        ReplSessionContext ctx, CancellationToken cancellationToken)
+    {
+        if (ctx.SubAgent is null)
+        {
+            AnsiConsole.MarkupLine("[dim]Sub-agent not available (started with --no-tools).[/]");
+            return CommandResult.Continue;
+        }
+        if (ctx.TurnIndex == 0)
+        {
+            AnsiConsole.MarkupLine("[dim]No conversation yet — nothing to diagnose.[/]");
+            return CommandResult.Continue;
+        }
+
+        var spinCts  = new CancellationTokenSource();
+        var spinTask = ReplTurn.RunSpinnerAsync("diagnosing…", spinCts.Token);
+        try
+        {
+            var correction = await ctx.SubAgent.DiagnoseAsync(ctx.History, cancellationToken);
+            spinCts.Cancel();
+            await spinTask;
+            ReplTurn.ClearSpinnerLine();
+
+            if (correction is null)
+            {
+                AnsiConsole.MarkupLine("[dim]Diagnosis returned no output.[/]");
+                return CommandResult.Continue;
+            }
+
+            AnsiConsole.MarkupLine("[dim]assist →[/]");
+            AnsiConsole.WriteLine(correction);
+            AnsiConsole.WriteLine();
+            await ctx.Emitter.EmitAsync("command", payload: new { command = "/assist" });
+            return CommandResult.Send(correction);
+        }
+        catch (OperationCanceledException)
+        {
+            spinCts.Cancel();
+            await spinTask;
+            ReplTurn.ClearSpinnerLine();
+            AnsiConsole.MarkupLine("[dim](cancelled)[/]");
+            return CommandResult.Continue;
+        }
+        catch (Exception ex)
+        {
+            spinCts.Cancel();
+            await spinTask;
+            ReplTurn.ClearSpinnerLine();
+            AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(ex.Message)}[/]");
+            return CommandResult.Continue;
+        }
+    }
+
     private static async Task<CommandResult> CmdMemoryAsync(
         ReplSessionContext ctx, string arg, CancellationToken cancellationToken)
     {
@@ -947,6 +1001,7 @@ internal static class ReplCommands
         AnsiConsole.MarkupLine("  [bold cyan]/help[/]                     Show this help");
         AnsiConsole.MarkupLine("  [bold cyan]/clear[/]                    Clear conversation history (keeps system prompt)");
         AnsiConsole.MarkupLine("  [bold cyan]/history[/]                  Show condensed conversation history");
+        AnsiConsole.MarkupLine("  [bold cyan]/assist[/]                   Diagnose the conversation and inject a corrective message");
         AnsiConsole.MarkupLine("  [bold cyan]/exit[/]                     Exit the REPL (auto-saves memories)");
         AnsiConsole.WriteLine();
 
