@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Microsoft.Extensions.AI;
+using fuseraft.Core;
 
 namespace fuseraft.Infrastructure.Plugins;
 
@@ -72,7 +73,7 @@ public sealed class ShellPlugin : IDisposable
 
     public ShellPlugin(string? sandboxRoot = null, Func<string, Task<bool>>? approveCommand = null)
     {
-        _sandboxRoot    = sandboxRoot is not null ? Path.GetFullPath(ProcessHelper.ExpandHome(sandboxRoot)) : null;
+        _sandboxRoot    = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _approveCommand = approveCommand;
     }
 

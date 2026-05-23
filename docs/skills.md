@@ -56,7 +56,16 @@ To share a skill with your team, commit the skill directory. `.agents/skills/` i
 
 ### For all your projects
 
-Place skills under `~/.fuseraft/skills/` to make them available in every fuseraft session, regardless of project.
+Use `fuseraft skills add` to copy a skill into `~/.fuseraft/skills/` and register it in the global search index:
+
+```bash
+fuseraft skills add ../skills/productivity/handoff
+fuseraft skills add ~/my-skills/triage
+```
+
+The command accepts a path to a skill directory (containing `SKILL.md`) or directly to a `SKILL.md` file. The slug is derived from the `name:` field in the frontmatter; if no `name:` field is present, the directory name is used. If a skill with the same slug already exists it is updated in place.
+
+You can also install skills by placing them directly under `~/.fuseraft/skills/` without using the CLI — skills are loaded from that directory at session start regardless of how they got there.
 
 ---
 
