@@ -6,6 +6,7 @@ using fuseraft.Cli.Display;
 using fuseraft.Cli.Telemetry;
 using fuseraft.Core.Exceptions;
 using fuseraft.Core.Interfaces;
+using fuseraft.Infrastructure;
 using fuseraft.Core.Models;
 using fuseraft.Orchestration;
 using MagenticOrchestrator = fuseraft.Orchestration.MagenticOrchestrator;
@@ -194,6 +195,7 @@ public sealed class SessionRunner(
             {
                 succeeded    = false;
                 errorMessage = ex.Message;
+                try { CrashDumper.Write(ex, []); } catch { }
                 break;
             }
 

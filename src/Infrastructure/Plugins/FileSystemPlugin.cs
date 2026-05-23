@@ -414,6 +414,10 @@ public sealed class FileSystemPlugin : ITurnResettable
         [Description("Skip escape-sequence normalisation.")] bool raw = false,
         [Description("Expected current version (0 = skip check). Write fails with VERSION_MISMATCH when the file has been modified since this version was read.")] int baseVersion = 0)
     {
+        if (content is null)
+            return PluginResult.Error(
+                "The 'content' parameter was not provided. Pass the file text as 'content' separately.");
+
         // Guard against models that accidentally embed file content in the path argument
         // (e.g. passing "my/file.go\npackage main\n..." as the path). A valid path never
         // contains newline characters; anything after the first newline is almost certainly
