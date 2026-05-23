@@ -7,6 +7,7 @@ using fuseraft.Cli.Telemetry;
 using fuseraft.Core.Exceptions;
 using fuseraft.Core.Interfaces;
 using fuseraft.Infrastructure;
+using fuseraft.Infrastructure.Plugins;
 using fuseraft.Core.Models;
 using fuseraft.Orchestration;
 using MagenticOrchestrator = fuseraft.Orchestration.MagenticOrchestrator;
@@ -538,6 +539,10 @@ public sealed class SessionRunner(
         await sessionStore.SaveAsync(checkpoint, ct);
 
         if (compactor?.ShouldCompact(_assistantTurnCount) == true)
+            return true;
+
+        if (compactor is not null &&
+            msg.ToolCalls?.Any(tc => tc.Name == CompactionPlugin.FunctionName) == true)
             return true;
 
         // Always accumulate per-agent cumulative input tokens — needed for both budget
