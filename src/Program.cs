@@ -42,8 +42,9 @@ if (args.Any(a => a is "--version" or "-v"))
 
 // Pre-parse --verbose, --output, and --vscode before Spectre so these flags
 // can configure global state before any services or commands are built.
-bool verbose = args.Any(a => a is "--verbose");
-if (args.Any(a => a is "--vscode"))
+bool verbose   = args.Any(a => a is "--verbose");
+bool vsCodeArg = args.Any(a => a is "--vscode");
+if (vsCodeArg)
     OrchestratorBuilder.VsCodeMode = true;
 string? outputPath = null;
 for (int i = 0; i < args.Length - 1; i++)
@@ -51,13 +52,16 @@ for (int i = 0; i < args.Length - 1; i++)
 
 // Serilog is configured here and forwarded into Microsoft.Extensions.Logging
 // so that all SK and orchestration logs flow through the same pipeline.
+// In vscode mode, route ALL console output to stderr so that stdout stays a
+// clean newline-delimited JSON stream for the webview panel bridge.
 var logConfig = new LoggerConfiguration()
     .MinimumLevel.Is(verbose ? LogEventLevel.Debug : LogEventLevel.Information)
     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
     .MinimumLevel.Override("System", LogEventLevel.Warning)
     .Enrich.FromLogContext()
-    .WriteTo.Console(outputTemplate:
-        "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}");
+    .WriteTo.Console(
+        outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}",
+        standardErrorFromLevel: vsCodeArg ? LogEventLevel.Verbose : null);
 
 // Always write Warning+ to .fuseraft/logs/app.log so store-corruption and other
 // runtime warnings survive past the terminal session.

@@ -37,6 +37,10 @@ public sealed class ReplSettings : CommandSettings
     [CommandOption("--resume")]
     [Description("Resume a previous REPL session by ID (e.g. --resume abc123ef).")]
     public string? Resume { get; set; }
+
+    [CommandOption("--vscode")]
+    [Description("Run in VS Code webview mode (JSON bridge over stdio). Set globally by Program.cs pre-parse; declared here so Spectre does not reject it as an unknown flag.")]
+    public bool VsCode { get; set; }
 }
 
 public sealed class ReplCommand : AsyncCommand<ReplSettings>
