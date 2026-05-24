@@ -66,23 +66,6 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Restore
-        run: dotnet restore src/FuseraftCli.csproj --verbosity quiet
-
-      - name: Publish self-contained binary
-        run: |
-          dotnet publish src/FuseraftCli.csproj \
-            --configuration Release \
-            --runtime ${{ matrix.rid }} \
-            --self-contained true \
-            -p:PublishSingleFile=true \
-            -p:EnableCompressionInSingleFile=true \
-            -p:DebugType=none \
-            -p:DebugSymbols=false \
-            --output publish/${{ matrix.rid }} \
-            --nologo \
-            --verbosity minimal
-
       - name: Resolve version
         id: ver
         run: |
@@ -96,6 +79,24 @@ jobs:
               || echo "0.0.0-dev+g$(git rev-parse --short HEAD)")
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Restore
+        run: dotnet restore src/FuseraftCli.csproj --verbosity quiet
+
+      - name: Publish self-contained binary
+        run: |
+          dotnet publish src/FuseraftCli.csproj \
+            --configuration Release \
+            --runtime ${{ matrix.rid }} \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:EnableCompressionInSingleFile=true \
+            -p:DebugType=none \
+            -p:DebugSymbols=false \
+            -p:Version=${{ steps.ver.outputs.version }} \
+            --output publish/${{ matrix.rid }} \
+            --nologo \
+            --verbosity minimal
 
       - name: Archive (tar)
         if: matrix.archive == 'tar'
