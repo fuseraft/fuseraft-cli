@@ -20,7 +20,7 @@ var runtime       = Argument("runtime",       "");          // e.g. "linux-x64"
 var skipTests     = Argument("skipTests",     false);
 
 // Paths
-var projectFile    = "src/FuseraftCli.csproj";
+var projectFile    = "src/fuseraft.csproj";
 var solutionFile   = "src/FuseraftCli.sln";
 var artifactsDir   = Directory("artifacts");
 var publishDir     = Directory("bin");

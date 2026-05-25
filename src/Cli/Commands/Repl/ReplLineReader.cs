@@ -42,6 +42,31 @@ internal sealed class ReplLineReader
             Console.Write(content);
             if (pad > 0) Console.Write(new string(' ', pad));
             longestWritten = Math.Max(longestWritten, content.Length);
+
+            // After writing, detect whether the terminal scrolled. If the
+            // content (or padding) pushed the cursor past the last row the
+            // terminal scrolls up and startTop becomes stale — the next
+            // SetCursorPosition call lands in the middle of the wrapped
+            // content instead of at the beginning, causing the buffer to be
+            // written again from that mid-line position (the duplication bug).
+            //
+            // Fix: compute where the cursor *should* be based on the number of
+            // characters written. If Console.CursorTop is less than that, the
+            // difference is how many rows were scrolled away; subtract that
+            // from startTop so the next Redraw anchors correctly.
+            if (!Console.IsOutputRedirected)
+            {
+                try
+                {
+                    var width = Math.Max(Console.WindowWidth, 1);
+                    // longestWritten == total chars on screen (content + any pad).
+                    var expectedEndRow = startTop + (startLeft + longestWritten) / width;
+                    var scrolled = expectedEndRow - Console.CursorTop;
+                    if (scrolled > 0) startTop = Math.Max(0, startTop - scrolled);
+                }
+                catch { }
+            }
+
             MoveTo(cursorPos);
         }
 
