@@ -26,6 +26,20 @@ using fuseraft.Orchestration.Strategies;
 namespace fuseraft.Cli;
 
 /// <summary>
+/// The product of <see cref="OrchestratorBuilder.BuildAsync"/>: the ready-to-run orchestrator
+/// together with all runtime components the session runner needs.
+/// </summary>
+public sealed record OrchestratorBuildResult(
+    IOrchestrator          Orchestrator,
+    OrchestrationConfig    Config,
+    McpSessionManager      McpManager,
+    ConversationCompactor? Compactor,
+    ChangeTracker?         ChangeTracker,
+    EventEmitter?          EventEmitter,
+    GovernanceKernel       GovernanceKernel,
+    SkillCurator?          SkillCurator);
+
+/// <summary>
 /// Builds a ready-to-use <see cref="IOrchestrator"/> directly from a config file path,
 /// without requiring a full DI host. Used by CLI commands that load config at runtime.
 /// </summary>
@@ -52,7 +66,7 @@ public static class OrchestratorBuilder
     /// and returns a configured orchestrator together with the active session manager.
     /// The caller is responsible for disposing <paramref name="mcpManager"/> (via <c>await using</c>).
     /// </summary>
-    public static async Task<(IOrchestrator Orchestrator, OrchestrationConfig Config, McpSessionManager McpManager, ConversationCompactor? Compactor, ChangeTracker? ChangeTracker, EventEmitter? EventEmitter, GovernanceKernel GovernanceKernel, SkillCurator? SkillCurator)> BuildAsync(
+    public static async Task<OrchestratorBuildResult> BuildAsync(
         string configPath,
         ILoggerFactory loggerFactory,
         PluginRegistry pluginRegistry,
@@ -103,26 +117,21 @@ public static class OrchestratorBuilder
         {
             var sandboxRoot = FuseraftPaths.ExpandPath(rawSandbox);
 
-            static string Resolve(string path, string root) =>
-                Path.IsPathRooted(ProcessHelper.ExpandHome(path))
-                    ? path
-                    : Path.GetFullPath(ProcessHelper.ExpandHome(path), root);
-
             if (config.Validation is { } v)
                 config = config with
                 {
                     Validation = v with
                     {
-                        BriefPath      = Resolve(v.BriefPath,      sandboxRoot),
-                        TestReportPath = Resolve(v.TestReportPath, sandboxRoot),
-                        ChangeLogPath  = v.ChangeLogPath is not null ? Resolve(v.ChangeLogPath, sandboxRoot) : null,
+                        BriefPath      = ResolveSandboxPath(v.BriefPath,      sandboxRoot),
+                        TestReportPath = ResolveSandboxPath(v.TestReportPath, sandboxRoot),
+                        ChangeLogPath  = v.ChangeLogPath is not null ? ResolveSandboxPath(v.ChangeLogPath, sandboxRoot) : null,
                     }
                 };
 
             if (config.ChangeTracking is { } ct)
                 config = config with
                 {
-                    ChangeTracking = ct with { Path = Resolve(ct.Path, sandboxRoot) }
+                    ChangeTracking = ct with { Path = ResolveSandboxPath(ct.Path, sandboxRoot) }
                 };
         }
 
@@ -132,17 +141,12 @@ public static class OrchestratorBuilder
         {
             var bfRoot = FuseraftPaths.ExpandPath(bfSandbox);
 
-            static string BfResolve(string path, string root) =>
-                Path.IsPathRooted(ProcessHelper.ExpandHome(path))
-                    ? path
-                    : Path.GetFullPath(ProcessHelper.ExpandHome(path), root);
-
             config = config with
             {
                 Brownfield = bf with
                 {
-                    DiscoveryBriefPath   = BfResolve(bf.DiscoveryBriefPath,   bfRoot),
-                    ConventionProfilePath = BfResolve(bf.ConventionProfilePath, bfRoot),
+                    DiscoveryBriefPath    = ResolveSandboxPath(bf.DiscoveryBriefPath,    bfRoot),
+                    ConventionProfilePath = ResolveSandboxPath(bf.ConventionProfilePath, bfRoot),
                 }
             };
         }
@@ -797,7 +801,7 @@ public static class OrchestratorBuilder
         if (config.Saga?.Enabled == true)
             orchestrator = new SagaOrchestrator(orchestrator, config.Saga, compensators: null, eventEmitter);
 
-        return (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator);
+        return new OrchestratorBuildResult(orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator);
     }
 
     /// <summary>
@@ -1248,4 +1252,14 @@ public static class OrchestratorBuilder
         var stderr  = await stderrTask;
         return string.IsNullOrWhiteSpace(stderr) ? stdout : $"{stdout}\nstderr: {stderr}";
     }
+
+    /// <summary>
+    /// Resolves <paramref name="path"/> relative to <paramref name="sandboxRoot"/> unless it is
+    /// already absolute. Expands <c>~</c> home-directory tokens before the rooted check.
+    /// Used to normalise validation and change-tracking paths against a configured sandbox root.
+    /// </summary>
+    private static string ResolveSandboxPath(string path, string sandboxRoot) =>
+        Path.IsPathRooted(ProcessHelper.ExpandHome(path))
+            ? path
+            : Path.GetFullPath(ProcessHelper.ExpandHome(path), sandboxRoot);
 }
