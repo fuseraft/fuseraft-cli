@@ -242,8 +242,9 @@ Task("Publish")
             settings.Runtime       = runtime;
             settings.SelfContained = true;
             settings.MSBuildSettings
-                .WithProperty("PublishSingleFile",              "true")
-                .WithProperty("EnableCompressionInSingleFile",  "true");
+                .WithProperty("PublishSingleFile",                    "true")
+                .WithProperty("IncludeNativeLibrariesForSelfExtract", "true")
+                .WithProperty("EnableCompressionInSingleFile",        "true");
 
             Information($"Self-contained single-file publish for: {runtime}");
         }
