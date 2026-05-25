@@ -125,8 +125,25 @@ If your instructions are long, move reference material into a `references/` subd
 
 ## Automatic skill generation
 
-When skill curation is enabled in your config, fuseraft automatically creates a new skill at the end of qualifying sessions. If the session produced a reusable procedure — a debugging workflow, a multi-step pattern, a problem-solving approach — fuseraft writes it to `~/.fuseraft/skills/` so future sessions can benefit from it.
+When skill curation is enabled, fuseraft automatically creates or updates a skill at the end of qualifying sessions. If the session produced a reusable procedure — a debugging workflow, a multi-step pattern, a problem-solving approach — fuseraft writes it to `~/.fuseraft/skills/` so future sessions can benefit from it.
 
 Trivial or highly project-specific sessions typically produce no output. If a skill with the same slug already exists it is updated in place, so the procedure is refined over time rather than duplicated.
 
-See [Configuration → Skill curation](configuration.md#skill-curation) to enable or tune this behavior.
+### Enabling curation for REPL sessions
+
+Add a `skillCuration` block to `~/.fuseraft/config`:
+
+```json
+{
+  "modelId": "claude-sonnet-4-5",
+  "skillCuration": {
+    "enabled": true
+  }
+}
+```
+
+All the standard knobs are supported (`minTurns`, `digestTurns`, `model`, `libraryPath`, `indexTopN`). Note that skill injection at session start (surfacing relevant skills before the first turn) is only available in `fuseraft run` sessions — the REPL has no upfront task description to query against.
+
+### Enabling curation for `fuseraft run` sessions
+
+Set `SkillCuration.Enabled: true` in your orchestration YAML. See [Configuration → Skill curation](configuration.md#skill-curation) for the full field reference and how start-of-session skill injection works.
