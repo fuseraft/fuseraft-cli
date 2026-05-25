@@ -796,6 +796,7 @@ SkillCuration:
 | `DigestTurns` | int | `30` | Maximum number of recent turns included in the curation prompt. Limits token cost for very long sessions. |
 | `IndexPath` | string | `~/.fuseraft/skills/index.db` | Path to the SQLite FTS5 skill index. Updated automatically after each new skill is written. |
 | `IndexTopN` | int | `5` | Number of skills injected into the session context at startup (retrieved by full-text search against the task description). `0` disables injection. |
+| `LogPath` | string | `~/.fuseraft/skill-curation.jsonl` | Path to the append-only curation log. Every attempt — success or failure — is recorded here. |
 
 **How curation works**
 
@@ -806,6 +807,29 @@ SkillCuration:
 5. At the start of the **next** session, fuseraft searches the index with keywords from the task description and injects the top-N matching skills as a context message.
 
 Curation is best-effort: any failure (LLM error, write failure, index error) is logged and swallowed without affecting the session result.
+
+**Curation log**
+
+Every curation attempt appends one JSON line to `~/.fuseraft/skill-curation.jsonl` (override with `LogPath`). Each line records the outcome, session ID, source (`run` or `repl`), slug, model, turn count, and any failure reason:
+
+```jsonl
+{"ts":"2026-05-24T10:00:00Z","session":"abc123","source":"repl","outcome":"created","slug":"debug-dotnet-sqlite","path":"/home/user/.fuseraft/skills/debug-dotnet-sqlite/SKILL.md","turns_digested":12,"model":"claude-sonnet-4-5"}
+{"ts":"2026-05-24T11:30:00Z","session":"def456","source":"run","outcome":"no_skill","turns_digested":6,"model":"gpt-4o-mini"}
+{"ts":"2026-05-24T12:15:00Z","session":"ghi789","source":"repl","outcome":"skipped","failure_reason":"Only 3 assistant turns (min 5)."}
+{"ts":"2026-05-24T13:00:00Z","session":"xyz012","source":"run","outcome":"failed","failure_reason":"LLM returned an empty response.","turns_digested":9,"model":"gpt-4o-mini"}
+```
+
+Possible `outcome` values:
+
+| Outcome | Meaning |
+|---------|---------|
+| `created` | A new SKILL.md was written. |
+| `updated` | An existing skill was refined in place. |
+| `skipped` | Session had fewer turns than `MinTurns` — no LLM call was made. |
+| `no_skill` | The LLM reviewed the session and determined no portable skill is warranted. |
+| `failed` | An error occurred (empty LLM response, malformed output, write failure). Check `failure_reason`. |
+
+`skill_curation_start` and `skill_curation_complete` events are also emitted to the session event log (`.fuseraft/logs/events.jsonl` for `fuseraft run`, `.fuseraft/logs/repl_events.jsonl` for REPL) so you can correlate curation with the rest of the session timeline. Use `--verbose` to see debug-level output including the LLM response preview.
 
 **Skill injection at session start (`fuseraft run` only)**
 
