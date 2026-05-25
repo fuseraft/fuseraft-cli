@@ -51,4 +51,11 @@ public record SkillCurationConfig
     /// Default: 5.
     /// </summary>
     public int IndexTopN { get; init; } = 5;
+
+    /// <summary>
+    /// Path to the append-only JSONL curation log written after every curation attempt.
+    /// Each line records the outcome, slug, model, turn count, and any error.
+    /// Defaults to <c>~/.fuseraft/skill-curation.jsonl</c> when null or empty.
+    /// </summary>
+    public string? LogPath { get; init; }
 }

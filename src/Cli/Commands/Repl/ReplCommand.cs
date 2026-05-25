@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using fuseraft.Cli.Display;
@@ -43,7 +44,7 @@ public sealed class ReplSettings : CommandSettings
     public bool VsCode { get; set; }
 }
 
-public sealed class ReplCommand : AsyncCommand<ReplSettings>
+public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<ReplSettings>
 {
     private static readonly (string EnvVar, string ModelId)[] AutoDetectOrder =
     [
@@ -310,7 +311,7 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
 
         // Post-session skill curation (best-effort — never fails the session).
         if (userCfg?.SkillCuration?.Enabled == true)
-            await RunSkillCurationAsync(ctx, userCfg.SkillCuration, jsonMode);
+            await RunSkillCurationAsync(ctx, userCfg.SkillCuration, loggerFactory, jsonMode);
 
         if (jsonMode)
             ReplJsonBridge.Emit(new { type = "session_end" });
@@ -426,10 +427,14 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
     private static async Task RunSkillCurationAsync(
         ReplSessionContext ctx,
         SkillCurationConfig curationConfig,
+        ILoggerFactory loggerFactory,
         bool jsonMode)
     {
         try
         {
+            await ctx.Emitter.EmitAsync("skill_curation_start",
+                payload: new { session = ctx.SessionId, source = "repl" });
+
             // Convert ChatMessage history to AgentMessage list (assistant turns only).
             var messages = ctx.History
                 .Where(m => m.Role == ChatRole.Assistant && !string.IsNullOrWhiteSpace(m.Text))
@@ -460,21 +465,46 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
                 : ctx.ModelConfig;
             using var curatorClient = ctx.Factory.Create(curatorModelCfg);
 
-            var curator = new Orchestration.SkillCurator(
+            var curator = new SkillCurator(
                 curatorClient,
                 curationConfig,
                 evidenceStore: null,   // REPL has no EvidenceStore
-                Microsoft.Extensions.Logging.Abstractions.NullLogger<Orchestration.SkillCurator>.Instance);
+                loggerFactory.CreateLogger<SkillCurator>());
 
-            var (created, slug, skillPath) = await curator.RunAsync(checkpoint, messages, CancellationToken.None);
+            var result = await curator.RunAsync(checkpoint, messages, CancellationToken.None, source: "repl");
 
-            if (created && slug is not null && !jsonMode)
-                AnsiConsole.MarkupLine(
-                    $"[green]✓ Skill curated:[/] [bold]{Markup.Escape(slug)}[/]  [dim]{Markup.Escape(skillPath!)}[/]");
+            await ctx.Emitter.EmitAsync("skill_curation_complete",
+                payload: new
+                {
+                    session       = ctx.SessionId,
+                    source        = "repl",
+                    outcome       = result.Outcome.ToString().ToLowerInvariant(),
+                    slug          = result.Slug,
+                    path          = result.Path,
+                    turns_digested = result.TurnsDigested,
+                    failure_reason = result.FailureReason,
+                });
+
+            if (!jsonMode)
+            {
+                if (result.WroteSkill)
+                    AnsiConsole.MarkupLine(
+                        $"[green]✓ Skill {(result.Outcome == SkillCurationOutcome.Updated ? "updated" : "curated")}:[/] " +
+                        $"[bold]{Markup.Escape(result.Slug!)}[/]  [dim]{Markup.Escape(result.Path!)}[/]");
+                else if (result.Outcome == SkillCurationOutcome.Failed)
+                    AnsiConsole.MarkupLine(
+                        $"[dim yellow]Skill curation failed:[/] {Markup.Escape(result.FailureReason ?? "unknown error")}");
+            }
         }
-        catch
+        catch (Exception ex)
         {
-            // Curation is best-effort — never surface as an error.
+            // Curation is best-effort — log but never surface as an error.
+            try
+            {
+                await ctx.Emitter.EmitAsync("skill_curation_complete",
+                    payload: new { session = ctx.SessionId, source = "repl", outcome = "failed", failure_reason = ex.Message });
+            }
+            catch { /* emitter itself failed — nothing we can do */ }
         }
     }
 }

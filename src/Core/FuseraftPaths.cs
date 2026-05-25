@@ -32,7 +32,8 @@ public static class FuseraftPaths
         }
         return Path.GetFullPath(path);
     }
-    public static string GlobalSkillsIndex => Path.Combine(GlobalRoot, "skills", "index.db");
+    public static string GlobalSkillsIndex      => Path.Combine(GlobalRoot, "skills", "index.db");
+    public static string GlobalSkillCurationLog => Path.Combine(GlobalRoot, "skill-curation.jsonl");
     public static string GlobalSchedule    => Path.Combine(GlobalRoot, "schedule");
     public static string GlobalMemoryRepl => Path.Combine(GlobalRoot, "memory", "repl");
     public static string GlobalMemoryAgent(string name) => Path.Combine(GlobalRoot, "memory", "agents", name);
