@@ -184,7 +184,19 @@ public sealed class SkillIndex(string? dbPath = null) : IAsyncDisposable
 
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
 
-        _conn = new SqliteConnection($"Data Source={_path};Mode=ReadWriteCreate;Cache=Shared");
+        SqliteConnection conn;
+        try
+        {
+            conn = new SqliteConnection($"Data Source={_path};Mode=ReadWriteCreate;Cache=Shared");
+        }
+        catch (Exception ex) when (IsMissingNativeLib(ex))
+        {
+            throw new InvalidOperationException(
+                "SQLite native library (e_sqlite3) could not be loaded. " +
+                "Re-install fuseraft to get the updated binary with the embedded SQLite library.", ex);
+        }
+
+        _conn = conn;
         await _conn.OpenAsync(ct);
 
         // WAL mode for concurrent read access alongside writes
@@ -194,6 +206,21 @@ public sealed class SkillIndex(string? dbPath = null) : IAsyncDisposable
 
         await EnsureSchemaAsync(ct);
         return _conn;
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when <paramref name="ex"/> (or any inner exception) is a
+    /// <see cref="DllNotFoundException"/> for the SQLite native library, which happens
+    /// when the binary was installed without the embedded <c>e_sqlite3</c> native library.
+    /// </summary>
+    private static bool IsMissingNativeLib(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+            if (e is DllNotFoundException dll &&
+                (dll.Message.Contains("e_sqlite3", StringComparison.OrdinalIgnoreCase) ||
+                 dll.Message.Contains("sqlite",    StringComparison.OrdinalIgnoreCase)))
+                return true;
+        return false;
     }
 
     private static string ExtractDescription(string skillContent)
