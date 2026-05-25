@@ -26,7 +26,7 @@ fuseraft uses a progressive-disclosure pattern to keep context lean:
 2. **On-demand load** — When the model decides a skill is relevant, it calls `load_skill("<slug>")` to retrieve the full `SKILL.md` content, then follows those step-by-step instructions using its other tools.
 3. **Script execution** — If a skill bundles executable scripts alongside its `SKILL.md`, the model can run them with `run_skill_script("<slug>", "<filename>")`.
 
-The startup line `Skills: N loaded.  Type /tools to see.` confirms how many skills were found. Type `/tools` to see each tool in the `Skills` category.
+At startup, the skill count appears in the compact info line alongside the active tool categories (e.g. `… · 3 skills · …`). Run `/tools` at any time to list all active tools by category, including the `Skills` category.
 
 | Tool | Description |
 |------|-------------|
@@ -53,18 +53,11 @@ You don't need to invoke this skill explicitly — it activates on its own when 
 
 ---
 
-## Built-in skill: `handoff`
+## Cross-session handoff: `/compact`
 
-The `handoff` skill writes a handoff document to the OS temp directory so a fresh agent session can pick up where the current one left off. It is intended for cross-session handoffs — passing context to a different session or a different agent entirely.
+To pass context from the current REPL session to a new one, use the `/compact` command. `/compact` generates a concise summary of what was worked on, key decisions, current state, and what comes next; it then replaces the conversation history with that summary so the session can continue with a clean context window.
 
-When invoked (`load_skill("handoff")`), the agent will:
-
-1. Summarise what was being worked on, key decisions, current state, and what comes next.
-2. Include a "suggested skills" section recommending skills for the next session.
-3. Redact any sensitive values (API keys, passwords, PII).
-4. Write the document to the OS temp directory and report the path.
-
-**Relationship to `/compact`:** If your goal is to continue in the *same* REPL session after freeing up context, use the `/compact` command instead. `/compact` generates the same style of summary, discards the old history in place, and injects the summary as the new opening context — no file is written and no new session is needed. Use `handoff` when you want a doc to carry to a *different* session; use `/compact` when you want to reclaim context window in the current one.
+If you want to carry a summary to a *different* session or agent entirely, run `/compact` and copy the resulting summary into the new session as an opening message.
 
 ---
 
@@ -122,7 +115,7 @@ description: What this skill does and when to use it.
 Step-by-step guidance for the agent...
 ```
 
-The `name` must match the directory name exactly. The `description` is what fuseraft uses to decide whether the skill is relevant to the current task — write it so it covers both what the skill does and the kinds of tasks that should trigger it.
+The `name` field is used by `fuseraft skills add` to derive the destination directory name when installing a skill globally, so keeping it in sync with the directory name is strongly recommended. The runtime loader uses the **directory name** as the slug — the `name:` field in frontmatter is not read at load time. The `description` is what fuseraft uses to decide whether the skill is relevant to the current task — write it so it covers both what the skill does and the kinds of tasks that should trigger it.
 
 If your instructions are long, move reference material into a `references/` subdirectory inside the skill folder. The agent loads those files on demand rather than all at once.
 
@@ -134,6 +127,6 @@ If your instructions are long, move reference material into a `references/` subd
 
 When skill curation is enabled in your config, fuseraft automatically creates a new skill at the end of qualifying sessions. If the session produced a reusable procedure — a debugging workflow, a multi-step pattern, a problem-solving approach — fuseraft writes it to `~/.fuseraft/skills/` so future sessions can benefit from it.
 
-Trivial or highly project-specific sessions typically produce no output. Generated skills are never overwritten — if a skill with the same name already exists, the session result is skipped.
+Trivial or highly project-specific sessions typically produce no output. If a skill with the same slug already exists it is updated in place, so the procedure is refined over time rather than duplicated.
 
 See [Configuration → Skill curation](configuration.md#skill-curation) to enable or tune this behavior.
