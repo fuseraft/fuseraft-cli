@@ -646,21 +646,7 @@ public sealed class GraphOrchestrator(
             var filtered = ContextWindowFilter.Apply(ctx.History, agentCfg.ContextWindow);
 
             // Emit a soft context-cap warning before the turn if approaching the cap.
-            if (eventEmitter is not null
-                && agentCfg.ContextWindow is { ContextCapFraction: > 0, MaxTailMessages: > 0 } cw
-                && filtered.Count > (int)(cw.MaxTailMessages * cw.ContextCapFraction))
-            {
-                await eventEmitter.EmitAsync("context_cap_warning",
-                    agent: agentName,
-                    turn:  ctx.TurnIndex,
-                    payload: new
-                    {
-                        messages  = filtered.Count,
-                        cap       = cw.MaxTailMessages,
-                        fraction  = cw.ContextCapFraction,
-                        threshold = (int)(cw.MaxTailMessages * cw.ContextCapFraction)
-                    });
-            }
+            await EmitContextCapWarningAsync(agentName, agentCfg, filtered, ctx);
 
             IEnumerable<ChatMessage> context = !string.IsNullOrWhiteSpace(instructions)
                 ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
@@ -722,21 +708,8 @@ public sealed class GraphOrchestrator(
                         if (consecutiveFails >= maxRetries)
                             throw new ValidatorStuckException(agentName, termValidator!, consecutiveFails, termErr!);
 
-                        if (eventEmitter is not null)
-                            await eventEmitter.EmitAsync("validation_fail",
-                                agent:   agentName,
-                                payload: new
-                                {
-                                    validator   = termValidator,
-                                    keyword     = "(terminal)",
-                                    consecutive = consecutiveFails,
-                                    message     = termErr
-                                });
-
-                        int histBefore0 = ctx.History.Count;
-                        await CorrectionEngine.InjectValidationError(
-                            ctx.History, termErr!, consecutiveFails, responseText, "(terminal)", eventEmitter);
-                        await PersistCorrectionsAsync(ctx, histBefore0, ct).ConfigureAwait(false);
+                        await EmitAndInjectValidationFailureAsync(
+                            agentName, "(terminal)", termValidator!, termErr!, responseText, consecutiveFails, ctx, ct);
                         continue;
                     }
                 }
@@ -799,15 +772,8 @@ public sealed class GraphOrchestrator(
                     if (consecutiveFails >= maxRetries)
                         throw new ValidatorStuckException(agentName, autoValidator!, consecutiveFails, autoErr!);
 
-                    if (eventEmitter is not null)
-                        await eventEmitter.EmitAsync("validation_fail",
-                            agent:   agentName,
-                            payload: new { validator = autoValidator, keyword = "(unconditional)", consecutive = consecutiveFails, message = autoErr });
-
-                    int histBeforeAuto = ctx.History.Count;
-                    await CorrectionEngine.InjectValidationError(
-                        ctx.History, autoErr!, consecutiveFails, responseText, "(unconditional)", eventEmitter);
-                    await PersistCorrectionsAsync(ctx, histBeforeAuto, ct).ConfigureAwait(false);
+                    await EmitAndInjectValidationFailureAsync(
+                        agentName, "(unconditional)", autoValidator!, autoErr!, responseText, consecutiveFails, ctx, ct);
                     continue;
                 }
 
@@ -827,15 +793,8 @@ public sealed class GraphOrchestrator(
                             if (consecutiveFails >= maxRetries)
                                 throw new ValidatorStuckException(agentName, ubValidator!, consecutiveFails, ubErr!);
 
-                            if (eventEmitter is not null)
-                                await eventEmitter.EmitAsync("validation_fail",
-                                    agent:   agentName,
-                                    payload: new { validator = ubValidator, keyword = "(unconditional-back)", consecutive = consecutiveFails, message = ubErr });
-
-                            int histBeforeUncBack = ctx.History.Count;
-                            await CorrectionEngine.InjectValidationError(
-                                ctx.History, ubErr!, consecutiveFails, responseText, "(unconditional-back)", eventEmitter);
-                            await PersistCorrectionsAsync(ctx, histBeforeUncBack, ct).ConfigureAwait(false);
+                            await EmitAndInjectValidationFailureAsync(
+                                agentName, "(unconditional-back)", ubValidator!, ubErr!, responseText, consecutiveFails, ctx, ct);
                             continue;
                         }
                     }
@@ -940,21 +899,8 @@ public sealed class GraphOrchestrator(
                             continue;
                         }
 
-                        if (eventEmitter is not null)
-                            await eventEmitter.EmitAsync("validation_fail",
-                                agent:   agentName,
-                                payload: new
-                                {
-                                    validator   = pbValidator,
-                                    keyword     = foundKeyword,
-                                    consecutive = consecutiveFails,
-                                    message     = pbErr
-                                });
-
-                        int histBefore0 = ctx.History.Count;
-                        await CorrectionEngine.InjectValidationError(
-                            ctx.History, pbErr!, consecutiveFails, responseText, foundKeyword, eventEmitter);
-                        await PersistCorrectionsAsync(ctx, histBefore0, ct).ConfigureAwait(false);
+                        await EmitAndInjectValidationFailureAsync(
+                            agentName, foundKeyword, pbValidator!, pbErr!, responseText, consecutiveFails, ctx, ct);
                         continue;
                     }
                 }
@@ -1013,15 +959,8 @@ public sealed class GraphOrchestrator(
                     if (consecutiveFails >= maxRetries)
                         throw new ValidatorStuckException(agentName, pgValidator!, consecutiveFails, pgErr!);
 
-                    if (eventEmitter is not null)
-                        await eventEmitter.EmitAsync("validation_fail",
-                            agent:   agentName,
-                            payload: new { validator = pgValidator, keyword = foundKeyword, consecutive = consecutiveFails, message = pgErr });
-
-                    int histBeforePg = ctx.History.Count;
-                    await CorrectionEngine.InjectValidationError(
-                        ctx.History, pgErr!, consecutiveFails, responseText, foundKeyword, eventEmitter);
-                    await PersistCorrectionsAsync(ctx, histBeforePg, ct).ConfigureAwait(false);
+                    await EmitAndInjectValidationFailureAsync(
+                        agentName, foundKeyword, pgValidator!, pgErr!, responseText, consecutiveFails, ctx, ct);
                     continue;
                 }
 
@@ -1174,21 +1113,8 @@ public sealed class GraphOrchestrator(
                     continue;
                 }
 
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("validation_fail",
-                        agent:   agentName,
-                        payload: new
-                        {
-                            validator  = failingValidator,
-                            keyword    = foundKeyword,
-                            consecutive = consecutiveFails,
-                            message    = errMsg
-                        });
-
-                int histBefore1 = ctx.History.Count;
-                await CorrectionEngine.InjectValidationError(
-                    ctx.History, errMsg!, consecutiveFails, responseText, foundKeyword, eventEmitter);
-                await PersistCorrectionsAsync(ctx, histBefore1, ct).ConfigureAwait(false);
+                await EmitAndInjectValidationFailureAsync(
+                    agentName, foundKeyword, failingValidator!, errMsg!, responseText, consecutiveFails, ctx, ct);
                 continue;
             }
 
@@ -1372,6 +1298,65 @@ public sealed class GraphOrchestrator(
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Validation-failure helpers (shared by RunNodeExecutorAsync / RunParallelNodeAsync)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Emits a <c>context_cap_warning</c> event when the filtered message count is
+    /// approaching the configured context-cap fraction. No-ops when
+    /// <paramref name="eventEmitter"/> is null or the context window is not configured.
+    /// </summary>
+    private async Task EmitContextCapWarningAsync(
+        string agentName, AgentConfig agentCfg, IReadOnlyList<ChatMessage> filtered, AgentContext ctx)
+    {
+        if (eventEmitter is null) return;
+        if (agentCfg.ContextWindow is not { ContextCapFraction: > 0, MaxTailMessages: > 0 } cw) return;
+        if (filtered.Count <= (int)(cw.MaxTailMessages * cw.ContextCapFraction)) return;
+
+        await eventEmitter.EmitAsync("context_cap_warning",
+            agent: agentName,
+            turn:  ctx.TurnIndex,
+            payload: new
+            {
+                messages  = filtered.Count,
+                cap       = cw.MaxTailMessages,
+                fraction  = cw.ContextCapFraction,
+                threshold = (int)(cw.MaxTailMessages * cw.ContextCapFraction)
+            });
+    }
+
+    /// <summary>
+    /// Emits a <c>validation_fail</c> event, injects a correction message into history via
+    /// <see cref="CorrectionEngine.InjectValidationError"/>, and persists the injected message
+    /// to the message sink. Called from every validation-failure path in the turn loop.
+    /// </summary>
+    private async Task EmitAndInjectValidationFailureAsync(
+        string agentName,
+        string keyword,
+        string validatorName,
+        string errMsg,
+        string responseText,
+        int consecutiveFails,
+        AgentContext ctx,
+        CancellationToken ct)
+    {
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync("validation_fail",
+                agent:   agentName,
+                payload: new
+                {
+                    validator   = validatorName,
+                    keyword,
+                    consecutive = consecutiveFails,
+                    message     = errMsg,
+                });
+
+        int histBefore = ctx.History.Count;
+        await CorrectionEngine.InjectValidationError(ctx.History, errMsg, consecutiveFails, responseText, keyword, eventEmitter);
+        await PersistCorrectionsAsync(ctx, histBefore, ct).ConfigureAwait(false);
+    }
+
     private static async Task<(bool ok, string? error, string? validatorName)> RunValidatorsAsync(
         IReadOnlyList<IRoutingValidator> validators,
         IList<ChatMessage> history,
@@ -1453,22 +1438,7 @@ public sealed class GraphOrchestrator(
                     $"Parallel node '{nodeId}' ({agentName}) exceeded {maxTotalTurns} total turns without completing.");
 
             var filtered = ContextWindowFilter.Apply(ctx.History, agentCfg.ContextWindow);
-
-            if (eventEmitter is not null
-                && agentCfg.ContextWindow is { ContextCapFraction: > 0, MaxTailMessages: > 0 } cw
-                && filtered.Count > (int)(cw.MaxTailMessages * cw.ContextCapFraction))
-            {
-                await eventEmitter.EmitAsync("context_cap_warning",
-                    agent: agentName,
-                    turn:  ctx.TurnIndex,
-                    payload: new
-                    {
-                        messages  = filtered.Count,
-                        cap       = cw.MaxTailMessages,
-                        fraction  = cw.ContextCapFraction,
-                        threshold = (int)(cw.MaxTailMessages * cw.ContextCapFraction)
-                    });
-            }
+            await EmitContextCapWarningAsync(agentName, agentCfg, filtered, ctx);
 
             IEnumerable<ChatMessage> context = !string.IsNullOrWhiteSpace(instructions)
                 ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
@@ -1602,21 +1572,8 @@ public sealed class GraphOrchestrator(
                     continue;
                 }
 
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("validation_fail",
-                        agent:   agentName,
-                        payload: new
-                        {
-                            validator   = failingValidator,
-                            keyword     = foundKeyword,
-                            consecutive = consecutiveFails,
-                            message     = errMsg
-                        });
-
-                int histBefore1 = ctx.History.Count;
-                await CorrectionEngine.InjectValidationError(
-                    ctx.History, errMsg!, consecutiveFails, responseText, foundKeyword, eventEmitter);
-                await PersistCorrectionsAsync(ctx, histBefore1, ct).ConfigureAwait(false);
+                await EmitAndInjectValidationFailureAsync(
+                    agentName, foundKeyword, failingValidator!, errMsg!, responseText, consecutiveFails, ctx, ct);
                 continue;
             }
 
