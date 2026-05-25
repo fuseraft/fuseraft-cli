@@ -1236,7 +1236,7 @@ The slug is derived from the `name:` field in the `SKILL.md` frontmatter. If no 
 
 ```bash
 # Install a skill from a sibling repository
-fuseraft skills add ../skills/productivity/handoff
+fuseraft skills add ../skills/sandbox-test
 
 # Install from a personal skills library
 fuseraft skills add ~/my-skills/triage
@@ -1282,7 +1282,140 @@ fuseraft skills remove <slug>
 **Examples**
 
 ```bash
-fuseraft skills remove handoff
+fuseraft skills remove triage
+```
+
+---
+
+### `fuseraft skills curation-log`
+
+View the skill curation log. Every curation attempt — success, skip, or failure — is recorded in `~/.fuseraft/skill-curation.jsonl`.
+
+```
+fuseraft skills curation-log [options]
+```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-n, --last <N>` | all | Show only the last N entries. |
+| `--outcome <outcome>` | — | Filter by outcome: `created`, `updated`, `skipped`, `no_skill`, `failed`. |
+| `--source <source>` | — | Filter by source: `run` or `repl`. |
+| `--path <path>` | `~/.fuseraft/skill-curation.jsonl` | Override the log file path. |
+
+**Examples**
+
+```bash
+# View the full curation log
+fuseraft skills curation-log
+
+# Show only failures
+fuseraft skills curation-log --outcome failed
+
+# Show the last 20 entries from REPL sessions
+fuseraft skills curation-log --last 20 --source repl
+```
+
+See [Configuration → Skill curation](configuration.md#skill-curation) for the log format and outcome reference.
+
+---
+
+## `fuseraft log`
+
+View fuseraft log files. All subcommands default to log files in the current project's `.fuseraft/logs/` directory.
+
+### `fuseraft log events`
+
+View the orchestration event log produced by `fuseraft run` sessions.
+
+```
+fuseraft log events [options]
+```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-n, --last <N>` | all | Show only the last N entries. |
+| `--session <id>` | — | Filter by session ID (prefix match). |
+| `--event <type>` | — | Filter by event type (e.g. `session_error`, `tool_blocked`, `validation_fail`). |
+| `--path <path>` | `.fuseraft/logs/events.jsonl` | Override the log file path. |
+
+**Examples**
+
+```bash
+# Tail the 50 most recent events
+fuseraft log events --last 50
+
+# Show all errors from the current project
+fuseraft log events --event session_error
+
+# Show all events for a specific session
+fuseraft log events --session a3f92c1d
+```
+
+---
+
+### `fuseraft log repl`
+
+View the REPL event log produced by interactive `fuseraft repl` sessions.
+
+```
+fuseraft log repl [options]
+```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-n, --last <N>` | all | Show only the last N entries. |
+| `--session <id>` | — | Filter by session ID (prefix match). |
+| `--event <type>` | — | Filter by event type (e.g. `command`, `skill_curation_complete`, `assistant_response`). |
+| `--path <path>` | `.fuseraft/logs/repl_events.jsonl` | Override the log file path. |
+
+**Examples**
+
+```bash
+# Show the last 50 REPL events
+fuseraft log repl --last 50
+
+# Show all slash commands issued in the current project
+fuseraft log repl --event command
+
+# Show curation events only
+fuseraft log repl --event skill_curation_complete
+```
+
+---
+
+### `fuseraft log app`
+
+View the application log. fuseraft writes Warning-level and above messages here for diagnostics that survive past the terminal session.
+
+```
+fuseraft log app [options]
+```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-n, --last <N>` | `50` | Show the last N lines. |
+| `--level <level>` | — | Filter by Serilog level token: `inf`, `wrn`, `err`, `dbg`. |
+| `--path <path>` | `.fuseraft/logs/app.log` | Override the log file path. |
+
+**Examples**
+
+```bash
+# Show the last 50 lines
+fuseraft log app
+
+# Show only errors
+fuseraft log app --level err
+
+# Show the last 200 lines
+fuseraft log app --last 200
 ```
 
 ---
