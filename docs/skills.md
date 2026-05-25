@@ -142,8 +142,8 @@ Add a `skillCuration` block to `~/.fuseraft/config`:
 }
 ```
 
-All the standard knobs are supported (`minTurns`, `digestTurns`, `model`, `libraryPath`, `indexTopN`). Note that skill injection at session start (surfacing relevant skills before the first turn) is only available in `fuseraft run` sessions — the REPL has no upfront task description to query against.
+All the standard knobs are supported (`minTurns`, `digestTurns`, `model`, `libraryPath`, `indexTopN`, `logPath`). Note that skill injection at session start (surfacing relevant skills before the first turn) is only available in `fuseraft run` sessions — the REPL has no upfront task description to query against.
 
 ### Enabling curation for `fuseraft run` sessions
 
-Set `SkillCuration.Enabled: true` in your orchestration YAML. See [Configuration → Skill curation](configuration.md#skill-curation) for the full field reference and how start-of-session skill injection works.
+Set `SkillCuration.Enabled: true` in your orchestration YAML. See [Configuration → Skill curation](configuration.md#skill-curation) for the full field reference, start-of-session skill injection, and the curation log format.
