@@ -116,6 +116,7 @@ services.AddTransient<ScheduleRunCommand>();
 services.AddTransient<SkillsAddCommand>();
 services.AddTransient<SkillsListCommand>();
 services.AddTransient<SkillsRemoveCommand>();
+services.AddTransient<SkillsCurationLogCommand>();
 services.AddTransient<UpdateCommand>();
 
 // Use CommandApp<ReplCommand> so bare `fuseraft` drops straight into the REPL.
@@ -274,6 +275,12 @@ app.Configure(cfg =>
         branch.AddCommand<SkillsRemoveCommand>("remove")
             .WithDescription("Remove a global skill and drop it from the search index.")
             .WithExample(["skills", "remove", "triage"]);
+
+        branch.AddCommand<SkillsCurationLogCommand>("curation-log")
+            .WithDescription("View the skill curation log (~/.fuseraft/skill-curation.jsonl).")
+            .WithExample(["skills", "curation-log"])
+            .WithExample(["skills", "curation-log", "--last", "20"])
+            .WithExample(["skills", "curation-log", "--outcome", "failed"]);
     });
 
     cfg.AddCommand<UpdateCommand>("update")
