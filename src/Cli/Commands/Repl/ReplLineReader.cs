@@ -36,22 +36,6 @@ internal sealed class ReplLineReader
 
         void Redraw()
         {
-            // Re-derive startTop from the current cursor position before every
-            // render. After each MoveTo(cursorPos) the cursor sits exactly
-            // (startLeft + cursorPos) / width rows below startTop, so we can
-            // recover startTop without carrying stale state across iterations.
-            // This self-corrects any drift that accumulated from line-wrap edge
-            // cases or prior scroll-detection imprecision.
-            if (!Console.IsOutputRedirected)
-            {
-                try
-                {
-                    var w = Math.Max(Console.WindowWidth, 1);
-                    startTop = Math.Max(0, Console.CursorTop - (startLeft + cursorPos) / w);
-                }
-                catch { }
-            }
-
             try { Console.SetCursorPosition(startLeft, startTop); } catch { }
             var content = buffer.ToString();
             var pad     = Math.Max(0, longestWritten - content.Length);
