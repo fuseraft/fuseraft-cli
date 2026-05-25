@@ -21,7 +21,6 @@ var skipTests     = Argument("skipTests",     false);
 
 // Paths
 var projectFile    = "src/fuseraft.csproj";
-var solutionFile   = "src/FuseraftCli.sln";
 var artifactsDir   = Directory("artifacts");
 var publishDir     = Directory("bin");
 var packDir        = artifactsDir + Directory("packages");
