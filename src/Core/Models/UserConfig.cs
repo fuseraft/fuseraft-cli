@@ -16,6 +16,9 @@ public sealed class UserConfig
     [JsonPropertyName("apiKeyEnvVar")]
     public string ApiKeyEnvVar { get; set; } = string.Empty;
 
+    [JsonPropertyName("skillCuration")]
+    public SkillCurationConfig? SkillCuration { get; set; }
+
     // Never written to disk — populated at runtime from the OS keychain.
     [JsonIgnore]
     public string ApiKey { get; set; } = string.Empty;

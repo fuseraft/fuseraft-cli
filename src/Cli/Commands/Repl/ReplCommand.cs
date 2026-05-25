@@ -308,6 +308,10 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
         await emitter.EmitAsync("session_end", payload: new { turns = ctx.TurnIndex });
         await ReplTurn.ExtractMemoriesOnExitAsync(ctx);
 
+        // Post-session skill curation (best-effort — never fails the session).
+        if (userCfg?.SkillCuration?.Enabled == true)
+            await RunSkillCurationAsync(ctx, userCfg.SkillCuration, jsonMode);
+
         if (jsonMode)
             ReplJsonBridge.Emit(new { type = "session_end" });
         else
@@ -412,5 +416,65 @@ public sealed class ReplCommand : AsyncCommand<ReplSettings>
         var bytes = new byte[6];
         System.Security.Cryptography.RandomNumberGenerator.Fill(bytes);
         return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Runs the skill curator after a REPL session ends. Converts the chat history to the
+    /// <see cref="AgentMessage"/> list the curator expects and fires a single LLM review call.
+    /// Best-effort — any exception is swallowed so it never surfaces to the user as an error.
+    /// </summary>
+    private static async Task RunSkillCurationAsync(
+        ReplSessionContext ctx,
+        SkillCurationConfig curationConfig,
+        bool jsonMode)
+    {
+        try
+        {
+            // Convert ChatMessage history to AgentMessage list (assistant turns only).
+            var messages = ctx.History
+                .Where(m => m.Role == ChatRole.Assistant && !string.IsNullOrWhiteSpace(m.Text))
+                .Select((m, i) => new AgentMessage
+                {
+                    AgentName = "Assistant",
+                    Content   = m.Text!,
+                    Role      = "assistant",
+                    TurnIndex = i,
+                })
+                .ToList();
+
+            // Derive a task description from the first user message in the session.
+            var taskDescription = ctx.History
+                .FirstOrDefault(m => m.Role == ChatRole.User)?.Text?.Trim()
+                ?? "REPL session";
+
+            var checkpoint = new SessionCheckpoint
+            {
+                Task       = taskDescription,
+                SessionId  = ctx.SessionId,
+                ConfigPath = string.Empty,   // no YAML config in a REPL session
+            };
+
+            // Build a chat client for the curator (use configured model or fall back to session model).
+            var curatorModelCfg = curationConfig.Model is { Length: > 0 } m
+                ? ctx.Factory.Resolve(new ModelConfig { ModelId = m })
+                : ctx.ModelConfig;
+            using var curatorClient = ctx.Factory.Create(curatorModelCfg);
+
+            var curator = new Orchestration.SkillCurator(
+                curatorClient,
+                curationConfig,
+                evidenceStore: null,   // REPL has no EvidenceStore
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<Orchestration.SkillCurator>.Instance);
+
+            var (created, slug, skillPath) = await curator.RunAsync(checkpoint, messages, CancellationToken.None);
+
+            if (created && slug is not null && !jsonMode)
+                AnsiConsole.MarkupLine(
+                    $"[green]✓ Skill curated:[/] [bold]{Markup.Escape(slug)}[/]  [dim]{Markup.Escape(skillPath!)}[/]");
+        }
+        catch
+        {
+            // Curation is best-effort — never surface as an error.
+        }
     }
 }
