@@ -58,7 +58,18 @@ public sealed class SkillsAddCommand : AsyncCommand<SkillsAddSettings>
         await File.WriteAllTextAsync(destPath, content, cancellationToken);
 
         await using var index = new SkillIndex();
-        await index.IndexAsync(slug, destPath, content, cancellationToken);
+        try
+        {
+            await index.IndexAsync(slug, destPath, content, cancellationToken);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("e_sqlite3") || ex.Message.Contains("SQLite"))
+        {
+            AnsiConsole.MarkupLine($"[red]✗ Skill index unavailable:[/] {Markup.Escape(ex.Message)}");
+            // The skill file was already written; report partial success so the user isn't blocked.
+            var verb2 = isUpdate ? "Updated" : "Added";
+            AnsiConsole.MarkupLine($"[green]✓[/] {verb2} [bold]{Markup.Escape(slug)}[/] → {Markup.Escape(destPath)} [dim](index skipped)[/]");
+            return 0;
+        }
 
         var verb = isUpdate ? "Updated" : "Added";
         AnsiConsole.MarkupLine($"[green]✓[/] {verb} [bold]{Markup.Escape(slug)}[/] → {Markup.Escape(destPath)}");
@@ -140,7 +151,15 @@ public sealed class SkillsRemoveCommand : AsyncCommand<SkillsRemoveSettings>
         Directory.Delete(destDir, recursive: true);
 
         await using var index = new SkillIndex();
-        await index.RemoveAsync(slug, cancellationToken);
+        try
+        {
+            await index.RemoveAsync(slug, cancellationToken);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("e_sqlite3") || ex.Message.Contains("SQLite"))
+        {
+            // Skill directory already deleted; index cleanup is best-effort.
+            AnsiConsole.MarkupLine($"[yellow]⚠[/] Skill files removed but index update failed: {Markup.Escape(ex.Message)}");
+        }
 
         AnsiConsole.MarkupLine($"[green]✓[/] Removed [bold]{Markup.Escape(slug)}[/].");
         return 0;
