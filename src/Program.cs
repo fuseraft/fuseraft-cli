@@ -117,6 +117,9 @@ services.AddTransient<SkillsAddCommand>();
 services.AddTransient<SkillsListCommand>();
 services.AddTransient<SkillsRemoveCommand>();
 services.AddTransient<SkillsCurationLogCommand>();
+services.AddTransient<LogEventsCommand>();
+services.AddTransient<LogReplCommand>();
+services.AddTransient<LogAppCommand>();
 services.AddTransient<UpdateCommand>();
 
 // Use CommandApp<ReplCommand> so bare `fuseraft` drops straight into the REPL.
@@ -281,6 +284,30 @@ app.Configure(cfg =>
             .WithExample(["skills", "curation-log"])
             .WithExample(["skills", "curation-log", "--last", "20"])
             .WithExample(["skills", "curation-log", "--outcome", "failed"]);
+    });
+
+    cfg.AddBranch("log", branch =>
+    {
+        branch.SetDescription("View fuseraft log files.");
+
+        branch.AddCommand<LogEventsCommand>("events")
+            .WithDescription("View the orchestration event log (.fuseraft/logs/events.jsonl).")
+            .WithExample(["log", "events"])
+            .WithExample(["log", "events", "--last", "50"])
+            .WithExample(["log", "events", "--event", "session_error"])
+            .WithExample(["log", "events", "--session", "abc123"]);
+
+        branch.AddCommand<LogReplCommand>("repl")
+            .WithDescription("View the REPL event log (.fuseraft/logs/repl_events.jsonl).")
+            .WithExample(["log", "repl"])
+            .WithExample(["log", "repl", "--last", "50"])
+            .WithExample(["log", "repl", "--event", "command"]);
+
+        branch.AddCommand<LogAppCommand>("app")
+            .WithDescription("View the application log (.fuseraft/logs/app.log).")
+            .WithExample(["log", "app"])
+            .WithExample(["log", "app", "--last", "100"])
+            .WithExample(["log", "app", "--level", "err"]);
     });
 
     cfg.AddCommand<UpdateCommand>("update")
