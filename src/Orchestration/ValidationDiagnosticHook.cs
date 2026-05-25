@@ -172,25 +172,4 @@ public sealed class ValidationDiagnosticHook : IOrchestrationHook
         catch { return null; }
     }
 
-    // Minimal projection of the change log schema — only the fields we need here.
-    private sealed class ChangeLogSnapshot
-    {
-        public List<ChangeEntrySnapshot>? Entries { get; init; }
-    }
-
-    private sealed class ChangeEntrySnapshot
-    {
-        public string?       Agent        { get; init; }
-        public int           TurnIndex    { get; init; }
-        public List<string>? FilesWritten { get; init; }
-        public List<string>? FilesDeleted { get; init; }
-        public List<CommandSnapshot>? CommandsRun { get; init; }
-        public List<string>? GitCommits   { get; init; }
-    }
-
-    private sealed class CommandSnapshot
-    {
-        public string Command   { get; init; } = string.Empty;
-        public bool   Succeeded { get; init; }
-    }
 }
