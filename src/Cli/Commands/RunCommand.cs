@@ -395,11 +395,31 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         {
             try
             {
-                var (created, slug, skillPath) = await skillCurator.RunAsync(
-                    checkpoint, result.Messages, CancellationToken.None);
-                if (created && slug is not null)
+                await (eventEmitter?.EmitAsync("skill_curation_start",
+                    payload: new { session = checkpoint.SessionId, source = "run" }) ?? Task.CompletedTask);
+
+                var curationResult = await skillCurator.RunAsync(
+                    checkpoint, result.Messages, CancellationToken.None, source: "run");
+
+                await (eventEmitter?.EmitAsync("skill_curation_complete",
+                    payload: new
+                    {
+                        session        = checkpoint.SessionId,
+                        source         = "run",
+                        outcome        = curationResult.Outcome.ToString().ToLowerInvariant(),
+                        slug           = curationResult.Slug,
+                        path           = curationResult.Path,
+                        turns_digested = curationResult.TurnsDigested,
+                        failure_reason = curationResult.FailureReason,
+                    }) ?? Task.CompletedTask);
+
+                if (curationResult.WroteSkill)
                     AnsiConsole.MarkupLine(
-                        $"[green]✓ Skill curated:[/] [bold]{Markup.Escape(slug)}[/]  [dim]{Markup.Escape(skillPath!)}[/]");
+                        $"[green]✓ Skill {(curationResult.Outcome == SkillCurationOutcome.Updated ? "updated" : "curated")}:[/] " +
+                        $"[bold]{Markup.Escape(curationResult.Slug!)}[/]  [dim]{Markup.Escape(curationResult.Path!)}[/]");
+                else if (curationResult.Outcome == SkillCurationOutcome.Failed)
+                    AnsiConsole.MarkupLine(
+                        $"[dim yellow]Skill curation failed:[/] {Markup.Escape(curationResult.FailureReason ?? "unknown error")}");
             }
             catch (Exception ex)
             {

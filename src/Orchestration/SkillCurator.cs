@@ -1,4 +1,6 @@
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -6,6 +8,34 @@ using fuseraft.Core;
 using fuseraft.Core.Models;
 
 namespace fuseraft.Orchestration;
+
+/// <summary>Outcome of a single skill curation attempt.</summary>
+public enum SkillCurationOutcome
+{
+    /// <summary>A new SKILL.md was written.</summary>
+    Created,
+    /// <summary>An existing SKILL.md was updated in place.</summary>
+    Updated,
+    /// <summary>Curation was skipped because the session had too few turns.</summary>
+    Skipped,
+    /// <summary>The LLM reviewed the session and determined no portable skill is warranted.</summary>
+    NoSkill,
+    /// <summary>Curation failed due to an LLM error, write error, or malformed response.</summary>
+    Failed,
+}
+
+/// <summary>Full result of a skill curation attempt.</summary>
+public sealed record SkillCurationResult(
+    SkillCurationOutcome Outcome,
+    string?              Slug          = null,
+    string?              Path          = null,
+    string?              FailureReason = null,
+    int                  TurnsDigested = 0,
+    string?              Model         = null)
+{
+    /// <summary>True when a skill file was written (Created or Updated).</summary>
+    public bool WroteSkill => Outcome is SkillCurationOutcome.Created or SkillCurationOutcome.Updated;
+}
 
 /// <summary>
 /// Post-session curator that reviews a completed session and writes reusable procedural
@@ -21,6 +51,12 @@ namespace fuseraft.Orchestration;
 /// Skills are written to <c>{LibraryPath}/{slug}/SKILL.md</c>. Existing skills with the
 /// same slug are updated in place; the curator never deletes.
 /// </para>
+///
+/// <para>
+/// Every attempt — success, skip, or failure — is appended to the curation log at
+/// <c>LogPath</c> (default <c>~/.fuseraft/skill-curation.jsonl</c>). This provides a
+/// persistent record for measuring curation quality over time.
+/// </para>
 /// </summary>
 public sealed class SkillCurator(
     IChatClient chatClient,
@@ -34,50 +70,157 @@ public sealed class SkillCurator(
     private static readonly Regex NameFrontmatter =
         new(@"^name:\s*(.+)$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
 
+    private static readonly JsonSerializerOptions LogJsonOpts = new()
+    {
+        PropertyNamingPolicy   = JsonNamingPolicy.SnakeCaseLower,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
     /// <summary>
     /// Evaluates the session and writes a SKILL.md to the library when one is warranted.
-    /// Returns <c>(true, slug, path)</c> when a skill was written; <c>(false, null, null)</c> otherwise.
     /// Never throws — curation is best-effort and must not fail the run.
     /// </summary>
-    public async Task<(bool Created, string? Slug, string? Path)> RunAsync(
+    /// <param name="checkpoint">Session checkpoint (provides task description and session ID).</param>
+    /// <param name="messages">All messages from the session.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <param name="source">
+    /// Label for the curation log (e.g. <c>"run"</c> or <c>"repl"</c>)
+    /// to distinguish which command surface triggered curation.
+    /// </param>
+    public async Task<SkillCurationResult> RunAsync(
         SessionCheckpoint checkpoint,
         IReadOnlyList<AgentMessage> messages,
-        CancellationToken ct)
+        CancellationToken ct,
+        string source = "run")
     {
+        var modelId = chatClient.GetService<ChatClientMetadata>()?.DefaultModelId;
+
         var assistantTurns = messages.Count(m => m.Role == "assistant");
         if (assistantTurns < config.MinTurns)
         {
-            logger.LogDebug(
-                "Skill curation skipped — {Turns} assistant turns (min {Min}).",
-                assistantTurns, config.MinTurns);
-            return (false, null, null);
+            var reason = $"Only {assistantTurns} assistant turn{(assistantTurns == 1 ? "" : "s")} (min {config.MinTurns}).";
+            logger.LogDebug("Skill curation skipped — {Reason}", reason);
+            var skipped = new SkillCurationResult(
+                SkillCurationOutcome.Skipped, FailureReason: reason, Model: modelId);
+            await AppendCurationLogAsync(checkpoint.SessionId, skipped, source, ct);
+            return skipped;
         }
+
+        var digestTurns = Math.Min(assistantTurns, config.DigestTurns);
+        logger.LogDebug(
+            "Skill curation starting — session={Session} turns={Turns} digest={Digest} model={Model}",
+            checkpoint.SessionId, assistantTurns, digestTurns, modelId);
 
         var digest   = await BuildDigestAsync(checkpoint, messages, ct);
         var response = await EvaluateAsync(digest, ct);
 
         if (string.IsNullOrWhiteSpace(response))
-            return (false, null, null);
+        {
+            const string emptyReason = "LLM returned an empty response.";
+            logger.LogWarning(
+                "Skill curation failed — session={Session} reason={Reason}",
+                checkpoint.SessionId, emptyReason);
+            var failed = new SkillCurationResult(
+                SkillCurationOutcome.Failed,
+                FailureReason: emptyReason,
+                TurnsDigested: digestTurns,
+                Model: modelId);
+            await AppendCurationLogAsync(checkpoint.SessionId, failed, source, ct);
+            return failed;
+        }
+
+        logger.LogDebug(
+            "Skill curation LLM response — session={Session} length={Length} preview={Preview}",
+            checkpoint.SessionId,
+            response.Length,
+            response.Length > 120 ? response[..120] + "…" : response);
+
+        // Intentional "no skill" signal from the model.
+        if (response.Contains("NO_SKILL", StringComparison.OrdinalIgnoreCase) && !SkillBlock.IsMatch(response))
+        {
+            logger.LogInformation(
+                "Skill curation: no portable skill identified — session={Session} turns={Turns}",
+                checkpoint.SessionId, digestTurns);
+            var noSkill = new SkillCurationResult(
+                SkillCurationOutcome.NoSkill,
+                TurnsDigested: digestTurns,
+                Model: modelId);
+            await AppendCurationLogAsync(checkpoint.SessionId, noSkill, source, ct);
+            return noSkill;
+        }
 
         var match = SkillBlock.Match(response);
         if (!match.Success)
-            return (false, null, null);
+        {
+            var badFormatReason = "LLM response contained neither a <SKILL> block nor NO_SKILL.";
+            logger.LogWarning(
+                "Skill curation failed — session={Session} reason={Reason} response={Response}",
+                checkpoint.SessionId, badFormatReason,
+                response.Length > 300 ? response[..300] + "…" : response);
+            var failed = new SkillCurationResult(
+                SkillCurationOutcome.Failed,
+                FailureReason: badFormatReason,
+                TurnsDigested: digestTurns,
+                Model: modelId);
+            await AppendCurationLogAsync(checkpoint.SessionId, failed, source, ct);
+            return failed;
+        }
 
         var skillContent = match.Groups[1].Value.Trim();
         var nameMatch    = NameFrontmatter.Match(skillContent);
         if (!nameMatch.Success)
         {
-            logger.LogWarning("Skill curation: response missing 'name' in frontmatter — skipping.");
-            return (false, null, null);
+            const string noNameReason = "SKILL block is missing the 'name:' frontmatter field.";
+            logger.LogWarning(
+                "Skill curation failed — session={Session} reason={Reason}",
+                checkpoint.SessionId, noNameReason);
+            var failed = new SkillCurationResult(
+                SkillCurationOutcome.Failed,
+                FailureReason: noNameReason,
+                TurnsDigested: digestTurns,
+                Model: modelId);
+            await AppendCurationLogAsync(checkpoint.SessionId, failed, source, ct);
+            return failed;
         }
 
         var name = nameMatch.Groups[1].Value.Trim().Trim('"').Trim('\'');
         var slug = ToSlug(name);
-        var path = await WriteSkillAsync(slug, skillContent, ct);
-        return (true, slug, path);
+
+        try
+        {
+            var (skillPath, isUpdate) = await WriteSkillAsync(slug, skillContent, ct);
+            var outcome = isUpdate ? SkillCurationOutcome.Updated : SkillCurationOutcome.Created;
+
+            logger.LogInformation(
+                "Skill {Verb} — session={Session} slug={Slug} path={Path} turns={Turns}",
+                isUpdate ? "updated" : "created",
+                checkpoint.SessionId, slug, skillPath, digestTurns);
+
+            var result = new SkillCurationResult(outcome, slug, skillPath,
+                TurnsDigested: digestTurns, Model: modelId);
+            await AppendCurationLogAsync(checkpoint.SessionId, result, source, ct);
+            return result;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var writeReason = $"Write failed: {ex.Message}";
+            logger.LogError(ex,
+                "Skill curation write failed — session={Session} slug={Slug}",
+                checkpoint.SessionId, slug);
+            var failed = new SkillCurationResult(
+                SkillCurationOutcome.Failed,
+                Slug: slug,
+                FailureReason: writeReason,
+                TurnsDigested: digestTurns,
+                Model: modelId);
+            await AppendCurationLogAsync(checkpoint.SessionId, failed, source, ct);
+            return failed;
+        }
     }
 
+    // -------------------------------------------------------------------------
     // Internals
+    // -------------------------------------------------------------------------
 
     private async Task<string> BuildDigestAsync(
         SessionCheckpoint checkpoint,
@@ -192,7 +335,12 @@ public sealed class SkillCurator(
         }
     }
 
-    private async Task<string> WriteSkillAsync(string slug, string content, CancellationToken ct)
+    /// <summary>
+    /// Writes the SKILL.md and returns <c>(path, isUpdate)</c>.
+    /// Throws on I/O failure so the caller can record it in the curation log.
+    /// </summary>
+    private async Task<(string Path, bool IsUpdate)> WriteSkillAsync(
+        string slug, string content, CancellationToken ct)
     {
         var libraryPath = string.IsNullOrWhiteSpace(config.LibraryPath)
             ? FuseraftPaths.GlobalSkills
@@ -206,10 +354,6 @@ public sealed class SkillCurator(
         var isUpdate = File.Exists(skillPath);
         await File.WriteAllTextAsync(skillPath, content, ct);
 
-        logger.LogInformation(
-            "Skill {Verb}: {Slug} → {Path}",
-            isUpdate ? "updated" : "created", slug, skillPath);
-
         // Update the FTS5 index so future sessions can discover this skill by task description.
         try
         {
@@ -221,12 +365,62 @@ public sealed class SkillCurator(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Skill index update failed for '{Slug}' — skill was still written.", slug);
+            logger.LogWarning(ex,
+                "Skill index update failed for '{Slug}' — skill was still written.", slug);
         }
 
-        return skillPath;
+        return (skillPath, isUpdate);
+    }
+
+    /// <summary>
+    /// Appends one JSON line to the curation log. Best-effort — never throws.
+    /// </summary>
+    private async Task AppendCurationLogAsync(
+        string sessionId,
+        SkillCurationResult result,
+        string source,
+        CancellationToken ct)
+    {
+        try
+        {
+            var logPath = string.IsNullOrWhiteSpace(config.LogPath)
+                ? FuseraftPaths.GlobalSkillCurationLog
+                : config.LogPath;
+
+            var entry = new CurationLogEntry(
+                Ts:            DateTimeOffset.UtcNow.ToString("O"),
+                Session:       sessionId,
+                Source:        source,
+                Outcome:       result.Outcome.ToString().ToLowerInvariant(),
+                Slug:          result.Slug,
+                Path:          result.Path,
+                TurnsDigested: result.TurnsDigested > 0 ? result.TurnsDigested : null,
+                Model:         result.Model,
+                FailureReason: result.FailureReason);
+
+            var line = JsonSerializer.Serialize(entry, LogJsonOpts) + "\n";
+
+            var dir = Path.GetDirectoryName(logPath);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            await File.AppendAllTextAsync(logPath, line, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Could not append to curation log — non-fatal.");
+        }
     }
 
     private static string ToSlug(string name) =>
         Regex.Replace(name.ToLowerInvariant().Trim(), @"[^a-z0-9]+", "-").Trim('-');
+
+    private sealed record CurationLogEntry(
+        string  Ts,
+        string  Session,
+        string  Source,
+        string  Outcome,
+        string? Slug,
+        string? Path,
+        int?    TurnsDigested,
+        string? Model,
+        string? FailureReason);
 }
