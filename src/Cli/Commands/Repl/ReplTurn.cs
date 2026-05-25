@@ -18,6 +18,35 @@ internal static class ReplTurn
     internal const int ContextTokenBudget = 80_000;
     internal const int StepIterationLimit = 5;
 
+    // Maximum times a transient streaming error (ResponseEnded, IOException, TimeoutException)
+    // is retried automatically before surfacing the failure to the user.
+    private const int MaxStreamRetries = 2;
+
+    /// <summary>
+    /// Returns <c>true</c> when <paramref name="ex"/> (or any inner exception) looks like a
+    /// transient mid-stream disconnection that is worth retrying automatically — e.g. the
+    /// server closed the SSE connection before the response was complete, a network hiccup
+    /// reset the TCP connection, or the per-stream idle timeout fired.
+    /// Auth errors, context-overflow errors, and user cancellations are <b>not</b> transient
+    /// and must not be retried here.
+    /// </summary>
+    private static bool IsTransientStreamError(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (e is OperationCanceledException) return false; // user-initiated — never retry
+            var msg = e.Message;
+            if (msg.Contains("ResponseEnded",        StringComparison.OrdinalIgnoreCase) ||
+                msg.Contains("response ended",       StringComparison.OrdinalIgnoreCase) ||
+                msg.Contains("stream was closed",    StringComparison.OrdinalIgnoreCase) ||
+                msg.Contains("connection was reset", StringComparison.OrdinalIgnoreCase) ||
+                msg.Contains("forcibly closed",      StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (e is IOException or TimeoutException) return true;
+        }
+        return false;
+    }
+
     // -------------------------------------------------------------------------
     // REPL loop
     // -------------------------------------------------------------------------
@@ -210,12 +239,13 @@ internal static class ReplTurn
         var inToolBatch       = false;
         var textStarted       = false;
 
+        var turnStart = DateTime.UtcNow;
         var reqCts    = new CancellationTokenSource();
         ctx.ActiveCts = reqCts;
         var spinCts   = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
         var spinTask  = ctx.JsonMode
             ? Task.CompletedTask
-            : RunSpinnerAsync(capturePlan ? "planning…" : "thinking…", spinCts.Token);
+            : RunSpinnerAsync(capturePlan ? "planning…" : "thinking…", spinCts.Token, turnStart);
         var spinning  = !ctx.JsonMode;
 
         // Cancels and awaits the spinner; caller disposes spinCts.
@@ -228,7 +258,10 @@ internal static class ReplTurn
             ClearSpinnerLine();
         }
 
-        var activeClient = isStepRequest ? ctx.StepClient : ctx.Client;
+        var activeClient  = isStepRequest ? ctx.StepClient : ctx.Client;
+        var streamAttempt = 0;
+        while (true) // retry loop for transient streaming errors
+        {
         try
         {
             await foreach (var chunk in activeClient.GetStreamingResponseAsync(
@@ -255,7 +288,7 @@ internal static class ReplTurn
                         await spinTask;
                         spinCts.Dispose();
                         spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
-                        spinTask = RunSpinnerAsync($"conjuring…  {chain}", spinCts.Token);
+                        spinTask = RunSpinnerAsync($"conjuring…  {chain}", spinCts.Token, turnStart);
                         spinning = true;
                     }
                     continue;
@@ -290,11 +323,12 @@ internal static class ReplTurn
                         if (!Console.IsOutputRedirected)
                         {
                             var approxTokens = (sb.Length + 3) / 4;
-                            Console.Write($"\r\x1b[2m receiving… {approxTokens} tokens\x1b[0m  ");
+                            Console.Write($"\r\x1b[2K\x1b[2m receiving… {approxTokens} tokens\x1b[0m");
                         }
                     }
                 }
             }
+            break; // streaming succeeded — exit retry loop
         }
         catch (OperationCanceledException)
         {
@@ -312,10 +346,56 @@ internal static class ReplTurn
             ctx.ActiveCts = null;
             return false;
         }
+        catch (Exception ex) when (IsTransientStreamError(ex) && streamAttempt < MaxStreamRetries)
+        {
+            // Transient stream disconnection — retry automatically with back-off.
+            streamAttempt++;
+            await StopSpinnerAsync();
+            spinCts.Dispose();
+
+            await ctx.Emitter.EmitAsync("repl_error", turn: ctx.TurnIndex, payload: new
+            {
+                exception_type = ex.GetType().Name,
+                message        = ex.Message,
+                attempt        = streamAttempt,
+                final          = false,
+            });
+
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new { type = "retrying", attempt = streamAttempt, max = MaxStreamRetries });
+            else
+                AnsiConsole.MarkupLine(
+                    $"[dim]  ↺ {Markup.Escape(ex.Message)} — retrying ({streamAttempt}/{MaxStreamRetries})…[/]");
+
+            // Exponential back-off: 2 s, 4 s. Not wired to the cancellation token so the
+            // short sleep is never interrupted — max wasted time is 6 s total.
+            await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, streamAttempt)));
+
+            // Reset per-attempt accumulators before reissuing the request.
+            sb.Clear(); toolCallsThisTurn.Clear();
+            toolRounds = 0; inToolBatch = false; textStarted = false;
+
+            // Restart spinner for the fresh attempt.
+            spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
+            spinTask = ctx.JsonMode
+                ? Task.CompletedTask
+                : RunSpinnerAsync(capturePlan ? "planning…" : "thinking…", spinCts.Token, turnStart);
+            spinning = !ctx.JsonMode;
+            // continue while-loop → reissue GetStreamingResponseAsync
+        }
         catch (Exception ex)
         {
             await StopSpinnerAsync();
             spinCts.Dispose();
+
+            await ctx.Emitter.EmitAsync("repl_error", turn: ctx.TurnIndex, payload: new
+            {
+                exception_type = ex.GetType().Name,
+                message        = ex.Message,
+                attempt        = streamAttempt + 1,
+                final          = true,
+            });
+
             if (ctx.JsonMode)
                 ReplJsonBridge.Emit(new { type = "error", text = ex.Message });
             else
@@ -327,6 +407,7 @@ internal static class ReplTurn
             ctx.ActiveCts = null;
             return false;
         }
+        } // end while (retry loop)
 
         reqCts.Dispose();
         ctx.ActiveCts = null;
@@ -706,14 +787,34 @@ internal static class ReplTurn
         }
     }
 
-    internal static async Task RunSpinnerAsync(string label, CancellationToken ct)
+    internal static async Task RunSpinnerAsync(string label, CancellationToken ct, DateTime? startedAt = null)
     {
         var i = 0;
         try
         {
             while (!ct.IsCancellationRequested)
             {
-                Console.Write($"\r\x1b[2m{SpinnerFrames[i % SpinnerFrames.Length]} {label}\x1b[0m  ");
+                var elapsed = startedAt.HasValue
+                    ? $" ({(int)(DateTime.UtcNow - startedAt.Value).TotalSeconds}s)"
+                    : string.Empty;
+                var frame = SpinnerFrames[i % SpinnerFrames.Length];
+                var text  = $"{frame} {label}{elapsed}";
+
+                // Clamp to one terminal line so the text never wraps. When a line wraps,
+                // the subsequent \r\x1b[2K only clears the continuation line and leaves
+                // the first visual line as a ghost — producing the multi-line cascade.
+                // Guard against Console.WindowWidth failing on non-interactive consoles.
+                if (!Console.IsOutputRedirected)
+                {
+                    var width = 0;
+                    try { width = Console.WindowWidth; } catch { }
+                    if (width > 4 && text.Length > width - 1)
+                        text = text[..(width - 2)] + "…";
+                }
+
+                // \r   — move to column 0
+                // \x1b[2K — erase entire line (prevents leftover chars when label shrinks)
+                Console.Write($"\r\x1b[2K\x1b[2m{text}\x1b[0m");
                 i++;
                 await Task.Delay(80, ct);
             }
