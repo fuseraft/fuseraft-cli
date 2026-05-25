@@ -264,7 +264,7 @@ app.Configure(cfg =>
 
         branch.AddCommand<SkillsAddCommand>("add")
             .WithDescription("Copy a skill into ~/.fuseraft/skills and add it to the search index.")
-            .WithExample(["skills", "add", "../skills/productivity/handoff"])
+            .WithExample(["skills", "add", "../skills/sandbox-test"])
             .WithExample(["skills", "add", "~/my-skills/triage"]);
 
         branch.AddCommand<SkillsListCommand>("list")
@@ -273,7 +273,7 @@ app.Configure(cfg =>
 
         branch.AddCommand<SkillsRemoveCommand>("remove")
             .WithDescription("Remove a global skill and drop it from the search index.")
-            .WithExample(["skills", "remove", "handoff"]);
+            .WithExample(["skills", "remove", "triage"]);
     });
 
     cfg.AddCommand<UpdateCommand>("update")
