@@ -141,27 +141,20 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         // Reconcile config path: an existing checkpoint always knows its own config.
         configPath = checkpoint?.ConfigPath ?? configPath;
 
-        OrchestrationConfig config;
-        IOrchestrator orchestrator;
-        McpSessionManager mcpManager;
-        ConversationCompactor? compactor;
-        ChangeTracker? changeTracker;
-        EventEmitter? eventEmitter;
-        AgentGovernance.GovernanceKernel governanceKernel;
-        SkillCurator? skillCurator;
-
         var approvalService = new ConsoleHumanApprovalService();
 
+        OrchestratorBuildResult built;
         try
         {
-            (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator) =
-                await OrchestratorBuilder.BuildAsync(configPath, loggerFactory, pluginRegistry, approvalService, settings.HumanInTheLoop);
+            built = await OrchestratorBuilder.BuildAsync(configPath, loggerFactory, pluginRegistry, approvalService, settings.HumanInTheLoop);
         }
         catch (Exception ex)
         {
             AnsiConsole.MarkupLine($"[red]✗ Config error:[/] {Markup.Escape(ex.Message)}");
             return 1;
         }
+
+        var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator) = built;
 
         await using var _mcp = mcpManager;
         using var _governance = governanceKernel;
