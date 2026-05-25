@@ -765,11 +765,26 @@ The substitution tokens are:
 
 Automatically authors a reusable `SKILL.md` from each completed session. When enabled, fuseraft makes one LLM call after the session ends to evaluate whether the session produced learnable, portable knowledge, and writes a skill to the configured library path if it did.
 
+Curation is available in both `fuseraft run` sessions (configured in the orchestration YAML) and interactive REPL sessions (configured in `~/.fuseraft/config`).
+
+**`fuseraft run` (YAML):**
+
 ```yaml
 SkillCuration:
   Enabled: true
   LibraryPath: ~/.fuseraft/skills    # default
   IndexTopN: 5
+```
+
+**REPL (`~/.fuseraft/config`):**
+
+```json
+{
+  "modelId": "claude-sonnet-4-5",
+  "skillCuration": {
+    "enabled": true
+  }
+}
 ```
 
 | Field | Type | Default | Description |
@@ -792,7 +807,7 @@ SkillCuration:
 
 Curation is best-effort: any failure (LLM error, write failure, index error) is logged and swallowed without affecting the session result.
 
-**Skill injection at session start**
+**Skill injection at session start (`fuseraft run` only)**
 
 When `IndexTopN > 0` and the index contains skills, fuseraft searches for skills relevant to the current task before the first agent turn. Matching skill bodies are injected as a system context message:
 
@@ -803,7 +818,7 @@ When `IndexTopN > 0` and the index contains skills, fuseraft searches for skills
 …SKILL.md body…
 ```
 
-This makes accumulated cross-session knowledge available to agents without requiring them to call any skill tools themselves.
+This makes accumulated cross-session knowledge available to agents without requiring them to call any skill tools themselves. Injection is not available in REPL sessions because there is no upfront task description to query against.
 
 See [Skills](skills.md) for the full `SKILL.md` format reference and the skill index details.
 
