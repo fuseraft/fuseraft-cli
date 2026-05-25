@@ -36,6 +36,22 @@ internal sealed class ReplLineReader
 
         void Redraw()
         {
+            // Re-derive startTop from the current cursor position before every
+            // render. After each MoveTo(cursorPos) the cursor sits exactly
+            // (startLeft + cursorPos) / width rows below startTop, so we can
+            // recover startTop without carrying stale state across iterations.
+            // This self-corrects any drift that accumulated from line-wrap edge
+            // cases or prior scroll-detection imprecision.
+            if (!Console.IsOutputRedirected)
+            {
+                try
+                {
+                    var w = Math.Max(Console.WindowWidth, 1);
+                    startTop = Math.Max(0, Console.CursorTop - (startLeft + cursorPos) / w);
+                }
+                catch { }
+            }
+
             try { Console.SetCursorPosition(startLeft, startTop); } catch { }
             var content = buffer.ToString();
             var pad     = Math.Max(0, longestWritten - content.Length);
@@ -43,24 +59,23 @@ internal sealed class ReplLineReader
             if (pad > 0) Console.Write(new string(' ', pad));
             longestWritten = Math.Max(longestWritten, content.Length);
 
-            // After writing, detect whether the terminal scrolled. If the
-            // content (or padding) pushed the cursor past the last row the
-            // terminal scrolls up and startTop becomes stale — the next
-            // SetCursorPosition call lands in the middle of the wrapped
-            // content instead of at the beginning, causing the buffer to be
-            // written again from that mid-line position (the duplication bug).
+            // After writing, detect and absorb any terminal scroll. Writing
+            // near the bottom of the viewport causes the terminal to scroll up,
+            // shifting startTop. Detect this by comparing where the cursor
+            // *should* be (last written char) with where it actually landed.
             //
-            // Fix: compute where the cursor *should* be based on the number of
-            // characters written. If Console.CursorTop is less than that, the
-            // difference is how many rows were scrolled away; subtract that
-            // from startTop so the next Redraw anchors correctly.
-            if (!Console.IsOutputRedirected)
+            // Use longestWritten-1 (index of the last written char) not
+            // longestWritten (index after it): terminals enter "pending-wrap"
+            // state when the cursor reaches the last column, so CursorTop stays
+            // on the current row. Using longestWritten would falsely predict
+            // row+1 whenever input exactly fills a line width, fire a phantom
+            // scroll-of-1, and wrongly decrement startTop.
+            if (!Console.IsOutputRedirected && longestWritten > 0)
             {
                 try
                 {
                     var width = Math.Max(Console.WindowWidth, 1);
-                    // longestWritten == total chars on screen (content + any pad).
-                    var expectedEndRow = startTop + (startLeft + longestWritten) / width;
+                    var expectedEndRow = startTop + (startLeft + longestWritten - 1) / width;
                     var scrolled = expectedEndRow - Console.CursorTop;
                     if (scrolled > 0) startTop = Math.Max(0, startTop - scrolled);
                 }
