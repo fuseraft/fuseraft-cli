@@ -81,11 +81,11 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Restore
-        run: dotnet restore src/FuseraftCli.csproj --verbosity quiet
+        run: dotnet restore src/fuseraft.csproj --verbosity quiet
 
       - name: Publish self-contained binary
         run: |
-          dotnet publish src/FuseraftCli.csproj \
+          dotnet publish src/fuseraft.csproj \
             --configuration Release \
             --runtime ${{ matrix.rid }} \
             --self-contained true \
