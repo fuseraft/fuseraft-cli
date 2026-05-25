@@ -14,6 +14,12 @@
     <NoWarn>$(NoWarn);MAAI001</NoWarn>
   </PropertyGroup>
 
+  <!-- When publishing as a single-file binary, embed native libraries (e.g. e_sqlite3.so)
+       so they are self-extracted at startup rather than required as sibling files. -->
+  <PropertyGroup Condition="'$(PublishSingleFile)' == 'true'">
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+
   <ItemGroup>
     <Compile Remove="FuseraftUpdate/**" />
   </ItemGroup>
@@ -56,6 +62,9 @@
 
     <!-- SQLite — skill index FTS5 -->
     <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
+    <!-- Bundle the native e_sqlite3 library inside the single-file executable so
+         it can be self-extracted at startup without a sibling .so file on disk. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.10" />
   </ItemGroup>
 
   <ItemGroup>
