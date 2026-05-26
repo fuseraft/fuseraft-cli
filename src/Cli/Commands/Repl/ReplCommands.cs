@@ -38,6 +38,7 @@ internal static class ReplCommands
             case "/explore":    return await CmdExploreAsync(ctx, arg, cancellationToken);
             case "/locate":     return await CmdLocateAsync(ctx, arg, cancellationToken);
             case "/sessions":   await CmdSessionsAsync(ctx.JsonMode, cancellationToken); return CommandResult.Continue;
+            case "/fork":       return await CmdForkAsync(ctx, arg, cancellationToken);
             default:
                 AnsiConsole.MarkupLine(
                     $"[yellow]Unknown command:[/] {Markup.Escape(command)}  [dim](type /help for commands)[/]");
@@ -1072,6 +1073,109 @@ internal static class ReplCommands
         return CommandResult.Continue;
     }
 
+    private static async Task<CommandResult> CmdForkAsync(
+        ReplSessionContext ctx, string arg, CancellationToken cancellationToken)
+    {
+        var doSwitch = arg.Equals("switch", StringComparison.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrEmpty(arg) && !doSwitch)
+        {
+            AnsiConsole.MarkupLine($"[yellow]Unknown /fork argument:[/] {Markup.Escape(arg)}");
+            AnsiConsole.MarkupLine("[dim]Usage: /fork         — snapshot current session to a new ID[/]");
+            AnsiConsole.MarkupLine("[dim]       /fork switch  — fork and immediately become the fork[/]");
+            return CommandResult.Continue;
+        }
+
+        // Generate a fresh session ID for the fork.
+        var bytes = new byte[6];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(bytes);
+        var forkId = Convert.ToHexString(bytes).ToLowerInvariant();
+
+        // Snapshot current execution queue / halted state.
+        var execQueue = ctx.ExecutionQueue.Count > 0
+            ? [.. ctx.ExecutionQueue.Select(e => new PlanStepEntry(e.Step, e.Total))]
+            : (PlanStepEntry[]?)null;
+
+        var haltedAt = ctx.HaltedAt.HasValue
+            ? new PlanStepEntry(ctx.HaltedAt.Value.Step, ctx.HaltedAt.Value.Total)
+            : (PlanStepEntry?)null;
+
+        var haltedRemaining = ctx.HaltedRemaining.Count > 0
+            ? [.. ctx.HaltedRemaining.Select(e => new PlanStepEntry(e.Step, e.Total))]
+            : (PlanStepEntry[]?)null;
+
+        var snapshot = ReplSessionSnapshot.Capture(
+            sessionId:       forkId,
+            modelId:         ctx.ModelId,
+            cwd:             ctx.Cwd,
+            turnIndex:       ctx.TurnIndex,
+            history:         ctx.History,
+            startedAt:       DateTime.UtcNow,
+            currentPlan:     ctx.CurrentPlan,
+            executionQueue:  execQueue,
+            haltedAt:        haltedAt,
+            haltedRemaining: haltedRemaining,
+            haltedToolCalls: ctx.HaltedToolCalls.Count > 0 ? [.. ctx.HaltedToolCalls] : null,
+            recoveryHint:    ctx.RecoveryHint);
+
+        try
+        {
+            await ReplSessionSnapshot.SaveAsync(snapshot, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]✗ Fork failed:[/] {Markup.Escape(ex.Message)}");
+            return CommandResult.Continue;
+        }
+
+        if (doSwitch)
+        {
+            // The original session is already checkpointed on disk from the last turn's
+            // auto-save.  Switch the live session to the fork by updating the mutable IDs.
+            var prevId        = ctx.SessionId;
+            ctx.SessionId     = forkId;
+            ctx.StartedAt     = DateTime.UtcNow;
+            ctx.Emitter.SetSessionId(forkId);
+
+            if (ctx.JsonMode)
+            {
+                Console.WriteLine(
+                    $"## Switched to Fork\n\n" +
+                    $"Previous session: **`{prevId}`** (saved)\n\n" +
+                    $"Now running as: **`{forkId}`**");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[dim]Switched to fork:[/] [bold cyan]{Markup.Escape(forkId)}[/]  [dim](was {Markup.Escape(prevId)})[/]");
+            }
+
+            await ctx.Emitter.EmitAsync("command", payload: new
+                { command = "/fork switch", fork_id = forkId, prev_id = prevId, turns = ctx.TurnIndex });
+        }
+        else
+        {
+            if (ctx.JsonMode)
+            {
+                Console.WriteLine(
+                    $"## Session Forked\n\n" +
+                    $"New session ID: **`{forkId}`**\n\n" +
+                    $"Resume with: `fuseraft repl --resume {forkId}`\n\n" +
+                    $"Or use `/fork switch` to branch and continue as the fork immediately.");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[dim]Forked to:[/] [bold cyan]{Markup.Escape(forkId)}[/]  [dim]({ctx.TurnIndex} turn{(ctx.TurnIndex == 1 ? "" : "s")} copied)[/]");
+                AnsiConsole.MarkupLine($"[dim]Resume with:[/] [bold]fuseraft repl --resume {Markup.Escape(forkId)}[/]");
+                AnsiConsole.MarkupLine($"[dim]Or:[/] [bold]/fork switch[/] [dim]to branch and continue as the fork right now.[/]");
+            }
+
+            await ctx.Emitter.EmitAsync("command", payload: new
+                { command = "/fork", fork_id = forkId, turns = ctx.TurnIndex });
+        }
+
+        return CommandResult.Continue;
+    }
+
     private static async Task CmdSessionsAsync(bool jsonMode, CancellationToken cancellationToken)
     {
         var sessions = await ReplSessionSnapshot.ListAsync(cancellationToken);
@@ -1133,6 +1237,8 @@ internal static class ReplCommands
             Console.WriteLine("### Session");
             Console.WriteLine("- `/help` — Show this help");
             Console.WriteLine("- `/sessions` — List resumable sessions with IDs and turn counts");
+            Console.WriteLine("- `/fork` — Snapshot the current session to a new ID so you can branch from this point");
+            Console.WriteLine("- `/fork switch` — Fork and immediately become the fork (continue under the new ID)");
             Console.WriteLine("- `/clear` — Clear conversation history (keeps system prompt)");
             Console.WriteLine("- `/history` — Show condensed conversation history");
             Console.WriteLine("- `/assist` — Diagnose the conversation and inject a corrective message");
@@ -1187,6 +1293,8 @@ internal static class ReplCommands
         AnsiConsole.MarkupLine("  [dim]Session[/]");
         AnsiConsole.MarkupLine("  [bold cyan]/help[/]                     Show this help");
         AnsiConsole.MarkupLine("  [bold cyan]/sessions[/]                 List resumable sessions with IDs and turn counts");
+        AnsiConsole.MarkupLine("  [bold cyan]/fork[/]                     Snapshot the current session to a new ID (branch from this point)");
+        AnsiConsole.MarkupLine("  [bold cyan]/fork switch[/]              Fork and immediately become the fork (continue under the new ID)");
         AnsiConsole.MarkupLine("  [bold cyan]/clear[/]                    Clear conversation history (keeps system prompt)");
         AnsiConsole.MarkupLine("  [bold cyan]/history[/]                  Show condensed conversation history");
         AnsiConsole.MarkupLine("  [bold cyan]/assist[/]                   Diagnose the conversation and inject a corrective message");

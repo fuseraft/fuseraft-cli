@@ -29,7 +29,7 @@ internal sealed class ReplSessionContext
 {
     // Immutable deps
     public readonly string              Cwd;
-    public readonly string              SessionId;
+    public string                       SessionId  { get; set; }
     public readonly string              EventsPath;
     public readonly EventEmitter        Emitter;
     public readonly MemoryStore         MemoryStore;
@@ -91,7 +91,7 @@ internal sealed class ReplSessionContext
     public int              PrevTurnTokenEstimate;
 
     // Session lifecycle
-    public readonly DateTime StartedAt;
+    public DateTime StartedAt { get; set; }
     public int  TurnIndex              = 0;
     public int  LastExtractedTurnIndex = -1;
     public bool PendingSave;
