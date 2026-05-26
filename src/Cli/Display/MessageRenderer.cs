@@ -1,3 +1,4 @@
+using System.Reflection;
 using Spectre.Console;
 using Spectre.Console.Rendering;
 using fuseraft.Core.Models;
@@ -30,6 +31,62 @@ public static class MessageRenderer
         AnsiConsole.WriteLine();
         AnsiConsole.Write(fig);
         AnsiConsole.MarkupLine("[dim]Multi-Agent Orchestration · Powered by Microsoft Agent Framework[/]");
+        AnsiConsole.WriteLine();
+    }
+
+    /// <summary>
+    /// Renders the modernized REPL start-up panel in place of the old Figlet banner +
+    /// model rule + info line.
+    /// </summary>
+    public static void RenderReplHeader(
+        string modelId,
+        string cwd,
+        IEnumerable<string> pluginNames,
+        string sessionId,
+        int memoryCount,
+        int skillCount,
+        string? eventsPath = null)
+    {
+        var ver = typeof(MessageRenderer).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion ?? "1.0.0";
+        // Strip git hash suffix: "1.0.0+abc1234…" → "1.0.0"
+        var semver = ver.Contains('+') ? ver[..ver.IndexOf('+')] : ver;
+
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var displayPath = cwd.StartsWith(home, StringComparison.Ordinal)
+            ? "~" + cwd[home.Length..]
+            : cwd;
+
+        var pluginList = string.Join(", ", pluginNames);
+
+        // Labels are right-padded so values align at column 10.
+        var content = new Markup(
+            $"[bold]fuseraft[/] [dim]- multi-agent orchestration framework (v{Markup.Escape(semver)})[/]\n" +
+            $"\n" +
+            $"[dim]Model:[/]    {Markup.Escape(modelId)}\n" +
+            $"[dim]Path:[/]     {Markup.Escape(displayPath)}\n" +
+            $"[dim]Plugins:[/]  {Markup.Escape(pluginList)}\n" +
+            $"[dim]Session:[/]  {Markup.Escape(sessionId)}\n" +
+            $"\n" +
+            $"[dim]Memories: {memoryCount}, Skills: {skillCount}[/]"
+        );
+
+        var panel = new Panel(content)
+        {
+            Border      = BoxBorder.Rounded,
+            BorderStyle = new Style(Color.Grey),
+            Padding     = new Padding(1, 0),
+        };
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.Write(panel);
+        AnsiConsole.WriteLine();
+
+        if (eventsPath is not null)
+            AnsiConsole.MarkupLine($"[dim]  events: {Markup.Escape(eventsPath)}[/]");
+
+        AnsiConsole.MarkupLine(" [dim]Tip: Use /help to see commands.[/]");
         AnsiConsole.WriteLine();
     }
 
