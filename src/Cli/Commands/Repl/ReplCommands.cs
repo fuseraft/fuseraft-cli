@@ -1610,68 +1610,89 @@ internal static class ReplCommands
         AnsiConsole.MarkupLine("[bold]REPL commands[/]");
         AnsiConsole.WriteLine();
 
+        // Two-column grid: command (no-wrap, 2-space indent, 4-space gap) + description (wraps to terminal width).
+        static Grid MakeGrid()
+        {
+            var g = new Grid();
+            g.AddColumn(new GridColumn().NoWrap().Padding(new Padding(2, 0, 4, 0)));
+            g.AddColumn(new GridColumn().Padding(new Padding(0, 0, 0, 0)));
+            return g;
+        }
+
         AnsiConsole.MarkupLine("  [dim]Session[/]");
-        AnsiConsole.MarkupLine("  [bold cyan]/help[/]                     Show this help");
-        AnsiConsole.MarkupLine("  [bold cyan]/sessions[/]                 List resumable sessions with IDs and turn counts");
-        AnsiConsole.MarkupLine("  [bold cyan]/fork[/]                     Snapshot the current session to a new ID (branch from this point)");
-        AnsiConsole.MarkupLine("  [bold cyan]/fork switch[/]              Fork and immediately become the fork (continue under the new ID)");
-        AnsiConsole.MarkupLine("  [bold cyan]/switch <id>[/]              Save the current session and load another saved session in its place");
-        AnsiConsole.MarkupLine("  [bold cyan]/conversation[/]             List all turns with numbers so you can pick a rewind point");
-        AnsiConsole.MarkupLine("  [bold cyan]/rewind <n>[/]               Keep turns 1…n and discard the rest");
-        AnsiConsole.MarkupLine("  [bold cyan]/rewind -<n>[/]              Step back n turns from the current position");
-        AnsiConsole.MarkupLine("  [bold cyan]/clear[/]                    Clear conversation history (keeps system prompt)");
-        AnsiConsole.MarkupLine("  [bold cyan]/history[/]                  Show condensed conversation history");
-        AnsiConsole.MarkupLine("  [bold cyan]/assist[/]                   Diagnose the conversation and inject a corrective message");
-        AnsiConsole.MarkupLine("  [bold cyan]/exit[/]                     Exit the REPL (auto-saves memories)");
+        var session = MakeGrid();
+        session.AddRow("[bold cyan]/help[/]",          "Show this help");
+        session.AddRow("[bold cyan]/sessions[/]",      "List resumable sessions with IDs and turn counts");
+        session.AddRow("[bold cyan]/fork[/]",           "Snapshot the current session to a new ID (branch from this point)");
+        session.AddRow("[bold cyan]/fork switch[/]",    "Fork and immediately become the fork (continue under the new ID)");
+        session.AddRow("[bold cyan]/switch <id>[/]",    "Save the current session and load another saved session in its place");
+        session.AddRow("[bold cyan]/conversation[/]",   "List all turns with numbers so you can pick a rewind point");
+        session.AddRow("[bold cyan]/rewind <n>[/]",     "Keep turns 1…n and discard the rest");
+        session.AddRow("[bold cyan]/rewind -<n>[/]",    "Step back n turns from the current position");
+        session.AddRow("[bold cyan]/clear[/]",          "Clear conversation history (keeps system prompt)");
+        session.AddRow("[bold cyan]/history[/]",        "Show condensed conversation history");
+        session.AddRow("[bold cyan]/assist[/]",         "Diagnose the conversation and inject a corrective message");
+        session.AddRow("[bold cyan]/exit[/]",           "Exit the REPL (auto-saves memories)");
+        AnsiConsole.Write(session);
         AnsiConsole.WriteLine();
 
         AnsiConsole.MarkupLine("  [dim]Planning[/]");
-        AnsiConsole.MarkupLine("  [bold cyan]/plan <task>[/]              Create a structured plan (JSON steps, no tool calls)");
-        AnsiConsole.MarkupLine("  [bold cyan]/plan[/]                     Show the current stored plan");
-        AnsiConsole.MarkupLine("  [bold cyan]/execute[/]                  Run each plan step sequentially with postcondition checks");
-        AnsiConsole.MarkupLine("  [bold cyan]/resume[/]                   Retry the halted step and continue remaining steps");
-        AnsiConsole.MarkupLine("  [bold cyan]/recover[/]                  Inject failure context and retry the halted step with agent awareness");
+        var planning = MakeGrid();
+        planning.AddRow("[bold cyan]/plan <task>[/]", "Create a structured plan (JSON steps, no tool calls)");
+        planning.AddRow("[bold cyan]/plan[/]",         "Show the current stored plan");
+        planning.AddRow("[bold cyan]/execute[/]",      "Run each plan step sequentially with postcondition checks");
+        planning.AddRow("[bold cyan]/resume[/]",       "Retry the halted step and continue remaining steps");
+        planning.AddRow("[bold cyan]/recover[/]",      "Inject failure context and retry the halted step with agent awareness");
+        AnsiConsole.Write(planning);
         AnsiConsole.WriteLine();
 
         AnsiConsole.MarkupLine("  [dim]Tools & modes[/]");
-        AnsiConsole.MarkupLine("  [bold cyan]/tools[/]                    List active tools by category");
-        AnsiConsole.MarkupLine("  [bold cyan]/tools disable <category>[/] Disable a tool category (FileSystem Shell Search Git Http)");
-        AnsiConsole.MarkupLine("  [bold cyan]/tools enable <category>[/]  Re-enable a disabled tool category");
-        AnsiConsole.MarkupLine("  [bold cyan]/safe-mode[/]                Show safe mode status");
-        AnsiConsole.MarkupLine("  [bold cyan]/safe-mode on[/]             Disable Shell, Git, Http tools to prevent mutations");
-        AnsiConsole.MarkupLine("  [bold cyan]/safe-mode off[/]            Restore tool categories");
-        AnsiConsole.MarkupLine("  [bold cyan]/adversarial[/]              Show adversarial mode status");
-        AnsiConsole.MarkupLine("  [bold cyan]/adversarial on[/]           Enable critic agent to review each /execute step");
-        AnsiConsole.MarkupLine("  [bold cyan]/adversarial off[/]          Disable critic agent");
+        var tools = MakeGrid();
+        tools.AddRow("[bold cyan]/tools[/]",                       "List active tools by category");
+        tools.AddRow("[bold cyan]/tools disable <category>[/]",    "Disable a tool category (FileSystem Shell Search Git Http)");
+        tools.AddRow("[bold cyan]/tools enable <category>[/]",     "Re-enable a disabled tool category");
+        tools.AddRow("[bold cyan]/safe-mode[/]",                   "Show safe mode status");
+        tools.AddRow("[bold cyan]/safe-mode on[/]",                "Disable Shell, Git, Http tools to prevent mutations");
+        tools.AddRow("[bold cyan]/safe-mode off[/]",               "Restore tool categories");
+        tools.AddRow("[bold cyan]/adversarial[/]",                 "Show adversarial mode status");
+        tools.AddRow("[bold cyan]/adversarial on[/]",              "Enable critic agent to review each /execute step");
+        tools.AddRow("[bold cyan]/adversarial off[/]",             "Disable critic agent");
+        AnsiConsole.Write(tools);
         AnsiConsole.WriteLine();
 
         AnsiConsole.MarkupLine("  [dim]Context & model[/]");
-        AnsiConsole.MarkupLine("  [bold cyan]/context[/]                  Show estimated context window usage and per-category breakdown");
-        AnsiConsole.MarkupLine("  [bold cyan]/compact[/]                  Summarise conversation into a handoff doc and reset history");
-        AnsiConsole.MarkupLine("  [bold cyan]/compact <focus>[/]          Same, but tailor the summary toward the next session's focus");
-        AnsiConsole.MarkupLine("  [bold cyan]/max-tokens <n>[/]           Set max output tokens for each response");
-        AnsiConsole.MarkupLine("  [bold cyan]/max-tokens reset[/]         Restore provider default max output tokens");
-        AnsiConsole.MarkupLine("  [bold cyan]/system[/]                   Show current system prompt");
-        AnsiConsole.MarkupLine("  [bold cyan]/system <prompt>[/]          Set a new system prompt");
-        AnsiConsole.MarkupLine("  [bold cyan]/provider[/]                 Show current provider, model, and API key");
-        AnsiConsole.MarkupLine("  [bold cyan]/provider setup[/]           Reconfigure provider, model, and API key");
+        var ctx = MakeGrid();
+        ctx.AddRow("[bold cyan]/context[/]",           "Show estimated context window usage and per-category breakdown");
+        ctx.AddRow("[bold cyan]/compact[/]",            "Summarise conversation into a handoff doc and reset history");
+        ctx.AddRow("[bold cyan]/compact <focus>[/]",    "Same, but tailor the summary toward the next session's focus");
+        ctx.AddRow("[bold cyan]/max-tokens <n>[/]",     "Set max output tokens for each response");
+        ctx.AddRow("[bold cyan]/max-tokens reset[/]",   "Restore provider default max output tokens");
+        ctx.AddRow("[bold cyan]/system[/]",             "Show current system prompt");
+        ctx.AddRow("[bold cyan]/system <prompt>[/]",    "Set a new system prompt");
+        ctx.AddRow("[bold cyan]/provider[/]",           "Show current provider, model, and API key");
+        ctx.AddRow("[bold cyan]/provider setup[/]",     "Reconfigure provider, model, and API key");
+        AnsiConsole.Write(ctx);
         AnsiConsole.WriteLine();
 
         AnsiConsole.MarkupLine("  [dim]Memory[/]");
-        AnsiConsole.MarkupLine("  [bold cyan]/memory[/]                   List all stored memories");
-        AnsiConsole.MarkupLine("  [bold cyan]/memory show <name>[/]       Show full body of a memory");
-        AnsiConsole.MarkupLine("  [bold cyan]/memory delete <name>[/]     Delete a stored memory");
-        AnsiConsole.MarkupLine("  [bold cyan]/memory save[/]              Extract and save memories from the current session now");
+        var mem = MakeGrid();
+        mem.AddRow("[bold cyan]/memory[/]",               "List all stored memories");
+        mem.AddRow("[bold cyan]/memory show <name>[/]",   "Show full body of a memory");
+        mem.AddRow("[bold cyan]/memory delete <name>[/]", "Delete a stored memory");
+        mem.AddRow("[bold cyan]/memory save[/]",          "Extract and save memories from the current session now");
+        AnsiConsole.Write(mem);
         AnsiConsole.WriteLine();
 
         AnsiConsole.MarkupLine("  [dim]I/O & events[/]");
-        AnsiConsole.MarkupLine("  [bold cyan]/paste[/]                    Enter paste mode (multi-line input; type EOF to finish)");
-        AnsiConsole.MarkupLine("  [bold cyan]/save[/]                     Save transcript to repl-<id>.md in the current directory");
-        AnsiConsole.MarkupLine("  [bold cyan]/save <file>[/]              Save transcript to the specified file");
-        AnsiConsole.MarkupLine("  [bold cyan]/events[/]                   Show session event stats (turns, tool calls, top tools)");
-        AnsiConsole.MarkupLine("  [bold cyan]/events stats[/]             Same as /events");
-        AnsiConsole.MarkupLine("  [bold cyan]/explore <query>[/]          Run a sub-agent exploration loop and return a prose summary");
-        AnsiConsole.MarkupLine("  [bold cyan]/locate <symbol>[/]          Run a sub-agent symbol lookup; returns path:line result");
+        var io = MakeGrid();
+        io.AddRow("[bold cyan]/paste[/]",           "Enter paste mode (multi-line input; type EOF to finish)");
+        io.AddRow("[bold cyan]/save[/]",             "Save transcript to repl-<id>.md in the current directory");
+        io.AddRow("[bold cyan]/save <file>[/]",      "Save transcript to the specified file");
+        io.AddRow("[bold cyan]/events[/]",           "Show session event stats (turns, tool calls, top tools)");
+        io.AddRow("[bold cyan]/events stats[/]",     "Same as /events");
+        io.AddRow("[bold cyan]/explore <query>[/]",  "Run a sub-agent exploration loop and return a prose summary");
+        io.AddRow("[bold cyan]/locate <symbol>[/]",  "Run a sub-agent symbol lookup; returns path:line result");
+        AnsiConsole.Write(io);
     }
 
     private static void SaveTranscript(List<ChatMessage> history, string modelId, string path)
