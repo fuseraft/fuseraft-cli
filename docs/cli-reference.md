@@ -326,6 +326,11 @@ Use `/tools` to see the full list at runtime.
 |---------|-------------|
 | `/help` | Show all slash commands |
 | `/sessions` | List resumable REPL sessions with their IDs, model, turn count, and age. Resume with `fuseraft repl --resume <id>`. |
+| `/fork` | Snapshot the current session to a new ID. The snapshot is saved immediately; the current session continues unchanged. Use `fuseraft repl --resume <id>` to open the fork later. |
+| `/fork switch` | Fork and immediately become the fork. The original session is already checkpointed on disk; the live session continues under the new ID. |
+| `/conversation` | List all turns in memory with 1-based turn numbers and a one-line preview of each user message and assistant response. Use this to find the right turn number before running `/rewind`. |
+| `/rewind <n>` | Keep turns 1…n and discard all later turns. Turn count is the number of User messages currently in memory. Clamps safely — passing a number larger than the current turn count is a no-op. |
+| `/rewind -<n>` | Step back n turns from the current position (relative rewind). `/rewind -1` drops the last turn; `/rewind -99` clamps to 0 and clears all turns. |
 | `/clear` | Clear conversation history (system prompt is kept) |
 | `/compact` | Ask the model to summarise the session into a handoff document, then replace history with that summary. The system prompt and tools/skills catalog are kept; everything else is discarded. Use this when context is filling up but you want to continue in the same session. |
 | `/compact <focus>` | Same as `/compact`, but passes a focus hint to the model so the summary is tailored toward the next task (e.g. `/compact fix the auth bug next`) |
@@ -464,6 +469,104 @@ When a step fails the REPL preserves the halted step and all remaining steps. Yo
 ```
 
 If the retry fails again the plan halts a second time and both `/recover` and `/resume` remain available. `/clear` discards halted state along with the rest of the session.
+
+**Branching and rewinding**
+
+`/fork`, `/fork switch`, `/conversation`, and `/rewind` give you git-like control over conversation history without leaving the REPL.
+
+**/fork — save a branch point**
+
+`/fork` writes a complete snapshot of the current session — history, plan state, halted-step state — to a new session ID and saves it to disk. The current session keeps running unchanged.
+
+```
+5> /fork
+Forked to: a3f1c9de  (5 turns copied)
+Resume with: fuseraft repl --resume a3f1c9de
+Or: /fork switch to branch and continue as the fork right now.
+```
+
+Open the fork later in a separate terminal:
+
+```bash
+fuseraft repl --resume a3f1c9de
+```
+
+**/fork switch — branch and continue**
+
+`/fork switch` does the same thing but immediately becomes the fork. The original session is already checkpointed from the last turn's auto-save; the live session continues under the new ID. All subsequent auto-saves, events, and turn tracking use the fork's ID.
+
+```
+5> /fork switch
+Switched to fork: a3f1c9de  (was b8fe12c0)
+```
+
+This is the recommended flow when you want to explore a different direction from the current point without losing the original thread.
+
+**/conversation — see what's in memory**
+
+`/conversation` lists all turns currently in memory with their 1-based indices — use it to find a turn number before running `/rewind`.
+
+```
+5> /conversation
+5 turns:
+
+    1  you: "can you help me refactor this module?"
+       asst: "Sure — here's a plan. First we'll extract the interface, then…"
+    2  you: "looks good, let's do it"
+       asst: "Done. I've updated Foo.cs and Bar.cs with the new interface…"
+    3  you: "actually let's try a different approach"
+       asst: "Of course. What direction did you have in mind?"
+    4  you: "use a strategy pattern instead"
+       asst: "Good call. Here's the revised design…"
+    5  you: "write the code"
+       asst: "Here it is…"
+
+  /rewind <n>   — keep turns 1…n, discard the rest
+  /rewind -<n>  — step back n turns from current
+```
+
+If `TrimHistory` has evicted early turns to fit the context window, a note is shown and numbering starts from the oldest turn still in memory.
+
+**/rewind — go back**
+
+`/rewind` truncates history to a chosen point, updates the turn counter, resets plan state, and adjusts token tracking to match. The model picks up from the new tail of the conversation as if the discarded turns never happened.
+
+| Command | Effect |
+|---------|--------|
+| `/rewind 2` | Keep turns 1–2, discard turns 3 and beyond |
+| `/rewind -1` | Drop the most recent turn |
+| `/rewind -3` | Drop the last 3 turns |
+| `/rewind 0` | Drop all turns (equivalent to `/clear`) |
+| `/rewind -99` | Clamped to 0 — always safe |
+| `/rewind 99` | Clamped to current end — no-op with message |
+
+**Typical workflows**
+
+*Try two approaches from the same starting point:*
+```
+3> /fork switch          # branch; original is saved at turn 3
+4> take the strategy pattern approach
+…
+```
+Then later in a second terminal:
+```bash
+fuseraft repl --resume <original-id>
+4> take the adapter pattern approach instead
+```
+
+*Undo the last turn and try again:*
+```
+5> /rewind -1
+Rewound to after turn 4 — 1 turn removed.
+5> let's try that differently…
+```
+
+*Rewind to a specific decision point:*
+```
+8> /conversation         # find the right turn number
+8> /rewind 3             # discard turns 4–8
+4> here's a better approach…
+```
 
 **Adversarial mode**
 

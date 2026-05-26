@@ -23,6 +23,43 @@ When resuming:
 - The system prompt is refreshed to pick up any new memories or `AGENTS.md` changes.
 - The turn counter continues from where it left off.
 
+**Branching sessions**
+
+A session can be forked at any point to create a diverging copy of the conversation from the current turn.
+
+```bash
+# Inside the REPL — snapshot to a new ID, stay in the current session
+/fork
+
+# Fork and immediately switch to it (original is already auto-saved)
+/fork switch
+```
+
+`/fork` writes a complete snapshot — conversation history, plan queue, and halted-step state — to a new session ID and saves it immediately. The running session is not affected. Resume the fork later:
+
+```bash
+fuseraft repl --resume <fork-id>
+```
+
+`/fork switch` does the same but mutates the live session to become the fork: future auto-saves, events, and turn tracking all use the new ID. The original session is left on disk at the branch point (the last turn's auto-save).
+
+All forks appear in `/sessions` and `fuseraft repl --resume` like any other saved session.
+
+**Rewinding**
+
+Use `/conversation` to list all turns in memory with their 1-based indices, then `/rewind` to truncate history to a chosen point:
+
+```
+/conversation           # see turn numbers and previews
+/rewind 3               # keep turns 1–3, discard the rest
+/rewind -1              # drop the last turn
+/rewind 0               # clear all turns (like /clear)
+```
+
+Rewind updates the turn counter, resets plan state, and adjusts token tracking. Out-of-range values are clamped silently — `/rewind -99` is always safe.
+
+A common pattern: fork to preserve the current state, then rewind in the fork to explore a different direction from an earlier point.
+
 **Session files**
 
 REPL snapshots are stored at `~/.fuseraft/repl-sessions/repl-<id>.json` with owner-only permissions (Unix mode 0600). Each file contains:
