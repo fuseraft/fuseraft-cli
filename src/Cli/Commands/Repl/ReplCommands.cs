@@ -1521,21 +1521,35 @@ internal static class ReplCommands
 
         AnsiConsole.MarkupLine($"[dim]Saved sessions ({sessions.Count}):[/]");
         AnsiConsole.WriteLine();
+
+        // Five-column grid: ID · model (capped at 22 chars) · turns · age · label.
+        // All columns NoWrap so Spectre owns the layout rather than the terminal.
+        var grid = new Grid();
+        grid.AddColumn(new GridColumn().NoWrap().Padding(new Padding(2, 0, 2, 0))); // ID
+        grid.AddColumn(new GridColumn().NoWrap().Padding(new Padding(0, 0, 2, 0))); // model
+        grid.AddColumn(new GridColumn().NoWrap().Padding(new Padding(0, 0, 2, 0))); // turns
+        grid.AddColumn(new GridColumn().NoWrap().Padding(new Padding(0, 0, 2, 0))); // age
+        grid.AddColumn(new GridColumn().NoWrap().Padding(new Padding(0, 0, 0, 0))); // label
+
         foreach (var s in sessions)
         {
-            var age   = DateTime.UtcNow - s.LastUpdatedAt;
-            var label = age.TotalDays >= 1
-                ? $"{(int)age.TotalDays}d ago"
-                : age.TotalHours >= 1
-                    ? $"{(int)age.TotalHours}h ago"
-                    : $"{(int)age.TotalMinutes}m ago";
-            AnsiConsole.MarkupLine(
-                $"  [bold cyan]{Markup.Escape(s.SessionId)}[/]  " +
-                $"[dim]{Markup.Escape(s.ModelId)}  " +
-                $"{s.TurnIndex} turn{(s.TurnIndex == 1 ? "" : "s")}  " +
-                $"{Markup.Escape(label)}  " +
-                $"{Markup.Escape(Path.GetFileName(s.Cwd))}[/]");
+            var elapsed = DateTime.UtcNow - s.LastUpdatedAt;
+            var age     = elapsed.TotalDays  >= 1 ? $"{(int)elapsed.TotalDays}d ago"
+                        : elapsed.TotalHours >= 1 ? $"{(int)elapsed.TotalHours}h ago"
+                        :                           $"{(int)elapsed.TotalMinutes}m ago";
+            var turns   = $"{s.TurnIndex} turn{(s.TurnIndex == 1 ? "" : "s")}";
+            var model   = s.ModelId.Length > 22 ? s.ModelId[..21] + "…" : s.ModelId;
+            var cwd     = Path.GetFileName(s.Cwd);
+
+            grid.AddRow(
+                $"[bold cyan]{Markup.Escape(s.SessionId)}[/]",
+                $"[dim]{Markup.Escape(model)}[/]",
+                $"[dim]{Markup.Escape(turns)}[/]",
+                $"[dim]{Markup.Escape(age)}[/]",
+                $"[dim]{Markup.Escape(cwd)}[/]");
         }
+
+        AnsiConsole.Write(grid);
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[dim]  Resume with:[/] [bold]fuseraft repl --resume <id>[/]");
     }
