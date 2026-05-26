@@ -63,9 +63,6 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // (--vscode + stdin redirected from the extension's child process).
         bool jsonMode = OrchestratorBuilder.VsCodeMode && Console.IsInputRedirected;
 
-        if (!settings.NoBanner && !jsonMode)
-            MessageRenderer.RenderBanner();
-
         var keyStore = ApiKeyStoreFactory.Create();
         var (userCfg, legacyKey) = UserConfigStore.Load();
 
@@ -199,14 +196,6 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             toolsByCategory["Session"] = PluginRegistry.GetFunctionsFromObject(
                 new ReplSessionPlugin(sessionId, startedAt, modelId, cwd)).ToList();
 
-        if (!jsonMode)
-        {
-            AnsiConsole.Write(new Rule($"[bold cyan]{Markup.Escape(modelId)}[/]")
-                .LeftJustified()
-                .RuleStyle(new Spectre.Console.Style(Spectre.Console.Color.Grey)));
-            AnsiConsole.WriteLine();
-        }
-
         using var emitter = new EventEmitter(eventsPath);
         emitter.SetSessionId(sessionId);
         await emitter.EmitAsync("session_start", payload: new
@@ -218,8 +207,11 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             resumed       = snapshot is not null,
         });
 
-        var memoryStore  = MemoryStore.ForRepl();
-        var memoryBlock  = await memoryStore.BuildPromptBlockAsync(cwd);
+        var memoryStore   = MemoryStore.ForRepl();
+        var memoryEntries = await memoryStore.LoadAllAsync(cwd);
+        var memoryBlock   = memoryEntries.Count > 0
+            ? await memoryStore.BuildPromptBlockAsync(cwd)
+            : null;
         var systemPrompt = BuildSystemPrompt(settings.SystemPrompt, initialTools.Count, cwd, memoryBlock, modelId, sessionId, startedAt);
 
         if (skillsCatalog is not null)
@@ -227,20 +219,15 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
         if (!jsonMode)
         {
-            // Single compact info line.
-            var infoParts = new List<string>();
-            if (toolsByCategory.Count > 0)
-                infoParts.Add(string.Join("  ", toolsByCategory.Keys));
-            if (File.Exists(Path.Combine(cwd, "AGENTS.md"))) infoParts.Add("agents");
-            if (memoryBlock is not null)                      infoParts.Add("memory");
-            if (skillsPlugin is not null)                     infoParts.Add($"{skillsPlugin.Count} skill{(skillsPlugin.Count == 1 ? "" : "s")}");
-            if (subAgent is not null)                         infoParts.Add("/explore  /locate  /adversarial");
-            infoParts.Add("/help");
-            AnsiConsole.MarkupLine($"[dim]  {Markup.Escape(string.Join("  ·  ", infoParts))}[/]");
-            AnsiConsole.MarkupLine($"[dim]  session: {Markup.Escape(sessionId)}[/]");
-            if (settings.Verbose)
-                AnsiConsole.MarkupLine($"[dim]  events: {Markup.Escape(eventsPath)}[/]");
-            AnsiConsole.WriteLine();
+            // Build plugin name list: tool categories + "Memory" if memories are loaded.
+            var pluginNames = new List<string>(toolsByCategory.Keys);
+            if (memoryBlock is not null) pluginNames.Add("Memory");
+
+            MessageRenderer.RenderReplHeader(
+                modelId, cwd, pluginNames, sessionId,
+                memoryCount: memoryEntries.Count,
+                skillCount:  skillsPlugin?.Count ?? 0,
+                eventsPath:  settings.Verbose ? eventsPath : null);
         }
 
         var ctx = new ReplSessionContext(
