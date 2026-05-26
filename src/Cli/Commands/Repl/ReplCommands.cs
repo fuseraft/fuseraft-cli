@@ -37,8 +37,10 @@ internal static class ReplCommands
             case "/compact":    return await CmdCompactAsync(ctx, arg, cancellationToken);
             case "/explore":    return await CmdExploreAsync(ctx, arg, cancellationToken);
             case "/locate":     return await CmdLocateAsync(ctx, arg, cancellationToken);
-            case "/sessions":   await CmdSessionsAsync(ctx.JsonMode, cancellationToken); return CommandResult.Continue;
-            case "/fork":       return await CmdForkAsync(ctx, arg, cancellationToken);
+            case "/sessions":      await CmdSessionsAsync(ctx.JsonMode, cancellationToken); return CommandResult.Continue;
+            case "/fork":          return await CmdForkAsync(ctx, arg, cancellationToken);
+            case "/conversation":  CmdConversation(ctx); return CommandResult.Continue;
+            case "/rewind":        return await CmdRewindAsync(ctx, arg, cancellationToken);
             default:
                 AnsiConsole.MarkupLine(
                     $"[yellow]Unknown command:[/] {Markup.Escape(command)}  [dim](type /help for commands)[/]");
@@ -1073,6 +1075,181 @@ internal static class ReplCommands
         return CommandResult.Continue;
     }
 
+    private static void CmdConversation(ReplSessionContext ctx)
+    {
+        // Collect (userMessage, assistantMessage?) pairs from the non-system history.
+        var nonSys = ctx.History.Where(m => m.Role != ChatRole.System).ToList();
+        var turns  = new List<(string User, string? Asst)>();
+        for (var i = 0; i < nonSys.Count; i++)
+        {
+            if (nonSys[i].Role != ChatRole.User) continue;
+            var userText = nonSys[i].Text ?? string.Empty;
+            string? asstText = null;
+            if (i + 1 < nonSys.Count && nonSys[i + 1].Role == ChatRole.Assistant)
+            {
+                asstText = nonSys[++i].Text;
+            }
+            turns.Add((userText, asstText));
+        }
+
+        if (turns.Count == 0)
+        {
+            if (ctx.JsonMode)
+                Console.WriteLine("No conversation yet.");
+            else
+                AnsiConsole.MarkupLine("[dim]No conversation yet.[/]");
+            return;
+        }
+
+        // Check whether early messages were trimmed (TrimHistory evicts old turns to fit context).
+        var trimmed = ctx.TurnIndex > turns.Count;
+
+        if (ctx.JsonMode)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"## Conversation ({turns.Count} turn{(turns.Count == 1 ? "" : "s")}{(trimmed ? ", earlier turns trimmed" : "")})\n");
+            for (var t = 0; t < turns.Count; t++)
+            {
+                var (u, a) = turns[t];
+                var uPrev = u.Replace('\n', ' ').Trim();
+                if (uPrev.Length > 100) uPrev = uPrev[..100] + "…";
+                sb.AppendLine($"**{t + 1}.** *you:* {uPrev}");
+                if (a is not null)
+                {
+                    var aPrev = a.Replace('\n', ' ').Trim();
+                    if (aPrev.Length > 100) aPrev = aPrev[..100] + "…";
+                    sb.AppendLine($"   *asst:* {aPrev}");
+                }
+            }
+            sb.AppendLine();
+            sb.AppendLine("Use `/rewind <n>` to rewind to after turn n, or `/rewind -<n>` to go back n turns.");
+            Console.Write(sb.ToString());
+            return;
+        }
+
+        AnsiConsole.MarkupLine(trimmed
+            ? $"[dim]{turns.Count} turn{(turns.Count == 1 ? "" : "s")} in memory  [yellow](earlier turns were trimmed to fit context)[/][dim]:[/]"
+            : $"[dim]{turns.Count} turn{(turns.Count == 1 ? "" : "s")}:[/]");
+        AnsiConsole.WriteLine();
+
+        for (var t = 0; t < turns.Count; t++)
+        {
+            var (u, a) = turns[t];
+            var uPrev = u.Replace('\n', ' ').Trim();
+            if (uPrev.Length > 80) uPrev = uPrev[..80] + "…";
+            AnsiConsole.MarkupLine($"  [bold]{t + 1,3}[/]  [cyan]you:[/] {Markup.Escape(uPrev)}");
+            if (a is not null)
+            {
+                var aPrev = a.Replace('\n', ' ').Trim();
+                if (aPrev.Length > 80) aPrev = aPrev[..80] + "…";
+                AnsiConsole.MarkupLine($"       [dim]asst: {Markup.Escape(aPrev)}[/]");
+            }
+        }
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[dim]  /rewind <n>   — keep turns 1…n, discard the rest[/]");
+        AnsiConsole.MarkupLine("[dim]  /rewind -<n>  — step back n turns from current[/]");
+    }
+
+    private static async Task<CommandResult> CmdRewindAsync(
+        ReplSessionContext ctx, string arg, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(arg))
+        {
+            AnsiConsole.MarkupLine("[dim]Usage: /rewind <n>   — keep turns 1…n, discard the rest[/]");
+            AnsiConsole.MarkupLine("[dim]       /rewind -<n>  — step back n turns from current[/]");
+            AnsiConsole.MarkupLine("[dim]Run /conversation to see turn numbers.[/]");
+            return CommandResult.Continue;
+        }
+
+        // Use the count of User messages in history as the authoritative turn count —
+        // TurnIndex can drift from the live history after TrimHistory or /execute steps.
+        var nonSys     = ctx.History.Where(m => m.Role != ChatRole.System).ToList();
+        var totalTurns = nonSys.Count(m => m.Role == ChatRole.User);
+
+        if (totalTurns == 0)
+        {
+            AnsiConsole.MarkupLine("[dim]No conversation to rewind.[/]");
+            return CommandResult.Continue;
+        }
+
+        int targetTurn;
+        if (arg.StartsWith('-'))
+        {
+            if (!int.TryParse(arg[1..], out var back) || back < 0)
+            {
+                AnsiConsole.MarkupLine($"[yellow]Invalid /rewind argument:[/] {Markup.Escape(arg)}");
+                return CommandResult.Continue;
+            }
+            targetTurn = totalTurns - back;
+        }
+        else
+        {
+            if (!int.TryParse(arg, out targetTurn) || targetTurn < 0)
+            {
+                AnsiConsole.MarkupLine($"[yellow]Invalid /rewind argument:[/] {Markup.Escape(arg)}");
+                return CommandResult.Continue;
+            }
+        }
+
+        // Clamp to valid range — never underflow below 0 or past current end.
+        targetTurn = Math.Clamp(targetTurn, 0, totalTurns);
+
+        if (targetTurn == totalTurns)
+        {
+            AnsiConsole.MarkupLine($"[dim]Already at turn {totalTurns} — nothing to rewind.[/]");
+            return CommandResult.Continue;
+        }
+
+        // Rebuild history: system prompt + first targetTurn user/assistant pairs.
+        // Non-user messages (assistant responses) are kept with the turn they follow.
+        var sys  = ctx.History.FirstOrDefault(m => m.Role == ChatRole.System);
+        var kept = new List<ChatMessage>();
+        if (sys is not null) kept.Add(sys);
+
+        var seen = 0;
+        for (var i = 0; i < nonSys.Count; i++)
+        {
+            if (nonSys[i].Role == ChatRole.User)
+            {
+                if (seen >= targetTurn) break;
+                kept.Add(nonSys[i]);
+                seen++;
+            }
+            else
+            {
+                kept.Add(nonSys[i]); // assistant message — belongs to the preceding user turn
+            }
+        }
+
+        var removed = totalTurns - targetTurn;
+        ctx.History.Clear();
+        ctx.History.AddRange(kept);
+        ctx.TurnIndex             = targetTurn;
+        ctx.PrevTurnTokenEstimate = 0;
+        ctx.PrevCtxEstimate       = 0;
+        if (ctx.TurnTokenDeltas.Count > targetTurn)
+            ctx.TurnTokenDeltas.RemoveRange(targetTurn, ctx.TurnTokenDeltas.Count - targetTurn);
+        ctx.ResetPlanState();
+
+        if (ctx.JsonMode)
+        {
+            Console.WriteLine(targetTurn == 0
+                ? $"## Rewound to Start\n\nAll {removed} turn{(removed == 1 ? "" : "s")} removed."
+                : $"## Rewound\n\nNow at turn {targetTurn}. {removed} turn{(removed == 1 ? "" : "s")} removed.");
+        }
+        else
+        {
+            AnsiConsole.MarkupLine(targetTurn == 0
+                ? $"[dim]Rewound to start — {removed} turn{(removed == 1 ? "" : "s")} removed.[/]"
+                : $"[dim]Rewound to after turn {targetTurn} — {removed} turn{(removed == 1 ? "" : "s")} removed.[/]");
+        }
+
+        await ctx.Emitter.EmitAsync("command", payload: new
+            { command = "/rewind", target = targetTurn, removed, total_was = totalTurns });
+        return CommandResult.Continue;
+    }
+
     private static async Task<CommandResult> CmdForkAsync(
         ReplSessionContext ctx, string arg, CancellationToken cancellationToken)
     {
@@ -1239,6 +1416,9 @@ internal static class ReplCommands
             Console.WriteLine("- `/sessions` — List resumable sessions with IDs and turn counts");
             Console.WriteLine("- `/fork` — Snapshot the current session to a new ID so you can branch from this point");
             Console.WriteLine("- `/fork switch` — Fork and immediately become the fork (continue under the new ID)");
+            Console.WriteLine("- `/conversation` — List all turns with numbers so you can pick a rewind point");
+            Console.WriteLine("- `/rewind <n>` — Keep turns 1…n and discard the rest");
+            Console.WriteLine("- `/rewind -<n>` — Step back n turns from the current position");
             Console.WriteLine("- `/clear` — Clear conversation history (keeps system prompt)");
             Console.WriteLine("- `/history` — Show condensed conversation history");
             Console.WriteLine("- `/assist` — Diagnose the conversation and inject a corrective message");
@@ -1295,6 +1475,9 @@ internal static class ReplCommands
         AnsiConsole.MarkupLine("  [bold cyan]/sessions[/]                 List resumable sessions with IDs and turn counts");
         AnsiConsole.MarkupLine("  [bold cyan]/fork[/]                     Snapshot the current session to a new ID (branch from this point)");
         AnsiConsole.MarkupLine("  [bold cyan]/fork switch[/]              Fork and immediately become the fork (continue under the new ID)");
+        AnsiConsole.MarkupLine("  [bold cyan]/conversation[/]             List all turns with numbers so you can pick a rewind point");
+        AnsiConsole.MarkupLine("  [bold cyan]/rewind <n>[/]               Keep turns 1…n and discard the rest");
+        AnsiConsole.MarkupLine("  [bold cyan]/rewind -<n>[/]              Step back n turns from the current position");
         AnsiConsole.MarkupLine("  [bold cyan]/clear[/]                    Clear conversation history (keeps system prompt)");
         AnsiConsole.MarkupLine("  [bold cyan]/history[/]                  Show condensed conversation history");
         AnsiConsole.MarkupLine("  [bold cyan]/assist[/]                   Diagnose the conversation and inject a corrective message");
