@@ -45,6 +45,19 @@ fuseraft repl --resume <fork-id>
 
 All forks appear in `/sessions` and `fuseraft repl --resume` like any other saved session.
 
+**Switching between sessions**
+
+`/switch <id>` saves the current session and loads another one in its place — no exit or restart required. History, turn counter, plan state, and model (rebuilt if different) are all restored from the target snapshot.
+
+```
+8> /switch a3f1c9de
+Switched to: a3f1c9de  (was b8fe12c0)
+Model: claude-sonnet-4-6
+5 turns · started 2026-05-25 14:32
+```
+
+Use `/sessions` to find IDs, then `/switch` to hop between them freely.
+
 **Rewinding**
 
 Use `/conversation` to list all turns in memory with their 1-based indices, then `/rewind` to truncate history to a chosen point:
