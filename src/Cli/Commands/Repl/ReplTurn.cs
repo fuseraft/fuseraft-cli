@@ -426,6 +426,20 @@ internal static class ReplTurn
         if (!ctx.JsonMode) AnsiConsole.WriteLine();
         if (responseText.Length > 0)
             ctx.History.Add(new ChatMessage(ChatRole.Assistant, responseText));
+        else if (!capturePlan)
+        {
+            // The model returned zero content — surface a clear warning so the user
+            // knows to retry rather than wondering why the prompt went quiet.
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new { type = "warning", text = "Model returned an empty response. Try sending your message again." });
+            else
+                AnsiConsole.MarkupLine("[dim]  ↯ empty response — the model returned no content. Try again.[/]");
+
+            await ctx.Emitter.EmitAsync("repl_warning", turn: ctx.TurnIndex, payload: new
+            {
+                message = "empty_response",
+            });
+        }
 
         if (capturePlan && responseText.Length > 0)
             HandlePlanCapture(ctx, responseText);
