@@ -275,7 +275,13 @@ internal static class ReplTurn
 
                     if (ctx.JsonMode)
                     {
-                        ReplJsonBridge.Emit(new { type = "tool_call", name = funcCall.Name });
+                        // Include arguments so the webview can show them on hover/expand.
+                        // Values are typically JsonElement from the model's JSON response and
+                        // serialise correctly; null Arguments → omit the field entirely.
+                        var args = funcCall.Arguments is { Count: > 0 }
+                            ? (object)funcCall.Arguments
+                            : null;
+                        ReplJsonBridge.Emit(new { type = "tool_call", name = funcCall.Name, args });
                     }
                     else
                     {
