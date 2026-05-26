@@ -328,6 +328,7 @@ Use `/tools` to see the full list at runtime.
 | `/sessions` | List resumable REPL sessions with their IDs, model, turn count, and age. Resume with `fuseraft repl --resume <id>`. |
 | `/fork` | Snapshot the current session to a new ID. The snapshot is saved immediately; the current session continues unchanged. Use `fuseraft repl --resume <id>` to open the fork later. |
 | `/fork switch` | Fork and immediately become the fork. The original session is already checkpointed on disk; the live session continues under the new ID. |
+| `/switch <id>` | Save the current session and load another saved session in its place. History, turn counter, model (if different), and plan state are all restored. Use `/sessions` to find IDs. |
 | `/conversation` | List all turns in memory with 1-based turn numbers and a one-line preview of each user message and assistant response. Use this to find the right turn number before running `/rewind`. |
 | `/rewind <n>` | Keep turns 1…n and discard all later turns. Turn count is the number of User messages currently in memory. Clamps safely — passing a number larger than the current turn count is a no-op. |
 | `/rewind -<n>` | Step back n turns from the current position (relative rewind). `/rewind -1` drops the last turn; `/rewind -99` clamps to 0 and clears all turns. |
@@ -502,6 +503,25 @@ Switched to fork: a3f1c9de  (was b8fe12c0)
 
 This is the recommended flow when you want to explore a different direction from the current point without losing the original thread.
 
+**/switch — jump between sessions**
+
+`/switch <id>` saves the current session and loads another one in its place — no exit required. History, turn counter, plan state, and model (if different) are all restored from the snapshot. Use `/sessions` to find IDs.
+
+```
+8> /sessions
+  a3f1c9de  claude-sonnet-4-6  5 turns  2m ago  fuseraft-cli
+  b8fe12c0  claude-sonnet-4-6  8 turns  now     fuseraft-cli
+
+8> /switch a3f1c9de
+Switched to: a3f1c9de  (was b8fe12c0)
+Model: claude-sonnet-4-6
+5 turns · started 2026-05-25 14:32
+
+6>
+```
+
+If the target session used a different model, `fuseraft` rebuilds the chat client automatically. If the model can't be loaded (missing key, unavailable endpoint), it warns and keeps the current model.
+
 **/conversation — see what's in memory**
 
 `/conversation` lists all turns currently in memory with their 1-based indices — use it to find a turn number before running `/rewind`.
@@ -547,10 +567,7 @@ If `TrimHistory` has evicted early turns to fit the context window, a note is sh
 3> /fork switch          # branch; original is saved at turn 3
 4> take the strategy pattern approach
 …
-```
-Then later in a second terminal:
-```bash
-fuseraft repl --resume <original-id>
+8> /switch b8fe12c0      # jump back to the original without exiting
 4> take the adapter pattern approach instead
 ```
 
@@ -566,6 +583,15 @@ Rewound to after turn 4 — 1 turn removed.
 8> /conversation         # find the right turn number
 8> /rewind 3             # discard turns 4–8
 4> here's a better approach…
+```
+
+*Flip between two parallel threads of work:*
+```
+/sessions                # note the IDs of both sessions
+/switch <id-a>           # work on thread A
+…
+/switch <id-b>           # work on thread B
+…
 ```
 
 **Adversarial mode**

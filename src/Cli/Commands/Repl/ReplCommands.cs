@@ -39,6 +39,7 @@ internal static class ReplCommands
             case "/locate":     return await CmdLocateAsync(ctx, arg, cancellationToken);
             case "/sessions":      await CmdSessionsAsync(ctx.JsonMode, cancellationToken); return CommandResult.Continue;
             case "/fork":          return await CmdForkAsync(ctx, arg, cancellationToken);
+            case "/switch":        return await CmdSwitchAsync(ctx, arg, cancellationToken);
             case "/conversation":  CmdConversation(ctx); return CommandResult.Continue;
             case "/rewind":        return await CmdRewindAsync(ctx, arg, cancellationToken);
             default:
@@ -1075,6 +1076,144 @@ internal static class ReplCommands
         return CommandResult.Continue;
     }
 
+    private static async Task<CommandResult> CmdSwitchAsync(
+        ReplSessionContext ctx, string arg, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(arg))
+        {
+            AnsiConsole.MarkupLine("[dim]Usage: /switch <session-id>[/]");
+            AnsiConsole.MarkupLine("[dim]Run /sessions to list available sessions.[/]");
+            return CommandResult.Continue;
+        }
+
+        var targetId = arg.Trim();
+        if (targetId.Equals(ctx.SessionId, StringComparison.OrdinalIgnoreCase))
+        {
+            AnsiConsole.MarkupLine("[dim]Already in this session.[/]");
+            return CommandResult.Continue;
+        }
+
+        // Checkpoint the current session before leaving it.
+        await ReplTurn.SaveSnapshotAsync(ctx);
+
+        var snapshot = await ReplSessionSnapshot.LoadAsync(targetId, cancellationToken);
+        if (snapshot is null)
+        {
+            AnsiConsole.MarkupLine(
+                $"[yellow]No saved session found with ID '[bold]{Markup.Escape(targetId)}[/]'.[/]");
+            AnsiConsole.MarkupLine("[dim]Run /sessions to list available sessions.[/]");
+            return CommandResult.Continue;
+        }
+
+        var prevId    = ctx.SessionId;
+        var prevModel = ctx.ModelId;
+
+        // Switch model when the target session used a different one.
+        if (!snapshot.ModelId.Equals(ctx.ModelId, StringComparison.OrdinalIgnoreCase))
+        {
+            var hasTools  = ctx.GetActiveTools().Count > 0;
+            var newConfig = ReplFactory.BuildModelConfig(snapshot.ModelId, ctx.UserCfg);
+            try
+            {
+                var newClient     = ReplFactory.BuildClient(newConfig, ctx.Factory, hasTools);
+                var newStepClient = ReplFactory.BuildClient(newConfig, ctx.Factory, hasTools, ReplTurn.StepIterationLimit);
+                ctx.ModelId     = snapshot.ModelId;
+                ctx.ModelConfig = newConfig;
+                ctx.Client      = newClient;
+                ctx.StepClient  = newStepClient;
+            }
+            catch (Exception ex)
+            {
+                AnsiConsole.MarkupLine(
+                    $"[yellow]⚠ Could not switch to model {Markup.Escape(snapshot.ModelId)}: {Markup.Escape(ex.Message)}[/]");
+                AnsiConsole.MarkupLine($"[dim]Keeping current model: {Markup.Escape(ctx.ModelId)}[/]");
+            }
+        }
+
+        // Switch session identity.
+        ctx.SessionId = snapshot.SessionId;
+        ctx.StartedAt = snapshot.StartedAt;
+        ctx.Emitter.SetSessionId(snapshot.SessionId);
+
+        // Restore history; keep the current system prompt so memories and AGENTS.md
+        // stay fresh (same approach as --resume at startup).
+        var restored   = snapshot.RestoreHistory();
+        var currentSys = ctx.History.FirstOrDefault(m => m.Role == ChatRole.System);
+        if (restored.Count > 0 && restored[0].Role == ChatRole.System && currentSys is not null)
+            restored[0] = currentSys;
+        ctx.History.Clear();
+        ctx.History.AddRange(restored);
+
+        // Reset counters and plan state.
+        ctx.TurnIndex              = snapshot.TurnIndex;
+        ctx.PrevTurnTokenEstimate  = 0;
+        ctx.PrevCtxEstimate        = 0;
+        ctx.TurnTokenDeltas.Clear();
+        ctx.LastExtractedTurnIndex = -1;
+        ctx.ResetPlanState();
+
+        // Restore plan execution state from the snapshot.
+        if (snapshot.ExecutionQueue is { Length: > 0 })
+            foreach (var e in snapshot.ExecutionQueue)
+                ctx.ExecutionQueue.Enqueue((e.Step, e.Total));
+        else if (snapshot.PendingPlan is { Length: > 0 })
+            ctx.CurrentPlan = snapshot.PendingPlan;
+
+        if (snapshot.HaltedAt is not null)
+        {
+            ctx.HaltedAt = (snapshot.HaltedAt.Step, snapshot.HaltedAt.Total);
+            if (snapshot.HaltedRemaining is { Length: > 0 })
+                foreach (var e in snapshot.HaltedRemaining)
+                    ctx.HaltedRemaining.Enqueue((e.Step, e.Total));
+            ctx.HaltedToolCalls = [.. snapshot.HaltedToolCalls ?? []];
+            ctx.RecoveryHint    = snapshot.RecoveryHint;
+        }
+
+        var modelChanged = !ctx.ModelId.Equals(prevModel, StringComparison.OrdinalIgnoreCase);
+
+        if (ctx.JsonMode)
+        {
+            Console.WriteLine(
+                $"## Switched Session\n\n" +
+                $"Now running as: **`{snapshot.SessionId}`** (was `{prevId}`)\n\n" +
+                $"Model: {ctx.ModelId} · {snapshot.TurnIndex} turn{(snapshot.TurnIndex == 1 ? "" : "s")} · " +
+                $"started {snapshot.StartedAt.ToLocalTime():yyyy-MM-dd HH:mm}");
+        }
+        else
+        {
+            AnsiConsole.MarkupLine(
+                $"[dim]Switched to:[/] [bold cyan]{Markup.Escape(snapshot.SessionId)}[/]  " +
+                $"[dim](was {Markup.Escape(prevId)})[/]");
+            AnsiConsole.MarkupLine(
+                $"[dim]Model:[/] [bold]{Markup.Escape(ctx.ModelId)}[/]" +
+                (modelChanged ? $"  [dim](was {Markup.Escape(prevModel)})[/]" : string.Empty));
+            AnsiConsole.MarkupLine(
+                $"[dim]{snapshot.TurnIndex} turn{(snapshot.TurnIndex == 1 ? "" : "s")} · " +
+                $"started {snapshot.StartedAt.ToLocalTime():yyyy-MM-dd HH:mm}[/]");
+
+            if (ctx.ExecutionQueue.Count > 0)
+                AnsiConsole.MarkupLine(
+                    $"[dim]  Plan in progress: {ctx.ExecutionQueue.Count} step{(ctx.ExecutionQueue.Count == 1 ? "" : "s")} queued — resuming automatically[/]");
+            else if (ctx.CurrentPlan is { Length: > 0 })
+                AnsiConsole.MarkupLine(
+                    $"[dim]  Pending plan restored ({ctx.CurrentPlan.Length} step{(ctx.CurrentPlan.Length == 1 ? "" : "s")}). Run /execute to start.[/]");
+
+            if (ctx.HaltedAt is not null)
+                AnsiConsole.MarkupLine(
+                    $"[yellow]  ⚠ Plan halted at step {ctx.HaltedAt.Value.Step.Step} of {ctx.HaltedAt.Value.Total}. Run /recover or /resume.[/]");
+        }
+
+        await ctx.Emitter.EmitAsync("command", payload: new
+        {
+            command   = "/switch",
+            target_id = snapshot.SessionId,
+            prev_id   = prevId,
+            turns     = snapshot.TurnIndex,
+            model     = ctx.ModelId,
+        });
+        return CommandResult.Continue;
+    }
+
     private static void CmdConversation(ReplSessionContext ctx)
     {
         // Collect (userMessage, assistantMessage?) pairs from the non-system history.
@@ -1416,6 +1555,7 @@ internal static class ReplCommands
             Console.WriteLine("- `/sessions` — List resumable sessions with IDs and turn counts");
             Console.WriteLine("- `/fork` — Snapshot the current session to a new ID so you can branch from this point");
             Console.WriteLine("- `/fork switch` — Fork and immediately become the fork (continue under the new ID)");
+            Console.WriteLine("- `/switch <id>` — Save the current session and load another saved session in its place");
             Console.WriteLine("- `/conversation` — List all turns with numbers so you can pick a rewind point");
             Console.WriteLine("- `/rewind <n>` — Keep turns 1…n and discard the rest");
             Console.WriteLine("- `/rewind -<n>` — Step back n turns from the current position");
@@ -1475,6 +1615,7 @@ internal static class ReplCommands
         AnsiConsole.MarkupLine("  [bold cyan]/sessions[/]                 List resumable sessions with IDs and turn counts");
         AnsiConsole.MarkupLine("  [bold cyan]/fork[/]                     Snapshot the current session to a new ID (branch from this point)");
         AnsiConsole.MarkupLine("  [bold cyan]/fork switch[/]              Fork and immediately become the fork (continue under the new ID)");
+        AnsiConsole.MarkupLine("  [bold cyan]/switch <id>[/]              Save the current session and load another saved session in its place");
         AnsiConsole.MarkupLine("  [bold cyan]/conversation[/]             List all turns with numbers so you can pick a rewind point");
         AnsiConsole.MarkupLine("  [bold cyan]/rewind <n>[/]               Keep turns 1…n and discard the rest");
         AnsiConsole.MarkupLine("  [bold cyan]/rewind -<n>[/]              Step back n turns from the current position");
