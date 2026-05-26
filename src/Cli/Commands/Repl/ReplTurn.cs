@@ -294,7 +294,8 @@ internal static class ReplTurn
                         await spinTask;
                         spinCts.Dispose();
                         spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
-                        spinTask = RunSpinnerAsync($"conjuring…  {chain}", spinCts.Token, turnStart);
+                        var verb = toolCallsThisTurn.Count % 2 == 0 ? "fusing" : "rafting";
+                        spinTask = RunSpinnerAsync($"{verb}…  {chain}", spinCts.Token, turnStart);
                         spinning = true;
                     }
                     continue;
