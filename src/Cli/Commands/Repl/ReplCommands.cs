@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
+using fuseraft.Cli.Display;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 
@@ -42,6 +43,9 @@ internal static class ReplCommands
             case "/switch":        return await CmdSwitchAsync(ctx, arg, cancellationToken);
             case "/conversation":  CmdConversation(ctx); return CommandResult.Continue;
             case "/rewind":        return await CmdRewindAsync(ctx, arg, cancellationToken);
+            case "/model":         return await CmdModelAsync(ctx, arg);
+            case "/retry":         return CmdRetry(ctx);
+            case "/last":          CmdLast(ctx); return CommandResult.Continue;
             default:
                 AnsiConsole.MarkupLine(
                     $"[yellow]Unknown command:[/] {Markup.Escape(command)}  [dim](type /help for commands)[/]");
@@ -61,6 +65,7 @@ internal static class ReplCommands
         ctx.TurnIndex              = 0;
         ctx.PrevTurnTokenEstimate  = 0;
         ctx.TurnTokenDeltas.Clear();
+        ctx.ContextWarningShown    = false;
         ctx.ResetPlanState();
         AnsiConsole.MarkupLine("[dim]History cleared.[/]");
         await ctx.Emitter.EmitAsync("command", payload: new { command = "/clear" });
@@ -940,6 +945,7 @@ internal static class ReplCommands
         ctx.TurnIndex             = 0;
         ctx.PrevTurnTokenEstimate = 0;
         ctx.TurnTokenDeltas.Clear();
+        ctx.ContextWarningShown   = false;
         ctx.ResetPlanState();
 
         AnsiConsole.MarkupLine("[dim]Session compacted — history replaced with handoff summary.[/]");
@@ -1492,6 +1498,110 @@ internal static class ReplCommands
         return CommandResult.Continue;
     }
 
+    private static async Task<CommandResult> CmdModelAsync(ReplSessionContext ctx, string arg)
+    {
+        if (string.IsNullOrWhiteSpace(arg))
+        {
+            AnsiConsole.MarkupLine($"  [dim]Model:[/] [bold]{Markup.Escape(ctx.ModelId)}[/]");
+            AnsiConsole.MarkupLine("[dim]Run[/] [bold]/model <id>[/] [dim]to switch models without clearing history.[/]");
+            return CommandResult.Continue;
+        }
+
+        var newModelId = arg.Trim();
+        if (newModelId.Equals(ctx.ModelId, StringComparison.OrdinalIgnoreCase))
+        {
+            AnsiConsole.MarkupLine($"[dim]Already using[/] [bold]{Markup.Escape(ctx.ModelId)}[/][dim].[/]");
+            return CommandResult.Continue;
+        }
+
+        var newConfig = ReplFactory.BuildModelConfig(newModelId, ctx.UserCfg);
+        var hasTools  = ctx.GetActiveTools().Count > 0;
+        IChatClient newClient;
+        try
+        {
+            newClient = ReplFactory.BuildClient(newConfig, ctx.Factory, hasTools);
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine(
+                $"[red]✗ Could not create client for {Markup.Escape(newModelId)}:[/] {Markup.Escape(ex.Message)}");
+            return CommandResult.Continue;
+        }
+
+        var prevModel   = ctx.ModelId;
+        ctx.ModelId     = newModelId;
+        ctx.ModelConfig = newConfig;
+        ctx.Client      = newClient;
+        ctx.StepClient  = ReplFactory.BuildClient(newConfig, ctx.Factory, hasTools, ReplTurn.StepIterationLimit);
+
+        // Keep the system message identity line current with the new model.
+        var sysIdx = ctx.History.FindIndex(m => m.Role == ChatRole.System);
+        if (sysIdx >= 0 && ctx.History[sysIdx].Text is { } sysText)
+        {
+            var updated = sysText.Replace(
+                $"running on {prevModel}", $"running on {newModelId}",
+                StringComparison.OrdinalIgnoreCase);
+            ctx.History[sysIdx] = new ChatMessage(ChatRole.System, updated);
+        }
+
+        AnsiConsole.MarkupLine(
+            $"[dim]Model:[/] [bold]{Markup.Escape(prevModel)}[/] [dim]→[/] [bold]{Markup.Escape(newModelId)}[/]  " +
+            $"[dim](history preserved)[/]");
+        await ctx.Emitter.EmitAsync("command", payload: new { command = "/model", model = newModelId, prev = prevModel });
+        return CommandResult.Continue;
+    }
+
+    private static CommandResult CmdRetry(ReplSessionContext ctx)
+    {
+        var idx = ctx.History.FindLastIndex(m => m.Role == ChatRole.User);
+        if (idx < 0)
+        {
+            AnsiConsole.MarkupLine("[dim]No previous message to retry.[/]");
+            return CommandResult.Continue;
+        }
+
+        var lastUserText = ctx.History[idx].Text ?? string.Empty;
+
+        // Remove the last user message and any trailing assistant response.
+        ctx.History.RemoveRange(idx, ctx.History.Count - idx);
+
+        // Un-count the retried turn so TurnIndex stays accurate after ExecuteAsync re-increments.
+        if (ctx.TurnIndex > 0) ctx.TurnIndex--;
+
+        if (ctx.JsonMode)
+            Console.WriteLine($"Retrying: {lastUserText.Replace('\n', ' ').Trim()[..Math.Min(80, lastUserText.Length)]}…");
+        else
+            AnsiConsole.MarkupLine("[dim]Retrying last message…[/]");
+
+        _ = ctx.Emitter.EmitAsync("command", payload: new { command = "/retry" });
+        return CommandResult.Send(lastUserText);
+    }
+
+    private static void CmdLast(ReplSessionContext ctx)
+    {
+        var lastAsst = ctx.History.LastOrDefault(m => m.Role == ChatRole.Assistant);
+        if (lastAsst is null)
+        {
+            if (ctx.JsonMode)
+                Console.WriteLine("No assistant response yet.");
+            else
+                AnsiConsole.MarkupLine("[dim]No assistant response yet.[/]");
+            return;
+        }
+
+        var text = lastAsst.Text ?? string.Empty;
+
+        if (ctx.JsonMode)
+        {
+            Console.WriteLine(text);
+            return;
+        }
+
+        AnsiConsole.MarkupLine("[dim]assistant (last response):[/]");
+        AnsiConsole.Write(MarkdownRenderer.Render(text));
+        AnsiConsole.WriteLine();
+    }
+
     private static async Task CmdSessionsAsync(bool jsonMode, CancellationToken cancellationToken)
     {
         var sessions = await ReplSessionSnapshot.ListAsync(cancellationToken);
@@ -1573,6 +1683,8 @@ internal static class ReplCommands
             Console.WriteLine("- `/conversation` — List all turns with numbers so you can pick a rewind point");
             Console.WriteLine("- `/rewind <n>` — Keep turns 1…n and discard the rest");
             Console.WriteLine("- `/rewind -<n>` — Step back n turns from the current position");
+            Console.WriteLine("- `/retry` — Resend the last message (useful when the response was poor)");
+            Console.WriteLine("- `/last` — Re-print the last assistant response");
             Console.WriteLine("- `/clear` — Clear conversation history (keeps system prompt)");
             Console.WriteLine("- `/history` — Show condensed conversation history");
             Console.WriteLine("- `/assist` — Diagnose the conversation and inject a corrective message");
@@ -1600,6 +1712,8 @@ internal static class ReplCommands
             Console.WriteLine("- `/context` — Show estimated context window usage and per-category breakdown");
             Console.WriteLine("- `/compact` — Summarise conversation into a handoff doc and reset history");
             Console.WriteLine("- `/compact <focus>` — Same, but tailor the summary toward the next session's focus");
+            Console.WriteLine("- `/model` — Show current model");
+            Console.WriteLine("- `/model <id>` — Switch to a different model without clearing history");
             Console.WriteLine("- `/max-tokens <n>` — Set max output tokens for each response");
             Console.WriteLine("- `/max-tokens reset` — Restore provider default max output tokens");
             Console.WriteLine("- `/system` — Show current system prompt");
@@ -1643,6 +1757,8 @@ internal static class ReplCommands
         session.AddRow("[bold cyan]/conversation[/]",   "List all turns with numbers so you can pick a rewind point");
         session.AddRow("[bold cyan]/rewind <n>[/]",     "Keep turns 1…n and discard the rest");
         session.AddRow("[bold cyan]/rewind -<n>[/]",    "Step back n turns from the current position");
+        session.AddRow("[bold cyan]/retry[/]",           "Resend the last message (useful when the response was poor)");
+        session.AddRow("[bold cyan]/last[/]",            "Re-print the last assistant response");
         session.AddRow("[bold cyan]/clear[/]",          "Clear conversation history (keeps system prompt)");
         session.AddRow("[bold cyan]/history[/]",        "Show condensed conversation history");
         session.AddRow("[bold cyan]/assist[/]",         "Diagnose the conversation and inject a corrective message");
@@ -1679,6 +1795,8 @@ internal static class ReplCommands
         ctx.AddRow("[bold cyan]/context[/]",           "Show estimated context window usage and per-category breakdown");
         ctx.AddRow("[bold cyan]/compact[/]",            "Summarise conversation into a handoff doc and reset history");
         ctx.AddRow("[bold cyan]/compact <focus>[/]",    "Same, but tailor the summary toward the next session's focus");
+        ctx.AddRow("[bold cyan]/model[/]",              "Show current model");
+        ctx.AddRow("[bold cyan]/model <id>[/]",         "Switch to a different model without clearing history");
         ctx.AddRow("[bold cyan]/max-tokens <n>[/]",     "Set max output tokens for each response");
         ctx.AddRow("[bold cyan]/max-tokens reset[/]",   "Restore provider default max output tokens");
         ctx.AddRow("[bold cyan]/system[/]",             "Show current system prompt");

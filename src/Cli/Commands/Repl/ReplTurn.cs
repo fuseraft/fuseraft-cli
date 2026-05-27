@@ -499,6 +499,28 @@ internal static class ReplTurn
                 $"[dim]  ── turn {ctx.TurnIndex + 1} · ~{postEst:N0} tok{toolStr}[/]");
         }
 
+        // One-time 75 % context warning. Fires on free-form turns only (not
+        // plan steps or plan-capture) so it never interrupts /execute flow.
+        // Resets after /compact or /clear so it can fire once per "fill cycle".
+        if (!ctx.ContextWarningShown && !isStepRequest && !capturePlan && responseText.Length > 0)
+        {
+            var pct = (double)postEst / ContextTokenBudget;
+            if (pct >= 0.75)
+            {
+                ctx.ContextWarningShown = true;
+                if (ctx.JsonMode)
+                    ReplJsonBridge.Emit(new
+                    {
+                        type = "warning",
+                        text = $"Context is {pct:P0} full. Consider /compact to summarise and free space.",
+                    });
+                else
+                    AnsiConsole.MarkupLine(
+                        $"[dim yellow]  ⚠ Context {pct:P0} full — consider [/][bold]/compact[/]" +
+                        $"[dim yellow] to summarise and free space.[/]");
+            }
+        }
+
         if (TrimHistory(ctx.History))
         {
             if (!ctx.JsonMode)

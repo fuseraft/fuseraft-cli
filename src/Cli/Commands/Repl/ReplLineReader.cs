@@ -8,6 +8,37 @@ namespace fuseraft.Cli.Commands.Repl;
 /// </summary>
 internal sealed class ReplLineReader
 {
+    // ── Tab completion ────────────────────────────────────────────────────────
+
+    private static readonly string[] SlashCommands =
+    [
+        "/adversarial", "/assist", "/clear", "/compact", "/context",
+        "/conversation", "/events", "/execute", "/exit", "/explore",
+        "/fork", "/help", "/history", "/last", "/locate",
+        "/max-tokens", "/memory", "/model", "/paste", "/plan",
+        "/provider", "/recover", "/resume", "/retry", "/rewind",
+        "/safe-mode", "/save", "/sessions", "/switch", "/system",
+        "/tools",
+    ];
+
+    private static readonly Dictionary<string, string[]> SubCommands =
+        new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["/adversarial"] = ["off", "on"],
+        ["/fork"]        = ["switch"],
+        ["/max-tokens"]  = ["reset"],
+        ["/memory"]      = ["delete", "list", "save", "show"],
+        ["/provider"]    = ["setup"],
+        ["/safe-mode"]   = ["off", "on"],
+        ["/tools"]       = ["disable", "enable"],
+    };
+
+    private bool     _tabActive;
+    private int      _tabIndex;
+    private string[] _tabMatches = [];
+
+    // ── Input history ─────────────────────────────────────────────────────────
+
     private readonly List<string> _history = [];
 
     public string? ReadLine()
@@ -83,6 +114,10 @@ internal sealed class ReplLineReader
                 ConsoleKeyInfo info;
                 try { info = Console.ReadKey(intercept: true); }
                 catch (InvalidOperationException) { return null; }
+
+                // Any key other than Tab breaks the current tab-cycling run.
+                if (info.Key != ConsoleKey.Tab)
+                    _tabActive = false;
 
                 switch (info.Key)
                 {
@@ -196,6 +231,57 @@ internal sealed class ReplLineReader
                             Redraw();
                         }
                         break;
+
+                    // ── Tab completion ────────────────────────────────────────
+                    case ConsoleKey.Tab:
+                    {
+                        var text = buffer.ToString();
+                        if (!text.StartsWith('/')) break;
+
+                        var spaceIdx = text.IndexOf(' ');
+                        if (spaceIdx < 0)
+                        {
+                            // Complete the command word.
+                            if (!_tabActive)
+                            {
+                                _tabMatches = SlashCommands
+                                    .Where(c => c.StartsWith(text, StringComparison.OrdinalIgnoreCase))
+                                    .ToArray();
+                                _tabIndex = -1;
+                            }
+                            if (_tabMatches.Length == 0) break;
+                            _tabIndex = (_tabIndex + 1) % _tabMatches.Length;
+                            buffer.Clear();
+                            buffer.Append(_tabMatches[_tabIndex]);
+                            if (_tabMatches.Length == 1) buffer.Append(' ');
+                        }
+                        else
+                        {
+                            // Complete the subcommand word.
+                            var cmd     = text[..spaceIdx];
+                            var partial = text[(spaceIdx + 1)..];
+                            if (!SubCommands.TryGetValue(cmd, out var subs)) break;
+                            if (!_tabActive)
+                            {
+                                _tabMatches = subs
+                                    .Where(s => s.StartsWith(partial, StringComparison.OrdinalIgnoreCase))
+                                    .ToArray();
+                                _tabIndex = -1;
+                            }
+                            if (_tabMatches.Length == 0) break;
+                            _tabIndex = (_tabIndex + 1) % _tabMatches.Length;
+                            buffer.Clear();
+                            buffer.Append(cmd);
+                            buffer.Append(' ');
+                            buffer.Append(_tabMatches[_tabIndex]);
+                            if (_tabMatches.Length == 1) buffer.Append(' ');
+                        }
+
+                        cursorPos  = buffer.Length;
+                        _tabActive = true;
+                        Redraw();
+                        break;
+                    }
 
                     // ── Character insert ──────────────────────────────────────
                     default:
