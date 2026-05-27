@@ -1731,6 +1731,8 @@ internal static class ReplCommands
             sb.AppendLine();
         }
 
+        var dir = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
         File.WriteAllText(path, sb.ToString(), System.Text.Encoding.UTF8);
     }
 
