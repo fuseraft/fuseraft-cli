@@ -297,8 +297,10 @@ public sealed class ChatClientFactory(
 
     // Shared timeout applied to both HttpClient and the OpenAI SDK's per-request
     // NetworkTimeout so the two layers stay in sync. The SDK default is 100 s, which
-    // is too short for long-running Magentic reasoning turns.
-    private static readonly TimeSpan HttpClientTimeout = TimeSpan.FromMinutes(5);
+    // is too short for long-running Magentic reasoning turns. Raised to 20 min so that
+    // reasoning models with large contexts (1 M+ token requests) can complete without
+    // hitting the timeout and triggering the 4-retry chain unnecessarily.
+    private static readonly TimeSpan HttpClientTimeout = TimeSpan.FromMinutes(20);
 
     private static HttpClient BuildResilientClient(string? errorLogPath = null, EventEmitter? eventEmitter = null)
     {
