@@ -48,6 +48,8 @@ PLAN.md
 DEBUGGING.md
 *.lscache
 
+hashnode/
+
 # fuseraft runtime artifacts — config/ and context/ remain tracked
 .fuseraft/*
 !.fuseraft/config/
