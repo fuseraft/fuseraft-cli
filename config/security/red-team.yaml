@@ -42,9 +42,16 @@ Orchestration:
   ## ChangeEnvelope ensures no agent can write outside .fuseraft/red-team/.
   Security:
     FileSystemSandboxPath: .
-    ReadFileSizeLimit: 40000
+    ReadFileSizeLimit: 8000   # ~2 K tokens/file — forces selective reading; prevents context blowup
     ChangeEnvelope:
       - .fuseraft/red-team/**
+
+  ## Warn at 200 K input tokens/turn; force compaction at 600 K to keep the session alive
+  ## instead of accumulating context until the 5-minute network timeout kills it.
+  WarnTurnTokens: 200000
+  ContextBudget:
+    WarnAt: 400000
+    CutoverAt: 700000
 
   ChangeTracking:
     Path: .fuseraft/red-team/changes.json
