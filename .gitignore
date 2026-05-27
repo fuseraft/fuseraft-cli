@@ -56,3 +56,4 @@ hashnode/
 !.fuseraft/config/**
 !.fuseraft/context/
 !.fuseraft/context/**
+temp/TestMetadata/
