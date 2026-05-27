@@ -96,6 +96,10 @@ internal sealed class ReplSessionContext
     public int  LastExtractedTurnIndex = -1;
     public bool PendingSave;
 
+    // One-time context-warning flag; reset by /clear and /compact so the hint
+    // fires once again if the user compacts and then fills context again.
+    public bool ContextWarningShown;
+
     // Ctrl+C interception for in-flight requests only
     public CancellationTokenSource? ActiveCts;
 
