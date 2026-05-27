@@ -396,6 +396,7 @@ public sealed class AgentFactory(
     /// <summary>
     /// Transparent proxy that fires <paramref name="onToolCalling"/> the moment a tool
     /// begins executing, forwarding all schema and metadata from the inner function.
+    /// Deterministically validates that all required parameters are present before invocation.
     /// Using <see cref="DelegatingAIFunction"/> means the model sees the exact same
     /// parameter schema as the original tool.
     /// </summary>
@@ -416,7 +417,57 @@ public sealed class AgentFactory(
             CancellationToken cancellationToken)
         {
             _onToolCalling(_agentName, Name, ToolCallHelper.SummarizeArgs(arguments));
+            
+            // Deterministically validate required parameters BEFORE invocation.
+            // This prevents the ArgumentException from being thrown deep in the invocation stack
+            // and returns a structured error message that the LLM can see and correct.
+            var validationError = ValidateRequiredParameters(arguments);
+            if (validationError is not null)
+                return validationError;
+            
             return await InnerFunction.InvokeAsync(arguments, cancellationToken);
+        }
+
+        /// <summary>
+        /// Validates that all required parameters (non-nullable, non-optional) are present
+        /// in the arguments dictionary. Returns a structured error message if any are missing.
+        /// </summary>
+        private string? ValidateRequiredParameters(AIFunctionArguments arguments)
+        {
+            // Access the underlying C# method to get accurate parameter metadata
+            var method = InnerFunction.GetType()
+                .GetProperty("UnderlyingMethod", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                ?.GetValue(InnerFunction) as System.Reflection.MethodInfo;
+
+            if (method is null)
+                return null; // Can't validate without method metadata
+
+            var missing = new List<string>();
+            foreach (var param in method.GetParameters())
+            {
+                // Skip CancellationToken
+                if (param.ParameterType == typeof(CancellationToken))
+                    continue;
+
+                // A parameter is required if it's not optional and not nullable
+                bool isOptional = param.IsOptional || param.HasDefaultValue;
+                bool isNullable = param.ParameterType.IsClass || 
+                                  Nullable.GetUnderlyingType(param.ParameterType) != null;
+
+                if (!isOptional && !isNullable && !arguments.ContainsKey(param.Name!))
+                {
+                    missing.Add(param.Name!);
+                }
+            }
+
+            if (missing.Count == 0)
+                return null;
+
+            // Build a structured error message that tells the LLM exactly what's wrong.
+            var paramList = string.Join(", ", missing.Select(p => $"'{p}'"));
+            var plural = missing.Count > 1 ? "parameters" : "parameter";
+            return $"[ERROR] Tool call failed: required {plural} {paramList} not provided.\n\n" +
+                   $"To fix: Call {Name} again with all required parameters included.";
         }
     }
 

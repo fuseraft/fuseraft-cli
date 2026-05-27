@@ -18,7 +18,53 @@ internal sealed class ToolEventNotifier(AIFunction inner, EventEmitter emitter, 
         await emitter.EmitAsync("sub_agent_tool_call",
             agent:   agentName,
             payload: new { tool = Name, args = SummarizeArgs(arguments) });
+        
+        // Deterministically validate required parameters BEFORE invocation
+        var validationError = ValidateRequiredParameters(arguments);
+        if (validationError is not null)
+            return validationError;
+        
         return await InnerFunction.InvokeAsync(arguments, cancellationToken);
+    }
+
+    /// <summary>
+    /// Validates that all required parameters are present. Returns a structured error message if any are missing.
+    /// </summary>
+    private string? ValidateRequiredParameters(AIFunctionArguments arguments)
+    {
+        // Access the underlying C# method to get accurate parameter metadata
+        var method = InnerFunction.GetType()
+            .GetProperty("UnderlyingMethod", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+            ?.GetValue(InnerFunction) as System.Reflection.MethodInfo;
+
+        if (method is null)
+            return null; // Can't validate without method metadata
+
+        var missing = new List<string>();
+        foreach (var param in method.GetParameters())
+        {
+            // Skip CancellationToken
+            if (param.ParameterType == typeof(CancellationToken))
+                continue;
+
+            // A parameter is required if it's not optional and not nullable
+            bool isOptional = param.IsOptional || param.HasDefaultValue;
+            bool isNullable = param.ParameterType.IsClass || 
+                              Nullable.GetUnderlyingType(param.ParameterType) != null;
+
+            if (!isOptional && !isNullable && !arguments.ContainsKey(param.Name!))
+            {
+                missing.Add(param.Name!);
+            }
+        }
+
+        if (missing.Count == 0)
+            return null;
+
+        var paramList = string.Join(", ", missing.Select(p => $"'{p}'"));
+        var plural = missing.Count > 1 ? "parameters" : "parameter";
+        return $"[ERROR] Tool call failed: required {plural} {paramList} not provided.\n\n" +
+               $"To fix: Call {Name} again with all required parameters included.";
     }
 
     private static string? SummarizeArgs(AIFunctionArguments? args)

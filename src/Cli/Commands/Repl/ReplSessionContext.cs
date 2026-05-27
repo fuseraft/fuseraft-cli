@@ -61,6 +61,7 @@ internal sealed class ReplSessionContext
 
     // Conversation
     public readonly List<ChatMessage> History;
+    public readonly ConversationCompactor? Compactor;
 
     // Plan/execution
     public PlanStep[]?                                CurrentPlan;
@@ -112,7 +113,7 @@ internal sealed class ReplSessionContext
         IApiKeyStore keyStore, EventEmitter emitter, string eventsPath,
         MemoryStore memoryStore, Dictionary<string, List<AIFunction>> toolsByCategory,
         string systemPrompt, bool pendingSave, bool verbose = false,
-        SubAgentPlugin? subAgent = null)
+        SubAgentPlugin? subAgent = null, ConversationCompactor? compactor = null)
     {
         Cwd             = cwd;
         SessionId       = sessionId;
@@ -132,6 +133,7 @@ internal sealed class ReplSessionContext
         Verbose         = verbose;
         History         = [new ChatMessage(ChatRole.System, systemPrompt)];
         ChatOptions     = BuildChatOptions();
+        Compactor       = compactor;
     }
 
     public void ResetPlanState()
