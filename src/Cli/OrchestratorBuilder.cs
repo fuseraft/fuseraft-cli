@@ -321,6 +321,15 @@ public static class OrchestratorBuilder
                 "The change envelope will not be enforced. Add a FileSystemSandboxPath to enable it.");
         }
 
+        // Warn when FileSystemPermissions is configured without a sandbox root.
+        if (config.Security?.FileSystemPermissions is not null
+            && string.IsNullOrEmpty(config.Security.FileSystemSandboxPath))
+        {
+            loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
+                "Security.FileSystemPermissions is configured but Security.FileSystemSandboxPath is not set. " +
+                "Filesystem permission globs will not be enforced. Add a FileSystemSandboxPath to enable them.");
+        }
+
         // Connect to MCP servers and register their tools before building agents.
         var mcpManager = new McpSessionManager(loggerFactory);
         if (config.McpServers.Count > 0)
