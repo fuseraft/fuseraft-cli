@@ -46,9 +46,9 @@ public sealed record OrchestratorBuildResult(
 public static class OrchestratorBuilder
 {
     /// <summary>
-    /// Set to <c>true</c> by <c>--vscode</c> flag. When true, the API key is read
-    /// from the <c>FUSERAFT_API_KEY</c> environment variable (injected by the VS Code
-    /// extension) instead of the OS keychain.
+    /// Set to <c>true</c> by <c>--vscode</c> flag. When true, <c>FUSERAFT_API_KEY</c>
+    /// (injected by the VS Code extension) is preferred over the OS keychain for API
+    /// key resolution. If the env var is absent the keychain is used as a fallback.
     /// </summary>
     public static bool VsCodeMode { get; set; }
 
@@ -963,9 +963,23 @@ public static class OrchestratorBuilder
 
         if (!anyAgentNeedsKey) return config;
 
-        var keychainKey = VsCodeMode
-            ? Environment.GetEnvironmentVariable("FUSERAFT_API_KEY")
-            : await ApiKeyStoreFactory.Create().RetrieveAsync();
+        // In VS Code mode prefer FUSERAFT_API_KEY (injected by the extension from
+        // ~/.fuseraft/config) but fall back to the OS keychain so that runs stay
+        // functional after a legacy-key migration has removed the plaintext apiKey
+        // field from the config (which causes the extension to stop injecting the
+        // env var).
+        string? keychainKey;
+        if (VsCodeMode)
+        {
+            var envKey = Environment.GetEnvironmentVariable("FUSERAFT_API_KEY");
+            keychainKey = !string.IsNullOrWhiteSpace(envKey)
+                ? envKey
+                : await ApiKeyStoreFactory.Create().RetrieveAsync();
+        }
+        else
+        {
+            keychainKey = await ApiKeyStoreFactory.Create().RetrieveAsync();
+        }
         if (string.IsNullOrWhiteSpace(keychainKey)) return config;
 
         ModelConfig Fill(ModelConfig m) =>
