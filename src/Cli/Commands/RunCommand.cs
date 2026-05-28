@@ -292,12 +292,18 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             AnsiConsole.MarkupLine("[dim]HITL mode enabled — you will be prompted after each agent turn.[/]\n");
 
         // Prepare checkpoint
+        var isNewSession = checkpoint is null;
         checkpoint ??= new SessionCheckpoint
         {
             SessionId  = Guid.NewGuid().ToString("N")[..8],
             Task       = task,
             ConfigPath = configPath
         };
+
+        // Write a seed checkpoint immediately so this session appears in the sessions list
+        // even if the process dies before the first agent turn completes.
+        if (isNewSession)
+            await activeStore.SaveAsync(checkpoint, cancellationToken);
 
         // Set up the context window recorder — appends per-turn snapshots for post-run visualization.
         var ctxSnapshotsPath = Path.Combine(fuseraft.Core.FuseraftPaths.LocalLogs,

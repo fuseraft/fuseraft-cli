@@ -291,6 +291,11 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         if (jsonMode)
             ReplJsonBridge.Emit(new { type = "ready", sessionId, model = modelId });
 
+        // Write a seed snapshot immediately so this session appears in the sessions list
+        // even if the process dies before the first turn completes.
+        if (snapshot is null)
+            _ = ReplTurn.SaveSnapshotAsync(ctx);
+
         await ReplTurn.RunAsync(ctx, cancellationToken);
 
         await emitter.EmitAsync("session_end", payload: new { turns = ctx.TurnIndex });
