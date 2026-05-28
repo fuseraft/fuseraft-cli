@@ -165,41 +165,69 @@ public sealed class AgentFactory(
         var hasHandoff = config.Plugins.Any(p =>
             p.Equals(HandoffPlugin.PluginName, StringComparison.OrdinalIgnoreCase));
 
-        // Wrap the chat client when options merging, budget enforcement, or handoff
-        // termination is needed.
-        var effectiveClient = chatOptions is not null || maxContextChars > 0 || maxInTurnChars > 0 || maxPayloadBytes > 0 || hasHandoff
-            ? chatClient.AsBuilder()
-                .Use(
-                    getResponseFunc: (messages, options, inner, ct) =>
+        // Always wrap: the adaptive context-trim retry fires on any provider rejection
+        // classified as ContextExceeded, regardless of whether explicit limits are set.
+        var effectiveClient = chatClient.AsBuilder()
+            .Use(
+                getResponseFunc: async (messages, options, inner, ct) =>
+                {
+                    if (maxInTurnChars > 0)
+                        messages = TrimInTurnContext(messages, maxInTurnChars);
+
+                    // Stop the FunctionInvokingChatClient loop immediately after handoff —
+                    // no follow-up LLM call is made, so the agent cannot call more tools.
+                    if (hasHandoff && HandoffWasInvoked(messages))
+                        return new ChatResponse(new ChatMessage(ChatRole.Assistant, string.Empty));
+
+                    var merged  = chatOptions is not null ? MergeOptions(messages, options, chatOptions) : options;
+                    var baseMsg = messages as IReadOnlyList<ChatMessage> ?? messages.ToList();
+
+                    // Adaptive retry: on ContextExceeded the context is progressively
+                    // trimmed (tool results truncated → dropped) and the call retried.
+                    // Pre-flight budget/payload checks run on each attempt so they act as
+                    // early-exit guards rather than hard failures.
+                    for (int attempt = 0; ; attempt++)
                     {
-                        if (maxInTurnChars > 0)
-                            messages = TrimInTurnContext(messages, maxInTurnChars);
-                        if (maxContextChars > 0)
-                            EnforceContextBudget(config.Name, messages, maxContextChars, toolSchemaChars);
-                        if (maxPayloadBytes > 0)
-                            EnforcePayloadLimit(config.Name, messages, toolSchemaChars, maxPayloadBytes);
-                        // Stop the FunctionInvokingChatClient loop immediately after handoff —
-                        // no follow-up LLM call is made, so the agent cannot call more tools.
-                        if (hasHandoff && HandoffWasInvoked(messages))
-                            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, string.Empty)));
-                        var merged = chatOptions is not null ? MergeOptions(messages, options, chatOptions) : options;
-                        return inner.GetResponseAsync(messages, merged, ct);
-                    },
-                    getStreamingResponseFunc: (messages, options, inner, ct) =>
-                    {
-                        if (maxInTurnChars > 0)
-                            messages = TrimInTurnContext(messages, maxInTurnChars);
-                        if (maxContextChars > 0)
-                            EnforceContextBudget(config.Name, messages, maxContextChars, toolSchemaChars);
-                        if (maxPayloadBytes > 0)
-                            EnforcePayloadLimit(config.Name, messages, toolSchemaChars, maxPayloadBytes);
-                        if (hasHandoff && HandoffWasInvoked(messages))
-                            return EmptyStreamingResponse();
-                        var merged = chatOptions is not null ? MergeOptions(messages, options, chatOptions) : options;
-                        return inner.GetStreamingResponseAsync(messages, merged, ct);
-                    })
-                .Build()
-            : chatClient;
+                        var ctx = attempt == 0
+                            ? (IEnumerable<ChatMessage>)baseMsg
+                            : AdaptiveTrimMessages(baseMsg, attempt);
+                        try
+                        {
+                            if (maxContextChars > 0)
+                                EnforceContextBudget(config.Name, ctx, maxContextChars, toolSchemaChars);
+                            if (maxPayloadBytes > 0)
+                                EnforcePayloadLimit(config.Name, ctx, toolSchemaChars, maxPayloadBytes);
+                            return await inner.GetResponseAsync(ctx, merged, ct);
+                        }
+                        catch (Exception ex) when (attempt < AdaptiveContextTrimMaxRetries
+                                                   && IsContextLimitException(ex))
+                        {
+                            Console.Error.WriteLine(
+                                $"[context-trim] {config.Name} stage {attempt + 1}/{AdaptiveContextTrimMaxRetries}: " +
+                                $"{ex.Message[..Math.Min(ex.Message.Length, 120)].Replace('\n', ' ')} — " +
+                                $"reducing tool results and retrying...");
+                        }
+                    }
+                },
+                getStreamingResponseFunc: (messages, options, inner, ct) =>
+                {
+                    if (maxInTurnChars > 0)
+                        messages = TrimInTurnContext(messages, maxInTurnChars);
+                    if (hasHandoff && HandoffWasInvoked(messages))
+                        return EmptyStreamingResponse();
+
+                    var merged = chatOptions is not null ? MergeOptions(messages, options, chatOptions) : options;
+
+                    // Cannot retry mid-stream — pre-trim proactively when limits are known.
+                    // Without configured limits we have no target, so trimming is skipped and
+                    // a provider rejection surfaces as a normal error for the user to see.
+                    if (maxContextChars > 0 || maxPayloadBytes > 0)
+                        messages = ProactivelyTrimIfNeeded(
+                            config.Name, messages, maxContextChars, maxPayloadBytes, toolSchemaChars);
+
+                    return inner.GetStreamingResponseAsync(messages, merged, ct);
+                })
+            .Build();
 
         // Pre-configure FunctionInvokingChatClient so ChatClientAgent reuses our instance
         // (it only adds its own when none is present in the pipeline). This lets us set
@@ -533,6 +561,127 @@ public sealed class AgentFactory(
         }
 
         return result;
+    }
+
+    // Number of adaptive-trim stages before giving up and propagating the exception.
+    // Stage 1: truncate all tool results to 4 000 chars (~1 000 tokens each)
+    // Stage 2: truncate to 500 chars — still useful for agent reasoning
+    // Stage 3: drop all tool messages entirely (text-only nuclear option)
+    private const int AdaptiveContextTrimMaxRetries = 3;
+
+    // Produces a trimmed copy of messages for the given retry stage.
+    private static List<ChatMessage> AdaptiveTrimMessages(
+        IReadOnlyList<ChatMessage> messages,
+        int stage)
+    {
+        int maxResultChars = stage switch
+        {
+            1 => 4_000,
+            2 =>   500,
+            _ =>     0, // stage 3+: nuclear — drop all tool content
+        };
+
+        return maxResultChars > 0
+            ? TrimToolResultsToChars(messages, maxResultChars)
+            : DropAllToolContent(messages);
+    }
+
+    // Truncates every FunctionResultContent string to maxChars in ChatRole.Tool messages.
+    private static List<ChatMessage> TrimToolResultsToChars(
+        IReadOnlyList<ChatMessage> messages,
+        int maxChars)
+    {
+        var result = new List<ChatMessage>(messages.Count);
+        foreach (var msg in messages)
+        {
+            if (msg.Role != ChatRole.Tool) { result.Add(msg); continue; }
+
+            bool changed = false;
+            var newContents = new List<AIContent>(msg.Contents.Count);
+            foreach (var content in msg.Contents)
+            {
+                if (content is FunctionResultContent fr && fr.Result is string s && s.Length > maxChars)
+                {
+                    newContents.Add(new FunctionResultContent(fr.CallId,
+                        s[..maxChars] +
+                        $"\n[...context-trimmed — {s.Length - maxChars:N0} chars removed to fit model limit...]"));
+                    changed = true;
+                }
+                else
+                {
+                    newContents.Add(content);
+                }
+            }
+            result.Add(changed ? new ChatMessage(ChatRole.Tool, newContents) : msg);
+        }
+        return result;
+    }
+
+    // Drops all ChatRole.Tool messages and strips FunctionCallContent from assistant messages.
+    // Equivalent to ContextWindowConfig.TextOnly filtering — structurally valid for all providers.
+    private static List<ChatMessage> DropAllToolContent(IReadOnlyList<ChatMessage> messages)
+    {
+        var result = new List<ChatMessage>(messages.Count);
+        foreach (var msg in messages)
+        {
+            if (msg.Role == ChatRole.Tool) continue;
+
+            if (msg.Role == ChatRole.Assistant)
+            {
+                var textContents = msg.Contents
+                    .OfType<TextContent>()
+                    .Where(t => !string.IsNullOrEmpty(t.Text))
+                    .ToList<AIContent>();
+                if (textContents.Count > 0)
+                    result.Add(new ChatMessage(ChatRole.Assistant, textContents) { AuthorName = msg.AuthorName });
+                continue;
+            }
+
+            result.Add(msg);
+        }
+        return result;
+    }
+
+    // Returns true when the exception should trigger an adaptive-trim retry.
+    // Covers both our own pre-flight throws and provider-level ContextExceeded signals.
+    private static bool IsContextLimitException(Exception ex) =>
+        ProviderErrorClassifier.Classify(ex) == FailoverReason.ContextExceeded ||
+        (ex is InvalidOperationException &&
+         (ex.Message.Contains("Context budget exceeded",   StringComparison.OrdinalIgnoreCase) ||
+          ex.Message.Contains("Estimated request payload", StringComparison.OrdinalIgnoreCase)));
+
+    // Proactively trims messages before streaming when explicit limits are configured.
+    // Without limits we have no target and skip trimming entirely — the caller sees the error.
+    private static IEnumerable<ChatMessage> ProactivelyTrimIfNeeded(
+        string agentName,
+        IEnumerable<ChatMessage> messages,
+        int maxContextChars,
+        long maxPayloadBytes,
+        int toolSchemaChars)
+    {
+        var list = messages as IReadOnlyList<ChatMessage> ?? messages.ToList();
+
+        for (int stage = 0; stage <= AdaptiveContextTrimMaxRetries; stage++)
+        {
+            IReadOnlyList<ChatMessage> ctx = stage == 0
+                ? list
+                : AdaptiveTrimMessages(list, stage);
+
+            int msgChars   = ctx.Sum(m => m.Contents.Sum(EstimateContentChars));
+            int totalChars = msgChars + toolSchemaChars;
+
+            bool contextOk = maxContextChars == 0 || totalChars <= maxContextChars;
+            bool payloadOk = maxPayloadBytes  == 0 || (long)(totalChars * 1.2) + 2048 <= maxPayloadBytes;
+
+            if (contextOk && payloadOk) return ctx;
+
+            if (stage < AdaptiveContextTrimMaxRetries)
+                Console.Error.WriteLine(
+                    $"[context-trim] {agentName} streaming pre-trim stage {stage + 1}: " +
+                    $"~{totalChars / 4:N0} tokens — reducing tool results...");
+        }
+
+        return DropAllToolContent(list);
     }
 
     private static int EstimateContentChars(AIContent content) => content switch
