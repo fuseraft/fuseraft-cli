@@ -131,7 +131,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         using var factory = new ChatClientFactory();
 
         var toolsByCategory = new Dictionary<string, List<AIFunction>>(StringComparer.OrdinalIgnoreCase);
-        using ShellPlugin? shellPlugin = settings.NoTools ? null : new ShellPlugin();
+        using ShellPlugin? shellPlugin = settings.NoTools ? null : new ShellPlugin(shellPolicy: TryLoadDefaultShellPolicy());
         SubAgentPlugin? subAgent = null;
         SkillsPlugin?   skillsPlugin   = null;
         string?         skillsCatalog  = null;
@@ -310,6 +310,31 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
     // -------------------------------------------------------------------------
     // Private setup helpers
     // -------------------------------------------------------------------------
+
+    // Loads ShellPolicy from the default orchestration config in the working directory, if one exists.
+    // Allows the REPL to honour shell allow/deny rules without requiring a --config flag.
+    private static ShellPolicy? TryLoadDefaultShellPolicy()
+    {
+        var candidates = new[]
+        {
+            Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "config", "orchestration.yaml"),
+            Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "config", "orchestration.json"),
+        };
+
+        foreach (var path in candidates)
+        {
+            if (!File.Exists(path)) continue;
+            try
+            {
+                var cfg = OrchestratorBuilder.LoadConfig(path);
+                if (cfg.Security?.ShellPolicy is { } policy)
+                    return policy;
+            }
+            catch { /* best effort — malformed config should not crash the REPL */ }
+        }
+
+        return null;
+    }
 
     private static string? ResolveModelId(ReplSettings settings, UserConfig? userCfg)
     {

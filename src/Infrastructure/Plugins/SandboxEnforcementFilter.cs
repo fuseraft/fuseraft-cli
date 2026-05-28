@@ -81,17 +81,47 @@ public sealed class SandboxEnforcementFilter
     private static readonly string[] EnvelopedFunctions =
         ["write_file", "patch_file", "delete_file"];
 
-    // All filesystem functions whose path arguments are checked against deny/read/write globs.
-    private static readonly HashSet<string> ReadOnlyFsFunctions = new(StringComparer.OrdinalIgnoreCase)
+    // Functions whose path content is protected by Read globs (actual file content is returned).
+    private static readonly HashSet<string> ContentReadFsFunctions = new(StringComparer.OrdinalIgnoreCase)
     {
-        "read_file", "grep_file", "list_files", "stat_file",
-        "path_exists", "list_directory", "get_file_info", "get_file_summary",
+        "read_file", "grep_file", "get_file_summary",
     };
 
+    // Functions that access only metadata (names, sizes, timestamps) — exempt from Read globs
+    // but still subject to sandbox boundary and Deny glob checks.
+    private static readonly HashSet<string> MetadataFsFunctions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "list_files", "list_directory", "path_exists", "stat_file", "get_file_info",
+    };
+
+    // Functions that write to user-specified paths.
     private static readonly HashSet<string> WriteOnlyFsFunctions = new(StringComparer.OrdinalIgnoreCase)
     {
         "write_file", "patch_file", "delete_file", "create_directory",
-        "delete_directory", "copy_file", "move_file", "set_permissions",
+        "delete_directory", "set_permissions",
+    };
+
+    // Functions where source is read and destination is written — each arg type gets its own glob check.
+    private static readonly HashSet<string> MixedReadWriteFunctions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "copy_file", "move_file",
+    };
+
+    // Functions that write internal metadata about a path — Deny glob applies to the path arg
+    // but write/read globs and the change envelope do not (the write target is .fuseraft/summaries/).
+    private static readonly HashSet<string> DenyCheckedFsFunctions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "save_file_summary",
+    };
+
+    // All extended FS functions eligible for glob-level checks (used for routing in Inspect).
+    private static readonly HashSet<string> AllExtendedFsFunctions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "read_file", "grep_file", "get_file_summary",
+        "list_files", "list_directory", "path_exists", "stat_file", "get_file_info",
+        "write_file", "patch_file", "delete_file", "create_directory", "delete_directory", "set_permissions",
+        "copy_file", "move_file",
+        "save_file_summary",
     };
 
     // Arg names that may carry file/directory paths across all filesystem functions.
@@ -164,13 +194,12 @@ public sealed class SandboxEnforcementFilter
         var ringDenial = InspectRing(functionName);
         if (ringDenial is not null) return ringDenial;
 
-        // Apply filesystem checks to core functions AND to the extended read/write sets
-        // added by FileSystemPermissions (grep_file, patch_file, copy_file, etc.).
+        // Core FS functions are always sandboxed; extended functions are routed when any glob
+        // matcher is configured so they get sandbox + deny/read/write checks.
+        bool hasGlobMatcher = _fsDenyMatcher is not null || _fsReadMatcher is not null || _fsWriteMatcher is not null;
         bool isFsFunction = FileSystemFunctions.Any(f =>
                 string.Equals(f, functionName, StringComparison.OrdinalIgnoreCase))
-            || (_fsDenyMatcher  is not null && (ReadOnlyFsFunctions.Contains(functionName) || WriteOnlyFsFunctions.Contains(functionName)))
-            || (_fsReadMatcher  is not null && ReadOnlyFsFunctions.Contains(functionName))
-            || (_fsWriteMatcher is not null && WriteOnlyFsFunctions.Contains(functionName));
+            || (hasGlobMatcher && AllExtendedFsFunctions.Contains(functionName));
 
         if (isFsFunction)
             return InspectFileSystem(functionName, args);
@@ -203,13 +232,14 @@ public sealed class SandboxEnforcementFilter
     {
         if (args is null) return null;
 
+        bool isMixedOp   = MixedReadWriteFunctions.Contains(functionName);
+        bool isMetadata  = MetadataFsFunctions.Contains(functionName);
+        bool isDenyOnly  = DenyCheckedFsFunctions.Contains(functionName);
         bool isEnveloped = _changeEnvelopeMatcher is not null &&
             EnvelopedFunctions.Any(f => string.Equals(f, functionName, StringComparison.OrdinalIgnoreCase));
-        bool isReadOp  = _fsReadMatcher  is not null && ReadOnlyFsFunctions.Contains(functionName);
-        bool isWriteOp = _fsWriteMatcher is not null && WriteOnlyFsFunctions.Contains(functionName);
+        bool isContentRead = _fsReadMatcher  is not null && ContentReadFsFunctions.Contains(functionName);
+        bool isWriteOp     = _fsWriteMatcher is not null && WriteOnlyFsFunctions.Contains(functionName);
 
-        // Extended arg name list covers copy_file/move_file (source/destination) in addition
-        // to the standard path/directory args used by all other filesystem functions.
         foreach (var argName in (ReadOnlySpan<string>)FsPathArgNames)
         {
             if (!args.TryGetValue(argName, out var val) || val is not string raw) continue;
@@ -218,34 +248,47 @@ public sealed class SandboxEnforcementFilter
             var sandboxDenial = CheckPath(raw);
             if (sandboxDenial is not null) return sandboxDenial;
 
-            // 2. Deny glob — hard-blocks matching paths regardless of read/write.
+            // 2. Deny glob — hard-blocks matching paths for all FS functions.
             if (_fsDenyMatcher is not null)
             {
                 var denyDenial = CheckGlob(raw, _fsDenyMatcher, matchMeansDeny: true,
-                    $"Path is blocked by a configured FileSystem deny rule.");
+                    "Path is blocked by a configured FileSystem deny rule.");
                 if (denyDenial is not null) return denyDenial;
             }
 
-            // 3. Change envelope check (existing brownfield feature).
-            if (isEnveloped)
+            // Metadata and deny-only functions stop here — no read/write glob or envelope checks.
+            if (isMetadata || isDenyOnly) continue;
+
+            bool isSourceArg = string.Equals(argName, "source",      StringComparison.OrdinalIgnoreCase);
+            bool isDestArg   = string.Equals(argName, "destination", StringComparison.OrdinalIgnoreCase);
+
+            // 3. Change envelope (existing brownfield feature).
+            //    Mixed ops: envelope applies only to the destination (the write target).
+            if (isEnveloped && (!isMixedOp || isDestArg))
             {
                 var envelopeDenial = CheckEnvelope(raw);
                 if (envelopeDenial is not null) return envelopeDenial;
             }
 
-            // 4. Write glob — restricts write operations to matching paths.
-            if (isWriteOp)
+            // 4. Write glob.
+            //    Pure write ops: all path args.
+            //    Mixed ops (copy_file/move_file): destination only — the source is read, not written.
+            bool applyWriteGlob = isWriteOp || (_fsWriteMatcher is not null && isMixedOp && isDestArg);
+            if (applyWriteGlob)
             {
                 var writeDenial = CheckGlob(raw, _fsWriteMatcher!, matchMeansDeny: false,
-                    $"Path is outside the configured FileSystem write permissions.");
+                    "Path is outside the configured FileSystem write permissions.");
                 if (writeDenial is not null) return writeDenial;
             }
 
-            // 5. Read glob — restricts read operations to matching paths.
-            if (isReadOp)
+            // 5. Read glob.
+            //    Content-read ops: all path args.
+            //    Mixed ops (copy_file/move_file): source only — the destination is written, not read.
+            bool applyReadGlob = isContentRead || (_fsReadMatcher is not null && isMixedOp && isSourceArg);
+            if (applyReadGlob)
             {
                 var readDenial = CheckGlob(raw, _fsReadMatcher!, matchMeansDeny: false,
-                    $"Path is outside the configured FileSystem read permissions.");
+                    "Path is outside the configured FileSystem read permissions.");
                 if (readDenial is not null) return readDenial;
             }
         }
