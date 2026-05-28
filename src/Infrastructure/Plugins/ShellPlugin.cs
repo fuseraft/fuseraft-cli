@@ -134,7 +134,7 @@ public sealed class ShellPlugin : IDisposable
         if (denial is not null) return denial;
 
         var ext     = OperatingSystem.IsWindows() ? ".cmd" : ".sh";
-        var tmpFile = Path.Combine(Path.GetTempPath(), $"fuseraft_{Guid.NewGuid():N}{ext}");
+        var tmpFile = FuseraftPaths.NewTempFile("script", ext);
 
         try
         {
@@ -204,9 +204,7 @@ public sealed class ShellPlugin : IDisposable
             {
                 if (_sessionTempDir is null)
                 {
-                    var path = Path.Combine(Path.GetTempPath(), $"fuseraft_{Guid.NewGuid():N}");
-                    Directory.CreateDirectory(path);
-                    _sessionTempDir = path;
+                    _sessionTempDir = FuseraftPaths.NewTempDir();
                 }
             }
         }

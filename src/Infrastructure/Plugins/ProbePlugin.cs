@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
+using fuseraft.Core;
 
 namespace fuseraft.Infrastructure.Plugins;
 
@@ -60,7 +61,7 @@ public sealed class ProbePlugin
 
             if (runner.UseTempFile)
             {
-                tempFile = Path.Combine(Path.GetTempPath(), $"fuseraft_probe_{Guid.NewGuid():N}{runner.TempExtension}");
+                tempFile = FuseraftPaths.NewTempFile("probe", runner.TempExtension);
                 await File.WriteAllTextAsync(tempFile, code);
                 // Pass the temp-file path as a separate argument — no quoting needed.
                 result = await ProcessHelper.RunAsync(

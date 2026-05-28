@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
 using fuseraft.Cli.Display;
+using fuseraft.Core;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 
@@ -46,6 +47,7 @@ internal static class ReplCommands
             case "/model":         return await CmdModelAsync(ctx, arg);
             case "/retry":         return CmdRetry(ctx);
             case "/last":          CmdLast(ctx); return CommandResult.Continue;
+            case "/snapshot":      await CmdSnapshotAsync(ctx); return CommandResult.Continue;
             default:
                 AnsiConsole.MarkupLine(
                     $"[yellow]Unknown command:[/] {Markup.Escape(command)}  [dim](type /help for commands)[/]");
@@ -1729,6 +1731,7 @@ internal static class ReplCommands
             Console.WriteLine("### I/O & events");
             Console.WriteLine("- `/save` — Save transcript to `repl-<id>.md` in the current directory");
             Console.WriteLine("- `/save <file>` — Save transcript to the specified file");
+            Console.WriteLine("- `/snapshot` — Write a full debug snapshot (context, tools, history, plan) to a temp file");
             Console.WriteLine("- `/events` — Show session event stats (turns, tool calls, top tools)");
             Console.WriteLine("- `/explore <query>` — Run a sub-agent exploration loop and return a prose summary");
             Console.WriteLine("- `/locate <symbol>` — Run a sub-agent symbol lookup; returns `path:line` result");
@@ -1820,11 +1823,79 @@ internal static class ReplCommands
         io.AddRow("[bold cyan]/paste[/]",           "Enter paste mode (multi-line input; type EOF to finish)");
         io.AddRow("[bold cyan]/save[/]",             "Save transcript to repl-<id>.md in the current directory");
         io.AddRow("[bold cyan]/save <file>[/]",      "Save transcript to the specified file");
+        io.AddRow("[bold cyan]/snapshot[/]",          "Write a full debug snapshot (context, tools, history, plan) to a temp file");
         io.AddRow("[bold cyan]/events[/]",           "Show session event stats (turns, tool calls, top tools)");
         io.AddRow("[bold cyan]/events stats[/]",     "Same as /events");
         io.AddRow("[bold cyan]/explore <query>[/]",  "Run a sub-agent exploration loop and return a prose summary");
         io.AddRow("[bold cyan]/locate <symbol>[/]",  "Run a sub-agent symbol lookup; returns path:line result");
         AnsiConsole.Write(io);
+    }
+
+    private static async Task CmdSnapshotAsync(ReplSessionContext ctx)
+    {
+        var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+        var path = Path.Combine(FuseraftPaths.SystemTempRoot, $"repl-snapshot-{ctx.SessionId}-{timestamp}.json");
+        Directory.CreateDirectory(FuseraftPaths.SystemTempRoot);
+
+        var snapshot = new
+        {
+            session = new
+            {
+                sessionId              = ctx.SessionId,
+                modelId                = ctx.ModelId,
+                cwd                    = ctx.Cwd,
+                eventsPath             = ctx.EventsPath,
+                startedAt              = ctx.StartedAt,
+                capturedAt             = DateTime.UtcNow,
+                turnIndex              = ctx.TurnIndex,
+                lastExtractedTurnIndex = ctx.LastExtractedTurnIndex,
+                pendingSave            = ctx.PendingSave,
+            },
+            modes = new
+            {
+                jsonMode        = ctx.JsonMode,
+                safeMode        = ctx.SafeMode,
+                adversarialMode = ctx.AdversarialMode,
+                maxOutputTokens = ctx.MaxOutputTokens,
+                verbose         = ctx.Verbose,
+            },
+            context = new
+            {
+                estimatedTokens       = ctx.EstimateTokens(),
+                prevCtxEstimate       = ctx.PrevCtxEstimate,
+                prevTurnTokenEstimate = ctx.PrevTurnTokenEstimate,
+                turnTokenDeltas       = ctx.TurnTokenDeltas,
+                contextWarningShown   = ctx.ContextWarningShown,
+            },
+            tools = new
+            {
+                disabledCategories = ctx.DisabledCategories.ToList(),
+                activeCount        = ctx.GetActiveTools().Count,
+                categories         = ctx.ToolsByCategory.Select(kv => new
+                {
+                    category = kv.Key,
+                    disabled = ctx.DisabledCategories.Contains(kv.Key),
+                    count    = kv.Value.Count,
+                    tools    = kv.Value.Select(t => t.Name).ToList(),
+                }).ToList(),
+            },
+            plan = ctx.CurrentPlan is null && ctx.ExecutionQueue.Count == 0 && ctx.HaltedAt is null
+                ? (object?)null
+                : new
+                {
+                    currentPlan     = ctx.CurrentPlan,
+                    executionQueue  = ctx.ExecutionQueue.Select(e => new { step = e.Step, total = e.Total }).ToArray(),
+                    haltedAt        = ctx.HaltedAt is { } h ? new { step = h.Step, total = h.Total } : (object?)null,
+                    haltedRemaining = ctx.HaltedRemaining.Select(e => new { step = e.Step, total = e.Total }).ToArray(),
+                    haltedToolCalls = ctx.HaltedToolCalls,
+                    recoveryHint    = ctx.RecoveryHint,
+                },
+            history = ctx.History.Select(ReplSerializedMessage.From).ToList(),
+        };
+
+        var opts = new JsonSerializerOptions { WriteIndented = true };
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(snapshot, opts));
+        AnsiConsole.MarkupLine($"[green]Snapshot written:[/] {Markup.Escape(path)}");
     }
 
     private static void SaveTranscript(List<ChatMessage> history, string modelId, string path)
