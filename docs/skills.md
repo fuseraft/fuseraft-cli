@@ -37,9 +37,19 @@ If `--no-tools` is passed, skills are disabled for that session.
 
 ---
 
-## Built-in skill: `sandbox-test`
+## Shipped skills
 
-fuseraft ships with a `sandbox-test` skill. It activates automatically when the agent needs to verify logic before touching real source files — for example, when debugging a defect, testing an edge case, or confirming a behavioral hypothesis.
+fuseraft ships with the following built-in skills. Install any of them globally with `fuseraft skills add`:
+
+```bash
+fuseraft skills add path/to/fuseraft/skills/sandbox-test
+```
+
+---
+
+### `sandbox-test`
+
+Activates automatically when the agent needs to verify logic before touching real source files — for example, when debugging a defect, testing an edge case, or confirming a behavioral hypothesis.
 
 When it triggers, the agent will:
 
@@ -50,6 +60,38 @@ When it triggers, the agent will:
 5. Apply the confirmed change to your real files and remove the harness.
 
 You don't need to invoke this skill explicitly — it activates on its own when appropriate.
+
+---
+
+### `craft-orchestration`
+
+Guides the agent through building a valid, runnable `orchestration.yaml` from scratch. Triggers when the user asks to create or scaffold a fuseraft config, set up a multi-agent pipeline, or convert a described workflow into a runnable config.
+
+The skill gathers requirements (agent roles, model, routing strategy, plugins, validators), picks the right skeleton, generates the YAML, validates it with `fuseraft validate`, and writes it to disk ready to run.
+
+---
+
+### `debug-session`
+
+Diagnoses a failing, stuck, or unexpectedly terminated `fuseraft run` session. Triggers when a session looped without progress, raised a `ValidatorStuckException`, hit the iteration cap, crashed, or stopped with a budget or circuit-breaker error.
+
+The skill reads the session checkpoint, events log, and crash dumps, maps the symptoms to a root cause (stuck validator, missing keyword, context loss after compaction, API failures, sandbox denial), and recommends the exact config or instruction fix.
+
+---
+
+### `config-audit`
+
+Reviews an existing orchestration config for correctness before running it. Triggers when the user wants to validate a config, when `fuseraft validate` passes but the run still fails, or when a config was recently written or modified.
+
+The skill runs `fuseraft validate`, then performs a deeper semantic audit: routing keyword alignment, plugin prerequisites, validator dependency chains, termination safety, failure handling, instruction quality, and model alias consistency. Findings are grouped by severity (error / warning / suggestion).
+
+---
+
+### `mcp-setup`
+
+Connects a fuseraft config to an MCP server and wires its tools to agents. Triggers when the user wants to add an MCP server (npm package, Python module, or HTTP endpoint), or when an existing `McpServers` block is failing at startup.
+
+The skill verifies the server command or endpoint, adds the `McpServers` entry to the config, wires the plugin name to the right agents, validates the result, and runs a one-turn dry-run to confirm the connection and tool registration.
 
 ---
 
