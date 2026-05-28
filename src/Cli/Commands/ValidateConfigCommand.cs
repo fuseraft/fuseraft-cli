@@ -589,6 +589,62 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
                 if (!string.IsNullOrWhiteSpace(t.RecoveryAgent) && !agentNames.Contains(t.RecoveryAgent))
                     issues.Add(("warning", $"{tpfx}: RecoveryAgent '{t.RecoveryAgent}' is not defined in Agents."));
+
+                // Parallel transition checks.
+                if (t.Parallel)
+                {
+                    if (t.Targets is null or { Count: 0 })
+                    {
+                        issues.Add(("error",
+                            $"{tpfx}: Parallel transition requires at least one entry in Targets."));
+                    }
+                    else
+                    {
+                        var seenTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var target in t.Targets)
+                        {
+                            if (!seenTargets.Add(target))
+                                issues.Add(("warning", $"{tpfx}: Duplicate target state '{target}' in Targets."));
+
+                            if (!stateNames.Contains(target))
+                                issues.Add(("error",
+                                    $"{tpfx}: Targets['{target}'] does not match any declared state."));
+                            else if (string.Equals(target, t.To, StringComparison.OrdinalIgnoreCase))
+                                issues.Add(("warning",
+                                    $"{tpfx}: Target state '{target}' is the same as the join state (To). " +
+                                    "Branch targets and the join state should be distinct."));
+                        }
+                    }
+
+                    // Merge agent is required for Ranked and SemanticDiff.
+                    if (t.Merge is { Strategy: fuseraft.Core.Models.MergeStrategy.Ranked or fuseraft.Core.Models.MergeStrategy.SemanticDiff })
+                    {
+                        if (string.IsNullOrWhiteSpace(t.Merge.Agent))
+                            issues.Add(("error",
+                                $"{tpfx}: Merge.Strategy '{t.Merge.Strategy}' requires Merge.Agent to be set."));
+                        else if (!agentNames.Contains(t.Merge.Agent))
+                            issues.Add(("error",
+                                $"{tpfx}: Merge.Agent '{t.Merge.Agent}' is not defined in Agents."));
+                    }
+
+                    // RecoveryAgent is meaningless on a parallel transition (no contract evaluation).
+                    if (!string.IsNullOrWhiteSpace(t.RecoveryAgent))
+                        issues.Add(("warning",
+                            $"{tpfx}: RecoveryAgent is ignored on parallel transitions."));
+                }
+                else
+                {
+                    // Targets without Parallel: true is almost certainly a config mistake.
+                    if (t.Targets is { Count: > 0 })
+                        issues.Add(("warning",
+                            $"{tpfx}: Targets is set but Parallel is false — Targets will be ignored. " +
+                            "Set 'Parallel: true' to enable fan-out."));
+
+                    // Merge without Parallel: true is ignored.
+                    if (t.Merge is not null)
+                        issues.Add(("warning",
+                            $"{tpfx}: Merge is set but Parallel is false — it will be ignored."));
+                }
             }
 
             // Terminal states should have no transitions — they're unreachable.

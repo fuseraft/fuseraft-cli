@@ -9,6 +9,7 @@ using fuseraft.Core.Models;
 using fuseraft.Infrastructure.Plugins;
 using fuseraft.Orchestration.Contracts;
 using fuseraft.Orchestration.Failure;
+using fuseraft.Orchestration.Parallel;
 
 namespace fuseraft.Orchestration.Strategies;
 
@@ -33,7 +34,7 @@ namespace fuseraft.Orchestration.Strategies;
 /// minimal changes when migrating from keyword routing to state machine routing.
 /// </para>
 /// </summary>
-public sealed class StateMachineSelectionStrategy : IAgentSelector, IContextSnapshotter
+public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAgentSelector, IContextSnapshotter
 {
     private readonly StateMachineConfig _machine;
     private readonly ContractEngine? _contractEngine;
@@ -298,6 +299,104 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IContextSnap
         return current
                ?? throw new InvalidOperationException(
                    $"[StateMachine] Agent '{state.Agent}' not found in pool for state '{_currentState}'.");
+    }
+
+    // IParallelAgentSelector ──────────────────────────────────────────────────
+
+    /// <inheritdoc/>
+    public Task<ParallelAgentBatch?> TrySelectParallelAsync(
+        IReadOnlyList<AIAgent> agents,
+        IList<ChatMessage> history,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_machine.States.TryGetValue(_currentState, out var state) || state.Terminal)
+            return Task.FromResult<ParallelAgentBatch?>(null);
+
+        int scanned = 0;
+        for (int i = history.Count - 1; i >= 0 && scanned < AgentMessageLookback; i--)
+        {
+            var msg = history[i];
+            if (msg.Role == ChatRole.Tool) continue;
+
+            string? toolSignal = null;
+            if (msg.Role == ChatRole.Assistant)
+            {
+                foreach (var item in msg.Contents)
+                {
+                    if (item is FunctionCallContent fc
+                        && string.Equals(fc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase)
+                        && fc.Arguments?.TryGetValue(HandoffPlugin.ArgumentName, out var kwObj) == true
+                        && kwObj?.ToString() is { Length: > 0 } kw)
+                    {
+                        toolSignal = kw;
+                        break;
+                    }
+                }
+            }
+
+            var content = toolSignal ?? msg.Text;
+            if (string.IsNullOrEmpty(content)) continue;
+            if (msg.Role == ChatRole.Assistant) scanned++;
+
+            foreach (var transition in state.Transitions)
+            {
+                if (!transition.Parallel || transition.Targets is null or { Count: 0 }) continue;
+
+                bool signalPresent = string.IsNullOrWhiteSpace(transition.Signal)
+                    || (toolSignal is not null
+                        ? string.Equals(toolSignal, transition.Signal, StringComparison.OrdinalIgnoreCase)
+                        : IsSignalOnOwnLine(content, transition.Signal!));
+
+                if (!signalPresent) continue;
+
+                if (transition.Signal is not null && TransitionAlreadyFired(history, i, transition.To))
+                {
+                    _logger.LogDebug(
+                        "[StateMachine] Parallel signal '{Signal}' → '{Join}' already consumed — skipping",
+                        transition.Signal, transition.To);
+                    continue;
+                }
+
+                // Resolve branch agents.
+                var branches = new List<(AIAgent Agent, string StateName)>();
+                foreach (var targetName in transition.Targets)
+                {
+                    if (!_machine.States.TryGetValue(targetName, out var targetState))
+                        throw new InvalidOperationException(
+                            $"[StateMachine] Parallel target state '{targetName}' is not defined.");
+
+                    var branchAgent = FindAgent(agents, targetState.Agent)
+                        ?? throw new InvalidOperationException(
+                            $"[StateMachine] Agent '{targetState.Agent}' not found for parallel state '{targetName}'.");
+
+                    branches.Add((branchAgent, targetName));
+                }
+
+                var joinState = transition.To;
+                if (!_machine.States.ContainsKey(joinState))
+                    throw new InvalidOperationException(
+                        $"[StateMachine] Parallel join state '{joinState}' is not defined.");
+
+                // Inject boundary marker and advance state before returning the batch.
+                if (_history is not null)
+                {
+                    var branchList = string.Join(", ", transition.Targets);
+                    _history.Add(new ChatMessage(ChatRole.User,
+                        $"[fuseraft: {state.Agent} → parallel({branchList}) → {joinState}]"));
+                }
+
+                _logger.LogDebug(
+                    "[StateMachine] Parallel transition fired: '{From}' → [{Branches}] (join: '{Join}')",
+                    _currentState, string.Join(", ", transition.Targets), joinState);
+
+                _currentState = joinState;
+
+                return Task.FromResult<ParallelAgentBatch?>(
+                    new ParallelAgentBatch(branches, transition.Merge ?? new MergeConfig(), joinState));
+            }
+        }
+
+        return Task.FromResult<ParallelAgentBatch?>(null);
     }
 
     // Handles a transition contract failure: classifies it, emits events, injects

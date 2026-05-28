@@ -29,7 +29,8 @@ Ask these questions. If the user already described the workflow in detail, extra
 
 **Pipeline topology**
 - How many agents? What are their names and roles?
-- Is this a linear pipeline (A → B → C) or does it branch (retry loops, recovery agents, parallel paths)?
+- Is this a linear pipeline (A → B → C), does it branch (retry loops, recovery agents), or does it fan out to parallel work?
+- Parallel fan-out: does any step produce N independent results that can later be combined? (e.g., backend + frontend + migration written at the same time) If so, note which step fans out, which agents run concurrently, and how outputs should be merged (union = concatenate all; ranked = pick best; semantic_diff = LLM resolves conflicts).
 
 **Model**
 - Which provider and model? (xAI Grok, Claude, OpenAI, Ollama, etc.)
@@ -63,6 +64,8 @@ Pick the appropriate skeleton based on routing type and agent count. Load `refer
 
 **State machine** — any pipeline with retry logic, recovery agents, branching transitions, or terminal states. Preferred when 3+ agents are involved.
 
+**State machine with parallel fan-out** — use when two or more agents can do independent work simultaneously and their outputs need to be combined before the pipeline continues. The fan-out transition uses `Parallel: true`, lists branch states in `Targets`, and sets `To` to the join state entered after merge.
+
 ### Step 3: Build the YAML
 
 Construct the YAML from the gathered answers. Apply these rules:
@@ -75,6 +78,12 @@ Construct the YAML from the gathered answers. Apply these rules:
 6. **Include a `Validation` section** whenever `TestReportValid`, `RequireBrief`, `RequireAllFilesWritten`, or `RequireAcceptanceCriteriaPassedValidator` are used.
 7. **Always include a `Termination` block** — use `MaxIterations` as a hard cap (40 is a safe default for dev pipelines).
 8. **Include `FailureHandling`** for any pipeline longer than 2 agents to prevent infinite reinstruct loops.
+9. **Parallel fan-out rules** (state machine only):
+   - Put `Parallel: true`, `Targets: [BranchStateA, BranchStateB, ...]`, and `To: JoinState` on the triggering transition. `To` is the join state entered after all branches finish — it is **not** a branch target.
+   - Each branch state must be declared in `States` with an `Agent`. Branch agents run for **one turn only** with an isolated history snapshot — do **not** instruct them to emit a handoff signal.
+   - Branch agents do not need the `Handoff` plugin.
+   - If `Merge.Strategy` is `ranked` or `semantic_diff`, set `Merge.Agent` to a named agent (declared in `Agents`) that will evaluate or reconcile the outputs. This agent needs no special plugins — it receives the branch outputs as context and returns text.
+   - `Merge.Strategy: union` (default) concatenates all branch outputs in declaration order — no merge agent needed.
 
 Write instructions for each agent using this pattern:
 ```
