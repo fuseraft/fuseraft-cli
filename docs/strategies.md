@@ -288,11 +288,14 @@ Selection:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `To` | string | — | Name of the target state. Must exist in `States`. |
+| `To` | string | — | Target state name. For sequential transitions: the state to enter. For parallel transitions: the **join state** entered after all branches finish and outputs are merged. Must exist in `States`. |
 | `Signal` | string | — | Signal the current agent must emit to trigger this transition. When omitted, the transition fires automatically (no signal required) — useful for unconditional handoffs. |
 | `Contract` | string | — | Single named contract that must pass. Referenced by name from `Orchestration.Contracts`. |
 | `Contracts` | array | — | Multiple named contracts (AND semantics — all must pass). Use instead of or together with `Contract`. |
 | `SourceAgents` | array | any | Optional. Restrict this transition to messages authored by agents in this list. |
+| `Parallel` | bool | `false` | When `true`, fans out to all states listed in `Targets` concurrently instead of routing to a single state. Each branch runs one agent turn with an isolated history snapshot. Outputs are merged via `Merge` before control advances to the join state in `To`. |
+| `Targets` | array | — | Branch state names for parallel fan-out. Required when `Parallel: true`. Each must exist in `States`. |
+| `Merge` | object | — | Merge strategy for parallel fan-out. See `MergeConfig` below. Ignored when `Parallel` is `false`. |
 
 **Contracts on transitions**
 
@@ -327,6 +330,88 @@ Orchestration:
 When a contract fails consecutively, the `FailureHandling` policy for the classified failure type determines the response (correction injection, audit request, HITL escalation). See [Failure handling](configuration.md#failure-handling).
 
 The `Verifier` agent integrates directly with the state machine: on `ConflictingEvidence` or `NoProgress` failures, the state machine selects the verifier for one audit turn before re-invoking the primary agent. See [Verifier](configuration.md#verifier).
+
+**Parallel fan-out / fan-in**
+
+A transition can fan out to multiple agents running concurrently by setting `Parallel: true` and listing branch states in `Targets`. Each branch agent gets one turn with an isolated copy of the shared history. After all branches complete, their outputs are merged and control advances to the join state (`To`).
+
+```yaml
+Selection:
+  Type: statemachine
+  StateMachine:
+    Initial: Planning
+
+    States:
+      Planning:
+        Agent: Planner
+        Transitions:
+          - To: Integration          # join state — entered after all branches finish
+            Targets:                 # branch states — run concurrently
+              - BackendWork
+              - FrontendWork
+              - MigrationWork
+            Parallel: true
+            Signal: "IMPLEMENT"
+            Merge:
+              Strategy: union        # concatenate outputs in declaration order
+
+      BackendWork:
+        Agent: BackendDev
+        # No transitions — branch agents run one turn; signals are not evaluated.
+
+      FrontendWork:
+        Agent: FrontendDev
+
+      MigrationWork:
+        Agent: MigrationDev
+
+      Integration:
+        Agent: Integrator
+        Transitions:
+          - To: Done
+            Signal: APPROVED
+
+      Done:
+        Agent: Integrator
+        Terminal: true
+```
+
+**How parallel fan-out works**
+
+1. When the triggering signal is detected in the current state, the strategy resolves all `Targets` states and their agents.
+2. All branch agents run concurrently (`Task.WhenAll`), each with an isolated snapshot of the shared history at the moment of fan-out. Branches cannot see each other's in-progress work.
+3. All branch outputs are merged according to `Merge.Strategy` and the result is injected into the shared history as a single block.
+4. The machine transitions to the join state (`To`). The join state's agent then runs as normal with the merged output visible in history.
+5. Branch agents' own `Transitions` are **not** evaluated — they run for exactly one turn. Do not instruct branch agents to emit a handoff signal.
+
+**`MergeConfig` fields**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `Strategy` | string | `union` | How to combine branch outputs. See merge strategies below. |
+| `Agent` | string | — | Agent name used for `ranked` and `semantic_diff` strategies. Must be declared in `Agents`. |
+| `ConflictResolution` | array | — | Fallback strategy names tried in order when the primary cannot reach a decision. |
+
+**Merge strategies**
+
+| Strategy | Behaviour | `Merge.Agent` required? |
+|---|---|---|
+| `union` | Concatenate all branch outputs in declaration order. | No |
+| `consensus` | Pass through if all branches agree on their final statement; fall back to union on disagreement. | No |
+| `vote` | Pick the output agreed by the most branches (majority); fall back to union on a tie. | No |
+| `ranked` | Scoring agent receives all branch outputs and selects or synthesises the best result. | Yes |
+| `semantic_diff` | Resolver agent identifies agreements, resolves conflicts, and produces a single reconciled output. | Yes |
+
+For `ranked` and `semantic_diff`, the merge agent receives the branch outputs as context and returns its result as plain text. It does not need any special plugins.
+
+**Parallel fan-out rules and constraints**
+
+- `Targets` must be non-empty when `Parallel: true`.
+- Every entry in `Targets` and the join state `To` must be declared states.
+- `To` (join state) must be distinct from all `Targets` entries.
+- Branch agents do not need the `Handoff` plugin and should not be instructed to emit signals.
+- Evidence contracts (`Contract`/`Contracts`) are not evaluated on parallel transitions — add contracts to the transition that leaves the join state if post-merge evidence is needed.
+- `RecoveryAgent` on a parallel transition is ignored.
 
 ---
 

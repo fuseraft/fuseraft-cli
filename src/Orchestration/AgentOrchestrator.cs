@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
+using fuseraft.Orchestration.Parallel;
 using fuseraft.Orchestration.Strategies;
 
 // Disambiguate from Microsoft.Agents.AI.AgentFactory
@@ -278,6 +279,134 @@ public sealed class AgentOrchestrator(
             // Hard iteration cap — takes effect regardless of the termination strategy.
             if (config.Termination?.ResolveMaxIterations() is > 0 and var maxIter && turn >= maxIter)
                 break;
+
+            // Parallel fan-out: check before the normal sequential SelectAsync path.
+            if (selection is IParallelAgentSelector psel)
+            {
+                var batch = await psel.TrySelectParallelAsync(agents, history, cancellationToken);
+                if (batch is not null)
+                {
+                    // Build one run-task per branch, each with an isolated history snapshot.
+                    var branchTasks = batch.Branches.Select(async branch =>
+                    {
+                        var (branchAgent, _) = branch;
+                        var snapshot = new List<ChatMessage>(history);
+
+                        AgentStarting?.Invoke(branchAgent.Name ?? "Unknown");
+                        agentFactory.OnAgentTurnStarting();
+                        changeTracker?.BeginTurn(branchAgent.Name ?? "Unknown", turn);
+
+                        bool hasInstr = agentInstructions.TryGetValue(branchAgent.Name ?? "", out var instr);
+                        if (memoryManager is not null)
+                            instr = await memoryManager.AugmentInstructionsAsync(branchAgent.Name ?? "", instr, cancellationToken);
+
+                        var bAgentCfg = agentConfigs.GetValueOrDefault(branchAgent.Name ?? "");
+                        var filtered  = ContextWindowFilter.Apply(snapshot, bAgentCfg?.ContextWindow);
+                        IEnumerable<ChatMessage> context = (hasInstr || memoryManager is not null) && instr is not null
+                            ? [new ChatMessage(ChatRole.System, instr), .. filtered]
+                            : filtered;
+
+                        AgentResponse response = governanceKernel?.CircuitBreaker is { } cb
+                            ? await cb.ExecuteAsync(() => branchAgent.RunAsync(context, null, null, cancellationToken))
+                            : await branchAgent.RunAsync(context, null, null, cancellationToken);
+
+                        return (branchAgent, response);
+                    }).ToList();
+
+                    var branchResults = await Task.WhenAll(branchTasks);
+
+                    // Merge branch outputs into the shared history.
+                    var mergeInputs = branchResults
+                        .Select(r => (r.branchAgent.Name ?? "Unknown", r.response.Text ?? string.Empty))
+                        .ToList();
+
+                    // Build an agent-runner delegate for Ranked / SemanticDiff strategies.
+                    // Looks up the named merge agent and runs it with the provided context.
+                    Func<IReadOnlyList<ChatMessage>, CancellationToken, Task<string>>? mergeAgentRunner = null;
+                    if (batch.Merge.Agent is { Length: > 0 } mergeAgentName)
+                    {
+                        var mergeAgent = agents.FirstOrDefault(a =>
+                            string.Equals(a.Name, mergeAgentName, StringComparison.OrdinalIgnoreCase));
+
+                        if (mergeAgent is not null)
+                        {
+                            bool mHasInstr = agentInstructions.TryGetValue(mergeAgentName, out var mInstr);
+                            mergeAgentRunner = async (ctx, ct) =>
+                            {
+                                IEnumerable<ChatMessage> mContext = mHasInstr && mInstr is not null
+                                    ? [new ChatMessage(ChatRole.System, mInstr), .. ctx]
+                                    : ctx;
+
+                                AgentResponse mr = governanceKernel?.CircuitBreaker is { } cb
+                                    ? await cb.ExecuteAsync(() => mergeAgent.RunAsync(mContext, null, null, ct))
+                                    : await mergeAgent.RunAsync(mContext, null, null, ct);
+
+                                return mr.Text ?? string.Empty;
+                            };
+                        }
+                        else
+                        {
+                            logger.LogWarning(
+                                "[Orchestrator] Merge agent '{Agent}' not found in agent pool — " +
+                                "Ranked/SemanticDiff will fall back to union.",
+                                mergeAgentName);
+                        }
+                    }
+
+                    var mergedMessages = await MergeEngine.MergeAsync(
+                        batch.Merge, mergeInputs, mergeAgentRunner, logger, cancellationToken);
+                    foreach (var m in mergedMessages)
+                        history.Add(m);
+
+                    // Yield an AgentMessage per branch and accumulate token usage.
+                    foreach (var (branchAgent, branchResponse) in branchResults)
+                    {
+                        var branchMsg = new AgentMessage
+                        {
+                            AgentName = branchAgent.Name ?? "Unknown",
+                            Content   = branchResponse.Text ?? string.Empty,
+                            Role      = "assistant",
+                            TurnIndex = turn++,
+                            Usage     = ExtractUsage(branchResponse),
+                            ToolCalls = ExtractToolCalls(branchResponse.Messages),
+                        };
+
+                        cumulativeTokens += branchMsg.Usage?.TotalTokens ?? 0;
+
+                        if (eventEmitter is not null)
+                            await eventEmitter.EmitAsync("turn_end",
+                                agent:   branchMsg.AgentName,
+                                turn:    branchMsg.TurnIndex,
+                                payload: new
+                                {
+                                    input_tokens  = branchMsg.Usage?.InputTokens,
+                                    output_tokens = branchMsg.Usage?.OutputTokens,
+                                    parallel = true,
+                                });
+
+                        if (changeTracker is not null)
+                        {
+                            try { await changeTracker.FlushTurnAsync(branchMsg.AgentName, branchMsg.TurnIndex, CancellationToken.None); }
+                            catch (Exception ex)
+                            {
+                                logger.LogWarning(ex,
+                                    "ChangeTracker flush failed for parallel turn {Turn} ({Agent}).",
+                                    branchMsg.TurnIndex, branchMsg.AgentName);
+                            }
+                        }
+
+                        yield return branchMsg;
+                    }
+
+                    if (config.MaxTotalTokens is { } pLimit && cumulativeTokens > pLimit)
+                        throw new BudgetExceededException(cumulativeTokens, pLimit);
+
+                    if (await termination.ShouldTerminateAsync(history, cancellationToken))
+                        break;
+
+                    continue;
+                }
+            }
 
             // Select the next agent.
             var agent = await selection.SelectAsync(agents, history, cancellationToken);

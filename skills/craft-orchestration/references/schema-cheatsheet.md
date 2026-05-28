@@ -230,6 +230,72 @@ Selection:
 
 ---
 
+## Routing: state machine with parallel fan-out
+
+Branch states run concurrently (one turn each, isolated history snapshots). Outputs are merged and control passes to the join state.
+
+```yaml
+Selection:
+  Type: statemachine
+  StateMachine:
+    Initial: Planning
+
+    States:
+      Planning:
+        Agent: Planner
+        Transitions:
+          - To: Integration          # fan-in join state (entered after merge)
+            Targets:                 # branch states run in parallel
+              - BackendWork
+              - FrontendWork
+              - MigrationWork
+            Parallel: true
+            Signal: "IMPLEMENT"
+            Merge:
+              Strategy: union        # concatenate all branch outputs (default)
+              # Strategy: ranked     # scoring agent picks/synthesises best output
+              # Strategy: semantic_diff  # resolver agent reconciles conflicts
+              # Agent: Integrator    # required for ranked / semantic_diff
+
+      BackendWork:
+        Agent: BackendDev
+        # No transitions — branch agents run one turn only; signals are not evaluated.
+
+      FrontendWork:
+        Agent: FrontendDev
+
+      MigrationWork:
+        Agent: MigrationDev
+
+      Integration:
+        Agent: Integrator
+        Transitions:
+          - To: Done
+            Signal: APPROVED
+
+      Done:
+        Agent: Integrator
+        Terminal: true
+```
+
+**Key rules:**
+- `To` is the join state — where control goes after all branches finish and outputs are merged.
+- `Targets` are the branch states — each runs one turn; their own transitions are not evaluated.
+- Branch agents do **not** need `Handoff` and should **not** be instructed to emit a signal.
+- For `ranked` / `semantic_diff`, add the merge agent to `Agents` with appropriate instructions; it receives all branch outputs as context and returns the merged result.
+
+**Merge strategies:**
+
+| Strategy | Behaviour | Merge.Agent required? |
+|---|---|---|
+| `union` | Concatenate all outputs in declaration order | No |
+| `consensus` | Pass if all branches agree on final statement; otherwise union | No |
+| `vote` | Pick the output agreed by the most branches; tie → union | No |
+| `ranked` | Scoring agent selects or synthesises the best output | Yes |
+| `semantic_diff` | Resolver agent reconciles agreements and conflicts | Yes |
+
+---
+
 ## Termination
 
 ```yaml

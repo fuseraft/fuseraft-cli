@@ -101,13 +101,59 @@ public record StateConfig
 /// <summary>
 /// A directed edge in the state graph. Fires when the current state's agent emits
 /// the declared <see cref="Signal"/> AND all <see cref="Contracts"/> are satisfied.
+///
+/// <para>
+/// For parallel fan-out set <see cref="Parallel"/> to <c>true</c>, list target states
+/// in <see cref="Targets"/>, and set <see cref="To"/> to the join state that receives
+/// control after all branches finish and their outputs are merged.
+/// </para>
+///
+/// Example YAML (parallel fan-out):
+/// <code>
+/// Transitions:
+///   - To: Integration          # fan-in join state
+///     Targets:                 # parallel branch states
+///       - BackendImplementation
+///       - FrontendImplementation
+///       - MigrationPlanning
+///     Parallel: true
+///     Signal: "IMPLEMENT"
+///     Merge:
+///       Strategy: union
+/// </code>
 /// </summary>
 public record TransitionConfig
 {
     /// <summary>
-    /// Target state name. Must exist in <see cref="StateMachineConfig.States"/>.
+    /// Target state name for a normal (sequential) transition, or the join state
+    /// after a parallel fan-out completes. Must exist in
+    /// <see cref="StateMachineConfig.States"/>.
     /// </summary>
     public string To { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Parallel branch target states. When <see cref="Parallel"/> is <c>true</c> and
+    /// this list is non-empty, all named states run concurrently (one turn each with
+    /// isolated history snapshots). <see cref="To"/> then acts as the fan-in join state
+    /// entered after branch outputs are merged.
+    /// </summary>
+    public List<string>? Targets { get; init; }
+
+    /// <summary>
+    /// When <c>true</c>, this transition fans out to all states in <see cref="Targets"/>
+    /// concurrently instead of routing to a single state. Each branch runs one agent
+    /// turn with an isolated history snapshot; outputs are merged via <see cref="Merge"/>
+    /// before control advances to the join state in <see cref="To"/>.
+    /// Defaults to <c>false</c>.
+    /// </summary>
+    public bool Parallel { get; init; } = false;
+
+    /// <summary>
+    /// How to combine branch outputs when <see cref="Parallel"/> is <c>true</c>.
+    /// Defaults to <see cref="MergeStrategy.Union"/> (concatenate in declaration order)
+    /// when null.
+    /// </summary>
+    public MergeConfig? Merge { get; init; }
 
     /// <summary>
     /// Keyword or phrase the agent must emit (on its own line) to trigger this transition.
