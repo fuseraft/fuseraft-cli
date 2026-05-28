@@ -119,9 +119,92 @@ public static class ContextWindowFilter
 
         // Step 4: Tail limit — keep only the last N messages.
         if (window.MaxTailMessages > 0 && list.Count > window.MaxTailMessages)
-            return list.Skip(list.Count - window.MaxTailMessages).ToList();
+            list = list.Skip(list.Count - window.MaxTailMessages).ToList();
+
+        // Step 5: Sanitize tool_use/tool_result pairing at slice boundaries.
+        // Steps 3 and 4 cut by position; either cut can land inside a tool-call/result
+        // sequence, producing an assistant message whose FunctionCallContent IDs have no
+        // matching ChatRole.Tool results in the retained slice. Strict providers (Bedrock)
+        // reject such messages with a 400. Strip orphaned tool calls to text-only here so
+        // the slice is always well-formed regardless of where the cut landed.
+        list = SanitizeToolPairs(list);
 
         return list;
+    }
+
+    // Removes tool-pairing violations that arise after positional slice cuts:
+    //   • Leading ChatRole.Tool messages with no preceding assistant tool-call are dropped.
+    //   • Assistant messages whose FunctionCallContent IDs are not fully covered by the
+    //     immediately following ChatRole.Tool messages are reduced to text-only (or dropped
+    //     entirely when they have no text content either).
+    private static List<ChatMessage> SanitizeToolPairs(List<ChatMessage> list)
+    {
+        // Fast path: if no assistant message has any tool calls, nothing to fix.
+        if (!list.Any(m => m.Role == ChatRole.Assistant &&
+                           m.Contents.OfType<FunctionCallContent>().Any()))
+            return list;
+
+        var result = new List<ChatMessage>(list.Count);
+        int i = 0;
+        while (i < list.Count)
+        {
+            var msg = list[i];
+
+            // Drop orphaned tool-result messages at the head of the slice or wherever
+            // they appear without a preceding assistant call in the result list.
+            if (msg.Role == ChatRole.Tool)
+            {
+                bool hasPrecedingCall = result.Count > 0 &&
+                    result[^1].Role == ChatRole.Assistant &&
+                    result[^1].Contents.OfType<FunctionCallContent>().Any();
+                if (!hasPrecedingCall) { i++; continue; }
+                result.Add(msg);
+                i++;
+                continue;
+            }
+
+            if (msg.Role == ChatRole.Assistant)
+            {
+                var toolCalls = msg.Contents.OfType<FunctionCallContent>().ToList();
+                if (toolCalls.Count > 0)
+                {
+                    // Collect the call IDs this message expects to be answered.
+                    var expectedIds = toolCalls
+                        .Select(tc => tc.CallId)
+                        .Where(id => id is not null)
+                        .ToHashSet();
+
+                    // Scan the immediately following ChatRole.Tool messages for results.
+                    var coveredIds = new HashSet<string?>();
+                    for (int j = i + 1; j < list.Count && list[j].Role == ChatRole.Tool; j++)
+                    {
+                        foreach (var fr in list[j].Contents.OfType<FunctionResultContent>())
+                            coveredIds.Add(fr.CallId);
+                    }
+
+                    // If any call is uncovered, reduce this message to text-only.
+                    if (!expectedIds.All(id => coveredIds.Contains(id)))
+                    {
+                        var textContents = msg.Contents
+                            .OfType<TextContent>()
+                            .Where(t => !string.IsNullOrEmpty(t.Text))
+                            .ToList<AIContent>();
+
+                        if (textContents.Count > 0)
+                            result.Add(new ChatMessage(ChatRole.Assistant, textContents)
+                                { AuthorName = msg.AuthorName });
+                        // Drop entirely when there is no text — a pure tool-call frame
+                        // without its results adds no value to the context.
+                        i++;
+                        continue;
+                    }
+                }
+            }
+
+            result.Add(msg);
+            i++;
+        }
+        return result;
     }
 
     // Maximum number of characters to replay from a single non-summary assistant message.
