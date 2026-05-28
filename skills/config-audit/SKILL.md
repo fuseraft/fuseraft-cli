@@ -64,10 +64,15 @@ For **keyword routing** (`Selection.Type: keyword`):
 
 For **state machine routing** (`Selection.Type: statemachine`):
 
-1. Extract every `Signal` from `Selection.Transitions`.
-2. For each transition, find the source state's agent and verify the signal appears in their instructions.
-3. Verify `From` and `To` state names are consistent — no dangling references to undefined states.
+1. Extract every `Signal` from each state's `Transitions`.
+2. For each **sequential** transition (no `Parallel: true`), find the source state's agent and verify the signal appears in their instructions.
+3. Verify every `To` state name is declared in `States` — no dangling references.
 4. Verify the initial state is defined.
+5. For each **parallel** transition (`Parallel: true`):
+   - Verify `Targets` is non-empty and every entry names a declared state.
+   - Verify `To` (the join state) is declared in `States` and is distinct from all `Targets` entries.
+   - If `Merge.Strategy` is `ranked` or `semantic_diff`, verify `Merge.Agent` is set and names a real agent in `Agents`.
+   - Check that branch agents' instructions do **not** instruct them to emit a handoff signal — branch agents run for exactly one turn with no signal evaluation; a handoff call will be ignored and may confuse the agent.
 
 ---
 
@@ -143,6 +148,7 @@ For each agent, read `Instructions` and flag:
 2. **Vague file references:** Instructions say "write the implementation" but don't name a path. Vague instructions cause validator failures (`RequireWriteFile` passes, but `RequireAllFilesWritten` fails because the wrong file was written).
 3. **FunctionChoice:** Agents expected to call tools every turn (Developer, Tester) should have `FunctionChoice: required`. Without it the model may produce a text-only response that satisfies no validator.
 4. **Instruction length:** Warn if an agent's instructions exceed ~50 lines — long instructions crowd the context and cause the model to lose track of the handoff step.
+5. **Parallel branch agents:** For any agent that only appears in `Targets` lists (never as the primary `Agent` of a non-parallel state), verify their instructions do **not** tell them to call `handoff(...)` or emit a transition signal. Branch agents run one turn and return — no signal is evaluated. Instructing them to hand off is misleading and may waste turns on a tool call that has no effect.
 
 ---
 
