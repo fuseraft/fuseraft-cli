@@ -55,4 +55,19 @@ public record SecurityConfig
     /// Example: <c>["src/billing/**", "src/payments/processor.go"]</c>
     /// </summary>
     public List<string>? ChangeEnvelope { get; init; }
+
+    /// <summary>
+    /// Granular read/write/deny glob rules for the FileSystem plugin.
+    /// Requires <see cref="FileSystemSandboxPath"/> — globs are evaluated relative to the sandbox root.
+    /// Null means no additional glob-level access control (sandbox + change envelope still apply).
+    /// </summary>
+    public FileSystemPermissions? FileSystemPermissions { get; init; }
+
+    /// <summary>
+    /// Allow/deny substring policy applied to every Shell plugin command before execution.
+    /// Works independently of <see cref="FileSystemSandboxPath"/> — shell policy is enforced
+    /// even when no filesystem sandbox is configured.
+    /// Null means the shell is unrestricted (subject to the existing sudo block).
+    /// </summary>
+    public ShellPolicy? ShellPolicy { get; init; }
 }

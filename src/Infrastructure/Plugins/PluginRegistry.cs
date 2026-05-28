@@ -112,7 +112,7 @@ public sealed class PluginRegistry : IDisposable
         var allowPrivateHosts = security.AllowPrivateHosts;
 
         Register("FileSystem", () => new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore));
-        Register("Shell",      () => new ShellPlugin(sandboxRoot, shellCommandApprover));
+        Register("Shell",      () => new ShellPlugin(sandboxRoot, shellCommandApprover, security.ShellPolicy));
         Register("Http",       () => new HttpPlugin(_sharedHttpClient, allowedHosts, apiProfiles, allowPrivateHosts, _loggerFactory?.CreateLogger<HttpPlugin>()));
         Register("Document",   () => new DocumentPlugin(sandboxRoot));
         return this;

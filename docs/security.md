@@ -54,6 +54,100 @@ The agent sees this as a tool error and can respond accordingly (typically by st
 
 ---
 
+## Filesystem permissions (read / write / deny globs)
+
+`Security.FileSystemPermissions` adds per-path access control on top of the sandbox boundary. All three sub-lists use the same glob syntax as `ChangeEnvelope` and are evaluated relative to `FileSystemSandboxPath`. Requires `FileSystemSandboxPath` to be set.
+
+```yaml
+Security:
+  FileSystemSandboxPath: /home/user/projects/myapp
+  FileSystemPermissions:
+    Read:
+      - src/**
+      - docs/**
+    Write:
+      - tests/**
+      - docs/**
+    Deny:
+      - secrets/**
+      - infra/prod/**
+      - .env
+```
+
+### Evaluation order
+
+For every filesystem function call, the three lists are checked in this order:
+
+1. **Deny** — if the resolved path matches any `Deny` glob, the call is blocked immediately, regardless of `Read` or `Write`.
+2. **Write** — if the function is a write operation and `Write` is non-empty, the path must match at least one `Write` glob to proceed.
+3. **Read** — if the function is a read operation and `Read` is non-empty, the path must match at least one `Read` glob to proceed.
+
+### Which functions are covered
+
+| Category | Functions |
+|----------|-----------|
+| Read ops | `read_file`, `grep_file`, `list_files`, `stat_file`, `path_exists`, `list_directory`, `get_file_info`, `get_file_summary` |
+| Write ops | `write_file`, `patch_file`, `delete_file`, `create_directory`, `delete_directory`, `copy_file`, `move_file`, `set_permissions` |
+
+For `copy_file` and `move_file`, both the `source` and `destination` arguments are checked.
+
+### Interaction with ChangeEnvelope
+
+`FileSystemPermissions.Write` and `ChangeEnvelope` are independent restrictions — **both must be satisfied** when both are configured. A write is permitted only if the path matches at least one pattern from each list.
+
+`ChangeEnvelope` targets brownfield workflows where the Archaeologist auto-populates the list from a discovery brief. `FileSystemPermissions.Write` is the general-purpose alternative for manual configuration.
+
+### Denial response
+
+```
+[DENIED] 'infra/prod/deploy.sh': Path is blocked by a configured FileSystem deny rule.
+[DENIED] 'src/auth/token.go': Path is outside the configured FileSystem write permissions.
+```
+
+---
+
+## Shell policy
+
+`Security.ShellPolicy` controls which shell commands agents may execute. It is enforced in the Shell plugin before execution and **does not require a filesystem sandbox** — it works even when `FileSystemSandboxPath` is not set.
+
+```yaml
+Security:
+  ShellPolicy:
+    Allow:
+      - "go test"
+      - "npm test"
+      - "dotnet test"
+    Deny:
+      - "rm -rf"
+      - "curl | bash"
+      - "wget | sh"
+      - "dd if="
+```
+
+### Evaluation
+
+- **Deny is checked first.** If the command text contains any `Deny` pattern (case-insensitive substring match), the command is blocked regardless of the `Allow` list.
+- **Allow is evaluated next.** When the `Allow` list is non-empty, the command must contain at least one `Allow` pattern (case-insensitive substring match) to proceed. Commands that match no allow pattern are rejected.
+- When both lists are empty, the shell is unrestricted (subject to the existing `sudo` block).
+
+Matching is substring-based so patterns are flexible:
+- `"go test"` matches `go test ./...`, `go test -v ./pkg/...`, etc.
+- `"rm -rf"` blocks any command containing that substring.
+
+### Applies to all shell execution
+
+The policy is enforced in `shell_run`, `shell_run_script`, and `shell_run_background`. Commands from any of these three tools are checked against the same `ShellPolicy`.
+
+### Denial response
+
+```
+[DENIED] Shell command blocked: matches configured deny pattern 'rm -rf'.
+[DENIED] Shell command blocked: not matched by any configured allow pattern.
+         Allowed: 'go test', 'npm test', 'dotnet test'.
+```
+
+---
+
 ## Change envelope
 
 Restricts **write** operations (`write_file`, `patch_file`, `delete_file`) to files matching at least one declared glob pattern. Read operations (`read_file`, `list_files`) are never affected. Requires `FileSystemSandboxPath` to be set — patterns are evaluated relative to the sandbox root.
