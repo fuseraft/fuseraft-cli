@@ -110,12 +110,12 @@ All runtime artifacts are written under `.fuseraft/` in the current working dire
 | `.fuseraft/state/intents.json` | Intent log: pre-execution records updated to APPLIED/FAILED |
 | `.fuseraft/state/evidence.json` | Evidence graph: typed nodes for contract evaluation |
 | `.fuseraft/state/file_versions.json` | Per-file monotonic write counters for conflict detection |
-| `.fuseraft/brief.json` | Planner brief (validator input) |
-| `.fuseraft/test-report.json` | Tester report (validator input) |
-| `.fuseraft/chatroom.jsonl` | Shared agent coordination log |
-| `.fuseraft/conventions.json` | Brownfield convention profile (auto-injected into agent prompts) |
-| `.fuseraft/brief.brownfield.json` | Brownfield discovery brief (`in_scope_files` seeds change envelope) |
-| `.fuseraft/memory_refs.json` | GUIDs of memories scoped to this working directory |
+| `.fuseraft/artifacts/brief.json` | Planner brief (validator input) |
+| `.fuseraft/artifacts/test-report.json` | Tester report (validator input) |
+| `.fuseraft/comms/chatroom.jsonl` | Shared agent coordination log |
+| `.fuseraft/artifacts/conventions.json` | Brownfield convention profile (auto-injected into agent prompts) |
+| `.fuseraft/artifacts/brief.brownfield.json` | Brownfield discovery brief (`in_scope_files` seeds change envelope) |
+| `.fuseraft/memory/memory_refs.json` | GUIDs of memories scoped to this working directory |
 | `.fuseraft/context/` | Context store entries and index |
 | `.fuseraft/summaries/` | File summaries written by FileSystem plugin |
 

@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 
@@ -476,7 +477,7 @@ public sealed class ConversationCompactor(
     /// </summary>
     public const string WorkflowResumptionNote =
         "RESUMPTION NOTE: History compacted. Before acting: " +
-        "(1) read_file .fuseraft/brief.json, " +
+        $"(1) read_file {FuseraftPaths.LocalBrief}, " +
         "(2) changes_read_latest to confirm what is already done, " +
         "(3) do not redo work changes.json confirms is complete.";
 

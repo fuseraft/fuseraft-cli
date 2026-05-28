@@ -87,9 +87,9 @@ The `Validation` section provides file paths and patterns used by the validators
 
 ```yaml
 Validation:
-  BriefPath: .fuseraft/brief.json
-  TestReportPath: .fuseraft/test-report.json
-  ChangeLogPath: .fuseraft/changes.json
+  BriefPath: .fuseraft/artifacts/brief.json
+  TestReportPath: .fuseraft/artifacts/test-report.json
+  ChangeLogPath: .fuseraft/state/changes.json
   TestAssertionPatterns:
     - tester::assert
     - "if .+ throw"
@@ -105,7 +105,7 @@ The `Validation` section is required when any route uses `TestReportValid`. It i
 
 **Used on:** `HANDOFF TO DEVELOPER` (blocks the Planner from handing off without a written brief)
 
-**What it checks:** Reads `brief.json` from `Validation.BriefPath` (default `.fuseraft/brief.json`) and verifies it exists on disk with valid, complete content.
+**What it checks:** Reads `brief.json` from `Validation.BriefPath` (default `.fuseraft/artifacts/brief.json`) and verifies it exists on disk with valid, complete content.
 
 **Passes if:** `brief.json` exists, is valid JSON, and contains non-empty `goal`, `files_to_change`, `acceptance_criteria`, and `implementation` fields.
 
@@ -347,7 +347,7 @@ Command: pytest tests/test_api.py tests/test_auth.py
 
 ### Test report schema
 
-The Tester must write a file at `Validation.TestReportPath` (default `.fuseraft/test-report.json`) matching this schema before writing `HANDOFF TO REVIEWER`:
+The Tester must write a file at `Validation.TestReportPath` (default `.fuseraft/artifacts/test-report.json`) matching this schema before writing `HANDOFF TO REVIEWER`:
 
 ```json
 {
@@ -512,7 +512,7 @@ to confirm behavioral correctness:
 
 ```yaml
 Validation:
-  BriefPath: .fuseraft/brief.json
+  BriefPath: .fuseraft/artifacts/brief.json
 
 Selection:
   Type: keyword
@@ -587,8 +587,8 @@ Run the indicated command(s), confirm the expected output appears, then retry th
 
 ```yaml
 Validation:
-  BriefPath:     .fuseraft/brief.json
-  ChangeLogPath: .fuseraft/changes.json
+  BriefPath:     .fuseraft/artifacts/brief.json
+  ChangeLogPath: .fuseraft/state/changes.json
 
 Selection:
   Type: keyword
@@ -659,7 +659,7 @@ Orchestration:
     - Name: ImplementationComplete
       Requires:
         - FilesWritten:
-            Source: .fuseraft/brief.json
+            Source: .fuseraft/artifacts/brief.json
             Field: files_to_change
         - CommandSucceeded:
             Pattern: "build|compile|go build|cargo build"
@@ -667,7 +667,7 @@ Orchestration:
     - Name: TestsValid
       Requires:
         - FileExists:
-            Path: .fuseraft/test-report.json
+            Path: .fuseraft/artifacts/test-report.json
         - TestReport:
             NoFailures: true
             HasAssertions: true
