@@ -19,6 +19,22 @@ public static class FuseraftPaths
     public static string GlobalScratchpad => Path.Combine(GlobalRoot, "scratchpad");
     public static string GlobalSkills      => Path.Combine(GlobalRoot, "skills");
 
+    // Centralized temp directory — all fuseraft-generated temp files land here.
+    public static string SystemTempRoot => Path.Combine(Path.GetTempPath(), "fuseraft");
+
+    public static string NewTempFile(string prefix, string ext)
+    {
+        Directory.CreateDirectory(SystemTempRoot);
+        return Path.Combine(SystemTempRoot, $"{prefix}_{Guid.NewGuid():N}{ext}");
+    }
+
+    public static string NewTempDir()
+    {
+        var path = Path.Combine(SystemTempRoot, $"session_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
     // Path utilities
 
     /// <summary>
