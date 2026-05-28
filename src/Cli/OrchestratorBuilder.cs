@@ -902,6 +902,25 @@ public static class OrchestratorBuilder
     }
 
     /// <summary>
+    /// Reads only the <c>Orchestration.Security</c> section from <paramref name="configPath"/>
+    /// without binding or resolving agents. Used by lightweight callers (e.g. the REPL) that
+    /// need security settings without paying the cost of full config loading.
+    /// Returns <c>null</c> when the file does not exist or has no Security section.
+    /// </summary>
+    public static SecurityConfig? LoadSecurityConfig(string configPath)
+    {
+        if (!File.Exists(configPath)) return null;
+
+        var configuration = YamlConfigLoader.IsYamlPath(configPath)
+            ? YamlConfigLoader.LoadAsConfiguration(configPath)
+            : new ConfigurationBuilder()
+                .AddJsonFile(Path.GetFullPath(configPath), optional: false)
+                .Build();
+
+        return configuration.GetSection("Orchestration:Security").Get<SecurityConfig>();
+    }
+
+    /// <summary>
     /// Tries to load <paramref name="configPath"/> without constructing full services.
     /// Returns the parsed <see cref="OrchestrationConfig"/> for display purposes.
     /// </summary>

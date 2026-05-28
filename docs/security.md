@@ -84,18 +84,20 @@ For every filesystem function call, the three lists are checked in this order:
 
 ### Which functions are covered
 
-| Category | Functions |
-|----------|-----------|
-| Read ops | `read_file`, `grep_file`, `list_files`, `stat_file`, `path_exists`, `list_directory`, `get_file_info`, `get_file_summary` |
-| Write ops | `write_file`, `patch_file`, `delete_file`, `create_directory`, `delete_directory`, `copy_file`, `move_file`, `set_permissions` |
-
-For `copy_file` and `move_file`, both the `source` and `destination` arguments are checked.
+| Category | Functions | Notes |
+|----------|-----------|-------|
+| Content-read (Read glob applies) | `read_file`, `grep_file`, `get_file_summary` | Returns file content |
+| Metadata (Deny glob only, exempt from Read) | `list_files`, `list_directory`, `stat_file`, `path_exists`, `get_file_info` | Returns names / timestamps only, not content — use `Deny` to restrict these |
+| Write ops (Write glob + envelope apply) | `write_file`, `patch_file`, `delete_file`, `create_directory`, `delete_directory`, `set_permissions` | |
+| Mixed read+write (Copy/Move) | `copy_file`, `move_file` | Read glob checked on `source`; Write glob and envelope checked on `destination` |
 
 ### Interaction with ChangeEnvelope
 
 `FileSystemPermissions.Write` and `ChangeEnvelope` are independent restrictions — **both must be satisfied** when both are configured. A write is permitted only if the path matches at least one pattern from each list.
 
 `ChangeEnvelope` targets brownfield workflows where the Archaeologist auto-populates the list from a discovery brief. `FileSystemPermissions.Write` is the general-purpose alternative for manual configuration.
+
+`ChangeEnvelope` applies to direct writes (`write_file`, `patch_file`, `delete_file`) and to the **destination** of copy and move operations — so copying or moving a file into a path outside the envelope is also denied.
 
 ### Denial response
 

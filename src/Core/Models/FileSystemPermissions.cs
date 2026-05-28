@@ -8,9 +8,11 @@ namespace fuseraft.Core.Models;
 public record FileSystemPermissions
 {
     /// <summary>
-    /// When non-empty, restricts read operations (read_file, grep_file, list_files, stat_file,
-    /// path_exists, list_directory, get_file_info, get_file_summary) to paths matching at least
-    /// one of these glob patterns. Paths outside the read set are denied even within the sandbox.
+    /// When non-empty, restricts content-reading operations (<c>read_file</c>, <c>grep_file</c>,
+    /// <c>get_file_summary</c>) to paths matching at least one of these glob patterns.
+    /// Metadata-only operations (<c>list_files</c>, <c>list_directory</c>, <c>stat_file</c>,
+    /// <c>path_exists</c>, <c>get_file_info</c>) are exempt — they return only names and
+    /// timestamps, not file content. Use <c>Deny</c> to restrict those.
     /// </summary>
     public List<string> Read { get; init; } = [];
 

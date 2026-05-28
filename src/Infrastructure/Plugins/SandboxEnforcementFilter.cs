@@ -78,8 +78,10 @@ public sealed class SandboxEnforcementFilter
 
     // Write operations subject to the change envelope (distinct from the ring-level WriteFunctions
     // list which also covers shell — shell is too coarse-grained for path-level envelope checks).
+    // copy_file/move_file are included because they create/overwrite files at their destination;
+    // the InspectFileSystem loop applies the envelope to the destination arg only for mixed ops.
     private static readonly string[] EnvelopedFunctions =
-        ["write_file", "patch_file", "delete_file"];
+        ["write_file", "patch_file", "delete_file", "copy_file", "move_file"];
 
     // Functions whose path content is protected by Read globs (actual file content is returned).
     private static readonly HashSet<string> ContentReadFsFunctions = new(StringComparer.OrdinalIgnoreCase)
@@ -115,14 +117,14 @@ public sealed class SandboxEnforcementFilter
     };
 
     // All extended FS functions eligible for glob-level checks (used for routing in Inspect).
-    private static readonly HashSet<string> AllExtendedFsFunctions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "read_file", "grep_file", "get_file_summary",
-        "list_files", "list_directory", "path_exists", "stat_file", "get_file_info",
-        "write_file", "patch_file", "delete_file", "create_directory", "delete_directory", "set_permissions",
-        "copy_file", "move_file",
-        "save_file_summary",
-    };
+    // Computed from the five specific sets so additions to those sets are automatically reflected here.
+    private static readonly HashSet<string> AllExtendedFsFunctions = new(
+        ContentReadFsFunctions
+            .Concat(MetadataFsFunctions)
+            .Concat(WriteOnlyFsFunctions)
+            .Concat(MixedReadWriteFunctions)
+            .Concat(DenyCheckedFsFunctions),
+        StringComparer.OrdinalIgnoreCase);
 
     // Arg names that may carry file/directory paths across all filesystem functions.
     private static readonly string[] FsPathArgNames = ["path", "directory", "source", "destination"];
