@@ -129,7 +129,55 @@ public static class ContextWindowFilter
         // the slice is always well-formed regardless of where the cut landed.
         list = SanitizeToolPairs(list);
 
+        // Step 6: Truncate large tool results.
+        // Tool outputs from prior turns (file reads, shell output, search results) are
+        // replayed verbatim on every subsequent agent call, compounding context growth.
+        // When MaxToolResultChars is set, any FunctionResultContent string that exceeds
+        // the limit is truncated and annotated with the omitted character count.
+        if (window.MaxToolResultChars > 0)
+            list = TruncateToolResults(list, window.MaxToolResultChars);
+
         return list;
+    }
+
+    private static List<ChatMessage> TruncateToolResults(List<ChatMessage> list, int maxChars)
+    {
+        // Fast path: no ChatRole.Tool messages in the slice.
+        if (!list.Any(m => m.Role == ChatRole.Tool)) return list;
+
+        var result = new List<ChatMessage>(list.Count);
+        foreach (var msg in list)
+        {
+            if (msg.Role != ChatRole.Tool)
+            {
+                result.Add(msg);
+                continue;
+            }
+
+            bool anyTruncated = false;
+            var newContents = new List<AIContent>(msg.Contents.Count);
+            foreach (var content in msg.Contents)
+            {
+                if (content is FunctionResultContent fr &&
+                    fr.Result is string s &&
+                    s.Length > maxChars)
+                {
+                    var truncated = s[..maxChars] +
+                        $"\n[...truncated — {s.Length - maxChars:N0} chars omitted to reduce context size...]";
+                    newContents.Add(new FunctionResultContent(fr.CallId, truncated));
+                    anyTruncated = true;
+                }
+                else
+                {
+                    newContents.Add(content);
+                }
+            }
+
+            result.Add(anyTruncated
+                ? new ChatMessage(ChatRole.Tool, newContents)
+                : msg);
+        }
+        return result;
     }
 
     // Removes tool-pairing violations that arise after positional slice cuts:

@@ -89,4 +89,20 @@ public sealed record ContextWindowConfig
     /// Default: <c>0</c> (disabled).
     /// </summary>
     public int MaxTurnAge { get; init; }
+
+    /// <summary>
+    /// Maximum characters to replay from a single tool-result (<c>ChatRole.Tool</c>) message
+    /// in the history slice passed to this agent. When a tool result exceeds this limit the
+    /// result string is truncated and a suffix noting the omitted character count is appended.
+    ///
+    /// <para>
+    /// This prevents large tool outputs — e.g. a <c>read_file</c> on a 200 KB file — from
+    /// being replayed verbatim in every subsequent agent turn, compounding context growth.
+    /// Unlike <see cref="TextOnly"/> (which drops tool messages entirely), this option keeps
+    /// the tool result visible but bounded.
+    /// </para>
+    ///
+    /// Default: <c>0</c> (no truncation).
+    /// </summary>
+    public int MaxToolResultChars { get; init; }
 }
