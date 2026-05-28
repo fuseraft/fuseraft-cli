@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
+using fuseraft.Core;
 
 namespace fuseraft.Infrastructure.Plugins;
 
@@ -233,8 +234,7 @@ public sealed class CodeExecutionPlugin
 
     private static async Task<string> RunInContainerAsync(DockerLanguage lang, string code, int timeoutSeconds)
     {
-        var tempFile = Path.Combine(
-            Path.GetTempPath(), $"fuseraft_exec_{Guid.NewGuid():N}{lang.Extension}");
+        var tempFile = FuseraftPaths.NewTempFile("exec", lang.Extension);
 
         try
         {
