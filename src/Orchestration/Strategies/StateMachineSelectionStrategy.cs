@@ -3,6 +3,7 @@ using AgentGovernance.Audit;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using fuseraft.Core;
 using fuseraft.Core.Exceptions;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
@@ -477,7 +478,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IContextSnap
                 $"{prefix}MISSING ARTIFACT — Transition '{fromState}' → '{toState}' is blocked " +
                 $"because contract '{contractName}' requires an artifact that does not exist yet.\n\n" +
                 $"Steps to resolve:\n" +
-                $"  1. Read .fuseraft/brief.json to identify the required artifacts.\n" +
+                $"  1. Read {FuseraftPaths.LocalBrief} to identify the required artifacts.\n" +
                 $"  2. Create the missing artifact using write_file or the appropriate tool.\n" +
                 $"  3. Re-emit the signal once the artifact exists.\n\n" +
                 errorMessage,
@@ -564,7 +565,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IContextSnap
                 $"LOOP WARNING: {agentName} has been invoked {consecutive} consecutive turns " +
                 $"in state '{_currentState}' without completing the required task. " +
                 $"You appear to be stuck. Take these steps:\n" +
-                $"  1. Call read_file on .fuseraft/brief.json to restore the task brief.\n" +
+                $"  1. Call read_file on {FuseraftPaths.LocalBrief} to restore the task brief.\n" +
                 $"  2. Call changes_read_latest to see what has already been done.\n" +
                 $"  3. Identify the single blocking action and execute it now.\n" +
                 $"  4. Emit the correct transition signal once that action is complete."));

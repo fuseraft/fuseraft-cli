@@ -55,13 +55,27 @@ public static class FuseraftPaths
     public const string LocalEvidence     = ".fuseraft/state/evidence.json";
     public const string LocalFileVersions = ".fuseraft/state/file_versions.json";
 
-    // Agent artifacts and validator inputs (user-visible at root)
-    public const string LocalBrief           = ".fuseraft/brief.json";
-    public const string LocalTestReport      = ".fuseraft/test-report.json";
-    public const string LocalChatroom        = ".fuseraft/chatroom.jsonl";
-    public const string LocalConventions     = ".fuseraft/conventions.json";
-    public const string LocalBrownfieldBrief = ".fuseraft/brief.brownfield.json";
-    public const string LocalMemoryRefs      = ".fuseraft/memory_refs.json";
+    // artifacts/ — structured agent-written documents read by validators
+    public const string LocalArtifacts       = ".fuseraft/artifacts";
+    public const string LocalBrief           = ".fuseraft/artifacts/brief.json";
+    public const string LocalTestReport      = ".fuseraft/artifacts/test-report.json";
+    public const string LocalConventions     = ".fuseraft/artifacts/conventions.json";
+    public const string LocalBrownfieldBrief = ".fuseraft/artifacts/brief.brownfield.json";
+
+    // comms/ — cross-agent communication channels
+    public const string LocalComms    = ".fuseraft/comms";
+    public const string LocalChatroom = ".fuseraft/comms/chatroom.jsonl";
+
+    // memory/ (local) — session-scoped memory reference index
+    public const string LocalMemory     = ".fuseraft/memory";
+    public const string LocalMemoryRefs = ".fuseraft/memory/memory_refs.json";
+
+    // docs/ — agent-written markdown documents (research, reports, drafts, notes)
+    public const string LocalDocs = ".fuseraft/docs";
+
+    // tests/ — tester-created test scripts and fixture files (any language/format)
+    public const string LocalTests        = ".fuseraft/tests";
+    public const string LocalTestFixtures = ".fuseraft/tests/fixtures";
 
     // Already-subdirectorized paths (unchanged locations)
     public const string LocalContext   = ".fuseraft/context";
@@ -85,18 +99,24 @@ public static class FuseraftPaths
         sb.AppendLine("This directory is managed by fuseraft-cli. Never call list_files or explore .fuseraft/ — reference these paths directly when needed:");
         if (includeLogs)
         {
-            sb.AppendLine("  .fuseraft/logs/events.jsonl        — agent/orchestration event log (JSONL)");
-            sb.AppendLine("  .fuseraft/logs/repl_events.jsonl   — REPL event log (JSONL)");
-            sb.AppendLine("  .fuseraft/logs/app.log             — application log");
+            sb.AppendLine("  .fuseraft/logs/events.jsonl               — agent/orchestration event log (JSONL)");
+            sb.AppendLine("  .fuseraft/logs/repl_events.jsonl          — REPL event log (JSONL)");
+            sb.AppendLine("  .fuseraft/logs/app.log                    — application log");
         }
-        sb.AppendLine("  .fuseraft/state/changes.json       — tool-call change log");
-        sb.AppendLine("  .fuseraft/state/intents.json       — in-progress intent records (consult before repeating work)");
-        sb.AppendLine("  .fuseraft/state/evidence.json      — structured evidence graph");
-        sb.AppendLine("  .fuseraft/state/file_versions.json — per-file versioned write counters");
-        sb.AppendLine("  .fuseraft/brief.json               — task brief (if present)");
-        sb.AppendLine("  .fuseraft/chatroom.jsonl           — cross-agent chatroom messages (if present)");
-        sb.AppendLine("  .fuseraft/context/                 — injected reference documents (see .fuseraft/context/index.json)");
-        sb.Append(    "  .fuseraft/summaries/               — compaction summaries");
+        sb.AppendLine("  .fuseraft/state/changes.json              — tool-call change log");
+        sb.AppendLine("  .fuseraft/state/intents.json              — in-progress intent records (consult before repeating work)");
+        sb.AppendLine("  .fuseraft/state/evidence.json             — structured evidence graph");
+        sb.AppendLine("  .fuseraft/state/file_versions.json        — per-file versioned write counters");
+        sb.AppendLine("  .fuseraft/artifacts/brief.json            — task brief (if present)");
+        sb.AppendLine("  .fuseraft/artifacts/brief.brownfield.json — brownfield discovery brief (if present)");
+        sb.AppendLine("  .fuseraft/artifacts/test-report.json      — tester output / validator input (if present)");
+        sb.AppendLine("  .fuseraft/artifacts/conventions.json      — brownfield convention profile (if present)");
+        sb.AppendLine("  .fuseraft/comms/chatroom.jsonl            — cross-agent chatroom messages (if present)");
+        sb.AppendLine("  .fuseraft/docs/                           — write all markdown notes, reports, and drafts here");
+        sb.AppendLine("  .fuseraft/tests/                          — write all test scripts and test support files here");
+        sb.AppendLine("  .fuseraft/tests/fixtures/                 — seed data, stubs, and fixture files");
+        sb.AppendLine("  .fuseraft/context/                        — injected reference documents (see .fuseraft/context/index.json)");
+        sb.Append(    "  .fuseraft/summaries/                      — compaction summaries");
         return sb.ToString();
     }
 }

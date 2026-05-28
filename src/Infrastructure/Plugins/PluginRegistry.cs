@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using fuseraft.Core;
 using fuseraft.Core.Models;
 
 namespace fuseraft.Infrastructure.Plugins;
@@ -81,8 +82,8 @@ public sealed class PluginRegistry : IDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".fuseraft", "scratchpad");
         Register("Scratchpad", () => new ScratchpadPlugin("agent", scratchpadBase));
-        Register("Chatroom",   () => new ChatroomPlugin("agent", ".fuseraft/chatroom.jsonl"));
-        Register("Changes",    () => new ChangesPlugin(".fuseraft/changes.json"));
+        Register("Chatroom",   () => new ChatroomPlugin("agent", FuseraftPaths.LocalChatroom));
+        Register("Changes",    () => new ChangesPlugin(FuseraftPaths.LocalChanges));
 
         // SubAgent stub — AgentFactory replaces this with a real instance that has a
         // live IChatClient and sandboxed FileSystem + Search tools for the sub-agent loop.
