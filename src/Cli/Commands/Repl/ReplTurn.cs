@@ -233,6 +233,11 @@ internal static class ReplTurn
         await ctx.Emitter.EmitAsync("user_input", turn: ctx.TurnIndex, payload: new { content = input });
         ctx.History.Add(new ChatMessage(ChatRole.User, input));
 
+        // Preserve the user's input before the LLM call so a crash mid-turn still
+        // leaves a recoverable snapshot with the typed text.
+        if (!isStepRequest)
+            _ = SaveSnapshotAsync(ctx);
+
         var sb                = new StringBuilder();
         var toolCallsThisTurn = new List<string>();
         var toolRounds        = 0;
