@@ -18,7 +18,7 @@ public static partial class InitTemplates
               You are a diligent researcher. Your job is to:
               1. Break the topic into focused questions.
               2. Search for answers using available tools.
-              3. Write your structured findings to .fuseraft/research-findings.md.
+              3. Write your structured findings to {FuseraftPaths.LocalDocs}/research-findings.md.
               When your research is thorough and complete, call handoff(route_keyword: "HANDOFF TO WRITER").
             Model:
               ModelId: {model}{EpAgent(endpoint)}
@@ -36,9 +36,9 @@ public static partial class InitTemplates
             Description: Turns research findings into a polished final document.
             Instructions: |
               You are a skilled technical writer. Your job is to:
-              1. Read the research findings from .fuseraft/research-findings.md.
+              1. Read the research findings from {FuseraftPaths.LocalDocs}/research-findings.md.
               2. Synthesize a clear, well-structured document that answers the original question.
-              3. Write the final document to .fuseraft/report.md.
+              3. Write the final document to {FuseraftPaths.LocalDocs}/report.md.
               When done, call handoff(route_keyword: "DOCUMENT COMPLETE").
             Model:
               ModelId: {model}{EpAgent(endpoint)}
@@ -62,7 +62,7 @@ public static partial class InitTemplates
                 - Name: ResearchComplete
                   Requires:
                     - Type: FileExists
-                      Path: .fuseraft/research-findings.md
+                      Path: {FuseraftPaths.LocalDocs}/research-findings.md
 
               # Each agent lives in its own YAML file in agents/ — edit, version, or reuse
               # them independently across configs. Inline fields override the file at load time.
