@@ -80,10 +80,20 @@ public record ModelConfig
     /// Maximum tokens allowed in the prompt sent to this model (the context window input limit).
     /// When set, the agent middleware estimates the token count before each API call and throws
     /// a clear exception if the budget would be exceeded — preventing expensive failed requests.
-    /// Set this to ~85% of the model's advertised limit to leave headroom for tool schemas and
-    /// the model's response. 0 = no limit enforced (not recommended for production).
+    /// Tool schemas are included in the estimate alongside message content.
+    /// Set this to ~85% of the model's advertised limit to leave headroom for the model's
+    /// response. 0 = no limit enforced (not recommended for production).
     /// </summary>
     public int MaxContextTokens { get; init; } = 0;
+
+    /// <summary>
+    /// Maximum serialized request body size in bytes. When set, the agent middleware
+    /// estimates the outgoing JSON payload size before each API call and throws if it would
+    /// exceed this limit — preventing HTTP 413 errors from upstream proxies (e.g. nginx).
+    /// A conservative estimate: set to the proxy's <c>client_max_body_size</c> minus ~10%
+    /// headroom. 0 = no limit enforced.
+    /// </summary>
+    public long MaxPayloadBytes { get; init; } = 0;
 
     /// <summary>
     /// Sampling temperature (0.0–2.0). Lower = more deterministic.

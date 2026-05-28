@@ -154,12 +154,20 @@ public sealed class AgentFactory(
             ? config.MaxInTurnContextTokens * 4
             : 0;
 
+        // Tool schema overhead: computed once at build time since the tool list is fixed
+        // for the lifetime of this agent. Included in the context budget and payload
+        // estimates so the pre-flight checks account for schema tokens that are invisible
+        // in the message list but still count toward the model's input limit.
+        var toolSchemaChars = EstimateToolSchemaChars(chatOptions?.Tools);
+
+        var maxPayloadBytes = resolvedModel.MaxPayloadBytes;
+
         var hasHandoff = config.Plugins.Any(p =>
             p.Equals(HandoffPlugin.PluginName, StringComparison.OrdinalIgnoreCase));
 
         // Wrap the chat client when options merging, budget enforcement, or handoff
         // termination is needed.
-        var effectiveClient = chatOptions is not null || maxContextChars > 0 || maxInTurnChars > 0 || hasHandoff
+        var effectiveClient = chatOptions is not null || maxContextChars > 0 || maxInTurnChars > 0 || maxPayloadBytes > 0 || hasHandoff
             ? chatClient.AsBuilder()
                 .Use(
                     getResponseFunc: (messages, options, inner, ct) =>
@@ -167,7 +175,9 @@ public sealed class AgentFactory(
                         if (maxInTurnChars > 0)
                             messages = TrimInTurnContext(messages, maxInTurnChars);
                         if (maxContextChars > 0)
-                            EnforceContextBudget(config.Name, messages, maxContextChars);
+                            EnforceContextBudget(config.Name, messages, maxContextChars, toolSchemaChars);
+                        if (maxPayloadBytes > 0)
+                            EnforcePayloadLimit(config.Name, messages, toolSchemaChars, maxPayloadBytes);
                         // Stop the FunctionInvokingChatClient loop immediately after handoff —
                         // no follow-up LLM call is made, so the agent cannot call more tools.
                         if (hasHandoff && HandoffWasInvoked(messages))
@@ -180,7 +190,9 @@ public sealed class AgentFactory(
                         if (maxInTurnChars > 0)
                             messages = TrimInTurnContext(messages, maxInTurnChars);
                         if (maxContextChars > 0)
-                            EnforceContextBudget(config.Name, messages, maxContextChars);
+                            EnforceContextBudget(config.Name, messages, maxContextChars, toolSchemaChars);
+                        if (maxPayloadBytes > 0)
+                            EnforcePayloadLimit(config.Name, messages, toolSchemaChars, maxPayloadBytes);
                         if (hasHandoff && HandoffWasInvoked(messages))
                             return EmptyStreamingResponse();
                         var merged = chatOptions is not null ? MergeOptions(messages, options, chatOptions) : options;
@@ -532,29 +544,84 @@ public sealed class AgentFactory(
     };
 
     /// <summary>
-    /// Estimates the token count of <paramref name="messages"/> using a conservative
-    /// 4-chars-per-token ratio and throws if it exceeds <paramref name="maxChars"/>.
-    /// Runs before every inner LLM call so the provider never sees an oversized request.
+    /// Estimates the token count of <paramref name="messages"/> (plus tool schema overhead)
+    /// using a conservative 4-chars-per-token ratio and throws if it exceeds
+    /// <paramref name="maxChars"/>. Runs before every inner LLM call so the provider never
+    /// sees an oversized request.
     /// </summary>
     private static void EnforceContextBudget(
         string agentName,
         IEnumerable<ChatMessage> messages,
-        int maxChars)
+        int maxChars,
+        int toolSchemaChars = 0)
     {
-        int totalChars = 0;
+        int msgChars = 0;
         foreach (var msg in messages)
             foreach (var content in msg.Contents)
-                totalChars += EstimateContentChars(content);
+                msgChars += EstimateContentChars(content);
 
+        var totalChars = msgChars + toolSchemaChars;
         if (totalChars <= maxChars) return;
 
-        var estimated = totalChars / 4;
-        var limit     = maxChars / 4;
+        var estimated     = totalChars / 4;
+        var schemaTokens  = toolSchemaChars / 4;
+        var limit         = maxChars / 4;
         throw new InvalidOperationException(
             $"[{agentName}] Context budget exceeded: ~{estimated:N0} estimated tokens in this " +
-            $"request (MaxContextTokens limit: {limit:N0}). The agent has accumulated too many " +
-            $"tool-call results within this turn. Reduce file read scope, lower ReadFileSizeLimit, " +
-            $"or raise MaxContextTokens if the model supports a larger context window.");
+            $"request (includes ~{schemaTokens:N0} tool-schema tokens; MaxContextTokens limit: {limit:N0}). " +
+            $"Reduce file read scope, lower ReadFileSizeLimit, or raise MaxContextTokens if the model " +
+            $"supports a larger context window.");
+    }
+
+    /// <summary>
+    /// Estimates the serialized JSON payload size for the outgoing request and throws if it
+    /// exceeds <paramref name="maxBytes"/>. Prevents HTTP 413 errors from upstream proxies
+    /// (e.g. nginx <c>client_max_body_size</c>) before the round-trip is attempted.
+    ///
+    /// <para>Estimate: content chars × 1.2 (JSON escaping/structure overhead) + tool schema
+    /// chars × 1.1 + 2 KB base overhead for request envelope fields.</para>
+    /// </summary>
+    private static void EnforcePayloadLimit(
+        string agentName,
+        IEnumerable<ChatMessage> messages,
+        int toolSchemaChars,
+        long maxBytes)
+    {
+        int msgChars = 0;
+        foreach (var msg in messages)
+            foreach (var content in msg.Contents)
+                msgChars += EstimateContentChars(content);
+
+        long estimatedBytes = (long)(msgChars * 1.2) + (long)(toolSchemaChars * 1.1) + 2048;
+        if (estimatedBytes <= maxBytes) return;
+
+        throw new InvalidOperationException(
+            $"[{agentName}] Estimated request payload ({estimatedBytes / 1024:N0} KB) would exceed " +
+            $"MaxPayloadBytes ({maxBytes / 1024:N0} KB). Reduce context size, lower MaxToolResultChars, " +
+            $"or increase MaxPayloadBytes if the proxy allows larger bodies.");
+    }
+
+    /// <summary>
+    /// Estimates the character footprint of all tool schemas passed with this agent's
+    /// requests. Computed once at agent build time — tools are fixed for an agent's lifetime.
+    /// Uses <c>JsonSchema.GetRawText()</c> for accuracy, matching how the REPL estimates
+    /// tool token usage.
+    /// </summary>
+    private static int EstimateToolSchemaChars(IList<AITool>? tools)
+    {
+        if (tools is null || tools.Count == 0) return 0;
+        int total = 0;
+        foreach (var tool in tools)
+        {
+            if (tool is not AIFunction fn) continue;
+            total += fn.Name?.Length ?? 0;
+            total += fn.Description?.Length ?? 0;
+            try { total += fn.JsonSchema.GetRawText().Length; }
+            catch { total += 200; } // fallback if schema serialization fails
+        }
+        // Add per-tool structural overhead (field names, brackets, quotes).
+        total += tools.Count * 50;
+        return total;
     }
 
     /// <summary>
