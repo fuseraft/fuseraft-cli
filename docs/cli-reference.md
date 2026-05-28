@@ -355,6 +355,7 @@ Use `/tools` to see the full list at runtime.
 | `/paste` | Enter multi-line paste mode; type `EOF` on its own line to finish |
 | `/save` | Save a Markdown transcript to `repl-<sessionId>.md` in the current directory |
 | `/save <file>` | Save the transcript to a specific file |
+| `/snapshot` | Write a full debug snapshot of the current session state — metadata, active modes, context stats, tool inventory, plan state, and full message history — to a timestamped JSON file in `/tmp/fuseraft/`. Prints the file path on completion. |
 | `/context` | Show estimated context window usage: token count vs. budget, explicit budget label, completed turn count, per-role message counts, per-category breakdown, delta since last check, and projected turns remaining after 2+ turns |
 | `/events` | Show event stats for the current session: turns, total tool calls, per-turn tool breakdown, and top tools by frequency |
 | `/events stats` | Same as `/events` |
