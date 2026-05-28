@@ -232,6 +232,21 @@ public static class OrchestratorBuilder
                 .ToList()
         };
 
+        // Inject .gitignore so agents know which paths to avoid writing to.
+        var gitIgnoreBlock = BuildGitIgnoreBlock();
+        if (gitIgnoreBlock is not null)
+        {
+            config = config with
+            {
+                Agents = config.Agents
+                    .Select(a => a with
+                    {
+                        Instructions = a.Instructions.TrimEnd() + "\n\n" + gitIgnoreBlock
+                    })
+                    .ToList()
+            };
+        }
+
         // Inject context items into every agent's system prompt so agents know what
         // reference material is available without burning a tool call on discovery.
         var contextStore = new fuseraft.Infrastructure.ContextStore();
@@ -1141,6 +1156,27 @@ public static class OrchestratorBuilder
             sb.AppendLine($"  FullSuiteCommand:   {ts.FullSuiteCommand}");
         sb.AppendLine();
         sb.Append("For each file you changed, substitute its path for {file} in FindRelatedCommand to discover related tests, then run those tests. Fall back to FullSuiteCommand when no related tests are found.");
+        return sb.ToString();
+    }
+
+    private static string? BuildGitIgnoreBlock()
+    {
+        var path = Path.Combine(Directory.GetCurrentDirectory(), ".gitignore");
+        if (!File.Exists(path)) return null;
+
+        const int maxLines = 100;
+        var lines     = File.ReadAllLines(path);
+        var truncated = lines.Length > maxLines;
+        var content   = string.Join('\n', truncated ? lines[..maxLines] : lines);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("## .gitignore");
+        sb.AppendLine("Avoid writing to paths matched by these patterns. Treat matched paths as non-source (generated, vendored, or sensitive) — read them only when the task explicitly requires it.");
+        if (truncated)
+            sb.AppendLine($"(truncated to {maxLines} of {lines.Length} lines)");
+        sb.AppendLine("```");
+        sb.AppendLine(content);
+        sb.Append("```");
         return sb.ToString();
     }
 
