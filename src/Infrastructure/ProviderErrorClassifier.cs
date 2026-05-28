@@ -66,6 +66,10 @@ public static class ProviderErrorClassifier
                         return IsQuotaMessage(msg) ? FailoverReason.QuotaExceeded : FailoverReason.RateLimit;
 
                     case 400 when IsContextExceededMessage(msg):
+                    case 400 when IsThinkingTokenMismatch(msg):
+                        return FailoverReason.ContextExceeded;
+
+                    case 413:
                         return FailoverReason.ContextExceeded;
 
                     case >= 500:
@@ -74,7 +78,9 @@ public static class ProviderErrorClassifier
             }
 
             // String-based fallback for exceptions that don't expose a status code.
-            // Checked in priority order: context exceeded before rate-limit before auth before server.
+            // Checked in priority order: payload/context exceeded before rate-limit before auth before server.
+            if (IsPayloadTooLargeMessage(msg)) return FailoverReason.ContextExceeded;
+            if (IsThinkingTokenMismatch(msg))  return FailoverReason.ContextExceeded;
             if (IsContextExceededMessage(msg)) return FailoverReason.ContextExceeded;
             if (Is429Message(msg))             return IsQuotaMessage(msg) ? FailoverReason.QuotaExceeded : FailoverReason.RateLimit;
             if (IsAuthMessage(msg))            return FailoverReason.AuthError;
@@ -127,4 +133,19 @@ public static class ProviderErrorClassifier
         msg.Contains("Bad Gateway",           StringComparison.OrdinalIgnoreCase) ||
         msg.Contains("Service Unavailable",   StringComparison.OrdinalIgnoreCase) ||
         msg.Contains("Gateway Timeout",       StringComparison.OrdinalIgnoreCase);
+
+    // Bedrock/LiteLLM: "max_tokens must be greater than thinking.budget_tokens"
+    // Fired when a thinking model's budget exceeds the configured MaxTokens.
+    private static bool IsThinkingTokenMismatch(string msg) =>
+        msg.Contains("budget_tokens", StringComparison.OrdinalIgnoreCase) ||
+        (msg.Contains("max_tokens",  StringComparison.OrdinalIgnoreCase) &&
+         msg.Contains("thinking",    StringComparison.OrdinalIgnoreCase) &&
+         msg.Contains("greater",     StringComparison.OrdinalIgnoreCase));
+
+    // nginx/proxy: "413 Request Entity Too Large" — payload exceeds proxy limit.
+    private static bool IsPayloadTooLargeMessage(string msg) =>
+        msg.Contains("Request Entity Too Large", StringComparison.OrdinalIgnoreCase) ||
+        msg.Contains("Payload Too Large",        StringComparison.OrdinalIgnoreCase) ||
+        msg.Contains("HTTP 413",                 StringComparison.OrdinalIgnoreCase) ||
+        msg.Contains("[413]",                    StringComparison.Ordinal);
 }
