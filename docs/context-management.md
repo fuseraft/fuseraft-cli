@@ -7,6 +7,7 @@ lifetime:
 
 ```
 Session start
+  └─ Auto-injection              → runtime environment + .gitignore (always on, no config)
   └─ Layer 1: Context Store      → files imported before the session
   └─ Layer 2: Persistent Memory  → facts recalled from prior sessions (EnableMemory)
 
@@ -23,6 +24,27 @@ After each run
 ```
 
 Each layer is optional and independently configured. Most sessions need only one or two.
+
+---
+
+## Automatic runtime injection
+
+Before any configurable layer runs, fuseraft injects two blocks into every agent's system prompt automatically — no configuration required.
+
+**Runtime environment** — OS, CPU architecture, shell, working directory, and current date/time:
+
+```
+## Runtime Environment
+OS: Linux
+Architecture: x64
+Shell: /usr/bin/bash
+Working directory: /home/dev/my-project
+Date/time: 2026-05-27 10:30:00 -05:00 (America/Chicago)
+```
+
+This prevents agents from spending tool calls probing for environment details they can read directly from their instructions.
+
+**`.gitignore`** — the project's `.gitignore` (capped at 100 lines) is read from the session working directory and injected so agents know which paths to avoid writing to without discovering the file via tool calls. Omitted silently when no `.gitignore` is present.
 
 ---
 
@@ -142,6 +164,7 @@ Agents:
       MaxTurnAge: 5           # only keep messages from the last 5 assistant turns
       MaxTailMessages: 40     # hard cap after the above filters
       ContextCapFraction: 0.8 # emit context_cap_warning when at 80% of MaxTailMessages
+      MaxToolResultChars: 8000  # truncate individual tool results in replayed history
 ```
 
 ### TextOnly
@@ -185,6 +208,26 @@ is replayed verbatim in every subsequent turn, compaction summaries grow each cy
 tokens balloon. fuseraft automatically truncates verbose non-summary assistant messages to
 2,000 characters when replaying them into the next turn's history. Compaction summaries are
 never truncated.
+
+### Tool-result truncation (`MaxToolResultChars`)
+
+A large tool result — for example, a `read_file` on a 200 KB source file — is replayed
+verbatim into every subsequent agent turn, compounding context growth each cycle. Set
+`MaxToolResultChars` to truncate `FunctionResultContent` strings in the replayed history
+slice. A suffix noting the omitted character count is appended so agents know the result
+was cut.
+
+Unlike `TextOnly` (which drops tool messages entirely), this keeps the result visible
+but bounded:
+
+```yaml
+Agents:
+  - Name: Developer
+    ContextWindow:
+      MaxToolResultChars: 8000   # truncate tool results in replayed history to 8 000 chars
+```
+
+Default: `0` (no truncation).
 
 ---
 
@@ -378,6 +421,33 @@ See [Configuration — Context budget](configuration.md#context-budget) for the 
 
 ---
 
+## Adaptive context-trim retry
+
+When a provider call fails due to a context or payload size error — HTTP 413, a Bedrock
+thinking-budget mismatch, or an orphaned tool-call pair — fuseraft automatically retries
+with progressively reduced tool-result content rather than failing the session outright.
+
+**Retry stages (non-streaming path):**
+
+| Stage | Action |
+|-------|--------|
+| 1 | Truncate all `FunctionResultContent` in history to 4,000 characters |
+| 2 | Truncate to 500 characters |
+| 3 | Drop all tool messages entirely (text-only nuclear option) |
+
+Each stage re-runs the pre-flight budget/payload checks on the trimmed context before
+calling the provider, so both fuseraft's own pre-flight throws and provider 400/413
+rejections recover automatically.
+
+**Streaming path:** when `MaxContextTokens` or `MaxPayloadBytes` is configured, fuseraft
+proactively pre-trims before streaming begins (streaming cannot retry mid-response). Without
+explicit limits, provider errors on the streaming path surface normally.
+
+No configuration is required — the retry logic fires automatically on every classifiable
+context error.
+
+---
+
 ## Context window visualization
 
 After every `fuseraft run`, fuseraft automatically writes a Chart.js HTML file that shows
@@ -416,6 +486,7 @@ Here is the full sequence from session start through a long-running session:
 
 ```
 1. fuseraft run
+   ├─ Auto-injection     → runtime environment block + .gitignore (always on)
    ├─ Context Store index → injected into every agent's system prompt
    └─ Persistent Memory  → prepended to each agent's instructions (if EnableMemory: true)
 
@@ -424,8 +495,11 @@ Here is the full sequence from session start through a long-running session:
    └─ ContextWindow filter applied to conversation history
       ├─ TextOnly / ExcludeAgents strip tool noise
       ├─ MaxTurnAge semantic cut
-      └─ MaxTailMessages hard cap
+      ├─ MaxTailMessages hard cap
+      ├─ MaxToolResultChars — truncate large tool results in replayed history
+      └─ SanitizeToolPairs — strip orphaned assistant tool-call frames (strict providers)
          └─ Filtered slice + replay-truncated content → sent to LLM
+            └─ On context/413 error → adaptive trim retry (up to 3 stages)
 
 3. After each checkpoint save
    └─ Compaction check
