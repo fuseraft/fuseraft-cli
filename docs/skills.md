@@ -95,6 +95,14 @@ The skill verifies the server command or endpoint, adds the `McpServers` entry t
 
 ---
 
+### `skill-author`
+
+Guides the agent through writing a new fuseraft skill from scratch. Triggers when the user wants to create a skill, capture a reusable procedure, or understand how to structure a `SKILL.md` file.
+
+The skill gathers requirements (what it does, when it triggers, where it lives), writes the frontmatter and body, decides whether reference files or bundled scripts are needed, installs the skill at the chosen scope, and verifies it appears in the catalog.
+
+---
+
 ## Cross-session handoff: `/compact`
 
 To pass context from the current REPL session to a new one, use the `/compact` command. `/compact` generates a concise summary of what was worked on, key decisions, current state, and what comes next; it then replaces the conversation history with that summary so the session can continue with a clean context window.
