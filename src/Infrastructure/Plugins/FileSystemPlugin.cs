@@ -411,7 +411,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     [Description("Create or overwrite a file. Prefer patch_file for edits on large files.")]
     public async Task<string> WriteFileAsync(
         [Description("File path.")] string path,
-        [Description("File content.")] string? content = null,
+        [Description("File content.")] string content,
         [Description("Skip escape-sequence normalisation.")] bool raw = false,
         [Description("Expected current version (0 = skip check). Write fails with VERSION_MISMATCH when the file has been modified since this version was read.")] int baseVersion = 0)
     {
