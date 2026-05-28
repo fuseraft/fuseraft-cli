@@ -312,7 +312,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
     // -------------------------------------------------------------------------
 
     // Loads ShellPolicy from the default orchestration config in the working directory, if one exists.
-    // Allows the REPL to honour shell allow/deny rules without requiring a --config flag.
+    // Uses OrchestratorBuilder.LoadSecurityConfig which binds only Orchestration.Security and does
+    // NOT run ResolveAgentFiles — a missing agent file therefore cannot silently drop the policy.
     private static ShellPolicy? TryLoadDefaultShellPolicy()
     {
         var candidates = new[]
@@ -323,11 +324,10 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
         foreach (var path in candidates)
         {
-            if (!File.Exists(path)) continue;
             try
             {
-                var cfg = OrchestratorBuilder.LoadConfig(path);
-                if (cfg.Security?.ShellPolicy is { } policy)
+                var security = OrchestratorBuilder.LoadSecurityConfig(path);
+                if (security?.ShellPolicy is { } policy)
                     return policy;
             }
             catch { /* best effort — malformed config should not crash the REPL */ }
