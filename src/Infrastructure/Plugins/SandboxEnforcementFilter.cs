@@ -5,6 +5,7 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.FileSystemGlobbing;
 using fuseraft.Core;
+using fuseraft.Core.Models;
 
 namespace fuseraft.Infrastructure.Plugins;
 
@@ -46,6 +47,9 @@ public sealed class SandboxEnforcementFilter
     private readonly ExecutionRing _ring;
     private readonly RingResourceLimits _limits;
     private readonly Matcher? _changeEnvelopeMatcher;
+    private readonly Matcher? _fsDenyMatcher;
+    private readonly Matcher? _fsReadMatcher;
+    private readonly Matcher? _fsWriteMatcher;
 
     // Prefixes of OS directories that contain executables and shared libraries.
     private static readonly string[] SystemPrefixes = OperatingSystem.IsWindows()
@@ -77,11 +81,28 @@ public sealed class SandboxEnforcementFilter
     private static readonly string[] EnvelopedFunctions =
         ["write_file", "patch_file", "delete_file"];
 
+    // All filesystem functions whose path arguments are checked against deny/read/write globs.
+    private static readonly HashSet<string> ReadOnlyFsFunctions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "read_file", "grep_file", "list_files", "stat_file",
+        "path_exists", "list_directory", "get_file_info", "get_file_summary",
+    };
+
+    private static readonly HashSet<string> WriteOnlyFsFunctions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "write_file", "patch_file", "delete_file", "create_directory",
+        "delete_directory", "copy_file", "move_file", "set_permissions",
+    };
+
+    // Arg names that may carry file/directory paths across all filesystem functions.
+    private static readonly string[] FsPathArgNames = ["path", "directory", "source", "destination"];
+
     public SandboxEnforcementFilter(
         string sandboxRoot,
         PromptInjectionDetector? injectionDetector = null,
         ExecutionRing ring = ExecutionRing.Ring2,
-        IReadOnlyList<string>? changeEnvelope = null)
+        IReadOnlyList<string>? changeEnvelope = null,
+        FileSystemPermissions? fsPermissions = null)
     {
         _sandboxRoot       = FuseraftPaths.ExpandPath(sandboxRoot);
         _injectionDetector = injectionDetector;
@@ -93,6 +114,24 @@ public sealed class SandboxEnforcementFilter
             _changeEnvelopeMatcher = new Matcher(StringComparison.OrdinalIgnoreCase);
             foreach (var pattern in changeEnvelope)
                 _changeEnvelopeMatcher.AddInclude(pattern);
+        }
+
+        if (fsPermissions?.Deny is { Count: > 0 } deny)
+        {
+            _fsDenyMatcher = new Matcher(StringComparison.OrdinalIgnoreCase);
+            foreach (var p in deny) _fsDenyMatcher.AddInclude(p);
+        }
+
+        if (fsPermissions?.Read is { Count: > 0 } read)
+        {
+            _fsReadMatcher = new Matcher(StringComparison.OrdinalIgnoreCase);
+            foreach (var p in read) _fsReadMatcher.AddInclude(p);
+        }
+
+        if (fsPermissions?.Write is { Count: > 0 } write)
+        {
+            _fsWriteMatcher = new Matcher(StringComparison.OrdinalIgnoreCase);
+            foreach (var p in write) _fsWriteMatcher.AddInclude(p);
         }
     }
 
@@ -125,8 +164,15 @@ public sealed class SandboxEnforcementFilter
         var ringDenial = InspectRing(functionName);
         if (ringDenial is not null) return ringDenial;
 
-        if (FileSystemFunctions.Any(f =>
-                string.Equals(f, functionName, StringComparison.OrdinalIgnoreCase)))
+        // Apply filesystem checks to core functions AND to the extended read/write sets
+        // added by FileSystemPermissions (grep_file, patch_file, copy_file, etc.).
+        bool isFsFunction = FileSystemFunctions.Any(f =>
+                string.Equals(f, functionName, StringComparison.OrdinalIgnoreCase))
+            || (_fsDenyMatcher  is not null && (ReadOnlyFsFunctions.Contains(functionName) || WriteOnlyFsFunctions.Contains(functionName)))
+            || (_fsReadMatcher  is not null && ReadOnlyFsFunctions.Contains(functionName))
+            || (_fsWriteMatcher is not null && WriteOnlyFsFunctions.Contains(functionName));
+
+        if (isFsFunction)
             return InspectFileSystem(functionName, args);
 
         if (ShellFunctions.Any(f =>
@@ -156,23 +202,54 @@ public sealed class SandboxEnforcementFilter
     private string? InspectFileSystem(string functionName, IReadOnlyDictionary<string, object?>? args)
     {
         if (args is null) return null;
+
         bool isEnveloped = _changeEnvelopeMatcher is not null &&
             EnvelopedFunctions.Any(f => string.Equals(f, functionName, StringComparison.OrdinalIgnoreCase));
+        bool isReadOp  = _fsReadMatcher  is not null && ReadOnlyFsFunctions.Contains(functionName);
+        bool isWriteOp = _fsWriteMatcher is not null && WriteOnlyFsFunctions.Contains(functionName);
 
-        foreach (var argName in (ReadOnlySpan<string>)["path", "directory"])
+        // Extended arg name list covers copy_file/move_file (source/destination) in addition
+        // to the standard path/directory args used by all other filesystem functions.
+        foreach (var argName in (ReadOnlySpan<string>)FsPathArgNames)
         {
-            if (args.TryGetValue(argName, out var val) && val is string raw)
-            {
-                var denial = CheckPath(raw);
-                if (denial is not null) return denial;
+            if (!args.TryGetValue(argName, out var val) || val is not string raw) continue;
 
-                if (isEnveloped)
-                {
-                    var envelopeDenial = CheckEnvelope(raw);
-                    if (envelopeDenial is not null) return envelopeDenial;
-                }
+            // 1. Sandbox check — deny if outside configured root.
+            var sandboxDenial = CheckPath(raw);
+            if (sandboxDenial is not null) return sandboxDenial;
+
+            // 2. Deny glob — hard-blocks matching paths regardless of read/write.
+            if (_fsDenyMatcher is not null)
+            {
+                var denyDenial = CheckGlob(raw, _fsDenyMatcher, matchMeansDeny: true,
+                    $"Path is blocked by a configured FileSystem deny rule.");
+                if (denyDenial is not null) return denyDenial;
+            }
+
+            // 3. Change envelope check (existing brownfield feature).
+            if (isEnveloped)
+            {
+                var envelopeDenial = CheckEnvelope(raw);
+                if (envelopeDenial is not null) return envelopeDenial;
+            }
+
+            // 4. Write glob — restricts write operations to matching paths.
+            if (isWriteOp)
+            {
+                var writeDenial = CheckGlob(raw, _fsWriteMatcher!, matchMeansDeny: false,
+                    $"Path is outside the configured FileSystem write permissions.");
+                if (writeDenial is not null) return writeDenial;
+            }
+
+            // 5. Read glob — restricts read operations to matching paths.
+            if (isReadOp)
+            {
+                var readDenial = CheckGlob(raw, _fsReadMatcher!, matchMeansDeny: false,
+                    $"Path is outside the configured FileSystem read permissions.");
+                if (readDenial is not null) return readDenial;
             }
         }
+
         return null;
     }
 
@@ -253,6 +330,29 @@ public sealed class SandboxEnforcementFilter
         }
 
         return null;
+    }
+
+    // Evaluates a glob matcher against a resolved relative path.
+    // When matchMeansDeny=true (deny list): returns a denial when the path matches.
+    // When matchMeansDeny=false (allow list): returns a denial when the path does NOT match.
+    private string? CheckGlob(string rawPath, Matcher matcher, bool matchMeansDeny, string reason)
+    {
+        string resolved;
+        try
+        {
+            var expanded = ProcessHelper.ExpandHome(rawPath);
+            resolved = Path.IsPathRooted(expanded)
+                ? Path.GetFullPath(expanded)
+                : Path.GetFullPath(expanded, _sandboxRoot);
+        }
+        catch { return null; }
+
+        var relative = Path.GetRelativePath(_sandboxRoot, resolved).Replace('\\', '/');
+        bool matches = matcher.Match(relative).HasMatches;
+
+        return (matchMeansDeny ? matches : !matches)
+            ? PluginResult.Denied($"[DENIED] '{relative}': {reason}")
+            : null;
     }
 
     private string? CheckEnvelope(string rawPath)

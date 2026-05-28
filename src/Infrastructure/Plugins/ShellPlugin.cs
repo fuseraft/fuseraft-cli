@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Microsoft.Extensions.AI;
 using fuseraft.Core;
+using fuseraft.Core.Models;
 
 namespace fuseraft.Infrastructure.Plugins;
 
@@ -31,6 +32,7 @@ public sealed class ShellPlugin : IDisposable
 
     private readonly string? _sandboxRoot;
     private readonly Func<string, Task<bool>>? _approveCommand;
+    private readonly ShellPolicy? _shellPolicy;
     private readonly object _tempDirLock = new();
     private string? _sessionTempDir;
 
@@ -71,10 +73,11 @@ public sealed class ShellPlugin : IDisposable
         }
     }
 
-    public ShellPlugin(string? sandboxRoot = null, Func<string, Task<bool>>? approveCommand = null)
+    public ShellPlugin(string? sandboxRoot = null, Func<string, Task<bool>>? approveCommand = null, ShellPolicy? shellPolicy = null)
     {
         _sandboxRoot    = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _approveCommand = approveCommand;
+        _shellPolicy    = shellPolicy;
     }
 
     public void Dispose()
@@ -105,6 +108,9 @@ public sealed class ShellPlugin : IDisposable
         var sudoDenial = CheckForSudo(command);
         if (sudoDenial is not null) return sudoDenial;
 
+        var policyDenial = CheckShellPolicy(command);
+        if (policyDenial is not null) return policyDenial;
+
         if (_approveCommand is not null && !await _approveCommand(command))
             return PluginResult.Denied("Shell command blocked by user.");
 
@@ -126,6 +132,9 @@ public sealed class ShellPlugin : IDisposable
     {
         var sudoDenial = CheckForSudo(script);
         if (sudoDenial is not null) return sudoDenial;
+
+        var policyDenial = CheckShellPolicy(script);
+        if (policyDenial is not null) return policyDenial;
 
         if (_approveCommand is not null && !await _approveCommand(script))
             return PluginResult.Denied("Shell script blocked by user.");
@@ -222,6 +231,9 @@ public sealed class ShellPlugin : IDisposable
 
         var sudoDenial = CheckForSudo(command);
         if (sudoDenial is not null) return sudoDenial;
+
+        var policyDenial = CheckShellPolicy(command);
+        if (policyDenial is not null) return policyDenial;
 
         if (_approveCommand is not null && !await _approveCommand(command))
             return PluginResult.Denied("Shell command blocked by user.");
@@ -347,6 +359,38 @@ public sealed class ShellPlugin : IDisposable
     }
 
     // Helpers
+
+    // Checks the command against the configured ShellPolicy allow/deny lists.
+    // Deny is evaluated first; a matching deny pattern blocks the command regardless of allow.
+    // Allow is only evaluated when the allow list is non-empty; the command must contain at
+    // least one allowed pattern to proceed.
+    // Returns a [DENIED] string when blocked, null when safe.
+    private string? CheckShellPolicy(string commandOrScript)
+    {
+        if (_shellPolicy is null) return null;
+
+        if (_shellPolicy.Deny is { Count: > 0 })
+        {
+            foreach (var pattern in _shellPolicy.Deny)
+            {
+                if (commandOrScript.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                    return PluginResult.Denied(
+                        $"Shell command blocked: matches configured deny pattern '{pattern}'.");
+            }
+        }
+
+        if (_shellPolicy.Allow is { Count: > 0 })
+        {
+            bool allowed = _shellPolicy.Allow.Any(p =>
+                commandOrScript.Contains(p, StringComparison.OrdinalIgnoreCase));
+            if (!allowed)
+                return PluginResult.Denied(
+                    $"Shell command blocked: not matched by any configured allow pattern. " +
+                    $"Allowed: {string.Join(", ", _shellPolicy.Allow.Select(p => $"'{p}'"))}.");
+        }
+
+        return null;
+    }
 
     // Detects sudo anywhere in a command string (including after ;, &&, ||, |, or newlines)
     // so agents cannot escalate privileges.  Returns a [DENIED] string when found, null when safe.

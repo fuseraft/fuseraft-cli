@@ -551,6 +551,13 @@ See [Strategies](strategies.md) for full detail.
 ```yaml
 Security:
   FileSystemSandboxPath: /home/user/projects/myapp
+  FileSystemPermissions:
+    Read:  [src/**, docs/**]
+    Write: [tests/**, docs/**]
+    Deny:  [secrets/**, infra/prod/**]
+  ShellPolicy:
+    Allow: ["go test", "npm test"]
+    Deny:  ["rm -rf", "curl | bash"]
   HttpAllowedHosts:
     - api.github.com
     - registry.npmjs.org
@@ -559,6 +566,13 @@ Security:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `FileSystemSandboxPath` | string | — | Restricts FileSystem and Shell plugins to this directory tree. |
+| `FileSystemPermissions` | object | — | Granular read/write/deny glob rules applied within the sandbox. Requires `FileSystemSandboxPath`. See [Security → Filesystem permissions](security.md#filesystem-permissions-read--write--deny-globs). |
+| `FileSystemPermissions.Read` | array | `[]` | When non-empty, read operations are restricted to matching paths. |
+| `FileSystemPermissions.Write` | array | `[]` | When non-empty, write operations are restricted to matching paths. Evaluated alongside `ChangeEnvelope`; both must match when both are set. |
+| `FileSystemPermissions.Deny` | array | `[]` | Paths matching these globs are hard-denied for all operations (read and write). Checked before `Read`/`Write`. |
+| `ShellPolicy` | object | — | Allow/deny substring policy for shell commands. Works without `FileSystemSandboxPath`. See [Security → Shell policy](security.md#shell-policy). |
+| `ShellPolicy.Allow` | array | `[]` | When non-empty, commands must contain at least one pattern to proceed. |
+| `ShellPolicy.Deny` | array | `[]` | Commands containing any of these patterns are blocked (checked before `Allow`). |
 | `ChangeEnvelope` | array | — | Glob patterns (relative to sandbox root) restricting write operations (`write_file`, `patch_file`, `delete_file`). Reads are unaffected. Auto-populated from the brownfield discovery brief when `Brownfield.SeedEnvelopeFromBrief` is true. See [Security → Change envelope](security.md#change-envelope). |
 | `HttpAllowedHosts` | array | `[]` | Hostname allowlist for the Http plugin. Empty = unrestricted (private IPs always blocked). |
 | `AllowPrivateHosts` | bool | `false` | Bypass the private/loopback IP check. For local dev and sandbox environments only — **do not set in production**. |

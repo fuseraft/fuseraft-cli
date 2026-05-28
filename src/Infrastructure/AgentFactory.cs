@@ -269,7 +269,8 @@ public sealed class AgentFactory(
                     securityConfig.FileSystemSandboxPath,
                     governanceKernel?.InjectionDetector,
                     ring,
-                    securityConfig.ChangeEnvelope)
+                    securityConfig.ChangeEnvelope,
+                    securityConfig.FileSystemPermissions)
                 .WrapAgent(agent);
         }
 
