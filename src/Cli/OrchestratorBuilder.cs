@@ -220,6 +220,18 @@ public static class OrchestratorBuilder
                 .ToList()
         };
 
+        // Inject OS and recommended shell so agents never have to guess.
+        var osBlock = FuseraftPaths.BuildOsEnvironmentBlock();
+        config = config with
+        {
+            Agents = config.Agents
+                .Select(a => a with
+                {
+                    Instructions = a.Instructions.TrimEnd() + "\n\n" + osBlock
+                })
+                .ToList()
+        };
+
         // Inject context items into every agent's system prompt so agents know what
         // reference material is available without burning a tool call on discovery.
         var contextStore = new fuseraft.Infrastructure.ContextStore();

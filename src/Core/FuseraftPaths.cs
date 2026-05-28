@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace fuseraft.Core;
 
 /// <summary>
@@ -78,6 +80,53 @@ public static class FuseraftPaths
     /// where the session block in the system prompt already lists the log paths and
     /// directs the agent to use the <c>repl_session_*</c> tools for log access.
     /// </param>
+    /// <summary>
+    /// Returns a runtime environment block injected into every agent system prompt so agents
+    /// know the OS, architecture, shell, working directory, and current date/time without
+    /// having to infer or probe for them.
+    /// </summary>
+    public static string BuildOsEnvironmentBlock()
+    {
+        string os, shell;
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            os    = "Windows";
+            shell = Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe";
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            os    = "macOS";
+            shell = Environment.GetEnvironmentVariable("SHELL") ?? "zsh";
+        }
+        else
+        {
+            os    = "Linux";
+            shell = Environment.GetEnvironmentVariable("SHELL") ?? "bash";
+        }
+
+        var arch = RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.X64   => "x64",
+            Architecture.Arm64 => "arm64",
+            Architecture.X86   => "x86",
+            Architecture.Arm   => "arm",
+            _                  => RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant()
+        };
+
+        var now = DateTimeOffset.Now;
+        var tz  = TimeZoneInfo.Local.Id;
+        var cwd = Directory.GetCurrentDirectory();
+
+        return new System.Text.StringBuilder()
+            .AppendLine("## Runtime Environment")
+            .AppendLine($"OS: {os}")
+            .AppendLine($"Architecture: {arch}")
+            .AppendLine($"Shell: {shell}")
+            .AppendLine($"Working directory: {cwd}")
+            .Append(    $"Date/time: {now:yyyy-MM-dd HH:mm:ss zzz} ({tz})")
+            .ToString();
+    }
+
     public static string BuildFolderOrientationBlock(bool includeLogs = true)
     {
         var sb = new System.Text.StringBuilder();
