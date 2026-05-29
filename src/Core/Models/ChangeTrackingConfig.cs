@@ -17,7 +17,7 @@ public record ChangeTrackingConfig
     /// <summary>
     /// Path to write the change log JSON file.
     /// Relative paths are resolved against the current working directory.
-    /// Defaults to <c>.fuseraft/changes.json</c>.
+    /// Defaults to <c>.fuseraft/state/changes.json</c>.
     /// </summary>
     public string Path { get; init; } = FuseraftPaths.LocalChanges;
 

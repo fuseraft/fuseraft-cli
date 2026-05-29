@@ -158,7 +158,7 @@ public record EvidenceStoreConfig
 {
     /// <summary>
     /// File path where the evidence graph JSON is written.
-    /// Defaults to <c>.fuseraft/evidence.json</c>.
+    /// Defaults to <c>.fuseraft/state/evidence.json</c>.
     /// </summary>
     public string Path { get; init; } = FuseraftPaths.LocalEvidence;
 }

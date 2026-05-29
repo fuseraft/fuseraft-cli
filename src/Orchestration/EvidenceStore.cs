@@ -19,7 +19,7 @@ namespace fuseraft.Orchestration;
 /// </para>
 ///
 /// <para>
-/// The graph is persisted to <c>.fuseraft/evidence.json</c> (configurable) and loaded
+/// The graph is persisted to <c>.fuseraft/state/evidence.json</c> (configurable) and loaded
 /// lazily on first query so sessions that do not use evidence contracts incur no overhead.
 /// </para>
 /// </summary>
