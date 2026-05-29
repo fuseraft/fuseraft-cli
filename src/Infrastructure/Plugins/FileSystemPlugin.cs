@@ -40,6 +40,13 @@ public sealed class FileSystemPlugin : ITurnResettable
     private int _readBudgetUsed;
     private readonly int _readBudgetPerTurn;
 
+    // Pre-read byte threshold: if the file exceeds this, stream just the first 30 lines +
+    // a line count for the preview instead of allocating a full string array.
+    private const int LargeFileByteThreshold = 25_000;
+    // maxLines values larger than this are treated as cold reads — an agent passing
+    // maxLines: 99999 is asking for everything and should be gated the same as omitting it.
+    private const int LargeFileColdReadLines  = 500;
+
     public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null)
     {
         _sandboxRoot       = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
@@ -91,7 +98,31 @@ public sealed class FileSystemPlugin : ITurnResettable
         }
 
         var effectiveStart = Math.Max(1, startLine);
-        var allLines = await File.ReadAllLinesAsync(resolved);
+
+        // Cold-read gate: fires when starting from line 1 with no meaningful upper bound
+        // (maxLines unset, or so large it amounts to "give me everything"). Byte pre-check
+        // avoids allocating a full string array for a 15K-line file we're about to redirect.
+        bool isColdRead = effectiveStart <= 1 && (maxLines <= 0 || maxLines > LargeFileColdReadLines);
+        var  fileInfo   = new FileInfo(resolved);
+        if (isColdRead && fileInfo.Length > LargeFileByteThreshold)
+        {
+            // Stream first 30 lines for the preview + count total without full array alloc.
+            var previewLines = new List<string>(30);
+            int lineCount    = 0;
+            using var sr     = new StreamReader(resolved);
+            string?   ln;
+            while ((ln = await sr.ReadLineAsync()) != null)
+            {
+                lineCount++;
+                if (previewLines.Count < 30) previewLines.Add(ln);
+            }
+            return string.Join('\n', previewLines) +
+                $"\n\n[Large file — {lineCount:N0} lines ({fileInfo.Length:N0} bytes). " +
+                $"Cold-reading would flood your context. " +
+                $"Use grep_file to locate the relevant section, then read_file with startLine/maxLines.]";
+        }
+
+        var allLines   = await File.ReadAllLinesAsync(resolved);
         var totalLines = allLines.Length;
 
         if (effectiveStart > totalLines)
