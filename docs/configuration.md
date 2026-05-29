@@ -34,6 +34,7 @@ YAML is often more readable for configs with long agent instructions (block scal
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `SchemaVersion` | string | — | Optional config format version (e.g. `"2026-05"`). When set, fuseraft-cli validates that it recognizes this version and logs a warning if not. Useful for catching upgrades that silently change field semantics. Omit to skip version validation. |
 | `Name` | string | `""` | Human-readable name displayed at startup. |
 | `Description` | string | — | Optional description shown at startup. |
 | `SystemPromptPath` | string | — | Path to a Markdown file that replaces the embedded FUSERAFT.md base prompt prepended to every agent. Relative paths resolve from the config file's directory. Takes precedence over `SystemPrompt`. |
@@ -258,6 +259,8 @@ Both tools inject the current working directory into the sub-agent's system prom
 ### RemoteAgent
 
 Delegates an agent slot to a remote process that implements the [A2A protocol](https://a2a-protocol.org/). The agent card is fetched from `{Url}/.well-known/agent.json` at session startup and the agent participates in orchestration identically to locally-hosted agents.
+
+> **Preview:** The A2A protocol integration depends on a pre-release SDK package (`1.0.0-preview2`). A `LogWarning` is emitted at session startup for every agent that uses `RemoteAgent`. The API may change in future releases — verify compatibility before upgrading in production-critical workflows.
 
 ```yaml
 - Name: RemoteReviewer
@@ -666,7 +669,9 @@ Events:
   Path: .fuseraft/logs/events.jsonl
 ```
 
-> **App log** — In addition to this configurable event stream, fuseraft-cli always writes `Warning`-level and higher diagnostic messages to `.fuseraft/logs/app.log` via an always-on Serilog file sink (5 MB per file, 3 retained). This includes store-corruption warnings from `ChangeTracker`, `IntentLog`, `EvidenceStore`, and `FileVersionStore`. No configuration needed.
+> **App log** — In addition to this configurable event stream, fuseraft-cli always writes `Warning`-level and higher diagnostic messages to `.fuseraft/logs/app.log` via an always-on Serilog file sink (5 MB per file, 3 retained). This includes store-corruption warnings from `ChangeTracker`, `IntentLog`, `EvidenceStore`, and `FileVersionStore`, as well as structured retry and model-fallover events from the HTTP layer. No configuration needed.
+>
+> **Secret masking** — All log output (console, `app.log`, and debug sidecar) passes through a secret-masking formatter that redacts API key–like values (`sk-…` keys, `Bearer …` tokens, `api_key=…` query strings) before they are written. Secrets are never visible in logs regardless of verbosity level.
 
 Each line is a JSON object:
 
