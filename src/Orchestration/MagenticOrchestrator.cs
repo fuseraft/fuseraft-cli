@@ -591,7 +591,9 @@ public sealed class MagenticOrchestrator(
         };
         context.AddRange(messages);
 
-        var response = await managerClient.GetResponseAsync(context, cancellationToken: cancellationToken);
+        var response = governanceKernel?.CircuitBreaker is { } cb
+            ? await cb.ExecuteAsync(() => managerClient.GetResponseAsync(context, cancellationToken: cancellationToken))
+            : await managerClient.GetResponseAsync(context, cancellationToken: cancellationToken);
         var text = response.Text?.Trim() ?? string.Empty;
 
         TokenUsage? usage = null;
