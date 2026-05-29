@@ -22,7 +22,7 @@ namespace fuseraft.Infrastructure;
 ///
 /// <para>
 /// When a <c>localCwd</c> is supplied to load/save methods, memories are scoped to
-/// that directory via <c>.fuseraft/memory_refs.json</c>, which records the GUIDs of
+/// that directory via <c>.fuseraft/memory/memory_refs.json</c>, which records the GUIDs of
 /// entries saved there. Directories that contain a <c>.fuseraft/</c> folder but no
 /// refs file start with an empty memory set; directories without <c>.fuseraft/</c>
 /// fall back to loading all globals (legacy behaviour).
@@ -32,7 +32,8 @@ public sealed class MemoryStore
 {
     private const string IndexFile    = "MEMORY.md";
     private const string IndexHeader  = "# Memory Index";
-    private const string LocalRefsFile = "memory_refs.json";
+    // Relative path from cwd to the memory refs index (kept in sync with FuseraftPaths.LocalMemoryRefs).
+    private const string LocalRefsFile = "memory/memory_refs.json";
 
     private readonly string _dir;
     private readonly SemaphoreSlim _lock = new(1, 1);
@@ -70,7 +71,7 @@ public sealed class MemoryStore
 
     /// <summary>
     /// Loads only the memories whose GUIDs are listed in
-    /// <c>{localCwd}/.fuseraft/memory_refs.json</c>. Falls back to loading all
+    /// <c>{localCwd}/.fuseraft/memory/memory_refs.json</c>. Falls back to loading all
     /// globals when <c>.fuseraft/</c> does not exist in <paramref name="localCwd"/>.
     /// </summary>
     public Task<List<MemoryEntry>> LoadAllAsync(string localCwd, CancellationToken ct = default)
@@ -101,7 +102,7 @@ public sealed class MemoryStore
 
     /// <summary>
     /// Loads memories scoped to <paramref name="localCwd"/> (via its
-    /// <c>.fuseraft/memory_refs.json</c>) and formats them as a prompt block.
+    /// <c>.fuseraft/memory/memory_refs.json</c>) and formats them as a prompt block.
     /// </summary>
     public async Task<string?> BuildPromptBlockAsync(string localCwd, CancellationToken ct = default)
     {
@@ -265,7 +266,7 @@ public sealed class MemoryStore
     {
         var fuseraftDir = Path.Combine(cwd, ".fuseraft");
         var refsPath    = Path.Combine(fuseraftDir, LocalRefsFile);
-        Directory.CreateDirectory(fuseraftDir);
+        Directory.CreateDirectory(Path.GetDirectoryName(refsPath)!);
 
         string[] existing = [];
         if (File.Exists(refsPath))
