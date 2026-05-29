@@ -18,7 +18,7 @@ public record BrownfieldConfig
 
     /// <summary>
     /// Path where the Archaeologist writes the discovery brief JSON.
-    /// Defaults to <c>.fuseraft/brief.brownfield.json</c>.
+    /// Defaults to <c>.fuseraft/artifacts/brief.brownfield.json</c>.
     /// </summary>
     public string DiscoveryBriefPath { get; init; } = FuseraftPaths.LocalBrownfieldBrief;
 
@@ -26,7 +26,7 @@ public record BrownfieldConfig
     /// Path where the Archaeologist writes the detected convention profile JSON.
     /// When the file exists at session startup, its contents are injected into every
     /// agent's system prompt so agents follow project conventions without re-deriving them.
-    /// Defaults to <c>.fuseraft/conventions.json</c>.
+    /// Defaults to <c>.fuseraft/artifacts/conventions.json</c>.
     /// </summary>
     public string ConventionProfilePath { get; init; } = FuseraftPaths.LocalConventions;
 
