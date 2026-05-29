@@ -116,7 +116,10 @@ public sealed class ScheduleRunCommand : AsyncCommand<ScheduleRunSettings>
     {
         // Acquire lock
         try { await File.WriteAllTextAsync(lockPath, DateTimeOffset.UtcNow.ToString("O"), ct); }
-        catch { /* lock write failure is non-fatal */ }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[yellow]⚠ Could not write lock file for {Markup.Escape(job.Name)} — concurrent runs are not protected:[/] {Markup.Escape(ex.Message)}");
+        }
 
         var exitCode = 0;
         try
@@ -161,7 +164,10 @@ public sealed class ScheduleRunCommand : AsyncCommand<ScheduleRunSettings>
         finally
         {
             try { if (File.Exists(lockPath)) File.Delete(lockPath); }
-            catch { /* ignore */ }
+            catch (Exception ex)
+            {
+                AnsiConsole.MarkupLine($"[yellow]⚠ Could not delete lock file {Markup.Escape(lockPath)} — remove it manually or the next run of {Markup.Escape(job.Name)} will be skipped:[/] {Markup.Escape(ex.Message)}");
+            }
         }
 
         // Update job state regardless of exit code
@@ -172,14 +178,21 @@ public sealed class ScheduleRunCommand : AsyncCommand<ScheduleRunSettings>
             if (reloaded is not null)
             {
                 CronExpression? cronExpr = null;
-                try { cronExpr = CronExpression.Parse(reloaded.Cron); } catch { }
+                try { cronExpr = CronExpression.Parse(reloaded.Cron); }
+                catch (Exception ex)
+                {
+                    AnsiConsole.MarkupLine($"[yellow]⚠ Could not parse cron expression '{Markup.Escape(reloaded.Cron)}' for {Markup.Escape(job.Name)} — NextRun will not be set:[/] {Markup.Escape(ex.Message)}");
+                }
 
                 reloaded.LastRun = DateTimeOffset.UtcNow;
                 reloaded.NextRun = cronExpr?.GetNextOccurrence(DateTimeOffset.UtcNow, TimeZoneInfo.Utc);
                 await File.WriteAllTextAsync(jobFilePath, ScheduleUtil.Serialize(reloaded), ct);
             }
         }
-        catch { /* state update failure is non-fatal */ }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[yellow]⚠ Could not persist state for {Markup.Escape(job.Name)} — LastRun and NextRun were not updated:[/] {Markup.Escape(ex.Message)}");
+        }
 
         return exitCode;
     }

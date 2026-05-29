@@ -1892,6 +1892,15 @@ public sealed class GraphOrchestrator(
             : null;
 
         // Expand {session_id} in the brief path so validators address this session's file.
+        // Warn loudly when the session ID was never stamped — the expanded path would still
+        // contain the literal token, causing RequireBriefValidator to surface a config error
+        // rather than directing the agent to a wrong (or literal "{session_id}") directory.
+        if (string.IsNullOrEmpty(_sessionId) && config.Validation?.BriefPath.Contains("{session_id}", StringComparison.Ordinal) == true)
+            logger.LogWarning(
+                "[GraphOrchestrator] BuildValidatorsFromNames called with empty session ID — " +
+                "brief path '{Path}' will not be expanded. Call SetSessionId before StreamAsync.",
+                config.Validation.BriefPath);
+
         var briefPath = config.Validation is not null
             ? FuseraftPaths.ExpandSessionId(config.Validation.BriefPath, _sessionId)
             : null;

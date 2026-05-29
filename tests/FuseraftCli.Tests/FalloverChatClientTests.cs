@@ -134,6 +134,144 @@ public sealed class ProviderErrorClassifierTests
         Assert.Contains(FailoverReason.RateLimit, result);
         Assert.Single(result);
     }
+
+    // IsContextExceededMessage — phrases not covered by the base Theory
+
+    [Theory]
+    [InlineData("You've hit the maximum context window for this model")]
+    [InlineData("Please reduce your prompt before retrying")]
+    public void Classify_ReturnsContextExceeded_ForAdditionalContextPhrases(string snippet)
+    {
+        var ex = new InvalidOperationException(snippet);
+        Assert.Equal(FailoverReason.ContextExceeded, ProviderErrorClassifier.Classify(ex));
+    }
+
+    // Is429Message — standalone keywords (no numeric "429" digit present)
+
+    [Theory]
+    [InlineData("rate limit reached, please back off")]
+    [InlineData("rate_limit hit on this endpoint")]
+    [InlineData("Too Many Requests, slow down")]
+    public void Classify_ReturnsRateLimit_ForStandaloneRateLimitKeywords(string snippet)
+    {
+        var ex = new InvalidOperationException(snippet);
+        Assert.Equal(FailoverReason.RateLimit, ProviderErrorClassifier.Classify(ex));
+    }
+
+    // IsPayloadTooLargeMessage — all four nginx/proxy patterns → ContextExceeded
+
+    [Theory]
+    [InlineData("413 Request Entity Too Large")]
+    [InlineData("Payload Too Large — reduce your request body")]
+    [InlineData("HTTP 413 from upstream proxy")]
+    [InlineData("error [413] payload exceeded limit")]
+    public void Classify_ReturnsContextExceeded_ForPayloadTooLargeMessages(string snippet)
+    {
+        var ex = new InvalidOperationException(snippet);
+        Assert.Equal(FailoverReason.ContextExceeded, ProviderErrorClassifier.Classify(ex));
+    }
+
+    // IsThinkingTokenMismatch — Bedrock/LiteLLM thinking-budget errors → ContextExceeded
+
+    [Fact]
+    public void Classify_ReturnsContextExceeded_ForBudgetTokensKeyword()
+    {
+        var ex = new InvalidOperationException("budget_tokens value is too high for this model");
+        Assert.Equal(FailoverReason.ContextExceeded, ProviderErrorClassifier.Classify(ex));
+    }
+
+    [Fact]
+    public void Classify_ReturnsContextExceeded_ForThinkingBudgetMismatch()
+    {
+        // Bedrock: "max_tokens must be greater than thinking.budget_tokens"
+        var ex = new InvalidOperationException("max_tokens must be greater than thinking.budget_tokens");
+        Assert.Equal(FailoverReason.ContextExceeded, ProviderErrorClassifier.Classify(ex));
+    }
+
+    // HttpRequestException status-code paths
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized,      FailoverReason.AuthError)]
+    [InlineData(HttpStatusCode.Forbidden,         FailoverReason.AuthError)]
+    [InlineData(HttpStatusCode.TooManyRequests,   FailoverReason.RateLimit)]
+    [InlineData(HttpStatusCode.RequestEntityTooLarge, FailoverReason.ContextExceeded)]
+    [InlineData(HttpStatusCode.InternalServerError,   FailoverReason.ServerError)]
+    [InlineData(HttpStatusCode.BadGateway,        FailoverReason.ServerError)]
+    public void Classify_MapsHttpRequestExceptionStatusCodes(HttpStatusCode code, FailoverReason expected)
+    {
+        var ex = new HttpRequestException("provider error", null, code);
+        Assert.Equal(expected, ProviderErrorClassifier.Classify(ex));
+    }
+
+    [Fact]
+    public void Classify_ReturnsQuotaExceeded_For429HttpRequestException_WithQuotaMessage()
+    {
+        // HttpRequestException status = 429 but message contains quota language.
+        // TryGetStatus returns 429; IsQuotaMessage on the same message fires QuotaExceeded.
+        var ex = new HttpRequestException("429: monthly quota exhausted — check billing", null, HttpStatusCode.TooManyRequests);
+        Assert.Equal(FailoverReason.QuotaExceeded, ProviderErrorClassifier.Classify(ex));
+    }
+
+    [Fact]
+    public void Classify_ReturnsContextExceeded_For400HttpRequestException_WithContextMessage()
+    {
+        var ex = new HttpRequestException("400 context_length_exceeded in your request", null, HttpStatusCode.BadRequest);
+        Assert.Equal(FailoverReason.ContextExceeded, ProviderErrorClassifier.Classify(ex));
+    }
+
+    // Priority ordering — fallback string checks run in priority order
+
+    [Fact]
+    public void Classify_PrefersPayloadTooLarge_OverRateLimitKeyword_WhenBothInMessage()
+    {
+        // "Request Entity Too Large" should win over "429" keyword
+        var ex = new InvalidOperationException("429 Request Entity Too Large from proxy");
+        Assert.Equal(FailoverReason.ContextExceeded, ProviderErrorClassifier.Classify(ex));
+    }
+
+    [Fact]
+    public void Classify_PrefersContextExceeded_OverAuthError_WhenBothInMessage()
+    {
+        // context check fires before auth check in the fallback chain
+        var ex = new InvalidOperationException("Unauthorized: context_length_exceeded");
+        Assert.Equal(FailoverReason.ContextExceeded, ProviderErrorClassifier.Classify(ex));
+    }
+
+    // Inner exception chain deeper than one level
+
+    [Fact]
+    public void Classify_WalksDeepInnerExceptionChain()
+    {
+        var root   = new InvalidOperationException("rate_limit hit");
+        var mid    = new Exception("middleware error", root);
+        var outer  = new Exception("top-level failure", mid);
+        Assert.Equal(FailoverReason.RateLimit, ProviderErrorClassifier.Classify(outer));
+    }
+
+    // ParseFalloverOn edge cases
+
+    [Fact]
+    public void ParseFalloverOn_ReturnsEmptySet_ForEmptyList()
+    {
+        var result = ProviderErrorClassifier.ParseFalloverOn([]);
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void ParseFalloverOn_ExcludesNone_EvenWhenExplicitlyNamed()
+    {
+        var result = ProviderErrorClassifier.ParseFalloverOn(["None", "RateLimit"]);
+        Assert.DoesNotContain(FailoverReason.None, result);
+        Assert.Contains(FailoverReason.RateLimit, result);
+    }
+
+    [Fact]
+    public void ParseFalloverOn_DeduplicatesRepeatedValues()
+    {
+        var result = ProviderErrorClassifier.ParseFalloverOn(["RateLimit", "RateLimit", "ratelimit"]);
+        Assert.Single(result);
+        Assert.Contains(FailoverReason.RateLimit, result);
+    }
 }
 
 // ---------------------------------------------------------------------------
