@@ -107,6 +107,12 @@ public sealed class AgentFactory(
         // TrustScore governs the governance ring assignment here).
         if (config.RemoteAgent is { Url: { Length: > 0 } remoteUrl } remoteCfg)
         {
+            loggerFactory?.CreateLogger(nameof(AgentFactory)).LogWarning(
+                "Agent '{AgentName}' uses the A2A protocol (currently preview). " +
+                "The A2A integration depends on a pre-release package and its API may change. " +
+                "For production-critical workflows, verify compatibility before upgrading.",
+                config.Name);
+
             var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(remoteCfg.TimeoutSeconds) };
             var resolver   = new A2ACardResolver(new Uri(remoteUrl), httpClient);
             var remoteAgent = Task.Run(() => resolver.GetAIAgentAsync(httpClient, loggerFactory: loggerFactory))

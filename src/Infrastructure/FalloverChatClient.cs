@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 
 namespace fuseraft.Infrastructure;
 
@@ -21,7 +22,8 @@ namespace fuseraft.Infrastructure;
 /// </summary>
 internal sealed class FalloverChatClient(
     IChatClient[] chain,
-    IReadOnlySet<FailoverReason> falloverOn) : IChatClient
+    IReadOnlySet<FailoverReason> falloverOn,
+    ILogger? logger = null) : IChatClient
 {
     public object? GetService(Type serviceType, object? serviceKey = null)
         => chain[0].GetService(serviceType, serviceKey);
@@ -119,9 +121,9 @@ internal sealed class FalloverChatClient(
     {
         var reason   = ProviderErrorClassifier.Classify(ex);
         var nextSlot = fromSlot + 1;
-        Console.Error.WriteLine(
-            $"[fallover] Slot {fromSlot + 1}/{chain.Length} failed ({reason}: {Trim(ex.Message, 120)}). " +
-            $"Trying slot {nextSlot + 1}/{chain.Length}.");
+        logger?.LogWarning(
+            "[fallover] Slot {From}/{Total} failed ({Reason}: {Message}). Trying slot {Next}/{Total}.",
+            fromSlot + 1, chain.Length, reason, Trim(ex.Message, 120), nextSlot + 1, chain.Length);
     }
 
     private static string Trim(string s, int max) =>
