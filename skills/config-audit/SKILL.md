@@ -161,6 +161,25 @@ For each agent, read `Instructions` and flag:
 
 ---
 
+#### H. SchemaVersion
+
+`SchemaVersion` is optional. If present:
+
+1. Verify the value matches a version recognized by the current fuseraft-cli build (e.g. `"2026-05"`). An unrecognized value causes a `LogWarning` at startup and may indicate the config was written for a newer or older build.
+2. If absent, note this as a suggestion — setting it makes version drift visible across upgrades.
+
+---
+
+#### I. RemoteAgent (preview)
+
+For any agent where `RemoteAgent` is set:
+
+1. Flag it as a **preview feature** — fuseraft-cli emits a `LogWarning` at session startup for every agent using `RemoteAgent` because the A2A SDK dependency (`1.0.0-preview2`) may have breaking changes in future releases.
+2. Verify that `Model`, `Plugins`, `FunctionChoice`, `Capabilities`, `SubAgentModel`, and `SubAgentPlugins` are **not** set on that agent — those fields are silently ignored when `RemoteAgent` is present, which can mislead readers into thinking tool access or model selection is in effect.
+3. Confirm `RemoteAgent.Url` is set and reachable in the target environment.
+
+---
+
 ### Step 5: Report Findings
 
 Group findings by severity:
@@ -179,11 +198,15 @@ Group findings by severity:
 - `FunctionChoice` absent on Developer/Tester agents
 - Vague path references in instructions
 - `Validation.ChangeLogPath` ≠ `ChangeTracking.Path`
+- `SchemaVersion` set to an unrecognized value (startup `LogWarning` emitted; check build compatibility)
+- `RemoteAgent` present with ignored fields (`Model`, `Plugins`, `FunctionChoice`, etc.) still set
 
 **Suggestions** (improvement opportunities):
 - Instructions longer than 50 lines
 - Compaction mode `llm` on a state machine config (suggest `lossless` or `hybrid`)
 - No `Description` on the orchestration or agents
+- `SchemaVersion` absent (recommend setting it for upgrade safety)
+- `RemoteAgent` in use — note the A2A pre-release status and recommend verifying SDK compatibility before production use
 
 For each finding, quote the relevant config field and give the exact fix to apply.
 
