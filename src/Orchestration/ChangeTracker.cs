@@ -11,7 +11,7 @@ namespace fuseraft.Orchestration;
 
 /// <summary>
 /// Automatically records every tool call made by any agent into a structured JSON log
-/// on disk (<c>.fuseraft/changes.json</c> by default).
+/// on disk (<c>.fuseraft/state/changes.json</c> by default).
 ///
 /// <para>
 /// Call <see cref="WrapAgent"/> on each agent after construction to attach the capturing
