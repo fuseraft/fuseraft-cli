@@ -523,7 +523,7 @@ public sealed class KeywordSelectionStrategy : IAgentSelector
                             // Compose the correction message based on failure type.
                             var correction = BuildCorrectionMessage(
                                 failureType, typeConfig, newCount, firstError,
-                                failingValidatorName, hasToolCalls);
+                                failingValidatorName, hasToolCalls, _sessionId);
 
                             _history.Add(new ChatMessage(ChatRole.User, correction));
                         }
@@ -778,7 +778,8 @@ public sealed class KeywordSelectionStrategy : IAgentSelector
         int newCount,
         string errorMessage,
         string? validatorName,
-        bool hadToolCalls)
+        bool hadToolCalls,
+        string sessionId = "")
     {
         var prefix = newCount > 1
             ? $"RETRY {newCount}/{typeConfig.Threshold} — "
@@ -793,7 +794,7 @@ public sealed class KeywordSelectionStrategy : IAgentSelector
 
             FailureType.MissingEvidence =>
                 $"{prefix}MISSING ARTIFACT: Required file not on disk.\n" +
-                $"  1. read_file {FuseraftPaths.LocalBrief}\n" +
+                $"  1. read_file {FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalBrief, sessionId)}\n" +
                 $"  2. write_file or create the missing artifact.\n" +
                 $"  3. Verify with read_file, then retry the handoff.\n\n" +
                 errorMessage,
@@ -847,7 +848,7 @@ public sealed class KeywordSelectionStrategy : IAgentSelector
         {
             _history.Add(new ChatMessage(ChatRole.User,
                 $"LOOP WARNING: {agent.Name} — {consecutive} consecutive turns, task incomplete.\n" +
-                $"  1. read_file {FuseraftPaths.LocalBrief}\n" +
+                $"  1. read_file {FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalBrief, _sessionId)}\n" +
                 $"  2. changes_read_latest\n" +
                 $"  3. Execute the single blocking action.\n" +
                 $"  4. Emit the handoff keyword."));

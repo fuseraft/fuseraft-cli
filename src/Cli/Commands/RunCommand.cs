@@ -146,7 +146,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         OrchestratorBuildResult built;
         try
         {
-            built = await OrchestratorBuilder.BuildAsync(configPath, loggerFactory, pluginRegistry, approvalService, settings.HumanInTheLoop);
+            built = await OrchestratorBuilder.BuildAsync(configPath, loggerFactory, pluginRegistry, approvalService, settings.HumanInTheLoop, sessionId: checkpoint?.SessionId);
         }
         catch (Exception ex)
         {
@@ -316,9 +316,11 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         if (changeTracker is not null)
             await changeTracker.SetSessionIdAsync(checkpoint.SessionId);
 
-        // Stamp the session ID on the event emitter and orchestrator so every event carries it.
+        // Stamp the session ID on the event emitter, orchestrator, and compactor so every
+        // component that uses session-scoped paths (e.g. brief.json) resolves them correctly.
         eventEmitter?.SetSessionId(checkpoint.SessionId);
         orchestrator.SetSessionId(checkpoint.SessionId);
+        compactor?.SetSessionId(checkpoint.SessionId);
 
         // Seed structured task model (resumed sessions may already have it in the checkpoint).
         orchestrator.SetStructuredTask(

@@ -37,7 +37,6 @@ public record ChangeTrackingConfig
     public string ResolveIntentLogPath()
     {
         if (IntentLogPath is { Length: > 0 }) return IntentLogPath;
-        var dir = System.IO.Path.GetDirectoryName(Path) ?? FuseraftPaths.LocalState;
-        return System.IO.Path.Combine(dir, "intents.json");
+        return FuseraftPaths.LocalIntents;
     }
 }

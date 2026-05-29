@@ -72,6 +72,7 @@ public static class OrchestratorBuilder
         PluginRegistry pluginRegistry,
         IHumanApprovalService? humanApprovalService = null,
         bool hitlMode = false,
+        string? sessionId = null,
         CancellationToken cancellationToken = default)
     {
         if (!File.Exists(configPath))
@@ -153,12 +154,15 @@ public static class OrchestratorBuilder
 
         // Brownfield: seed the change envelope from the Archaeologist's discovery brief
         // when the brief already exists on disk (written by a prior recon pass).
+        // {session_id} is only expanded when resuming — new sessions won't have a brief yet.
         if (config.Brownfield is { SeedEnvelopeFromBrief: true, DiscoveryBriefPath: { } discoveryPath }
-            && File.Exists(discoveryPath))
+            && sessionId is { Length: > 0 }
+            && File.Exists(FuseraftPaths.ExpandSessionId(discoveryPath, sessionId)))
         {
+            var expandedDiscoveryPath = FuseraftPaths.ExpandSessionId(discoveryPath, sessionId!);
             try
             {
-                var briefJson  = await File.ReadAllTextAsync(discoveryPath, cancellationToken);
+                var briefJson  = await File.ReadAllTextAsync(expandedDiscoveryPath, cancellationToken);
                 var brief      = JsonSerializer.Deserialize<BrownfieldDiscoveryBrief>(briefJson, BrownfieldJsonOpts);
                 var scopeFiles = brief?.InScopeFiles;
                 if (scopeFiles is { Count: > 0 })
@@ -172,7 +176,7 @@ public static class OrchestratorBuilder
             {
                 loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
                     "Could not seed change envelope from brownfield brief '{Path}': {Message}",
-                    discoveryPath, ex.Message);
+                    expandedDiscoveryPath, ex.Message);
             }
         }
 

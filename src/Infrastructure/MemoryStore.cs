@@ -33,7 +33,10 @@ public sealed class MemoryStore
     private const string IndexFile    = "MEMORY.md";
     private const string IndexHeader  = "# Memory Index";
     // Relative path from cwd to the memory refs index (kept in sync with FuseraftPaths.LocalMemoryRefs).
-    private const string LocalRefsFile = "memory/memory_refs.json";
+    private static string LocalRefsFile(string? sessionId) =>
+        sessionId is { Length: > 0 }
+            ? $"memory/sessions/{sessionId}/memory_refs.json"
+            : "memory/memory_refs.json";
 
     private readonly string _dir;
     private readonly SemaphoreSlim _lock = new(1, 1);
@@ -74,8 +77,8 @@ public sealed class MemoryStore
     /// <c>{localCwd}/.fuseraft/memory/memory_refs.json</c>. Falls back to loading all
     /// globals when <c>.fuseraft/</c> does not exist in <paramref name="localCwd"/>.
     /// </summary>
-    public Task<List<MemoryEntry>> LoadAllAsync(string localCwd, CancellationToken ct = default)
-        => LoadByCwdAsync(localCwd, ct);
+    public Task<List<MemoryEntry>> LoadAllAsync(string localCwd, string? sessionId = null, CancellationToken ct = default)
+        => LoadByCwdAsync(localCwd, sessionId, ct);
 
     /// <summary>
     /// Synchronous variant for callers that cannot await (e.g. synchronous factory methods).
@@ -104,10 +107,10 @@ public sealed class MemoryStore
     /// Loads memories scoped to <paramref name="localCwd"/> (via its
     /// <c>.fuseraft/memory/memory_refs.json</c>) and formats them as a prompt block.
     /// </summary>
-    public async Task<string?> BuildPromptBlockAsync(string localCwd, CancellationToken ct = default)
+    public async Task<string?> BuildPromptBlockAsync(string localCwd, string? sessionId = null, CancellationToken ct = default)
     {
         const int MaxChars = 8_000;
-        var entries = await LoadAllAsync(localCwd, ct);
+        var entries = await LoadAllAsync(localCwd, sessionId, ct);
         return entries.Count == 0 ? null : FormatPromptBlock(entries, MaxChars);
     }
 
@@ -176,7 +179,7 @@ public sealed class MemoryStore
 
     // Write
 
-    public async Task<string> SaveAsync(MemoryEntry entry, string? localCwd = null, CancellationToken ct = default)
+    public async Task<string> SaveAsync(MemoryEntry entry, string? localCwd = null, string? sessionId = null, CancellationToken ct = default)
     {
         // Reuse an existing GUID when a same-named entry is already stored so that
         // repeated saves of the same memory update the file in-place rather than
@@ -204,18 +207,18 @@ public sealed class MemoryStore
         finally { _lock.Release(); }
 
         if (localCwd is not null)
-            await AddLocalRefAsync(localCwd, guid, ct);
+            await AddLocalRefAsync(localCwd, sessionId, guid, ct);
 
         return guid;
     }
 
-    public async Task<bool> DeleteAsync(string name, string? localCwd = null, CancellationToken ct = default)
+    public async Task<bool> DeleteAsync(string name, string? localCwd = null, string? sessionId = null, CancellationToken ct = default)
     {
         // Look up by stored Name (case-insensitive) so the caller doesn't need
         // to know the exact casing or SafeFileName transformation that was used.
         // Load before acquiring the lock to avoid holding it during directory enumeration.
         var entries = localCwd is not null
-            ? await LoadAllAsync(localCwd, ct)
+            ? await LoadAllAsync(localCwd, sessionId, ct)
             : await LoadAllAsync(ct);
         var entry = entries.FirstOrDefault(e => e.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
         if (entry is null) return false;
@@ -230,17 +233,17 @@ public sealed class MemoryStore
         finally { _lock.Release(); }
 
         if (localCwd is not null && !string.IsNullOrEmpty(entry.Guid))
-            await RemoveLocalRefAsync(localCwd, entry.Guid, ct);
+            await RemoveLocalRefAsync(localCwd, sessionId, entry.Guid, ct);
 
         return true;
     }
 
     // Helpers — local-refs (cwd scoping)
 
-    private async Task<List<MemoryEntry>> LoadByCwdAsync(string cwd, CancellationToken ct)
+    private async Task<List<MemoryEntry>> LoadByCwdAsync(string cwd, string? sessionId, CancellationToken ct)
     {
         var fuseraftDir = Path.Combine(cwd, ".fuseraft");
-        var refsPath    = Path.Combine(fuseraftDir, LocalRefsFile);
+        var refsPath    = Path.Combine(fuseraftDir, LocalRefsFile(sessionId));
 
         if (!Directory.Exists(fuseraftDir))
             return await LoadAllAsync(ct); // not a fuseraft project — load all globals
@@ -262,10 +265,10 @@ public sealed class MemoryStore
         return entries;
     }
 
-    private static async Task AddLocalRefAsync(string cwd, string guid, CancellationToken ct)
+    private static async Task AddLocalRefAsync(string cwd, string? sessionId, string guid, CancellationToken ct)
     {
         var fuseraftDir = Path.Combine(cwd, ".fuseraft");
-        var refsPath    = Path.Combine(fuseraftDir, LocalRefsFile);
+        var refsPath    = Path.Combine(fuseraftDir, LocalRefsFile(sessionId));
         Directory.CreateDirectory(Path.GetDirectoryName(refsPath)!);
 
         string[] existing = [];
@@ -281,9 +284,9 @@ public sealed class MemoryStore
         await WriteAtomicAsync(refsPath, JsonSerializer.Serialize(updated) + '\n', ct);
     }
 
-    private static async Task RemoveLocalRefAsync(string cwd, string guid, CancellationToken ct)
+    private static async Task RemoveLocalRefAsync(string cwd, string? sessionId, string guid, CancellationToken ct)
     {
-        var refsPath = Path.Combine(cwd, ".fuseraft", LocalRefsFile);
+        var refsPath = Path.Combine(cwd, ".fuseraft", LocalRefsFile(sessionId));
         if (!File.Exists(refsPath)) return;
 
         var json    = await File.ReadAllTextAsync(refsPath, ct);

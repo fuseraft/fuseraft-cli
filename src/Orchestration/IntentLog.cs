@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using fuseraft.Core;
 using fuseraft.Core.Models;
 using Microsoft.Extensions.Logging;
 
@@ -23,7 +24,7 @@ namespace fuseraft.Orchestration;
 /// </summary>
 public sealed class IntentLog
 {
-    private readonly string _logPath;
+    private string _logPath;
     private readonly SemaphoreSlim _fileLock = new(1, 1);
     private readonly ILogger<IntentLog>? _logger;
     private string? _sessionId;
@@ -41,7 +42,11 @@ public sealed class IntentLog
         _logger  = logger;
     }
 
-    public void SetSessionId(string sessionId) => _sessionId = sessionId;
+    public void SetSessionId(string sessionId)
+    {
+        _sessionId = sessionId;
+        _logPath   = FuseraftPaths.ExpandSessionId(_logPath, sessionId);
+    }
 
     /// <summary>
     /// Writes a <c>PENDING</c> intent entry before the tool call executes.

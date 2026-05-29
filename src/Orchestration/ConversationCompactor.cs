@@ -32,6 +32,15 @@ public sealed class ConversationCompactor(
     // Tracks savings ratios from the last AntiThrashWindow compactions so we can detect
     // conversations that are thrashing (repeatedly compacting but saving very little).
     private readonly Queue<double> _recentSavings = new();
+    private string _sessionId = string.Empty;
+
+    public void SetSessionId(string sessionId) => _sessionId = sessionId;
+
+    private string? ExpandedNote =>
+        resumptionNote is null ? null
+        : _sessionId is { Length: > 0 }
+            ? FuseraftPaths.ExpandSessionId(resumptionNote, _sessionId)
+            : resumptionNote;
     /// <summary>
     /// Returns true when the current mode is <c>window</c>.
     /// In window mode compaction is token-budget-based; no LLM call is made.
@@ -302,8 +311,8 @@ public sealed class ConversationCompactor(
             "Do not re-execute operations marked ✓ (applied). " +
             "Operations marked ✗ (failed) should be retried if the task requires them.");
 
-        if (resumptionNote is not null)
-            sb.Append("\n\n---\n" + resumptionNote);
+        if (ExpandedNote is not null)
+            sb.Append("\n\n---\n" + ExpandedNote);
 
         var content = sb.ToString().TrimEnd();
         if (!string.IsNullOrEmpty(prefixBlock))
@@ -456,8 +465,8 @@ public sealed class ConversationCompactor(
             "• Check the change log for ground truth of what was actually written.\n" +
             "• Re-derive your next step from observable disk state, not from memory.";
 
-        if (resumptionNote is not null)
-            content += "\n\n---\n" + resumptionNote;
+        if (ExpandedNote is not null)
+            content += "\n\n---\n" + ExpandedNote;
 
         return new AgentMessage
         {
@@ -487,8 +496,8 @@ public sealed class ConversationCompactor(
             ? prefixBlock + "\n\n---\n\n"
             : string.Empty;
         var header = $"{prefixSection}[CONVERSATION SUMMARY — covers turns {firstTurn + 1}–{lastTurn + 1}]\n\n{summaryText}";
-        return resumptionNote is not null
-            ? $"{header}\n\n---\n{resumptionNote}"
+        return ExpandedNote is not null
+            ? $"{header}\n\n---\n{ExpandedNote}"
             : header;
     }
 

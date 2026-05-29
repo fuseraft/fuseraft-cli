@@ -62,7 +62,11 @@ public sealed class AdversarialOrchestrator(
     public event Action<string, string, string?>? ToolCalling;
     public event Action<string, int, int>? TokenBudgetWarning;
 
-    public void SetSessionId(string sessionId) => _sessionId = sessionId;
+    public void SetSessionId(string sessionId)
+    {
+        _sessionId = sessionId;
+        agentFactory.SetSessionId(sessionId);
+    }
 
     public async Task<OrchestrationResult> RunAsync(
         string task,
@@ -138,7 +142,10 @@ public sealed class AdversarialOrchestrator(
             .ToDictionary(a => a.Name!, StringComparer.OrdinalIgnoreCase);
         var agentInstructions = config.Agents
             .Where(a => !string.IsNullOrWhiteSpace(a.Instructions))
-            .ToDictionary(a => a.Name, a => a.Instructions, StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(
+                a => a.Name,
+                a => FuseraftPaths.ExpandSessionId(a.Instructions, _sessionId),
+                StringComparer.OrdinalIgnoreCase);
 
         int turn             = priorHistory is { Count: > 0 } ? priorHistory[^1].TurnIndex + 1 : 0;
         int cumulativeTokens = 0;
