@@ -17,7 +17,7 @@ Use this skill when:
 Do **not** create a skill for:
 - Procedures that are specific to one project and won't generalize
 - Tasks that are a single tool call (just do it; no skill needed)
-- Anything already covered by a shipped skill (`sandbox-test`, `craft-orchestration`, `debug-session`, `config-audit`, `mcp-setup`, `skill-author`)
+- Anything already covered by a shipped skill (`sandbox-test`, `craft-orchestration`, `debug-session`, `config-audit`, `mcp-setup`, `skill-author`, `build-docx`)
 
 ## Workflow
 

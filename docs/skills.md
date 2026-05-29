@@ -103,6 +103,14 @@ The skill gathers requirements (what it does, when it triggers, where it lives),
 
 ---
 
+### `build-docx`
+
+Generates a DOCX file from structured content, a template, or a description. Triggers when the user wants to produce a Word document, export content to `.docx`, fill in a DOCX template, or convert Markdown/JSON/outline data to a formatted document.
+
+The skill detects the project stack, selects the appropriate library (`python-docx`, `docx` npm, or `DocumentFormat.OpenXml`/`DocX`), gathers content requirements, writes a self-contained builder script, runs it, and reports the output path. Reference files for each library's common patterns are loaded on demand to keep context lean.
+
+---
+
 ## Cross-session handoff: `/compact`
 
 To pass context from the current REPL session to a new one, use the `/compact` command. `/compact` generates a concise summary of what was worked on, key decisions, current state, and what comes next; it then replaces the conversation history with that summary so the session can continue with a clean context window.
