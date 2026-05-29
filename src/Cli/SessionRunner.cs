@@ -192,6 +192,37 @@ public sealed class SessionRunner(
                     $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
                 break;
             }
+            catch (Exception ex) when (ProviderErrorClassifier.Classify(ex) == FailoverReason.ContextExceeded && compactor is not null)
+            {
+                if (eventEmitter is not null)
+                    await eventEmitter.EmitAsync("context_exceeded_recovery",
+                        payload: new { message = TrimTo(ex.Message, 200) });
+                AnsiConsole.MarkupLine(
+                    $"\n[yellow]⚠ Context window exceeded — fallover chain exhausted.[/] Compacting history and retrying...\n" +
+                    $"  [dim]{Markup.Escape(TrimTo(ex.Message, 200))}[/]\n");
+                compactionNeeded = true;
+            }
+            catch (Exception ex) when (Is400(ex) && ProviderErrorClassifier.Classify(ex) == FailoverReason.None)
+            {
+                if (eventEmitter is not null)
+                    await eventEmitter.EmitAsync("hitl_escalation",
+                        payload: new { reason = "provider_400", message = TrimTo(ex.Message, 200) });
+                AnsiConsole.MarkupLine(
+                    $"\n[yellow]⚠ Provider returned HTTP 400 (bad request).[/]\n" +
+                    $"  [dim]{Markup.Escape(TrimTo(ex.Message, 300))}[/]\n");
+                var redirect = await approvalService.PromptRedirectAsync("(provider-400)");
+                if (redirect == null)
+                {
+                    succeeded    = false;
+                    errorMessage = $"Aborted: provider 400 — {TrimTo(ex.Message, 200)}";
+                    AnsiConsole.MarkupLine(
+                        $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] paused — resume with:[/] " +
+                        $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
+                    break;
+                }
+                await InjectAndSaveHumanMessageAsync(redirect, messages, checkpoint, cancellationToken);
+                continue;
+            }
             catch (Exception ex)
             {
                 succeeded    = false;
@@ -647,6 +678,23 @@ public sealed class SessionRunner(
         Role      = "user",
         TurnIndex = turnIndex,
     };
+
+    // Returns true when the exception (or any inner exception) is an HTTP 400.
+    private static bool Is400(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (e.GetType().Name == "ClientResultException")
+            {
+                var status = e.GetType().GetProperty("Status")?.GetValue(e);
+                if (status is int code && code == 400) return true;
+            }
+            if (e is System.Net.Http.HttpRequestException httpEx &&
+                httpEx.StatusCode == System.Net.HttpStatusCode.BadRequest)
+                return true;
+        }
+        return false;
+    }
 
     // Returns true when the exception (or any inner exception) is an HTTP 429.
     private static bool Is429(Exception ex)

@@ -140,10 +140,20 @@ public static class ContextWindowFilter
         return list;
     }
 
+    // How much of a consumed read_file result to keep for structural context (file shape,
+    // imports, class header) after a downstream write/patch confirms the content was acted on.
+    // The rest is elided — the model's mental model of the file is stale at that point anyway.
+    private const int ConsumedReadCapChars = 500;
+
     private static List<ChatMessage> TruncateToolResults(List<ChatMessage> list, int maxChars)
     {
         // Fast path: no ChatRole.Tool messages in the slice.
         if (!list.Any(m => m.Role == ChatRole.Tool)) return list;
+
+        // Build the set of read_file call IDs that have a downstream write/patch to the same
+        // path. Those results are stale and can be aggressively capped; unconsumed reads that
+        // the model hasn't yet acted on are left at the normal maxChars limit.
+        var consumedReadIds = BuildConsumedReadCallIds(list);
 
         var result = new List<ChatMessage>(list.Count);
         foreach (var msg in list)
@@ -158,14 +168,35 @@ public static class ContextWindowFilter
             var newContents = new List<AIContent>(msg.Contents.Count);
             foreach (var content in msg.Contents)
             {
-                if (content is FunctionResultContent fr &&
-                    fr.Result is string s &&
-                    s.Length > maxChars)
+                if (content is FunctionResultContent fr && fr.Result is string s)
                 {
-                    var truncated = s[..maxChars] +
-                        $"\n[...truncated — {s.Length - maxChars:N0} chars omitted to reduce context size...]";
-                    newContents.Add(new FunctionResultContent(fr.CallId, truncated));
-                    anyTruncated = true;
+                    string? truncated = null;
+
+                    if (consumedReadIds.Contains(fr.CallId ?? string.Empty) &&
+                        s.Length > ConsumedReadCapChars)
+                    {
+                        // Consumed read: a downstream write/patch to this file exists, so the
+                        // content is stale. Keep a small structural preview and elide the rest.
+                        truncated = s[..ConsumedReadCapChars] +
+                            $"\n[...{s.Length - ConsumedReadCapChars:N0} chars elided — " +
+                            $"file was written or patched later this session; " +
+                            $"call read_file again if current content is needed]";
+                    }
+                    else if (s.Length > maxChars)
+                    {
+                        truncated = s[..maxChars] +
+                            $"\n[...truncated — {s.Length - maxChars:N0} chars omitted to reduce context size...]";
+                    }
+
+                    if (truncated is not null)
+                    {
+                        newContents.Add(new FunctionResultContent(fr.CallId!, truncated));
+                        anyTruncated = true;
+                    }
+                    else
+                    {
+                        newContents.Add(content);
+                    }
                 }
                 else
                 {
@@ -179,6 +210,62 @@ public static class ContextWindowFilter
         }
         return result;
     }
+
+    /// <summary>
+    /// Scans <paramref name="messages"/> for <c>read_file</c> calls and returns the set of
+    /// call IDs whose file was subsequently written or patched. These results are stale and
+    /// can be aggressively capped during context trimming without harming accuracy.
+    /// </summary>
+    internal static HashSet<string> BuildConsumedReadCallIds(IReadOnlyList<ChatMessage> messages)
+    {
+        // Collect all function calls in message order: (callId, name, path, messageIndex).
+        var calls = new List<(string CallId, string Name, string? Path, int MsgIdx)>();
+        for (int i = 0; i < messages.Count; i++)
+        {
+            var msg = messages[i];
+            if (msg.Role != ChatRole.Assistant) continue;
+            foreach (var content in msg.Contents)
+            {
+                if (content is not FunctionCallContent fc) continue;
+                var path = ExtractPathArg(fc.Arguments);
+                calls.Add((fc.CallId ?? fc.Name ?? string.Empty, fc.Name ?? string.Empty, path, i));
+            }
+        }
+
+        var consumed = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (callId, name, path, msgIdx) in calls)
+        {
+            if (!IsReadFile(name) || path is null) continue;
+
+            // Mark as consumed when any later write_file or patch_file targets the same path.
+            bool hasDownstreamWrite = calls.Any(c =>
+                c.MsgIdx > msgIdx &&
+                IsWriteOrPatchFile(c.Name) &&
+                string.Equals(c.Path, path, StringComparison.OrdinalIgnoreCase));
+
+            if (hasDownstreamWrite)
+                consumed.Add(callId);
+        }
+        return consumed;
+    }
+
+    private static string? ExtractPathArg(IDictionary<string, object?>? args)
+    {
+        if (args is null) return null;
+        foreach (var kv in args)
+        {
+            if (string.Equals(kv.Key, "path", StringComparison.OrdinalIgnoreCase))
+                return kv.Value?.ToString();
+        }
+        return null;
+    }
+
+    private static bool IsReadFile(string name) =>
+        string.Equals(name, "read_file", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsWriteOrPatchFile(string name) =>
+        string.Equals(name, "write_file",  StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(name, "patch_file",  StringComparison.OrdinalIgnoreCase);
 
     // Removes tool-pairing violations that arise after positional slice cuts:
     //   • Leading ChatRole.Tool messages with no preceding assistant tool-call are dropped.
