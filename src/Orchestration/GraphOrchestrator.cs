@@ -120,7 +120,11 @@ public sealed class GraphOrchestrator(
 
     // IOrchestrator
 
-    public void SetSessionId(string sessionId) => _sessionId = sessionId;
+    public void SetSessionId(string sessionId)
+    {
+        _sessionId = sessionId;
+        agentFactory.SetSessionId(sessionId);
+    }
 
     /// <inheritdoc/>
     /// <remarks>Consumed on the next <see cref="StreamAsync"/> call and cleared.</remarks>
@@ -229,7 +233,10 @@ public sealed class GraphOrchestrator(
             StringComparer.OrdinalIgnoreCase);
         var agentInstructions = config.Agents
             .Where(a => !string.IsNullOrWhiteSpace(a.Instructions))
-            .ToDictionary(a => a.Name, a => a.Instructions, StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(
+                a => a.Name,
+                a => FuseraftPaths.ExpandSessionId(a.Instructions, _sessionId),
+                StringComparer.OrdinalIgnoreCase);
         var agentConfigs = config.Agents.ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
         var nodeById = graphCfg.Nodes.ToDictionary(n => n.Id, StringComparer.OrdinalIgnoreCase);
 
@@ -1884,6 +1891,11 @@ public sealed class GraphOrchestrator(
             ? FuseraftPaths.ExpandPath(sbx)
             : null;
 
+        // Expand {session_id} in the brief path so validators address this session's file.
+        var briefPath = config.Validation is not null
+            ? FuseraftPaths.ExpandSessionId(config.Validation.BriefPath, _sessionId)
+            : null;
+
         foreach (var name in names)
         {
             IRoutingValidator? v = name.ToLowerInvariant() switch
@@ -1894,23 +1906,22 @@ public sealed class GraphOrchestrator(
                 "requirewritefile"        => new HandoffToTesterValidator(
                                                  shellFallbackPattern: shellFallbackPattern,
                                                  changeLogPath:        config.Validation?.ChangeLogPath),
-                "requireallfileswritten"  => config.Validation is not null
+                "requireallfileswritten"  => briefPath is not null
                                                  ? new RequireAllFilesWrittenValidator(
-                                                       config.Validation.BriefPath,
-                                                       config.Validation.ChangeLogPath)
+                                                       briefPath,
+                                                       config.Validation!.ChangeLogPath)
                                                  : null,
-                "requirebrief"            => config.Validation is not null
-                                                 ? new RequireBriefValidator(config.Validation.BriefPath)
+                "requirebrief"            => briefPath is not null
+                                                 ? new RequireBriefValidator(briefPath)
                                                  : null,
                 "testreportvalid"         => config.Validation is not null
                                                  ? new HandoffToReviewerValidator(config.Validation)
                                                  : null,
-                "requirereviewjudgement"  => new RequireReviewJudgementValidator(
-                                                 config.Validation?.BriefPath),
-                "requireacceptancecriteriapassed" => config.Validation is not null
+                "requirereviewjudgement"  => new RequireReviewJudgementValidator(briefPath),
+                "requireacceptancecriteriapassed" => briefPath is not null
                                                  ? new RequireAcceptanceCriteriaPassedValidator(
-                                                       config.Validation.BriefPath,
-                                                       config.Validation.ChangeLogPath)
+                                                       briefPath,
+                                                       config.Validation!.ChangeLogPath)
                                                  : null,
                 "requirerelatedtestspass" => config.TestSelector is not null
                                                  ? new RequireRelatedTestsPassValidator(

@@ -31,6 +31,10 @@ public sealed class AgentFactory(
     ILoggerFactory? loggerFactory = null,
     AgentSkillsProvider? skillsProvider = null)
 {
+    private string? _sessionId;
+
+    public void SetSessionId(string sessionId) => _sessionId = sessionId;
+
     // Maps agent name → DID for the current session. Populated by Create().
     private readonly ConcurrentDictionary<string, AgentIdentity> _identities = new(StringComparer.OrdinalIgnoreCase);
 
@@ -325,7 +329,9 @@ public sealed class AgentFactory(
             // "Chatroom" is per-agent (own sender name) but all agents share the same file.
             else if (pluginName.Equals("Chatroom", StringComparison.OrdinalIgnoreCase))
             {
-                var chatPath = chatroomConfig?.Path ?? FuseraftPaths.LocalChatroom;
+                var chatPath = FuseraftPaths.ExpandSessionId(
+                    chatroomConfig?.Path ?? FuseraftPaths.LocalChatroom,
+                    _sessionId ?? "startup");
                 functions = PluginRegistry.GetFunctionsFromObject(new ChatroomPlugin(config.Name, chatPath));
             }
             else if (pluginRegistry.TryGetAIFunctions(pluginName, out var aiFunctions))

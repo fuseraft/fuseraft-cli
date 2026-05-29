@@ -69,24 +69,29 @@ public static class FuseraftPaths
     // state/ — session-scoped runtime state files
     public const string LocalState        = ".fuseraft/state";
     public const string LocalChanges      = ".fuseraft/state/changes.json";
-    public const string LocalIntents      = ".fuseraft/state/intents.json";
+    public const string LocalIntents      = ".fuseraft/state/sessions/{session_id}/intents.json";
     public const string LocalEvidence     = ".fuseraft/state/evidence.json";
     public const string LocalFileVersions = ".fuseraft/state/file_versions.json";
 
     // artifacts/ — structured agent-written documents read by validators
     public const string LocalArtifacts       = ".fuseraft/artifacts";
-    public const string LocalBrief           = ".fuseraft/artifacts/brief.json";
+    // Brief paths include {session_id}, expanded at runtime via ExpandSessionId.
+    public const string LocalBrief           = ".fuseraft/artifacts/sessions/{session_id}/brief.json";
     public const string LocalTestReport      = ".fuseraft/artifacts/test-report.json";
-    public const string LocalConventions     = ".fuseraft/artifacts/conventions.json";
-    public const string LocalBrownfieldBrief = ".fuseraft/artifacts/brief.brownfield.json";
+    public const string LocalConventions     = ".fuseraft/artifacts/sessions/{session_id}/conventions.json";
+    public const string LocalBrownfieldBrief = ".fuseraft/artifacts/sessions/{session_id}/brief.brownfield.json";
+
+    /// <summary>Expands the <c>{session_id}</c> token in a path with the given session ID.</summary>
+    public static string ExpandSessionId(string path, string sessionId) =>
+        path.Replace("{session_id}", sessionId, StringComparison.Ordinal);
 
     // comms/ — cross-agent communication channels
     public const string LocalComms    = ".fuseraft/comms";
-    public const string LocalChatroom = ".fuseraft/comms/chatroom.jsonl";
+    public const string LocalChatroom = ".fuseraft/comms/sessions/{session_id}/chatroom.jsonl";
 
     // memory/ (local) — session-scoped memory reference index
     public const string LocalMemory     = ".fuseraft/memory";
-    public const string LocalMemoryRefs = ".fuseraft/memory/memory_refs.json";
+    public const string LocalMemoryRefs = ".fuseraft/memory/sessions/{session_id}/memory_refs.json";
 
     // docs/ — agent-written markdown documents (research, reports, drafts, notes)
     public const string LocalDocs = ".fuseraft/docs";
@@ -169,13 +174,13 @@ public static class FuseraftPaths
             sb.AppendLine("  .fuseraft/logs/app.log                    — application log");
         }
         sb.AppendLine("  .fuseraft/state/changes.json              — tool-call change log");
-        sb.AppendLine("  .fuseraft/state/intents.json              — in-progress intent records (consult before repeating work)");
+        sb.AppendLine($"  {LocalIntents,-42} — in-progress intent records (consult before repeating work)");
         sb.AppendLine("  .fuseraft/state/evidence.json             — structured evidence graph");
         sb.AppendLine("  .fuseraft/state/file_versions.json        — per-file versioned write counters");
-        sb.AppendLine("  .fuseraft/artifacts/brief.json            — task brief (if present)");
-        sb.AppendLine("  .fuseraft/artifacts/brief.brownfield.json — brownfield discovery brief (if present)");
+        sb.AppendLine($"  {LocalBrief,-42} — task brief (if present)");
+        sb.AppendLine($"  {LocalBrownfieldBrief,-42} — brownfield discovery brief (if present)");
         sb.AppendLine("  .fuseraft/artifacts/test-report.json      — tester output / validator input (if present)");
-        sb.AppendLine("  .fuseraft/artifacts/conventions.json      — brownfield convention profile (if present)");
+        sb.AppendLine($"  {LocalConventions,-42} — brownfield convention profile (if present)");
         sb.AppendLine("  .fuseraft/comms/chatroom.jsonl            — cross-agent chatroom messages (if present)");
         sb.AppendLine("  .fuseraft/docs/                           — write all markdown notes, reports, and drafts here");
         sb.AppendLine("  .fuseraft/tests/                          — write all test scripts and test support files here");
