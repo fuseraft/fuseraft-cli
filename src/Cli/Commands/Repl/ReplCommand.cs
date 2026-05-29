@@ -24,7 +24,7 @@ public sealed class ReplSettings : CommandSettings
     public string? SystemPrompt { get; set; }
 
     [CommandOption("--no-banner")]
-    [Description("Skip the Figlet banner.")]
+    [Description("Skip the startup banner.")]
     public bool NoBanner { get; set; }
 
     [CommandOption("--no-tools")]

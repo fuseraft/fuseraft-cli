@@ -53,7 +53,7 @@ public sealed class RunSettings : CommandSettings
     public bool ShowTools { get; set; }
 
     [CommandOption("--no-banner")]
-    [Description("Skip the Figlet banner (useful in CI / piped output).")]
+    [Description("Skip the startup banner (useful in CI / piped output).")]
     public bool NoBanner { get; set; }
 
     [CommandOption("--ci")]
@@ -83,9 +83,6 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
 {
     protected override async Task<int> ExecuteAsync(CommandContext context, RunSettings settings, CancellationToken cancellationToken)
     {
-        if (!settings.NoBanner)
-            MessageRenderer.RenderBanner();
-
         // Determine the config path early so we can build the right session store before
         // loading the full config. When resuming, checkpoint.ConfigPath will refine this later.
         // Resolve to absolute immediately so it stays valid after a potential CWD change below.
@@ -141,6 +138,10 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         // Reconcile config path: an existing checkpoint always knows its own config.
         configPath = checkpoint?.ConfigPath ?? configPath;
 
+        // Pre-generate session ID so the startup header can show a stable value even
+        // before the checkpoint object is constructed (which requires the task string).
+        var pendingSessionId = checkpoint?.SessionId ?? Guid.NewGuid().ToString("N")[..8];
+
         var approvalService = new ConsoleHumanApprovalService();
 
         OrchestratorBuildResult built;
@@ -168,7 +169,27 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
 
         using var telemetry = FuseraftTelemetry.Create(config.Telemetry, config.Name);
 
-        MessageRenderer.RenderConfigSummary(config, DiscoverSkills());
+        if (!settings.NoBanner)
+        {
+            var skills      = DiscoverSkills();
+            var pluginNames = config.Agents
+                .SelectMany(a => a.Plugins)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var modelIds = config.Agents
+                .Select(a => a.Model.ModelId)
+                .Where(m => !string.IsNullOrWhiteSpace(m))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var modelDisplay = modelIds.Count > 0 ? string.Join(", ", modelIds) : "unknown";
+            MessageRenderer.RenderReplHeader(
+                modelDisplay,
+                Directory.GetCurrentDirectory(),
+                pluginNames,
+                pendingSessionId,
+                memoryCount: 0,
+                skillCount:  skills.Count);
+        }
 
         // Validate API keys early so a bad/missing key surfaces before the session starts.
         try
@@ -295,7 +316,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         var isNewSession = checkpoint is null;
         checkpoint ??= new SessionCheckpoint
         {
-            SessionId  = Guid.NewGuid().ToString("N")[..8],
+            SessionId  = pendingSessionId,
             Task       = task,
             ConfigPath = configPath
         };
