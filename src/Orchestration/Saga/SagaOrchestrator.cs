@@ -30,6 +30,8 @@ public sealed class SagaOrchestrator(
     private readonly IReadOnlyDictionary<string, ICompensatingAgent> _compensators =
         compensators ?? new Dictionary<string, ICompensatingAgent>(StringComparer.OrdinalIgnoreCase);
 
+    private string _sessionId = string.Empty;
+
     /// <inheritdoc/>
     public event Action<string>? AgentStarting
     {
@@ -52,10 +54,20 @@ public sealed class SagaOrchestrator(
     }
 
     /// <inheritdoc/>
-    public void SetSessionId(string sessionId) => inner.SetSessionId(sessionId);
+    public void SetSessionId(string sessionId)
+    {
+        _sessionId = sessionId;
+        inner.SetSessionId(sessionId);
+    }
 
     /// <inheritdoc/>
     public void SetResumeExecutorId(string? executorId) => inner.SetResumeExecutorId(executorId);
+
+    /// <inheritdoc/>
+    public void SetResumeStateName(string? stateName) => inner.SetResumeStateName(stateName);
+
+    /// <inheritdoc/>
+    public void SetStructuredTask(fuseraft.Core.Models.TaskModel? model) => inner.SetStructuredTask(model);
 
     /// <inheritdoc/>
     public async Task<OrchestrationResult> RunAsync(
@@ -73,18 +85,42 @@ public sealed class SagaOrchestrator(
 
             return new OrchestrationResult
             {
-                SessionId         = string.Empty,
+                SessionId         = _sessionId,
                 Succeeded         = true,
                 Messages          = messages,
                 Duration          = DateTime.UtcNow - start,
                 TerminationReason = "Completed"
             };
         }
+        catch (BudgetExceededException ex)
+        {
+            return new OrchestrationResult
+            {
+                SessionId         = _sessionId,
+                Succeeded         = false,
+                Messages          = messages,
+                Duration          = DateTime.UtcNow - start,
+                TerminationReason = "BudgetExceeded",
+                ErrorMessage      = ex.Message
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            return new OrchestrationResult
+            {
+                SessionId         = _sessionId,
+                Succeeded         = false,
+                Messages          = messages,
+                Duration          = DateTime.UtcNow - start,
+                TerminationReason = "Cancelled",
+                ErrorMessage      = "Operation was cancelled."
+            };
+        }
         catch (Exception ex)
         {
             return new OrchestrationResult
             {
-                SessionId         = string.Empty,
+                SessionId         = _sessionId,
                 Succeeded         = false,
                 Messages          = messages,
                 Duration          = DateTime.UtcNow - start,

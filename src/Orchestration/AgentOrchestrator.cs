@@ -609,6 +609,11 @@ public sealed class AgentOrchestrator(
                 };
 
                 cumulativeTokens += verifierMessage.Usage?.TotalTokens ?? 0;
+
+                var vWarnThreshold = config.WarnTurnTokens;
+                if (vWarnThreshold > 0 && verifierMessage.Usage?.InputTokens is { } vInputToks && vInputToks > vWarnThreshold)
+                    TokenBudgetWarning?.Invoke(verifierMessage.AgentName, vInputToks, vWarnThreshold);
+
                 yield return verifierMessage;
 
                 if (config.MaxTotalTokens is { } vLimit && cumulativeTokens > vLimit)
