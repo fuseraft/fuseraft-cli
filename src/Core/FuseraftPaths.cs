@@ -181,7 +181,7 @@ public static class FuseraftPaths
         sb.AppendLine($"  {LocalBrownfieldBrief,-42} — brownfield discovery brief (if present)");
         sb.AppendLine("  .fuseraft/artifacts/test-report.json      — tester output / validator input (if present)");
         sb.AppendLine($"  {LocalConventions,-42} — brownfield convention profile (if present)");
-        sb.AppendLine("  .fuseraft/comms/chatroom.jsonl            — cross-agent chatroom messages (if present)");
+        sb.AppendLine($"  {LocalChatroom,-42} — cross-agent chatroom messages (if present)");
         sb.AppendLine("  .fuseraft/docs/                           — write all markdown notes, reports, and drafts here");
         sb.AppendLine("  .fuseraft/tests/                          — write all test scripts and test support files here");
         sb.AppendLine("  .fuseraft/tests/fixtures/                 — seed data, stubs, and fixture files");

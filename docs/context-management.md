@@ -108,7 +108,7 @@ directory are loaded. Directories without `.fuseraft/` fall back to all global m
 
 **REPL:** Memory is always active in the REPL — no config flag needed. Memories are extracted
 automatically at the end of each session and scoped to the working directory via
-`.fuseraft/memory/memory_refs.json`. Use `/memory` commands to inspect or delete them.
+`.fuseraft/memory/sessions/{session_id}/memory_refs.json`. Use `/memory` commands to inspect or delete them.
 
 **Memory cap:** The prompt block is capped at 8,000 characters. Entries are ordered by type
 then name; entries that would exceed the cap are dropped (header only is kept for visibility).
@@ -553,7 +553,6 @@ Here is the full sequence from session start through a long-running session:
 ```yaml
 ChangeTracking:
   Path: .fuseraft/state/changes.json
-  IntentLogPath: .fuseraft/state/intents.json
 
 Compaction:
   TriggerTurnCount: 40
