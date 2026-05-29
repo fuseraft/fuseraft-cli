@@ -903,7 +903,12 @@ internal static class ReplCommands
             "Write a concise handoff document summarising this conversation so a fresh session can continue the work. " +
             "Include: what was being worked on, key decisions and findings, current state, and what comes next. " +
             "Reference file paths and symbols by name rather than quoting their full content. " +
-            "Redact any sensitive values such as API keys or passwords." +
+            "Redact any sensitive values such as API keys or passwords. " +
+            "For any facts about files, code, or system state that the assistant stated WITHOUT a corresponding tool call " +
+            "in that same turn (e.g. claimed a file exists, described code contents, or reported a command result without " +
+            "calling read_file / shell_run / grep_file etc.), do NOT include them as established facts. " +
+            "Instead write: [UNVERIFIED ASSUMPTION: <one-line description>]. " +
+            "Facts confirmed by actual tool output are verified and should be stated normally." +
             focus;
 
         var messages = new List<ChatMessage>(ctx.History)
