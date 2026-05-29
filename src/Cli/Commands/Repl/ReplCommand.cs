@@ -368,31 +368,37 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                   "\nGuidelines:\n" +
                   "- Prefer tools over guessing.\n" +
                   "- Read before writing or mutating.\n" +
-                  "- For large files: call get_file_summary first (shows first 30 lines and file size), grep_file to locate the relevant section, then read_file with startLine/maxLines for that section only — never cold-read a large file in full.\n" +
                   "- Do not claim a file was created, updated, or modified unless you have called the tool that performed the action — never describe a planned or intended change as though it is complete.\n" +
                   "- Avoid destructive actions (rm, overwrite, force-push) unless explicitly requested.\n" +
                   "- Only write files the user explicitly requests — never create unsolicited summaries, changelogs, or status files.\n" +
                   "- For multi-step work, briefly state intent first.\n" +
                   "- If a command fails due to missing project/config file: search subdirs for the entry point, then run `cd <dir> && <command>` in one shell_run call. Note the directory used.\n" +
-                  "- Always return to the original working directory for subsequent commands unless the task explicitly requires otherwise.\n" +
-                  "- Context may contain [UNVERIFIED ASSUMPTION: ...] markers from a prior compaction — treat these as unconfirmed claims that require tool verification before acting on them.\n" +
-                  "\nBefore signaling completion, verify:\n" +
-                  "  Tools & verification:\n" +
-                  "  - Every action was performed with a tool call — not described as if done\n" +
-                  "  - Tool calls succeeded (no errors, exit code 0 for shell)\n" +
-                  "  Files:\n" +
-                  "  - For file writes: re-read the file to confirm content is correct\n" +
-                  "  Shell:\n" +
-                  "  - Shell output is shown; it confirms the goal was met\n" +
-                  "  Completeness:\n" +
-                  "  - Every part of the user's request has been addressed\n" +
-                  "  - Nothing was deferred or skipped without explaining why\n" +
-                  "  If any check fails, complete it before responding.\n"
+                  "- Always return to the original working directory for subsequent commands unless the task explicitly requires otherwise.\n"
                 : $"{identity} The current working directory is: {cwd}.";
         }
         else
         {
             prompt = settingsPrompt + $"\n\nThe current working directory is: {cwd}.";
+        }
+
+        // Guardrails appended unconditionally so custom settingsPrompt deployments receive them too.
+        if (toolCount > 0)
+        {
+            prompt +=
+                "\n- For large files: call get_file_summary first (shows first 30 lines and file size), grep_file to locate the relevant section, then read_file with startLine/maxLines for that section only — never cold-read a large file in full.\n" +
+                "- Context may contain [UNVERIFIED ASSUMPTION: ...] markers from a prior compaction — treat these as unconfirmed claims that require tool verification before acting on them.\n" +
+                "\nBefore signaling completion, verify:\n" +
+                "  Tools & verification:\n" +
+                "  - Every action was performed with a tool call — not described as if done\n" +
+                "  - Tool calls succeeded (no errors, exit code 0 for shell)\n" +
+                "  Files:\n" +
+                "  - For file writes: re-read the file to confirm content is correct\n" +
+                "  Shell:\n" +
+                "  - Shell output is shown; it confirms the goal was met\n" +
+                "  Completeness:\n" +
+                "  - Every part of the user's request has been addressed\n" +
+                "  - Nothing was deferred or skipped without explaining why\n" +
+                "  If any check fails, complete it before responding.\n";
         }
 
         if (sessionId is not null)

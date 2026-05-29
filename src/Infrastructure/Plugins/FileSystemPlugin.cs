@@ -99,27 +99,25 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         var effectiveStart = Math.Max(1, startLine);
 
-        // Cold-read gate: fires when starting from line 1 with no meaningful upper bound
-        // (maxLines unset, or so large it amounts to "give me everything"). Byte pre-check
-        // avoids allocating a full string array for a 15K-line file we're about to redirect.
-        bool isColdRead = effectiveStart <= 1 && (maxLines <= 0 || maxLines > LargeFileColdReadLines);
+        // Cold-read gate: fires when no meaningful maxLines cap is set ("give me everything"),
+        // regardless of startLine — a large file requested from line 2 with no cap is just as
+        // expensive as one from line 1. Byte pre-check avoids allocating a full string array
+        // for a file we're about to redirect.
+        bool isColdRead = maxLines <= 0 || maxLines > LargeFileColdReadLines;
         var  fileInfo   = new FileInfo(resolved);
         if (isColdRead && fileInfo.Length > LargeFileByteThreshold)
         {
-            // Stream first 30 lines for the preview + count total without full array alloc.
-            var previewLines = new List<string>(30);
-            int lineCount    = 0;
-            using var sr     = new StreamReader(resolved);
-            string?   ln;
-            while ((ln = await sr.ReadLineAsync()) != null)
-            {
-                lineCount++;
-                if (previewLines.Count < 30) previewLines.Add(ln);
-            }
-            return string.Join('\n', previewLines) +
-                $"\n\n[Large file — {lineCount:N0} lines ({fileInfo.Length:N0} bytes). " +
+            var (coldLines, coldLineCount, coldSizeBytes) = await StreamPreviewLinesAsync(resolved, 30);
+            var preview = string.Join('\n', coldLines) +
+                $"\n\n[Large file — {coldLineCount:N0} lines ({coldSizeBytes:N0} bytes). " +
                 $"Cold-reading would flood your context. " +
                 $"Use grep_file to locate the relevant section, then read_file with startLine/maxLines.]";
+            if (_readBudgetUsed + preview.Length > _readBudgetPerTurn)
+                return PluginResult.Error(
+                    $"Read budget exhausted ({_readBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars). " +
+                    $"Proceed with context already available — use patch_file or shell_run. Budget resets next turn.");
+            _readBudgetUsed += preview.Length;
+            return preview;
         }
 
         var allLines   = await File.ReadAllLinesAsync(resolved);
@@ -212,43 +210,62 @@ public sealed class FileSystemPlugin : ITurnResettable
             return PluginResult.Error($"Invalid pattern '{pattern}': {ex.Message}");
         }
 
-        var lines = await File.ReadAllLinesAsync(resolved, cancellationToken);
-        var ctx   = Math.Max(0, contextLines);
-        var shown = new HashSet<int>();
-        var sb    = new System.Text.StringBuilder();
-        int matches = 0;
+        var ctx        = Math.Max(0, contextLines);
+        var sb         = new System.Text.StringBuilder();
+        int matches    = 0;
+        int lineNumber = 0;
+        int lastOutput = -1;
+        int postCtxLeft = 0;
+        var preCtxBuf  = new Queue<(int Num, string Text)>();
 
-        for (int i = 0; i < lines.Length && matches < maxMatches; i++)
+        using (var reader = new StreamReader(resolved))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!regex.IsMatch(lines[i])) continue;
-            matches++;
-
-            var from = Math.Max(0, i - ctx);
-            var to   = Math.Min(lines.Length - 1, i + ctx);
-
-            var shownMax = shown.Count > 0 ? shown.Max() : -1;
-            if (shownMax >= 0 && from <= shownMax + 1)
+            string? line;
+            while ((line = await reader.ReadLineAsync()) is not null)
             {
-                // Extend the previous block rather than creating a gap marker.
-                var prev = shownMax + 1;
-                for (int j = prev; j <= to; j++)
-                    if (shown.Add(j))
-                        sb.AppendLine($"{j + 1,6}: {lines[j]}");
-            }
-            else
-            {
-                if (sb.Length > 0) sb.AppendLine("  ---");
-                for (int j = from; j <= to; j++)
-                    if (shown.Add(j))
-                        sb.AppendLine($"{j + 1,6}: {lines[j]}");
+                cancellationToken.ThrowIfCancellationRequested();
+                lineNumber++;
+
+                if (matches >= maxMatches) continue; // drain to count total lines
+
+                if (regex.IsMatch(line))
+                {
+                    matches++;
+
+                    // Separator if there is a gap before the pre-context window.
+                    var firstPre = preCtxBuf.Count > 0 ? preCtxBuf.Peek().Num : lineNumber;
+                    if (sb.Length > 0 && firstPre > lastOutput + 1)
+                        sb.AppendLine("  ---");
+
+                    foreach (var (n, t) in preCtxBuf)
+                    {
+                        sb.AppendLine($"{n,6}: {t}");
+                        lastOutput = n;
+                    }
+                    preCtxBuf.Clear();
+
+                    sb.AppendLine($"{lineNumber,6}: {line}");
+                    lastOutput  = lineNumber;
+                    postCtxLeft = ctx;
+                }
+                else if (postCtxLeft > 0)
+                {
+                    sb.AppendLine($"{lineNumber,6}: {line}");
+                    lastOutput = lineNumber;
+                    postCtxLeft--;
+                }
+                else
+                {
+                    preCtxBuf.Enqueue((lineNumber, line));
+                    if (preCtxBuf.Count > ctx) preCtxBuf.Dequeue();
+                }
             }
         }
 
         if (matches == 0)
             return PluginResult.Info($"No matches for '{pattern}' in {resolved}");
 
-        var header = $"[{matches} match(s) in {resolved} ({lines.Length} lines total)]\n";
+        var header = $"[{matches} match(s) in {resolved} ({lineNumber} lines total)]\n";
         if (matches >= maxMatches)
             header += $"[Result capped at {maxMatches} matches — use a more specific pattern to narrow results.]\n";
 
@@ -852,16 +869,33 @@ public sealed class FileSystemPlugin : ITurnResettable
             return $"[Cached summary for '{resolved}']\n{cached}";
         }
 
-        // Auto-preview: first 30 lines + stats.
-        var allLines  = await File.ReadAllLinesAsync(resolved);
-        var totalLines = allLines.Length;
-        var sizeBytes  = new FileInfo(resolved).Length;
-        var preview    = string.Join('\n', allLines.Take(30));
-        var trailer    = totalLines > 30
-            ? $"\n\n[Auto-preview: showing first 30 of {totalLines} lines ({sizeBytes:N0} bytes). " +
-              $"Use grep_in_file to locate specific content, or save_file_summary to store a " +
-              $"human-written summary for future turns.]"
-            : $"\n\n[Full file — {totalLines} lines, {sizeBytes:N0} bytes.]";
+        // Auto-preview: first 30 lines + stats. For large files, stream rather than
+        // allocating a full string array — same protection as ReadFileAsync's cold-read gate.
+        var fileInfo = new FileInfo(resolved);
+        string preview;
+        string trailer;
+        if (fileInfo.Length > LargeFileByteThreshold)
+        {
+            var (previewLines, totalLines, sizeBytes) = await StreamPreviewLinesAsync(resolved, 30);
+            preview = string.Join('\n', previewLines);
+            trailer = totalLines > 30
+                ? $"\n\n[Auto-preview: showing first 30 of {totalLines:N0} lines ({sizeBytes:N0} bytes). " +
+                  $"Use grep_in_file to locate specific content, or save_file_summary to store a " +
+                  $"human-written summary for future turns.]"
+                : $"\n\n[Full file — {totalLines} lines, {sizeBytes:N0} bytes.]";
+        }
+        else
+        {
+            var allLines  = await File.ReadAllLinesAsync(resolved);
+            int lineCount = allLines.Length;
+            long byteCount = fileInfo.Length;
+            preview = string.Join('\n', allLines.Take(30));
+            trailer = lineCount > 30
+                ? $"\n\n[Auto-preview: showing first 30 of {lineCount} lines ({byteCount:N0} bytes). " +
+                  $"Use grep_in_file to locate specific content, or save_file_summary to store a " +
+                  $"human-written summary for future turns.]"
+                : $"\n\n[Full file — {lineCount} lines, {byteCount:N0} bytes.]";
+        }
 
         return preview + trailer;
     }
@@ -929,6 +963,23 @@ public sealed class FileSystemPlugin : ITurnResettable
             result += $"\n\n[TRUNCATED — only first {maxEntries} entries shown. Use a more specific pattern to narrow results.]";
 
         return result;
+    }
+
+    // Streams the first `previewCount` lines without allocating the full file into a string
+    // array. Returns the preview lines, total line count, and file size in bytes.
+    private static async Task<(List<string> Lines, int TotalLines, long SizeBytes)>
+        StreamPreviewLinesAsync(string path, int previewCount)
+    {
+        var preview   = new List<string>(previewCount);
+        int lineCount = 0;
+        using var sr  = new StreamReader(path);
+        string? ln;
+        while ((ln = await sr.ReadLineAsync()) is not null)
+        {
+            lineCount++;
+            if (preview.Count < previewCount) preview.Add(ln);
+        }
+        return (preview, lineCount, new FileInfo(path).Length);
     }
 
     private string SummaryPath(string resolvedFilePath)

@@ -24,11 +24,7 @@ public static partial class InitTemplates
               1. Check if both {FuseraftPaths.LocalBrownfieldBrief} and {FuseraftPaths.LocalConventions}
                  already exist. If they do, call handoff(route_keyword: "RECON COMPLETE") immediately
                  without re-running recon.
-              2. For any file you need to examine: call get_file_summary first (shows the first
-                 30 lines and total line count), grep_file to locate key structures (classes,
-                 entry points, imports), then read_file with startLine/maxLines for those
-                 sections only — files can exceed 10,000 lines; never cold-read a large file
-                 in full.
+              2. For any file you need to examine: {LargeFileProtocolArchaeologist}
               3. Use list_files and sub_agent_explore to map the directory structure — do NOT
                  read every file; prefer sub_agent_explore for structural questions — it returns
                  a prose summary, not raw file contents.
@@ -67,8 +63,7 @@ public static partial class InitTemplates
               2. Read {FuseraftPaths.LocalBrownfieldBrief} to understand the codebase shape and risks.
               3. Read {FuseraftPaths.LocalConventions} to understand the project's conventions — follow them exactly.
               4. Use sub_agent_explore for any additional targeted questions. For direct file
-                 reads: call get_file_summary first, grep_file to locate the section, then
-                 read_file with startLine/maxLines — never cold-read a large file in full.
+                 reads: {LargeFileProtocol}
               5. Write a scoped brief to {FuseraftPaths.LocalBrief} with fields:
                    goal — one-sentence description of the change
                    findings — summary of relevant existing code to modify
@@ -94,9 +89,7 @@ public static partial class InitTemplates
               You are a developer working carefully inside an existing codebase. Your job is to:
               1. Read {FuseraftPaths.LocalBrief} — implement ONLY the files listed in files_to_change.
               2. Read {FuseraftPaths.LocalConventions} — follow the project's naming, import, and style conventions exactly.
-              3. Before modifying an existing file: call get_file_summary to check its size, grep_file
-                 to locate the exact section to edit, then read_file with startLine/maxLines for
-                 that section only — never cold-read a large file in full. Never overwrite blindly.
+              3. Before modifying an existing file: {LargeFileProtocolDeveloper} Never overwrite blindly.
               4. Use patch_file for surgical edits to existing files; use write_file only for new files.
               5. Run the build command from the convention profile to confirm nothing is broken.
               6. Commit with git_add and git_commit.
@@ -120,8 +113,7 @@ public static partial class InitTemplates
             Instructions: |
               You are a principal engineer reviewing a change to an existing codebase. Your job is to:
               1. For each file listed in {FuseraftPaths.LocalBrief} under files_to_change:
-                 call get_file_summary first, grep_file to locate the section to inspect,
-                 then read_file with startLine/maxLines — never cold-read a large file in full.
+                 {LargeFileProtocolReviewer}
               2. Inspect the code against every acceptance criterion.
               3. Check that the change follows conventions from {FuseraftPaths.LocalConventions}.
               4. Confirm no files outside files_to_change were modified (use changes_read_latest).

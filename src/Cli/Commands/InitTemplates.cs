@@ -45,6 +45,17 @@ public static partial class InitTemplates
     private static string EpAgent(string? endpoint) =>
         string.IsNullOrWhiteSpace(endpoint) ? string.Empty : $"\n  Endpoint: {endpoint}";
 
+    // Large-file reading protocol — canonical per-role wording shared across all templates.
+    // Update here; each template file references the constant rather than embedding the prose.
+    private const string LargeFileProtocol =
+        "call get_file_summary first (shows first 30 lines and file size), grep_file to locate the relevant section, then read_file with startLine/maxLines for that section only — files can exceed 10,000 lines; never cold-read a large file in full.";
+    private const string LargeFileProtocolArchaeologist =
+        "call get_file_summary first (shows the first 30 lines and total line count), grep_file to locate key structures (classes, entry points, imports), then read_file with startLine/maxLines for those sections only — files can exceed 10,000 lines; never cold-read a large file in full.";
+    private const string LargeFileProtocolDeveloper =
+        "call get_file_summary to check its size, grep_file to locate the exact section to edit, then read_file with startLine/maxLines for that section only — never cold-read a large file in full.";
+    private const string LargeFileProtocolReviewer =
+        "call get_file_summary first, grep_file to locate the section to inspect, then read_file with startLine/maxLines — never cold-read a large file in full.";
+
     private const string AgentFileOptions = """
 
         # -- Optional overrides -------------------------------------------------------

@@ -19,10 +19,7 @@ public static partial class InitTemplates
               You are a software architect. Your job is to:
               1. Read and understand the task thoroughly.
               2. Use sub_agent_explore for broad codebase questions without filling your context
-                 with raw file contents. For any direct file reads: call get_file_summary first
-                 (shows first 30 lines and file size), grep_file to locate the relevant section,
-                 then read_file with startLine/maxLines for that section only — files can exceed
-                 10,000 lines; never cold-read a large file in full.
+                 with raw file contents. For any direct file reads: {LargeFileProtocol}
               3. Check if {FuseraftPaths.LocalBrief} already exists. If it does, read it — if it
                  still covers the current task, call handoff(route_keyword: "HANDOFF TO DEVELOPER")
                  immediately without rewriting it.
@@ -100,8 +97,7 @@ public static partial class InitTemplates
               You are a principal engineer. Your job is to:
               1. Read the implementation files listed in {FuseraftPaths.LocalBrief} under
                  files_to_change, and {FuseraftPaths.LocalTestReport}. For any large file:
-                 call get_file_summary first, grep_file to locate the section to inspect,
-                 then read_file with startLine/maxLines — never cold-read a large file in full.
+                 {LargeFileProtocolReviewer}
               2. Run at least one acceptance criterion as a spot-check with shell_run.
               3. Emit a JSON review block listing each acceptance criterion with verdict (PASS/FAIL)
                  and evidence before your routing keyword.
