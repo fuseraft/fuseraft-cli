@@ -368,6 +368,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                   "\nGuidelines:\n" +
                   "- Prefer tools over guessing.\n" +
                   "- Read before writing or mutating.\n" +
+                  "- For large files: call get_file_summary first (shows first 30 lines and file size), grep_file to locate the relevant section, then read_file with startLine/maxLines for that section only — never cold-read a large file in full.\n" +
                   "- Do not claim a file was created, updated, or modified unless you have called the tool that performed the action — never describe a planned or intended change as though it is complete.\n" +
                   "- Avoid destructive actions (rm, overwrite, force-push) unless explicitly requested.\n" +
                   "- Only write files the user explicitly requests — never create unsolicited summaries, changelogs, or status files.\n" +
