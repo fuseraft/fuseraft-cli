@@ -587,11 +587,21 @@ public sealed class AgentFactory(
             : DropAllToolContent(messages);
     }
 
-    // Truncates every FunctionResultContent string to maxChars in ChatRole.Tool messages.
+    // Truncates FunctionResultContent strings in ChatRole.Tool messages.
+    // Consumed read_file results (where a later write/patch targeted the same path) are capped
+    // at ConsumedReadCapChars regardless of maxChars — their content is stale anyway.
+    // All other results are capped at maxChars.
+    private const int ConsumedReadCapChars = 500;
+
     private static List<ChatMessage> TrimToolResultsToChars(
         IReadOnlyList<ChatMessage> messages,
         int maxChars)
     {
+        if (!messages.Any(m => m.Role == ChatRole.Tool))
+            return messages as List<ChatMessage> ?? messages.ToList();
+
+        var consumedReadIds = ContextWindowFilter.BuildConsumedReadCallIds(messages);
+
         var result = new List<ChatMessage>(messages.Count);
         foreach (var msg in messages)
         {
@@ -601,12 +611,33 @@ public sealed class AgentFactory(
             var newContents = new List<AIContent>(msg.Contents.Count);
             foreach (var content in msg.Contents)
             {
-                if (content is FunctionResultContent fr && fr.Result is string s && s.Length > maxChars)
+                if (content is FunctionResultContent fr && fr.Result is string s)
                 {
-                    newContents.Add(new FunctionResultContent(fr.CallId,
-                        s[..maxChars] +
-                        $"\n[...context-trimmed — {s.Length - maxChars:N0} chars removed to fit model limit...]"));
-                    changed = true;
+                    string? replacement = null;
+
+                    if (consumedReadIds.Contains(fr.CallId ?? string.Empty) &&
+                        s.Length > ConsumedReadCapChars)
+                    {
+                        replacement = s[..ConsumedReadCapChars] +
+                            $"\n[...{s.Length - ConsumedReadCapChars:N0} chars elided — " +
+                            $"file was written or patched later this session; " +
+                            $"call read_file again if current content is needed]";
+                    }
+                    else if (s.Length > maxChars)
+                    {
+                        replacement = s[..maxChars] +
+                            $"\n[...context-trimmed — {s.Length - maxChars:N0} chars removed to fit model limit...]";
+                    }
+
+                    if (replacement is not null)
+                    {
+                        newContents.Add(new FunctionResultContent(fr.CallId!, replacement));
+                        changed = true;
+                    }
+                    else
+                    {
+                        newContents.Add(content);
+                    }
                 }
                 else
                 {

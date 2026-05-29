@@ -229,6 +229,22 @@ Agents:
 
 Default: `0` (no truncation).
 
+**Consumed-read optimisation:** fuseraft distinguishes between `read_file` results that
+the agent has already acted on and those that are still load-bearing:
+
+- **Consumed read** — a `write_file` or `patch_file` to the same path appears later in
+  the history. The content is stale (the file has since been rewritten). These are capped
+  at 500 characters regardless of `MaxToolResultChars`, with a stub noting that the file
+  was subsequently modified and can be re-read if needed.
+- **Unconsumed read** — no downstream write to the same path exists. The model may still
+  need this content to plan its next action, so it is left at the full `MaxToolResultChars`
+  limit.
+- **All other tool results** (shell output, grep results, etc.) are truncated uniformly
+  at `MaxToolResultChars`.
+
+This means a file that was read and then immediately patched stops consuming context across
+all subsequent turns, while a file that was read but not yet written remains fully visible.
+
 ---
 
 ## Layer 4: Compaction
@@ -431,9 +447,13 @@ with progressively reduced tool-result content rather than failing the session o
 
 | Stage | Action |
 |-------|--------|
-| 1 | Truncate all `FunctionResultContent` in history to 4,000 characters |
-| 2 | Truncate to 500 characters |
+| 1 | Truncate all `FunctionResultContent` to 4,000 chars; consumed `read_file` results capped at 500 chars |
+| 2 | Truncate all `FunctionResultContent` to 500 chars; consumed `read_file` results capped at 500 chars |
 | 3 | Drop all tool messages entirely (text-only nuclear option) |
+
+The consumed-read cap applies at every stage: a `read_file` result whose file was
+subsequently written or patched is always capped at 500 characters because the content is
+stale regardless of how aggressive the retry is.
 
 Each stage re-runs the pre-flight budget/payload checks on the trimmed context before
 calling the provider, so both fuseraft's own pre-flight throws and provider 400/413
