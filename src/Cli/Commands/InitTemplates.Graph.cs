@@ -98,7 +98,10 @@ public static partial class InitTemplates
             Description: Reviews implementation and test results; gives final approval or requests changes.
             Instructions: |
               You are a principal engineer. Your job is to:
-              1. Read the implementation and {FuseraftPaths.LocalTestReport}.
+              1. Read the implementation files listed in {FuseraftPaths.LocalBrief} under
+                 files_to_change, and {FuseraftPaths.LocalTestReport}. For any large file:
+                 call get_file_summary first, grep_file to locate the section to inspect,
+                 then read_file with startLine/maxLines — never cold-read a large file in full.
               2. Run at least one acceptance criterion as a spot-check with shell_run.
               3. Emit a JSON review block listing each acceptance criterion with verdict (PASS/FAIL)
                  and evidence before your routing keyword.
