@@ -76,7 +76,11 @@ public sealed class MagenticOrchestrator(
     /// <inheritdoc/>
     public event Action<string, int, int>? TokenBudgetWarning;
 
-    public void SetSessionId(string sessionId) => _sessionId = sessionId;
+    public void SetSessionId(string sessionId)
+    {
+        _sessionId = sessionId;
+        agentFactory.SetSessionId(sessionId);
+    }
 
     /// <summary>
     /// Provides Magentic-specific loop-counter state when resuming a paused session.
@@ -162,7 +166,10 @@ public sealed class MagenticOrchestrator(
         var agentsByName      = agents.ToDictionary(a => a.Name!, StringComparer.OrdinalIgnoreCase);
         var agentInstructions = config.Agents
             .Where(a => !string.IsNullOrWhiteSpace(a.Instructions))
-            .ToDictionary(a => a.Name, a => a.Instructions, StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(
+                a => a.Name,
+                a => FuseraftPaths.ExpandSessionId(a.Instructions, _sessionId),
+                StringComparer.OrdinalIgnoreCase);
         var agentConfigs      = config.Agents
             .ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
         // Shared history: participant agents see the task + prior participant responses.

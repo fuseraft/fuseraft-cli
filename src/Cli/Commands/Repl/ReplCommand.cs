@@ -208,9 +208,9 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         });
 
         var memoryStore   = MemoryStore.ForRepl();
-        var memoryEntries = await memoryStore.LoadAllAsync(cwd);
+        var memoryEntries = await memoryStore.LoadAllAsync(cwd, sessionId);
         var memoryBlock   = memoryEntries.Count > 0
-            ? await memoryStore.BuildPromptBlockAsync(cwd)
+            ? await memoryStore.BuildPromptBlockAsync(cwd, sessionId)
             : null;
         var systemPrompt = BuildSystemPrompt(settings.SystemPrompt, initialTools.Count, cwd, memoryBlock, modelId, sessionId, startedAt);
 

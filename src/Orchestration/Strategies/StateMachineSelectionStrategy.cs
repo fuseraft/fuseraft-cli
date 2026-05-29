@@ -43,7 +43,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
     private readonly EventEmitter? _eventEmitter;
     private readonly ILogger<StateMachineSelectionStrategy> _logger;
     private readonly GovernanceKernel? _governance;
-    private readonly string _sessionId = "unknown";
+    private string _sessionId = "unknown";
     private IList<ChatMessage>? _history;
 
     // Current state name — mutated on each successful transition.
@@ -118,6 +118,8 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
     /// Must be called before the orchestration loop begins.
     /// </summary>
     public void SetHistory(IList<ChatMessage> history) => _history = history;
+
+    public void SetSessionId(string sessionId) => _sessionId = sessionId;
 
     public async Task<AIAgent?> SelectAsync(
         IReadOnlyList<AIAgent> agents,
@@ -544,7 +546,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
         {
             var correction = BuildTransitionCorrectionMessage(
                 failureType, typeConfig, newCount,
-                errorMessage, failingContract, _currentState, transition.To);
+                errorMessage, failingContract, _currentState, transition.To, _sessionId);
             _history.Add(new ChatMessage(ChatRole.User, correction));
         }
 
@@ -559,7 +561,8 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
         string errorMessage,
         string contractName,
         string fromState,
-        string toState)
+        string toState,
+        string sessionId = "")
     {
         var prefix = newCount > 1
             ? $"RETRY {newCount}/{typeConfig.Threshold} — "
@@ -577,7 +580,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                 $"{prefix}MISSING ARTIFACT — Transition '{fromState}' → '{toState}' is blocked " +
                 $"because contract '{contractName}' requires an artifact that does not exist yet.\n\n" +
                 $"Steps to resolve:\n" +
-                $"  1. Read {FuseraftPaths.LocalBrief} to identify the required artifacts.\n" +
+                $"  1. Read {FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalBrief, sessionId)} to identify the required artifacts.\n" +
                 $"  2. Create the missing artifact using write_file or the appropriate tool.\n" +
                 $"  3. Re-emit the signal once the artifact exists.\n\n" +
                 errorMessage,
@@ -664,7 +667,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                 $"LOOP WARNING: {agentName} has been invoked {consecutive} consecutive turns " +
                 $"in state '{_currentState}' without completing the required task. " +
                 $"You appear to be stuck. Take these steps:\n" +
-                $"  1. Call read_file on {FuseraftPaths.LocalBrief} to restore the task brief.\n" +
+                $"  1. Call read_file on {FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalBrief, _sessionId)} to restore the task brief.\n" +
                 $"  2. Call changes_read_latest to see what has already been done.\n" +
                 $"  3. Identify the single blocking action and execute it now.\n" +
                 $"  4. Emit the correct transition signal once that action is complete."));

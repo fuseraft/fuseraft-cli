@@ -20,11 +20,14 @@ public static partial class InitTemplates
               1. Read and understand the task thoroughly.
               2. Use sub_agent_explore for broad codebase questions without filling
                  your context with raw file contents.
-              3. Write a brief to {FuseraftPaths.LocalBrief} with fields:
+              3. Check if {FuseraftPaths.LocalBrief} already exists. If it does, read it — if it
+                 still covers the current task, call handoff(route_keyword: "HANDOFF TO DEVELOPER")
+                 immediately without rewriting it.
+              4. Write a brief to {FuseraftPaths.LocalBrief} with fields:
                    goal — one-sentence description of what to build
                    files_to_change — array of file paths to create or modify
                    acceptance_criteria — array of testable criteria the code must satisfy
-              4. Break work into concrete steps for the Developer.
+              5. Break work into concrete steps for the Developer.
               When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
             Model:
               ModelId: {model}{EpAgent(endpoint)}

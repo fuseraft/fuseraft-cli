@@ -133,7 +133,11 @@ public sealed class AgentOrchestrator(
     /// Stamps the session ID onto routing/termination strategies so governance audit events
     /// carry a correlation ID. Called from the CLI after the checkpoint session ID is known.
     /// </summary>
-    public void SetSessionId(string sessionId) => _sessionId = sessionId;
+    public void SetSessionId(string sessionId)
+    {
+        _sessionId = sessionId;
+        agentFactory.SetSessionId(sessionId);
+    }
 
     private fuseraft.Core.Models.TaskModel? _structuredTask;
 
@@ -176,6 +180,8 @@ public sealed class AgentOrchestrator(
         var agents = config.Agents
             .Select(a => agentFactory.Create(a, onToolCalling: (agent, tool, args) => ToolCalling?.Invoke(agent, tool, args)))
             .ToList();
+        if (!string.IsNullOrEmpty(_sessionId))
+            strategyFactory.SetSessionId(_sessionId);
         var selection = strategyFactory.CreateSelection(config.Selection, agents, config.Validation, config.FailureHandling, config.Contracts, config.Verifier);
         CurrentSnapshotter = selection as fuseraft.Core.Interfaces.IContextSnapshotter;
         var termination = strategyFactory.CreateTermination(config.Termination ?? new(), agents, config.Validation);
@@ -219,6 +225,8 @@ public sealed class AgentOrchestrator(
         else if (selection is StateMachineSelectionStrategy smss)
         {
             smss.SetHistory(history);
+            if (!string.IsNullOrEmpty(_sessionId))
+                smss.SetSessionId(_sessionId);
 
             // Restore state after compaction so the machine resumes from e.g. "Testing"
             // rather than resetting to its initial state ("Planning").
@@ -261,7 +269,10 @@ public sealed class AgentOrchestrator(
         // them, but they are not forwarded. Manual prepend is the only path that reaches the model.
         var agentInstructions = config.Agents
             .Where(a => !string.IsNullOrWhiteSpace(a.Instructions))
-            .ToDictionary(a => a.Name, a => a.Instructions, StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(
+                a => a.Name,
+                a => FuseraftPaths.ExpandSessionId(a.Instructions, _sessionId),
+                StringComparer.OrdinalIgnoreCase);
 
         // Build a lookup of agent name → full agent config for per-agent options (e.g. ContextWindow).
         var agentConfigs = config.Agents

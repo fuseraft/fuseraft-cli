@@ -3,6 +3,7 @@ using AgentGovernance;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 using fuseraft.Orchestration.Contracts;
@@ -22,6 +23,9 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
     private readonly EvidenceStore? _evidenceStore = evidenceStore;
     private readonly TestSelectorConfig? _testSelector = testSelector;
     private readonly string? _sandboxRoot = sandboxRoot;
+    private string _sessionId = string.Empty;
+
+    public void SetSessionId(string sessionId) => _sessionId = sessionId;
 
     // Selection
 
@@ -69,11 +73,12 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
         if (config.Routes is not { Count: > 0 })
             throw new InvalidOperationException("Keyword selection strategy requires at least one entry in 'Routes'.");
 
-        var validators = BuildValidators(validationConfig, testSelector: _testSelector, sandboxRoot: _sandboxRoot);
+        var validators = BuildValidators(validationConfig, testSelector: _testSelector, sandboxRoot: _sandboxRoot, sessionId: _sessionId);
 
         // Build the contract engine once — shared across all routes that reference contracts.
+        var contractValidationConfig = ExpandValidationSessionId(validationConfig, _sessionId);
         ContractEngine? contractEngine = contracts is { Count: > 0 }
-            ? new ContractEngine(contracts, validationConfig, _evidenceStore, _testSelector, _sandboxRoot)
+            ? new ContractEngine(contracts, contractValidationConfig, _evidenceStore, _testSelector, _sandboxRoot)
             : null;
 
         var routes = config.Routes
@@ -214,8 +219,9 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
                     $"but no 'Orchestration.Contracts' section is defined.");
         }
 
+        var smContractValidationConfig = ExpandValidationSessionId(validationConfig, _sessionId);
         ContractEngine? contractEngine = contracts is { Count: > 0 }
-            ? new ContractEngine(contracts, validationConfig, _evidenceStore, _testSelector, _sandboxRoot)
+            ? new ContractEngine(contracts, smContractValidationConfig, _evidenceStore, _testSelector, _sandboxRoot)
             : null;
 
         var strategyLogger = loggerFactory?.CreateLogger<StateMachineSelectionStrategy>();
@@ -226,7 +232,8 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
         ValidationConfig? config,
         bool isTermination = false,
         TestSelectorConfig? testSelector = null,
-        string? sandboxRoot = null)
+        string? sandboxRoot = null,
+        string? sessionId = null)
     {
         var registry = new Dictionary<string, IRoutingValidator>(StringComparer.OrdinalIgnoreCase)
         {
@@ -252,9 +259,12 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
                 }
             }
 
+            var briefPath = sessionId is { Length: > 0 }
+                ? FuseraftPaths.ExpandSessionId(config.BriefPath, sessionId)
+                : config.BriefPath;
             registry["TestReportValid"]          = new HandoffToReviewerValidator(config);
-            registry["RequireBrief"]             = new RequireBriefValidator(config.BriefPath);
-            registry["RequireAllFilesWritten"]   = new RequireAllFilesWrittenValidator(config.BriefPath, config.ChangeLogPath);
+            registry["RequireBrief"]             = new RequireBriefValidator(briefPath);
+            registry["RequireAllFilesWritten"]   = new RequireAllFilesWrittenValidator(briefPath, config.ChangeLogPath);
             registry["RequireReviewJudgement"]   = new RequireReviewJudgementValidator();
         }
 
@@ -292,7 +302,7 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
 
         if (validatorNames is not null && config.Type != "maxiterations")
         {
-            var validatorRegistry = BuildValidators(validationConfig, isTermination: true, testSelector: _testSelector, sandboxRoot: _sandboxRoot);
+            var validatorRegistry = BuildValidators(validationConfig, isTermination: true, testSelector: _testSelector, sandboxRoot: _sandboxRoot, sessionId: _sessionId);
             var validatorList = validatorNames
                 .Select(name => validatorRegistry.TryGetValue(name, out var v) ? v : null)
                 .Where(v => v is not null)
@@ -334,6 +344,11 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
 
         return new CompositeTerminationStrategy(children);
     }
+
+    private static ValidationConfig? ExpandValidationSessionId(ValidationConfig? config, string sessionId) =>
+        config is not null && sessionId is { Length: > 0 }
+            ? config with { BriefPath = FuseraftPaths.ExpandSessionId(config.BriefPath, sessionId) }
+            : config;
 
     private static string BuildDefaultSelectionPrompt() => """
         You are a group-chat moderator. Choose which agent should respond next.

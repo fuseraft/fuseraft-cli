@@ -18,7 +18,10 @@ public static partial class InitTemplates
               You are a DevOps architect. Your job is to:
               1. Understand the infrastructure or deployment task.
               2. Use sub_agent_explore to survey relevant config files and scripts.
-              3. Write a step-by-step execution plan to {FuseraftPaths.LocalBrief} with fields:
+              3. Check if {FuseraftPaths.LocalBrief} already exists. If it does, read it — if it
+                 still covers the current task, call handoff(route_keyword: "PLANNING_COMPLETE")
+                 immediately without rewriting it.
+              4. Write a step-by-step execution plan to {FuseraftPaths.LocalBrief} with fields:
                    goal — what the deployment achieves
                    steps — ordered list of execution steps
                    rollback — steps to undo if something goes wrong

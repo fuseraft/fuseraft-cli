@@ -684,10 +684,10 @@ internal static class ReplTurn
             if (!ctx.JsonMode) AnsiConsole.Markup("[dim]saving memory…[/]");
             var mc = ctx.Factory.Create(ctx.ModelConfig);
             using var _ = mc as IDisposable;
-            var existing = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd);
+            var existing = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd, ctx.SessionId);
             var (saved, parseFailed) = await new MemoryExtractor(mc).ExtractAsync([.. ctx.History], existing);
             if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 30)}\r");
-            foreach (var m in saved) await ctx.MemoryStore.SaveAsync(m, ctx.Cwd);
+            foreach (var m in saved) await ctx.MemoryStore.SaveAsync(m, ctx.Cwd, sessionId: ctx.SessionId);
             if (!ctx.JsonMode)
             {
                 if (parseFailed)

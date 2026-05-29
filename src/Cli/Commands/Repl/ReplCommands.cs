@@ -794,7 +794,7 @@ internal static class ReplCommands
 
         if (string.IsNullOrEmpty(arg) || sub == "list")
         {
-            var all = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd);
+            var all = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd, ctx.SessionId);
             if (all.Count == 0)
                 AnsiConsole.MarkupLine("[dim]No memories stored. They are saved automatically on /exit.[/]");
             else
@@ -813,7 +813,7 @@ internal static class ReplCommands
             }
             else
             {
-                var all   = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd);
+                var all   = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd, ctx.SessionId);
                 var found = all.FirstOrDefault(e => e.Name.Equals(memArg, StringComparison.OrdinalIgnoreCase));
                 if (found is null)
                     AnsiConsole.MarkupLine($"[yellow]No memory named '{Markup.Escape(memArg)}'.[/]");
@@ -834,7 +834,7 @@ internal static class ReplCommands
             }
             else
             {
-                var deleted = await ctx.MemoryStore.DeleteAsync(memArg, ctx.Cwd);
+                var deleted = await ctx.MemoryStore.DeleteAsync(memArg, ctx.Cwd, sessionId: ctx.SessionId);
                 AnsiConsole.MarkupLine(deleted
                     ? $"[dim]Deleted memory '{Markup.Escape(memArg)}'.[/]"
                     : $"[yellow]No memory named '{Markup.Escape(memArg)}'.[/]");
@@ -854,10 +854,10 @@ internal static class ReplCommands
                 {
                     var mc = ctx.Factory.Create(ctx.ModelConfig);
                     using var _ = mc as IDisposable;
-                    var existing             = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd);
+                    var existing             = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd, ctx.SessionId);
                     var (saved, parseFailed) = await new MemoryExtractor(mc).ExtractAsync([.. ctx.History], existing);
                     if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 30)}\r");
-                    foreach (var m in saved) await ctx.MemoryStore.SaveAsync(m, ctx.Cwd);
+                    foreach (var m in saved) await ctx.MemoryStore.SaveAsync(m, ctx.Cwd, sessionId: ctx.SessionId);
                     AnsiConsole.MarkupLine(parseFailed
                         ? "[dim](extraction returned unparseable output — memories may not have been saved)[/]"
                         : saved.Count > 0
