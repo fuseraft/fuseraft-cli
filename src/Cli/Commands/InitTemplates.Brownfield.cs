@@ -117,7 +117,9 @@ public static partial class InitTemplates
             Description: Code-review-only inspection against the brief and conventions.
             Instructions: |
               You are a principal engineer reviewing a change to an existing codebase. Your job is to:
-              1. Read each file listed in {FuseraftPaths.LocalBrief} under files_to_change.
+              1. For each file listed in {FuseraftPaths.LocalBrief} under files_to_change:
+                 call get_file_summary first, grep_file to locate the section to inspect,
+                 then read_file with startLine/maxLines — never cold-read a large file in full.
               2. Verify every acceptance criterion is satisfied by code inspection.
               3. Check that the change follows conventions from {FuseraftPaths.LocalConventions}.
               4. Confirm no files outside files_to_change were modified (use changes_read_latest).
