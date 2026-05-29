@@ -202,6 +202,21 @@ public sealed class SessionRunner(
                     $"  [dim]{Markup.Escape(TrimTo(ex.Message, 200))}[/]\n");
                 compactionNeeded = true;
             }
+            catch (Exception ex) when (ProviderErrorClassifier.Classify(ex) == FailoverReason.ContextExceeded)
+            {
+                // Compactor is not configured — nothing we can do but surface a clear message.
+                if (eventEmitter is not null)
+                    await eventEmitter.EmitAsync("session_error",
+                        payload: new { reason = "context_exceeded_no_compactor", message = TrimTo(ex.Message, 200) });
+                succeeded    = false;
+                errorMessage = "Context window exceeded with no compaction configured.";
+                AnsiConsole.MarkupLine(
+                    $"\n[red]✗ Context window exceeded[/] — no compactor configured.\n" +
+                    $"  Add [dim]compaction: window[/] (or [dim]llm[/]) to your config to enable auto-compaction.\n" +
+                    $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] saved — resume after adding compaction config:[/] " +
+                    $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
+                break;
+            }
             catch (Exception ex) when (Is400(ex) && ProviderErrorClassifier.Classify(ex) == FailoverReason.None)
             {
                 if (eventEmitter is not null)
@@ -227,7 +242,15 @@ public sealed class SessionRunner(
             {
                 succeeded    = false;
                 errorMessage = ex.Message;
-                try { CrashDumper.Write(ex, []); } catch { }
+                string? dumpPath = null;
+                try { dumpPath = CrashDumper.Write(ex, []); } catch { }
+                AnsiConsole.MarkupLine(
+                    $"\n[red]✗ Unexpected error:[/] {Markup.Escape(TrimTo(ex.Message, 300))}");
+                if (dumpPath is not null)
+                    AnsiConsole.MarkupLine($"  [dim]Crash dump: {Markup.Escape(dumpPath)}[/]");
+                AnsiConsole.MarkupLine(
+                    $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] saved — resume with:[/] " +
+                    $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
                 break;
             }
 
@@ -263,6 +286,23 @@ public sealed class SessionRunner(
                     errorMessage = "Cancelled.";
                     AnsiConsole.MarkupLine(
                         $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] paused — resume with:[/] " +
+                        $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    // Compaction itself failed. Treat as a session error rather than letting
+                    // the exception escape RunAsync to the caller uncaught.
+                    succeeded    = false;
+                    errorMessage = $"Compaction failed: {ex.Message}";
+                    string? dumpPath = null;
+                    try { dumpPath = CrashDumper.Write(ex, []); } catch { }
+                    AnsiConsole.MarkupLine(
+                        $"\n[red]✗ Compaction error:[/] {Markup.Escape(TrimTo(ex.Message, 300))}");
+                    if (dumpPath is not null)
+                        AnsiConsole.MarkupLine($"  [dim]Crash dump: {Markup.Escape(dumpPath)}[/]");
+                    AnsiConsole.MarkupLine(
+                        $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] saved — resume with:[/] " +
                         $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
                     break;
                 }
@@ -347,8 +387,8 @@ public sealed class SessionRunner(
             turnClock.Restart();
 
             MessageRenderer.RenderMessage(msg, elapsed, showTools);
-            telemetry?.RecordTurn(msg, elapsed, modelIdByAgent.GetValueOrDefault(msg.AgentName));
-            devUI?.BroadcastMessage(msg, elapsed);
+            try { telemetry?.RecordTurn(msg, elapsed, modelIdByAgent.GetValueOrDefault(msg.AgentName)); } catch { }
+            try { devUI?.BroadcastMessage(msg, elapsed); } catch { }
             if (await RecordMessageAsync(msg, messages, checkpoint, cancellationToken))
             {
                 compactionNeeded = true;
@@ -448,8 +488,8 @@ public sealed class SessionRunner(
                         MessageRenderer.RenderMessage(msg, elapsed, showTools);
                     }
 
-                    telemetry?.RecordTurn(msg, elapsed, modelIdByAgent.GetValueOrDefault(msg.AgentName));
-                    devUI?.BroadcastMessage(msg, elapsed);
+                    try { telemetry?.RecordTurn(msg, elapsed, modelIdByAgent.GetValueOrDefault(msg.AgentName)); } catch { }
+                    try { devUI?.BroadcastMessage(msg, elapsed); } catch { }
                     if (await RecordMessageAsync(msg, messages, checkpoint, cancellationToken))
                     {
                         compactionNeeded = true;
@@ -567,7 +607,18 @@ public sealed class SessionRunner(
         checkpoint.LastUpdatedAt = DateTime.UtcNow;
         if (orchestrator is MagenticOrchestrator mo) checkpoint.MagenticState = mo.CurrentState;
         if (orchestrator is GraphOrchestrator go) checkpoint.StateHistory = [..go.StateHistory];
-        await sessionStore.SaveAsync(checkpoint, ct);
+        try
+        {
+            await sessionStore.SaveAsync(checkpoint, ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception saveEx)
+        {
+            // Checkpoint save failed (e.g. disk full, permissions). Non-fatal: session continues
+            // in memory. The next successful save will catch up.
+            AnsiConsole.MarkupLine(
+                $"[yellow]  ⚠ Checkpoint save failed: {Markup.Escape(TrimTo(saveEx.Message, 200))}[/]");
+        }
 
         if (compactor?.ShouldCompact(_assistantTurnCount) == true)
             return true;
