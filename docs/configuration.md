@@ -352,7 +352,7 @@ The `{AgentName}` component is sanitized so it is safe as a directory name. Agen
 
 The REPL always loads and saves memories automatically — no config flag is needed. Each REPL memory entry is identified by a UUID (stored in the file's frontmatter and used as its filename).
 
-Memories are **scoped to the working directory** where they were created. A file at `.fuseraft/memory/memory_refs.json` in the current directory records the GUIDs of memories saved there. On session start the REPL loads only the entries listed in that file:
+Memories are **scoped to the working directory** where they were created. A file at `.fuseraft/memory/sessions/{session_id}/memory_refs.json` records the GUIDs of memories saved in that session. On session start the REPL loads only the entries listed in that file:
 
 - Directories with a `.fuseraft/` folder but no refs file start with an empty memory set.
 - Directories without a `.fuseraft/` folder fall back to loading all global memories (useful outside a project context).
@@ -646,12 +646,12 @@ The change log is consumed in two ways:
 - **Agents** — add `"Changes"` to a Tester or Reviewer agent's `Plugins` list and call `changes_read_latest` to see what the previous agent did. See [Plugins](plugins.md#changes).
 - **Validators** — set `Validation.ChangeLogPath` to the same path to enable check 8 in `TestReportValid` (cross-referencing report commands against actually-run commands) and to allow `RequireAllFilesWritten` to count files written in prior turns.
 
-**Intent log** — Alongside `changes.json`, the orchestrator also writes `.fuseraft/state/intents.json`. Unlike the change log (which records what happened *after* a tool call returns), the intent log records what is *about to happen* before the call executes, then updates the entry `APPLIED` or `FAILED` when it completes. On session resume, any `PENDING` entries represent operations that were in-flight at the time of interruption and can be replayed or skipped. The intent log also backs the `"intent"` compaction mode. See [Conversation compaction](#conversation-compaction).
+**Intent log** — Alongside `changes.json`, the orchestrator also writes `.fuseraft/state/sessions/{session_id}/intents.json`. Unlike the change log (which records what happened *after* a tool call returns), the intent log records what is *about to happen* before the call executes, then updates the entry `APPLIED` or `FAILED` when it completes. On session resume, any `PENDING` entries represent operations that were in-flight at the time of interruption and can be replayed or skipped. The intent log also backs the `"intent"` compaction mode. See [Conversation compaction](#conversation-compaction).
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `Path` | string | `.fuseraft/state/changes.json` | Path to write the change log. Relative paths resolve against the current working directory. |
-| `IntentLogPath` | string | _(derived)_ | Path to write the intent log. When omitted, the path is derived from `Path` by replacing the filename with `intents.json` in the same directory. |
+| `IntentLogPath` | string | _(derived)_ | Path to write the intent log. When omitted, defaults to `.fuseraft/state/sessions/{session_id}/intents.json` with `{session_id}` expanded at runtime. |
 
 **Omit** `ChangeTracking` entirely if you don't need cross-agent observability or the command cross-reference check.
 
