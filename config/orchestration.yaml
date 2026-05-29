@@ -16,15 +16,15 @@ Orchestration:
       ApiKeyEnvVar: XAI_API_KEY
 
   EvidenceStore:
-    Path: .fuseraft/evidence.json
+    Path: .fuseraft/state/evidence.json
 
   ChangeTracking:
-    Path: .fuseraft/changes.json
+    Path: .fuseraft/state/changes.json
 
   Validation:
-    BriefPath: .fuseraft/brief.json
-    TestReportPath: .fuseraft/test-report.json
-    ChangeLogPath: .fuseraft/changes.json
+    BriefPath: .fuseraft/artifacts/brief.json
+    TestReportPath: .fuseraft/artifacts/test-report.json
+    ChangeLogPath: .fuseraft/state/changes.json
     TestAssertionPatterns:
       - "tester::assert"
       - "if .+ throw"
@@ -35,12 +35,12 @@ Orchestration:
     - Name: BriefExists
       Requires:
         - Type: FileExists
-          Path: .fuseraft/brief.json
+          Path: .fuseraft/artifacts/brief.json
 
     - Name: ImplementationComplete
       Requires:
         - Type: FilesWritten
-          Source: .fuseraft/brief.json
+          Source: .fuseraft/artifacts/brief.json
           Field: files_to_change
         - Type: CommandSucceeded
           Pattern: "build|compile|test|check"
@@ -48,7 +48,7 @@ Orchestration:
     - Name: TestsValid
       Requires:
         - Type: FileExists
-          Path: .fuseraft/test-report.json
+          Path: .fuseraft/artifacts/test-report.json
         - Type: TestReport
           NoFailures: true
           HasAssertions: true
@@ -101,7 +101,7 @@ Orchestration:
            ALWAYS include this as an acceptance criterion when tests are involved: 'Test files contain real assertions that can fail (if/throw, tester::assert, or equivalent) — not just print statements.'
 
         5. WRITE BRIEF TO DISK: Immediately after writing the brief above, call write_file to save it as structured JSON:
-           - Path: .fuseraft/brief.json
+           - Path: .fuseraft/artifacts/brief.json
            - Content must match this exact schema:
              {
                "goal": "<one sentence>",
@@ -136,7 +136,7 @@ Orchestration:
 
         FOLLOW THESE STEPS IN ORDER:
 
-        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/brief.json to get the canonical brief. Do not rely solely on the chat context — the file is the authoritative source that survives compaction. Note the goal, files_to_change, acceptance_criteria, and constraints. If the Tester has reported BUGS FOUND, that report is your specific fix target.
+        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/artifacts/brief.json to get the canonical brief. Do not rely solely on the chat context — the file is the authoritative source that survives compaction. Note the goal, files_to_change, acceptance_criteria, and constraints. If the Tester has reported BUGS FOUND, that report is your specific fix target.
 
         2. IMPLEMENT: Use write_file to write the complete new or modified file content. Do not describe what you would write — write it. Never output a diff.
 
@@ -179,7 +179,7 @@ Orchestration:
 
         FOLLOW THESE STEPS IN ORDER:
 
-        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/brief.json to get the acceptance criteria. The acceptance_criteria array is your test checklist — every item must pass.
+        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/artifacts/brief.json to get the acceptance criteria. The acceptance_criteria array is your test checklist — every item must pass.
 
         1b. CHECK THE CHANGE LOG: Call changes_read_latest to see exactly what the Developer wrote and ran this turn. Cross-reference with files_to_change in the brief — if an expected file is missing from the change log, that is grounds for BUGS FOUND.
 
@@ -195,7 +195,7 @@ Orchestration:
            - Record PASS or FAIL for each criterion with the exact shell_run output — not a summary, the raw output.
 
         5a. IF ALL CRITERIA PASS: First write the test report to disk using write_file:
-           - Path: .fuseraft/test-report.json
+           - Path: .fuseraft/artifacts/test-report.json
            - Schema:
              {
                "results": [
@@ -216,7 +216,7 @@ Orchestration:
         RULES:
         - NEVER write output for a shell command you did not call with shell_run.
         - NEVER call handoff(route_keyword: "HANDOFF TO REVIEWER") unless every criterion has a real shell_run output showing PASS.
-        - NEVER call handoff(route_keyword: "HANDOFF TO REVIEWER") before writing .fuseraft/test-report.json to disk.
+        - NEVER call handoff(route_keyword: "HANDOFF TO REVIEWER") before writing .fuseraft/artifacts/test-report.json to disk.
       Model:
         ModelId: reasoning
         MaxTokens: 16384
@@ -247,8 +247,8 @@ Orchestration:
 
         4. SPOT-CHECK WITH SHELL: Run the most critical acceptance criterion yourself using shell_run. You must produce at least one successful shell_run before calling APPROVED.
 
-        5. READ THE TEST REPORT FROM DISK: Call read_file on .fuseraft/test-report.json.
-           a. Confirm the report has a PASS entry with a non-empty command for every criterion from .fuseraft/brief.json.
+        5. READ THE TEST REPORT FROM DISK: Call read_file on .fuseraft/artifacts/test-report.json.
+           a. Confirm the report has a PASS entry with a non-empty command for every criterion from .fuseraft/artifacts/brief.json.
            b. Check that shell output in the report is consistent with the code you read and your own spot-check.
 
         6. EMIT A STRUCTURED JUDGEMENT: Before writing your decision keyword, output a JSON block with a per-criterion verdict. Use exactly this format inside a ```json code fence:

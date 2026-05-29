@@ -14,15 +14,15 @@ Orchestration:
       ApiKeyEnvVar: OPENWEBUI_API_KEY
 
   EvidenceStore:
-    Path: .fuseraft/evidence.json
+    Path: .fuseraft/state/evidence.json
 
   ChangeTracking:
-    Path: .fuseraft/changes.json
+    Path: .fuseraft/state/changes.json
 
   Validation:
-    BriefPath: .fuseraft/brief.json
-    TestReportPath: .fuseraft/test-report.json
-    ChangeLogPath: .fuseraft/changes.json
+    BriefPath: .fuseraft/artifacts/brief.json
+    TestReportPath: .fuseraft/artifacts/test-report.json
+    ChangeLogPath: .fuseraft/state/changes.json
     TestAssertionPatterns:
       - "tester::assert"
       - "if .+ throw"
@@ -33,12 +33,12 @@ Orchestration:
     - Name: BriefExists
       Requires:
         - Type: FileExists
-          Path: .fuseraft/brief.json
+          Path: .fuseraft/artifacts/brief.json
 
     - Name: ImplementationComplete
       Requires:
         - Type: FilesWritten
-          Source: .fuseraft/brief.json
+          Source: .fuseraft/artifacts/brief.json
           Field: files_to_change
         - Type: CommandSucceeded
           Pattern: "build|compile|run|go test|npm test|cargo test"
@@ -46,7 +46,7 @@ Orchestration:
     - Name: TestsValid
       Requires:
         - Type: FileExists
-          Path: .fuseraft/test-report.json
+          Path: .fuseraft/artifacts/test-report.json
         - Type: TestReport
           NoFailures: true
           HasAssertions: true
@@ -97,7 +97,7 @@ Orchestration:
            ALWAYS include this as an acceptance criterion when tests are involved:
            'Test files contain real assertions that can fail (if/throw, tester::assert, or equivalent) — not just print statements.'
 
-        5. WRITE BRIEF TO DISK: Call write_file to save .fuseraft/brief.json.
+        5. WRITE BRIEF TO DISK: Call write_file to save .fuseraft/artifacts/brief.json.
            Schema:
              {
                "goal": "<one sentence>",
@@ -133,7 +133,7 @@ Orchestration:
 
         FOLLOW THESE STEPS IN ORDER:
 
-        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/brief.json to get the canonical brief. Note the goal, files_to_change, acceptance_criteria, and constraints. If the Tester has reported BUGS FOUND, that report is your specific fix target.
+        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/artifacts/brief.json to get the canonical brief. Note the goal, files_to_change, acceptance_criteria, and constraints. If the Tester has reported BUGS FOUND, that report is your specific fix target.
 
         2. IMPLEMENT: Use write_file to write the complete new or modified file content for every path in files_to_change. Do not describe what you would write — write it. Never output a diff.
 
@@ -177,7 +177,7 @@ Orchestration:
 
         FOLLOW THESE STEPS IN ORDER:
 
-        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/brief.json to get the acceptance criteria.
+        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/artifacts/brief.json to get the acceptance criteria.
 
         2. CHECK THE CHANGE LOG: Call changes_read_latest to see exactly what the Developer wrote and ran this turn.
 
@@ -189,7 +189,7 @@ Orchestration:
 
         6. TEST EACH ACCEPTANCE CRITERION with shell_run. Record PASS or FAIL for each.
 
-        7a. IF ALL CRITERIA PASS: Write the test report to .fuseraft/test-report.json:
+        7a. IF ALL CRITERIA PASS: Write the test report to .fuseraft/artifacts/test-report.json:
               {
                 "results": [
                   {
@@ -207,7 +207,7 @@ Orchestration:
 
         RULES:
         - NEVER call HANDOFF TO REVIEWER unless every criterion has real shell_run output showing PASS.
-        - NEVER call HANDOFF TO REVIEWER before writing .fuseraft/test-report.json to disk.
+        - NEVER call HANDOFF TO REVIEWER before writing .fuseraft/artifacts/test-report.json to disk.
         - A PASS result with an empty or missing command field is treated as fabricated and will block handoff.
       Model:
         ModelId: owui-default
@@ -242,8 +242,8 @@ Orchestration:
 
         5. SPOT-CHECK WITH SHELL: Run the most critical acceptance criterion yourself using shell_run. You must produce at least one successful shell_run before signalling APPROVED.
 
-        6. READ THE TEST REPORT FROM DISK: Call read_file on .fuseraft/test-report.json.
-           Confirm a PASS entry with a non-empty command exists for every criterion from .fuseraft/brief.json.
+        6. READ THE TEST REPORT FROM DISK: Call read_file on .fuseraft/artifacts/test-report.json.
+           Confirm a PASS entry with a non-empty command exists for every criterion from .fuseraft/artifacts/brief.json.
 
         7. EMIT A STRUCTURED JUDGEMENT inside a ```json code fence:
 
@@ -356,7 +356,7 @@ Orchestration:
           - Reviewer
 
   Chatroom:
-    Path: .fuseraft/chatroom.jsonl
+    Path: .fuseraft/comms/chatroom.jsonl
 
   Events:
     Path: .fuseraft/events.jsonl

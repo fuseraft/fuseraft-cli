@@ -22,15 +22,15 @@ Orchestration:
       ApiKeyEnvVar: XAI_API_KEY
 
   EvidenceStore:
-    Path: .fuseraft/evidence.json
+    Path: .fuseraft/state/evidence.json
 
   ChangeTracking:
-    Path: .fuseraft/changes.json
+    Path: .fuseraft/state/changes.json
 
   Validation:
-    BriefPath: .fuseraft/brief.json
-    TestReportPath: .fuseraft/test-report.json
-    ChangeLogPath: .fuseraft/changes.json
+    BriefPath: .fuseraft/artifacts/brief.json
+    TestReportPath: .fuseraft/artifacts/test-report.json
+    ChangeLogPath: .fuseraft/state/changes.json
     TestAssertionPatterns:
       - "tester::assert"
       - "if .+ throw"
@@ -41,12 +41,12 @@ Orchestration:
     - Name: BriefExists
       Requires:
         - Type: FileExists
-          Path: .fuseraft/brief.json
+          Path: .fuseraft/artifacts/brief.json
 
     - Name: ImplementationComplete
       Requires:
         - Type: FilesWritten
-          Source: .fuseraft/brief.json
+          Source: .fuseraft/artifacts/brief.json
           Field: files_to_change
         - Type: CommandSucceeded
           # Read the verify command from the Planner's brief so this works for any
@@ -59,7 +59,7 @@ Orchestration:
     - Name: TestsValid
       Requires:
         - Type: FileExists
-          Path: .fuseraft/test-report.json
+          Path: .fuseraft/artifacts/test-report.json
         - Type: TestReport
           NoFailures: true
           HasAssertions: true
@@ -104,7 +104,7 @@ Orchestration:
            - Acceptance criteria: bullet list of specific, testable conditions
            - Constraints: anything to avoid or preserve
 
-        4. WRITE BRIEF TO DISK: Call write_file to save .fuseraft/brief.json.
+        4. WRITE BRIEF TO DISK: Call write_file to save .fuseraft/artifacts/brief.json.
            Schema:
              {
                "goal": "<one sentence>",
@@ -131,7 +131,7 @@ Orchestration:
 
         FOLLOW THESE STEPS IN ORDER:
 
-        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/brief.json.
+        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/artifacts/brief.json.
         2. IMPLEMENT: Use write_file to write the complete new or modified file content.
            Implement every path listed in files_to_change.
         3. BUILD/RUN: Use shell_run to build and confirm it works. Include exact output.
@@ -157,11 +157,11 @@ Orchestration:
 
         FOLLOW THESE STEPS IN ORDER:
 
-        1. READ THE BRIEF: Call read_file on .fuseraft/brief.json.
+        1. READ THE BRIEF: Call read_file on .fuseraft/artifacts/brief.json.
         2. CHECK THE CHANGE LOG: Call changes_read_latest to verify what the Developer wrote.
         3. RUN TESTS: Execute the project's test suite with shell_run. Paste exact output.
         4. EVALUATE: Map each acceptance criterion to PASS or FAIL.
-        5. WRITE REPORT: Save results to .fuseraft/test-report.json:
+        5. WRITE REPORT: Save results to .fuseraft/artifacts/test-report.json:
              {
                "results": [
                  {
@@ -194,12 +194,12 @@ Orchestration:
 
         FOLLOW THESE STEPS IN ORDER:
 
-        1. READ THE BRIEF: Call read_file on .fuseraft/brief.json.
+        1. READ THE BRIEF: Call read_file on .fuseraft/artifacts/brief.json.
         2. READ THE CHANGE LOG: Call changes_read to see what was actually done this session.
         3. READ THE CODE: Use read_file to inspect the changed files.
         4. REVIEW: Check code quality, correctness, and adherence to the brief.
         5. SPOT-CHECK: Run at least one acceptance criterion yourself with shell_run.
-        6. READ THE TEST REPORT: Call read_file on .fuseraft/test-report.json.
+        6. READ THE TEST REPORT: Call read_file on .fuseraft/artifacts/test-report.json.
         7. DECIDE:
            - All criteria verified → call handoff(route_keyword: "APPROVED").
            - Code or tests need fixing → call handoff(route_keyword: "REVISION REQUIRED")
