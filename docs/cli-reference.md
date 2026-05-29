@@ -333,7 +333,7 @@ Use `/tools` to see the full list at runtime.
 | `/rewind <n>` | Keep turns 1…n and discard all later turns. Turn count is the number of User messages currently in memory. Clamps safely — passing a number larger than the current turn count is a no-op. |
 | `/rewind -<n>` | Step back n turns from the current position (relative rewind). `/rewind -1` drops the last turn; `/rewind -99` clamps to 0 and clears all turns. |
 | `/clear` | Clear conversation history (system prompt is kept) |
-| `/compact` | Ask the model to summarise the session into a handoff document, then replace history with that summary. The system prompt and tools/skills catalog are kept; everything else is discarded. Use this when context is filling up but you want to continue in the same session. |
+| `/compact` | Ask the model to summarise the session into a handoff document, then replace history with that summary. The system prompt and tools/skills catalog are kept; everything else is discarded. Facts the assistant stated without a backing tool call are tombstoned as `[UNVERIFIED ASSUMPTION: ...]` rather than carried forward as established facts. Use this when context is filling up but you want to continue in the same session. |
 | `/compact <focus>` | Same as `/compact`, but passes a focus hint to the model so the summary is tailored toward the next task (e.g. `/compact fix the auth bug next`) |
 | `/history` | Show a condensed view of the conversation (role + preview of each message) |
 | `/system` | Print the current system prompt |
@@ -672,6 +672,29 @@ At session start, scoped memories are injected into the system prompt. When the 
 
 Each memory file lives at `~/.fuseraft/memory/repl/memory_{guid}.md`. Use `/memory save` mid-session if you want to capture facts before the session ends naturally.
 
+**Agent reliability guardrails**
+
+The REPL harness applies several layers of runtime checking to catch common model failure modes before they propagate.
+
+*Mutation-claim correction* — After each free-form turn, the harness checks whether the assistant claimed a write action (e.g. "I updated the file", "I created the directory") without having called a write tool in that same turn. When this is detected it auto-injects a correction turn:
+
+```
+You described changes above but did not call any write tool.
+Please call write_file or patch_file now to actually apply the changes.
+Do not re-describe the changes — just call the tool.
+```
+
+If the agent still does not call a write tool on the correction turn, a warning is printed to the terminal so you can verify the result manually.
+
+*Completion checklist* — The agent's system prompt includes a structured self-verification checklist that fires before every response:
+
+- **Tools & verification:** every action was performed with a tool call — not described as if done; tool calls succeeded (no errors, exit code 0 for shell)
+- **Files:** for file writes, re-read the file to confirm content is correct
+- **Shell:** shell output is shown and confirms the goal was met
+- **Completeness:** every part of the request was addressed; nothing was deferred or skipped without explaining why
+
+*Unverified assumption tombstoning* — Covered in the `/compact` section below.
+
 **Compacting a session**
 
 As a conversation grows, token usage climbs and the model's effective context window shrinks. Use `/compact` to reset history without losing continuity:
@@ -679,6 +702,16 @@ As a conversation grows, token usage climbs and the model's effective context wi
 1. The model summarises the entire conversation into a handoff document — what was being worked on, key decisions, current state, and what comes next.
 2. The full history is discarded and replaced with that single summary message. The system prompt, tools, and skills catalog are kept intact.
 3. The session continues as if it had just started, but with the summary as its opening context.
+
+**Unverified assumption tombstoning**
+
+During compaction, the summarizing model scans for turns where the assistant stated facts about files, code, or system state without a corresponding tool call in that same turn. Those claims are not carried forward as established facts — instead they become compact tombstone markers:
+
+```
+[UNVERIFIED ASSUMPTION: claimed src/api/users.go defines a CreateUser function]
+```
+
+Facts confirmed by actual tool output (`read_file`, `shell_run`, `grep_file`, etc.) are summarised normally. The REPL agent is instructed to treat any `[UNVERIFIED ASSUMPTION: ...]` marker it encounters as an unconfirmed claim that requires tool verification before acting on it. This prevents bad early claims from silently propagating across a compaction boundary.
 
 Pass an optional focus hint to steer the summary toward the next task:
 
