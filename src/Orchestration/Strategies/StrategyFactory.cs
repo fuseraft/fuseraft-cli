@@ -259,9 +259,11 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
                 }
             }
 
-            var briefPath = sessionId is { Length: > 0 }
-                ? FuseraftPaths.ExpandSessionId(config.BriefPath, sessionId)
-                : config.BriefPath;
+            // Always expand {session_id} — when sessionId is empty the token is removed
+            // (giving a harmless double-slash path) rather than left literal, which would
+            // cause RequireBriefValidator to emit an error that directs the agent to create
+            // a directory literally named "{session_id}".
+            var briefPath = FuseraftPaths.ExpandSessionId(config.BriefPath, sessionId ?? string.Empty);
             registry["TestReportValid"]          = new HandoffToReviewerValidator(config);
             registry["RequireBrief"]             = new RequireBriefValidator(briefPath);
             registry["RequireAllFilesWritten"]   = new RequireAllFilesWrittenValidator(briefPath, config.ChangeLogPath);
@@ -346,7 +348,7 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
     }
 
     private static ValidationConfig? ExpandValidationSessionId(ValidationConfig? config, string sessionId) =>
-        config is not null && sessionId is { Length: > 0 }
+        config is not null
             ? config with { BriefPath = FuseraftPaths.ExpandSessionId(config.BriefPath, sessionId) }
             : config;
 
