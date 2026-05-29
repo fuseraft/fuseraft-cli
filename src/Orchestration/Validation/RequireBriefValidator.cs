@@ -43,6 +43,18 @@ public sealed class RequireBriefValidator(string briefPath) : IRoutingValidator
         IList<ChatMessage> history,
         CancellationToken cancellationToken = default)
     {
+        // Defensive guard: if the path still contains the un-expanded {session_id} token it means
+        // the orchestrator failed to stamp the session ID before building this validator.  Directing
+        // the agent to write to a literal "{session_id}" directory would corrupt the run — surface
+        // the configuration error instead so the operator can investigate.
+        if (briefPath.Contains("{session_id}", StringComparison.Ordinal))
+            return RoutingValidationResult.Fail(
+                "HANDOFF TO DEVELOPER blocked: the brief path was not expanded with a real session ID " +
+                $"(still contains the literal token '{{session_id}}'). This is a fuseraft-cli internal error — " +
+                $"the orchestrator should have called SetSessionId before starting the session. " +
+                $"Do NOT create a directory literally named '{{session_id}}'. " +
+                $"Report this to the operator and wait for a corrected run.");
+
         // 1. File existence
         if (!File.Exists(briefPath))
             return RoutingValidationResult.Fail(
