@@ -29,7 +29,11 @@ All paths are resolved to their canonical absolute form (symlinks followed, `..`
 
 ### Shell command scanning
 
-The `command` and `script` arguments are scanned with a regex for tokens that look like absolute paths. Matches are resolved and checked against the sandbox. System binary prefixes are **exempted** so agents can invoke normal tools without being blocked:
+The `command` and `script` arguments are scanned before execution. Two checks run in order:
+
+**1. Subshell blocking** — Commands containing `$(...)`, `` `...` `` (backtick substitution), or `${VAR}` variable expansion are **unconditionally denied**. These constructs evaluate at runtime and produce values that cannot be statically verified against the sandbox root. If your workflow requires command substitution, use the `CodeExecution` plugin (Docker) instead.
+
+**2. Absolute path scan** — The remaining command text is scanned with a regex for tokens that look like absolute paths. Matches are resolved and checked against the sandbox. System binary prefixes are **exempted** so agents can invoke normal tools without being blocked:
 
 **Exempted prefixes (Unix):** `/usr/`, `/bin/`, `/sbin/`, `/lib/`, `/lib64/`, `/opt/`, `/nix/`, `/run/current-system/`, `/snap/`
 
@@ -39,7 +43,7 @@ This means `/usr/bin/dotnet build src/` is allowed, but `cat /etc/passwd` is blo
 
 ### Limitation
 
-Shell command scanning is heuristic. It can be bypassed by variable interpolation, subshells, or shell escaping. **For strict containment, use the `CodeExecution` plugin (Docker) instead of `Shell`.** Docker containers run with `--network none` and are isolated from the host filesystem.
+Absolute-path scanning is heuristic. Shell escaping (quoting, concatenation) may bypass regex detection. **For strict containment, use the `CodeExecution` plugin (Docker) instead of `Shell`.** Docker containers run with `--network none` and are isolated from the host filesystem.
 
 ### Denial response
 
@@ -50,7 +54,15 @@ When a check fails, the function is never executed and the agent receives this t
 All file operations must stay within the sandbox.
 ```
 
-The agent sees this as a tool error and can respond accordingly (typically by staying within the sandbox).
+For subshell constructs:
+
+```
+[DENIED] Shell command contains a command substitution or variable expansion ('$(cat /etc/passwd)')
+that cannot be statically verified against the sandbox. Rewrite the command without subshells,
+or use the CodeExecution plugin (Docker) for commands that require substitution.
+```
+
+The agent sees these as tool errors and can respond accordingly (typically by staying within the sandbox).
 
 ---
 
@@ -336,6 +348,18 @@ Detection is automatic — no configuration required.
 ## API key storage
 
 When you configure the REPL via the first-run wizard or `/provider setup`, the API key is stored in the OS-native credential store — never in `~/.fuseraft/config` on disk.
+
+### Secret masking in logs
+
+All log output (console, `~/.fuseraft/logs/app.log`, and any debug sidecar file) passes through a secret-masking text formatter before being written. The formatter applies three regex patterns:
+
+| Pattern | Example match | Replaced with |
+|---------|--------------|---------------|
+| `sk-[A-Za-z0-9_-]{20,}` | `sk-ant-api03-abc123…` | `[REDACTED]` |
+| `(?i)bearer <token>` | `Bearer eyJhbGc…` | `[REDACTED]` |
+| `(?i)(api_key\|token\|secret)=<value>` | `api_key=supersecret` | `[REDACTED]` |
+
+This means even if a provider error response or debug trace contains an API key, it is stripped before reaching any log sink. No configuration is required — masking is always active.
 
 | Platform | Store | Mechanism |
 |----------|-------|-----------|
