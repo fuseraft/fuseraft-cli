@@ -90,6 +90,13 @@ public record MagenticCheckpointState
     /// <summary>The current plan text produced by the manager.</summary>
     public string? CurrentPlan { get; init; }
 
+    /// <summary>
+    /// Structured step list parsed from <see cref="CurrentPlan"/>.
+    /// Null when the manager did not emit a JSON step block, or for sessions started
+    /// before this field was introduced (backward compatible).
+    /// </summary>
+    public PlanStep[]? CurrentPlanSteps { get; init; }
+
     /// <summary>Inner-loop round index at checkpoint time.</summary>
     public int RoundIndex { get; init; }
 

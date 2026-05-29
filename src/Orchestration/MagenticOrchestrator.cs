@@ -184,7 +184,9 @@ public sealed class MagenticOrchestrator(
         int stallCount          = _resumeState?.StallCount         ?? 0;
         int resetCount          = _resumeState?.ResetCount         ?? 0;
         bool awaitingPlanReview = _resumeState?.AwaitingPlanReview ?? false;
-        string? currentPlan     = _resumeState?.CurrentPlan;
+        string?     currentPlan      = _resumeState?.CurrentPlan;
+        PlanStep[]? currentPlanSteps = _resumeState?.CurrentPlanSteps;
+        var completedStepIds         = new HashSet<int>();
         _resumeState = null; // consumed; prevent stale re-application on subsequent StreamAsync calls
 
         int cumulativeTokens = priorHistory?.Sum(m => m.Usage?.TotalTokens ?? 0) ?? 0;
@@ -288,6 +290,9 @@ public sealed class MagenticOrchestrator(
             // If the checkpoint says we were awaiting plan review, re-emit the plan prompt.
             if (awaitingPlanReview && currentPlan is not null && approvalService is not null)
             {
+                if (currentPlanSteps is null)
+                    PlanStep.TryParse(currentPlan, out currentPlanSteps);
+
                 var feedback = await approvalService.PromptPlanReviewAsync(currentPlan);
                 while (feedback is not null)
                 {
@@ -295,15 +300,16 @@ public sealed class MagenticOrchestrator(
                         $"[Plan revision requested]: {feedback}"));
                     var (revisedPlan, revCost) = await InvokeManagerAsync(managerHistory, cancellationToken);
                     currentPlan = revisedPlan;
+                    PlanStep.TryParse(currentPlan, out currentPlanSteps);
                     managerHistory.Add(new ChatMessage(ChatRole.Assistant, currentPlan) { AuthorName = ManagerPlanTag });
                     cumulativeTokens += revCost?.TotalTokens ?? 0;
 
-                    UpdateState(currentPlan, roundIndex, stallCount, resetCount, awaitingReview: true);
+                    UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: true);
                     yield return MakeMessage(ManagerPlanTag, currentPlan, turn++, revCost);
 
                     feedback = await approvalService.PromptPlanReviewAsync(currentPlan);
                 }
-                UpdateState(currentPlan, roundIndex, stallCount, resetCount, awaitingReview: false);
+                UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
             }
         }
         else
@@ -330,12 +336,13 @@ public sealed class MagenticOrchestrator(
             logger.LogDebug("[MagenticOrchestrator] Generating initial plan...");
             var (initialPlan, planCost) = await InvokeManagerAsync(managerHistory, cancellationToken);
             currentPlan = initialPlan;
+            PlanStep.TryParse(currentPlan, out currentPlanSteps);
             managerHistory.Add(new ChatMessage(ChatRole.Assistant, currentPlan) { AuthorName = ManagerPlanTag });
             cumulativeTokens += planCost?.TotalTokens ?? 0;
 
             if (_magConfig.EnablePlanReview && approvalService is not null)
             {
-                UpdateState(currentPlan, roundIndex, stallCount, resetCount, awaitingReview: true);
+                UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: true);
                 yield return MakeMessage(ManagerPlanTag, currentPlan, turn++, planCost);
 
                 var feedback = await approvalService.PromptPlanReviewAsync(currentPlan);
@@ -345,21 +352,22 @@ public sealed class MagenticOrchestrator(
                         $"[Plan revision requested]: {feedback}"));
                     var (revisedPlan, revCost) = await InvokeManagerAsync(managerHistory, cancellationToken);
                     currentPlan = revisedPlan;
+                    PlanStep.TryParse(currentPlan, out currentPlanSteps);
                     managerHistory.Add(new ChatMessage(ChatRole.Assistant, currentPlan) { AuthorName = ManagerPlanTag });
                     cumulativeTokens += revCost?.TotalTokens ?? 0;
 
-                    UpdateState(currentPlan, roundIndex, stallCount, resetCount, awaitingReview: true);
+                    UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: true);
                     yield return MakeMessage(ManagerPlanTag, currentPlan, turn++, revCost);
 
                     feedback = await approvalService.PromptPlanReviewAsync(currentPlan);
                 }
 
-                UpdateState(currentPlan, roundIndex, stallCount, resetCount, awaitingReview: false);
+                UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
             }
             else
             {
                 yield return MakeMessage(ManagerPlanTag, currentPlan, turn++, planCost);
-                UpdateState(currentPlan, roundIndex, stallCount, resetCount, awaitingReview: false);
+                UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
             }
 
             if (eventEmitter is not null)
@@ -375,7 +383,7 @@ public sealed class MagenticOrchestrator(
 
         while (roundIndex < _magConfig.MaxRoundCount && !cancellationToken.IsCancellationRequested)
         {
-            var ledgerPrompt = BuildLedgerPrompt(sharedHistory, currentPlan, participantNames);
+            var ledgerPrompt = BuildLedgerPrompt(sharedHistory, currentPlan, currentPlanSteps, completedStepIds, participantNames);
 
             // Evaluate progress — use a windowed snapshot of manager history to prevent long
             // sessions with many replan cycles from overflowing the manager model's context.
@@ -401,6 +409,10 @@ public sealed class MagenticOrchestrator(
             }
             else if (ledger.IsRequestSatisfied)
             {
+                // Merge any newly-completed steps reported by the manager before exiting.
+                if (ledger.StepsCompleted is { Length: > 0 })
+                    foreach (var id in ledger.StepsCompleted) completedStepIds.Add(id);
+
                 // Task complete — synthesize and yield the final answer.
                 string finalContent;
                 TokenUsage? finalCost = null;
@@ -418,7 +430,7 @@ public sealed class MagenticOrchestrator(
                     cumulativeTokens += finalCost?.TotalTokens ?? 0;
                 }
 
-                UpdateState(currentPlan, roundIndex, stallCount, resetCount, awaitingReview: false);
+                UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
                 yield return MakeMessage(ManagerFinalTag, finalContent, turn++, finalCost);
 
                 if (eventEmitter is not null)
@@ -429,6 +441,10 @@ public sealed class MagenticOrchestrator(
             }
             else
             {
+                // Track completed steps reported by the manager so the checklist stays current.
+                if (ledger.StepsCompleted is { Length: > 0 })
+                    foreach (var id in ledger.StepsCompleted) completedStepIds.Add(id);
+
                 if (!ledger.IsProgressBeingMade || ledger.IsInLoop)
                     stallCount++;
                 else
@@ -444,7 +460,7 @@ public sealed class MagenticOrchestrator(
                 if (resetCount > _magConfig.MaxResetCount)
                 {
                     logger.LogWarning("[MagenticOrchestrator] Max resets ({Max}) reached — terminating.", _magConfig.MaxResetCount);
-                    UpdateState(currentPlan, roundIndex, stallCount, resetCount, awaitingReview: false);
+                    UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
                     yield return MakeMessage(ManagerFinalTag,
                         $"The session could not make further progress after {resetCount - 1} replanning cycles. " +
                         "Please review the conversation history and consider restarting with a more specific task.",
@@ -456,8 +472,9 @@ public sealed class MagenticOrchestrator(
                 logger.LogInformation("[MagenticOrchestrator] Stall detected — replanning (cycle {Cycle}).", resetCount);
                 stallCount = 0;
                 roundIndex = 0;
+                completedStepIds.Clear();
 
-                var replanPrompt = BuildReplanPrompt(sharedHistory, currentPlan);
+                var replanPrompt = BuildReplanPrompt(sharedHistory, currentPlan, currentPlanSteps, completedStepIds);
 
                 // Apply the same history window as ledger evaluation so a high MaxResetCount
                 // cannot push the replan call past the manager model's context limit.
@@ -468,12 +485,13 @@ public sealed class MagenticOrchestrator(
 
                 var (newPlan, replanCost) = await InvokeManagerAsync(replanContext, cancellationToken);
                 currentPlan = newPlan;
+                PlanStep.TryParse(currentPlan, out currentPlanSteps);
                 // Record the full exchange in managerHistory for future reference.
                 managerHistory.Add(new ChatMessage(ChatRole.User, replanPrompt));
                 managerHistory.Add(new ChatMessage(ChatRole.Assistant, currentPlan) { AuthorName = ManagerReplanTag });
                 cumulativeTokens += replanCost?.TotalTokens ?? 0;
 
-                UpdateState(currentPlan, roundIndex, stallCount, resetCount, awaitingReview: false);
+                UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
                 yield return MakeMessage(ManagerReplanTag, currentPlan, turn++, replanCost);
 
                 if (eventEmitter is not null)
@@ -544,7 +562,7 @@ public sealed class MagenticOrchestrator(
             // Yield and snapshot state before checking the budget so the participant's response
             // is always visible in the transcript even if it was the turn that pushed over the
             // limit — the work was done and the tokens were already consumed regardless.
-            UpdateState(currentPlan, roundIndex, stallCount, resetCount, awaitingReview: false);
+            UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
             yield return agentMsg;
 
             if (config.MaxTotalTokens is { } limit && cumulativeTokens > limit)
@@ -576,7 +594,7 @@ public sealed class MagenticOrchestrator(
         // at the last participant message with no synthesized answer and no explanation.
         if (!emittedFinal && !cancellationToken.IsCancellationRequested)
         {
-            UpdateState(currentPlan, roundIndex, stallCount, resetCount, awaitingReview: false);
+            UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
             yield return MakeMessage(ManagerFinalTag,
                 $"The session reached the maximum of {_magConfig.MaxRoundCount} coordination rounds " +
                 "without completing the task. Review the conversation history and consider restarting " +
@@ -702,18 +720,35 @@ public sealed class MagenticOrchestrator(
         Be concise. Focus only on information most relevant to completing the task.
         """;
 
-    private static string BuildPlanningPrompt(IList<AgentConfig> agentConfigs) => $"""
+    private static string BuildPlanningPrompt(IList<AgentConfig> agentConfigs) => $$"""
         Based on the task, facts, and constraints above, create a STEP-BY-STEP PLAN.
 
-        For each step specify:
-        - Which team member handles it
-        - What they must do
-        - What the expected output or deliverable is
-
         TEAM:
-        {BuildTeamDescription(agentConfigs)}
+        {{BuildTeamDescription(agentConfigs)}}
 
-        Keep the plan realistic and achievable. Prefer fewer, larger steps over many tiny ones.
+        Respond with:
+        1. A brief 2-3 sentence overview of the approach.
+        2. A JSON array of plan steps in a ```json ``` fenced block.
+
+        Each step object must include:
+          "step"        — integer step number (1-based, sequential)
+          "description" — what the agent does in this step
+          "agent"       — exact team member name from the TEAM list above
+          "tool"        — (optional) primary tool expected (e.g. "write_file", "shell_run")
+          "creates"     — (optional) file path or artifact the step produces
+          "verifies"    — (optional) shell command that exits 0 when the step is complete
+          "depends_on"  — (optional) array of step numbers this step depends on
+
+        Keep the plan realistic. Prefer fewer, larger steps over many tiny ones.
+
+        Example:
+        ```json
+        [
+          {"step":1,"description":"Scaffold the module","agent":"Developer","tool":"write_file","creates":"src/Foo.cs"},
+          {"step":2,"description":"Write unit tests","agent":"Developer","tool":"write_file","creates":"tests/FooTests.cs","depends_on":[1]},
+          {"step":3,"description":"Run tests and fix failures","agent":"Tester","tool":"shell_run","verifies":"dotnet test --no-build","depends_on":[2]}
+        ]
+        ```
         """;
 
     private static string BuildTeamDescription(IList<AgentConfig> agentConfigs) =>
@@ -725,6 +760,8 @@ public sealed class MagenticOrchestrator(
     private static string BuildLedgerPrompt(
         IReadOnlyList<ChatMessage> sharedHistory,
         string? currentPlan,
+        PlanStep[]? currentPlanSteps,
+        HashSet<int> completedStepIds,
         string participantNames)
     {
         var historyText = string.Join("\n\n", sharedHistory
@@ -732,10 +769,13 @@ public sealed class MagenticOrchestrator(
             .TakeLast(LedgerConversationWindow)
             .Select(m => $"[{m.AuthorName ?? m.Role.Value}]: {m.Text}"));
 
+        var stepChecklist = BuildStepChecklist(currentPlanSteps, completedStepIds);
+
         return $$"""
             CURRENT PLAN:
             {{currentPlan ?? "(no plan yet)"}}
 
+            {{stepChecklist}}
             CONVERSATION SO FAR:
             {{historyText}}
 
@@ -748,6 +788,7 @@ public sealed class MagenticOrchestrator(
               "is_progress_being_made": <true|false>,
               "next_speaker": "<exact agent name from available agents>",
               "instruction_or_question": "<clear, specific, actionable instruction>",
+              "steps_completed": [<step numbers you consider fully done, or empty array>],
               "final_answer": null
             }
 
@@ -756,16 +797,23 @@ public sealed class MagenticOrchestrator(
             - "is_in_loop": true when the team is repeating steps without new progress.
             - "is_progress_being_made": true when the last round moved the task forward.
             - "next_speaker": must be EXACTLY one of: {{participantNames}}
+            - "steps_completed": list all step numbers (from the STEP CHECKLIST above) that are done; include previously-completed steps.
             - "final_answer": a comprehensive summary when is_request_satisfied is true; JSON null (not the string "null") otherwise.
             """;
     }
 
-    private static string BuildReplanPrompt(IReadOnlyList<ChatMessage> sharedHistory, string? oldPlan)
+    private static string BuildReplanPrompt(
+        IReadOnlyList<ChatMessage> sharedHistory,
+        string? oldPlan,
+        PlanStep[]? oldPlanSteps,
+        HashSet<int> completedStepIds)
     {
         var historyText = string.Join("\n\n", sharedHistory
             .Where(m => !string.IsNullOrEmpty(m.Text))
             .TakeLast(ReplanConversationWindow)
             .Select(m => $"[{m.AuthorName ?? m.Role.Value}]: {m.Text}"));
+
+        var stepChecklist = BuildStepChecklist(oldPlanSteps, completedStepIds);
 
         return $"""
             The team has been unable to make progress following the current plan.
@@ -773,13 +821,33 @@ public sealed class MagenticOrchestrator(
             PREVIOUS PLAN:
             {oldPlan ?? "(unknown)"}
 
+            {stepChecklist}
             RECENT CONVERSATION:
             {historyText}
 
             Create a REVISED PLAN that takes a different approach to complete the task.
             Acknowledge what has been attempted and why it hasn't worked, then describe
-            a concrete alternative strategy.
+            a concrete alternative strategy. Include a JSON step array as specified in the
+            planning instructions.
             """;
+    }
+
+    private static string BuildStepChecklist(PlanStep[]? steps, HashSet<int> completedIds)
+    {
+        if (steps is not { Length: > 0 }) return string.Empty;
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("STEP CHECKLIST:");
+        foreach (var s in steps)
+        {
+            var status = completedIds.Contains(s.Step) ? "✓" : "○";
+            sb.Append($"  {status} Step {s.Step}: {s.Description}");
+            if (s.DependsOn is { Length: > 0 })
+                sb.Append($" [depends on: {string.Join(", ", s.DependsOn)}]");
+            sb.AppendLine();
+        }
+        sb.AppendLine();
+        return sb.ToString();
     }
 
     private static string BuildFinalAnswerPrompt(IReadOnlyList<ChatMessage> sharedHistory)
@@ -806,6 +874,7 @@ public sealed class MagenticOrchestrator(
 
     private void UpdateState(
         string? plan,
+        PlanStep[]? planSteps,
         int roundIndex,
         int stallCount,
         int resetCount,
@@ -814,6 +883,7 @@ public sealed class MagenticOrchestrator(
         CurrentState = new MagenticCheckpointState
         {
             CurrentPlan        = plan,
+            CurrentPlanSteps   = planSteps,
             RoundIndex         = roundIndex,
             StallCount         = stallCount,
             ResetCount         = resetCount,

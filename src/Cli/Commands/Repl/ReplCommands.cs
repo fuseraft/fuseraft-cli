@@ -446,8 +446,9 @@ internal static class ReplCommands
         }
 
         ctx.ExecutionQueue.Clear();
-        var total = ctx.CurrentPlan.Length;
-        foreach (var ps in ctx.CurrentPlan)
+        var ordered = TopologicalSort(ctx.CurrentPlan);
+        var total   = ordered.Length;
+        foreach (var ps in ordered)
             ctx.ExecutionQueue.Enqueue((ps, total));
         ctx.CurrentPlan = null;
 
@@ -1938,5 +1939,47 @@ internal static class ReplCommands
         var suffix      = note is not null ? $" [dim]{Markup.Escape(note)}[/]" : string.Empty;
         AnsiConsole.MarkupLine(
             $"    [dim]{Markup.Escape(paddedLabel)}[/] [bold]{tokens,7:N0}[/] [dim]tok  {pct,5:F1}%  {bar}[/]{suffix}");
+    }
+
+    /// <summary>
+    /// Returns <paramref name="steps"/> in dependency order using Kahn's algorithm.
+    /// Steps with no <c>DependsOn</c> or with already-satisfied dependencies are emitted
+    /// first; within the same dependency tier, steps are ordered by their original step
+    /// number. Falls back to the original order if a cycle is detected.
+    /// </summary>
+    private static PlanStep[] TopologicalSort(PlanStep[] steps)
+    {
+        if (steps.All(s => s.DependsOn is not { Length: > 0 }))
+            return steps;
+
+        var byId       = steps.ToDictionary(s => s.Step);
+        var inDegree   = steps.ToDictionary(s => s.Step, _ => 0);
+        var dependents = steps.ToDictionary(s => s.Step, _ => new List<int>());
+
+        foreach (var step in steps.Where(s => s.DependsOn is { Length: > 0 }))
+        {
+            foreach (var dep in step.DependsOn!)
+            {
+                if (!byId.ContainsKey(dep)) continue;
+                inDegree[step.Step]++;
+                dependents[dep].Add(step.Step);
+            }
+        }
+
+        var queue  = new Queue<int>(inDegree.Where(kv => kv.Value == 0).Select(kv => kv.Key).OrderBy(id => id));
+        var result = new List<PlanStep>(steps.Length);
+
+        while (queue.Count > 0)
+        {
+            var id = queue.Dequeue();
+            result.Add(byId[id]);
+            foreach (var dep in dependents[id].OrderBy(x => x))
+            {
+                if (--inDegree[dep] == 0)
+                    queue.Enqueue(dep);
+            }
+        }
+
+        return result.Count == steps.Length ? [.. result] : steps;
     }
 }

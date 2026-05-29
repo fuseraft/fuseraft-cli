@@ -598,7 +598,7 @@ internal static class ReplTurn
         ReplSessionContext ctx, PlanStep activeStep, int total, List<string> toolCallsThisTurn, bool hitIterationCap,
         string responseText = "", CancellationToken cancellationToken = default)
     {
-        var passed    = VerifyStep(activeStep, toolCallsThisTurn, ctx.Cwd);
+        var passed    = await VerifyStepAsync(activeStep, toolCallsThisTurn, ctx.Cwd, cancellationToken);
         var stepsLeft = ctx.ExecutionQueue.Count;
 
         // When deterministic checks pass and adversarial mode is on, ask the critic.
@@ -739,8 +739,11 @@ internal static class ReplTurn
     {
         var sb = new StringBuilder();
         sb.Append($"Execute step {step.Step} of {total}: {step.Description}");
-        if (step.Tool    is not null) sb.Append($"\nExpected tool: {step.Tool}");
-        if (step.Creates is not null) sb.Append($"\nExpected artifact: {step.Creates}");
+        if (step.Tool      is not null) sb.Append($"\nExpected tool: {step.Tool}");
+        if (step.Creates   is not null) sb.Append($"\nExpected artifact: {step.Creates}");
+        if (step.Verifies  is not null) sb.Append($"\nVerification command (must exit 0): {step.Verifies}");
+        if (step.DependsOn is { Length: > 0 })
+            sb.Append($"\nDepends on: steps {string.Join(", ", step.DependsOn)} (already completed)");
         if (step.Tool is not null)
             sb.Append($"\n\nYou MUST call '{step.Tool}' for this step. Do NOT call any other tool that modifies files or state. Do NOT do work that belongs to a later step.");
         else
@@ -786,7 +789,9 @@ internal static class ReplTurn
                lower.Contains(".drawio") || lower.Contains(".sh") || lower.Contains(".toml");
     }
 
-    internal static bool VerifyStep(PlanStep step, List<string> toolCalls, string cwd)
+    internal static async Task<bool> VerifyStepAsync(
+        PlanStep step, List<string> toolCalls, string cwd,
+        CancellationToken cancellationToken = default)
     {
         // No tool calls at all = agent determined nothing needed to be done (conditional skip).
         // Only read/inspect tools called without the expected write tool = agent verified the
@@ -799,25 +804,30 @@ internal static class ReplTurn
         var fileOk = step.Creates is null ||
                      File.Exists(Path.Combine(cwd, step.Creates)) ||
                      Directory.Exists(Path.Combine(cwd, step.Creates));
-        return toolOk && fileOk;
+
+        if (!toolOk || !fileOk) return false;
+        if (step.Verifies is null)  return true;
+
+        return await RunVerifyCommandAsync(step.Verifies, cwd, cancellationToken);
     }
 
-    internal static bool TryParsePlan(string text, out PlanStep[] steps)
+    private static async Task<bool> RunVerifyCommandAsync(string command, string cwd, CancellationToken cancellationToken)
     {
-        steps = [];
-        var trimmed  = text.Trim();
-        var startIdx = trimmed.IndexOf('[');
-        var endIdx   = trimmed.LastIndexOf(']');
-        if (startIdx < 0 || endIdx <= startIdx) return false;
-        var json = trimmed[startIdx..(endIdx + 1)];
         try
         {
-            var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            steps = JsonSerializer.Deserialize<PlanStep[]>(json, opts) ?? [];
-            return steps.Length > 0;
+            var (shell, args) = OperatingSystem.IsWindows()
+                ? ("cmd.exe",   $"/c {command}")
+                : ("/bin/bash", $"-c {command}");
+
+            var result = await fuseraft.Infrastructure.Plugins.ProcessHelper.RunAsync(
+                shell, args, workingDirectory: cwd, timeoutSeconds: 10, cancellationToken: cancellationToken);
+            return result.Succeeded;
         }
         catch { return false; }
     }
+
+    internal static bool TryParsePlan(string text, out PlanStep[] steps) =>
+        PlanStep.TryParse(text, out steps);
 
     // Drip-prints text character by character so large chunks don't pop in all at once.
     // Skips the delay when output is redirected (e.g. piped to a file).

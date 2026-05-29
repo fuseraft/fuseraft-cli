@@ -5,7 +5,36 @@ using Microsoft.Extensions.AI;
 namespace fuseraft.Core.Models;
 
 /// <summary>A single step in a /plan.</summary>
-public sealed record PlanStep(int Step, string Description, string? Tool, string? Creates);
+public sealed record PlanStep(
+    int Step,
+    string Description,
+    string? Tool,
+    string? Creates,
+    string? Verifies  = null,
+    int[]?  DependsOn = null)
+{
+    /// <summary>
+    /// Extracts and parses the first JSON array of <see cref="PlanStep"/> objects found in
+    /// <paramref name="text"/>. Returns true and populates <paramref name="steps"/> when a
+    /// valid non-empty array is found; returns false otherwise.
+    /// </summary>
+    public static bool TryParse(string text, out PlanStep[] steps)
+    {
+        steps = [];
+        var trimmed  = text.Trim();
+        var startIdx = trimmed.IndexOf('[');
+        var endIdx   = trimmed.LastIndexOf(']');
+        if (startIdx < 0 || endIdx <= startIdx) return false;
+        var json = trimmed[startIdx..(endIdx + 1)];
+        try
+        {
+            var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            steps = JsonSerializer.Deserialize<PlanStep[]>(json, opts) ?? [];
+            return steps.Length > 0;
+        }
+        catch { return false; }
+    }
+}
 
 /// <summary>A queue entry pairing a step with the total step count for display.</summary>
 public sealed record PlanStepEntry(PlanStep Step, int Total);
