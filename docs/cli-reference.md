@@ -642,10 +642,10 @@ When a session has stalled — the agent keeps making the same mistake, misunder
 
 The REPL automatically maintains a persistent memory store at `~/.fuseraft/memory/repl/`. Each entry is identified by a UUID and stored as `memory_{guid}.md`. Memories are **scoped to the working directory** where they were created:
 
-- If the current directory contains a `.fuseraft/` folder, the REPL loads only memories whose GUIDs are listed in `.fuseraft/memory/memory_refs.json`. Directories with a `.fuseraft/` folder but no refs file start with an empty memory set (no cross-project bleed).
+- If the current directory contains a `.fuseraft/` folder, the REPL loads only memories whose GUIDs are listed in `.fuseraft/memory/sessions/{session_id}/memory_refs.json`. Directories with a `.fuseraft/` folder but no refs file start with an empty memory set (no cross-project bleed).
 - Directories without a `.fuseraft/` folder fall back to loading all global memories (legacy behaviour, useful outside of a project context).
 
-When a memory is saved, the REPL writes the entry to the global store and registers its GUID in `.fuseraft/memory/memory_refs.json` for the current directory. Repeated saves of the same-named memory reuse the existing GUID, so the entry is updated in-place rather than duplicated.
+When a memory is saved, the REPL writes the entry to the global store and registers its GUID in `.fuseraft/memory/sessions/{session_id}/memory_refs.json` for the current session. Repeated saves of the same-named memory reuse the existing GUID, so the entry is updated in-place rather than duplicated.
 
 At session start, scoped memories are injected into the system prompt. When the session ends (via `/exit` or Ctrl+C), the model is prompted to extract key facts and they are saved automatically.
 

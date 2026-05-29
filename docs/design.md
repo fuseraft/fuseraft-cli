@@ -107,15 +107,15 @@ All runtime artifacts are written under `.fuseraft/` in the current working dire
 | `.fuseraft/logs/provider_errors.jsonl` | LLM provider error records |
 | `.fuseraft/logs/app.log` | Warning+ diagnostic log (always-on Serilog file sink, 5 MB rolling, 3 retained) |
 | `.fuseraft/state/changes.json` | Change tracker: file/shell/git activity per turn |
-| `.fuseraft/state/intents.json` | Intent log: pre-execution records updated to APPLIED/FAILED |
+| `.fuseraft/state/sessions/{session_id}/intents.json` | Intent log: pre-execution records updated to APPLIED/FAILED |
 | `.fuseraft/state/evidence.json` | Evidence graph: typed nodes for contract evaluation |
 | `.fuseraft/state/file_versions.json` | Per-file monotonic write counters for conflict detection |
-| `.fuseraft/artifacts/brief.json` | Planner brief (validator input) |
+| `.fuseraft/artifacts/sessions/{session_id}/brief.json` | Planner brief (validator input) |
 | `.fuseraft/artifacts/test-report.json` | Tester report (validator input) |
-| `.fuseraft/comms/chatroom.jsonl` | Shared agent coordination log |
-| `.fuseraft/artifacts/conventions.json` | Brownfield convention profile (auto-injected into agent prompts) |
-| `.fuseraft/artifacts/brief.brownfield.json` | Brownfield discovery brief (`in_scope_files` seeds change envelope) |
-| `.fuseraft/memory/memory_refs.json` | GUIDs of memories scoped to this working directory |
+| `.fuseraft/comms/sessions/{session_id}/chatroom.jsonl` | Shared agent coordination log |
+| `.fuseraft/artifacts/sessions/{session_id}/conventions.json` | Brownfield convention profile (auto-injected into agent prompts) |
+| `.fuseraft/artifacts/sessions/{session_id}/brief.brownfield.json` | Brownfield discovery brief (`in_scope_files` seeds change envelope) |
+| `.fuseraft/memory/sessions/{session_id}/memory_refs.json` | GUIDs of memories scoped to this working directory |
 | `.fuseraft/context/` | Context store entries and index |
 | `.fuseraft/summaries/` | File summaries written by FileSystem plugin |
 
@@ -620,7 +620,7 @@ Example — a Reviewer that inspects files and git history but cannot write, del
 - `ActiveSessionId` — current session ID
 - `Entries[]` — `{ Agent, TurnIndex, Timestamp, SessionId, FilesWritten[], FilesDeleted[], CommandsRun[], GitCommits[] }`
 
-**Intent log** (`.fuseraft/state/intents.json`): Alongside the change log, `CapturingMiddleware` also writes to an `IntentLog` — one entry per tracked tool call, written *before* the call executes with `Status: Pending`, then updated to `Applied` or `Failed` once the call returns.
+**Intent log** (`.fuseraft/state/sessions/{session_id}/intents.json`): Alongside the change log, `CapturingMiddleware` also writes to an `IntentLog` — one entry per tracked tool call, written *before* the call executes with `Status: Pending`, then updated to `Applied` or `Failed` once the call returns.
 
 - `BeginTurn(agentName, turnIndex)` must be called before each `agent.RunAsync` so middleware has the correct turn index. All orchestrators (`AgentOrchestrator`, `MagenticOrchestrator`, `GraphOrchestrator`) call this immediately after `OnAgentTurnStarting()`.
 - On session resume, any `Pending` entries indicate operations that were in-flight at interruption time.
@@ -629,7 +629,7 @@ Example — a Reviewer that inspects files and git history but cannot write, del
 
 **`ChangeLog` load failures** (`.fuseraft/state/changes.json`): Both the session-init path (setting `ActiveSessionId`) and the per-entry flush path read the existing change log before appending. If either read fails, the failure is emitted via `ILogger<ChangeTracker>` at Warning level and the log resets to empty for that operation. `EvidenceStore` and `FileVersionStore` follow the same pattern. All warnings route to `.fuseraft/logs/app.log` via the always-on Serilog file sink so they survive past the terminal session.
 
-**`IntentStore` schema** (`.fuseraft/state/intents.json`):
+**`IntentStore` schema** (`.fuseraft/state/sessions/{session_id}/intents.json`):
 - `ActiveSessionId`
 - `Entries[]` — `{ IntentId, Timestamp, Agent, TurnIndex, SessionId, Operation: { FunctionName, TargetPath, ArgsSummary }, Status, ErrorMessage, CompletedAt }`
 

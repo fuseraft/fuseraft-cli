@@ -22,7 +22,7 @@ namespace fuseraft.Infrastructure;
 ///
 /// <para>
 /// When a <c>localCwd</c> is supplied to load/save methods, memories are scoped to
-/// that directory via <c>.fuseraft/memory/memory_refs.json</c>, which records the GUIDs of
+/// that directory via <c>.fuseraft/memory/sessions/{session_id}/memory_refs.json</c>, which records the GUIDs of
 /// entries saved there. Directories that contain a <c>.fuseraft/</c> folder but no
 /// refs file start with an empty memory set; directories without <c>.fuseraft/</c>
 /// fall back to loading all globals (legacy behaviour).
@@ -74,7 +74,7 @@ public sealed class MemoryStore
 
     /// <summary>
     /// Loads only the memories whose GUIDs are listed in
-    /// <c>{localCwd}/.fuseraft/memory/memory_refs.json</c>. Falls back to loading all
+    /// <c>{localCwd}/.fuseraft/memory/sessions/{session_id}/memory_refs.json</c>. Falls back to loading all
     /// globals when <c>.fuseraft/</c> does not exist in <paramref name="localCwd"/>.
     /// </summary>
     public Task<List<MemoryEntry>> LoadAllAsync(string localCwd, string? sessionId = null, CancellationToken ct = default)
@@ -105,7 +105,7 @@ public sealed class MemoryStore
 
     /// <summary>
     /// Loads memories scoped to <paramref name="localCwd"/> (via its
-    /// <c>.fuseraft/memory/memory_refs.json</c>) and formats them as a prompt block.
+    /// <c>.fuseraft/memory/sessions/{session_id}/memory_refs.json</c>) and formats them as a prompt block.
     /// </summary>
     public async Task<string?> BuildPromptBlockAsync(string localCwd, string? sessionId = null, CancellationToken ct = default)
     {
