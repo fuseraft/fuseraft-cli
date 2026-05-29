@@ -8,6 +8,14 @@ namespace fuseraft.Core.Models;
 public record OrchestrationConfig
 {
     /// <summary>
+    /// Optional config format version. When set, fuseraft-cli validates that it
+    /// understands this version and warns on unrecognized values rather than silently
+    /// misinterpreting fields. Format: <c>"YYYY-MM"</c> (e.g. <c>"2026-05"</c>).
+    /// Omitting this field disables version validation.
+    /// </summary>
+    public string? SchemaVersion { get; init; }
+
+    /// <summary>
     /// Human-readable name for this orchestration setup.
     /// </summary>
     public string Name { get; init; } = string.Empty;

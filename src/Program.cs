@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Serilog;
 using Serilog.Events;
+using Serilog.Formatting.Display;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using fuseraft.Cli;
@@ -16,6 +17,7 @@ using fuseraft.Cli.Commands.Skills;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Infrastructure;
+using fuseraft.Infrastructure.Logging;
 using fuseraft.Infrastructure.Plugins;
 
 ConfigureConsoleEncoding();
@@ -58,21 +60,28 @@ for (int i = 0; i < args.Length - 1; i++)
 // so that all SK and orchestration logs flow through the same pipeline.
 // In vscode mode, route ALL console output to stderr so that stdout stays a
 // clean newline-delimited JSON stream for the webview panel bridge.
+const string LogTemplate = "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}";
+
+// SecretMaskingTextFormatter wraps the standard template formatter so API keys are
+// redacted before reaching any sink — console, app.log, and debug sidecar alike.
+var maskedFormatter = new SecretMaskingTextFormatter(
+    new MessageTemplateTextFormatter(LogTemplate, null));
+
 var logConfig = new LoggerConfiguration()
     .MinimumLevel.Is(verbose ? LogEventLevel.Debug : LogEventLevel.Information)
     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
     .MinimumLevel.Override("System", LogEventLevel.Warning)
     .Enrich.FromLogContext()
     .WriteTo.Console(
-        outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}",
+        formatter: maskedFormatter,
         standardErrorFromLevel: vsCodeArg ? LogEventLevel.Verbose : null);
 
 // Always write Warning+ to .fuseraft/logs/app.log so store-corruption and other
 // runtime warnings survive past the terminal session.
 logConfig = logConfig.WriteTo.File(
-    FuseraftPaths.LocalAppLog,
+    formatter: maskedFormatter,
+    path: FuseraftPaths.LocalAppLog,
     restrictedToMinimumLevel: LogEventLevel.Warning,
-    outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}",
     fileSizeLimitBytes: 5_000_000,
     rollOnFileSizeLimit: true,
     retainedFileCountLimit: 3);
@@ -84,8 +93,8 @@ if (verbose && outputPath is not null)
     var logDir = Path.GetDirectoryName(outputPath);
     if (!string.IsNullOrEmpty(logDir)) Directory.CreateDirectory(logDir);
     logConfig = logConfig.WriteTo.File(
-        outputPath + ".debug.log",
-        outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}");
+        formatter: maskedFormatter,
+        path: outputPath + ".debug.log");
 }
 
 Log.Logger = logConfig.CreateLogger();

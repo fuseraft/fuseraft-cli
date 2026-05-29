@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.Logging;
 using fuseraft.Orchestration;
 
 namespace fuseraft.Infrastructure;
@@ -31,7 +32,7 @@ namespace fuseraft.Infrastructure;
 /// we don't overshoot the window the server has indicated.
 /// </para>
 /// </summary>
-internal sealed class TransientRetryHandler(string? errorLogPath = null) : DelegatingHandler
+internal sealed class TransientRetryHandler(string? errorLogPath = null, ILogger? logger = null) : DelegatingHandler
 {
     private const int MaxRetries = 3;
     // Base delay in seconds for attempt N: 2^(N+1)  →  2 s, 4 s, 8 s
@@ -61,9 +62,9 @@ internal sealed class TransientRetryHandler(string? errorLogPath = null) : Deleg
             catch (HttpRequestException ex) when (attempt < MaxRetries)
             {
                 var delay = ComputeBackoff(attempt);
-                Console.Error.WriteLine(
-                    $"[retry {attempt + 1}/{MaxRetries}] Network error ({ex.Message}). " +
-                    $"Retrying in {delay.TotalSeconds:F1} s…");
+                logger?.LogWarning(
+                    "[retry {Attempt}/{Max}] Network error ({Message}). Retrying in {Delay:F1} s…",
+                    attempt + 1, MaxRetries, ex.Message, delay.TotalSeconds);
                 await Task.Delay(delay, cancellationToken);
                 continue;
             }
@@ -80,8 +81,9 @@ internal sealed class TransientRetryHandler(string? errorLogPath = null) : Deleg
             {
                 var body = await response.Content.ReadAsStringAsync(cancellationToken);
                 var truncated = body.Length > 200 ? body[..200] + "…" : body;
-                var stderrLine = $"[HTTP {(int)response.StatusCode}] {request.RequestUri?.Host}: {truncated}";
-                Console.Error.WriteLine(stderrLine);
+                logger?.LogWarning(
+                    "[HTTP {StatusCode}] {Host}: {Body}",
+                    (int)response.StatusCode, request.RequestUri?.Host, truncated);
                 AppendProviderError((int)response.StatusCode, request.RequestUri?.Host ?? "unknown", body);
                 // Rebuild so the body stream can still be read by the caller or retry path.
                 loggedResponse = new HttpResponseMessage(response.StatusCode)
@@ -113,9 +115,9 @@ internal sealed class TransientRetryHandler(string? errorLogPath = null) : Deleg
             }
 
             var retryDelay = RetryAfterDelay(response) ?? ComputeBackoff(attempt);
-            Console.Error.WriteLine(
-                $"[retry {attempt + 1}/{MaxRetries}] HTTP {(int)response.StatusCode} from " +
-                $"{request.RequestUri?.Host}. Retrying in {retryDelay.TotalSeconds:F1} s…");
+            logger?.LogWarning(
+                "[retry {Attempt}/{Max}] HTTP {StatusCode} from {Host}. Retrying in {Delay:F1} s…",
+                attempt + 1, MaxRetries, (int)response.StatusCode, request.RequestUri?.Host, retryDelay.TotalSeconds);
 
             // Drain and dispose the error response before retrying.
             response.Dispose();

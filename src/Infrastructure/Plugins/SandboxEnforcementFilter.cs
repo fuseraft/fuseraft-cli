@@ -62,6 +62,15 @@ public sealed class SandboxEnforcementFilter
         @"(?<![:\w])(/[^\s""'`;|&><(){}$\\]{2,}|[A-Za-z]:\\[^\s""'`;|&><(){}]+|\\\\[^\s""'`;|&><(){}]+)",
         RegexOptions.Compiled);
 
+    // Detects command substitution patterns that could smuggle arbitrary paths past the
+    // regex scanner: $(...), `...`, and ${VAR} expansion. These constructs execute
+    // subshells or dereference variables at runtime, making static path analysis
+    // unreliable. Commands containing them are denied when a sandbox root is active
+    // because the substituted value can reference any path on the filesystem.
+    private static readonly Regex SubshellPattern = new(
+        @"\$\([^)]*\)|`[^`]*`|\$\{[^}]*\}",
+        RegexOptions.Compiled);
+
     private static readonly string[] FileSystemFunctions =
         ["read_file", "write_file", "delete_file", "list_files"];
 
@@ -312,6 +321,16 @@ public sealed class SandboxEnforcementFilter
         {
             if (args.TryGetValue(argName, out var cmd) && cmd is string cmdStr)
             {
+                // Deny subshell constructs ($(...), backticks, ${VAR}) — the substituted
+                // value is unknown at static analysis time and can reference any path.
+                var subshellMatch = SubshellPattern.Match(cmdStr);
+                if (subshellMatch.Success)
+                    return PluginResult.Denied(
+                        $"Shell command contains a command substitution or variable expansion " +
+                        $"('{subshellMatch.Value}') that cannot be statically verified against " +
+                        $"the sandbox. Rewrite the command without subshells, or use the " +
+                        $"CodeExecution plugin (Docker) for commands that require substitution.");
+
                 var pathDenial = ScanCommandString(cmdStr);
                 if (pathDenial is not null) return pathDenial;
 

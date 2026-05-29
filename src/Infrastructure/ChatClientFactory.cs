@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using Azure.AI.OpenAI;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using OllamaSharp;
 using OpenAI;
 using fuseraft.Core.Models;
@@ -40,11 +41,12 @@ namespace fuseraft.Infrastructure;
 public sealed class ChatClientFactory(
     IReadOnlyDictionary<string, ModelConfig>? models = null,
     string? errorLogPath = null,
-    EventEmitter? eventEmitter = null) : IDisposable
+    EventEmitter? eventEmitter = null,
+    ILoggerFactory? loggerFactory = null) : IDisposable
 {
     // One shared HttpClient per factory instance (one per session). The retry handler
     // wraps SocketsHttpHandler for proper connection pooling.
-    private readonly HttpClient _httpClient = BuildResilientClient(errorLogPath, eventEmitter);
+    private readonly HttpClient _httpClient = BuildResilientClient(errorLogPath, eventEmitter, loggerFactory?.CreateLogger<TransientRetryHandler>());
 
     public void Dispose() => _httpClient.Dispose();
 
@@ -192,7 +194,7 @@ public sealed class ChatClientFactory(
             for (int i = 0; i < config.FalloverModels.Count; i++)
                 chain[i + 1] = Create(config.FalloverModels[i]);
             var falloverOn = ProviderErrorClassifier.ParseFalloverOn(config.FalloverOn);
-            return new FalloverChatClient(chain, falloverOn);
+            return new FalloverChatClient(chain, falloverOn, loggerFactory?.CreateLogger<FalloverChatClient>());
         }
 
         return primary;
@@ -302,7 +304,7 @@ public sealed class ChatClientFactory(
     // hitting the timeout and triggering the 4-retry chain unnecessarily.
     private static readonly TimeSpan HttpClientTimeout = TimeSpan.FromMinutes(20);
 
-    private static HttpClient BuildResilientClient(string? errorLogPath = null, EventEmitter? eventEmitter = null)
+    private static HttpClient BuildResilientClient(string? errorLogPath = null, EventEmitter? eventEmitter = null, ILogger? retryLogger = null)
     {
         var handler = new ToolsRequiredRetryHandler
         {
@@ -314,7 +316,7 @@ public sealed class ChatClientFactory(
                     {
                         InnerHandler = new RawReasoningCaptureHandler(eventEmitter)
                         {
-                            InnerHandler = new TransientRetryHandler(errorLogPath) { InnerHandler = new SocketsHttpHandler() }
+                            InnerHandler = new TransientRetryHandler(errorLogPath, retryLogger) { InnerHandler = new SocketsHttpHandler() }
                         }
                     }
                 }
