@@ -390,13 +390,18 @@ Set either field to `0` to disable the guard entirely.
 
 ### Failure resilience
 
-When the LLM summary call fails (network error, rate limit, model timeout), fuseraft no longer
-crashes the session. Instead it injects a `[COMPACTION FAILED]` marker message that tells agents
-the history for that range could not be preserved, and instructs them to read disk state directly
-rather than relying on memory. The session then continues from the retained tail.
+When the LLM summary call fails (network error, rate limit, model timeout), fuseraft injects a
+`[COMPACTION FAILED]` marker message that tells agents the history for that range could not be
+preserved, and instructs them to read disk state directly rather than relying on memory. The
+session then continues from the retained tail.
 
 For `hybrid` mode specifically, if the LLM call fails the session falls back to the lossless
 reconstruction alone — still useful, just without the narrative summary layer.
+
+If compaction itself fails for any other reason (infrastructure error, serialization failure),
+the session terminates gracefully with a crash dump written to `~/.fuseraft/crashdumps/` and a
+resume hint printed to the terminal. The checkpoint saved before compaction began is intact and
+can be resumed.
 
 ### Change log grounding
 

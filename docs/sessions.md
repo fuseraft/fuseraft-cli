@@ -148,6 +148,34 @@ You can resume with a different config or task — the session ID is what ties t
 
 ---
 
+## Error recovery
+
+fuseraft saves a checkpoint after every agent turn. If a session is interrupted for any reason, the checkpoint is already up to date.
+
+**Checkpoint save failures** are non-fatal. If a checkpoint write fails (disk full, permissions error), a yellow warning is printed to the terminal and the session continues using its in-memory state. The next successful save will catch up. No in-progress work is lost.
+
+**Unexpected errors** (exceptions not covered by a specific handler) write a crash dump to `~/.fuseraft/crashdumps/<id>.json` and print the dump path to the terminal. The session terminates, but the checkpoint is intact:
+
+```bash
+fuseraft run --resume <sessionId>
+```
+
+**Context window exceeded with no compactor** — if the model's context window fills and no `Compaction` section is configured, fuseraft shows an actionable error message and saves the checkpoint. Resume after adding compaction to your config:
+
+```yaml
+Compaction:
+  Mode: window        # simplest option — no LLM cost
+  TokenBudget: 80000  # optional
+```
+
+Then:
+
+```bash
+fuseraft run --resume <sessionId>
+```
+
+---
+
 ## Session files
 
 Sessions are stored at `~/.fuseraft/sessions/<sessionId>.json` with owner-only read/write permissions (Unix mode 0600).
