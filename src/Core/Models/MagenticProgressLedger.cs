@@ -27,4 +27,11 @@ public record MagenticProgressLedger
     /// Becomes the final session-ending message.
     /// </summary>
     public string? FinalAnswer { get; init; }
+
+    /// <summary>
+    /// Step numbers (1-based) that the manager considers fully complete as of this round.
+    /// Used to build a structured progress checklist in the ledger prompt so subsequent
+    /// evaluations know which steps have already been verified.
+    /// </summary>
+    public int[]? StepsCompleted { get; init; }
 }
