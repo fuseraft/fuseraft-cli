@@ -24,26 +24,26 @@ Orchestration:
     agents can only advance when evidence contracts are satisfied.
 
   EvidenceStore:
-    Path: .fuseraft/evidence.json
+    Path: .fuseraft/state/evidence.json
 
   ChangeTracking:
-    Path: .fuseraft/changes.json
+    Path: .fuseraft/state/changes.json
 
   Validation:
-    BriefPath: .fuseraft/brief.json
-    TestReportPath: .fuseraft/test-report.json
-    ChangeLogPath: .fuseraft/changes.json
+    BriefPath: .fuseraft/artifacts/brief.json
+    TestReportPath: .fuseraft/artifacts/test-report.json
+    ChangeLogPath: .fuseraft/state/changes.json
 
   Contracts:
     - Name: BriefExists
       Requires:
         - FileExists:
-            Path: .fuseraft/brief.json
+            Path: .fuseraft/artifacts/brief.json
 
     - Name: ImplementationComplete
       Requires:
         - FilesWritten:
-            Source: .fuseraft/brief.json
+            Source: .fuseraft/artifacts/brief.json
             Field: files_to_change
         - CommandSucceeded:
             Pattern: "build|compile"
@@ -51,7 +51,7 @@ Orchestration:
     - Name: TestsValid
       Requires:
         - FileExists:
-            Path: .fuseraft/test-report.json
+            Path: .fuseraft/artifacts/test-report.json
         - TestReport:
             NoFailures: true
             HasAssertions: true
@@ -82,7 +82,7 @@ Orchestration:
     - Name: Planner
       Description: Analyses the task and writes a structured brief.
       Instructions: |
-        You are a software planner. Analyse the task and write .fuseraft/brief.json:
+        You are a software planner. Analyse the task and write .fuseraft/artifacts/brief.json:
           { "goal": "...", "files_to_change": [{"path": "src/a.go", "reason": "..."}], "acceptance_criteria": [...], "implementation": [{"action": "write", "path": "src/a.go", "description": "..."}] }
         When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
       Model:
@@ -95,7 +95,7 @@ Orchestration:
     - Name: Developer
       Description: Implements the changes described in the brief.
       Instructions: |
-        You are a software developer. Read .fuseraft/brief.json and implement every
+        You are a software developer. Read .fuseraft/artifacts/brief.json and implement every
         listed file using write_file. Run the build with shell_run to confirm it
         compiles. When done, call handoff(route_keyword: "HANDOFF TO TESTER").
         If you need a clearer plan, call handoff(route_keyword: "REPLAN REQUIRED").
@@ -113,8 +113,8 @@ Orchestration:
       Description: Writes and runs tests, produces a structured report.
       Instructions: |
         You are a software tester. Write tests covering the acceptance criteria in
-        .fuseraft/brief.json. Run them with shell_run. Write results to
-        .fuseraft/test-report.json:
+        .fuseraft/artifacts/brief.json. Run them with shell_run. Write results to
+        .fuseraft/artifacts/test-report.json:
           { "passed": true, "results": [{ "name": "TestFoo", "status": "PASS" }] }
         If tests fail, call handoff(route_keyword: "BUGS FOUND").
         When all pass, call handoff(route_keyword: "HANDOFF TO REVIEWER").
@@ -130,7 +130,7 @@ Orchestration:
     - Name: Reviewer
       Description: Reviews implementation and test results.
       Instructions: |
-        You are a code reviewer. Read the implementation and .fuseraft/test-report.json.
+        You are a code reviewer. Read the implementation and .fuseraft/artifacts/test-report.json.
         If the code meets all acceptance criteria, call handoff(route_keyword: "APPROVED").
         If changes are needed, call handoff(route_keyword: "REVISION REQUIRED") and
         explain exactly what to fix.
@@ -241,8 +241,8 @@ Orchestration:
   Brownfield:
     EntryPoints:
       - src/main.go
-    DiscoveryBriefPath: .fuseraft/brief.brownfield.json
-    ConventionProfilePath: .fuseraft/conventions.json
+    DiscoveryBriefPath: .fuseraft/artifacts/brief.brownfield.json
+    ConventionProfilePath: .fuseraft/artifacts/conventions.json
     SeedEnvelopeFromBrief: true
 
   TestSelector:
@@ -253,28 +253,28 @@ Orchestration:
     FileSystemSandboxPath: .
 
   EvidenceStore:
-    Path: .fuseraft/evidence.json
+    Path: .fuseraft/state/evidence.json
 
   ChangeTracking:
-    Path: .fuseraft/changes.json
+    Path: .fuseraft/state/changes.json
 
   Contracts:
     - Name: ReconComplete
       Requires:
         - FileExists:
-            Path: .fuseraft/brief.brownfield.json
+            Path: .fuseraft/artifacts/brief.brownfield.json
         - FileExists:
-            Path: .fuseraft/conventions.json
+            Path: .fuseraft/artifacts/conventions.json
 
     - Name: BriefExists
       Requires:
         - FileExists:
-            Path: .fuseraft/brief.json
+            Path: .fuseraft/artifacts/brief.json
 
     - Name: ImplementationComplete
       Requires:
         - FilesWritten:
-            Source: .fuseraft/brief.json
+            Source: .fuseraft/artifacts/brief.json
             Field: files_to_change
         - CommandSucceeded:
             Pattern: "build|compile|test"
@@ -282,7 +282,7 @@ Orchestration:
     - Name: TestsValid
       Requires:
         - FileExists:
-            Path: .fuseraft/test-report.json
+            Path: .fuseraft/artifacts/test-report.json
         - TestReport:
             NoFailures: true
             HasAssertions: true
@@ -418,7 +418,7 @@ Orchestration:
   Name: ResearchTeam
 
   EvidenceStore:
-    Path: .fuseraft/evidence.json
+    Path: .fuseraft/state/evidence.json
 
   Contracts:
     - Name: ResearchComplete
@@ -564,7 +564,7 @@ Orchestration:
       MaxTokens: 4096
 
   EvidenceStore:
-    Path: .fuseraft/evidence.json
+    Path: .fuseraft/state/evidence.json
 
   Contracts:
     - Name: PlanExists
@@ -822,10 +822,10 @@ Orchestration:
   Name: LongRunningTeam
 
   EvidenceStore:
-    Path: .fuseraft/evidence.json
+    Path: .fuseraft/state/evidence.json
 
   ChangeTracking:
-    Path: .fuseraft/changes.json
+    Path: .fuseraft/state/changes.json
 
   Compaction:
     TriggerTurnCount: 40

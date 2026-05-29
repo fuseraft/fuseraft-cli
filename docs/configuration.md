@@ -99,7 +99,7 @@ Orchestration:
 | 2 | Agent `Instructions` | Per-agent field in the config |
 | 3 | `.fuseraft/` folder orientation | Auto-injected from `FuseraftPaths.BuildFolderOrientationBlock()` — gives every agent a compact manifest of the runtime directory so they never call `list_files` on `.fuseraft/` to discover it. See [Directory layout](design.md#3-directory-layout). |
 | 4 | Context store summary | Appended when `.fuseraft/context/index.json` has entries (see [Context store](context-store.md)) |
-| 5 | Convention profile | Appended when `.fuseraft/conventions.json` exists (Brownfield mode) |
+| 5 | Convention profile | Appended when `.fuseraft/artifacts/conventions.json` exists (Brownfield mode) |
 | 6 | Test selector hint | Appended when `TestSelector.FindRelatedCommand` is configured |
 
 In **REPL mode** the same folder orientation is injected (blocks 3 onward), but the log-file entries are omitted from the manifest because the session section of the REPL system prompt already lists them and directs the agent to the `repl_session_*` tools for log access.
@@ -352,7 +352,7 @@ The `{AgentName}` component is sanitized so it is safe as a directory name. Agen
 
 The REPL always loads and saves memories automatically — no config flag is needed. Each REPL memory entry is identified by a UUID (stored in the file's frontmatter and used as its filename).
 
-Memories are **scoped to the working directory** where they were created. A file at `.fuseraft/memory_refs.json` in the current directory records the GUIDs of memories saved there. On session start the REPL loads only the entries listed in that file:
+Memories are **scoped to the working directory** where they were created. A file at `.fuseraft/memory/memory_refs.json` in the current directory records the GUIDs of memories saved there. On session start the REPL loads only the entries listed in that file:
 
 - Directories with a `.fuseraft/` folder but no refs file start with an empty memory set.
 - Directories without a `.fuseraft/` folder fall back to loading all global memories (useful outside a project context).
@@ -866,8 +866,8 @@ See [Skills](skills.md) for the full `SKILL.md` format reference and the skill i
 
 ```yaml
 Validation:
-  BriefPath: .fuseraft/brief.json
-  TestReportPath: .fuseraft/test-report.json
+  BriefPath: .fuseraft/artifacts/brief.json
+  TestReportPath: .fuseraft/artifacts/test-report.json
   TestAssertionPatterns:
     - tester::assert
     - "if .+ throw"
@@ -877,8 +877,8 @@ Validation:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `BriefPath` | string | `.fuseraft/brief.json` | Canonical path for the project brief. Required by `RequireBrief` and `TestReportValid`. |
-| `TestReportPath` | string | `.fuseraft/test-report.json` | Canonical path for the test report. Required by `TestReportValid`. |
+| `BriefPath` | string | `.fuseraft/artifacts/brief.json` | Canonical path for the project brief. Required by `RequireBrief` and `TestReportValid`. |
+| `TestReportPath` | string | `.fuseraft/artifacts/test-report.json` | Canonical path for the test report. Required by `TestReportValid`. |
 | `ChangeLogPath` | string | `.fuseraft/state/changes.json` | Path to `changes.json` produced by `ChangeTracking` (must match `ChangeTracking.Path`). Enables check 8 in `TestReportValid` and prior-turn file detection in `RequireAllFilesWritten`. |
 | `TestAssertionPatterns` | array | see above | Regex patterns that identify real assertion calls in test files. |
 
@@ -1065,7 +1065,7 @@ Contracts:
   - Name: ImplementationComplete
     Requires:
       - FilesWritten:
-          Source: .fuseraft/brief.json
+          Source: .fuseraft/artifacts/brief.json
           Field: files_to_change
       - CommandSucceeded:
           Pattern: "build|compile|go build|cargo build"
@@ -1073,7 +1073,7 @@ Contracts:
   - Name: TestsValid
     Requires:
       - FileExists:
-          Path: .fuseraft/test-report.json
+          Path: .fuseraft/artifacts/test-report.json
       - TestReport:
           NoFailures: true
           HasAssertions: true
@@ -1232,16 +1232,16 @@ Brownfield:
   EntryPoints:
     - src/cmd/server/main.go
     - src/internal/billing/charge.go
-  DiscoveryBriefPath: .fuseraft/brief.brownfield.json
-  ConventionProfilePath: .fuseraft/conventions.json
+  DiscoveryBriefPath: .fuseraft/artifacts/brief.brownfield.json
+  ConventionProfilePath: .fuseraft/artifacts/conventions.json
   SeedEnvelopeFromBrief: true
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `EntryPoints` | array | `[]` | Files or directories that seed the Archaeologist agent's dependency walk. Referenced in agent instructions; not automatically injected into prompts. Relative paths resolve against the sandbox root. |
-| `DiscoveryBriefPath` | string | `.fuseraft/brief.brownfield.json` | Path where the Archaeologist writes the discovery brief JSON. When `SeedEnvelopeFromBrief` is true and this file exists at startup, its `in_scope_files` list is merged into `Security.ChangeEnvelope`. |
-| `ConventionProfilePath` | string | `.fuseraft/conventions.json` | Path where the Archaeologist writes the convention profile JSON. When this file exists at session startup, its contents are formatted and prepended to every agent's system prompt. |
+| `DiscoveryBriefPath` | string | `.fuseraft/artifacts/brief.brownfield.json` | Path where the Archaeologist writes the discovery brief JSON. When `SeedEnvelopeFromBrief` is true and this file exists at startup, its `in_scope_files` list is merged into `Security.ChangeEnvelope`. |
+| `ConventionProfilePath` | string | `.fuseraft/artifacts/conventions.json` | Path where the Archaeologist writes the convention profile JSON. When this file exists at session startup, its contents are formatted and prepended to every agent's system prompt. |
 | `SeedEnvelopeFromBrief` | bool | `true` | When true and `DiscoveryBriefPath` exists, the `in_scope_files` list from the discovery brief is merged into `Security.ChangeEnvelope` at startup. Requires `Security.FileSystemSandboxPath` to be set for enforcement to take effect. |
 
 ### Brownfield discovery brief

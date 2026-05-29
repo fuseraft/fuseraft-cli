@@ -7,6 +7,7 @@ using AgentGovernance.Trust;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using fuseraft.Core;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure.Plugins;
 using fuseraft.Orchestration;
@@ -324,7 +325,7 @@ public sealed class AgentFactory(
             // "Chatroom" is per-agent (own sender name) but all agents share the same file.
             else if (pluginName.Equals("Chatroom", StringComparison.OrdinalIgnoreCase))
             {
-                var chatPath = chatroomConfig?.Path ?? ".fuseraft/chatroom.jsonl";
+                var chatPath = chatroomConfig?.Path ?? FuseraftPaths.LocalChatroom;
                 functions = PluginRegistry.GetFunctionsFromObject(new ChatroomPlugin(config.Name, chatPath));
             }
             else if (pluginRegistry.TryGetAIFunctions(pluginName, out var aiFunctions))

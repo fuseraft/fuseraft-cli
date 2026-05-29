@@ -26,7 +26,7 @@ fuseraft run [task] [options]
 | `--verbose` | off | Enable debug logging, including token counts per turn. |
 | `--tools` | off | Show tool calls made by each agent inline in the turn panel. |
 | `--no-banner` | off | Skip the ASCII banner. Useful for CI or piped output. |
-| `--ci` | off | CI mode. After the session ends, reads `.fuseraft/test-report.json` and exits with code `2` if any criterion has `status: FAIL`. Exits `0` if the report is absent or all criteria pass. |
+| `--ci` | off | CI mode. After the session ends, reads `.fuseraft/artifacts/test-report.json` and exits with code `2` if any criterion has `status: FAIL`. Exits `0` if the report is absent or all criteria pass. |
 | `--devui` | off | Start a local web server and print a URL for real-time session visualization. See [DevUI](#devui) below. |
 | `--work-dir <path>` | — | Set the working directory for the session. Priority: flag > `Security.FileSystemSandboxPath` in the config > current directory. |
 | `--context-file <path>` | — | Attach a file as context. Its content is appended to the task. PDF, DOCX, PPTX, and XLSX files are extracted to plain text automatically; other files are read as UTF-8. Repeatable — specify once per file. Ignored when resuming. |
@@ -642,10 +642,10 @@ When a session has stalled — the agent keeps making the same mistake, misunder
 
 The REPL automatically maintains a persistent memory store at `~/.fuseraft/memory/repl/`. Each entry is identified by a UUID and stored as `memory_{guid}.md`. Memories are **scoped to the working directory** where they were created:
 
-- If the current directory contains a `.fuseraft/` folder, the REPL loads only memories whose GUIDs are listed in `.fuseraft/memory_refs.json`. Directories with a `.fuseraft/` folder but no refs file start with an empty memory set (no cross-project bleed).
+- If the current directory contains a `.fuseraft/` folder, the REPL loads only memories whose GUIDs are listed in `.fuseraft/memory/memory_refs.json`. Directories with a `.fuseraft/` folder but no refs file start with an empty memory set (no cross-project bleed).
 - Directories without a `.fuseraft/` folder fall back to loading all global memories (legacy behaviour, useful outside of a project context).
 
-When a memory is saved, the REPL writes the entry to the global store and registers its GUID in `.fuseraft/memory_refs.json` for the current directory. Repeated saves of the same-named memory reuse the existing GUID, so the entry is updated in-place rather than duplicated.
+When a memory is saved, the REPL writes the entry to the global store and registers its GUID in `.fuseraft/memory/memory_refs.json` for the current directory. Repeated saves of the same-named memory reuse the existing GUID, so the entry is updated in-place rather than duplicated.
 
 At session start, scoped memories are injected into the system prompt. When the session ends (via `/exit` or Ctrl+C), the model is prompted to extract key facts and they are saved automatically.
 

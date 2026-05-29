@@ -4,11 +4,11 @@
     "Description": "Two-agent research pipeline: Researcher fetches data and writes structured findings to disk; Writer synthesises a polished report. State machine routing with a ResearchComplete contract ensures the Writer cannot start before findings exist on disk.",
 
     "EvidenceStore": {
-      "Path": ".fuseraft/evidence.json"
+      "Path": ".fuseraft/state/evidence.json"
     },
 
     "ChangeTracking": {
-      "Path": ".fuseraft/changes.json"
+      "Path": ".fuseraft/state/changes.json"
     },
 
     "Contracts": [
