@@ -17,7 +17,7 @@ public static partial class InitTemplates
             Instructions: |
               You are a creative and precise writer. Your job is to:
               1. Understand the content brief from the task.
-              2. Write a complete draft and save it to output/draft.md using write_file.
+              2. Write a complete draft and save it to {FuseraftPaths.LocalDocs}/draft.md using write_file.
               When the draft is ready for review, call handoff(route_keyword: "DRAFT_COMPLETE").
             Model:
               ModelId: {model}{EpAgent(endpoint)}
@@ -34,9 +34,9 @@ public static partial class InitTemplates
             Description: Edits for clarity, accuracy, and style; writes the final version.
             Instructions: |
               You are a senior editor. Your job is to:
-              1. Read the draft from output/draft.md.
+              1. Read the draft from {FuseraftPaths.LocalDocs}/draft.md.
               2. Edit for clarity, accuracy, tone, and structure.
-              3. Save the final version to output/final.md using write_file.
+              3. Save the final version to {FuseraftPaths.LocalDocs}/final.md using write_file.
               When editing is complete, call handoff(route_keyword: "CONTENT_APPROVED").
             Model:
               ModelId: {model}{EpAgent(endpoint)}
@@ -60,7 +60,7 @@ public static partial class InitTemplates
                 - Name: DraftExists
                   Requires:
                     - Type: FileExists
-                      Path: output/draft.md
+                      Path: {FuseraftPaths.LocalDocs}/draft.md
 
               # Each agent lives in its own YAML file in agents/ — edit, version, or reuse
               # them independently across configs. Inline fields override the file at load time.

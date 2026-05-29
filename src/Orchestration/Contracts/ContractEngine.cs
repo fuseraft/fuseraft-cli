@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using fuseraft.Core;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure.Plugins;
 using fuseraft.Orchestration.Validation;
@@ -191,7 +192,7 @@ public sealed class ContractEngine
         {
             var sourcePath = pred.PatternSource
                 ?? _validationConfig?.BriefPath
-                ?? ".fuseraft/brief.json";
+                ?? FuseraftPaths.LocalBrief;
 
             if (!File.Exists(sourcePath))
                 return (false,
@@ -240,7 +241,7 @@ public sealed class ContractEngine
             return (true, null);
 
         var resolvedFrom = pred.PatternField is not null
-            ? $" (read from '{pred.PatternSource ?? ".fuseraft/brief.json"}' field '{pred.PatternField}')"
+            ? $" (read from '{pred.PatternSource ?? FuseraftPaths.LocalBrief}' field '{pred.PatternField}')"
             : string.Empty;
 
         return (false,
@@ -270,7 +271,7 @@ public sealed class ContractEngine
         string contractName,
         CancellationToken ct)
     {
-        var reportPath = _validationConfig?.TestReportPath ?? ".fuseraft/test-report.json";
+        var reportPath = _validationConfig?.TestReportPath ?? FuseraftPaths.LocalTestReport;
 
         if (!File.Exists(reportPath))
         {
@@ -345,7 +346,7 @@ public sealed class ContractEngine
     // Reads acceptance_criteria from brief.json (best-effort; returns empty on any error).
     private async Task<List<string>> TryReadAcceptanceCriteriaAsync(CancellationToken ct)
     {
-        var briefPath = _validationConfig?.BriefPath ?? ".fuseraft/brief.json";
+        var briefPath = _validationConfig?.BriefPath ?? FuseraftPaths.LocalBrief;
         if (!File.Exists(briefPath)) return [];
 
         try

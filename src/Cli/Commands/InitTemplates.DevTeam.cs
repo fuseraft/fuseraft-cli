@@ -65,7 +65,8 @@ public static partial class InitTemplates
             Instructions: |
               You are a QA engineer. Your job is to:
               1. Read {FuseraftPaths.LocalBrief} to understand acceptance criteria.
-              2. Write tests and run them with shell_run.
+              2. Write test scripts (any format) to {FuseraftPaths.LocalTests}/ and any
+                 fixture or seed files to {FuseraftPaths.LocalTestFixtures}/. Run them with shell_run.
               3. Write results to {FuseraftPaths.LocalTestReport}:
                    passed — true if every criterion passes, false otherwise
                    results — array of objects:

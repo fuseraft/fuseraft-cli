@@ -307,7 +307,7 @@ Orchestration:
     - Name: ImplementationComplete
       Requires:
         - FilesWritten:
-            Source: .fuseraft/brief.json
+            Source: .fuseraft/artifacts/brief.json
             Field: files_to_change
         - CommandSucceeded:
             Pattern: "build|compile"

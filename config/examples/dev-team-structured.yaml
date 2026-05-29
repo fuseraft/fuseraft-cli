@@ -23,15 +23,15 @@ Orchestration:
       ApiKeyEnvVar: XAI_API_KEY
 
   EvidenceStore:
-    Path: .fuseraft/evidence.json
+    Path: .fuseraft/state/evidence.json
 
   ChangeTracking:
-    Path: .fuseraft/changes.json
+    Path: .fuseraft/state/changes.json
 
   Validation:
-    BriefPath: .fuseraft/brief.json
-    TestReportPath: .fuseraft/test-report.json
-    ChangeLogPath: .fuseraft/changes.json
+    BriefPath: .fuseraft/artifacts/brief.json
+    TestReportPath: .fuseraft/artifacts/test-report.json
+    ChangeLogPath: .fuseraft/state/changes.json
     TestAssertionPatterns:
       - "tester::assert"
       - "if .+ throw"
@@ -42,12 +42,12 @@ Orchestration:
     - Name: BriefExists
       Requires:
         - Type: FileExists
-          Path: .fuseraft/brief.json
+          Path: .fuseraft/artifacts/brief.json
 
     - Name: ImplementationComplete
       Requires:
         - Type: FilesWritten
-          Source: .fuseraft/brief.json
+          Source: .fuseraft/artifacts/brief.json
           Field: files_to_change
         - Type: CommandSucceeded
           PatternField: verify_command
@@ -56,7 +56,7 @@ Orchestration:
     - Name: TestsValid
       Requires:
         - Type: FileExists
-          Path: .fuseraft/test-report.json
+          Path: .fuseraft/artifacts/test-report.json
         - Type: TestReport
           NoFailures: true
           HasAssertions: true
@@ -107,7 +107,7 @@ Orchestration:
            - Constraints: anything to avoid or preserve
            Always include: "Test files contain real assertions that can fail."
 
-        5. WRITE BRIEF TO DISK: Call write_file → .fuseraft/brief.json:
+        5. WRITE BRIEF TO DISK: Call write_file → .fuseraft/artifacts/brief.json:
              {
                "goal": "<one sentence>",
                "files_to_change": ["src/a.go", "src/b.go"],
@@ -137,7 +137,7 @@ Orchestration:
 
         FOLLOW THESE STEPS IN ORDER:
 
-        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/brief.json.
+        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/artifacts/brief.json.
            If returning from a Reviewer rejection, the feedback field is your fix target.
 
         2. IMPLEMENT: Use write_file for every file in files_to_change. Never output a diff.
@@ -176,14 +176,14 @@ Orchestration:
 
         FOLLOW THESE STEPS IN ORDER:
 
-        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/brief.json.
+        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/artifacts/brief.json.
         2. CHECK THE CHANGE LOG: Call changes_read_latest.
         3. AUDIT TEST CODE: A test file is only valid if it contains assertion logic
            that can actually FAIL. Print-only files are not tests — BUGS FOUND immediately.
         4. RUN TESTS: Paste exact stdout/stderr. Any failure = FAIL.
         5. TEST EACH ACCEPTANCE CRITERION with shell_run. Record PASS or FAIL.
 
-        6a. ALL PASS: Write test report to .fuseraft/test-report.json:
+        6a. ALL PASS: Write test report to .fuseraft/artifacts/test-report.json:
               {
                 "results": [
                   {
@@ -200,7 +200,7 @@ Orchestration:
         6b. ANY FAIL: Call handoff(route_keyword: "BUGS FOUND") and list every failure.
 
         RULES:
-        - Never call HANDOFF TO REVIEWER before writing .fuseraft/test-report.json.
+        - Never call HANDOFF TO REVIEWER before writing .fuseraft/artifacts/test-report.json.
         - Never fabricate shell output.
         - A PASS result with an empty or missing command field is treated as fabricated and will block handoff.
       Model:
@@ -228,7 +228,7 @@ Orchestration:
         3. REVIEW: Correctness, consistency, error handling, edge cases, security.
         3b. AUDIT TESTS: Can each test actually fail if the feature is broken?
         4. SPOT-CHECK: Run the most critical acceptance criterion with shell_run.
-        5. READ THE TEST REPORT: Call read_file on .fuseraft/test-report.json.
+        5. READ THE TEST REPORT: Call read_file on .fuseraft/artifacts/test-report.json.
 
         6. EMIT A STRUCTURED VERDICT inside a ```json code fence:
 
@@ -342,7 +342,7 @@ Orchestration:
           - Reviewer
 
   Chatroom:
-    Path: .fuseraft/chatroom.jsonl
+    Path: .fuseraft/comms/chatroom.jsonl
 
   Events:
     Path: .fuseraft/events.jsonl
