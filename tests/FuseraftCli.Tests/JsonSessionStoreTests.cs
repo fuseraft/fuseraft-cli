@@ -134,6 +134,79 @@ public sealed class JsonSessionStoreTests : IDisposable
         Assert.Empty(all);
     }
 
+    // Concurrency
+
+    [Fact]
+    public async Task ConcurrentWrites_ToDifferentSessions_DoNotCorrupt()
+    {
+        const int SessionCount = 20;
+        var ids = Enumerable.Range(0, SessionCount)
+            .Select(i => $"{i:x2}a1b2c3")
+            .ToArray();
+
+        await Parallel.ForEachAsync(ids, async (id, _) =>
+        {
+            await _store.SaveAsync(MakeCheckpoint(id));
+        });
+
+        foreach (var id in ids)
+        {
+            var loaded = await _store.LoadAsync(id);
+            Assert.NotNull(loaded);
+            Assert.Equal(id, loaded!.SessionId);
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentWrites_ToSameSession_DoNotLeaveCorruptFile()
+    {
+        const string SessionId = "deadbeef";
+        const int Writers = 10;
+
+        // All tasks attempt to write different content to the same file concurrently.
+        // FileShare.None means some writers will receive IOException (OS serializes access)
+        // — that is intentional and prevents partial writes. At least one write must succeed
+        // and the file must be a valid, complete checkpoint afterwards.
+        var tasks = Enumerable.Range(0, Writers).Select(async i =>
+        {
+            var checkpoint = new SessionCheckpoint
+            {
+                SessionId  = SessionId,
+                Task       = $"Concurrent write #{i}",
+                ConfigPath = "config/test.json",
+                IsComplete = false,
+                Messages   = [new AgentMessage { AgentName = "A", Content = $"msg {i}", Role = "assistant", TurnIndex = i }]
+            };
+            try { await _store.SaveAsync(checkpoint); return true; }
+            catch (IOException) { return false; }  // contention is expected
+        });
+
+        var results = await Task.WhenAll(tasks);
+        Assert.True(results.Any(r => r), "At least one write should have succeeded.");
+
+        // The file must be readable and represent a complete, valid checkpoint.
+        var loaded = await _store.LoadAsync(SessionId);
+        Assert.NotNull(loaded);
+        Assert.Equal(SessionId, loaded!.SessionId);
+        Assert.NotEmpty(loaded.Messages);
+    }
+
+    [Fact]
+    public async Task ListAsync_UnderConcurrentWrites_DoesNotThrow()
+    {
+        // Session IDs must be exactly 8 lowercase hex chars.
+        var ids = Enumerable.Range(0, 10).Select(i => $"c0ffee{i:x2}").ToArray();
+
+        var writeTask = Task.WhenAll(ids.Select(id => _store.SaveAsync(MakeCheckpoint(id))));
+
+        var listTask = Task.WhenAll(Enumerable.Range(0, 5).Select(_ =>
+            _store.ListAsync()));
+
+        // Neither writes nor concurrent lists should throw.
+        var ex = await Record.ExceptionAsync(() => Task.WhenAll(writeTask, listTask));
+        Assert.Null(ex);
+    }
+
     // Helpers
 
     private static SessionCheckpoint MakeCheckpoint(string id) => new()

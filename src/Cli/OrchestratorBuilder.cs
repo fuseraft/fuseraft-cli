@@ -86,6 +86,8 @@ public static class OrchestratorBuilder
 
         var config = BindConfig(configPath, configuration);
 
+        ValidateSchemaVersion(config, loggerFactory);
+
         if (config.Agents.Count == 0)
             throw new InvalidOperationException("Config must define at least one agent.");
 
@@ -451,7 +453,7 @@ public static class OrchestratorBuilder
         var providerErrorLog  = config.Events is { } evtPath
             ? Path.Combine(Path.GetDirectoryName(evtPath.Path) ?? FuseraftPaths.LocalLogs, "provider_errors.jsonl")
             : FuseraftPaths.LocalProviderErrors;
-        var chatClientFactory = new ChatClientFactory(config.Models.Count > 0 ? config.Models : null, providerErrorLog, eventEmitter);
+        var chatClientFactory = new ChatClientFactory(config.Models.Count > 0 ? config.Models : null, providerErrorLog, eventEmitter, loggerFactory);
 
         // Eagerly resolve every agent's model config so that undefined aliases
         // (e.g. "fast" not declared in the Models registry) fail here at startup
@@ -1356,4 +1358,24 @@ public static class OrchestratorBuilder
         Path.IsPathRooted(ProcessHelper.ExpandHome(path))
             ? path
             : Path.GetFullPath(ProcessHelper.ExpandHome(path), sandboxRoot);
+
+    // Known config schema versions. Any version not in this set triggers a warning.
+    private static readonly IReadOnlySet<string> KnownSchemaVersions =
+        new HashSet<string>(StringComparer.Ordinal) { "2026-05" };
+
+    private static void ValidateSchemaVersion(OrchestrationConfig config, ILoggerFactory loggerFactory)
+    {
+        if (config.SchemaVersion is null) return;
+
+        var logger = loggerFactory.CreateLogger(nameof(OrchestratorBuilder));
+        if (!KnownSchemaVersions.Contains(config.SchemaVersion))
+            logger.LogWarning(
+                "Config declares schema_version '{SchemaVersion}' which is not recognized by this build of fuseraft-cli. " +
+                "Some fields may be silently ignored or default incorrectly. " +
+                "Known versions: {KnownVersions}",
+                config.SchemaVersion,
+                string.Join(", ", KnownSchemaVersions));
+        else
+            logger.LogDebug("Config schema_version '{SchemaVersion}' is valid.", config.SchemaVersion);
+    }
 }
