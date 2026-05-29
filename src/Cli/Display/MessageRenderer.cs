@@ -19,21 +19,6 @@ public static class MessageRenderer
 
     private static readonly Dictionary<string, Color> _colorMap = new(StringComparer.OrdinalIgnoreCase);
 
-    // Banner
-
-    public static void RenderBanner()
-    {
-        using var stream = typeof(MessageRenderer).Assembly
-            .GetManifestResourceStream("fuseraft.Resources.fender.flf");
-        var fig = stream is not null
-            ? new FigletText(FigletFont.Load(stream), "fuseraft").Color(Color.Aqua)
-            : new FigletText("fuseraft").Color(Color.Aqua);
-        AnsiConsole.WriteLine();
-        AnsiConsole.Write(fig);
-        AnsiConsole.MarkupLine("[dim]Multi-Agent Orchestration · Powered by Microsoft Agent Framework[/]");
-        AnsiConsole.WriteLine();
-    }
-
     /// <summary>
     /// Renders the modernized REPL start-up panel in place of the old Figlet banner +
     /// model rule + info line.
