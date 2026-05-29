@@ -79,7 +79,6 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Resources/FUSERAFT.md" />
-    <EmbeddedResource Include="Resources/fender.flf" />
   </ItemGroup>
 
   <ItemGroup>
