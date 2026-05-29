@@ -377,6 +377,8 @@ public sealed class GraphOrchestrator(
                 ? mp
                 : int.MaxValue;
 
+            bool naturallyTerminated = false;
+
             while (phaseCount < maxPhases)
             {
                 phaseCount++;
@@ -424,10 +426,16 @@ public sealed class GraphOrchestrator(
                     phaseCount, lastKeyword ?? "(none)");
 
                 if (lastKeyword is null)
+                {
+                    naturallyTerminated = true;
                     break; // No keyword — stop to avoid infinite loop.
+                }
 
                 if (!_backEdgeDestinations.TryGetValue(lastKeyword, out var nextStart))
+                {
+                    naturallyTerminated = true;
                     break; // Unknown keyword — stop.
+                }
 
                 // Translate synthetic unconditional-back keywords to human-readable form
                 // before injecting into agent history or event logs.
@@ -441,7 +449,10 @@ public sealed class GraphOrchestrator(
                         payload: new { phase = phaseCount, keyword = displayKeyword, next = nextStart ?? "terminal" });
 
                 if (nextStart is null)
+                {
+                    naturallyTerminated = true;
                     break; // Terminal node reached — session complete.
+                }
 
                 // Inject a phase-transition marker so the next node has explicit context.
                 // When a rejection keyword (REVISION REQUIRED, BUGS FOUND, etc.) drives the
@@ -458,6 +469,26 @@ public sealed class GraphOrchestrator(
 
                 agentCtx.LastKeyword = null; // reset for next phase
                 currentStart         = nextStart;
+            }
+
+            // When the phase cap fires (rather than a natural terminal/break), emit an
+            // explanatory message so the session transcript has a clear stopping reason —
+            // mirrors the equivalent behaviour in MagenticOrchestrator.
+            if (!naturallyTerminated && !ct.IsCancellationRequested && maxPhases != int.MaxValue)
+            {
+                logger.LogWarning(
+                    "[GraphOrchestrator] Session reached maximum of {Max} phases — terminating.",
+                    maxPhases);
+                await agentCtx.MessageSink.WriteAsync(new AgentMessage
+                {
+                    AgentName = "orchestrator",
+                    Content   =
+                        $"The session reached the maximum of {maxPhases} orchestration phases " +
+                        "without completing the task. Review the conversation history and consider " +
+                        "restarting with a more specific task or a higher Termination.MaxIterations.",
+                    Role      = "assistant",
+                    TurnIndex = agentCtx.TurnIndex++,
+                }, ct).ConfigureAwait(false);
             }
         }
         finally
