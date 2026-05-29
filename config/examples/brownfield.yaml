@@ -5,7 +5,7 @@
 ##
 ## Workflow:
 ##   1. Archaeologist surveys the codebase from EntryPoints, writes a discovery brief
-##      (.fuseraft/brief.brownfield.json) and a convention profile (.fuseraft/conventions.json).
+##      (.fuseraft/artifacts/brief.brownfield.json) and a convention profile (.fuseraft/artifacts/conventions.json).
 ##   2. OrchestratorBuilder seeds the change envelope from in_scope_files and injects
 ##      the convention profile into every agent's system prompt on subsequent runs.
 ##   3. Planner reads the discovery brief, narrows scope, and writes brief.json.
@@ -38,8 +38,8 @@ Orchestration:
   Brownfield:
     EntryPoints:
       - src/main.go        # Replace with your project's actual entry points
-    DiscoveryBriefPath: .fuseraft/brief.brownfield.json
-    ConventionProfilePath: .fuseraft/conventions.json
+    DiscoveryBriefPath: .fuseraft/artifacts/brief.brownfield.json
+    ConventionProfilePath: .fuseraft/artifacts/conventions.json
     SeedEnvelopeFromBrief: true   # merges in_scope_files → Security.ChangeEnvelope at startup
 
   ## Incremental test selection.
@@ -50,15 +50,15 @@ Orchestration:
     FullSuiteCommand: "go test ./..."
 
   EvidenceStore:
-    Path: .fuseraft/evidence.json
+    Path: .fuseraft/state/evidence.json
 
   ChangeTracking:
-    Path: .fuseraft/changes.json
+    Path: .fuseraft/state/changes.json
 
   Validation:
-    BriefPath: .fuseraft/brief.json
-    TestReportPath: .fuseraft/test-report.json
-    ChangeLogPath: .fuseraft/changes.json
+    BriefPath: .fuseraft/artifacts/brief.json
+    TestReportPath: .fuseraft/artifacts/test-report.json
+    ChangeLogPath: .fuseraft/state/changes.json
     TestAssertionPatterns:
       - "\\bt\\.Error\\b"
       - "\\bt\\.Fatal\\b"
@@ -79,19 +79,19 @@ Orchestration:
     - Name: ReconComplete
       Requires:
         - Type: FileExists
-          Path: .fuseraft/brief.brownfield.json
+          Path: .fuseraft/artifacts/brief.brownfield.json
         - Type: FileExists
-          Path: .fuseraft/conventions.json
+          Path: .fuseraft/artifacts/conventions.json
 
     - Name: BriefExists
       Requires:
         - Type: FileExists
-          Path: .fuseraft/brief.json
+          Path: .fuseraft/artifacts/brief.json
 
     - Name: ImplementationComplete
       Requires:
         - Type: FilesWritten
-          Source: .fuseraft/brief.json
+          Source: .fuseraft/artifacts/brief.json
           Field: files_to_change
         - Type: CommandSucceeded
           PatternField: verify_command
@@ -101,7 +101,7 @@ Orchestration:
     - Name: TestsValid
       Requires:
         - Type: FileExists
-          Path: .fuseraft/test-report.json
+          Path: .fuseraft/artifacts/test-report.json
         - Type: TestReport
           NoFailures: true
           HasAssertions: true
@@ -141,7 +141,7 @@ Orchestration:
         FOLLOW THESE STEPS IN ORDER:
 
         1. CHECK IF RECON ALREADY DONE:
-           Call read_file on .fuseraft/brief.brownfield.json.
+           Call read_file on .fuseraft/artifacts/brief.brownfield.json.
            If it exists and is non-empty, skip to step 7 immediately.
 
         2. SURVEY ENTRY POINTS:
@@ -172,7 +172,7 @@ Orchestration:
            Examine 3–5 representative files. Use sub_agent_explore for broad questions, sub_agent_locate for targeted symbol lookups.
 
         7. WRITE DISCOVERY BRIEF:
-           Call write_file → .fuseraft/brief.brownfield.json:
+           Call write_file → .fuseraft/artifacts/brief.brownfield.json:
            {
              "entry_points": ["<entry point paths>"],
              "in_scope_files": ["<relative path>", ...],
@@ -182,7 +182,7 @@ Orchestration:
            }
 
         8. WRITE CONVENTION PROFILE:
-           Call write_file → .fuseraft/conventions.json:
+           Call write_file → .fuseraft/artifacts/conventions.json:
            {
              "language": "<language>",
              "naming_patterns": ["<pattern>"],
@@ -224,7 +224,7 @@ Orchestration:
 
         FOLLOW THESE STEPS IN ORDER:
 
-        1. READ THE DISCOVERY BRIEF: Call read_file on .fuseraft/brief.brownfield.json.
+        1. READ THE DISCOVERY BRIEF: Call read_file on .fuseraft/artifacts/brief.brownfield.json.
            The in_scope_files and fragility_signals tell you what is safe to change.
 
         2. READ THE TASK: Extract the goal, constraints, and acceptance criteria.
@@ -243,7 +243,7 @@ Orchestration:
            - Constraints: include any fragility_signals for chosen files + coverage gaps
            Always include: "Test files contain real assertions that can fail."
 
-        6. WRITE BRIEF TO DISK: Call write_file → .fuseraft/brief.json:
+        6. WRITE BRIEF TO DISK: Call write_file → .fuseraft/artifacts/brief.json:
            {
              "goal": "<one sentence>",
              "files_to_change": ["src/billing/charge.go"],
@@ -273,16 +273,16 @@ Orchestration:
         You are an expert software developer working in a brownfield codebase.
 
         IMPORTANT: The change envelope is enforced — write_file and patch_file are blocked
-        for paths outside the files listed in .fuseraft/brief.json → files_to_change.
+        for paths outside the files listed in .fuseraft/artifacts/brief.json → files_to_change.
         If you need to touch an additional file, call handoff(route_keyword: "REPLAN REQUIRED")
         and explain which file needs to be added to scope.
 
         FOLLOW THESE STEPS IN ORDER:
 
-        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/brief.json.
+        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/artifacts/brief.json.
            If returning from a Reviewer rejection, the feedback field is your fix target.
 
-        2. READ FRAGILITY CONTEXT: Call read_file on .fuseraft/brief.brownfield.json
+        2. READ FRAGILITY CONTEXT: Call read_file on .fuseraft/artifacts/brief.brownfield.json
            and note any fragility_signals for the files you are about to change.
            Be conservative around fragile files: minimal diffs, no refactoring.
 
@@ -327,7 +327,7 @@ Orchestration:
 
         FOLLOW THESE STEPS IN ORDER:
 
-        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/brief.json.
+        1. READ THE BRIEF FROM DISK: Call read_file on .fuseraft/artifacts/brief.json.
         2. CHECK THE CHANGE LOG: Call changes_read_latest.
         3. AUDIT TEST CODE: A test file is only valid if it contains assertion logic
            that can actually FAIL. Print-only files are not tests — BUGS FOUND immediately.
@@ -339,7 +339,7 @@ Orchestration:
 
         5. TEST EACH ACCEPTANCE CRITERION with shell_run. Record PASS or FAIL.
 
-        6a. ALL PASS: Write test report to .fuseraft/test-report.json:
+        6a. ALL PASS: Write test report to .fuseraft/artifacts/test-report.json:
               {
                 "results": [
                   {
@@ -356,7 +356,7 @@ Orchestration:
         6b. ANY FAIL: Call handoff(route_keyword: "BUGS FOUND") and list every failure.
 
         RULES:
-        - Never call HANDOFF TO REVIEWER before writing .fuseraft/test-report.json.
+        - Never call HANDOFF TO REVIEWER before writing .fuseraft/artifacts/test-report.json.
         - Never fabricate shell output.
         - A PASS result with an empty or missing command field is treated as fabricated and will block handoff.
       Model:
@@ -386,7 +386,7 @@ Orchestration:
            Flag any deviation from naming, error handling, or forbidden patterns.
         4. AUDIT TESTS: Can each test actually fail if the feature is broken?
         5. SPOT-CHECK: Run the most critical acceptance criterion with shell_run.
-        6. READ THE TEST REPORT: Call read_file on .fuseraft/test-report.json.
+        6. READ THE TEST REPORT: Call read_file on .fuseraft/artifacts/test-report.json.
 
         7. EMIT A STRUCTURED VERDICT inside a ```json code fence:
 
@@ -509,7 +509,7 @@ Orchestration:
           - Reviewer
 
   Chatroom:
-    Path: .fuseraft/chatroom.jsonl
+    Path: .fuseraft/comms/chatroom.jsonl
 
   Events:
     Path: .fuseraft/events.jsonl
