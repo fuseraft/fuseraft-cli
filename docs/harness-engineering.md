@@ -25,7 +25,7 @@ Enable change tracking first — it is the ground-truth record that validators a
 
 ```yaml
 ChangeTracking:
-  Path: .fuseraft/changes.json
+  Path: .fuseraft/state/changes.json
 ```
 
 With this enabled, every `write_file`, `delete_file`, `shell_run`, `shell_run_script`, and `git_commit` call is recorded to `changes.json`. Downstream agents can call `changes_read_latest()` (via the `Changes` plugin) to see what previous agents actually did. Validators that reference `Validation.ChangeLogPath` cross-check their evidence against this log.
@@ -58,7 +58,7 @@ Blocks until `brief.json` exists on disk with non-empty `goal`, `files_to_change
     - Planner
 ```
 
-The Planner must call `write_file` to produce `.fuseraft/brief.json` before this route fires. A claimed brief — one described in prose but never written — will not pass.
+The Planner must call `write_file` to produce `.fuseraft/artifacts/brief.json` before this route fires. A claimed brief — one described in prose but never written — will not pass.
 
 ### RequireWriteFile
 
@@ -112,7 +112,7 @@ Without `RequiredCommandPattern`, any successful shell run satisfies the check. 
 
 ### TestReportValid
 
-Blocks unless a valid `.fuseraft/test-report.json` exists and passes eight structural checks, including: no FAIL results, real assertion patterns in test files, no empty `command` fields on PASS results, and (when a change log is configured) PASS result commands cross-referenced against commands that were actually executed.
+Blocks unless a valid `.fuseraft/artifacts/test-report.json` exists and passes eight structural checks, including: no FAIL results, real assertion patterns in test files, no empty `command` fields on PASS results, and (when a change log is configured) PASS result commands cross-referenced against commands that were actually executed.
 
 ```yaml
 - Keyword: "HANDOFF TO REVIEWER"
@@ -187,9 +187,9 @@ Provide file paths used by validators that read disk artifacts:
 
 ```yaml
 Validation:
-  BriefPath: .fuseraft/brief.json
-  TestReportPath: .fuseraft/test-report.json
-  ChangeLogPath: .fuseraft/changes.json
+  BriefPath: .fuseraft/artifacts/brief.json
+  TestReportPath: .fuseraft/artifacts/test-report.json
+  ChangeLogPath: .fuseraft/state/changes.json
   TestAssertionPatterns:
     - \bassert\b
     - \bexpect\b
@@ -236,7 +236,7 @@ To ground summaries in the change log, configure both `Compaction` and `ChangeTr
 
 ```yaml
 ChangeTracking:
-  Path: .fuseraft/changes.json
+  Path: .fuseraft/state/changes.json
 
 Compaction:
   TriggerTurnCount: 30
@@ -304,12 +304,12 @@ Orchestration:
   Name: Software Team
 
   ChangeTracking:
-    Path: .fuseraft/changes.json
+    Path: .fuseraft/state/changes.json
 
   Validation:
-    BriefPath: .fuseraft/brief.json
-    TestReportPath: .fuseraft/test-report.json
-    ChangeLogPath: .fuseraft/changes.json
+    BriefPath: .fuseraft/artifacts/brief.json
+    TestReportPath: .fuseraft/artifacts/test-report.json
+    ChangeLogPath: .fuseraft/state/changes.json
     TestAssertionPatterns:
       - \bassert\b
       - \bexpect\b
@@ -333,7 +333,7 @@ Orchestration:
     - Name: Planner
       Instructions: >-
         You are a software planner. Read the codebase, identify what needs to change,
-        and write .fuseraft/brief.json with goal, files_to_change, and acceptance_criteria.
+        and write .fuseraft/artifacts/brief.json with goal, files_to_change, and acceptance_criteria.
         When done, write HANDOFF TO DEVELOPER on its own line.
       Model: strong
       Plugins: [FileSystem]
@@ -342,7 +342,7 @@ Orchestration:
 
     - Name: Developer
       Instructions: >-
-        You are a software developer. Read .fuseraft/brief.json to understand the task.
+        You are a software developer. Read .fuseraft/artifacts/brief.json to understand the task.
         Implement every file in files_to_change. Run the build with shell_run to verify
         before handing off. Write HANDOFF TO TESTER on its own line when done.
       Model: strong
@@ -352,9 +352,9 @@ Orchestration:
 
     - Name: Tester
       Instructions: >-
-        You are a software tester. Read .fuseraft/brief.json for acceptance criteria.
+        You are a software tester. Read .fuseraft/artifacts/brief.json for acceptance criteria.
         Call changes_read_latest() to see what was implemented. Write tests, run them with shell_run,
-        and write .fuseraft/test-report.json before handing off.
+        and write .fuseraft/artifacts/test-report.json before handing off.
         Write HANDOFF TO REVIEWER on its own line when all tests pass.
         Write BUGS FOUND on its own line when tests fail.
       Model: strong
@@ -364,7 +364,7 @@ Orchestration:
 
     - Name: Reviewer
       Instructions: >-
-        You are a code reviewer. Read .fuseraft/brief.json and .fuseraft/test-report.json.
+        You are a code reviewer. Read .fuseraft/artifacts/brief.json and .fuseraft/artifacts/test-report.json.
         Verify the implementation against every acceptance criterion. Re-run key commands.
         Emit a JSON review block before your decision keyword.
         Write APPROVED on its own line when satisfied.
