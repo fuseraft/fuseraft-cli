@@ -165,6 +165,11 @@ public sealed class AgentFactory(
             ? config.MaxInTurnContextTokens * 4
             : 0;
 
+        // Deterministic sliding-window cap: always keep only the last N tool call/result
+        // pairs in full, replacing older ones with placeholders unconditionally.
+        // Applied before the budget-reactive trim so the window runs first.
+        var maxInTurnToolPairs = config.MaxInTurnToolPairs;
+
         // Tool schema overhead: computed once at build time since the tool list is fixed
         // for the lifetime of this agent. Included in the context budget and payload
         // estimates so the pre-flight checks account for schema tokens that are invisible
@@ -182,6 +187,9 @@ public sealed class AgentFactory(
             .Use(
                 getResponseFunc: async (messages, options, inner, ct) =>
                 {
+                    if (maxInTurnToolPairs > 0)
+                        messages = KeepLastToolPairs(messages, maxInTurnToolPairs);
+
                     if (maxInTurnChars > 0)
                         messages = TrimInTurnContext(messages, maxInTurnChars);
 
@@ -222,6 +230,9 @@ public sealed class AgentFactory(
                 },
                 getStreamingResponseFunc: (messages, options, inner, ct) =>
                 {
+                    if (maxInTurnToolPairs > 0)
+                        messages = KeepLastToolPairs(messages, maxInTurnToolPairs);
+
                     if (maxInTurnChars > 0)
                         messages = TrimInTurnContext(messages, maxInTurnChars);
                     if (hasHandoff && HandoffWasInvoked(messages))
@@ -523,6 +534,42 @@ public sealed class AgentFactory(
             return $"[ERROR] Tool call failed: required {plural} {paramList} not provided.\n\n" +
                    $"To fix: Call {Name} again with all required parameters included.";
         }
+    }
+
+    /// <summary>
+    /// Unconditionally keeps only the most-recent <paramref name="maxPairs"/> tool call/result
+    /// pairs in full; older pairs are replaced with a compact placeholder. Applied on every
+    /// inner LLM call regardless of total context size, giving an O(maxPairs) tool-result
+    /// footprint per iteration. Non-tool messages are never touched.
+    /// </summary>
+    private static IEnumerable<ChatMessage> KeepLastToolPairs(
+        IEnumerable<ChatMessage> messages,
+        int maxPairs)
+    {
+        var list = messages as IList<ChatMessage> ?? messages.ToList();
+
+        // Collect indices of ChatRole.Tool messages in order (oldest → newest).
+        var toolIndices = new List<int>(list.Count);
+        for (int i = 0; i < list.Count; i++)
+            if (list[i].Role == ChatRole.Tool) toolIndices.Add(i);
+
+        if (toolIndices.Count <= maxPairs) return list;
+
+        var result = new List<ChatMessage>(list);
+        const string Placeholder = "[result omitted — sliding window]";
+        int cutoff = toolIndices.Count - maxPairs;
+        for (int k = 0; k < cutoff; k++)
+        {
+            int idx = toolIndices[k];
+            var old = result[idx];
+            var trimmed = old.Contents
+                .OfType<FunctionResultContent>()
+                .Select(fr => (AIContent)new FunctionResultContent(fr.CallId, Placeholder))
+                .ToList<AIContent>();
+            result[idx] = new ChatMessage(old.Role,
+                trimmed.Count > 0 ? trimmed : [new TextContent(Placeholder)]);
+        }
+        return result;
     }
 
     /// <summary>
