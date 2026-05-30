@@ -1175,6 +1175,7 @@ public static class OrchestratorBuilder
             Capabilities           = inline.Capabilities.Count > 0                     ? inline.Capabilities           : baseConfig.Capabilities,
             MaxToolCallsPerTurn    = inline.MaxToolCallsPerTurn    != 0                 ? inline.MaxToolCallsPerTurn    : baseConfig.MaxToolCallsPerTurn,
             MaxInTurnContextTokens = inline.MaxInTurnContextTokens != 0                 ? inline.MaxInTurnContextTokens : baseConfig.MaxInTurnContextTokens,
+            MaxInTurnToolPairs     = inline.MaxInTurnToolPairs     != 0                 ? inline.MaxInTurnToolPairs     : baseConfig.MaxInTurnToolPairs,
             EnableMemory           = inline.EnableMemory || baseConfig.EnableMemory,
             SubAgentModel          = inline.SubAgentModel                               ?? baseConfig.SubAgentModel,
             SubAgentPlugins        = inline.SubAgentPlugins                             ?? baseConfig.SubAgentPlugins,
