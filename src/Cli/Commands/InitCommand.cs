@@ -64,7 +64,7 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
     [
         ("OPENAI_API_KEY",    "gpt-4o"),
         ("ANTHROPIC_API_KEY", "claude-sonnet-4-6"),
-        ("XAI_API_KEY",       "grok-4"),
+        ("XAI_API_KEY",       "grok-4.3"),
         ("GOOGLE_AI_API_KEY", "gemini-2.5-flash"),
         ("MISTRAL_API_KEY",   "mistral-medium-latest"),
         ("DEEPSEEK_API_KEY",  "deepseek-chat"),

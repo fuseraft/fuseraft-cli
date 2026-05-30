@@ -19,9 +19,11 @@ Define aliases once in the top-level `Models` dictionary, then reference by name
 ```yaml
 Models:
   fast:
-    ModelId: grok-4-1-fast-non-reasoning
+    ModelId: grok-4.3
+    ReasoningEffort: none
   smart:
-    ModelId: grok-4-1-fast-reasoning
+    ModelId: grok-4.3
+    ReasoningEffort: low
 
 Agents:
   - Name: Planner
@@ -71,6 +73,7 @@ Any field left empty falls back to auto-detection.
 | `MaxContextTokens` | int | `0` | Input context window limit (≈85% of the model's advertised maximum). Requests that would exceed this value are rejected before the API call — prevents expensive failures on models with hard limits. `0` disables the check. |
 | `MaxPayloadBytes` | integer | `0` | Maximum serialized request body size in bytes. When set, the agent middleware estimates the outgoing JSON payload size (content × 1.2 + tool schemas × 1.1 + 2 KB envelope) before each API call and rejects it if it would exceed this limit — preventing HTTP 413 errors from upstream proxies (e.g. nginx). Set to your proxy's `client_max_body_size` minus ~10% headroom. `0` = no limit enforced. |
 | `Temperature` | number | — | Sampling temperature (0.0–2.0). Omit for reasoning models that reject this parameter. |
+| `ReasoningEffort` | string | — | Reasoning depth for models that support it (e.g. `grok-4.3`). Values: `none`, `low`, `medium`, `high`. Injected as `"reasoning": {"effort": "..."}` in the request. Omit for models that do not support this parameter. |
 | `FalloverModels` | array | — | Ordered list of fallover models to try when this model fails with a classifiable error. Each entry supports the same shorthand as `ModelId` (a plain string in YAML). See [Fallover chain](#fallover-chain). |
 | `FalloverOn` | array | — | Error reasons that trigger fallover. Defaults to all recoverable reasons: `RateLimit`, `ContextExceeded`, `QuotaExceeded`, `ServerError`. `AuthError` is never fallover-able. Only relevant when `FalloverModels` is set. |
 
@@ -393,12 +396,37 @@ Agents:
 
 ## Reasoning models
 
-Reasoning models (OpenAI `o1`/`o3`/`o4`, xAI `grok-*-reasoning`) reject the `temperature` parameter. Leave `Temperature` unset (null) for these models:
+Reasoning models (OpenAI `o1`/`o3`/`o4`, xAI `grok-4.3`) reject the `temperature` parameter. Leave `Temperature` unset (null) for these models.
+
+### xAI reasoning effort
+
+`grok-4.3` supports four reasoning depth levels controlled by the `ReasoningEffort` field:
+
+| Value | Behaviour |
+|-------|-----------|
+| `none` | Reasoning disabled — fastest, cheapest. Use for structured output, routing, and summarisation agents. |
+| `low` | Light reasoning (default when unset on `grok-4.3`). Balances speed and analytical depth. |
+| `medium` | More thinking tokens. Good for complex analysis, planning, and code review. |
+| `high` | Maximum reasoning — slowest and most expensive. Reserve for the hardest problems. |
 
 ```yaml
-Model:
-  ModelId: o3-mini
-  MaxTokens: 8192
+Models:
+  fast:
+    ModelId: grok-4.3
+    ApiKeyEnvVar: XAI_API_KEY
+    ReasoningEffort: none      # structured output, routing agents
+
+  reasoning:
+    ModelId: grok-4.3
+    ApiKeyEnvVar: XAI_API_KEY
+    ReasoningEffort: low       # general agentic work
+
+  deep:
+    ModelId: grok-4.3
+    ApiKeyEnvVar: XAI_API_KEY
+    ReasoningEffort: high      # complex planning or review
 ```
 
-Non-reasoning models default to the provider's built-in temperature if `Temperature` is omitted.
+The value is injected at the HTTP layer as `"reasoning": {"effort": "..."}` — no SDK-level support is required.
+
+For OpenAI `o1`/`o3`/`o4`, leave `ReasoningEffort` unset; those models use a separate SDK-native mechanism (`ReasoningEffortLevel`) that the OpenAI SDK applies automatically.

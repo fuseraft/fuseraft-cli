@@ -50,7 +50,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
     [
         ("ANTHROPIC_API_KEY",  "claude-sonnet-4-5"),
         ("OPENAI_API_KEY",     "gpt-4o-mini"),
-        ("XAI_API_KEY",        "grok-4-1-fast-reasoning"),
+        ("XAI_API_KEY",        "grok-4.3"),
         ("GOOGLE_AI_API_KEY",  "gemini-2.0-flash"),
         ("MISTRAL_API_KEY",    "mistral-small-latest"),
         ("DEEPSEEK_API_KEY",   "deepseek-chat"),

@@ -167,6 +167,10 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                 if (agent.FunctionChoice.ToLowerInvariant() is not ("auto" or "required" or "none"))
                     issues.Add(("error", $"Agent '{agent.Name}': FunctionChoice '{agent.FunctionChoice}' is invalid. Valid values: auto, required, none."));
 
+                var effort = agent.Model.ReasoningEffort?.ToLowerInvariant();
+                if (effort is not null and not ("none" or "low" or "medium" or "high"))
+                    issues.Add(("error", $"Agent '{agent.Name}': Model.ReasoningEffort '{agent.Model.ReasoningEffort}' is invalid. Valid values: none, low, medium, high."));
+
                 if (settings.Strict)
                 {
                     var registered = pluginRegistry.RegisteredPlugins
@@ -294,8 +298,9 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
         {
             return alias with
             {
-                Temperature = model.Temperature ?? alias.Temperature,
-                MaxTokens   = model.MaxTokens > 0 ? model.MaxTokens : alias.MaxTokens
+                Temperature     = model.Temperature ?? alias.Temperature,
+                MaxTokens       = model.MaxTokens > 0 ? model.MaxTokens : alias.MaxTokens,
+                ReasoningEffort = model.ReasoningEffort ?? alias.ReasoningEffort,
             };
         }
         return model;

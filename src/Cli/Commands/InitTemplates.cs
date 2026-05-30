@@ -89,6 +89,7 @@ public static partial class InitTemplates
           #     MaxContextTokens: 128000
           #   reasoning:
           #     ModelId: {model}
+          #     ReasoningEffort: low
 
           # Sandbox agents to a directory and restrict outbound HTTP hosts.
           # Security:

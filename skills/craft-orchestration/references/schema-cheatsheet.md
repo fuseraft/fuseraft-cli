@@ -13,13 +13,15 @@ Orchestration:
 
   Models:                         # named aliases — reference by alias in agent Model.ModelId
     fast:
-      ModelId: grok-4-1-fast-non-reasoning
+      ModelId: grok-4.3
       Endpoint: https://api.x.ai/v1
       ApiKeyEnvVar: XAI_API_KEY
+      ReasoningEffort: none       # none | low | medium | high
     reasoning:
-      ModelId: grok-4-1-fast-reasoning
+      ModelId: grok-4.3
       Endpoint: https://api.x.ai/v1
       ApiKeyEnvVar: XAI_API_KEY
+      ReasoningEffort: low
 
   Agents: [...]                   # at least one required
   Selection: { ... }              # routing strategy
@@ -341,12 +343,12 @@ Termination:
 
 ## Common providers
 
-| Provider | ModelId example | Endpoint | ApiKeyEnvVar |
-|----------|----------------|----------|-------------|
-| xAI | `grok-4-1-fast-non-reasoning` | `https://api.x.ai/v1` | `XAI_API_KEY` |
-| Anthropic | `claude-sonnet-4-6` | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` |
-| OpenAI | `gpt-4o` | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
-| Ollama (local) | `llama3.1` | `http://localhost:11434/v1` | *(none needed)* |
+| Provider | ModelId example | Endpoint | ApiKeyEnvVar | Notes |
+|----------|----------------|----------|-------------|-------|
+| xAI | `grok-4.3` | `https://api.x.ai/v1` | `XAI_API_KEY` | Set `ReasoningEffort: none/low/medium/high` |
+| Anthropic | `claude-sonnet-4-6` | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` | |
+| OpenAI | `gpt-4o` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | |
+| Ollama (local) | `llama3.1` | `http://localhost:11434/v1` | *(none needed)* | |
 
 ---
 

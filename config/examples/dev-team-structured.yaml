@@ -14,13 +14,15 @@ Orchestration:
 
   Models:
     fast:
-      ModelId: grok-4-1-fast-non-reasoning
+      ModelId: grok-4.3
       Endpoint: https://api.x.ai/v1
       ApiKeyEnvVar: XAI_API_KEY
+      ReasoningEffort: none
     reasoning:
-      ModelId: grok-4-1-fast-reasoning
+      ModelId: grok-4.3
       Endpoint: https://api.x.ai/v1
       ApiKeyEnvVar: XAI_API_KEY
+      ReasoningEffort: low
 
   EvidenceStore:
     Path: .fuseraft/state/evidence.json
