@@ -57,7 +57,6 @@ public static class FuseraftPaths
     public static string GlobalMemoryAgent(string name) => Path.Combine(GlobalRoot, "memory", "agents", name);
 
     // Local (.fuseraft/ relative to CWD)
-    public const string LocalRoot = ".fuseraft";
 
     // logs/ — append-only diagnostic and observability files
     public const string LocalLogs           = ".fuseraft/logs";
@@ -74,7 +73,6 @@ public static class FuseraftPaths
     public const string LocalFileVersions = ".fuseraft/state/file_versions.json";
 
     // artifacts/ — structured agent-written documents read by validators
-    public const string LocalArtifacts       = ".fuseraft/artifacts";
     // Brief paths include {session_id}, expanded at runtime via ExpandSessionId.
     public const string LocalBrief           = ".fuseraft/artifacts/sessions/{session_id}/brief.json";
     public const string LocalTestReport      = ".fuseraft/artifacts/test-report.json";
@@ -86,11 +84,9 @@ public static class FuseraftPaths
         path.Replace("{session_id}", sessionId, StringComparison.Ordinal);
 
     // comms/ — cross-agent communication channels
-    public const string LocalComms    = ".fuseraft/comms";
     public const string LocalChatroom = ".fuseraft/comms/sessions/{session_id}/chatroom.jsonl";
 
     // memory/ (local) — session-scoped memory reference index
-    public const string LocalMemory     = ".fuseraft/memory";
     public const string LocalMemoryRefs = ".fuseraft/memory/sessions/{session_id}/memory_refs.json";
 
     // docs/ — agent-written markdown documents (research, reports, drafts, notes)
@@ -102,7 +98,6 @@ public static class FuseraftPaths
 
     // Already-subdirectorized paths (unchanged locations)
     public const string LocalContext   = ".fuseraft/context";
-    public const string LocalSummaries = ".fuseraft/summaries";
 
     /// <summary>
     /// Returns a compact orientation block that tells agents exactly what is in the
