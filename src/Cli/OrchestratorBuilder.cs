@@ -73,6 +73,7 @@ public static class OrchestratorBuilder
         IHumanApprovalService? humanApprovalService = null,
         bool hitlMode = false,
         string? sessionId = null,
+        string? specContent = null,
         CancellationToken cancellationToken = default)
     {
         if (!File.Exists(configPath))
@@ -93,6 +94,12 @@ public static class OrchestratorBuilder
 
         // Expand ${ENV_VAR} tokens in security and API profile config before use.
         config = ExpandEnvVars(config);
+
+        // Expand {session_id} across all path-bearing and instruction fields so every
+        // downstream consumer receives pre-interpolated values without needing to know
+        // about the token.
+        if (sessionId is { Length: > 0 })
+            config = InterpolateSessionId(config, sessionId);
 
         // Fill in Endpoint and ApiKeyEnvVar from ~/.fuseraft/config for any agent
         // model that doesn't declare them explicitly.
@@ -156,12 +163,10 @@ public static class OrchestratorBuilder
 
         // Brownfield: seed the change envelope from the Archaeologist's discovery brief
         // when the brief already exists on disk (written by a prior recon pass).
-        // {session_id} is only expanded when resuming — new sessions won't have a brief yet.
         if (config.Brownfield is { SeedEnvelopeFromBrief: true, DiscoveryBriefPath: { } discoveryPath }
-            && sessionId is { Length: > 0 }
-            && File.Exists(FuseraftPaths.ExpandSessionId(discoveryPath, sessionId)))
+            && File.Exists(discoveryPath))
         {
-            var expandedDiscoveryPath = FuseraftPaths.ExpandSessionId(discoveryPath, sessionId!);
+            var expandedDiscoveryPath = discoveryPath;
             try
             {
                 var briefJson  = await File.ReadAllTextAsync(expandedDiscoveryPath, cancellationToken);
@@ -208,6 +213,26 @@ public static class OrchestratorBuilder
                     .Select(a => a with
                     {
                         Instructions = basePrompt + "\n\n" + a.Instructions.TrimStart()
+                    })
+                    .ToList()
+            };
+        }
+
+        // Inject the user-supplied spec into every agent's system prompt so all agents
+        // remain anchored to it even after context compaction (spec-anchored SDD).
+        if (!string.IsNullOrWhiteSpace(specContent))
+        {
+            var specBlock =
+                "## Project Spec (authoritative)\n\n" +
+                "The following specification is the single source of truth for this session. " +
+                "All plans, brief.json, and implementation decisions must conform to it.\n\n" +
+                specContent.Trim();
+            config = config with
+            {
+                Agents = config.Agents
+                    .Select(a => a with
+                    {
+                        Instructions = a.Instructions.TrimEnd() + "\n\n" + specBlock
                     })
                     .ToList()
             };
@@ -1283,6 +1308,60 @@ public static class OrchestratorBuilder
         {
             Security    = expandedSecurity,
             ApiProfiles = expandedProfiles,
+        };
+    }
+
+    private static OrchestrationConfig InterpolateSessionId(OrchestrationConfig config, string sessionId)
+    {
+        string  E(string  s) => FuseraftPaths.ExpandSessionId(s, sessionId);
+        string? En(string? s) => s is null ? null : E(s);
+
+        return config with
+        {
+            Agents = config.Agents
+                .Select(a => a with { Instructions = E(a.Instructions) })
+                .ToList(),
+
+            Validation = config.Validation is { } v
+                ? v with
+                {
+                    BriefPath      = E(v.BriefPath),
+                    TestReportPath = E(v.TestReportPath),
+                    ChangeLogPath  = En(v.ChangeLogPath),
+                }
+                : null,
+
+            Contracts = config.Contracts is { Count: > 0 } contracts
+                ? contracts
+                    .Select(c => c with
+                    {
+                        Requires = c.Requires
+                            .Select(p => p with
+                            {
+                                Path          = En(p.Path),
+                                Source        = En(p.Source),
+                                PatternSource = En(p.PatternSource),
+                            })
+                            .ToList(),
+                    })
+                    .ToList()
+                : config.Contracts,
+
+            Brownfield = config.Brownfield is { } bf
+                ? bf with
+                {
+                    DiscoveryBriefPath    = E(bf.DiscoveryBriefPath),
+                    ConventionProfilePath = E(bf.ConventionProfilePath),
+                }
+                : null,
+
+            Chatroom = config.Chatroom is { } ch
+                ? ch with { Path = E(ch.Path) }
+                : null,
+
+            ChangeTracking = config.ChangeTracking is { } ct
+                ? ct with { IntentLogPath = E(ct.ResolveIntentLogPath()) }
+                : null,
         };
     }
 
