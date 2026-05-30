@@ -286,7 +286,7 @@ See [Getting Started — Set your API key](getting-started.md#set-your-api-key) 
 |---------------------|---------------|
 | `ANTHROPIC_API_KEY` | `claude-sonnet-4-5` |
 | `OPENAI_API_KEY` | `gpt-4o-mini` |
-| `XAI_API_KEY` | `grok-4-1-fast-reasoning` |
+| `XAI_API_KEY` | `grok-4.3` |
 | `GOOGLE_AI_API_KEY` | `gemini-2.0-flash` |
 | `MISTRAL_API_KEY` | `mistral-small-latest` |
 | `DEEPSEEK_API_KEY` | `deepseek-chat` |
@@ -369,9 +369,20 @@ Use `/tools` to see the full list at runtime.
 | `/adversarial off` | Disable the critic agent |
 | `/provider` | Show the current model, endpoint, and API key store |
 | `/provider setup` | Reconfigure provider URL, model ID, and API key; saves immediately |
+| `/model` | Show current model and reasoning effort |
+| `/model <id>` | Switch to a different model without clearing history |
+| `/model <id> <effort>` | Switch model and set reasoning effort in one step (e.g. `/model grok-4.3 low`) |
+| `/reasoning` | Show current reasoning effort |
+| `/reasoning <effort>` | Set reasoning effort for the current model — `none`, `low`, `medium`, `high`. Injected as `"reasoning": {"effort": "..."}` in the request; supported by xAI `grok-4.3`. |
 | `/max-tokens <n>` | Cap the model's output to `n` tokens per response |
 | `/max-tokens reset` | Restore the provider's default max output tokens |
 | `/exit` | End the session |
+
+**Switching models and reasoning effort**
+
+`/model <id>` switches the LLM mid-session without clearing history. `/reasoning <effort>` adjusts the reasoning depth of the current model without switching it. Both can be combined: `/model grok-4.3 high` switches to grok-4.3 and sets high reasoning effort in a single command.
+
+Reasoning effort levels (`none` / `low` / `medium` / `high`) are supported by xAI `grok-4.3`. `none` disables thinking tokens entirely for fast structured output; `high` uses maximum reasoning for complex tasks. The level is injected at the HTTP layer — no provider-specific SDK support is required, so the same mechanism works for any xAI model that accepts the `reasoning` parameter.
 
 **Prompt format**
 

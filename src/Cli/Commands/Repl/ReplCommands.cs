@@ -45,6 +45,7 @@ internal static class ReplCommands
             case "/conversation":  CmdConversation(ctx); return CommandResult.Continue;
             case "/rewind":        return await CmdRewindAsync(ctx, arg, cancellationToken);
             case "/model":         return await CmdModelAsync(ctx, arg);
+            case "/reasoning":     return await CmdReasoningAsync(ctx, arg);
             case "/retry":         return CmdRetry(ctx);
             case "/last":          CmdLast(ctx); return CommandResult.Continue;
             case "/snapshot":      await CmdSnapshotAsync(ctx); return CommandResult.Continue;
@@ -1510,19 +1511,32 @@ internal static class ReplCommands
     {
         if (string.IsNullOrWhiteSpace(arg))
         {
-            AnsiConsole.MarkupLine($"  [dim]Model:[/] [bold]{Markup.Escape(ctx.ModelId)}[/]");
-            AnsiConsole.MarkupLine("[dim]Run[/] [bold]/model <id>[/] [dim]to switch models without clearing history.[/]");
+            var effortDisplay = ctx.ModelConfig.ReasoningEffort is { } e
+                ? $"  [dim]Reasoning:[/] [bold]{Markup.Escape(e)}[/]" : string.Empty;
+            AnsiConsole.MarkupLine($"  [dim]Model:[/] [bold]{Markup.Escape(ctx.ModelId)}[/]{effortDisplay}");
+            AnsiConsole.MarkupLine("[dim]Run[/] [bold]/model <id> [effort][/] [dim]to switch models. Effort: none, low, medium, high.[/]");
             return CommandResult.Continue;
         }
 
-        var newModelId = arg.Trim();
-        if (newModelId.Equals(ctx.ModelId, StringComparison.OrdinalIgnoreCase))
+        // Optional second token is reasoning effort: /model grok-4.3 low
+        var parts      = arg.Trim().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        var newModelId = parts[0];
+        var newEffort  = parts.Length > 1 ? parts[1].ToLowerInvariant() : null;
+
+        if (newEffort is not null and not ("none" or "low" or "medium" or "high"))
+        {
+            AnsiConsole.MarkupLine($"[red]✗ Invalid reasoning effort '{Markup.Escape(newEffort)}'.[/] [dim]Valid values: none, low, medium, high.[/]");
+            return CommandResult.Continue;
+        }
+
+        if (newModelId.Equals(ctx.ModelId, StringComparison.OrdinalIgnoreCase)
+            && newEffort == ctx.ModelConfig.ReasoningEffort)
         {
             AnsiConsole.MarkupLine($"[dim]Already using[/] [bold]{Markup.Escape(ctx.ModelId)}[/][dim].[/]");
             return CommandResult.Continue;
         }
 
-        var newConfig = ReplFactory.BuildModelConfig(newModelId, ctx.UserCfg);
+        var newConfig = ReplFactory.BuildModelConfig(newModelId, ctx.UserCfg, newEffort);
         var hasTools  = ctx.GetActiveTools().Count > 0;
         IChatClient newClient;
         try
@@ -1552,10 +1566,57 @@ internal static class ReplCommands
             ctx.History[sysIdx] = new ChatMessage(ChatRole.System, updated);
         }
 
+        var effortSuffix = newEffort is not null ? $" [dim](reasoning: {Markup.Escape(newEffort)})[/]" : string.Empty;
         AnsiConsole.MarkupLine(
-            $"[dim]Model:[/] [bold]{Markup.Escape(prevModel)}[/] [dim]→[/] [bold]{Markup.Escape(newModelId)}[/]  " +
+            $"[dim]Model:[/] [bold]{Markup.Escape(prevModel)}[/] [dim]→[/] [bold]{Markup.Escape(newModelId)}[/]{effortSuffix}  " +
             $"[dim](history preserved)[/]");
-        await ctx.Emitter.EmitAsync("command", payload: new { command = "/model", model = newModelId, prev = prevModel });
+        await ctx.Emitter.EmitAsync("command", payload: new { command = "/model", model = newModelId, prev = prevModel, reasoning_effort = newEffort });
+        return CommandResult.Continue;
+    }
+
+    private static readonly string[] ValidReasoningEfforts = ["none", "low", "medium", "high"];
+
+    private static async Task<CommandResult> CmdReasoningAsync(ReplSessionContext ctx, string arg)
+    {
+        if (string.IsNullOrWhiteSpace(arg))
+        {
+            var current = ctx.ModelConfig.ReasoningEffort ?? "(not set)";
+            AnsiConsole.MarkupLine($"  [dim]Reasoning effort:[/] [bold]{Markup.Escape(current)}[/]");
+            AnsiConsole.MarkupLine("[dim]Run[/] [bold]/reasoning <none|low|medium|high>[/] [dim]to change.[/]");
+            return CommandResult.Continue;
+        }
+
+        var effort = arg.Trim().ToLowerInvariant();
+        if (!ValidReasoningEfforts.Contains(effort))
+        {
+            AnsiConsole.MarkupLine($"[red]✗ Invalid value '{Markup.Escape(effort)}'.[/] [dim]Valid values: none, low, medium, high.[/]");
+            return CommandResult.Continue;
+        }
+
+        var prev = ctx.ModelConfig.ReasoningEffort;
+        if (effort == prev)
+        {
+            AnsiConsole.MarkupLine($"[dim]Reasoning effort already set to[/] [bold]{Markup.Escape(effort)}[/][dim].[/]");
+            return CommandResult.Continue;
+        }
+
+        ctx.ModelConfig = ctx.ModelConfig with { ReasoningEffort = effort };
+        var hasTools = ctx.GetActiveTools().Count > 0;
+        try
+        {
+            ctx.Client     = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools);
+            ctx.StepClient = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ReplTurn.StepIterationLimit);
+        }
+        catch (Exception ex)
+        {
+            ctx.ModelConfig = ctx.ModelConfig with { ReasoningEffort = prev };
+            AnsiConsole.MarkupLine($"[red]✗ Could not apply reasoning effort:[/] {Markup.Escape(ex.Message)}");
+            return CommandResult.Continue;
+        }
+
+        var prevDisplay = prev ?? "(none)";
+        AnsiConsole.MarkupLine($"[dim]Reasoning:[/] [bold]{Markup.Escape(prevDisplay)}[/] [dim]→[/] [bold]{Markup.Escape(effort)}[/]");
+        await ctx.Emitter.EmitAsync("command", payload: new { command = "/reasoning", reasoning_effort = effort, prev = prevDisplay, model = ctx.ModelId });
         return CommandResult.Continue;
     }
 
@@ -1720,8 +1781,10 @@ internal static class ReplCommands
             Console.WriteLine("- `/context` — Show estimated context window usage and per-category breakdown");
             Console.WriteLine("- `/compact` — Summarise conversation into a handoff doc and reset history");
             Console.WriteLine("- `/compact <focus>` — Same, but tailor the summary toward the next session's focus");
-            Console.WriteLine("- `/model` — Show current model");
-            Console.WriteLine("- `/model <id>` — Switch to a different model without clearing history");
+            Console.WriteLine("- `/model` — Show current model and reasoning effort");
+            Console.WriteLine("- `/model <id> [effort]` — Switch model; optional effort: none, low, medium, high");
+            Console.WriteLine("- `/reasoning` — Show current reasoning effort");
+            Console.WriteLine("- `/reasoning <none|low|medium|high>` — Set reasoning effort for the current model");
             Console.WriteLine("- `/max-tokens <n>` — Set max output tokens for each response");
             Console.WriteLine("- `/max-tokens reset` — Restore provider default max output tokens");
             Console.WriteLine("- `/system` — Show current system prompt");
@@ -1804,8 +1867,10 @@ internal static class ReplCommands
         ctx.AddRow("[bold cyan]/context[/]",           "Show estimated context window usage and per-category breakdown");
         ctx.AddRow("[bold cyan]/compact[/]",            "Summarise conversation into a handoff doc and reset history");
         ctx.AddRow("[bold cyan]/compact <focus>[/]",    "Same, but tailor the summary toward the next session's focus");
-        ctx.AddRow("[bold cyan]/model[/]",              "Show current model");
-        ctx.AddRow("[bold cyan]/model <id>[/]",         "Switch to a different model without clearing history");
+        ctx.AddRow("[bold cyan]/model[/]",                          "Show current model and reasoning effort");
+        ctx.AddRow("[bold cyan]/model <id> [effort][/]",           "Switch model; effort: none, low, medium, high");
+        ctx.AddRow("[bold cyan]/reasoning[/]",                     "Show current reasoning effort");
+        ctx.AddRow("[bold cyan]/reasoning <effort>[/]",            "Set reasoning effort for the current model");
         ctx.AddRow("[bold cyan]/max-tokens <n>[/]",     "Set max output tokens for each response");
         ctx.AddRow("[bold cyan]/max-tokens reset[/]",   "Restore provider default max output tokens");
         ctx.AddRow("[bold cyan]/system[/]",             "Show current system prompt");
