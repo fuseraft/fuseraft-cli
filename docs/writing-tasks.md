@@ -174,3 +174,16 @@ Before running a session, verify your task covers:
 - [ ] If you gave a code example, you also wrote what running it should produce
 - [ ] `RequireAllFilesWritten` is on the developer handoff route (not just `RequireWriteFile`)
 - [ ] `Validation.BriefPath` is set so `RequireReviewJudgement` enforces criterion coverage
+
+---
+
+## Spec-driven development
+
+When a task is complex enough to require up-front design agreement — user journeys, API contracts, system boundaries — write a spec file first and pass it with `--spec`. All agents are anchored to the spec from the start; the Planner derives `brief.json` from it rather than synthesising a plan from a raw prompt.
+
+```bash
+fuseraft run --spec spec.md
+fuseraft run --spec spec.md "Add authentication"
+```
+
+See [Spec-Driven Development](spec-driven.md) for the full workflow, spec file format, and when to use each level (spec-first, spec-anchored, spec-as-source).
