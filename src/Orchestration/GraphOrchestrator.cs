@@ -233,10 +233,7 @@ public sealed class GraphOrchestrator(
             StringComparer.OrdinalIgnoreCase);
         var agentInstructions = config.Agents
             .Where(a => !string.IsNullOrWhiteSpace(a.Instructions))
-            .ToDictionary(
-                a => a.Name,
-                a => FuseraftPaths.ExpandSessionId(a.Instructions, _sessionId),
-                StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(a => a.Name, a => a.Instructions, StringComparer.OrdinalIgnoreCase);
         var agentConfigs = config.Agents.ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
         var nodeById = graphCfg.Nodes.ToDictionary(n => n.Id, StringComparer.OrdinalIgnoreCase);
 
@@ -1891,19 +1888,7 @@ public sealed class GraphOrchestrator(
             ? FuseraftPaths.ExpandPath(sbx)
             : null;
 
-        // Expand {session_id} in the brief path so validators address this session's file.
-        // Warn loudly when the session ID was never stamped — the expanded path would still
-        // contain the literal token, causing RequireBriefValidator to surface a config error
-        // rather than directing the agent to a wrong (or literal "{session_id}") directory.
-        if (string.IsNullOrEmpty(_sessionId) && config.Validation?.BriefPath.Contains("{session_id}", StringComparison.Ordinal) == true)
-            logger.LogWarning(
-                "[GraphOrchestrator] BuildValidatorsFromNames called with empty session ID — " +
-                "brief path '{Path}' will not be expanded. Call SetSessionId before StreamAsync.",
-                config.Validation.BriefPath);
-
-        var briefPath = config.Validation is not null
-            ? FuseraftPaths.ExpandSessionId(config.Validation.BriefPath, _sessionId)
-            : null;
+        var briefPath = config.Validation?.BriefPath;
 
         foreach (var name in names)
         {

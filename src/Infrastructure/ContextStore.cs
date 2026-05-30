@@ -24,7 +24,7 @@ namespace fuseraft.Infrastructure;
 /// </summary>
 public sealed class ContextStore
 {
-    public const string DefaultContextDir = ".fuseraft/context";
+    public const string DefaultContextDir = FuseraftPaths.LocalContext;
 
     private const string IndexFileName = "index.json";
 

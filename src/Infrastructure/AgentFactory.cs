@@ -318,10 +318,7 @@ public sealed class AgentFactory(
             // "Scratchpad" is per-agent — each agent gets its own file.
             if (pluginName.Equals("Scratchpad", StringComparison.OrdinalIgnoreCase))
             {
-                var basePath = scratchpadConfig?.BasePath
-                    ?? Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                        ".fuseraft", "scratchpad");
+                var basePath = scratchpadConfig?.BasePath ?? FuseraftPaths.GlobalScratchpad;
                 functions = PluginRegistry.GetFunctionsFromObject(new ScratchpadPlugin(config.Name, basePath));
             }
             // "SubAgent" is per-agent — each agent gets its own lightweight IChatClient

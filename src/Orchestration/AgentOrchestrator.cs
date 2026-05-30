@@ -269,10 +269,7 @@ public sealed class AgentOrchestrator(
         // them, but they are not forwarded. Manual prepend is the only path that reaches the model.
         var agentInstructions = config.Agents
             .Where(a => !string.IsNullOrWhiteSpace(a.Instructions))
-            .ToDictionary(
-                a => a.Name,
-                a => FuseraftPaths.ExpandSessionId(a.Instructions, _sessionId),
-                StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(a => a.Name, a => a.Instructions, StringComparer.OrdinalIgnoreCase);
 
         // Build a lookup of agent name → full agent config for per-agent options (e.g. ContextWindow).
         var agentConfigs = config.Agents
