@@ -30,6 +30,7 @@ fuseraft run [task] [options]
 | `--devui` | off | Start a local web server and print a URL for real-time session visualization. See [DevUI](#devui) below. |
 | `--work-dir <path>` | — | Set the working directory for the session. Priority: flag > `Security.FileSystemSandboxPath` in the config > current directory. |
 | `--context-file <path>` | — | Attach a file as context. Its content is appended to the task. PDF, DOCX, PPTX, and XLSX files are extracted to plain text automatically; other files are read as UTF-8. Repeatable — specify once per file. Ignored when resuming. |
+| `--spec <path>` | — | Path to a spec file (Markdown, plain text, or JSON) that anchors all agents to an agreed specification. The spec is injected into every agent's system prompt as the authoritative source of truth and appended to the task at turn 0. Ignored when resuming. See [Spec-Driven Development](spec-driven.md). |
 | `--vscode` | off | VS Code mode. Reads the API key from the `FUSERAFT_API_KEY` environment variable (injected by the fuseraft VS Code extension) instead of the OS keychain. Automatically passed by the extension — not intended for manual use. |
 
 **Examples**
@@ -81,21 +82,29 @@ fuseraft run --context-file schema.sql --context-file openapi.yaml "Add a /users
 # Binary documents are extracted to plain text automatically
 fuseraft run --context-file requirements.pdf "Implement the auth flow described in the requirements"
 fuseraft run --context-file design.docx --context-file data-model.xlsx "Generate the API layer"
+
+# Spec-driven development — spec anchors every agent and drives the Planner brief
+fuseraft run --spec spec.md
+fuseraft run --spec spec.md "Add authentication to the API"
+fuseraft run --spec spec.json -c dev-team.yaml
 ```
 
 **Task input priority**
 
 When multiple task inputs are provided, the following order applies:
 
-1. **Session checkpoint** — when resuming, the original task is always used; `[task]`, `--task-file`, and `--context-file` are ignored with a warning
+1. **Session checkpoint** — when resuming, the original task is always used; `[task]`, `--task-file`, `--context-file`, and `--spec` are ignored with a warning
 2. **`--task-file`** — if supplied, the file contents are used as the task
 3. **`[task]`** — the positional argument
 4. **Interactive prompt** — if nothing is supplied, you are asked to type a task
-5. **Built-in demo** — if the prompt is left blank, a default demo task runs
+5. **`--spec` default** — if `--spec` is provided with no task, the task defaults to `"Implement the specification."` instead of prompting
+6. **Built-in demo** — if the prompt is left blank and no spec is set, a default demo task runs
 
 The task file is read as plain UTF-8 text. Leading and trailing whitespace is trimmed. The file can contain any content — Markdown, plain prose, bullet lists, structured specs.
 
 `--context-file` is a modifier on top of whatever task source is used: after the task text is resolved, each context file's content is appended as a fenced code block under an `--- Attached files:` section. PDF, DOCX, PPTX, and XLSX files are automatically extracted to plain text; all other files are appended as UTF-8. Files that cannot be found or read emit a warning and are skipped without aborting the run.
+
+`--spec` differs from `--context-file` in two ways: (1) the spec is injected into every agent's system prompt — not just the task message — so it remains visible after context compaction, and (2) the spec is framed as the single authoritative source of truth that `brief.json` must derive from. Use `--spec` to run a [spec-driven development](spec-driven.md) workflow; use `--context-file` for supplementary reference material.
 
 ### Human-in-the-loop controls
 

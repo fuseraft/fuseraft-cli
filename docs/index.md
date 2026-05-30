@@ -24,6 +24,7 @@ fuseraft-cli is actively maintained and in production use. New features ship reg
 |-----|---------------|
 | [Getting Started](getting-started.md) | Prerequisites, installation, first run |
 | [Writing Effective Tasks](writing-tasks.md) | How to write task descriptions that produce correct, verifiable results |
+| [Spec-Driven Development](spec-driven.md) | Using `--spec` to anchor agents to an agreed specification before implementation begins |
 | [CLI Reference](cli-reference.md) | All commands and flags |
 | [Configuration](configuration.md) | Full config schema (YAML and JSON) |
 | [Models & Providers](models.md) | Model configuration and auto-detection |
