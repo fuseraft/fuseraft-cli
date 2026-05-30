@@ -71,6 +71,10 @@ public sealed class RunSettings : CommandSettings
     [CommandOption("--context-file")]
     [Description("Attach a file as context — its content is appended to the task. Repeatable.")]
     public string[]? ContextFiles { get; set; }
+
+    [CommandOption("--spec")]
+    [Description("Path to a spec file (Markdown, plain text, or JSON) that anchors all agents to an agreed specification. Agents treat it as the authoritative source of truth.")]
+    public string? SpecFile { get; set; }
 }
 
 /// <summary>
@@ -142,12 +146,34 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         // before the checkpoint object is constructed (which requires the task string).
         var pendingSessionId = checkpoint?.SessionId ?? Guid.NewGuid().ToString("N")[..8];
 
+        // Load spec file (--spec) before building so the content can be injected into
+        // every agent's system prompt as the authoritative specification.
+        string? specContent = null;
+        if (settings.SpecFile is not null)
+        {
+            var absSpec = Path.IsPathRooted(settings.SpecFile)
+                ? settings.SpecFile
+                : Path.GetFullPath(settings.SpecFile);
+            if (!File.Exists(absSpec))
+            {
+                AnsiConsole.MarkupLine($"[red]✗ Spec file not found:[/] {Markup.Escape(absSpec)}");
+                return 1;
+            }
+            specContent = (await File.ReadAllTextAsync(absSpec, cancellationToken)).Trim();
+            if (string.IsNullOrWhiteSpace(specContent))
+            {
+                AnsiConsole.MarkupLine($"[red]✗ Spec file is empty:[/] {Markup.Escape(absSpec)}");
+                return 1;
+            }
+            AnsiConsole.MarkupLine($"[dim]Spec → {Markup.Escape(absSpec)}[/]");
+        }
+
         var approvalService = new ConsoleHumanApprovalService();
 
         OrchestratorBuildResult built;
         try
         {
-            built = await OrchestratorBuilder.BuildAsync(configPath, loggerFactory, pluginRegistry, approvalService, settings.HumanInTheLoop, sessionId: checkpoint?.SessionId);
+            built = await OrchestratorBuilder.BuildAsync(configPath, loggerFactory, pluginRegistry, approvalService, settings.HumanInTheLoop, sessionId: pendingSessionId, specContent: specContent);
         }
         catch (Exception ex)
         {
@@ -235,12 +261,30 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
 
         if (string.IsNullOrEmpty(task))
         {
-            task = AnsiConsole.Prompt(
-                new TextPrompt<string>("[bold]Task[/] [dim](Enter to use demo)[/]:")
-                    .AllowEmpty());
+            if (specContent is not null)
+            {
+                // Spec provided with no explicit task — the spec IS the mission.
+                task = "Implement the specification.";
+            }
+            else
+            {
+                task = AnsiConsole.Prompt(
+                    new TextPrompt<string>("[bold]Task[/] [dim](Enter to use demo)[/]:")
+                        .AllowEmpty());
 
-            if (string.IsNullOrWhiteSpace(task))
-                task = DefaultDemoTask;
+                if (string.IsNullOrWhiteSpace(task))
+                    task = DefaultDemoTask;
+            }
+        }
+
+        // Append spec as an authoritative block so the Planner sees it at turn 0.
+        // Only on new sessions — resumed sessions already have the spec in history.
+        if (checkpoint is null && specContent is not null)
+        {
+            var ext = Path.GetExtension(settings.SpecFile ?? string.Empty).TrimStart('.');
+            if (string.IsNullOrEmpty(ext)) ext = "txt";
+            task = task.TrimEnd() +
+                $"\n\n---\nSPEC (authoritative — treat this as the single source of truth; your brief.json must derive directly from it):\n```{ext}\n{specContent}\n```";
         }
 
         if (checkpoint is null && settings.ContextFiles is { Length: > 0 } && !string.IsNullOrWhiteSpace(task))
