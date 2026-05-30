@@ -305,6 +305,7 @@ public static partial class InitTemplates
               #     ModelId: {model}
               #   reasoning:
               #     ModelId: {model}
+              #     ReasoningEffort: low
             """;
 
         return new GeneratedConfig(mainConfig, [

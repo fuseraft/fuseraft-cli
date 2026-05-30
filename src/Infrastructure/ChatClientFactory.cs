@@ -1,5 +1,6 @@
 using System.ClientModel;
 using System.ClientModel.Primitives;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -44,11 +45,18 @@ public sealed class ChatClientFactory(
     EventEmitter? eventEmitter = null,
     ILoggerFactory? loggerFactory = null) : IDisposable
 {
-    // One shared HttpClient per factory instance (one per session). The retry handler
-    // wraps SocketsHttpHandler for proper connection pooling.
-    private readonly HttpClient _httpClient = BuildResilientClient(errorLogPath, eventEmitter, loggerFactory?.CreateLogger<TransientRetryHandler>());
+    // Created together so ReasoningEffortInjectHandler gets a reference to the shared dictionary.
+    private static (ConcurrentDictionary<string, string> Efforts, HttpClient Client) CreateComponents(
+        string? errorLogPath, EventEmitter? eventEmitter, ILogger? logger)
+    {
+        var efforts = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        return (efforts, BuildResilientClient(errorLogPath, eventEmitter, logger, efforts));
+    }
 
-    public void Dispose() => _httpClient.Dispose();
+    private readonly (ConcurrentDictionary<string, string> Efforts, HttpClient Client) _components =
+        CreateComponents(errorLogPath, eventEmitter, loggerFactory?.CreateLogger<TransientRetryHandler>());
+
+    public void Dispose() => _components.Client.Dispose();
 
     // Provider presets:
     // Each entry maps a model-ID prefix (lower-cased) to the defaults used when the
@@ -94,11 +102,12 @@ public sealed class ChatClientFactory(
         if (models?.TryGetValue(config.ModelId, out var alias) == true)
         {
             var registryKey = config.ModelId;
-            // Per-agent Temperature / MaxTokens always override the alias values.
+            // Per-agent Temperature / MaxTokens / ReasoningEffort always override the alias values.
             config = alias with
             {
-                Temperature = config.Temperature ?? alias.Temperature,
-                MaxTokens   = config.MaxTokens > 0 ? config.MaxTokens : alias.MaxTokens
+                Temperature     = config.Temperature ?? alias.Temperature,
+                MaxTokens       = config.MaxTokens > 0 ? config.MaxTokens : alias.MaxTokens,
+                ReasoningEffort = config.ReasoningEffort ?? alias.ReasoningEffort,
             };
             // When an alias omits ModelId the user intends the registry key itself
             // to be the model name sent to the provider (e.g. a custom server that
@@ -229,8 +238,12 @@ public sealed class ChatClientFactory(
     // Builds a single IChatClient for a resolved config + explicit apiKey string.
     private IChatClient CreateCore(ModelConfig config, string apiKey)
     {
+        // Register reasoning effort so ReasoningEffortInjectHandler can inject it at request time.
+        if (!string.IsNullOrEmpty(config.ReasoningEffort))
+            _components.Efforts[config.ModelId] = config.ReasoningEffort.ToLowerInvariant();
+
         var provider = config.Provider.Trim().ToLowerInvariant();
-        var transport = new HttpClientPipelineTransport(_httpClient);
+        var transport = new HttpClientPipelineTransport(_components.Client);
 
         switch (provider)
         {
@@ -304,7 +317,11 @@ public sealed class ChatClientFactory(
     // hitting the timeout and triggering the 4-retry chain unnecessarily.
     private static readonly TimeSpan HttpClientTimeout = TimeSpan.FromMinutes(20);
 
-    private static HttpClient BuildResilientClient(string? errorLogPath = null, EventEmitter? eventEmitter = null, ILogger? retryLogger = null)
+    private static HttpClient BuildResilientClient(
+        string? errorLogPath,
+        EventEmitter? eventEmitter,
+        ILogger? retryLogger,
+        ConcurrentDictionary<string, string> reasoningEfforts)
     {
         var handler = new ToolsRequiredRetryHandler
         {
@@ -312,11 +329,14 @@ public sealed class ChatClientFactory(
             {
                 InnerHandler = new FunctionStrictStripHandler
                 {
-                    InnerHandler = new FinishReasonNormalizerHandler
+                    InnerHandler = new ReasoningEffortInjectHandler(reasoningEfforts)
                     {
-                        InnerHandler = new RawReasoningCaptureHandler(eventEmitter)
+                        InnerHandler = new FinishReasonNormalizerHandler
                         {
-                            InnerHandler = new TransientRetryHandler(errorLogPath, retryLogger) { InnerHandler = new SocketsHttpHandler() }
+                            InnerHandler = new RawReasoningCaptureHandler(eventEmitter)
+                            {
+                                InnerHandler = new TransientRetryHandler(errorLogPath, retryLogger) { InnerHandler = new SocketsHttpHandler() }
+                            }
                         }
                     }
                 }
@@ -329,6 +349,7 @@ public sealed class ChatClientFactory(
 // Handler classes extracted to src/Infrastructure/Http/:
 //   TransientRetryHandler          — retry + SSE idle-timeout wrapping
 //   FunctionStrictStripHandler      — strips "strict" from tool definitions
+//   ReasoningEffortInjectHandler    — injects reasoning effort for xAI grok-4.3+
 //   RawReasoningCaptureHandler      — captures xAI reasoning_content field
 //   FinishReasonNormalizerHandler   — normalizes empty finish_reason values
 //   MessageNameStripHandler         — strips name field from non-user messages
