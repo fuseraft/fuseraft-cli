@@ -41,7 +41,9 @@ Orchestration:
         agents to prevent fabricated tool output), TrustScore (0.0–1.0, default 0.7),
         Capabilities (per-plugin tool filter, e.g. FileSystem: [read]),
         ContextWindow.TextOnly (strip tool frames from history — useful for review agents),
-        MaxToolCallsPerTurn, MaxInTurnContextTokens, EnableMemory, SubAgentModel, SubAgentPlugins,
+        MaxToolCallsPerTurn, MaxInTurnContextTokens, MaxInTurnToolPairs (sliding-window cap — deterministic
+        alternative to MaxInTurnContextTokens; recommended 8–16 for Developer/Tester/Operator),
+        EnableMemory, SubAgentModel, SubAgentPlugins,
         RemoteAgent.Url (delegate to remote A2A endpoint — ignores Model/Plugins/FunctionChoice/Capabilities).
 
         ROUTING:
