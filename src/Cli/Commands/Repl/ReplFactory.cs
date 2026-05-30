@@ -12,13 +12,14 @@ namespace fuseraft.Cli.Commands.Repl;
 /// </summary>
 internal static class ReplFactory
 {
-    internal static ModelConfig BuildModelConfig(string modelId, UserConfig? userCfg) =>
+    internal static ModelConfig BuildModelConfig(string modelId, UserConfig? userCfg, string? reasoningEffort = null) =>
         new()
         {
-            ModelId  = modelId,
-            Endpoint = userCfg?.Endpoint ?? string.Empty,
-            ApiKey   = userCfg?.ApiKey   ?? string.Empty,
-            Provider = userCfg?.Provider ?? string.Empty,
+            ModelId         = modelId,
+            Endpoint        = userCfg?.Endpoint ?? string.Empty,
+            ApiKey          = userCfg?.ApiKey   ?? string.Empty,
+            Provider        = userCfg?.Provider ?? string.Empty,
+            ReasoningEffort = reasoningEffort,
         };
 
     // addFunctionInvocation controls whether the FunctionInvokingChatClient middleware is
