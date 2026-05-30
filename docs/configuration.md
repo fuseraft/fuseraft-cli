@@ -137,7 +137,8 @@ Each entry in `Agents` configures one participant in the group chat.
 | `Capabilities` | object | `{}` | no | Per-plugin capability filter. Keys are plugin names; values are arrays of capability tags. Only tools covered by a listed tag are registered. Omitting a plugin allows all its tools. See [Capabilities](#capabilities). |
 | `FunctionChoice` | string | `"auto"` | no | Tool-use enforcement: `auto`, `required`, or `none`. |
 | `MaxToolCallsPerTurn` | int | `0` | no | Hard cap on tool calls per turn. `0` means no limit. When exceeded, the turn ends with an error injected into history. |
-| `MaxInTurnContextTokens` | int | `0` | no | Soft cap on in-turn context tokens. `0` means no limit. A `context_cap_warning` event is emitted when exceeded. |
+| `MaxInTurnContextTokens` | int | `0` | no | Soft cap (budget-reactive) on in-turn context tokens. `0` means no limit. Before each inner LLM call the oldest tool-result messages are replaced with placeholders until the total is under this budget. |
+| `MaxInTurnToolPairs` | int | `0` | no | Hard sliding-window cap (deterministic) on the number of tool call/result pairs kept in full within a turn. Before every inner LLM call, all but the most-recent N pairs are replaced with placeholders unconditionally — regardless of total token count. `0` means no limit. Recommended: 8–16 for high-volume action agents. |
 | `TrustScore` | number | `0.7` | no | Governance trust score (0.0–1.0) used to assign an execution ring. See [Governance](governance.md#execution-rings). |
 | `ContextWindow` | object | — | no | Filters the conversation history before it reaches this agent. See [ContextWindow](#contextwindow). |
 | `EnableMemory` | bool | `false` | no | When `true`, persistent memories from `~/.fuseraft/memory/agents/{Name}/` are prepended to the agent's instructions at session start. See [Memory](#memory). |
@@ -215,6 +216,7 @@ Agents:
   - AgentFile: agents/developer.yaml
     Name: LeadDeveloper               # rename the agent for this config's routing rules
     MaxInTurnContextTokens: 40000     # tighter context cap for this environment
+    MaxInTurnToolPairs: 12            # deterministic sliding window: keep only last 12 tool results per turn
 ```
 
 **Override semantics** — inline fields whose value differs from the field's default override the file; fields left at their defaults are inherited. The practical rules:
