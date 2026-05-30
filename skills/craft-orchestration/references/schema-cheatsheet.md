@@ -108,6 +108,8 @@ Orchestration:
     ModelId: fast                 # alias from Models, or a literal model ID string
     MaxTokens: 16384
   FunctionChoice: required        # forces at least one tool call per turn
+  MaxInTurnToolPairs: 12         # sliding window: keep only last 12 tool results per inner LLM call (deterministic)
+  MaxInTurnContextTokens: 40000  # budget-reactive: trim oldest tool results when total exceeds this (soft cap)
   Plugins:
     - FileSystem
     - Shell

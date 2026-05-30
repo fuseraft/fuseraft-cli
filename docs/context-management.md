@@ -442,6 +442,42 @@ See [Configuration — Context budget](configuration.md#context-budget) for the 
 
 ---
 
+## In-turn tool-result sliding window
+
+Compaction and Context Budget operate across turns. The in-turn sliding window operates
+*within* a single agent turn — before each inner LLM call in the tool-calling loop.
+
+Without a cap, N sequential tool calls cost O(N²) cumulative tokens across the turn because
+each iteration resends all prior tool results. The sliding window keeps this cost at O(window)
+by replacing every tool result older than the last `MaxInTurnToolPairs` with a compact
+placeholder before the next LLM call:
+
+```yaml
+Agents:
+  - Name: Developer
+    MaxInTurnToolPairs: 12   # keep only the last 12 tool call/result pairs in full
+```
+
+**Deterministic vs. budget-reactive:**
+
+| Field | When it fires | Guarantee |
+|-------|--------------|-----------|
+| `MaxInTurnToolPairs` | Every inner LLM call, unconditionally | O(N) tool-result footprint always |
+| `MaxInTurnContextTokens` | Only when total in-turn chars exceed the budget | Fires only after the budget is exceeded |
+
+Use `MaxInTurnToolPairs` when you want a hard bound regardless of result sizes. Use
+`MaxInTurnContextTokens` when result sizes vary and you want to preserve more context for
+turns with small results. Both can be set simultaneously — the sliding window runs first.
+
+**Replaced results:** replaced pairs become `[result omitted — sliding window]`. The
+`CallId` on each `FunctionResultContent` is preserved so the conversation structure stays
+valid for strict providers. The agent can re-read a file or re-run a command if it needs
+the full content again.
+
+**Recommended values:** 8–16 for high-volume action agents (Developer, Tester, Operator).
+
+---
+
 ## Adaptive context-trim retry
 
 When a provider call fails due to a context or payload size error — HTTP 413, a Bedrock
@@ -524,6 +560,8 @@ Here is the full sequence from session start through a long-running session:
       ├─ MaxToolResultChars — truncate large tool results in replayed history
       └─ SanitizeToolPairs — strip orphaned assistant tool-call frames (strict providers)
          └─ Filtered slice + replay-truncated content → sent to LLM
+            ├─ MaxInTurnToolPairs — sliding window: keep only last N tool pairs per inner call
+            ├─ MaxInTurnContextTokens — budget-reactive: trim oldest pairs when over budget
             └─ On context/413 error → adaptive trim retry (up to 3 stages)
 
 3. After each checkpoint save
@@ -616,3 +654,15 @@ Compaction:
 ```
 
 Both triggers are active simultaneously — whichever fires first wins.
+
+**For action agents that make many sequential tool calls** (Developer, Tester, Operator), set
+`MaxInTurnToolPairs` to keep within-turn context cost at O(N) regardless of how many tool
+calls the agent makes in a single turn:
+
+```yaml
+Agents:
+  - Name: Developer
+    MaxInTurnToolPairs: 12
+```
+
+Combine with `ContextBudget` to protect against both within-turn spikes and across-turn accumulation.

@@ -144,6 +144,7 @@ Orchestration:
         ModelId: fast
         MaxTokens: 16384
       FunctionChoice: required
+      MaxInTurnToolPairs: 12
       Plugins:
         - FileSystem
         - Shell
@@ -183,6 +184,7 @@ Orchestration:
         ModelId: fast
         MaxTokens: 8192
       FunctionChoice: required
+      MaxInTurnToolPairs: 12
       Plugins:
         - FileSystem
         - Shell
