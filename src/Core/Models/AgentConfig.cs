@@ -146,6 +146,25 @@ public record AgentConfig
     public int MaxInTurnContextTokens { get; init; } = 0;
 
     /// <summary>
+    /// Hard sliding-window cap on the number of tool call/result pairs kept in full
+    /// within the active turn. Before each inner LLM call, tool-result messages beyond
+    /// the most-recent <c>MaxInTurnToolPairs</c> are replaced with a compact placeholder.
+    /// Unlike <see cref="MaxInTurnContextTokens"/> (which is budget-reactive), this limit
+    /// is applied unconditionally on every iteration — the context window cost is
+    /// O(MaxInTurnToolPairs) regardless of how many tool calls the agent makes.
+    ///
+    /// <para>
+    /// Use this when you want a deterministic bound rather than a soft budget.
+    /// Compatible with <see cref="MaxInTurnContextTokens"/>: both are applied when set,
+    /// with the sliding window running first.
+    /// </para>
+    ///
+    /// <para>Recommended: 8–16 for high-volume action agents (Developer, Tester).</para>
+    /// 0 (default) = no sliding window.
+    /// </summary>
+    public int MaxInTurnToolPairs { get; init; } = 0;
+
+    /// <summary>
     /// When true, loads this agent's persistent memory from
     /// <c>~/.fuseraft/memory/agents/{Name}/</c> and prepends it to <see cref="Instructions"/>
     /// at creation time so the agent has recall across sessions without an explicit

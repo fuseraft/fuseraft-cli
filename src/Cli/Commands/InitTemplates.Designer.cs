@@ -57,7 +57,7 @@ public static partial class InitTemplates
                 agents to prevent fabricated tool output), TrustScore (0.0–1.0, default 0.7),
                 Capabilities (per-plugin tool filter, e.g. FileSystem: [read_file]),
                 ContextWindow.TextOnly (strip tool frames from history — useful for review agents),
-                MaxToolCallsPerTurn, MaxInTurnContextTokens, EnableMemory, SubAgentModel, SubAgentPlugins,
+                MaxToolCallsPerTurn, MaxInTurnContextTokens, MaxInTurnToolPairs, EnableMemory, SubAgentModel, SubAgentPlugins,
                 AgentFile (path to a standalone agent YAML — inline fields override the file at load time),
                 RemoteAgent.Url (delegate to remote A2A endpoint — ignores Model/Plugins/FunctionChoice/Capabilities).
 

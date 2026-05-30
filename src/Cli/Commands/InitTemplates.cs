@@ -67,6 +67,7 @@ public static partial class InitTemplates
         # FunctionChoice: required  # force at least one tool call per turn (auto|required|none)
         # TrustScore: 0.8           # 0.0–1.0; governs sandbox ring (≥0.8 → ring 1)
         # MaxToolCallsPerTurn: 20
+        # MaxInTurnToolPairs: 12        # sliding window: keep only last N tool results per turn (deterministic)
         # MaxTokens: 4096
         # Capabilities:             # per-plugin tool allowlist
         #   Shell: [shell_run]
