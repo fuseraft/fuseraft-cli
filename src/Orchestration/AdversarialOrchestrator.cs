@@ -142,10 +142,7 @@ public sealed class AdversarialOrchestrator(
             .ToDictionary(a => a.Name!, StringComparer.OrdinalIgnoreCase);
         var agentInstructions = config.Agents
             .Where(a => !string.IsNullOrWhiteSpace(a.Instructions))
-            .ToDictionary(
-                a => a.Name,
-                a => FuseraftPaths.ExpandSessionId(a.Instructions, _sessionId),
-                StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(a => a.Name, a => a.Instructions, StringComparer.OrdinalIgnoreCase);
 
         int turn             = priorHistory is { Count: > 0 } ? priorHistory[^1].TurnIndex + 1 : 0;
         int cumulativeTokens = 0;

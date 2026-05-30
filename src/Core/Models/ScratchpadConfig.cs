@@ -1,3 +1,5 @@
+using fuseraft.Core;
+
 namespace fuseraft.Core.Models;
 
 /// <summary>
@@ -13,8 +15,5 @@ public record ScratchpadConfig
     /// Directory where scratchpad files are stored.
     /// Supports <c>~</c> expansion. Defaults to <c>~/.fuseraft/scratchpad</c>.
     /// </summary>
-    public string BasePath { get; init; } =
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".fuseraft", "scratchpad");
+    public string BasePath { get; init; } = FuseraftPaths.GlobalScratchpad;
 }

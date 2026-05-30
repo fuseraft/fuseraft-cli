@@ -36,6 +36,7 @@ public sealed class ContractEngine
     private readonly EvidenceStore? _evidenceStore;
     private readonly TestSelectorConfig? _testSelector;
     private readonly string? _sandboxRoot;
+    private readonly string _sessionId;
 
     private static readonly JsonSerializerOptions JsonOpts =
         new() { PropertyNameCaseInsensitive = true };
@@ -45,7 +46,8 @@ public sealed class ContractEngine
         ValidationConfig? validationConfig = null,
         EvidenceStore? evidenceStore = null,
         TestSelectorConfig? testSelector = null,
-        string? sandboxRoot = null)
+        string? sandboxRoot = null,
+        string? sessionId = null)
     {
         _contracts        = contracts.ToDictionary(
             c => c.Name,
@@ -55,7 +57,10 @@ public sealed class ContractEngine
         _evidenceStore    = evidenceStore;
         _testSelector     = testSelector;
         _sandboxRoot      = sandboxRoot;
+        _sessionId        = sessionId ?? string.Empty;
     }
+
+    private string Expand(string path) => FuseraftPaths.ExpandSessionId(path, _sessionId);
 
     /// <summary>Names of all contracts known to this engine.</summary>
     public IReadOnlyList<string> ContractNames => [.. _contracts.Keys];
@@ -115,15 +120,17 @@ public sealed class ContractEngine
             return (false,
                 $"Contract '{contractName}' config error: FilesWritten requires 'Source' (JSON path) and 'Field' (array field name).");
 
-        if (!File.Exists(pred.Source))
+        var source = Expand(pred.Source);
+
+        if (!File.Exists(source))
             return (false,
-                $"Contract '{contractName}' failed: FilesWritten source '{pred.Source}' does not exist. Write it before handing off.");
+                $"Contract '{contractName}' failed: FilesWritten source '{source}' does not exist. Write it before handing off.");
 
         // Parse the source file and extract the array field.
         List<string> expectedPaths;
         try
         {
-            var raw = await File.ReadAllTextAsync(pred.Source, ct);
+            var raw = await File.ReadAllTextAsync(source, ct);
             using var doc = JsonDocument.Parse(raw);
             var root = doc.RootElement;
 
@@ -131,7 +138,7 @@ public sealed class ContractEngine
                 !root.TryGetProperty(pred.Field.ToLowerInvariant(), out fieldEl))
             {
                 return (false,
-                    $"Contract '{contractName}' failed: '{pred.Source}' has no field '{pred.Field}'.");
+                    $"Contract '{contractName}' failed: '{source}' has no field '{pred.Field}'.");
             }
 
             expectedPaths = [];
@@ -156,7 +163,7 @@ public sealed class ContractEngine
         catch (Exception ex)
         {
             return (false,
-                $"Contract '{contractName}' error: could not parse '{pred.Source}': {ex.Message}");
+                $"Contract '{contractName}' error: could not parse '{source}': {ex.Message}");
         }
 
         if (expectedPaths.Count == 0)
@@ -173,7 +180,7 @@ public sealed class ContractEngine
             return (true, null);
 
         return (false,
-            $"Contract '{contractName}' failed — files from '{pred.Source}'['{pred.Field}'] not written:\n" +
+            $"Contract '{contractName}' failed — files from '{source}'['{pred.Field}'] not written:\n" +
             string.Join("\n", missing.Select(f => $"  ✗ {f}")) +
             "\n\nWrite them with write_file before handing off.");
     }
@@ -190,9 +197,9 @@ public sealed class ContractEngine
 
         if (!string.IsNullOrWhiteSpace(pred.PatternField))
         {
-            var sourcePath = pred.PatternSource
+            var sourcePath = Expand(pred.PatternSource
                 ?? _validationConfig?.BriefPath
-                ?? FuseraftPaths.LocalBrief;
+                ?? FuseraftPaths.LocalBrief);
 
             if (!File.Exists(sourcePath))
                 return (false,
@@ -241,7 +248,7 @@ public sealed class ContractEngine
             return (true, null);
 
         var resolvedFrom = pred.PatternField is not null
-            ? $" (read from '{pred.PatternSource ?? FuseraftPaths.LocalBrief}' field '{pred.PatternField}')"
+            ? $" (read from '{Expand(pred.PatternSource ?? FuseraftPaths.LocalBrief)}' field '{pred.PatternField}')"
             : string.Empty;
 
         return (false,
@@ -251,17 +258,19 @@ public sealed class ContractEngine
 
     // FileExists
 
-    private static (bool, string?) EvaluateFileExists(ContractPredicate pred, string contractName)
+    private (bool, string?) EvaluateFileExists(ContractPredicate pred, string contractName)
     {
         if (string.IsNullOrWhiteSpace(pred.Path))
             return (false,
                 $"Contract '{contractName}' config error: FileExists requires 'Path'.");
 
-        if (File.Exists(pred.Path))
+        var path = Expand(pred.Path);
+
+        if (File.Exists(path))
             return (true, null);
 
         return (false,
-            $"Contract '{contractName}' failed — '{pred.Path}' does not exist. Create it before handing off.");
+            $"Contract '{contractName}' failed — '{path}' does not exist. Create it before handing off.");
     }
 
     // TestReport
