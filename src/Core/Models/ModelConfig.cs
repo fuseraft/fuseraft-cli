@@ -102,6 +102,14 @@ public record ModelConfig
     public double? Temperature { get; init; } = null;
 
     /// <summary>
+    /// Reasoning effort level for models that support it (e.g. <c>grok-4.3</c>).
+    /// Accepted values: <c>none</c>, <c>low</c>, <c>medium</c>, <c>high</c>.
+    /// Injected as <c>"reasoning": {"effort": "..."}</c> in the request body.
+    /// Omit for models that do not support the <c>reasoning</c> parameter.
+    /// </summary>
+    public string? ReasoningEffort { get; init; }
+
+    /// <summary>
     /// Ordered list of fallover models to try when this model fails with a classifiable error.
     /// Each entry supports the same shorthand as <see cref="ModelId"/> (a plain string in YAML).
     /// The primary model is always tried first; fallover models are tried in order.
