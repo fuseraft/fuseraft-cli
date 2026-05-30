@@ -104,6 +104,7 @@ public static partial class InitTemplates
               - Changes
               - Handoff
             FunctionChoice: required
+            MaxInTurnToolPairs: 12
             {AgentFileOptions}
             """;
 
