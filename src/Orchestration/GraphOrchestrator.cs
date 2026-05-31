@@ -312,7 +312,7 @@ public sealed class GraphOrchestrator(
 
         if (eventEmitter is not null)
             await eventEmitter.EmitAsync("session_start",
-                payload: new { start_node = startNodeId, resume = priorHistory is { Count: > 0 } });
+                payload: new { task, start_node = startNodeId, resume = priorHistory is { Count: > 0 } });
 
         var phaseTask = Task.Run(
             () => RunPhasesAsync(bindings, agentCtx, startNodeId, phaseCts.Token),

@@ -655,7 +655,7 @@ Event consumers may inject messages, trigger external systems, or enforce additi
 
 | Event | Emitter | Payload |
 |---|---|---|
-| `session_start` | `GraphOrchestrator`, `ReplCommand` | Task, agent count |
+| `session_start` | `GraphOrchestrator`, `ReplCommand` | `task` (raw task string), `start_node`, `resume` |
 | `session_end` | `GraphOrchestrator`, `ReplCommand` | Turn count, succeeded |
 | `phase_start` | `GraphOrchestrator` | Phase name, starting executor |
 | `phase_end` | `GraphOrchestrator` | Phase name, turn count |

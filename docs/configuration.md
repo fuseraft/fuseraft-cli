@@ -691,6 +691,8 @@ Each line is a JSON object:
 | `event_type` | Event identifier. Session lifecycle: `session_start`, `session_end`, `phase_start`, `phase_end`, `compaction`, `session_error`. Per-turn: `turn_start`, `turn_end`, `turn_timeout`, `reasoning`. Routing: `keyword_detected`, `multi_keyword`, `no_keyword`, `keyword_not_found`, `agent_routed`, `state_advanced`, `context_cap_warning`, `correction_injected`. Validation: `validation_fail`, `hitl_escalation`. Context budget: `context_budget_warn`, `context_budget_cutover`. Saga: `saga_compensating`, `saga_compensated`. Magentic: `magentic_plan`, `magentic_replan`, `magentic_complete`. Infrastructure: `tool_blocked`, `tool_call`, `circuit_breaker_open`, `http_reasoning`. Sub-agent: `sub_agent_start`, `sub_agent_tool_call`, `sub_agent_end`. |
 | `payload` | Event-specific JSON object |
 
+**`session_start` payload:** `{ task, start_node, resume }` — `task` is the raw task string passed to the session (inline `--task` value or full contents of `--task-file`); `start_node` is the initial graph node; `resume` is true when replaying prior history.
+
 **`turn_end` payload:** `{ input_tokens, output_tokens }` — accumulated across all API calls within the turn.
 
 **`validation_fail` payload:** `{ validator, consecutive }` — name of the blocking validator and how many times in a row it has fired for this agent.
