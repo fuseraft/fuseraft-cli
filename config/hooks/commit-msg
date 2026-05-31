@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# commit-msg hook — enforces conventional commit format.
+#
+# Install: cp config/hooks/commit-msg .git/hooks/commit-msg && chmod +x .git/hooks/commit-msg
+#
+# Format:
+#   type(optional-scope): description
+#
+#   Optional body — each line a bullet starting with "- "
+#
+# Rules enforced:
+#   1. Subject matches type[(scope)]: description
+#   2. Subject ≤ 72 characters
+#   3. Blank line between subject and body (when body is present)
+#   4. Description starts with a lowercase letter or digit
+#   5. Subject does not end with a period
+
+MSG_FILE="$1"
+
+# Read all non-comment lines (handle files with no trailing newline).
+LINES=()
+while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^# ]] && continue
+    LINES+=("$line")
+done < "$MSG_FILE"
+
+# Nothing meaningful — let git handle it.
+JOINED="${LINES[*]}"
+if [[ -z "${JOINED// /}" ]]; then
+    exit 0
+fi
+
+SUBJECT="${LINES[0]}"
+
+# ── Rule 1: type[(scope)]: description ───────────────────────────────────────
+# Pattern must be in a variable — bash rejects .+ when the pattern is inline.
+SUBJECT_RE='^(feat|fix|refactor|docs|chore|test|style|perf|ci|build|revert)(\([a-z0-9][a-z0-9-]*\))?: .+'
+if ! [[ "$SUBJECT" =~ $SUBJECT_RE ]]; then
+    echo ""
+    echo "✗ Commit subject does not match conventional format."
+    echo ""
+    echo "  Expected:  type: description"
+    echo "             type(scope): description"
+    echo ""
+    echo "  Examples:  feat: add Redis caching to customer lookup"
+    echo "             fix(parser): handle empty input gracefully"
+    echo "             docs: update session_start payload reference"
+    echo ""
+    echo "  Types:     feat  fix  refactor  docs  chore  test"
+    echo "             style  perf  ci  build  revert"
+    echo ""
+    echo "  Got: $SUBJECT"
+    echo ""
+    exit 1
+fi
+
+# ── Rule 2: subject length ────────────────────────────────────────────────────
+SUBJECT_LEN=${#SUBJECT}
+if (( SUBJECT_LEN > 72 )); then
+    echo ""
+    echo "✗ Subject line is $SUBJECT_LEN characters (max 72)."
+    echo ""
+    echo "  Move detail into the commit body, separated by a blank line:"
+    echo ""
+    echo "  feat: short summary under 72 chars"
+    echo ""
+    echo "  - Detail that did not fit goes here"
+    echo ""
+    exit 1
+fi
+
+# ── Rule 3: blank line before body ───────────────────────────────────────────
+if (( ${#LINES[@]} > 1 )); then
+    SECOND="${LINES[1]}"
+    if [[ -n "${SECOND// /}" ]]; then
+        echo ""
+        echo "✗ Missing blank line between subject and body."
+        echo ""
+        echo "  Add an empty line after the subject:"
+        echo ""
+        echo "  feat: short summary"
+        echo ""
+        echo "  - Body detail"
+        echo ""
+        exit 1
+    fi
+fi
+
+# ── Rule 4: description starts lowercase ─────────────────────────────────────
+DESC="${SUBJECT#*: }"
+FIRST_CHAR="${DESC:0:1}"
+if [[ "$FIRST_CHAR" =~ [A-Z] ]]; then
+    LOWER_DESC="${FIRST_CHAR,,}${DESC:1}"
+    echo ""
+    echo "✗ Description must start with a lowercase letter."
+    echo ""
+    echo "  Got:  $SUBJECT"
+    echo "  Fix:  ${SUBJECT%%: *}: $LOWER_DESC"
+    echo ""
+    exit 1
+fi
+
+# ── Rule 5: no trailing period ────────────────────────────────────────────────
+LAST_CHAR="${SUBJECT: -1}"
+if [[ "$LAST_CHAR" == "." ]]; then
+    echo ""
+    echo "✗ Subject line must not end with a period."
+    echo ""
+    echo "  Got: $SUBJECT"
+    echo ""
+    exit 1
+fi
+
+exit 0
