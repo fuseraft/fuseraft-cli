@@ -15,6 +15,10 @@ public sealed class SessionsSettings : CommandSettings
     [CommandOption("-d|--delete")]
     [Description("Delete a session by ID, or 'all' to delete every completed session.")]
     public string? Delete { get; set; }
+
+    [CommandOption("--prune")]
+    [Description("Delete sessions whose config file no longer exists on disk (orphaned sessions).")]
+    public bool Prune { get; set; }
 }
 
 /// <summary>
@@ -24,6 +28,27 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
 {
     protected override async Task<int> ExecuteAsync(CommandContext context, SessionsSettings settings, CancellationToken cancellationToken)
     {
+        // Prune orphaned sessions
+        if (settings.Prune)
+        {
+            var all = await sessionStore.ListAsync();
+            var orphaned = all
+                .Where(s => string.IsNullOrEmpty(s.ConfigPath) || !File.Exists(s.ConfigPath))
+                .ToList();
+
+            if (orphaned.Count == 0)
+            {
+                AnsiConsole.MarkupLine("[green]✓ No orphaned sessions found.[/]");
+                return 0;
+            }
+
+            foreach (var s in orphaned)
+                await sessionStore.DeleteAsync(s.SessionId);
+
+            AnsiConsole.MarkupLine($"[green]✓ Pruned {orphaned.Count} orphaned session(s).[/]");
+            return 0;
+        }
+
         // Delete mode
         if (settings.Delete is { } target)
         {
