@@ -137,7 +137,7 @@ Orchestration:
         2. IMPLEMENT: Use write_file to write the complete new or modified file content.
            Implement every path listed in files_to_change.
         3. BUILD/RUN: Use shell_run to build and confirm it works. Include exact output.
-        4. COMMIT: Use git_add and git_commit to commit your changes.
+        4. COMMIT: Call load_skill("git-commit") and follow its steps to stage and commit.
         5. HAND OFF: Call handoff(route_keyword: "HANDOFF TO TESTER").
            If the plan needs rethinking, call handoff(route_keyword: "REPLAN REQUIRED").
       Model:
