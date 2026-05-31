@@ -138,7 +138,7 @@ public static partial class InitTemplates
           # Checkpoint: save and resume sessions across restarts.
           # Checkpoint:
           #   Mode: json
-          #   Path: .fuseraft/checkpoints
+          #   Path: {FuseraftPaths.LocalCheckpoints}
 
           # ChangeTracking: record every file write/delete made by agents.
           # ChangeTracking:

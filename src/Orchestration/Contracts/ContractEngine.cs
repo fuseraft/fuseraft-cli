@@ -120,6 +120,13 @@ public sealed class ContractEngine
             return (false,
                 $"Contract '{contractName}' config error: FilesWritten requires 'Source' (JSON path) and 'Field' (array field name).");
 
+        if (string.IsNullOrWhiteSpace(_sessionId) &&
+            pred.Source.Contains("{session_id}", StringComparison.Ordinal))
+            return (false,
+                $"Contract '{contractName}' failed — source path '{pred.Source}' contains '{{session_id}}' but " +
+                $"no session ID is set. This is a fuseraft-cli internal error — " +
+                $"the orchestrator should have called SetSessionId before starting the session.");
+
         var source = Expand(pred.Source);
 
         if (!File.Exists(source))
@@ -197,9 +204,18 @@ public sealed class ContractEngine
 
         if (!string.IsNullOrWhiteSpace(pred.PatternField))
         {
-            var sourcePath = Expand(pred.PatternSource
+            var rawSourcePath = pred.PatternSource
                 ?? _validationConfig?.BriefPath
-                ?? FuseraftPaths.LocalBrief);
+                ?? FuseraftPaths.LocalBrief;
+
+            if (string.IsNullOrWhiteSpace(_sessionId) &&
+                rawSourcePath.Contains("{session_id}", StringComparison.Ordinal))
+                return (false,
+                    $"Contract '{contractName}' failed — source path '{rawSourcePath}' contains '{{session_id}}' but " +
+                    $"no session ID is set. This is a fuseraft-cli internal error — " +
+                    $"the orchestrator should have called SetSessionId before starting the session.");
+
+            var sourcePath = Expand(rawSourcePath);
 
             if (!File.Exists(sourcePath))
                 return (false,
@@ -248,7 +264,7 @@ public sealed class ContractEngine
             return (true, null);
 
         var resolvedFrom = pred.PatternField is not null
-            ? $" (read from '{Expand(pred.PatternSource ?? FuseraftPaths.LocalBrief)}' field '{pred.PatternField}')"
+            ? $" (read from '{Expand(pred.PatternSource ?? _validationConfig?.BriefPath ?? FuseraftPaths.LocalBrief)}' field '{pred.PatternField}')"
             : string.Empty;
 
         return (false,
@@ -263,6 +279,17 @@ public sealed class ContractEngine
         if (string.IsNullOrWhiteSpace(pred.Path))
             return (false,
                 $"Contract '{contractName}' config error: FileExists requires 'Path'.");
+
+        // Guard: if the path template uses {session_id} but no session ID was injected,
+        // Expand() would silently produce a mangled path like "sessions//brief.json".
+        // Surface the config error explicitly instead so the operator can investigate.
+        if (string.IsNullOrWhiteSpace(_sessionId) &&
+            pred.Path.Contains("{session_id}", StringComparison.Ordinal))
+            return (false,
+                $"Contract '{contractName}' failed — path '{pred.Path}' contains '{{session_id}}' but " +
+                $"no session ID is set. This is a fuseraft-cli internal error — " +
+                $"the orchestrator should have called SetSessionId before starting the session. " +
+                $"Do NOT create a directory literally named '{{session_id}}'.");
 
         var path = Expand(pred.Path);
 
