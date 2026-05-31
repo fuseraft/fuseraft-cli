@@ -1868,7 +1868,7 @@ internal static class ReplCommands
         ctx.AddRow("[bold cyan]/compact[/]",            "Summarise conversation into a handoff doc and reset history");
         ctx.AddRow("[bold cyan]/compact <focus>[/]",    "Same, but tailor the summary toward the next session's focus");
         ctx.AddRow("[bold cyan]/model[/]",                          "Show current model and reasoning effort");
-        ctx.AddRow("[bold cyan]/model <id> [effort][/]",           "Switch model; effort: none, low, medium, high");
+        ctx.AddRow("[bold cyan]/model <id> [[effort]][/]",          "Switch model; effort: none, low, medium, high");
         ctx.AddRow("[bold cyan]/reasoning[/]",                     "Show current reasoning effort");
         ctx.AddRow("[bold cyan]/reasoning <effort>[/]",            "Set reasoning effort for the current model");
         ctx.AddRow("[bold cyan]/max-tokens <n>[/]",     "Set max output tokens for each response");
