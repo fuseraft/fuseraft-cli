@@ -224,7 +224,12 @@ fuseraft sessions --delete a3f92c1d
 
 # Purge all completed sessions
 fuseraft sessions --delete all
+
+# Remove orphaned sessions (config file no longer exists on disk)
+fuseraft sessions --prune
 ```
+
+A session is **orphaned** when its `ConfigPath` points to an orchestration config file that no longer exists — for example, after a project directory is deleted or the `.fuseraft/` workspace is reset. Orphaned sessions cannot be resumed and accumulate silently over time. `--prune` removes all of them in one pass.
 
 ---
 
