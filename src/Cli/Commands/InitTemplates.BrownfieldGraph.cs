@@ -299,7 +299,7 @@ public static partial class InitTemplates
 
               # Checkpoint:
               #   Mode: json
-              #   Path: .fuseraft/checkpoints
+              #   Path: {FuseraftPaths.LocalCheckpoints}
 
               # Models:
               #   fast:

@@ -92,6 +92,9 @@ public static class FuseraftPaths
     // docs/ — agent-written markdown documents (research, reports, drafts, notes)
     public const string LocalDocs = ".fuseraft/docs";
 
+    // checkpoints/ — session checkpoint files written when Checkpoint.Mode is set
+    public const string LocalCheckpoints = ".fuseraft/checkpoints";
+
     // tests/ — tester-created test scripts and fixture files (any language/format)
     public const string LocalTests        = ".fuseraft/tests";
     public const string LocalTestFixtures = ".fuseraft/tests/fixtures";
