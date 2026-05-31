@@ -217,7 +217,8 @@ app.Configure(cfg =>
         .WithExample(["sessions"])
         .WithExample(["sessions", "--all"])
         .WithExample(["sessions", "--delete", "a1b2c3d4"])
-        .WithExample(["sessions", "--delete", "all"]);
+        .WithExample(["sessions", "--delete", "all"])
+        .WithExample(["sessions", "--prune"]);
 
     cfg.AddCommand<InitCommand>("init")
         .WithDescription("Generate a ready-to-run orchestration config from an interactive wizard.")
