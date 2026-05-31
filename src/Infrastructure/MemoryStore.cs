@@ -249,10 +249,42 @@ public sealed class MemoryStore
             return await LoadAllAsync(ct); // not a fuseraft project — load all globals
 
         if (!File.Exists(refsPath))
-            return []; // fuseraft project but no memories saved here yet
+            return await LoadFromWorkspaceSessionsAsync(fuseraftDir, ct);
 
         var json  = await File.ReadAllTextAsync(refsPath, ct);
         var guids = JsonSerializer.Deserialize<string[]>(json) ?? [];
+
+        var entries = new List<MemoryEntry>();
+        foreach (var guid in guids)
+        {
+            var filePath = Path.Combine(_dir, $"memory_{guid}.md");
+            if (!File.Exists(filePath)) continue;
+            var entry = await ParseFileAsync(filePath, ct);
+            if (entry is not null) entries.Add(entry);
+        }
+        return entries;
+    }
+
+    // Collects all GUIDs from every session refs file under {cwd}/.fuseraft/memory/sessions/
+    // so that a new REPL session in the same workspace sees memories saved by prior sessions.
+    private async Task<List<MemoryEntry>> LoadFromWorkspaceSessionsAsync(string fuseraftDir, CancellationToken ct)
+    {
+        var sessionsDir = Path.Combine(fuseraftDir, "memory", "sessions");
+        if (!Directory.Exists(sessionsDir)) return [];
+
+        var guids = new HashSet<string>();
+        foreach (var sessionDir in Directory.GetDirectories(sessionsDir))
+        {
+            var refsFile = Path.Combine(sessionDir, "memory_refs.json");
+            if (!File.Exists(refsFile)) continue;
+            try
+            {
+                var json      = await File.ReadAllTextAsync(refsFile, ct);
+                var sessionGuids = JsonSerializer.Deserialize<string[]>(json) ?? [];
+                foreach (var g in sessionGuids) guids.Add(g);
+            }
+            catch { /* corrupt refs — skip */ }
+        }
 
         var entries = new List<MemoryEntry>();
         foreach (var guid in guids)
