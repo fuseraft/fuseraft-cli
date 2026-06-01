@@ -135,6 +135,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         SubAgentPlugin? subAgent = null;
         SkillsPlugin?   skillsPlugin   = null;
         string?         skillsCatalog  = null;
+        List<AIFunction>? explorerTools = null;
         if (!settings.NoTools)
         {
             toolsByCategory["FileSystem"] = PluginRegistry.GetFunctionsFromObject(new FileSystemPlugin()).ToList();
@@ -149,12 +150,11 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 { "shell_run", "shell_get_env", "shell_which", "shell_get_working_directory" };
             var gitReadOps   = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 { "git_status", "git_diff", "git_log", "git_show", "git_branch_list", "git_stash_list" };
-            var explorerTools = toolsByCategory["FileSystem"].Where(f => fsReadOps.Contains(f.Name))
+            explorerTools = toolsByCategory["FileSystem"].Where(f => fsReadOps.Contains(f.Name))
                 .Concat(toolsByCategory["Search"])
                 .Concat(toolsByCategory["Shell"].Where(f => shellReadOps.Contains(f.Name)))
                 .Concat(toolsByCategory["Git"].Where(f => gitReadOps.Contains(f.Name)))
                 .ToList();
-            subAgent = new SubAgentPlugin(factory.Create(modelConfig), explorerTools);
 
             (skillsPlugin, skillsCatalog) = ReplSkillsLoader.BuildSkills();
             if (skillsPlugin is not null)
@@ -198,6 +198,11 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
         using var emitter = new EventEmitter(eventsPath);
         emitter.SetSessionId(sessionId);
+
+        if (explorerTools is not null)
+            subAgent = new SubAgentPlugin(factory.Create(modelConfig), explorerTools,
+                eventEmitter:    emitter,
+                parentAgentName: "repl");
         await emitter.EmitAsync("session_start", payload: new
         {
             model         = modelId,
@@ -319,7 +324,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
     // Loads ShellPolicy from the default orchestration config in the working directory, if one exists.
     // Uses OrchestratorBuilder.LoadSecurityConfig which binds only Orchestration.Security and does
     // NOT run ResolveAgentFiles — a missing agent file therefore cannot silently drop the policy.
-    private static ShellPolicy? TryLoadDefaultShellPolicy()
+    private ShellPolicy? TryLoadDefaultShellPolicy()
     {
         var candidates = new[]
         {
@@ -329,13 +334,18 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
         foreach (var path in candidates)
         {
+            if (!File.Exists(path)) continue;
             try
             {
                 var security = OrchestratorBuilder.LoadSecurityConfig(path);
                 if (security?.ShellPolicy is { } policy)
                     return policy;
             }
-            catch { /* best effort — malformed config should not crash the REPL */ }
+            catch (Exception ex)
+            {
+                loggerFactory.CreateLogger<ReplCommand>().LogDebug(
+                    ex, "Failed to load shell policy from '{Path}' — REPL will proceed without it.", path);
+            }
         }
 
         return null;

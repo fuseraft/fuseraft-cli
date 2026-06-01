@@ -80,6 +80,9 @@ public sealed class IntentLog
         };
 
         await AppendEntryAsync(entry, ct);
+        _logger?.LogDebug(
+            "IntentLog: recorded PENDING intent '{IntentId}' — {Function} (agent: {Agent}, turn: {Turn})",
+            intentId, functionName, agent, turnIndex);
         return intentId;
     }
 
@@ -98,7 +101,17 @@ public sealed class IntentLog
         {
             var store = await LoadAsync(ct);
             var entry = store.Entries.Find(e => e.IntentId == intentId);
-            if (entry is null) return;
+            if (entry is null)
+            {
+                _logger?.LogWarning(
+                    "IntentLog: intent '{IntentId}' not found — status update to {Status} skipped (log may have been reset).",
+                    intentId, status);
+                return;
+            }
+
+            _logger?.LogDebug(
+                "IntentLog: intent '{IntentId}' ({Function}) {OldStatus} → {NewStatus}",
+                intentId, entry.Operation.FunctionName, entry.Status, status);
 
             entry.Status       = status;
             entry.ErrorMessage = errorMessage;

@@ -378,7 +378,7 @@ public sealed class AgentOrchestrator(
                             Role      = "assistant",
                             TurnIndex = turn++,
                             Usage     = ExtractUsage(branchResponse),
-                            ToolCalls = ExtractToolCalls(branchResponse.Messages),
+                            ToolCalls = ExtractToolCalls(branchResponse.Messages, branchAgent.Name ?? "Unknown"),
                         };
 
                         cumulativeTokens += branchMsg.Usage?.TotalTokens ?? 0;
@@ -509,7 +509,7 @@ public sealed class AgentOrchestrator(
                 Role      = "assistant",
                 TurnIndex = turn++,
                 Usage     = ExtractUsage(response),
-                ToolCalls = ExtractToolCalls(response.Messages)
+                ToolCalls = ExtractToolCalls(response.Messages, agent.Name ?? "Unknown")
             };
 
             cumulativeTokens += agentMessage.Usage?.TotalTokens ?? 0;
@@ -630,7 +630,7 @@ public sealed class AgentOrchestrator(
                     Role      = "assistant",
                     TurnIndex = turn++,
                     Usage     = ExtractUsage(vResponse),
-                    ToolCalls = ExtractToolCalls(vResponse.Messages)
+                    ToolCalls = ExtractToolCalls(vResponse.Messages, verifierAgent.Name ?? "Verifier")
                 };
 
                 cumulativeTokens += verifierMessage.Usage?.TotalTokens ?? 0;
@@ -710,8 +710,9 @@ public sealed class AgentOrchestrator(
     /// <summary>
     /// Scans the raw response messages for function call / result pairs and returns a
     /// slim summary list suitable for terminal display. Fails gracefully on any parse error.
+    /// Logs tool call failures and parse errors.
     /// </summary>
-    private static IReadOnlyList<ToolCallRecord>? ExtractToolCalls(IList<ChatMessage> messages)
+    private IReadOnlyList<ToolCallRecord>? ExtractToolCalls(IList<ChatMessage> messages, string agentName = "Unknown")
     {
         var calls   = new List<(string CallId, string Name, string? ArgsSummary)>();
         var results = new Dictionary<string, bool>(StringComparer.Ordinal); // callId → succeeded
@@ -737,11 +738,25 @@ public sealed class AgentOrchestrator(
                                    && !text.StartsWith("[EXIT ",      StringComparison.Ordinal);
                         if (!string.IsNullOrEmpty(key))
                             results[key] = success;
+
+                        if (!success)
+                        {
+                            var toolName = calls.LastOrDefault(c => c.CallId == key).Name ?? key;
+                            logger.LogWarning(
+                                "[{Agent}] Tool '{Tool}' failed: {ResultPreview}",
+                                agentName, toolName,
+                                text.Length > 120 ? text[..120].Replace('\n', ' ') : text.Replace('\n', ' '));
+                        }
                     }
                 }
             }
         }
-        catch (Exception) { /* best-effort — return null on any parse error */ }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "[{Agent}] Failed to parse tool calls from agent response — tool call records will be incomplete.",
+                agentName);
+        }
 
         if (calls.Count == 0) return null;
 

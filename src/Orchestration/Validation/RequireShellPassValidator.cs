@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 
@@ -29,7 +30,8 @@ namespace fuseraft.Orchestration.Validation;
 public sealed class RequireShellPassValidator(
     string? requiredCommandPattern = null,
     string? changeLogPath = null,
-    bool requireCurrentTurn = false) : IRoutingValidator
+    bool requireCurrentTurn = false,
+    ILogger<RequireShellPassValidator>? logger = null) : IRoutingValidator
 {
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -98,8 +100,9 @@ public sealed class RequireShellPassValidator(
                 (requiredCommandPattern is null ||
                  HistoryHelpers.MatchesPattern(c.Command, requiredCommandPattern)));
         }
-        catch
+        catch (Exception ex)
         {
+            logger?.LogWarning(ex, "RequireShellPassValidator: failed to read change log at '{Path}' — treating as no shell pass.", logPath);
             return false;
         }
     }
