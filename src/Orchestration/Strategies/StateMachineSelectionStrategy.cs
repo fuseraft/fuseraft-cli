@@ -541,6 +541,20 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                 failureType, failingContract);
         }
 
+        // Global backstop: escalate to HITL when any transition has failed too many
+        // times regardless of the per-type action. This prevents Reinstruct policies
+        // from looping indefinitely when a contract cannot be satisfied.
+        if (_failureHandling.MaxConsecutiveContractFailures > 0
+            && newCount >= _failureHandling.MaxConsecutiveContractFailures)
+        {
+            _transitionFailure = null;
+            throw new ValidatorStuckException(
+                agentName:           state.Agent,
+                validatorName:       failingContract,
+                consecutiveFailures: newCount,
+                lastValidatorError:  $"[MaxConsecutiveContractFailures={_failureHandling.MaxConsecutiveContractFailures} reached] " + errorMessage);
+        }
+
         // Inject correction.
         if (_history is not null)
         {
@@ -548,6 +562,13 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                 failureType, typeConfig, newCount,
                 errorMessage, failingContract, _currentState, transition.To, _sessionId);
             _history.Add(new ChatMessage(ChatRole.User, correction));
+
+            // Blocking marker: prevents the signal that triggered this failed transition
+            // from being re-evaluated on the next turn via the lookback window. The agent
+            // must emit a fresh signal for another contract check. TransitionAlreadyFired
+            // already checks for "[fuseraft:" prefix, so this marker is picked up naturally.
+            _history.Add(new ChatMessage(ChatRole.User,
+                $"[fuseraft:blocked {_currentState}→{transition.To}]"));
         }
 
         return null; // re-invoke the current state's agent

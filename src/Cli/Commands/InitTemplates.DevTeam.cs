@@ -210,6 +210,10 @@ public static partial class InitTemplates
                 NoProgress:
                   Action: Abort
                   Threshold: 3
+                # Hard backstop: escalate to HITL after this many consecutive contract
+                # failures on any transition, regardless of per-type action. Prevents
+                # Reinstruct from looping indefinitely when a contract cannot be satisfied.
+                MaxConsecutiveContractFailures: 6
 
               Verifier:
                 AgentName: Verifier

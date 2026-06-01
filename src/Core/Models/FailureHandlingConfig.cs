@@ -123,6 +123,22 @@ public record FailureHandlingConfig
     public FailureTypeConfig NoProgress { get; init; } =
         new() { Action = FailureAction.Abort, Threshold = 3 };
 
+    /// <summary>
+    /// Hard backstop applied across all failure types and all transitions. When any
+    /// single state-to-state transition accumulates this many consecutive contract
+    /// failures — regardless of the per-type <see cref="FailureTypeConfig.Action"/> —
+    /// the orchestrator escalates to HITL via <see cref="Core.Exceptions.ValidatorStuckException"/>.
+    ///
+    /// <para>
+    /// This prevents a <see cref="FailureAction.Reinstruct"/> policy from looping forever
+    /// when a contract cannot be satisfied: the configured type threshold continues to
+    /// control when reinstructions stop and the type-specific escalation fires, but this
+    /// global ceiling ensures no transition fails more than N times total regardless of
+    /// the type policy. 0 (default) disables the global backstop.
+    /// </para>
+    /// </summary>
+    public int MaxConsecutiveContractFailures { get; init; } = 0;
+
     /// <summary>Returns the <see cref="FailureTypeConfig"/> for <paramref name="type"/>.</summary>
     public FailureTypeConfig GetConfig(FailureType type) => type switch
     {
