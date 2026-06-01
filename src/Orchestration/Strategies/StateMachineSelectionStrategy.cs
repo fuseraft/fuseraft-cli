@@ -52,6 +52,11 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
     // Tracks consecutive transition failures keyed by "{state}::{transitionTo}".
     private (string Key, int Count, string LastError)? _transitionFailure;
 
+    // Tracks consecutive turns in the current state without any matching signal.
+    // Stored in strategy state (not history) so it survives compaction cycles.
+    // Resets on successful transition or when the agent emits any valid signal.
+    private (string State, int Count)? _noSignalFailure;
+
     // Tracks which state+transition pairs have already had their recovery logic fire.
     private readonly HashSet<string> _recoveryActivated = new(StringComparer.OrdinalIgnoreCase);
 
@@ -263,8 +268,9 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                     throw new InvalidOperationException(
                         $"[StateMachine] Transition target state '{targetState}' is not defined.");
 
-                // Clear failure tracker on successful transition.
+                // Clear failure trackers on successful transition.
                 _transitionFailure = null;
+                _noSignalFailure   = null;
 
                 // Inject turn-boundary marker when agent changes.
                 if (_history is not null &&
@@ -294,6 +300,31 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
             _ = _eventEmitter.EmitAsync("keyword_not_found",
                 agent: state.Agent,
                 payload: new { state = _currentState, agent = state.Agent });
+
+        // Accumulate consecutive no-signal turns in strategy state so the counter
+        // survives compaction (unlike the history-scan used by InjectLoopWarningIfNeeded).
+        var noSigCount = _noSignalFailure?.State == _currentState
+            ? _noSignalFailure.Value.Count + 1
+            : 1;
+        _noSignalFailure = (_currentState, noSigCount);
+
+        if (_failureHandling.MaxConsecutiveTurnsWithoutSignal > 0
+            && noSigCount >= _failureHandling.MaxConsecutiveTurnsWithoutSignal)
+        {
+            _noSignalFailure = null;
+            var validSignals = string.Join(", ", state.Transitions
+                .Where(t => !string.IsNullOrWhiteSpace(t.Signal))
+                .Select(t => $"'{t.Signal}'")
+                .Distinct());
+            throw new ValidatorStuckException(
+                agentName:           state.Agent,
+                validatorName:       $"signal-required:{_currentState}",
+                consecutiveFailures: noSigCount,
+                lastValidatorError:
+                    $"Agent '{state.Agent}' completed {noSigCount} consecutive turns in state '{_currentState}' " +
+                    $"without emitting a routing signal. Required signal(s): {validSignals}. " +
+                    $"The agent may have completed its work but is not calling handoff correctly.");
+        }
 
         InjectLoopWarningIfNeeded(history, state.Agent);
         InjectMissingSignalCorrectionIfNeeded(history, state);
@@ -416,6 +447,9 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
         string? authorName,
         CancellationToken cancellationToken)
     {
+        // Agent emitted a signal (contract blocked it), so silence counter resets.
+        _noSignalFailure = null;
+
         var failureKey = $"{_currentState}::{transition.To}";
         var newCount = _transitionFailure?.Key == failureKey
             ? _transitionFailure.Value.Count + 1
