@@ -223,7 +223,24 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
             : null;
 
         var strategyLogger = loggerFactory?.CreateLogger<StateMachineSelectionStrategy>();
-        return new StateMachineSelectionStrategy(sm, contractEngine, failureHandling, _eventEmitter, strategyLogger, _governanceKernel, verifier);
+
+        // Build a handoff context resolver when any transition in the machine declares
+        // HandoffContext sources. It reads from the same artifact paths the contract engine
+        // uses, so no new dependencies are required.
+        HandoffContextResolver? handoffResolver = null;
+        bool anyHandoffContext = sm.States.Values
+            .SelectMany(s => s.Transitions)
+            .Any(t => t.HandoffContext is { Count: > 0 });
+        if (anyHandoffContext)
+        {
+            handoffResolver = new HandoffContextResolver(
+                sandboxRoot:   _sandboxRoot,
+                changeLogPath: validationConfig?.ChangeLogPath,
+                briefPath:     validationConfig?.BriefPath);
+            handoffResolver.SetSessionId(_sessionId);
+        }
+
+        return new StateMachineSelectionStrategy(sm, contractEngine, failureHandling, _eventEmitter, strategyLogger, _governanceKernel, verifier, handoffResolver);
     }
 
     private static Dictionary<string, IRoutingValidator> BuildValidators(

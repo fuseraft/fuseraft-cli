@@ -238,6 +238,9 @@ public static partial class InitTemplates
                         - To: Review
                           Signal: "HANDOFF TO REVIEWER"
                           Contract: ImplementationComplete
+                          HandoffContext:
+                            - Source: session_context
+                            - Source: changes_recent
                         - To: Planning
                           Signal: "REPLAN REQUIRED"
 
