@@ -301,6 +301,11 @@ public sealed class SessionRunner(
                     _perAgentCumulativeInputTokens.Clear();
                     _warnedAgents.Clear();
                     _justCompacted = true;
+                    // Reset the assistant-turn counter to the retained history's assistant count so
+                    // ShouldCompact starts fresh from the post-compaction baseline. Without this reset,
+                    // the counter keeps climbing past TriggerTurnCount and compaction fires on every
+                    // subsequent turn, thrashing the session indefinitely.
+                    _assistantTurnCount = checkpoint.Messages.Count(m => m.Role == "assistant");
                     if (contextWindowRecorder is not null)
                         await contextWindowRecorder.RecordCompactionAsync(_assistantTurnCount);
                 }
