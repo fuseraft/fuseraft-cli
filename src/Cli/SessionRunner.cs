@@ -661,6 +661,22 @@ public sealed class SessionRunner(
                             payload: new { cumulative_input_tokens = cumulative, warn_at = contextBudget.WarnAt, cutover_at = contextBudget.CutoverAt });
                 }
 
+                // Per-turn ceiling: fires when a single turn's input exceeds the threshold,
+                // independently of the cumulative counter. Catches single-turn explosions
+                // that exhaust the cumulative budget in one shot.
+                if (contextBudget.MaxSingleTurnInputTokens > 0 && inputToks > contextBudget.MaxSingleTurnInputTokens)
+                {
+                    AnsiConsole.MarkupLine(
+                        $"[yellow]  ⚡ {Markup.Escape(agentName)} single-turn input ({inputToks:N0}) exceeded " +
+                        $"MaxSingleTurnInputTokens ({contextBudget.MaxSingleTurnInputTokens:N0}). " +
+                        $"Compacting before next turn...[/]");
+                    if (eventEmitter is not null)
+                        await eventEmitter.EmitAsync("context_budget_cutover",
+                            agent: agentName,
+                            payload: new { input_tokens = inputToks, cutover_at = contextBudget.MaxSingleTurnInputTokens, reason = "single_turn_limit" });
+                    return true;
+                }
+
                 if (contextBudget.CutoverAt > 0 && cumulative >= contextBudget.CutoverAt)
                 {
                     AnsiConsole.MarkupLine(

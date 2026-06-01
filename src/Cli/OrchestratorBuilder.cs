@@ -730,18 +730,34 @@ public static class OrchestratorBuilder
         }
 
         // Validate context budget config.
-        if (config.ContextBudget is { CutoverAt: > 0 } cb)
+        if (config.ContextBudget is { } budget)
         {
-            if (compactor is null)
+            bool budgetNeedsCompactor = budget.CutoverAt > 0 || budget.MaxSingleTurnInputTokens > 0;
+            if (budgetNeedsCompactor && compactor is null)
                 throw new InvalidOperationException(
-                    "ContextBudget.CutoverAt requires a Compaction configuration. " +
-                    "Add a Compaction section to your orchestration config so the compactor " +
-                    "is available when the context budget triggers.");
+                    "ContextBudget.CutoverAt and ContextBudget.MaxSingleTurnInputTokens require a " +
+                    "Compaction configuration. Add a Compaction section to your orchestration config " +
+                    "so the compactor is available when the context budget triggers.");
 
-            if (cb.WarnAt > 0 && cb.WarnAt >= cb.CutoverAt)
+            if (budget.WarnAt > 0 && budget.CutoverAt > 0 && budget.WarnAt >= budget.CutoverAt)
                 throw new InvalidOperationException(
-                    $"ContextBudget.WarnAt ({cb.WarnAt:N0}) must be less than " +
-                    $"CutoverAt ({cb.CutoverAt:N0}).");
+                    $"ContextBudget.WarnAt ({budget.WarnAt:N0}) must be less than " +
+                    $"CutoverAt ({budget.CutoverAt:N0}).");
+
+            // Warn when WarnTurnTokens >= CutoverAt: a turn that fires the per-turn warning
+            // will simultaneously trigger compaction, making the warning a post-hoc note
+            // rather than an advance signal. Lower WarnTurnTokens below CutoverAt to get
+            // a meaningful early warning before the compaction threshold is crossed.
+            if (config.WarnTurnTokens > 0 && budget.CutoverAt > 0 &&
+                config.WarnTurnTokens >= budget.CutoverAt)
+            {
+                loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
+                    "WarnTurnTokens ({WarnTurnTokens:N0}) is >= ContextBudget.CutoverAt ({CutoverAt:N0}). " +
+                    "The per-turn warning fires in the same turn that triggers compaction — it cannot " +
+                    "provide advance warning. Set WarnTurnTokens below CutoverAt to get an early signal " +
+                    "before the compaction threshold is crossed.",
+                    config.WarnTurnTokens, budget.CutoverAt);
+            }
         }
 
         // MagenticOrchestrator handles the "magentic" selection type: a manager LLM drives

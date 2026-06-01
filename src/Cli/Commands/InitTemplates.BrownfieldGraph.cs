@@ -191,7 +191,10 @@ public static partial class InitTemplates
               Events:
                 Path: {FuseraftPaths.LocalEventsLog}
 
-              WarnTurnTokens: 300000
+              # WarnTurnTokens: warn when a single turn's input exceeds this value.
+              # Keep this below ContextBudget.CutoverAt so the warning fires before
+              # compaction is forced, giving an advance signal rather than a post-hoc note.
+              WarnTurnTokens: 60000
 
               # Each agent lives in its own YAML file in agents/ — edit, version, or reuse
               # them independently across configs. Inline fields override the file at load time.
@@ -300,13 +303,19 @@ public static partial class InitTemplates
               Compaction:
                 TriggerTurnCount: 30
                 KeepRecentTurns: 8
-                Mode: lossless
+                # Graph sessions have no state-machine snapshotter; "intent" mode rebuilds
+                # deterministically from the intent log produced by ChangeTracking.
+                Mode: intent
 
               # ContextBudget: per-agent cumulative input-token thresholds. Warns before
-              # context rot sets in, then triggers compaction automatically. Requires Compaction.
-              # ContextBudget:
-              #   WarnAt: 80000
-              #   CutoverAt: 120000
+              # context rot sets in, then triggers compaction automatically. Counters reset
+              # after each compaction cycle so the session can run indefinitely.
+              # MaxSingleTurnInputTokens guards against single-turn explosions that exhaust
+              # the cumulative budget in one shot — compaction fires before the next turn.
+              ContextBudget:
+                WarnAt: 60000
+                CutoverAt: 100000
+                MaxSingleTurnInputTokens: 200000
 
               # Checkpoint:
               #   Mode: json

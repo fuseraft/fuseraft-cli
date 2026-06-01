@@ -222,14 +222,20 @@ public static partial class InitTemplates
                 KeepRecentTurns: 8
                 Mode: lossless
 
-              WarnTurnTokens: 300000
+              # WarnTurnTokens: warn when a single turn's input exceeds this value.
+              # Keep this below ContextBudget.CutoverAt so the warning fires before
+              # compaction is forced, giving an advance signal rather than a post-hoc note.
+              WarnTurnTokens: 60000
 
               # ContextBudget: per-agent cumulative input-token thresholds. Warns before
               # context rot sets in, then triggers compaction automatically. Counters reset
               # after each compaction cycle so the session can run indefinitely.
-              # ContextBudget:
-              #   WarnAt: 80000
-              #   CutoverAt: 120000
+              # MaxSingleTurnInputTokens guards against single-turn explosions that exhaust
+              # the cumulative budget in one shot — compaction fires before the next turn.
+              ContextBudget:
+                WarnAt: 60000
+                CutoverAt: 100000
+                MaxSingleTurnInputTokens: 200000
 
               Events:
                 Path: {FuseraftPaths.LocalEventsLog}

@@ -42,4 +42,25 @@ public record ContextBudgetConfig
     /// </para>
     /// </summary>
     public int CutoverAt { get; init; } = 0;
+
+    /// <summary>
+    /// Per-turn input-token ceiling that triggers compaction before the next turn,
+    /// independently of the cumulative <see cref="CutoverAt"/> counter. When a
+    /// completed turn's input-token count exceeds this value the session history is
+    /// compacted before the following agent turn begins.
+    ///
+    /// <para>
+    /// This guards against single-turn explosions — e.g. an agent reading many large
+    /// files in one turn — whose individual cost exceeds <see cref="CutoverAt"/> in a
+    /// single shot and would leave the next turn carrying an already-bloated history.
+    /// Note: this check fires <em>after</em> the expensive turn completes; it prevents
+    /// the next turn from inheriting the inflated context, not the current one.
+    /// </para>
+    ///
+    /// <para>
+    /// Requires <see cref="OrchestrationConfig.Compaction"/> to be configured.
+    /// 0 (default) disables per-turn enforcement.
+    /// </para>
+    /// </summary>
+    public int MaxSingleTurnInputTokens { get; init; } = 0;
 }
