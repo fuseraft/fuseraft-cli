@@ -163,7 +163,8 @@ Every session is driven by a single JSON or YAML file under the top-level `Orche
 | `Plugins` | List of plugin names to load as tools |
 | `FunctionChoice` | `auto` / `required` / `none` — maps to `tool_choice` in the API |
 | `TrustScore` | 0.0–1.0 — governs execution ring assignment and privilege level |
-| `ContextWindow` | Optional per-agent history filter (strips tool noise, limits tail length) |
+| `ContextWindow` | Optional per-agent history filter (strips tool noise, limits tail length). Ignored when `Context` is set. |
+| `Context` | Optional artifact-first context spec. When declared, replaces history replay entirely — context is assembled from disk sources (`session_context`, `changes_recent`, `brief_field`, `file`, `own_history`) rather than filtering the shared transcript. |
 
 **Environment variable expansion** for `Security.HttpAllowedHosts` and all `ApiProfiles` header values is performed at startup via `${ENV_VAR}` tokens. Credentials never appear in agent instructions or conversation history.
 
@@ -223,10 +224,12 @@ event Action<string, int, int>? TokenBudgetWarning        // (agentName, inputTo
 The general-purpose path. Drives any selection strategy through a single `while(true)` loop:
 
 1. Call `IAgentSelector.SelectAsync(agents, history)` → get next agent (null = session ends)
-2. Apply the agent's `ContextWindow` filter to trim the history slice passed to the LLM
+2. Build the context slice for the agent — two paths depending on `AgentConfig.Context`:
+   - **Context spec declared:** `ContextAssembler.AssembleForAgentAsync` reads declared artifact sources from disk and returns `[task, own_history_turns, artifact_block]`. Shared history is not replayed. Token cost is proportional to the declared sources, not session length.
+   - **No Context spec:** `ContextWindowFilter.Apply` filters the shared history by `TextOnly`, `MaxTurnAge`, `MaxTailMessages`, etc. (traditional path).
 3. Prepend the agent's system instruction (MAF's `ChatClientAgent.RunAsync` does not inject instructions automatically when `session = null`)
 4. Call `agent.RunAsync(context, null, null, ct)` via the governance circuit breaker
-5. Append all response messages (including tool calls/results) to shared history with `AuthorName` set
+5. Append all response messages (including tool calls/results) to shared history with `AuthorName` set — regardless of which context path was used, so routing/termination strategies always read from the full history
 6. Yield the final text response as an `AgentMessage`
 7. Check `ITerminationCondition.ShouldTerminateAsync(history)` — break if true
 8. Check `MaxIterations` hard cap
@@ -235,18 +238,19 @@ The general-purpose path. Drives any selection strategy through a single `while(
 
 ```
 START
-  → SelectAgent       (IAgentSelector.SelectAsync)
-  → FilterHistory     (ContextWindowFilter)
-  → InvokeAgent       (agent.RunAsync via circuit breaker)
-  → AppendHistory
-  → CheckTermination  (ITerminationCondition.ShouldTerminateAsync)
+  → SelectAgent           (IAgentSelector.SelectAsync)
+  → BuildContext          (ContextAssembler  if AgentConfig.Context is set)
+                          (ContextWindowFilter  otherwise)
+  → InvokeAgent           (agent.RunAsync via circuit breaker)
+  → AppendHistory         (always writes to shared history for routing)
+  → CheckTermination      (ITerminationCondition.ShouldTerminateAsync)
   → CheckIterationCap
   → (terminated or capped ? END : SelectAgent)
 ```
 
 **Why instructions are injected manually:** When calling `RunAsync` without a session, MAF does not prepend the agent's `Instructions` as a system message. Agents must see their role definition and routing keywords on every turn, so we prepend it explicitly.
 
-**Shared history:** All agents read from and write to the same `List<ChatMessage>`. This is intentional — routing strategies (especially `KeywordSelectionStrategy`) read `AuthorName` from the most recent assistant message to determine who just spoke and where they want to route.
+**Shared history:** All agents read from and write to the same `List<ChatMessage>`. This is intentional — routing strategies (especially `KeywordSelectionStrategy`) read `AuthorName` from the most recent assistant message to determine who just spoke and where they want to route. The `Context` spec changes what the *model* sees, not what the orchestrator's routing layer sees.
 
 ### 6.2 MagenticOrchestrator
 
@@ -512,7 +516,7 @@ Every session is backed by a `SessionCheckpoint` persisted after each agent turn
 
 `ConversationCompactor` prevents context window exhaustion on long sessions by summarizing older turns using an LLM.
 
-**Trigger:** `ShouldCompact(messages)` returns true when `messages.Count >= config.TriggerTurnCount`.
+**Trigger:** `ShouldCompact(messages)` returns true when the assistant-message count in `messages` reaches `config.TriggerTurnCount`. Only assistant turns are counted — user messages and tool frames are excluded. The `SessionRunner` resets this count to the retained tail's assistant count after each compaction so the trigger fires relative to the current window, not the session lifetime.
 
 **Process:** The oldest `Count - KeepRecentTurns` messages are compacted into a single summary `AgentMessage`. The retained tail is kept verbatim. The summary is injected with `Role = "user"` so agents treat it as context, and `IsCompactionSummary = true` so tooling can identify it.
 
