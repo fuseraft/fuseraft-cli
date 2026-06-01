@@ -47,6 +47,12 @@ public sealed class SessionRunner(
     private readonly Dictionary<string, int> _perAgentCumulativeInputTokens = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _warnedAgents = new(StringComparer.OrdinalIgnoreCase);
 
+    // Set to true after each compaction cycle. Suppresses CutoverAt and MaxSingleTurnInputTokens
+    // enforcement for exactly one turn so a post-compaction turn can run without immediately
+    // triggering another compaction — the history is already at minimum after compaction and
+    // re-compacting before the agent makes any progress would thrash indefinitely.
+    private bool _justCompacted;
+
     public async Task<SessionResult> RunAsync(
         string task,
         SessionCheckpoint checkpoint,
@@ -69,6 +75,23 @@ public sealed class SessionRunner(
             string? injection        = null;
             bool    compactionNeeded = false;
 
+            // Pre-turn context size guard: if the retained history already exceeds the
+            // per-turn token ceiling, compact before the agent runs. This prevents the
+            // agent from spending expensive tokens on a turn that would immediately trigger
+            // post-turn compaction anyway. Skipped for the first turn after a compaction
+            // (_justCompacted) so we don't thrash when the retained tail itself is large.
+            if (!_justCompacted
+                && compactor is not null
+                && contextBudget?.MaxSingleTurnInputTokens > 0
+                && checkpoint.Messages.Sum(m => (m.Content?.Length ?? 0) / 4) > contextBudget.MaxSingleTurnInputTokens)
+            {
+                AnsiConsole.MarkupLine(
+                    $"[yellow]  ⚡ Pre-turn context estimate exceeds MaxSingleTurnInputTokens " +
+                    $"({contextBudget.MaxSingleTurnInputTokens:N0}). Compacting before next turn...[/]");
+                compactionNeeded = true;
+            }
+
+            if (!compactionNeeded)
             try
             {
                 if (hitlMode)
@@ -277,6 +300,7 @@ public sealed class SessionRunner(
                     // Reset per-agent budget counters so the next stream window starts clean.
                     _perAgentCumulativeInputTokens.Clear();
                     _warnedAgents.Clear();
+                    _justCompacted = true;
                     if (contextWindowRecorder is not null)
                         await contextWindowRecorder.RecordCompactionAsync(_assistantTurnCount);
                 }
@@ -659,6 +683,15 @@ public sealed class SessionRunner(
                         await eventEmitter.EmitAsync("context_budget_warn",
                             agent: agentName,
                             payload: new { cumulative_input_tokens = cumulative, warn_at = contextBudget.WarnAt, cutover_at = contextBudget.CutoverAt });
+                }
+
+                // Post-compaction grace: skip compaction-triggering checks for exactly one
+                // turn after a compaction cycle. The history is already at its post-compaction
+                // minimum; re-compacting before any new progress would thrash indefinitely.
+                if (_justCompacted)
+                {
+                    _justCompacted = false;
+                    return false;
                 }
 
                 // Per-turn ceiling: fires when a single turn's input exceeds the threshold,
