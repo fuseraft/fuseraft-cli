@@ -75,6 +75,32 @@ public record AgentConfig
     public ContextWindowConfig? ContextWindow { get; init; }
 
     /// <summary>
+    /// Artifact sources assembled as this agent's context at each invocation.
+    /// When set, the agent's context is constructed entirely from these sources rather than
+    /// replaying the shared session transcript. This eliminates cross-agent history coupling:
+    /// the agent sees only the artifacts it needs plus its own prior turns (via
+    /// <c>own_history:N</c>), not the Planner's analysis or another agent's tool traces.
+    ///
+    /// <para>
+    /// Example:
+    /// <code>
+    /// Context:
+    ///   - Source: session_context
+    ///   - Source: changes_recent:5
+    ///   - Source: brief_field:test_targets
+    ///   - Source: brief_field:build_command
+    ///   - Source: own_history:4
+    /// </code>
+    /// </para>
+    ///
+    /// <para>
+    /// When <c>Context</c> is set, <c>ContextWindow</c> is ignored.
+    /// The task message is always included regardless of what sources are declared.
+    /// </para>
+    /// </summary>
+    public List<ContextSource>? Context { get; init; }
+
+    /// <summary>
     /// Per-plugin capability allowlist. When a plugin name appears here, only the tools
     /// whose capability tag is in the declared list are registered for this agent. Plugins
     /// listed in <see cref="Plugins"/> that have no entry here receive all of their tools

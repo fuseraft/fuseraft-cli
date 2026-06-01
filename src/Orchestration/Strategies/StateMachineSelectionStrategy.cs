@@ -43,7 +43,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
     private readonly EventEmitter? _eventEmitter;
     private readonly ILogger<StateMachineSelectionStrategy> _logger;
     private readonly GovernanceKernel? _governance;
-    private readonly HandoffContextResolver? _handoffResolver;
+    private readonly ContextAssembler? _handoffResolver;
     private string _sessionId = "unknown";
     private IList<ChatMessage>? _history;
 
@@ -81,7 +81,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
         ILogger<StateMachineSelectionStrategy>? logger = null,
         GovernanceKernel? governanceKernel = null,
         VerifierConfig? verifier = null,
-        HandoffContextResolver? handoffResolver = null)
+        ContextAssembler? handoffResolver = null)
     {
         _machine         = machine;
         _contractEngine  = contractEngine;

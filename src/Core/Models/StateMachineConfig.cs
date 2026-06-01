@@ -99,9 +99,11 @@ public record StateConfig
 }
 
 /// <summary>
-/// One data source in a <see cref="TransitionConfig.HandoffContext"/> list.
+/// One data source used in <see cref="TransitionConfig.HandoffContext"/> (what to inject
+/// when a transition fires) and in <c>AgentConfig.Context</c> (what to assemble as the
+/// agent's context at invocation time instead of replaying shared history).
 /// </summary>
-public record HandoffContextSource
+public record ContextSource
 {
     /// <summary>
     /// Source identifier. Supported forms:
@@ -110,6 +112,9 @@ public record HandoffContextSource
     ///   <item><c>changes_recent</c> or <c>changes_recent:N</c> — the last N change-log entries (default N = 3).</item>
     ///   <item><c>brief_field:FIELD</c> — a top-level field from brief.json (e.g. <c>brief_field:test_targets</c>).</item>
     ///   <item><c>file:PATH</c> — content of a file at PATH relative to the sandbox root.</item>
+    ///   <item><c>own_history:N</c> — the agent's own last N turns from the shared history
+    ///     (text-only, no tool frames). Only meaningful in <c>AgentConfig.Context</c>;
+    ///     ignored in <c>TransitionConfig.HandoffContext</c>.</item>
     /// </list>
     /// </summary>
     public string Source { get; init; } = string.Empty;
@@ -124,6 +129,9 @@ public record HandoffContextSource
     /// <summary>Section header label. Defaults to a name derived from the source type.</summary>
     public string? Label { get; init; }
 }
+
+/// <summary>Alias kept for backward YAML compatibility — same as <see cref="ContextSource"/>.</summary>
+public record HandoffContextSource : ContextSource;
 
 /// <summary>
 /// A directed edge in the state graph. Fires when the current state's agent emits
@@ -241,7 +249,7 @@ public record TransitionConfig
     /// </code>
     /// </para>
     /// </summary>
-    public List<HandoffContextSource>? HandoffContext { get; init; }
+    public List<ContextSource>? HandoffContext { get; init; }
 
     /// <summary>Returns all contract names declared on this transition (Contract + Contracts merged).</summary>
     internal IReadOnlyList<string> AllContracts
