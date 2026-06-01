@@ -240,6 +240,7 @@ internal static class ReplTurn
 
         var sb                = new StringBuilder();
         var toolCallsThisTurn = new List<string>();
+        var toolCallDetails   = new List<(string Name, string? Args)>();
         var toolRounds        = 0;
         var inToolBatch       = false;
         var textStarted       = false;
@@ -277,6 +278,7 @@ internal static class ReplTurn
                 {
                     if (!inToolBatch) { toolRounds++; inToolBatch = true; }
                     toolCallsThisTurn.Add(funcCall.Name);
+                    toolCallDetails.Add((funcCall.Name, SummarizeToolArgs(funcCall.Arguments)));
 
                     if (ctx.JsonMode)
                     {
@@ -384,7 +386,7 @@ internal static class ReplTurn
             await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, streamAttempt)));
 
             // Reset per-attempt accumulators before reissuing the request.
-            sb.Clear(); toolCallsThisTurn.Clear();
+            sb.Clear(); toolCallsThisTurn.Clear(); toolCallDetails.Clear();
             toolRounds = 0; inToolBatch = false; textStarted = false;
 
             // Restart spinner for the fresh attempt.
@@ -536,8 +538,8 @@ internal static class ReplTurn
             AnsiConsole.MarkupLine(
                 $"[dim]  tokens (est.): {postEst:N0} / {ContextTokenBudget:N0}  rounds: {toolRounds}  tool calls: {toolCallsThisTurn.Count}[/]");
 
-        foreach (var tool in toolCallsThisTurn)
-            await ctx.Emitter.EmitAsync("tool_call", turn: ctx.TurnIndex, payload: new { tool_name = tool });
+        foreach (var (name, args) in toolCallDetails)
+            await ctx.Emitter.EmitAsync("tool_call", turn: ctx.TurnIndex, payload: new { tool_name = name, args });
         await ctx.Emitter.EmitAsync("assistant_response", turn: ctx.TurnIndex, payload: new { content = responseText });
 
         if (ctx.PendingSave && responseText.Length > 0)
@@ -828,6 +830,23 @@ internal static class ReplTurn
 
     internal static bool TryParsePlan(string text, out PlanStep[] steps) =>
         PlanStep.TryParse(text, out steps);
+
+    private static string? SummarizeToolArgs(IDictionary<string, object?>? args)
+    {
+        if (args is null || args.Count == 0) return null;
+        ReadOnlySpan<string> priority = ["path", "command", "script", "url", "key", "query", "message", "branch"];
+        foreach (var key in priority)
+        {
+            if (args.TryGetValue(key, out var val) && val is not null)
+            {
+                var s = val.ToString() ?? string.Empty;
+                return $"{key}={(s.Length > 60 ? s[..60] : s)}";
+            }
+        }
+        var first = args.First();
+        var fv = first.Value?.ToString() ?? string.Empty;
+        return $"{first.Key}={(fv.Length > 60 ? fv[..60] : fv)}";
+    }
 
     // Drip-prints text character by character so large chunks don't pop in all at once.
     // Skips the delay when output is redirected (e.g. piped to a file).
