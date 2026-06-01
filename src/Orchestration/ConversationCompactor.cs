@@ -63,17 +63,6 @@ public sealed class ConversationCompactor(
     }
 
     /// <summary>
-    /// Overload for callers that maintain a running assistant-turn counter,
-    /// avoiding a full list scan. Only valid when not in window mode.
-    /// </summary>
-    public bool ShouldCompact(int assistantTurnCount)
-    {
-        if (IsWindowMode) return false;
-        if (IsAntiThrashed()) return false;
-        return assistantTurnCount >= config.TriggerTurnCount;
-    }
-
-    /// <summary>
     /// Drops the oldest user+assistant pairs from <paramref name="messages"/> until
     /// the estimated token count is within <see cref="CompactionConfig.TokenBudget"/>.
     /// No LLM call is made; no summary message is injected.
