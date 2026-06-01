@@ -297,15 +297,7 @@ public sealed class SessionRunner(
                 {
                     checkpoint = await ApplyCompactionAsync(task, checkpoint, compactor!, cancellationToken);
 
-                    // Reset per-agent budget counters so the next stream window starts clean.
-                    _perAgentCumulativeInputTokens.Clear();
-                    _warnedAgents.Clear();
-                    _justCompacted = true;
-                    // Reset the assistant-turn counter to the retained history's assistant count so
-                    // ShouldCompact starts fresh from the post-compaction baseline. Without this reset,
-                    // the counter keeps climbing past TriggerTurnCount and compaction fires on every
-                    // subsequent turn, thrashing the session indefinitely.
-                    _assistantTurnCount = checkpoint.Messages.Count(m => m.Role == "assistant");
+                    PostCompactionReset(checkpoint);
                     if (contextWindowRecorder is not null)
                         await contextWindowRecorder.RecordCompactionAsync(_assistantTurnCount);
                 }
@@ -624,6 +616,17 @@ public sealed class SessionRunner(
         return checkpoint;
     }
 
+    // Resets all per-compaction-cycle state in one place. Every counter or flag that
+    // must restart after a compaction belongs here — adding it anywhere else means the
+    // next person to introduce a new counter will miss this site.
+    private void PostCompactionReset(SessionCheckpoint checkpoint)
+    {
+        _perAgentCumulativeInputTokens.Clear();
+        _warnedAgents.Clear();
+        _assistantTurnCount = checkpoint.Messages.Count(m => m.Role == "assistant");
+        _justCompacted = true;
+    }
+
     private async Task<bool> RecordMessageAsync(
         AgentMessage msg,
         List<AgentMessage> messages,
@@ -649,21 +652,17 @@ public sealed class SessionRunner(
                 $"[yellow]  ⚠ Checkpoint save failed: {Markup.Escape(TrimTo(saveEx.Message, 200))}[/]");
         }
 
-        if (compactor?.ShouldCompact(_assistantTurnCount) == true)
-            return true;
-
-        if (compactor is not null &&
-            msg.ToolCalls?.Any(tc => tc.Name == CompactionPlugin.FunctionName) == true)
-            return true;
-
-        // Always accumulate per-agent cumulative input tokens — needed for both budget
-        // enforcement and context window recording even when no budget is configured.
-        if (msg.Usage?.InputTokens is > 0 and var inputToks)
+        // Accumulate per-agent cumulative input tokens unconditionally — needed for
+        // budget enforcement and context window recording regardless of grace state.
+        var agentName  = msg.AgentName ?? "Unknown";
+        int inputToks  = 0;
+        int cumulative = 0;
+        if (msg.Usage?.InputTokens is > 0 and var rawInputToks)
         {
-            var agentName = msg.AgentName ?? "Unknown";
+            inputToks = rawInputToks;
             _perAgentCumulativeInputTokens[agentName] =
                 _perAgentCumulativeInputTokens.GetValueOrDefault(agentName) + inputToks;
-            var cumulative = _perAgentCumulativeInputTokens[agentName];
+            cumulative = _perAgentCumulativeInputTokens[agentName];
 
             if (contextWindowRecorder is not null)
                 await contextWindowRecorder.RecordAsync(
@@ -675,57 +674,63 @@ public sealed class SessionRunner(
                     warnAt:                contextBudget?.WarnAt,
                     cutoverAt:             contextBudget?.CutoverAt);
 
-            if (contextBudget is not null)
+            if (contextBudget?.WarnAt > 0 && cumulative >= contextBudget.WarnAt
+                && _warnedAgents.Add(agentName))
             {
-                if (contextBudget.WarnAt > 0 && cumulative >= contextBudget.WarnAt
-                    && _warnedAgents.Add(agentName))
-                {
-                    AnsiConsole.MarkupLine(
-                        $"[yellow]  ⚠ {Markup.Escape(agentName)} has accumulated {cumulative:N0} cumulative " +
-                        $"input tokens (warn_at: {contextBudget.WarnAt:N0}). " +
-                        $"Context rot risk — compaction will trigger at {contextBudget.CutoverAt:N0} tokens.[/]");
-                    if (eventEmitter is not null)
-                        await eventEmitter.EmitAsync("context_budget_warn",
-                            agent: agentName,
-                            payload: new { cumulative_input_tokens = cumulative, warn_at = contextBudget.WarnAt, cutover_at = contextBudget.CutoverAt });
-                }
+                AnsiConsole.MarkupLine(
+                    $"[yellow]  ⚠ {Markup.Escape(agentName)} has accumulated {cumulative:N0} cumulative " +
+                    $"input tokens (warn_at: {contextBudget.WarnAt:N0}). " +
+                    $"Context rot risk — compaction will trigger at {contextBudget.CutoverAt:N0} tokens.[/]");
+                if (eventEmitter is not null)
+                    await eventEmitter.EmitAsync("context_budget_warn",
+                        agent: agentName,
+                        payload: new { cumulative_input_tokens = cumulative, warn_at = contextBudget.WarnAt, cutover_at = contextBudget.CutoverAt });
+            }
+        }
 
-                // Post-compaction grace: skip compaction-triggering checks for exactly one
-                // turn after a compaction cycle. The history is already at its post-compaction
-                // minimum; re-compacting before any new progress would thrash indefinitely.
-                if (_justCompacted)
-                {
-                    _justCompacted = false;
-                    return false;
-                }
+        // Post-compaction grace: skip all compaction triggers for exactly one turn.
+        // Token accumulation above still runs so budget recording stays accurate.
+        if (_justCompacted)
+        {
+            _justCompacted = false;
+            return false;
+        }
 
-                // Per-turn ceiling: fires when a single turn's input exceeds the threshold,
-                // independently of the cumulative counter. Catches single-turn explosions
-                // that exhaust the cumulative budget in one shot.
-                if (contextBudget.MaxSingleTurnInputTokens > 0 && inputToks > contextBudget.MaxSingleTurnInputTokens)
-                {
-                    AnsiConsole.MarkupLine(
-                        $"[yellow]  ⚡ {Markup.Escape(agentName)} single-turn input ({inputToks:N0}) exceeded " +
-                        $"MaxSingleTurnInputTokens ({contextBudget.MaxSingleTurnInputTokens:N0}). " +
-                        $"Compacting before next turn...[/]");
-                    if (eventEmitter is not null)
-                        await eventEmitter.EmitAsync("context_budget_cutover",
-                            agent: agentName,
-                            payload: new { input_tokens = inputToks, cutover_at = contextBudget.MaxSingleTurnInputTokens, reason = "single_turn_limit" });
-                    return true;
-                }
+        if (compactor?.ShouldCompact(_assistantTurnCount) == true)
+            return true;
 
-                if (contextBudget.CutoverAt > 0 && cumulative >= contextBudget.CutoverAt)
-                {
-                    AnsiConsole.MarkupLine(
-                        $"[yellow]  ⚡ {Markup.Escape(agentName)} reached context budget cutover " +
-                        $"({cumulative:N0} ≥ {contextBudget.CutoverAt:N0} input tokens). Compacting history...[/]");
-                    if (eventEmitter is not null)
-                        await eventEmitter.EmitAsync("context_budget_cutover",
-                            agent: agentName,
-                            payload: new { cumulative_input_tokens = cumulative, cutover_at = contextBudget.CutoverAt });
-                    return true;
-                }
+        if (compactor is not null &&
+            msg.ToolCalls?.Any(tc => tc.Name == CompactionPlugin.FunctionName) == true)
+            return true;
+
+        if (contextBudget is not null && inputToks > 0)
+        {
+            // Per-turn ceiling: fires when a single turn's input exceeds the threshold,
+            // independently of the cumulative counter. Catches single-turn explosions
+            // that exhaust the cumulative budget in one shot.
+            if (contextBudget.MaxSingleTurnInputTokens > 0 && inputToks > contextBudget.MaxSingleTurnInputTokens)
+            {
+                AnsiConsole.MarkupLine(
+                    $"[yellow]  ⚡ {Markup.Escape(agentName)} single-turn input ({inputToks:N0}) exceeded " +
+                    $"MaxSingleTurnInputTokens ({contextBudget.MaxSingleTurnInputTokens:N0}). " +
+                    $"Compacting before next turn...[/]");
+                if (eventEmitter is not null)
+                    await eventEmitter.EmitAsync("context_budget_cutover",
+                        agent: agentName,
+                        payload: new { input_tokens = inputToks, cutover_at = contextBudget.MaxSingleTurnInputTokens, reason = "single_turn_limit" });
+                return true;
+            }
+
+            if (contextBudget.CutoverAt > 0 && cumulative >= contextBudget.CutoverAt)
+            {
+                AnsiConsole.MarkupLine(
+                    $"[yellow]  ⚡ {Markup.Escape(agentName)} reached context budget cutover " +
+                    $"({cumulative:N0} ≥ {contextBudget.CutoverAt:N0} input tokens). Compacting history...[/]");
+                if (eventEmitter is not null)
+                    await eventEmitter.EmitAsync("context_budget_cutover",
+                        agent: agentName,
+                        payload: new { cumulative_input_tokens = cumulative, cutover_at = contextBudget.CutoverAt });
+                return true;
             }
         }
 
