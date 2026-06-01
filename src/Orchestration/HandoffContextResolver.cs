@@ -31,7 +31,10 @@ public sealed class ContextAssembler
 
     private string _sessionId = string.Empty;
 
-    private const int DefaultMaxCharsPerSource = 4_000;
+    private const int DefaultMaxCharsPerSource   = 4_000;
+    // Own-history default is higher than artifact sources because each turn naturally
+    // contains more text, but still bounded so 4 verbose turns don't silently cost 80k chars.
+    private const int DefaultMaxCharsOwnHistory  = 8_000;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -129,12 +132,13 @@ public sealed class ContextAssembler
             else                       artifactSources.Add(src);
         }
 
-        // 2. Agent's own prior turns (text-only, chronological).
+        // 2. Agent's own prior turns (text-only, chronological, char-bounded).
         if (ownHistorySrc is not null)
         {
             var (_, param) = ParseSource(ownHistorySrc.Source);
-            var n = int.TryParse(param, out var parsed) ? Math.Max(1, parsed) : 6;
-            var ownTurns = ExtractOwnHistory(agentName, n, sharedHistory);
+            var n        = int.TryParse(param, out var parsed) ? Math.Max(1, parsed) : 6;
+            var maxChars = ownHistorySrc.MaxChars > 0 ? ownHistorySrc.MaxChars : DefaultMaxCharsOwnHistory;
+            var ownTurns = ExtractOwnHistory(agentName, n, maxChars, sharedHistory);
             result.AddRange(ownTurns);
         }
 
@@ -259,20 +263,22 @@ public sealed class ContextAssembler
 
     // ── own_history extraction ───────────────────────────────────────────────
 
-    // Extracts the last N assistant turns authored by agentName from shared history,
-    // stripping tool frames (text-only). Chronological order is preserved.
+    // Extracts the last N text-only assistant turns for agentName, then enforces a
+    // total-char budget by dropping oldest turns first. If the most recent surviving
+    // turn still exceeds maxChars, its text is truncated so the budget is always kept.
     private static IReadOnlyList<ChatMessage> ExtractOwnHistory(
         string agentName,
         int n,
+        int maxChars,
         IList<ChatMessage> history)
     {
-        var ownTurns = new List<ChatMessage>();
+        // Collect all text-only turns for this agent, newest last.
+        var ownTurns = new List<(ChatMessage Msg, int Chars)>();
         foreach (var msg in history)
         {
             if (msg.Role != ChatRole.Assistant) continue;
             if (!string.Equals(msg.AuthorName, agentName, StringComparison.OrdinalIgnoreCase)) continue;
 
-            // Text-only: keep TextContent items, strip FunctionCallContent and tool frames.
             var textContents = msg.Contents
                 .OfType<TextContent>()
                 .Where(t => !string.IsNullOrWhiteSpace(t.Text))
@@ -282,13 +288,30 @@ public sealed class ContextAssembler
             var textOnly = textContents.Count == msg.Contents.Count
                 ? msg
                 : new ChatMessage(ChatRole.Assistant, textContents) { AuthorName = msg.AuthorName };
-            ownTurns.Add(textOnly);
+            var chars = textContents.OfType<TextContent>().Sum(t => t.Text?.Length ?? 0);
+            ownTurns.Add((textOnly, chars));
         }
 
-        // Keep only the last N — older turns are irrelevant to the current phase.
-        return ownTurns.Count <= n
-            ? ownTurns
-            : ownTurns.Skip(ownTurns.Count - n).ToList();
+        // Step 1: keep only the last N turns.
+        if (ownTurns.Count > n)
+            ownTurns = ownTurns.Skip(ownTurns.Count - n).ToList();
+
+        // Step 2: drop oldest turns until total chars fits within maxChars.
+        while (ownTurns.Count > 1 && ownTurns.Sum(t => t.Chars) > maxChars)
+            ownTurns.RemoveAt(0);
+
+        // Step 3: if the single remaining turn still exceeds the budget, truncate its text.
+        if (ownTurns.Count == 1 && ownTurns[0].Chars > maxChars)
+        {
+            var (msg, _) = ownTurns[0];
+            var truncated = string.Concat(
+                msg.Contents.OfType<TextContent>().Select(t => t.Text))[..maxChars]
+                + $"\n[...truncated — own_history turn exceeded {maxChars:N0} char limit]";
+            ownTurns[0] = (new ChatMessage(ChatRole.Assistant,
+                [new TextContent(truncated)]) { AuthorName = msg.AuthorName }, maxChars);
+        }
+
+        return ownTurns.Select(t => t.Msg).ToList();
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
