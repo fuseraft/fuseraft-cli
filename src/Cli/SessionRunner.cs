@@ -43,7 +43,9 @@ public sealed class SessionRunner(
     ContextBudgetConfig? contextBudget = null,
     ContextWindowRecorder? contextWindowRecorder = null)
 {
-    private int _assistantTurnCount;
+    // Session-lifetime assistant-turn counter. Only ever increments — never reset after
+    // compaction. Used solely for the MaxIterations hard cap.
+    private int _totalAssistantTurnCount;
     private readonly Dictionary<string, int> _perAgentCumulativeInputTokens = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _warnedAgents = new(StringComparer.OrdinalIgnoreCase);
 
@@ -68,7 +70,7 @@ public sealed class SessionRunner(
         var turnClock    = Stopwatch.StartNew();
         var succeeded    = true;
         string? errorMessage = null;
-        _assistantTurnCount = messages.Count(m => m.Role == "assistant");
+        _totalAssistantTurnCount = messages.Count(m => m.Role == "assistant");
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -281,7 +283,7 @@ public sealed class SessionRunner(
 
             // Session-level hard cap. Count only agent (assistant) turns across all StreamAsync
             // invocations. This fires even when compaction resets the internal phase counter.
-            if (maxIterations > 0 && _assistantTurnCount >= maxIterations)
+            if (maxIterations > 0 && _totalAssistantTurnCount >= maxIterations)
             {
                 succeeded    = false;
                 errorMessage = $"Session exceeded MaxIterations limit of {maxIterations} agent turns.";
@@ -299,7 +301,7 @@ public sealed class SessionRunner(
 
                     PostCompactionReset(checkpoint);
                     if (contextWindowRecorder is not null)
-                        await contextWindowRecorder.RecordCompactionAsync(_assistantTurnCount);
+                        await contextWindowRecorder.RecordCompactionAsync(_totalAssistantTurnCount);
                 }
                 catch (OperationCanceledException)
                 {
@@ -619,11 +621,12 @@ public sealed class SessionRunner(
     // Resets all per-compaction-cycle state in one place. Every counter or flag that
     // must restart after a compaction belongs here — adding it anywhere else means the
     // next person to introduce a new counter will miss this site.
-    private void PostCompactionReset(SessionCheckpoint checkpoint)
+    // Note: _totalAssistantTurnCount is session-lifetime (MaxIterations cap) and intentionally
+    // does not appear here.
+    private void PostCompactionReset(SessionCheckpoint _)
     {
         _perAgentCumulativeInputTokens.Clear();
         _warnedAgents.Clear();
-        _assistantTurnCount = checkpoint.Messages.Count(m => m.Role == "assistant");
         _justCompacted = true;
     }
 
@@ -635,7 +638,7 @@ public sealed class SessionRunner(
     {
         messages.Add(msg);
         checkpoint.Messages.Add(msg);
-        if (msg.Role == "assistant") _assistantTurnCount++;
+        if (msg.Role == "assistant") _totalAssistantTurnCount++;
         checkpoint.LastUpdatedAt = DateTime.UtcNow;
         if (orchestrator is MagenticOrchestrator mo) checkpoint.MagenticState = mo.CurrentState;
         if (orchestrator is GraphOrchestrator go) checkpoint.StateHistory = [..go.StateHistory];
@@ -696,7 +699,7 @@ public sealed class SessionRunner(
             return false;
         }
 
-        if (compactor?.ShouldCompact(_assistantTurnCount) == true)
+        if (compactor?.ShouldCompact(checkpoint.Messages) == true)
             return true;
 
         if (compactor is not null &&
