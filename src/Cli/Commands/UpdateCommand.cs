@@ -88,7 +88,8 @@ public sealed class UpdateCommand : AsyncCommand<UpdateSettings>
             return 1;
         }
 
-        var archive     = $"fuseraft-{latestVersion}-{rid}.tar.gz";
+        var ext         = rid.StartsWith("win", StringComparison.Ordinal) ? "zip" : "tar.gz";
+        var archive     = $"fuseraft-{latestVersion}-{rid}.{ext}";
         var downloadUrl = $"https://github.com/{Repo}/releases/download/{tag}/{archive}";
 
         if (!releaseJson.Contains($"\"{archive}\""))
@@ -117,7 +118,7 @@ public sealed class UpdateCommand : AsyncCommand<UpdateSettings>
         byte[]? newBinary;
         try
         {
-            newBinary = await ExtractBinaryAsync(archiveBytes, cancellationToken);
+            newBinary = await ExtractBinaryAsync(archiveBytes, ext, cancellationToken);
             AnsiConsole.MarkupLine(" [green]done[/]");
         }
         catch (Exception ex)
@@ -246,7 +247,15 @@ public sealed class UpdateCommand : AsyncCommand<UpdateSettings>
         return v.Trim();
     }
 
-    private static async Task<byte[]?> ExtractBinaryAsync(byte[] tarGzBytes, CancellationToken ct)
+    private static async Task<byte[]?> ExtractBinaryAsync(byte[] archiveBytes, string ext, CancellationToken ct)
+    {
+        if (ext.Equals("zip", StringComparison.OrdinalIgnoreCase))
+            return await ExtractFromZipAsync(archiveBytes, ct);
+
+        return await ExtractFromTarGzAsync(archiveBytes, ct);
+    }
+
+    private static async Task<byte[]?> ExtractFromTarGzAsync(byte[] tarGzBytes, CancellationToken ct)
     {
         using var ms   = new MemoryStream(tarGzBytes);
         using var gzip = new GZipStream(ms, CompressionMode.Decompress);
@@ -268,5 +277,26 @@ public sealed class UpdateCommand : AsyncCommand<UpdateSettings>
         }
 
         return null;
+    }
+
+    private static Task<byte[]?> ExtractFromZipAsync(byte[] zipBytes, CancellationToken ct)
+    {
+        using var ms      = new MemoryStream(zipBytes);
+        using var archive = new ZipArchive(ms, ZipArchiveMode.Read);
+
+        foreach (var entry in archive.Entries)
+        {
+            var name = Path.GetFileName(entry.FullName);
+            if (name.Equals("fuseraft",     StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("fuseraft.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                using var stream = entry.Open();
+                using var buf    = new MemoryStream();
+                stream.CopyTo(buf);
+                return Task.FromResult<byte[]?>(buf.ToArray());
+            }
+        }
+
+        return Task.FromResult<byte[]?>(null);
     }
 }
