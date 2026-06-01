@@ -75,9 +75,12 @@ Call `read_file` on it (or `shell_run("tail -n 100 .fuseraft/logs/events.jsonl")
 | `validator_stuck` | `ValidatorStuckException` threshold reached (3 consecutive blocks) |
 | `tool_blocked` | Sandbox or injection detector denied a tool call |
 | `session_started` / `session_completed` | Bookends for normal runs |
-| `compaction_fired` | Compaction triggered — check if context loss may have caused drift |
+| `compaction` | Compaction triggered — check if context loss may have caused drift; repeated `compaction` events with no progress between them signal thrashing |
 | `budget_exceeded` | `MaxTotalTokens` was hit |
 | `circuit_breaker_open` | 5 consecutive model API failures |
+| `context_budget_warn` | Agent's cumulative input tokens crossed `WarnAt` |
+| `context_budget_cutover` | Compaction fired due to budget: cumulative tokens ≥ `CutoverAt`, or `reason: "single_turn_limit"` if a single turn exceeded `MaxSingleTurnInputTokens` |
+| `keyword_not_found` | State machine turn with no matching routing signal — repeated occurrences across compaction boundaries mean a silently stuck agent |
 
 ### Step 5: Check for Crash Dumps
 
@@ -102,9 +105,13 @@ Match the evidence to a root cause using this table:
 | Session stopped at `MaxIterations` | Pipeline needs more turns than allowed | Raise `MaxIterations`; or add `FailureHandling` to detect loops early |
 | `budget_exceeded` event | Token budget too low for the task | Raise `MaxTotalTokens`; or enable compaction to reduce context size |
 | `circuit_breaker_open` event | Model API is returning 5+ consecutive errors | Check API key env var, provider endpoint, and model ID; look at `.fuseraft/logs/provider_errors.jsonl` |
-| Compaction fired and agent lost track of what was done | Compaction mode `llm` hallucinated progress | Switch to `intent` mode (requires `ChangeTracking`) or `lossless` mode (requires `EvidenceStore` + state machine) |
+| Compaction fired and agent lost track of what was done | Compaction mode `llm` hallucinated progress; or lossless compaction dropped the resumption note | Switch to `intent` mode (requires `ChangeTracking`) or `lossless` mode (requires `EvidenceStore` + state machine); ensure `ChangeTracking` is configured so the resumption note points agents to `changes.json` |
+| Agent repeats same work after compaction (duplicate commits, re-running tests) | Resumption note absent from the compaction summary — agent had no "don't redo ✓ work" anchor | Ensure `ChangeTracking` is configured; confirm `Compaction.Mode` is `lossless` or `intent`, not `llm` |
 | `StallCount` or `ResetCount` high in `MagenticState` | Magentic orchestrator repeatedly re-planned without making progress | Lower the stall threshold or add more concrete subtask hints in the initial task string |
 | `StateHistory` shows same node repeating in Graph run | Back-edge loop without a progress condition | Add a `MaxPhaseIterations` guard on the looping node, or change the back-edge condition |
+| `keyword_not_found` events repeat across multiple compaction cycles for the same agent | Agent completed work but never called `handoff()` — "silent stuck" case. Loop-warning counter resets on compaction so standard warnings do not accumulate | Add `FailureHandling.MaxConsecutiveTurnsWithoutSignal` (e.g. `8`) — this counter lives in strategy state and survives compaction; will escalate to HITL after N silent turns |
+| Repeated `compaction` events with no agent progress between them | Post-compaction budget thrashing: first turn after compaction exceeds `CutoverAt`, triggering another immediate compaction | Raise `CutoverAt`, lower the per-agent token usage (enable `ContextWindow.TextOnly` + `MaxTurnAge` on the expensive agent), or add `MaxSingleTurnInputTokens` to catch single-turn explosions |
+| Single turn burned nearly all of `MaxTotalTokens` | Agent read many large files in one turn; no per-turn ceiling was set | Add `ContextBudget.MaxSingleTurnInputTokens` — compaction fires before the *next* turn when a single turn exceeds this, preventing inherited bloat |
 | Tool call denied (`tool_blocked`) | Agent's `TrustScore` < 0.60 (Ring 3 — no write/shell access) | Raise `TrustScore` to ≥ 0.60 for agents that need write access |
 
 ### Step 7: Report and Recommend
