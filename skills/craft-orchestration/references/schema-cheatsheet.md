@@ -125,6 +125,14 @@ Orchestration:
     - Handoff
   ContextWindow:
     TextOnly: true                # strip tool-call results from context window
+  Context:                            # replaces ContextWindow when set; assembles from artifacts
+    - Source: session_context         # handoff summary from session_context_write
+    - Source: changes_recent:5        # last 5 change-log entries
+    - Source: brief_field:test_targets # field from brief.json
+    - Source: file:.fuseraft/artifacts/test-report.json
+      MaxChars: 3000
+    - Source: own_history:4           # agent's own last 4 turns, text-only, bounded to 8k chars
+      MaxChars: 8000                  # override default (8000 chars ≈ 2000 tokens)
   SubAgentModel: claude-haiku-4-5-20251001   # cheaper model for sub-agent exploration
   SubAgentMaxToolCalls: 20        # cap on sub-agent iterations
   SubAgentPlugins:                # custom plugin list for sub-agent (defaults to read-only set)
@@ -213,6 +221,10 @@ Selection:
           - To: Testing
             Signal: "HANDOFF TO TESTER"
             Contract: ImplementationComplete
+            HandoffContext:                   # inject targeted artifacts when transition fires
+              - Source: session_context
+              - Source: changes_recent
+              - Source: brief_field:test_targets
           - To: Planning
             Signal: "REPLAN REQUIRED"
 

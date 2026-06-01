@@ -247,6 +247,74 @@ all subsequent turns, while a file that was read but not yet written remains ful
 
 ---
 
+## HandoffContext (targeted transition injection)
+
+Declared on a `TransitionConfig` in the state machine. When a transition fires, the orchestrator reads from durable disk artifacts and injects a compact block into shared history before the receiving agent's first turn. Agents that don't use a `Context` spec see the injected block as part of the conversation history.
+
+```yaml
+Transitions:
+  - To: Testing
+    Signal: "HANDOFF TO TESTER"
+    Contract: ImplementationComplete
+    HandoffContext:
+      - Source: session_context
+      - Source: changes_recent
+      - Source: brief_field:test_targets
+```
+
+**Supported source types** (same as `Context` spec, minus `own_history`):
+
+| Source | Description |
+|--------|-------------|
+| `session_context` | Handoff summary from `session_context_write` |
+| `changes_recent[:N]` | Last N entries from `changes.json` (default: all recent) |
+| `brief_field:FIELD` | A named field from `brief.json` |
+| `file:PATH` | Raw contents of an artifact file |
+
+`own_history` is not supported in `HandoffContext`. Use the `Context` spec on the receiving agent instead.
+
+**How it differs from `Context` spec:** `HandoffContext` injects content *into shared history* so any agent (including those without a `Context` spec) sees it in subsequent turns. `Context` spec is a per-agent read at invocation time and does not touch shared history at all.
+
+---
+
+## Layer 3a: Context spec (artifact-first assembly)
+
+When `Context:` is declared on an agent, the orchestrator assembles that agent's context from disk artifacts instead of filtering or replaying the shared transcript. The agent receives only the declared sources plus its own prior turns — no Planner analysis, no Developer tool traces, nothing from other agents.
+
+```yaml
+Agents:
+  - Name: Tester
+    Context:
+      - Source: session_context
+      - Source: changes_recent:5        # last 5 change-log entries
+      - Source: brief_field:test_targets
+      - Source: brief_field:build_command
+      - Source: own_history:4           # agent's own last 4 turns, text-only, char-bounded
+```
+
+**`ContextSource` fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `Source` | string | — | Required. One of: `session_context`, `changes_recent[:N]`, `brief_field:FIELD`, `file:PATH`, `own_history[:N]` |
+| `MaxChars` | int | 4000 (artifacts) / 8000 (own_history) | Per-source character cap |
+| `Label` | string | derived from source type | Section header override |
+
+**`own_history` semantics:** text-only (tool-call frames and tool results stripped), char-bounded to `MaxChars`, oldest turns dropped first if the cap is reached. If the last surviving turn is still over the cap, it is truncated at the cap boundary.
+
+**Architectural shift:**
+
+| Mode | What the agent receives |
+|------|------------------------|
+| Without `Context` spec | `filtered_history` (via `ContextWindow`) + optional `HandoffContext` injection |
+| With `Context` spec | `task` + `own_history` + assembled artifact block |
+
+Token cost with a `Context` spec is O(relevant artifacts + own recent work) rather than O(session length).
+
+**`ContextWindow` interaction:** when `Context:` is declared, `ContextWindow:` is ignored for that agent. Shared history is still written after each turn so routing and termination strategies work normally; only what the model receives changes.
+
+---
+
 ## Layer 4: Compaction
 
 When conversation history grows long enough to approach a model's context window, compaction
@@ -553,16 +621,18 @@ Here is the full sequence from session start through a long-running session:
 
 2. Each agent turn
    ├─ Memory provider pre-turn → fresh block prepended to instructions (if Memory: set)
-   └─ ContextWindow filter applied to conversation history
-      ├─ TextOnly / ExcludeAgents strip tool noise
-      ├─ MaxTurnAge semantic cut
-      ├─ MaxTailMessages hard cap
-      ├─ MaxToolResultChars — truncate large tool results in replayed history
-      └─ SanitizeToolPairs — strip orphaned assistant tool-call frames (strict providers)
-         └─ Filtered slice + replay-truncated content → sent to LLM
-            ├─ MaxInTurnToolPairs — sliding window: keep only last N tool pairs per inner call
-            ├─ MaxInTurnContextTokens — budget-reactive: trim oldest pairs when over budget
-            └─ On context/413 error → adaptive trim retry (up to 3 stages)
+   ├─ HandoffContext injection (state machine only) → artifact block written into shared history when a transition fires
+   ├─ ContextWindow filter applied to conversation history (skipped when Context: is declared)
+   │  ├─ TextOnly / ExcludeAgents strip tool noise
+   │  ├─ MaxTurnAge semantic cut
+   │  ├─ MaxTailMessages hard cap
+   │  ├─ MaxToolResultChars — truncate large tool results in replayed history
+   │  └─ SanitizeToolPairs — strip orphaned assistant tool-call frames (strict providers)
+   ├─ Layer 3a: Context spec (when Context: is declared) → task + own_history + artifact block assembled from disk
+   └─ Filtered slice or artifact-assembled context → sent to LLM
+      ├─ MaxInTurnToolPairs — sliding window: keep only last N tool pairs per inner call
+      ├─ MaxInTurnContextTokens — budget-reactive: trim oldest pairs when over budget
+      └─ On context/413 error → adaptive trim retry (up to 3 stages)
 
 3. After each checkpoint save
    └─ Compaction check
@@ -654,6 +724,19 @@ Compaction:
 ```
 
 Both triggers are active simultaneously — whichever fires first wins.
+
+**For an agent that should see NO cross-agent history — only artifacts and its own work:**
+
+```yaml
+Agents:
+  - Name: Tester
+    Context:
+      - Source: session_context
+      - Source: changes_recent:5
+      - Source: brief_field:test_targets
+      - Source: own_history:4
+        MaxChars: 8000
+```
 
 **For action agents that make many sequential tool calls** (Developer, Tester, Operator), set
 `MaxInTurnToolPairs` to keep within-turn context cost at O(N) regardless of how many tool

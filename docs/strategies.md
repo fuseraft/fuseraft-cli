@@ -413,6 +413,41 @@ For `ranked` and `semantic_diff`, the merge agent receives the branch outputs as
 - Evidence contracts (`Contract`/`Contracts`) are not evaluated on parallel transitions — add contracts to the transition that leaves the join state if post-merge evidence is needed.
 - `RecoveryAgent` on a parallel transition is ignored.
 
+**HandoffContext — targeted artifact injection on transition**
+
+`HandoffContext` on a `TransitionConfig` injects a compact artifact block into shared history at the moment the transition fires. The receiving agent sees the block as the most recent history entry before its first turn.
+
+```yaml
+Implementation:
+  Agent: Developer
+  Transitions:
+    - To: Testing
+      Signal: "HANDOFF TO TESTER"
+      Contract: ImplementationComplete
+      HandoffContext:                   # inject targeted artifacts when transition fires
+        - Source: session_context
+        - Source: changes_recent
+        - Source: brief_field:test_targets
+```
+
+**Supported source types:**
+
+| Source | Description |
+|--------|-------------|
+| `session_context` | Handoff summary from `session_context_write` |
+| `changes_recent[:N]` | Last N entries from `changes.json` |
+| `brief_field:FIELD` | A named field from `brief.json` |
+| `file:PATH` | Raw contents of an artifact file |
+
+`own_history` is not supported in `HandoffContext` — it is only available in `AgentConfig.Context`.
+
+**HandoffContext vs. Context spec:**
+
+- `HandoffContext` injects content *into shared history*. Any agent in subsequent turns — including those without a `Context` spec — sees the injected block.
+- `AgentConfig.Context` assembles context from disk artifacts at invocation time and does not touch shared history. The receiving agent sees only the declared artifact sources and its own prior turns.
+
+**Recommended usage:** use `HandoffContext` on transitions when the receiving agent uses standard `ContextWindow` filtering; use `AgentConfig.Context` on the receiving agent when it should receive no cross-agent history at all. Both can be used together — `HandoffContext` on the transition provides a snapshot for routing/termination agents that read shared history, while the `Context` spec controls exactly what the model receives.
+
 ---
 
 ### graph
