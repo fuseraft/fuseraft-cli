@@ -130,6 +130,10 @@ fuseraft init --template designer       # AI-assisted config designer
 # Run a session
 fuseraft run -c .fuseraft/config/orchestration.yaml "Build a REST API in Go with JWT authentication"
 
+# Anchor all agents to a spec file as the authoritative source of truth
+fuseraft run --spec spec.md
+fuseraft run -c .fuseraft/config/orchestration.yaml --spec spec.md "Implement the specification"
+
 # Resume the most recent incomplete session
 fuseraft run --resume
 
@@ -194,8 +198,9 @@ The binary lands in `./bin/`.
 ## Features
 
 **Orchestration**
-- Six routing modes: keyword, state machine, declarative directed graph (with parallel fan-out/fan-in), LLM-based selection, fully autonomous Magentic, and adversarial generate→critique→revise pipelines
+- Nine routing modes: sequential, round-robin, keyword, structured (JSON-field routing), state machine, declarative directed graph (with parallel fan-out/fan-in), LLM-based selection, fully autonomous Magentic, and adversarial generate→critique→revise pipelines
 - Routing validators that block handoffs unless real evidence is present on disk — no hallucinated progress
+- `HandoffContext` on state machine transitions — inject targeted artifact snapshots into shared history at the moment a transition fires, so the receiving agent sees only what it needs
 - Saga orchestration wraps any pipeline with compensating rollback if a step fails
 
 **Agents**
@@ -211,6 +216,7 @@ The binary lands in `./bin/`.
 - Checkpoints after every turn — sessions can always be resumed exactly where they left off
 - Token tracking per turn; enforce per-model context caps and a session-wide hard spending limit
 - Conversation compaction keeps long sessions within context window limits
+- Per-agent **`Context` spec** — declare exactly which artifact sources (files, brief fields, recent changes, own history) each agent receives instead of filtering the shared transcript. When set, history replay is skipped entirely; context cost is proportional to what you declare, not session length
 
 **Governance**
 - Per-agent execution rings, prompt injection detection, circuit breaker, and a hash-chain audit log
