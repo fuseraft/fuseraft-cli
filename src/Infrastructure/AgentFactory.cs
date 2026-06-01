@@ -552,15 +552,24 @@ public sealed class AgentFactory(
     /// inner LLM call regardless of total context size, giving an O(maxPairs) tool-result
     /// footprint per iteration. Non-tool messages are never touched.
     /// </summary>
-    // Maximum text/reasoning chars kept in an intermediate tool-calling assistant message.
-    // Only the FunctionCallContent (name + args) and this short stub are retained; the rest
-    // is elided to prevent O(N²) token growth when models emit per-call reasoning blocks.
+    // Maximum chars kept for text/reasoning content in an intermediate tool-calling message.
     private const int MaxIntermediateAssistantTextChars = 120;
+    // Maximum chars kept for a single function-call argument value in an intermediate message.
+    // Large values (e.g. write_file content argument) accumulate in every subsequent step's
+    // call frame, causing O(N) growth per step that compounds across N steps to O(N²) total.
+    private const int MaxIntermediateArgValueChars = 500;
 
     /// <summary>
-    /// Truncates verbose text/reasoning content in intermediate (tool-calling) assistant
-    /// messages while preserving the <see cref="FunctionCallContent"/> items the provider
-    /// needs for structural validity. Pure-text (non-tool) messages are never touched.
+    /// Truncates verbose content in intermediate (tool-calling) assistant messages:
+    /// <list type="bullet">
+    ///   <item>Text and reasoning content truncated to <see cref="MaxIntermediateAssistantTextChars"/>.
+    ///     <see cref="TextReasoningContent.ProtectedData"/> is preserved so the provider can
+    ///     continue the reasoning chain.</item>
+    ///   <item>Large <see cref="FunctionCallContent"/> argument values truncated to
+    ///     <see cref="MaxIntermediateArgValueChars"/>. Short values (paths, flags) are kept
+    ///     in full; only bulk payloads (file contents, scripts) are elided.</item>
+    /// </list>
+    /// Pure-text (non-tool) messages are never modified.
     /// </summary>
     private static IEnumerable<ChatMessage> TruncateIntermediateAssistantReasoning(
         IEnumerable<ChatMessage> messages)
@@ -581,47 +590,103 @@ public sealed class AgentFactory(
                 continue;
             }
 
-            var toolCalls = msg.Contents.OfType<FunctionCallContent>().ToList<AIContent>();
-            if (toolCalls.Count == 0)
+            if (!msg.Contents.OfType<FunctionCallContent>().Any())
             {
                 // Pure text message (final response, orchestrator signal) — keep as-is.
                 result.Add(msg);
                 continue;
             }
 
-            // Intermediate tool-calling message. Extract text from any content that carries
-            // a string — covers both TextContent and TextReasoningContent (the latter is
-            // used by extended-thinking models and is identified by name since it may not
-            // be a TextContent subclass in all SDK versions).
-            string? text = null;
-            foreach (var c in msg.Contents)
+            // Intermediate tool-calling message: truncate each content item individually.
+            bool anyTruncated = false;
+            var rebuilt = new List<AIContent>(msg.Contents.Count);
+            foreach (var content in msg.Contents)
             {
-                string? raw = c switch
+                switch (content)
                 {
-                    TextContent tc                            => tc.Text,
-                    { } other when other.GetType().Name
-                        .Contains("Reasoning", StringComparison.Ordinal)
-                        => (other.GetType()
-                                .GetProperty("Text")?
-                                .GetValue(other) as string),
-                    _                                        => null
-                };
-                if (!string.IsNullOrEmpty(raw)) { text = raw; break; }
+                    case TextReasoningContent trc:
+                        // Truncate verbose reasoning text. ProtectedData (the opaque blob the
+                        // provider needs for round-trip extended thinking) is preserved intact.
+                        if (!string.IsNullOrEmpty(trc.Text) && trc.Text.Length > MaxIntermediateAssistantTextChars)
+                        {
+                            rebuilt.Add(new TextReasoningContent(
+                                trc.Text[..MaxIntermediateAssistantTextChars] + "[reasoning omitted]")
+                            {
+                                ProtectedData = trc.ProtectedData
+                            });
+                            anyTruncated = true;
+                        }
+                        else
+                        {
+                            rebuilt.Add(content);
+                        }
+                        break;
+
+                    case TextContent tc:
+                        if (!string.IsNullOrEmpty(tc.Text) && tc.Text.Length > MaxIntermediateAssistantTextChars)
+                        {
+                            rebuilt.Add(new TextContent(
+                                tc.Text[..MaxIntermediateAssistantTextChars] + "[text omitted]"));
+                            anyTruncated = true;
+                        }
+                        else
+                        {
+                            rebuilt.Add(content);
+                        }
+                        break;
+
+                    case FunctionCallContent fc:
+                        // Truncate large argument values. The call ID and function name are
+                        // always preserved; only bulk string payloads (file contents, scripts)
+                        // are replaced with a size annotation.
+                        if (fc.Arguments?.Any(kv => IsLargeArgValue(kv.Value)) == true)
+                        {
+                            var truncatedArgs = new AIFunctionArguments(
+                                fc.Arguments.ToDictionary(
+                                    kv => kv.Key,
+                                    kv => IsLargeArgValue(kv.Value)
+                                        ? TruncateArgValue(kv.Value)
+                                        : kv.Value));
+                            rebuilt.Add(new FunctionCallContent(
+                                fc.CallId ?? fc.Name ?? string.Empty,
+                                fc.Name ?? string.Empty,
+                                truncatedArgs));
+                            anyTruncated = true;
+                        }
+                        else
+                        {
+                            rebuilt.Add(content);
+                        }
+                        break;
+
+                    default:
+                        rebuilt.Add(content);
+                        break;
+                }
             }
 
-            if (text == null || text.Length <= MaxIntermediateAssistantTextChars)
-            {
-                result.Add(msg);
-                continue;
-            }
-
-            var stub    = text[..MaxIntermediateAssistantTextChars] + "[reasoning omitted]";
-            var rebuilt = new List<AIContent> { new TextContent(stub) };
-            rebuilt.AddRange(toolCalls);
-            result.Add(new ChatMessage(msg.Role, rebuilt) { AuthorName = msg.AuthorName });
+            result.Add(anyTruncated
+                ? new ChatMessage(msg.Role, rebuilt) { AuthorName = msg.AuthorName }
+                : msg);
         }
         return result;
     }
+
+    private static bool IsLargeArgValue(object? value) => value switch
+    {
+        string s                                                                   => s.Length > MaxIntermediateArgValueChars,
+        System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.String
+            => (je.GetString()?.Length ?? 0) > MaxIntermediateArgValueChars,
+        _ => false
+    };
+
+    private static object? TruncateArgValue(object? value) => value switch
+    {
+        string s                                                                   => $"[{s.Length:N0} chars — omitted from intermediate context]",
+        System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.String
+            => $"[{je.GetString()?.Length ?? 0:N0} chars — omitted from intermediate context]",
+        _ => value
+    };
 
     private static IEnumerable<ChatMessage> KeepLastToolPairs(
         IEnumerable<ChatMessage> messages,
@@ -861,7 +926,9 @@ public sealed class AgentFactory(
     {
         TextContent t           => t.Text?.Length ?? 0,
         FunctionResultContent r => r.Result is string s ? s.Length : r.Result?.ToString()?.Length ?? 0,
-        FunctionCallContent c   => (c.Name?.Length ?? 0) + (c.Arguments?.ToString()?.Length ?? 0),
+        FunctionCallContent c   => (c.Name?.Length ?? 0) + (c.Arguments?.Values.Sum(v =>
+                                      v is System.Text.Json.JsonElement je ? je.GetRawText().Length
+                                      : v?.ToString()?.Length ?? 0) ?? 0),
         _                       => 0,
     };
 
