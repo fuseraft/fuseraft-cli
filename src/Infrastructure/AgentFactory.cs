@@ -187,6 +187,12 @@ public sealed class AgentFactory(
             .Use(
                 getResponseFunc: async (messages, options, inner, ct) =>
                 {
+                    // Strip verbose reasoning text from ALL intermediate tool-calling assistant
+                    // messages before the window filter — reasoning from prior calls in the
+                    // same turn is never needed again and is the primary cause of the O(N²)
+                    // token growth seen with grok-build and other reasoning-heavy models.
+                    messages = TruncateIntermediateAssistantReasoning(messages);
+
                     if (maxInTurnToolPairs > 0)
                         messages = KeepLastToolPairs(messages, maxInTurnToolPairs);
 
@@ -230,6 +236,8 @@ public sealed class AgentFactory(
                 },
                 getStreamingResponseFunc: (messages, options, inner, ct) =>
                 {
+                    messages = TruncateIntermediateAssistantReasoning(messages);
+
                     if (maxInTurnToolPairs > 0)
                         messages = KeepLastToolPairs(messages, maxInTurnToolPairs);
 
@@ -544,6 +552,77 @@ public sealed class AgentFactory(
     /// inner LLM call regardless of total context size, giving an O(maxPairs) tool-result
     /// footprint per iteration. Non-tool messages are never touched.
     /// </summary>
+    // Maximum text/reasoning chars kept in an intermediate tool-calling assistant message.
+    // Only the FunctionCallContent (name + args) and this short stub are retained; the rest
+    // is elided to prevent O(N²) token growth when models emit per-call reasoning blocks.
+    private const int MaxIntermediateAssistantTextChars = 120;
+
+    /// <summary>
+    /// Truncates verbose text/reasoning content in intermediate (tool-calling) assistant
+    /// messages while preserving the <see cref="FunctionCallContent"/> items the provider
+    /// needs for structural validity. Pure-text (non-tool) messages are never touched.
+    /// </summary>
+    private static IEnumerable<ChatMessage> TruncateIntermediateAssistantReasoning(
+        IEnumerable<ChatMessage> messages)
+    {
+        var list = messages as IList<ChatMessage> ?? messages.ToList();
+
+        // Fast path: no assistant messages with tool calls.
+        if (!list.Any(m => m.Role == ChatRole.Assistant &&
+                           m.Contents.OfType<FunctionCallContent>().Any()))
+            return list;
+
+        var result = new List<ChatMessage>(list.Count);
+        foreach (var msg in list)
+        {
+            if (msg.Role != ChatRole.Assistant)
+            {
+                result.Add(msg);
+                continue;
+            }
+
+            var toolCalls = msg.Contents.OfType<FunctionCallContent>().ToList<AIContent>();
+            if (toolCalls.Count == 0)
+            {
+                // Pure text message (final response, orchestrator signal) — keep as-is.
+                result.Add(msg);
+                continue;
+            }
+
+            // Intermediate tool-calling message. Extract text from any content that carries
+            // a string — covers both TextContent and TextReasoningContent (the latter is
+            // used by extended-thinking models and is identified by name since it may not
+            // be a TextContent subclass in all SDK versions).
+            string? text = null;
+            foreach (var c in msg.Contents)
+            {
+                string? raw = c switch
+                {
+                    TextContent tc                            => tc.Text,
+                    { } other when other.GetType().Name
+                        .Contains("Reasoning", StringComparison.Ordinal)
+                        => (other.GetType()
+                                .GetProperty("Text")?
+                                .GetValue(other) as string),
+                    _                                        => null
+                };
+                if (!string.IsNullOrEmpty(raw)) { text = raw; break; }
+            }
+
+            if (text == null || text.Length <= MaxIntermediateAssistantTextChars)
+            {
+                result.Add(msg);
+                continue;
+            }
+
+            var stub    = text[..MaxIntermediateAssistantTextChars] + "[reasoning omitted]";
+            var rebuilt = new List<AIContent> { new TextContent(stub) };
+            rebuilt.AddRange(toolCalls);
+            result.Add(new ChatMessage(msg.Role, rebuilt) { AuthorName = msg.AuthorName });
+        }
+        return result;
+    }
+
     private static IEnumerable<ChatMessage> KeepLastToolPairs(
         IEnumerable<ChatMessage> messages,
         int maxPairs)
@@ -558,19 +637,11 @@ public sealed class AgentFactory(
         if (toolIndices.Count <= maxPairs) return list;
 
         var result = new List<ChatMessage>(list);
-        const string Placeholder         = "[result omitted — sliding window]";
-        const string ReasoningPlaceholder = "[reasoning omitted]";
-        // Max chars of reasoning/text to keep in an old assistant tool-call message.
-        // Models that emit reasoning blocks in assistant messages (grok-build, claude extended
-        // thinking) accumulate O(N²) tokens across N tool calls unless these are trimmed.
-        const int    MaxOldAssistantTextChars = 120;
-
+        const string Placeholder = "[result omitted — sliding window]";
         int cutoff = toolIndices.Count - maxPairs;
         for (int k = 0; k < cutoff; k++)
         {
             int idx = toolIndices[k];
-
-            // Replace the tool-result message with a compact placeholder.
             var old = result[idx];
             var trimmed = old.Contents
                 .OfType<FunctionResultContent>()
@@ -578,35 +649,6 @@ public sealed class AgentFactory(
                 .ToList<AIContent>();
             result[idx] = new ChatMessage(old.Role,
                 trimmed.Count > 0 ? trimmed : [new TextContent(Placeholder)]);
-
-            // Also strip verbose reasoning text from the preceding assistant tool-call
-            // message. Reasoning blocks from models like grok-build or claude extended
-            // thinking can be thousands of tokens each and accumulate quadratically when
-            // left in the in-turn context. Keep only the function-call content plus a
-            // short text stub so the provider sees a structurally valid message.
-            if (idx > 0 && result[idx - 1].Role == ChatRole.Assistant)
-            {
-                var aMsg      = result[idx - 1];
-                var toolCalls = aMsg.Contents.OfType<FunctionCallContent>().ToList<AIContent>();
-                if (toolCalls.Count > 0)
-                {
-                    var textPart = aMsg.Contents
-                        .OfType<TextContent>()
-                        .Where(t => !string.IsNullOrEmpty(t.Text))
-                        .Select(t => t.Text!)
-                        .FirstOrDefault();
-
-                    var truncText = textPart is { Length: > MaxOldAssistantTextChars }
-                        ? textPart[..MaxOldAssistantTextChars] + ReasoningPlaceholder
-                        : textPart;
-
-                    var newContents = truncText is not null
-                        ? [new TextContent(truncText), .. toolCalls]
-                        : toolCalls;
-                    result[idx - 1] = new ChatMessage(aMsg.Role, newContents)
-                        { AuthorName = aMsg.AuthorName };
-                }
-            }
         }
         return result;
     }
