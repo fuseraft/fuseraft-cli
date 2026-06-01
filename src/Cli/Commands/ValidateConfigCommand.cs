@@ -250,6 +250,27 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
         if (config.Termination is not null)
             ValidateTermination(config.Termination, config.Agents, issues);
 
+        // Context budget — mirror the guards in OrchestratorBuilder.BuildAsync so they
+        // surface here rather than only at session startup.
+        if (config.ContextBudget is { } cb)
+        {
+            bool needsCompactor = cb.CutoverAt > 0 || cb.MaxSingleTurnInputTokens > 0;
+            if (needsCompactor && config.Compaction is null)
+                issues.Add(("error",
+                    "ContextBudget.CutoverAt and ContextBudget.MaxSingleTurnInputTokens require " +
+                    "a Compaction section. Add Compaction to enable automatic context trimming."));
+
+            if (cb.WarnAt > 0 && cb.CutoverAt > 0 && cb.WarnAt >= cb.CutoverAt)
+                issues.Add(("error",
+                    $"ContextBudget.WarnAt ({cb.WarnAt:N0}) must be less than CutoverAt ({cb.CutoverAt:N0})."));
+
+            if (config.WarnTurnTokens > 0 && cb.CutoverAt > 0 && config.WarnTurnTokens >= cb.CutoverAt)
+                issues.Add(("warning",
+                    $"WarnTurnTokens ({config.WarnTurnTokens:N0}) is >= ContextBudget.CutoverAt ({cb.CutoverAt:N0}). " +
+                    "The per-turn warning fires in the same turn as compaction — lower WarnTurnTokens " +
+                    "below CutoverAt to get an advance signal."));
+        }
+
         // Telemetry
         if (config.Telemetry is { OtlpEndpoint: { } endpoint })
         {
