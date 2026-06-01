@@ -77,8 +77,11 @@ Construct the YAML from the gathered answers. Apply these rules:
 5. **Include `EvidenceStore`** when using evidence contracts or lossless compaction.
 6. **Include a `Validation` section** whenever `TestReportValid`, `RequireBrief`, `RequireAllFilesWritten`, or `RequireAcceptanceCriteriaPassedValidator` are used.
 7. **Always include a `Termination` block** — use `MaxIterations` as a hard cap (40 is a safe default for dev pipelines).
-8. **Include `FailureHandling`** for any pipeline longer than 2 agents to prevent infinite reinstruct loops.
-9. **Parallel fan-out rules** (state machine only):
+8. **Include `FailureHandling`** for any pipeline longer than 2 agents to prevent infinite reinstruct loops. Always set both global backstops:
+   - `MaxConsecutiveContractFailures: 6` — prevents a `Reinstruct` policy from looping indefinitely when a contract cannot be satisfied.
+   - `MaxConsecutiveTurnsWithoutSignal: 8` — escalates to HITL when an agent completes work but never calls `handoff()`. This counter survives compaction cycles; the built-in loop warning does not.
+9. **Include `ContextBudget`** when using `Compaction`. Recommended defaults: `WarnAt: 60000`, `CutoverAt: 100000`, `MaxSingleTurnInputTokens: 200000`. Keep `WarnTurnTokens` (top-level) below `CutoverAt` so the per-turn warning fires before compaction is forced.
+10. **Parallel fan-out rules** (state machine only):
    - Put `Parallel: true`, `Targets: [BranchStateA, BranchStateB, ...]`, and `To: JoinState` on the triggering transition. `To` is the join state entered after all branches finish — it is **not** a branch target.
    - Each branch state must be declared in `States` with an `Agent`. Branch agents run for **one turn only** with an isolated history snapshot — do **not** instruct them to emit a handoff signal.
    - Branch agents do not need the `Handoff` plugin.
