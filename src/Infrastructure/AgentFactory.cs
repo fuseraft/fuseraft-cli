@@ -558,11 +558,19 @@ public sealed class AgentFactory(
         if (toolIndices.Count <= maxPairs) return list;
 
         var result = new List<ChatMessage>(list);
-        const string Placeholder = "[result omitted — sliding window]";
+        const string Placeholder         = "[result omitted — sliding window]";
+        const string ReasoningPlaceholder = "[reasoning omitted]";
+        // Max chars of reasoning/text to keep in an old assistant tool-call message.
+        // Models that emit reasoning blocks in assistant messages (grok-build, claude extended
+        // thinking) accumulate O(N²) tokens across N tool calls unless these are trimmed.
+        const int    MaxOldAssistantTextChars = 120;
+
         int cutoff = toolIndices.Count - maxPairs;
         for (int k = 0; k < cutoff; k++)
         {
             int idx = toolIndices[k];
+
+            // Replace the tool-result message with a compact placeholder.
             var old = result[idx];
             var trimmed = old.Contents
                 .OfType<FunctionResultContent>()
@@ -570,6 +578,35 @@ public sealed class AgentFactory(
                 .ToList<AIContent>();
             result[idx] = new ChatMessage(old.Role,
                 trimmed.Count > 0 ? trimmed : [new TextContent(Placeholder)]);
+
+            // Also strip verbose reasoning text from the preceding assistant tool-call
+            // message. Reasoning blocks from models like grok-build or claude extended
+            // thinking can be thousands of tokens each and accumulate quadratically when
+            // left in the in-turn context. Keep only the function-call content plus a
+            // short text stub so the provider sees a structurally valid message.
+            if (idx > 0 && result[idx - 1].Role == ChatRole.Assistant)
+            {
+                var aMsg      = result[idx - 1];
+                var toolCalls = aMsg.Contents.OfType<FunctionCallContent>().ToList<AIContent>();
+                if (toolCalls.Count > 0)
+                {
+                    var textPart = aMsg.Contents
+                        .OfType<TextContent>()
+                        .Where(t => !string.IsNullOrEmpty(t.Text))
+                        .Select(t => t.Text!)
+                        .FirstOrDefault();
+
+                    var truncText = textPart is { Length: > MaxOldAssistantTextChars }
+                        ? textPart[..MaxOldAssistantTextChars] + ReasoningPlaceholder
+                        : textPart;
+
+                    var newContents = truncText is not null
+                        ? [new TextContent(truncText), .. toolCalls]
+                        : toolCalls;
+                    result[idx - 1] = new ChatMessage(aMsg.Role, newContents)
+                        { AuthorName = aMsg.AuthorName };
+                }
+            }
         }
         return result;
     }
