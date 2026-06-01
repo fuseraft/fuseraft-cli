@@ -74,6 +74,7 @@ public static class OrchestratorBuilder
         bool hitlMode = false,
         string? sessionId = null,
         string? specContent = null,
+        bool noReplan = false,
         CancellationToken cancellationToken = default)
     {
         if (!File.Exists(configPath))
@@ -100,6 +101,29 @@ public static class OrchestratorBuilder
         // about the token.
         if (sessionId is { Length: > 0 })
             config = InterpolateSessionId(config, sessionId);
+
+        // --no-replan: strip all state-machine transitions whose Signal contains "REPLAN"
+        // so the session never routes back to the planning phase. Useful in CI or when the
+        // developer agent has already planned and a replan loop would just burn tokens.
+        if (noReplan && config.Selection.StateMachine is { } smForReplan)
+        {
+            var prunedStates = smForReplan.States.ToDictionary(
+                kv => kv.Key,
+                kv => kv.Value with
+                {
+                    Transitions = kv.Value.Transitions
+                        .Where(t => t.Signal is null ||
+                                    !t.Signal.Contains("REPLAN", StringComparison.OrdinalIgnoreCase))
+                        .ToList()
+                });
+            config = config with
+            {
+                Selection = config.Selection with
+                {
+                    StateMachine = smForReplan with { States = prunedStates }
+                }
+            };
+        }
 
         // Fill in Endpoint and ApiKeyEnvVar from ~/.fuseraft/config for any agent
         // model that doesn't declare them explicitly.
@@ -278,6 +302,25 @@ public static class OrchestratorBuilder
             };
         }
 
+        // Project root orientation: when a sandbox root is configured, inject a prompt block
+        // telling agents the canonical root path and warning against double-nested paths.
+        // This is the primary prompt-level defence against the vsl/vsl/… path confusion
+        // pattern observed in long sessions.
+        if (config.Security?.FileSystemSandboxPath is { Length: > 0 } sbxForBlock)
+        {
+            var sandboxExpanded = FuseraftPaths.ExpandPath(sbxForBlock);
+            var projectRootBlock = BuildProjectRootBlock(sandboxExpanded);
+            config = config with
+            {
+                Agents = config.Agents
+                    .Select(a => a with
+                    {
+                        Instructions = a.Instructions.TrimEnd() + "\n\n" + projectRootBlock
+                    })
+                    .ToList()
+            };
+        }
+
         // Inject context items into every agent's system prompt so agents know what
         // reference material is available without burning a tool call on discovery.
         var contextStore = new fuseraft.Infrastructure.ContextStore();
@@ -396,9 +439,29 @@ public static class OrchestratorBuilder
             : FuseraftPaths.LocalFileVersions;
         var fileVersionStore = new fuseraft.Infrastructure.FileVersionStore(versionStorePath, loggerFactory.CreateLogger<fuseraft.Infrastructure.FileVersionStore>());
 
-        // Re-configure the FileSystem plugin with the version store so write_file and
-        // stat_file can participate in version-aware conflict detection.
-        pluginRegistry.Configure(config.Security ?? new SecurityConfig(), profiles, shellApprover, fileVersionStore);
+        // Session-level read cache: short-circuits cross-turn re-reads of unchanged files
+        // so agents receive a "content unchanged since last read" hint instead of re-dumping
+        // full file content into context every turn. Persisted to the session artifacts dir
+        // so the cache survives process restarts within the same session.
+        var readCacheRoot = config.Security?.FileSystemSandboxPath is { Length: > 0 } rcs
+            ? FuseraftPaths.ExpandPath(rcs)
+            : Directory.GetCurrentDirectory();
+        var readCachePath = sessionId is { Length: > 0 }
+            ? Path.Combine(readCacheRoot, FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalSessionReadCache, sessionId))
+            : null;
+        var sessionReadCache = new fuseraft.Infrastructure.SessionReadCache(readCachePath);
+
+        // Re-configure the FileSystem plugin with the version store and session read cache
+        // so write_file, stat_file, and read_file participate in version-aware conflict
+        // detection and cross-turn read deduplication.
+        pluginRegistry.Configure(config.Security ?? new SecurityConfig(), profiles, shellApprover, fileVersionStore, sessionReadCache);
+
+        // Session context plugin: shared handoff notes that agents write before routing
+        // and read on re-entry. Scoped to the same root as the read cache.
+        var ctxSummaryPath = sessionId is { Length: > 0 }
+            ? Path.Combine(readCacheRoot, FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalSessionContext, sessionId))
+            : Path.Combine(readCacheRoot, ".fuseraft", "state", "sessions", "default", "context_summary.md");
+        pluginRegistry.Register("SessionContext", () => new fuseraft.Infrastructure.Plugins.SessionContextPlugin(ctxSummaryPath));
 
         // Governance kernel: load default policy if one exists alongside the config file.
         var configDir         = Path.GetDirectoryName(Path.GetFullPath(configPath)) ?? ".";
@@ -1216,6 +1279,19 @@ public static class OrchestratorBuilder
             sb.AppendLine($"  FullSuiteCommand:   {ts.FullSuiteCommand}");
         sb.AppendLine();
         sb.Append("For each file you changed, substitute its path for {file} in FindRelatedCommand to discover related tests, then run those tests. Fall back to FullSuiteCommand when no related tests are found.");
+        return sb.ToString();
+    }
+
+    private static string BuildProjectRootBlock(string sandboxRoot)
+    {
+        var dirName = Path.GetFileName(sandboxRoot.TrimEnd(Path.DirectorySeparatorChar));
+        var sb = new StringBuilder();
+        sb.AppendLine("## Project Root (Sandbox)");
+        sb.AppendLine($"Sandbox root: {sandboxRoot}");
+        sb.AppendLine("All file paths must be relative to this root or absolute. Never include the project directory name as a prefix in a relative path.");
+        sb.AppendLine($"  Correct:  src/module/file.py  or  {dirName}/src/module/file.py (absolute)");
+        sb.AppendLine($"  Wrong:    {dirName}/{dirName}/src/module/file.py  ← double-nested, file will not exist");
+        sb.Append("Files you have already read this session are cached. If the file is unchanged you will see a hint instead of the full content — use grep_in_file for targeted lookup or pass startLine/maxLines for a specific section.");
         return sb.ToString();
     }
 

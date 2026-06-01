@@ -17,23 +17,27 @@ public static partial class InitTemplates
             Description: Analyses the task and writes a structured brief.
             Instructions: |
               You are a software architect. Your job is to:
-              1. Read and understand the task thoroughly.
-              2. Use sub_agent_explore for broad codebase questions without filling your context
+              1. {ContextReadStep}
+              2. Read and understand the task thoroughly.
+              3. Use sub_agent_explore for broad codebase questions without filling your context
                  with raw file contents. For any direct file reads: {LargeFileProtocol}
-              3. Check if {FuseraftPaths.LocalBrief} already exists. If it does, read it — if it
+              4. Check if {FuseraftPaths.LocalBrief} already exists. If it does, read it — if it
                  still covers the current task, call handoff(route_keyword: "HANDOFF TO DEVELOPER")
                  immediately without rewriting it.
-              4. Write a brief to {FuseraftPaths.LocalBrief} with fields:
+              5. Write a brief to {FuseraftPaths.LocalBrief} with fields:
                    goal — one-sentence description of what to build
-                   files_to_change — array of file paths to create or modify
+                   files_to_change — array of paths RELATIVE TO THE SANDBOX ROOT
+                     Correct:  src/module/file.py
+                     Wrong:    project_name/src/module/file.py  (never prefix with the project dir)
                    acceptance_criteria — array of testable criteria the code must satisfy
-              5. Break work into concrete steps for the Developer.
+              6. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
               - FileSystem
               - Search
+              - SessionContext
               - SubAgent
               - Handoff
             FunctionChoice: required
@@ -45,9 +49,13 @@ public static partial class InitTemplates
             Description: Implements the changes described in the brief.
             Instructions: |
               You are a senior software engineer. Your job is to:
-              1. Read {FuseraftPaths.LocalBrief} and implement every listed file using write_file.
-              2. Run a build command with shell_run to confirm it compiles.
-              3. Commit your work with git_add and git_commit.
+              1. {ContextReadStep}
+              2. Read {FuseraftPaths.LocalBrief} — implement every file in files_to_change.
+                 Use patch_file for targeted edits to existing files; use write_file only for
+                 new files. All paths are relative to the sandbox root.
+              3. Run a build command with shell_run to confirm it compiles.
+              4. Commit with git_add and git_commit.
+              5. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO TESTER").
               If the brief is unclear or needs rethinking, call handoff(route_keyword: "REPLAN REQUIRED").
             Model:
@@ -57,9 +65,11 @@ public static partial class InitTemplates
               - Shell
               - Git
               - Changes
+              - SessionContext
               - Handoff
             FunctionChoice: required
             MaxInTurnToolPairs: 12
+            {DeveloperContextWindow}
             {AgentFileOptions}
             """;
 
@@ -68,16 +78,18 @@ public static partial class InitTemplates
             Description: Writes and runs tests, produces a structured test report.
             Instructions: |
               You are a QA engineer. Your job is to:
-              1. Read {FuseraftPaths.LocalBrief} to understand the acceptance criteria.
-              2. Write test scripts (any format) to {FuseraftPaths.LocalTests}/ and any
+              1. {ContextReadStep}
+              2. Read {FuseraftPaths.LocalBrief} to understand the acceptance criteria.
+              3. Write test scripts (any format) to {FuseraftPaths.LocalTests}/ and any
                  fixture or seed files to {FuseraftPaths.LocalTestFixtures}/. Run them with shell_run.
-              3. Write results to {FuseraftPaths.LocalTestReport}:
+              4. Write results to {FuseraftPaths.LocalTestReport}:
                    passed — true if every criterion passes, false otherwise
                    results — array of objects:
                      PASS: name, status, exit_code, command (exact shell_run command — required)
                      FAIL: name, status, exit_code, command, output (relevant stderr/stdout from the failure — required)
               A PASS result with an empty or missing command field is treated as fabricated and will block handoff.
               Always write the report before routing, even when tests fail.
+              5. {ContextWriteStep}
               If all tests pass, call handoff(route_keyword: "HANDOFF TO REVIEWER").
               If any tests fail, call handoff(route_keyword: "BUGS FOUND").
             Model:
@@ -86,9 +98,11 @@ public static partial class InitTemplates
               - FileSystem
               - Shell
               - Changes
+              - SessionContext
               - Handoff
             FunctionChoice: required
             MaxInTurnToolPairs: 12
+            {TesterContextWindow}
             {AgentFileOptions}
             """;
 
@@ -97,11 +111,12 @@ public static partial class InitTemplates
             Description: Reviews implementation and test results; gives final approval or requests changes.
             Instructions: |
               You are a principal engineer. Your job is to:
-              1. Read the implementation files listed in {FuseraftPaths.LocalBrief} under
+              1. {ContextReadStep}
+              2. Read the implementation files listed in {FuseraftPaths.LocalBrief} under
                  files_to_change, and {FuseraftPaths.LocalTestReport}. For any large file:
                  {LargeFileProtocolReviewer}
-              2. Run at least one acceptance criterion as a spot-check with shell_run.
-              3. Emit a JSON review block listing each acceptance criterion with verdict (PASS/FAIL)
+              3. Run at least one acceptance criterion as a spot-check with shell_run.
+              4. Emit a JSON review block listing each acceptance criterion with verdict (PASS/FAIL)
                  and evidence before your routing keyword.
               If all criteria pass, call handoff(route_keyword: "APPROVED").
               If targeted fixes are needed, call handoff(route_keyword: "REVISION REQUIRED").
@@ -113,6 +128,7 @@ public static partial class InitTemplates
               - FileSystem
               - Shell
               - Changes
+              - SessionContext
               - Handoff
             FunctionChoice: auto
             ContextWindow:
@@ -140,6 +156,9 @@ public static partial class InitTemplates
                 Back-edges (BUGS FOUND, REVISION REQUIRED, REPLAN REQUIRED) return to earlier nodes
                 without restarting the full pipeline. APPROVED routes to a terminal confirmation node.
 
+              Security:
+                FileSystemSandboxPath: .   # set to your project root (e.g. ~/projects/myapp)
+
               ChangeTracking:
                 Path: {FuseraftPaths.LocalChanges}
 
@@ -150,6 +169,8 @@ public static partial class InitTemplates
 
               Events:
                 Path: {FuseraftPaths.LocalEventsLog}
+
+              WarnTurnTokens: 300000
 
               # Each agent lives in its own YAML file in agents/ — edit, version, or reuse
               # them independently across configs. Inline fields override the file at load time.
@@ -241,9 +262,6 @@ public static partial class InitTemplates
               #     Requires:
               #       - Type: FileExists
               #         Path: {FuseraftPaths.LocalBrief}
-
-              # Security:
-              #   FileSystemSandboxPath: ~/my-project
 
               Compaction:
                 TriggerTurnCount: 30

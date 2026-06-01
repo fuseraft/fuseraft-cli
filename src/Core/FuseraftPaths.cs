@@ -66,15 +66,17 @@ public static class FuseraftPaths
     public const string LocalAppLog         = ".fuseraft/logs/app.log";
 
     // state/ — session-scoped runtime state files
-    public const string LocalState        = ".fuseraft/state";
-    public const string LocalChanges      = ".fuseraft/state/changes.json";
-    public const string LocalIntents      = ".fuseraft/state/sessions/{session_id}/intents.json";
-    public const string LocalEvidence     = ".fuseraft/state/evidence.json";
-    public const string LocalFileVersions = ".fuseraft/state/file_versions.json";
+    public const string LocalState          = ".fuseraft/state";
+    public const string LocalChanges        = ".fuseraft/state/changes.json";
+    public const string LocalIntents        = ".fuseraft/state/sessions/{session_id}/intents.json";
+    public const string LocalSessionContext = ".fuseraft/state/sessions/{session_id}/context_summary.md";
+    public const string LocalEvidence       = ".fuseraft/state/evidence.json";
+    public const string LocalFileVersions   = ".fuseraft/state/file_versions.json";
 
     // artifacts/ — structured agent-written documents read by validators
     // Brief paths include {session_id}, expanded at runtime via ExpandSessionId.
-    public const string LocalBrief           = ".fuseraft/artifacts/sessions/{session_id}/brief.json";
+    public const string LocalSessionReadCache = ".fuseraft/artifacts/sessions/{session_id}/read_cache.json";
+    public const string LocalBrief            = ".fuseraft/artifacts/sessions/{session_id}/brief.json";
     public const string LocalTestReport      = ".fuseraft/artifacts/test-report.json";
     public const string LocalConventions     = ".fuseraft/artifacts/sessions/{session_id}/conventions.json";
     public const string LocalBrownfieldBrief = ".fuseraft/artifacts/sessions/{session_id}/brief.brownfield.json";
@@ -173,6 +175,7 @@ public static class FuseraftPaths
         }
         sb.AppendLine("  .fuseraft/state/changes.json              — tool-call change log");
         sb.AppendLine($"  {LocalIntents,-42} — in-progress intent records (consult before repeating work)");
+        sb.AppendLine($"  {LocalSessionContext,-42} — shared handoff notes (read at turn start; write before handoff)");
         sb.AppendLine("  .fuseraft/state/evidence.json             — structured evidence graph");
         sb.AppendLine("  .fuseraft/state/file_versions.json        — per-file versioned write counters");
         sb.AppendLine($"  {LocalBrief,-42} — task brief (if present)");

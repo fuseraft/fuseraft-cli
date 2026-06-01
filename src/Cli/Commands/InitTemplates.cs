@@ -56,6 +56,33 @@ public static partial class InitTemplates
     private const string LargeFileProtocolReviewer =
         "call get_file_summary first, grep_file to locate the section to inspect, then read_file with startLine/maxLines — never cold-read a large file in full.";
 
+    // Session context handoff protocol — read on entry, write before routing.
+    // These steps prevent agents from re-reading files that previous agents already
+    // summarised, and give successor agents a current-state snapshot without needing
+    // to replay the full conversation history.
+    private const string ContextReadStep =
+        "Call session_context_read. If a prior summary exists, use it to catch up — do not re-read files that are already described there.";
+    private const string ContextWriteStep =
+        "Call session_context_write with a short bullet summary: what you accomplished, which files changed, and any open issues (keep it under 200 words).";
+
+    // Standard ContextWindow blocks used by developer and tester agents to strip tool
+    // frames from cross-turn history and cap how far back each turn looks.
+    private const string DeveloperContextWindow = """
+        ContextWindow:
+          TextOnly: true
+          MaxTurnAge: 8
+        """;
+    private const string TesterContextWindow = """
+        ContextWindow:
+          TextOnly: true
+          MaxTurnAge: 6
+        """;
+    private const string VerifierContextWindow = """
+        ContextWindow:
+          TextOnly: true
+          MaxTurnAge: 6
+        """;
+
     private const string AgentFileOptions = """
 
         # -- Optional overrides -------------------------------------------------------

@@ -19,7 +19,8 @@ public sealed class FileSystemPlugin : ITurnResettable
     private readonly string? _sandboxRoot;
     private readonly int     _readFileSizeLimit;
     private readonly string  _summaryDir;
-    private readonly FileVersionStore? _versionStore;
+    private readonly FileVersionStore?  _versionStore;
+    private readonly SessionReadCache?  _sessionCache;
 
     // Per-turn read cache: cleared at the start of each agent turn so re-reading the same
     // file within a single turn is caught and short-circuited before dumping redundant
@@ -47,7 +48,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     // maxLines: 99999 is asking for everything and should be gated the same as omitting it.
     private const int LargeFileColdReadLines  = 500;
 
-    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null)
+    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null)
     {
         _sandboxRoot       = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _readFileSizeLimit = readFileSizeLimit > 0 ? readFileSizeLimit : 20_000;
@@ -55,6 +56,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         var baseDir        = _sandboxRoot ?? Directory.GetCurrentDirectory();
         _summaryDir        = Path.Combine(baseDir, ".fuseraft", "summaries");
         _versionStore      = versionStore;
+        _sessionCache      = sessionCache;
     }
 
     /// <inheritdoc cref="ITurnResettable.BeginTurn"/>
@@ -76,6 +78,26 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         if (!File.Exists(resolved))
             return PluginResult.Error($"File not found: {resolved}");
+
+        // Compute FileInfo once — used by the session cache check and the cold-read gate.
+        var fileInfo = new FileInfo(resolved);
+
+        // Session-level read cache: if the file is in the cache and unchanged on disk
+        // (matching mtime + size), return a hint instead of re-dumping the full content.
+        // Only fires on cold reads (no startLine/maxLines override), same condition as the
+        // per-turn cache below. After compaction the content may no longer be in context,
+        // so agents can pass startLine/maxLines to force a targeted re-read.
+        if (startLine <= 1 && maxLines <= 0 && _sessionCache is not null
+            && _sessionCache.TryGetHit(resolved, fileInfo, out var cacheHit))
+        {
+            var ago   = FormatTimeAgo(DateTime.UtcNow - cacheHit!.LastReadUtc);
+            var times = cacheHit.ReadCount == 1 ? "once" : $"{cacheHit.ReadCount} times";
+            return PluginResult.Info(
+                $"'{resolved}' has not changed since it was last read this session " +
+                $"({times}, {ago} ago). Content from that read is in your conversation " +
+                $"history (unless compacted away). Use grep_in_file to locate a specific " +
+                $"section, or pass startLine/maxLines to force a targeted re-read.");
+        }
 
         // Turn-level read cache — identical file reads within one agent turn return a short
         // reminder instead of re-dumping the full content into context. The cache is cleared
@@ -104,7 +126,6 @@ public sealed class FileSystemPlugin : ITurnResettable
         // expensive as one from line 1. Byte pre-check avoids allocating a full string array
         // for a file we're about to redirect.
         bool isColdRead = maxLines <= 0 || maxLines > LargeFileColdReadLines;
-        var  fileInfo   = new FileInfo(resolved);
         if (isColdRead && fileInfo.Length > LargeFileByteThreshold)
         {
             var (coldLines, coldLineCount, coldSizeBytes) = await StreamPreviewLinesAsync(resolved, 30);
@@ -117,6 +138,7 @@ public sealed class FileSystemPlugin : ITurnResettable
                     $"Read budget exhausted ({_readBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars). " +
                     $"Proceed with context already available — use patch_file or shell_run. Budget resets next turn.");
             _readBudgetUsed += preview.Length;
+            _sessionCache?.RecordRead(resolved, fileInfo);
             return preview;
         }
 
@@ -175,6 +197,13 @@ public sealed class FileSystemPlugin : ITurnResettable
                     : $"\n\n[Showing lines {effectiveStart}–{endLine} of {totalLines}.]";
             content += hint;
         }
+
+        // Record successful full cold reads in the session cache so subsequent attempts
+        // on the same unchanged file are short-circuited with a "content unchanged" hint.
+        // Partial reads (startLine > 1 or maxLines > 0) are not cached — agents requesting
+        // specific ranges are actively paging and should continue to receive content.
+        if (startLine <= 1 && maxLines <= 0)
+            _sessionCache?.RecordRead(resolved, fileInfo);
 
         return content;
     }
@@ -339,8 +368,9 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         await File.WriteAllTextAsync(resolved, patched);
 
-        // Invalidate the read cache — content has changed.
+        // Invalidate both caches — content has changed.
         _readThisTurn.Remove(resolved);
+        _sessionCache?.Invalidate(resolved);
 
         // Record that this path was patched so write_file can detect the pattern.
         _patchedThisTurn.Add(resolved);
@@ -417,6 +447,13 @@ public sealed class FileSystemPlugin : ITurnResettable
 
     private static string Truncate(string s, int max = 60)
         => s.Length <= max ? s : s[..max] + "…";
+
+    private static string FormatTimeAgo(TimeSpan elapsed)
+    {
+        if (elapsed.TotalSeconds < 60)  return $"{(int)elapsed.TotalSeconds}s";
+        if (elapsed.TotalMinutes < 60)  return $"{(int)elapsed.TotalMinutes}m";
+        return $"{elapsed.TotalHours:F1}h";
+    }
 
     // Extensions where a literal \" in the file is almost never intentional.
     // LLMs frequently over-escape quote characters in these languages (writing \" when
@@ -612,9 +649,10 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         await File.WriteAllTextAsync(resolved, content);
 
-        // Invalidate the read cache for this path — content has changed so a subsequent
-        // read_file call should return the new content, not the cache-hit message.
+        // Invalidate both caches — content has changed so a subsequent read_file call should
+        // return the new content, not a cache-hit message.
         _readThisTurn.Remove(resolved);
+        _sessionCache?.Invalidate(resolved);
 
         // Bump the version store so stat_file and future baseVersion checks stay accurate.
         int? newVersion = null;

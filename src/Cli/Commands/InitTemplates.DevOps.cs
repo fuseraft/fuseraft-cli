@@ -16,21 +16,24 @@ public static partial class InitTemplates
             Description: Designs the deployment or infrastructure plan.
             Instructions: |
               You are a DevOps architect. Your job is to:
-              1. Understand the infrastructure or deployment task.
-              2. Use sub_agent_explore to survey relevant config files and scripts. For any direct
+              1. {ContextReadStep}
+              2. Understand the infrastructure or deployment task.
+              3. Use sub_agent_explore to survey relevant config files and scripts. For any direct
                  file reads: {LargeFileProtocol}
-              3. Check if {FuseraftPaths.LocalBrief} already exists. If it does, read it — if it
+              4. Check if {FuseraftPaths.LocalBrief} already exists. If it does, read it — if it
                  still covers the current task, call handoff(route_keyword: "PLANNING_COMPLETE")
                  immediately without rewriting it.
-              4. Write a step-by-step execution plan to {FuseraftPaths.LocalBrief} with fields:
+              5. Write a step-by-step execution plan to {FuseraftPaths.LocalBrief} with fields:
                    goal — what the deployment achieves
                    steps — ordered list of execution steps
                    rollback — steps to undo if something goes wrong
+              6. {ContextWriteStep}
               When the plan is ready, call handoff(route_keyword: "PLANNING_COMPLETE").
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
               - FileSystem
+              - SessionContext
               - SubAgent
               - Handoff
             FunctionChoice: required
@@ -42,10 +45,13 @@ public static partial class InitTemplates
             Description: Implements scripts, manifests, and config files.
             Instructions: |
               You are a DevOps engineer. Your job is to:
-              1. Read the plan from {FuseraftPaths.LocalBrief} and implement all required
-                 scripts, manifests, or config files using write_file.
-              2. Run static analysis or validation with shell_run (e.g. lint, validate, check).
-              3. Commit with git_add and git_commit when ready.
+              1. {ContextReadStep}
+              2. Read the plan from {FuseraftPaths.LocalBrief} and implement all required
+                 scripts, manifests, or config files. Use patch_file for edits to existing
+                 files; use write_file only for new files.
+              3. Run static analysis or validation with shell_run (e.g. lint, validate, check).
+              4. Commit with git_add and git_commit when ready.
+              5. {ContextWriteStep}
               When done, call handoff(route_keyword: "DEVELOPMENT_COMPLETE").
               If the plan is unclear, call handoff(route_keyword: "REPLAN_REQUIRED").
             Model:
@@ -55,9 +61,11 @@ public static partial class InitTemplates
               - Shell
               - Git
               - Changes
+              - SessionContext
               - Handoff
             FunctionChoice: required
             MaxInTurnToolPairs: 12
+            {DeveloperContextWindow}
             {AgentFileOptions}
             """;
 
