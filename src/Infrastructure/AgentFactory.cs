@@ -32,6 +32,9 @@ public sealed class AgentFactory(
     AgentSkillsProvider? skillsProvider = null)
 {
     private string? _sessionId;
+    private readonly ILogger _logger =
+        loggerFactory?.CreateLogger(nameof(AgentFactory))
+        ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
 
     public void SetSessionId(string sessionId) => _sessionId = sessionId;
 
@@ -227,10 +230,10 @@ public sealed class AgentFactory(
                         catch (Exception ex) when (attempt < AdaptiveContextTrimMaxRetries
                                                    && IsContextLimitException(ex))
                         {
-                            Console.Error.WriteLine(
-                                $"[context-trim] {config.Name} stage {attempt + 1}/{AdaptiveContextTrimMaxRetries}: " +
-                                $"{ex.Message[..Math.Min(ex.Message.Length, 120)].Replace('\n', ' ')} — " +
-                                $"reducing tool results and retrying...");
+                            _logger.LogWarning(
+                                "[context-trim] {Agent} stage {Stage}/{Max}: {Error} — reducing tool results and retrying",
+                                config.Name, attempt + 1, AdaptiveContextTrimMaxRetries,
+                                ex.Message[..Math.Min(ex.Message.Length, 120)].Replace('\n', ' '));
                         }
                     }
                 },
@@ -253,7 +256,7 @@ public sealed class AgentFactory(
                     // a provider rejection surfaces as a normal error for the user to see.
                     if (maxContextChars > 0 || maxPayloadBytes > 0)
                         messages = ProactivelyTrimIfNeeded(
-                            config.Name, messages, maxContextChars, maxPayloadBytes, toolSchemaChars);
+                            config.Name, messages, maxContextChars, maxPayloadBytes, toolSchemaChars, _logger);
 
                     return inner.GetStreamingResponseAsync(messages, merged, ct);
                 })
@@ -895,7 +898,8 @@ public sealed class AgentFactory(
         IEnumerable<ChatMessage> messages,
         int maxContextChars,
         long maxPayloadBytes,
-        int toolSchemaChars)
+        int toolSchemaChars,
+        ILogger? logger = null)
     {
         var list = messages as IReadOnlyList<ChatMessage> ?? messages.ToList();
 
@@ -914,9 +918,9 @@ public sealed class AgentFactory(
             if (contextOk && payloadOk) return ctx;
 
             if (stage < AdaptiveContextTrimMaxRetries)
-                Console.Error.WriteLine(
-                    $"[context-trim] {agentName} streaming pre-trim stage {stage + 1}: " +
-                    $"~{totalChars / 4:N0} tokens — reducing tool results...");
+                logger?.LogWarning(
+                    "[context-trim] {Agent} streaming pre-trim stage {Stage}: ~{Tokens:N0} tokens — reducing tool results",
+                    agentName, stage + 1, totalChars / 4);
         }
 
         return DropAllToolContent(list);

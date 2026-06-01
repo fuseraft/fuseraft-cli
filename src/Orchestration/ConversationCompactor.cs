@@ -57,9 +57,33 @@ public sealed class ConversationCompactor(
     public bool ShouldCompact(IReadOnlyList<AgentMessage> messages)
     {
         if (IsWindowMode)
-            return messages.Sum(m => (m.Content?.Length ?? 0) / 4) > config.TokenBudget;
-        if (IsAntiThrashed()) return false;
-        return messages.Count(m => m.Role == "assistant") >= config.TriggerTurnCount;
+        {
+            var estimated = messages.Sum(m => (m.Content?.Length ?? 0) / 4);
+            if (estimated > config.TokenBudget)
+            {
+                logger.LogDebug(
+                    "Compaction triggered (window): ~{Tokens:N0} tokens > budget {Budget:N0}.",
+                    estimated, config.TokenBudget);
+                return true;
+            }
+            return false;
+        }
+        if (IsAntiThrashed())
+        {
+            logger.LogWarning(
+                "Compaction skipped: anti-thrash guard triggered (last {Window} compactions saved < {Min:P0} each).",
+                config.AntiThrashWindow, config.AntiThrashMinSavingsRatio);
+            return false;
+        }
+        var assistantTurns = messages.Count(m => m.Role == "assistant");
+        if (assistantTurns >= config.TriggerTurnCount)
+        {
+            logger.LogDebug(
+                "Compaction triggered: {Turns} assistant turns >= threshold {Threshold}.",
+                assistantTurns, config.TriggerTurnCount);
+            return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -323,7 +347,13 @@ public sealed class ConversationCompactor(
     {
         if (changeLogPath is null) return null;
         try { return File.ReadAllText(changeLogPath); }
-        catch { return null; }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Compaction: failed to read change log at '{Path}' — summary will proceed without it.",
+                changeLogPath);
+            return null;
+        }
     }
 
     private async Task<(string Text, TokenUsage? Usage)> GenerateSummaryAsync(
@@ -633,8 +663,10 @@ public sealed class ConversationCompactor(
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }
-        catch
+        catch (Exception ex)
         {
+            logger.LogWarning(ex,
+                "Compaction: failed to read change log for symbol graph at '{Path}'.", changeLogPath);
             return [];
         }
     }

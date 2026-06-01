@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 
@@ -13,16 +14,20 @@ namespace fuseraft.Infrastructure;
 public sealed class MemoryManager : IDisposable
 {
     private readonly IReadOnlyList<IMemoryProvider> _providers;
+    private readonly ILogger<MemoryManager>? _logger;
 
-    public MemoryManager(IReadOnlyList<IMemoryProvider> providers)
-        => _providers = providers;
+    public MemoryManager(IReadOnlyList<IMemoryProvider> providers, ILogger<MemoryManager>? logger = null)
+    {
+        _providers = providers;
+        _logger    = logger;
+    }
 
     /// <summary>
     /// Builds a <see cref="MemoryManager"/> from orchestration config.
     /// Returns <see langword="null"/> when <paramref name="cfg"/> is null or the provider
     /// name is unrecognised.
     /// </summary>
-    public static MemoryManager? FromConfig(MemoryConfig? cfg)
+    public static MemoryManager? FromConfig(MemoryConfig? cfg, ILogger<MemoryManager>? logger = null)
     {
         if (cfg is null) return null;
 
@@ -35,11 +40,12 @@ public sealed class MemoryManager : IDisposable
 
         if (provider is null)
         {
-            Console.Error.WriteLine($"[MemoryManager] Unknown or misconfigured memory provider '{cfg.Provider}' — memory disabled.");
+            logger?.LogWarning(
+                "MemoryManager: unknown or misconfigured provider '{Provider}' — memory disabled.", cfg.Provider);
             return null;
         }
 
-        return new MemoryManager([provider]);
+        return new MemoryManager([provider], logger);
     }
 
     /// <summary>
@@ -62,7 +68,7 @@ public sealed class MemoryManager : IDisposable
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[MemoryManager] Provider load error for '{agentName}': {ex.Message}");
+                _logger?.LogWarning(ex, "MemoryManager: provider load error for '{Agent}'.", agentName);
             }
         }
 
@@ -83,7 +89,7 @@ public sealed class MemoryManager : IDisposable
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[MemoryManager] Provider save error for '{agentName}': {ex.Message}");
+                _logger?.LogWarning(ex, "MemoryManager: provider save error for '{Agent}'.", agentName);
             }
         }
     }
