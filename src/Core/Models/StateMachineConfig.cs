@@ -99,6 +99,33 @@ public record StateConfig
 }
 
 /// <summary>
+/// One data source in a <see cref="TransitionConfig.HandoffContext"/> list.
+/// </summary>
+public record HandoffContextSource
+{
+    /// <summary>
+    /// Source identifier. Supported forms:
+    /// <list type="bullet">
+    ///   <item><c>session_context</c> — the handoff summary written by the previous agent via <c>session_context_write</c>.</item>
+    ///   <item><c>changes_recent</c> or <c>changes_recent:N</c> — the last N change-log entries (default N = 3).</item>
+    ///   <item><c>brief_field:FIELD</c> — a top-level field from brief.json (e.g. <c>brief_field:test_targets</c>).</item>
+    ///   <item><c>file:PATH</c> — content of a file at PATH relative to the sandbox root.</item>
+    /// </list>
+    /// </summary>
+    public string Source { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Maximum characters to include from this source. Content exceeding the limit is
+    /// truncated with an annotation showing the omitted character count.
+    /// Defaults to 4,000 characters when not set.
+    /// </summary>
+    public int MaxChars { get; init; } = 0;
+
+    /// <summary>Section header label. Defaults to a name derived from the source type.</summary>
+    public string? Label { get; init; }
+}
+
+/// <summary>
 /// A directed edge in the state graph. Fires when the current state's agent emits
 /// the declared <see cref="Signal"/> AND all <see cref="Contracts"/> are satisfied.
 ///
@@ -192,6 +219,29 @@ public record TransitionConfig
     /// state/transition pair to prevent infinite recovery loops.
     /// </summary>
     public string? RecoveryAgent { get; init; }
+
+    /// <summary>
+    /// Targeted artifact sources to inject as context for the receiving agent when this
+    /// transition fires. When set, the orchestrator reads each source from durable disk
+    /// artifacts and injects a compact block into history immediately after the turn-boundary
+    /// marker. The receiving agent sees relevant facts without the full session transcript.
+    ///
+    /// <para>
+    /// Example YAML:
+    /// <code>
+    /// - To: Testing
+    ///   Signal: "HANDOFF TO TESTER"
+    ///   Contract: ImplementationComplete
+    ///   HandoffContext:
+    ///     - Source: session_context
+    ///     - Source: changes_recent
+    ///     - Source: brief_field:test_targets
+    ///     - Source: file:.fuseraft/artifacts/test-report.json
+    ///       MaxChars: 2000
+    /// </code>
+    /// </para>
+    /// </summary>
+    public List<HandoffContextSource>? HandoffContext { get; init; }
 
     /// <summary>Returns all contract names declared on this transition (Contract + Contracts merged).</summary>
     internal IReadOnlyList<string> AllContracts
