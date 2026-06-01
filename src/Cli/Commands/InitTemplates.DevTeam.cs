@@ -276,6 +276,10 @@ public static partial class InitTemplates
                         - To: Testing
                           Signal: "HANDOFF TO TESTER"
                           Contract: ImplementationComplete
+                          HandoffContext:
+                            - Source: session_context
+                            - Source: changes_recent
+                            - Source: brief_field:test_targets
                         - To: Planning
                           Signal: "REPLAN REQUIRED"
 
@@ -285,8 +289,15 @@ public static partial class InitTemplates
                         - To: Review
                           Signal: "HANDOFF TO REVIEWER"
                           Contract: TestsValid
+                          HandoffContext:
+                            - Source: session_context
+                            - Source: changes_recent
+                            - Source: file:.fuseraft/artifacts/test-report.json
                         - To: Implementation
                           Signal: "BUGS FOUND"
+                          HandoffContext:
+                            - Source: session_context
+                            - Source: changes_recent
 
                     Review:
                       Agent: Reviewer

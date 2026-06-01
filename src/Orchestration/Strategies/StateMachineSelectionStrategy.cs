@@ -43,6 +43,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
     private readonly EventEmitter? _eventEmitter;
     private readonly ILogger<StateMachineSelectionStrategy> _logger;
     private readonly GovernanceKernel? _governance;
+    private readonly HandoffContextResolver? _handoffResolver;
     private string _sessionId = "unknown";
     private IList<ChatMessage>? _history;
 
@@ -79,7 +80,8 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
         EventEmitter? eventEmitter = null,
         ILogger<StateMachineSelectionStrategy>? logger = null,
         GovernanceKernel? governanceKernel = null,
-        VerifierConfig? verifier = null)
+        VerifierConfig? verifier = null,
+        HandoffContextResolver? handoffResolver = null)
     {
         _machine         = machine;
         _contractEngine  = contractEngine;
@@ -88,9 +90,10 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
         _logger          = logger
             ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<StateMachineSelectionStrategy>.Instance;
         _governance      = governanceKernel;
+        _handoffResolver = handoffResolver;
         _currentState    = machine.Initial;
 
-        _verifierAgentName      = string.IsNullOrWhiteSpace(verifier?.AgentName) ? null : verifier!.AgentName;
+        _verifierAgentName         = string.IsNullOrWhiteSpace(verifier?.AgentName) ? null : verifier!.AgentName;
         _triggerVerifierOnConflict = verifier?.TriggerOnSuspiciousTransition ?? true;
     }
 
@@ -124,7 +127,11 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
     /// </summary>
     public void SetHistory(IList<ChatMessage> history) => _history = history;
 
-    public void SetSessionId(string sessionId) => _sessionId = sessionId;
+    public void SetSessionId(string sessionId)
+    {
+        _sessionId = sessionId;
+        _handoffResolver?.SetSessionId(sessionId);
+    }
 
     public async Task<AIAgent?> SelectAsync(
         IReadOnlyList<AIAgent> agents,
@@ -272,12 +279,32 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                 _transitionFailure = null;
                 _noSignalFailure   = null;
 
-                // Inject turn-boundary marker when agent changes.
+                // Inject turn-boundary marker when agent changes, followed by any
+                // handoff context assembled from durable artifacts.
                 if (_history is not null &&
                     !string.Equals(state.Agent, nextState.Agent, StringComparison.OrdinalIgnoreCase))
                 {
                     _history.Add(new ChatMessage(ChatRole.User,
                         $"[fuseraft: {state.Agent} → {nextState.Agent}]"));
+
+                    if (transition.HandoffContext is { Count: > 0 } hcSources
+                        && _handoffResolver is not null)
+                    {
+                        try
+                        {
+                            var hcText = await _handoffResolver.ResolveAsync(
+                                nextState.Agent, hcSources, cancellationToken);
+                            if (hcText is not null)
+                                _history.Add(new ChatMessage(ChatRole.User, hcText));
+                        }
+                        catch (OperationCanceledException) { throw; }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex,
+                                "[StateMachine] HandoffContext resolution failed for transition '{From}' → '{To}' — continuing without injected context.",
+                                _currentState, targetState);
+                        }
+                    }
                 }
 
                 _logger.LogDebug(
