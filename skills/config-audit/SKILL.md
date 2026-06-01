@@ -126,21 +126,43 @@ Also verify:
 
 ---
 
-#### E. Failure handling
+#### E. Context budget
 
-For pipelines with **3 or more agents**, the absence of `FailureHandling` means a stuck agent will keep getting the same error injected until `ValidatorStuckException` fires at turn 3. Add `FailureHandling` to reroute after N consecutive failures:
+If `ContextBudget` is present, verify:
 
-```yaml
-FailureHandling:
-  MaxConsecutiveFailures: 2
-  OnExceed:
-    Action: reroute
-    TargetAgent: Planner
-```
+1. **Compaction required:** `CutoverAt > 0` or `MaxSingleTurnInputTokens > 0` without a `Compaction` section is an error — `fuseraft validate` now catches this, but flag it here too.
+2. **WarnAt < CutoverAt:** both fields non-zero and `WarnAt >= CutoverAt` is an error.
+3. **WarnTurnTokens < CutoverAt:** if `WarnTurnTokens` (top-level) is set alongside `CutoverAt`, verify `WarnTurnTokens < CutoverAt`. Equal or greater means the per-turn warning is useless — it fires in the same turn as compaction.
+4. **MaxSingleTurnInputTokens > CutoverAt:** a sensible value is 1.5–2× `CutoverAt`. Setting it equal to or below `CutoverAt` means every turn that hits the cumulative cutover also hits this ceiling — they fire together with no differentiation.
+5. **Compaction mode vs selection type:** `Mode: lossless` requires a state machine snapshotter. Graph sessions (`Selection.Type: graph`) have no snapshotter — they silently fall back to LLM compaction. Use `Mode: intent` for graph sessions with `ChangeTracking`, or `Mode: llm` if no change tracking is configured.
+
+#### F. Failure handling
+
+For pipelines with **3 or more agents**, the absence of `FailureHandling` means a `Reinstruct` action has no exit condition — a contract that can never be satisfied will loop until `MaxIterations` kills the session. Check the following:
+
+1. **Global backstops present:** verify `MaxConsecutiveContractFailures` and `MaxConsecutiveTurnsWithoutSignal` are set.
+   - `MaxConsecutiveContractFailures` — fires HITL when any single transition accumulates this many consecutive contract failures regardless of the per-type action. Without it, a `Reinstruct` policy loops indefinitely.
+   - `MaxConsecutiveTurnsWithoutSignal` — fires HITL when the active-state agent runs this many consecutive turns without emitting any routing signal (the "silent stuck" case — agent completed work but never called handoff). This counter lives in strategy state and survives compaction cycles, unlike the loop-warning injection which resets after each compaction.
+
+   ```yaml
+   FailureHandling:
+     MissingEvidence:
+       Action: Reinstruct
+       Threshold: 3
+     NoProgress:
+       Action: Abort
+       Threshold: 3
+     MaxConsecutiveContractFailures: 6   # backstop for stuck contracts
+     MaxConsecutiveTurnsWithoutSignal: 8 # backstop for silent stuck agents
+   ```
+
+2. **Per-type thresholds reasonable:** `NoProgress` should be `Abort` not `Reinstruct` — an agent that re-emits a handoff without any tool calls cannot self-correct through reinstructions.
+
+3. **WarnTurnTokens vs CutoverAt:** if `ContextBudget.CutoverAt` is set, verify `WarnTurnTokens < CutoverAt`. If `WarnTurnTokens >= CutoverAt`, the per-turn warning fires in the same turn as compaction and gives no advance signal. `fuseraft validate` now surfaces this as a warning.
 
 ---
 
-#### F. Instruction quality
+#### G. Instruction quality
 
 For each agent, read `Instructions` and flag:
 
@@ -152,7 +174,7 @@ For each agent, read `Instructions` and flag:
 
 ---
 
-#### G. Model aliases
+#### H. Model aliases
 
 1. Every `Model.ModelId` in agents must either be a direct provider model ID (e.g. `gpt-4o`, `claude-sonnet-4-5`) or an alias defined in `Models`.
 2. Every alias in `Models` must have a `ModelId` field.
@@ -161,7 +183,7 @@ For each agent, read `Instructions` and flag:
 
 ---
 
-#### H. SchemaVersion
+#### I. SchemaVersion
 
 `SchemaVersion` is optional. If present:
 
@@ -170,7 +192,7 @@ For each agent, read `Instructions` and flag:
 
 ---
 
-#### I. RemoteAgent (preview)
+#### J. RemoteAgent (preview)
 
 For any agent where `RemoteAgent` is set:
 
