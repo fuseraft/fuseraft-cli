@@ -73,6 +73,8 @@ Orchestration:
     NoProgress:
       Action: Abort
       Threshold: 3
+    MaxConsecutiveContractFailures: 6   # backstop: HITL after N contract failures (any type)
+    MaxConsecutiveTurnsWithoutSignal: 8 # backstop: HITL after N turns with no signal emitted
 
   Verifier:                       # optional meta-agent that audits evidence graph
     AgentName: Verifier
@@ -83,7 +85,14 @@ Orchestration:
   Compaction:
     TriggerTurnCount: 25
     KeepRecentTurns: 10
-    Mode: lossless                # or: summarize
+    Mode: lossless                # or: intent, hybrid, llm, window
+
+  WarnTurnTokens: 60000           # warn when a single turn's input exceeds this (keep < CutoverAt)
+
+  ContextBudget:                  # per-agent token budget; requires Compaction
+    WarnAt: 60000
+    CutoverAt: 100000
+    MaxSingleTurnInputTokens: 200000  # compact before next turn if single turn exceeded this
 
   Checkpoint:
     Mode: json
