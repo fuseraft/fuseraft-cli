@@ -103,7 +103,13 @@ public static partial class InitTemplates
               - Handoff
             FunctionChoice: required
             MaxInTurnToolPairs: 12
-            {TesterContextWindow}
+            MaxInTurnContextTokens: 30000
+            Context:
+              - Source: session_context
+              - Source: changes_recent:5
+              - Source: brief_field:test_targets
+              - Source: brief_field:build_command
+              - Source: own_history:4
             {AgentFileOptions}
             """;
 
@@ -131,8 +137,12 @@ public static partial class InitTemplates
               - SessionContext
               - Handoff
             FunctionChoice: auto
-            ContextWindow:
-              TextOnly: true
+            Context:
+              - Source: session_context
+              - Source: changes_recent:3
+              - Source: file:.fuseraft/artifacts/test-report.json
+                MaxChars: 3000
+              - Source: own_history:2
             {AgentFileOptions}
             """;
 

@@ -1,23 +1,29 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.AI;
 using fuseraft.Core;
 using fuseraft.Core.Models;
 
 namespace fuseraft.Orchestration;
 
 /// <summary>
-/// Resolves a <see cref="TransitionConfig.HandoffContext"/> source list into a formatted
-/// context block that is injected into history when a state machine transition fires.
+/// Assembles agent context and handoff blocks from durable disk artifacts rather than
+/// replaying the shared session transcript.
 ///
 /// <para>
-/// Each source reads from a durable disk artifact (session context summary, change log,
-/// brief fields, or arbitrary files) rather than from the conversation transcript. This
-/// keeps the injected context proportional to what the receiving agent actually needs
-/// rather than proportional to total session length.
+/// Two entry points serve distinct purposes:
+/// <list type="bullet">
+///   <item><see cref="ResolveAsync"/> — called by the state machine when a transition fires.
+///     Returns a formatted string injected into history as a handoff context block.</item>
+///   <item><see cref="AssembleForAgentAsync"/> — called by the orchestrator at agent
+///     invocation time when an agent declares <c>AgentConfig.Context</c>. Returns a
+///     <see cref="ChatMessage"/> list that replaces shared-history replay entirely, giving
+///     the agent only the artifacts it needs plus its own prior turns.</item>
+/// </list>
 /// </para>
 /// </summary>
-public sealed class HandoffContextResolver
+public sealed class ContextAssembler
 {
     private readonly string? _sandboxRoot;
     private readonly string? _changeLogPath;
@@ -29,14 +35,14 @@ public sealed class HandoffContextResolver
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
-        PropertyNameCaseInsensitive    = true,
-        DefaultIgnoreCondition         = JsonIgnoreCondition.WhenWritingNull,
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition      = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    public HandoffContextResolver(
-        string? sandboxRoot    = null,
-        string? changeLogPath  = null,
-        string? briefPath      = null)
+    public ContextAssembler(
+        string? sandboxRoot   = null,
+        string? changeLogPath = null,
+        string? briefPath     = null)
     {
         _sandboxRoot   = sandboxRoot;
         _changeLogPath = changeLogPath;
@@ -45,14 +51,17 @@ public sealed class HandoffContextResolver
 
     public void SetSessionId(string sessionId) => _sessionId = sessionId;
 
+    // ── Handoff injection (state machine transitions) ────────────────────────
+
     /// <summary>
-    /// Resolves all sources in <paramref name="sources"/> and returns a formatted context
-    /// block labelled for <paramref name="toAgent"/>, or <c>null</c> when no source yields
-    /// content (missing files, empty summaries).
+    /// Resolves <paramref name="sources"/> into a formatted text block labelled for
+    /// <paramref name="toAgent"/>. The result is injected into shared history as a user
+    /// message after the turn-boundary marker when a transition fires.
+    /// Returns <c>null</c> when no source yields content.
     /// </summary>
     public async Task<string?> ResolveAsync(
         string toAgent,
-        IReadOnlyList<HandoffContextSource> sources,
+        IReadOnlyList<ContextSource> sources,
         CancellationToken ct = default)
     {
         if (sources.Count == 0) return null;
@@ -60,7 +69,11 @@ public sealed class HandoffContextResolver
         var sections = new List<(string Label, string Content)>(sources.Count);
         foreach (var src in sources)
         {
-            var content = await ResolveOneAsync(src, ct);
+            // own_history is only meaningful in AssembleForAgentAsync; skip it here.
+            var (type, _) = ParseSource(src.Source);
+            if (type == "own_history") continue;
+
+            var content = await ResolveArtifactAsync(src, ct);
             if (!string.IsNullOrWhiteSpace(content))
                 sections.Add((src.Label ?? DefaultLabel(src.Source), content.Trim()));
         }
@@ -78,9 +91,84 @@ public sealed class HandoffContextResolver
         return sb.ToString().TrimEnd();
     }
 
-    // Source resolution
+    // ── Per-agent context assembly (replaces ContextWindowFilter) ────────────
 
-    private async Task<string?> ResolveOneAsync(HandoffContextSource src, CancellationToken ct)
+    /// <summary>
+    /// Assembles the full context for an agent invocation from <paramref name="sources"/>,
+    /// replacing shared-history replay. The returned list is a drop-in replacement for the
+    /// output of <c>ContextWindowFilter.Apply</c>.
+    ///
+    /// <para>Layout (in order):</para>
+    /// <list type="number">
+    ///   <item>The original task message (always first, so the agent knows its goal).</item>
+    ///   <item>The agent's own prior turns from <paramref name="sharedHistory"/>
+    ///     (from any <c>own_history:N</c> source), text-only, oldest first.</item>
+    ///   <item>A single user message containing all resolved artifact sources
+    ///     (session context, change log, brief fields, files).</item>
+    /// </list>
+    /// </summary>
+    public async Task<IReadOnlyList<ChatMessage>> AssembleForAgentAsync(
+        string agentName,
+        string task,
+        IReadOnlyList<ContextSource> sources,
+        IList<ChatMessage> sharedHistory,
+        CancellationToken ct = default)
+    {
+        var result = new List<ChatMessage>();
+
+        // 1. Task message — the agent always needs to know what it's working on.
+        result.Add(new ChatMessage(ChatRole.User, task));
+
+        // Separate own_history sources from artifact sources.
+        ContextSource? ownHistorySrc = null;
+        var artifactSources = new List<ContextSource>(sources.Count);
+        foreach (var src in sources)
+        {
+            var (type, _) = ParseSource(src.Source);
+            if (type == "own_history") ownHistorySrc = src;
+            else                       artifactSources.Add(src);
+        }
+
+        // 2. Agent's own prior turns (text-only, chronological).
+        if (ownHistorySrc is not null)
+        {
+            var (_, param) = ParseSource(ownHistorySrc.Source);
+            var n = int.TryParse(param, out var parsed) ? Math.Max(1, parsed) : 6;
+            var ownTurns = ExtractOwnHistory(agentName, n, sharedHistory);
+            result.AddRange(ownTurns);
+        }
+
+        // 3. Artifact block — all non-own_history sources formatted into one user message.
+        if (artifactSources.Count > 0)
+        {
+            var sections = new List<(string Label, string Content)>(artifactSources.Count);
+            foreach (var src in artifactSources)
+            {
+                var content = await ResolveArtifactAsync(src, ct);
+                if (!string.IsNullOrWhiteSpace(content))
+                    sections.Add((src.Label ?? DefaultLabel(src.Source), content.Trim()));
+            }
+
+            if (sections.Count > 0)
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine("[AGENT CONTEXT — assembled from artifacts]");
+                foreach (var (label, content) in sections)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine($"## {label}");
+                    sb.AppendLine(content);
+                }
+                result.Add(new ChatMessage(ChatRole.User, sb.ToString().TrimEnd()));
+            }
+        }
+
+        return result;
+    }
+
+    // ── Shared source resolution ─────────────────────────────────────────────
+
+    private async Task<string?> ResolveArtifactAsync(ContextSource src, CancellationToken ct)
     {
         var maxChars = src.MaxChars > 0 ? src.MaxChars : DefaultMaxCharsPerSource;
         var (type, param) = ParseSource(src.Source);
@@ -114,8 +202,8 @@ public sealed class HandoffContextResolver
         if (!File.Exists(logPath)) return null;
         try
         {
-            var json    = await File.ReadAllTextAsync(logPath, ct);
-            var log     = JsonSerializer.Deserialize<ChangeLog>(json, JsonOpts);
+            var json = await File.ReadAllTextAsync(logPath, ct);
+            var log  = JsonSerializer.Deserialize<ChangeLog>(json, JsonOpts);
             if (log is null || log.Entries.Count == 0) return null;
 
             var entries = log.Entries
@@ -141,16 +229,13 @@ public sealed class HandoffContextResolver
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            // Try exact name then lowercase
             if (!root.TryGetProperty(field, out var prop))
                 root.TryGetProperty(field.ToLowerInvariant(), out prop);
-
             if (prop.ValueKind == JsonValueKind.Undefined) return null;
 
             var text = prop.ValueKind == JsonValueKind.String
                 ? prop.GetString()
                 : prop.GetRawText();
-
             return text is null ? null : Truncate(text, maxChars);
         }
         catch { return null; }
@@ -172,7 +257,41 @@ public sealed class HandoffContextResolver
         catch { return null; }
     }
 
-    // Helpers
+    // ── own_history extraction ───────────────────────────────────────────────
+
+    // Extracts the last N assistant turns authored by agentName from shared history,
+    // stripping tool frames (text-only). Chronological order is preserved.
+    private static IReadOnlyList<ChatMessage> ExtractOwnHistory(
+        string agentName,
+        int n,
+        IList<ChatMessage> history)
+    {
+        var ownTurns = new List<ChatMessage>();
+        foreach (var msg in history)
+        {
+            if (msg.Role != ChatRole.Assistant) continue;
+            if (!string.Equals(msg.AuthorName, agentName, StringComparison.OrdinalIgnoreCase)) continue;
+
+            // Text-only: keep TextContent items, strip FunctionCallContent and tool frames.
+            var textContents = msg.Contents
+                .OfType<TextContent>()
+                .Where(t => !string.IsNullOrWhiteSpace(t.Text))
+                .ToList<AIContent>();
+            if (textContents.Count == 0) continue;
+
+            var textOnly = textContents.Count == msg.Contents.Count
+                ? msg
+                : new ChatMessage(ChatRole.Assistant, textContents) { AuthorName = msg.AuthorName };
+            ownTurns.Add(textOnly);
+        }
+
+        // Keep only the last N — older turns are irrelevant to the current phase.
+        return ownTurns.Count <= n
+            ? ownTurns
+            : ownTurns.Skip(ownTurns.Count - n).ToList();
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
 
     private static (string Type, string? Param) ParseSource(string source)
     {
@@ -200,7 +319,6 @@ public sealed class HandoffContextResolver
         foreach (var e in entries)
         {
             sb.AppendLine($"[Turn {e.TurnIndex}] {e.Agent} ({e.Timestamp:yyyy-MM-dd HH:mm} UTC)");
-
             if (e.FilesWritten.Count > 0)
             {
                 sb.AppendLine("  Files written:");

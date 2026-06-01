@@ -15,7 +15,7 @@ namespace fuseraft.Orchestration.Strategies;
 /// <summary>
 /// Builds agent selection and termination strategies from configuration.
 /// </summary>
-public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatClient, EventEmitter? eventEmitter = null, ILoggerFactory? loggerFactory = null, GovernanceKernel? governanceKernel = null, IHumanApprovalService? humanApprovalService = null, EvidenceStore? evidenceStore = null, TestSelectorConfig? testSelector = null, string? sandboxRoot = null)
+public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatClient, EventEmitter? eventEmitter = null, ILoggerFactory? loggerFactory = null, GovernanceKernel? governanceKernel = null, IHumanApprovalService? humanApprovalService = null, EvidenceStore? evidenceStore = null, TestSelectorConfig? testSelector = null, string? sandboxRoot = null, ContextAssembler? contextAssembler = null)
 {
     private readonly EventEmitter? _eventEmitter = eventEmitter;
     private readonly GovernanceKernel? _governanceKernel = governanceKernel;
@@ -23,9 +23,14 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
     private readonly EvidenceStore? _evidenceStore = evidenceStore;
     private readonly TestSelectorConfig? _testSelector = testSelector;
     private readonly string? _sandboxRoot = sandboxRoot;
+    private readonly ContextAssembler? _contextAssembler = contextAssembler;
     private string _sessionId = string.Empty;
 
-    public void SetSessionId(string sessionId) => _sessionId = sessionId;
+    public void SetSessionId(string sessionId)
+    {
+        _sessionId = sessionId;
+        _contextAssembler?.SetSessionId(sessionId);
+    }
 
     // Selection
 
@@ -223,24 +228,7 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
             : null;
 
         var strategyLogger = loggerFactory?.CreateLogger<StateMachineSelectionStrategy>();
-
-        // Build a handoff context resolver when any transition in the machine declares
-        // HandoffContext sources. It reads from the same artifact paths the contract engine
-        // uses, so no new dependencies are required.
-        HandoffContextResolver? handoffResolver = null;
-        bool anyHandoffContext = sm.States.Values
-            .SelectMany(s => s.Transitions)
-            .Any(t => t.HandoffContext is { Count: > 0 });
-        if (anyHandoffContext)
-        {
-            handoffResolver = new HandoffContextResolver(
-                sandboxRoot:   _sandboxRoot,
-                changeLogPath: validationConfig?.ChangeLogPath,
-                briefPath:     validationConfig?.BriefPath);
-            handoffResolver.SetSessionId(_sessionId);
-        }
-
-        return new StateMachineSelectionStrategy(sm, contractEngine, failureHandling, _eventEmitter, strategyLogger, _governanceKernel, verifier, handoffResolver);
+        return new StateMachineSelectionStrategy(sm, contractEngine, failureHandling, _eventEmitter, strategyLogger, _governanceKernel, verifier, _contextAssembler);
     }
 
     private static Dictionary<string, IRoutingValidator> BuildValidators(
