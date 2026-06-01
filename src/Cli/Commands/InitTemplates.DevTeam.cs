@@ -214,6 +214,10 @@ public static partial class InitTemplates
                 # failures on any transition, regardless of per-type action. Prevents
                 # Reinstruct from looping indefinitely when a contract cannot be satisfied.
                 MaxConsecutiveContractFailures: 6
+                # Escalate to HITL when an agent runs this many turns without emitting
+                # any routing signal. Survives compaction — unlike the history-scan loop
+                # warning — so it catches agents stuck after repeated compaction cycles.
+                MaxConsecutiveTurnsWithoutSignal: 8
 
               Verifier:
                 AgentName: Verifier

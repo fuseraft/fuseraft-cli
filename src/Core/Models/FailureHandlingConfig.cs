@@ -124,6 +124,22 @@ public record FailureHandlingConfig
         new() { Action = FailureAction.Abort, Threshold = 3 };
 
     /// <summary>
+    /// Maximum consecutive turns the active-state agent may run without emitting any
+    /// routing signal before the orchestrator escalates to HITL. Unlike
+    /// <see cref="MaxConsecutiveContractFailures"/> (which counts failures when a signal
+    /// IS detected but a contract blocks it), this counter fires when the agent produces
+    /// no matching signal at all — the "silent stuck" case.
+    ///
+    /// <para>
+    /// The counter is stored in strategy state, not in history, so it survives
+    /// compaction cycles. It resets whenever the agent emits a valid signal (even if
+    /// the subsequent contract check fails) or when a transition succeeds.
+    /// 0 (default) disables this guard.
+    /// </para>
+    /// </summary>
+    public int MaxConsecutiveTurnsWithoutSignal { get; init; } = 0;
+
+    /// <summary>
     /// Hard backstop applied across all failure types and all transitions. When any
     /// single state-to-state transition accumulates this many consecutive contract
     /// failures — regardless of the per-type <see cref="FailureTypeConfig.Action"/> —
