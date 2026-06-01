@@ -774,7 +774,17 @@ public static class OrchestratorBuilder
         // any agent names and any team size.
         var resolvedSandbox = config.Security?.FileSystemSandboxPath is { Length: > 0 } sbx
             ? FuseraftPaths.ExpandPath(sbx) : null;
-        var strategyFactory = new StrategyFactory(chatClientFactory.Create, eventEmitter, loggerFactory, governanceKernel, humanApprovalService, evidenceStore, config.TestSelector, resolvedSandbox);
+
+        // Shared assembler used by both the state machine (HandoffContext) and the
+        // orchestrator (AgentConfig.Context). One instance so session ID updates propagate.
+        var contextAssembler = new ContextAssembler(
+            sandboxRoot:   resolvedSandbox,
+            changeLogPath: config.Validation?.ChangeLogPath,
+            briefPath:     config.Validation?.BriefPath);
+        if (!string.IsNullOrEmpty(sessionId))
+            contextAssembler.SetSessionId(sessionId);
+
+        var strategyFactory = new StrategyFactory(chatClientFactory.Create, eventEmitter, loggerFactory, governanceKernel, humanApprovalService, evidenceStore, config.TestSelector, resolvedSandbox, contextAssembler);
 
         // Validate verifier config: the named agent must exist in the agent pool.
         if (config.Verifier is { AgentName: { Length: > 0 } verifierAgentName })
@@ -938,7 +948,7 @@ public static class OrchestratorBuilder
         else
         {
             var memoryManager = MemoryManager.FromConfig(config.Memory);
-            orchestrator = new AgentOrchestrator(config, agentFactory, strategyFactory, aoLogger, changeTracker, eventEmitter, governanceKernel, memoryManager);
+            orchestrator = new AgentOrchestrator(config, agentFactory, strategyFactory, aoLogger, changeTracker, eventEmitter, governanceKernel, memoryManager, contextAssembler);
         }
 
         // Wrap with SagaOrchestrator when the saga pattern is enabled.

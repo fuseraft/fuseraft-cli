@@ -28,7 +28,8 @@ public sealed class AgentOrchestrator(
     ChangeTracker? changeTracker = null,
     EventEmitter? eventEmitter = null,
     GovernanceKernel? governanceKernel = null,
-    fuseraft.Infrastructure.MemoryManager? memoryManager = null) : IOrchestrator
+    fuseraft.Infrastructure.MemoryManager? memoryManager = null,
+    ContextAssembler? contextAssembler = null) : IOrchestrator
 {
     // IOrchestrator
 
@@ -137,6 +138,7 @@ public sealed class AgentOrchestrator(
     {
         _sessionId = sessionId;
         agentFactory.SetSessionId(sessionId);
+        contextAssembler?.SetSessionId(sessionId);
     }
 
     private fuseraft.Core.Models.TaskModel? _structuredTask;
@@ -438,12 +440,27 @@ public sealed class AgentOrchestrator(
             if (memoryManager is not null)
                 instructions = await memoryManager.AugmentInstructionsAsync(agent.Name ?? "", instructions, cancellationToken);
 
-            // Apply the agent's ContextWindow filter before building the context slice.
-            // This lets downstream agents (e.g. Reviewer) strip tool-call noise accumulated
-            // by earlier agents, dramatically reducing input-token count without changing the
-            // shared history that routing/termination strategies read.
+            // Build the context slice for this agent.
+            // When the agent declares a Context spec, assemble it from artifacts so the agent
+            // sees only what it needs rather than the full session transcript. The shared
+            // history list is still updated after the turn so routing/termination strategies
+            // continue to work normally.
+            // When no Context spec is set, fall back to the traditional ContextWindow filter.
             var agentCfg = agentConfigs.GetValueOrDefault(agent.Name ?? "");
-            var filtered = ContextWindowFilter.Apply(history, agentCfg?.ContextWindow);
+            IReadOnlyList<ChatMessage> filtered;
+            if (agentCfg?.Context is { Count: > 0 } agentContextSources && contextAssembler is not null)
+            {
+                filtered = await contextAssembler.AssembleForAgentAsync(
+                    agent.Name ?? string.Empty,
+                    task,
+                    agentContextSources,
+                    history,
+                    cancellationToken);
+            }
+            else
+            {
+                filtered = ContextWindowFilter.Apply(history, agentCfg?.ContextWindow);
+            }
 
             IEnumerable<ChatMessage> context = (hasInstructions || memoryManager is not null) && instructions is not null
                 ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
