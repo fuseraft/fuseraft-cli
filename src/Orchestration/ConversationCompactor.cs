@@ -170,6 +170,8 @@ public sealed class ConversationCompactor(
                 {
                     Content = prefixBlock + "\n\n---\n\n" + reconstructed.Content
                 };
+            if (ExpandedNote is not null)
+                reconstructed = reconstructed with { Content = reconstructed.Content + "\n\n---\n" + ExpandedNote };
             logger.LogInformation(
                 "Lossless compaction: {Compacted} turns replaced by evidence reconstruction.",
                 toCompact.Count);
