@@ -238,6 +238,10 @@ Task("Publish")
 
         if (!string.IsNullOrEmpty(runtime))
         {
+            // Self-contained publish compiles for a specific RID — the earlier Restore and
+            // Build steps didn't target that RID, so both flags must be cleared.
+            settings.NoRestore     = false;
+            settings.NoBuild       = false;
             settings.Runtime       = runtime;
             settings.SelfContained = true;
             settings.MSBuildSettings

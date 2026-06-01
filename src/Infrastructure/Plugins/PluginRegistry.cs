@@ -91,6 +91,10 @@ public sealed class PluginRegistry : IDisposable
 
         Register("Compaction", () => new CompactionPlugin());
 
+        // Stub — OrchestratorBuilder replaces this with a session-scoped instance.
+        Register("SessionContext", () => new SessionContextPlugin(
+            Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "state", "sessions", "default", "context_summary.md")));
+
         // Stub — ReplCommand replaces this with a real instance bound to the live session.
         Register("Session", () => new ReplSessionPlugin("stub", DateTime.UtcNow, "unknown", Directory.GetCurrentDirectory()));
         return this;
@@ -106,13 +110,14 @@ public sealed class PluginRegistry : IDisposable
         SecurityConfig security,
         IReadOnlyDictionary<string, ApiProfileConfig>? apiProfiles = null,
         Func<string, Task<bool>>? shellCommandApprover = null,
-        FileVersionStore? fileVersionStore = null)
+        FileVersionStore? fileVersionStore = null,
+        SessionReadCache? sessionReadCache = null)
     {
-        var sandboxRoot      = security.FileSystemSandboxPath;
-        var allowedHosts     = security.HttpAllowedHosts is { Count: > 0 } h ? (IReadOnlyList<string>)h : null;
+        var sandboxRoot       = security.FileSystemSandboxPath;
+        var allowedHosts      = security.HttpAllowedHosts is { Count: > 0 } h ? (IReadOnlyList<string>)h : null;
         var allowPrivateHosts = security.AllowPrivateHosts;
 
-        Register("FileSystem", () => new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore));
+        Register("FileSystem", () => new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore, sessionCache: sessionReadCache));
         Register("Shell",      () => new ShellPlugin(sandboxRoot, shellCommandApprover, security.ShellPolicy));
         Register("Http",       () => new HttpPlugin(_sharedHttpClient, allowedHosts, apiProfiles, allowPrivateHosts, _loggerFactory?.CreateLogger<HttpPlugin>()));
         Register("Document",   () => new DocumentPlugin(sandboxRoot));

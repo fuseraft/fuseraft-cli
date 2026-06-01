@@ -75,6 +75,10 @@ public sealed class RunSettings : CommandSettings
     [CommandOption("--spec")]
     [Description("Path to a spec file (Markdown, plain text, or JSON) that anchors all agents to an agreed specification. Agents treat it as the authoritative source of truth.")]
     public string? SpecFile { get; set; }
+
+    [CommandOption("--no-replan")]
+    [Description("Disable replanning: strip any state-machine transitions whose signal contains 'REPLAN' so the session cannot route back to the planning phase mid-run.")]
+    public bool NoReplan { get; set; }
 }
 
 /// <summary>
@@ -173,7 +177,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         OrchestratorBuildResult built;
         try
         {
-            built = await OrchestratorBuilder.BuildAsync(configPath, loggerFactory, pluginRegistry, approvalService, settings.HumanInTheLoop, sessionId: pendingSessionId, specContent: specContent);
+            built = await OrchestratorBuilder.BuildAsync(configPath, loggerFactory, pluginRegistry, approvalService, settings.HumanInTheLoop, sessionId: pendingSessionId, specContent: specContent, noReplan: settings.NoReplan);
         }
         catch (Exception ex)
         {
