@@ -34,7 +34,7 @@ public static class ContextRebuilder
 
         if (snapshot.ContractResults.Count > 0)
         {
-            sb.AppendLine("CONTRACT STATUS:");
+            sb.AppendLine("CONTRACT STATUS (at compaction time \u2014 retained turns below may supersede failures):");
             foreach (var r in snapshot.ContractResults.Where(r => r.Passed))
                 sb.AppendLine($"  \u2713 {r.Name}");
             foreach (var r in snapshot.ContractResults.Where(r => !r.Passed))
@@ -83,14 +83,11 @@ public static class ContextRebuilder
             ? $" Continue from state '{snapshot.CurrentStateName}'."
             : string.Empty;
 
-        var unsatisfied = snapshot.ContractResults.Any(r => !r.Passed);
-        var contractHint = unsatisfied
-            ? " Satisfy all \u2717 contracts before emitting a transition signal."
-            : string.Empty;
-
         sb.Append(
-            "RESUMPTION NOTE: History compacted. The above is ground-truth derived from the evidence " +
-            $"graph \u2014 it is authoritative. Do not contradict it.{stateHint}{contractHint}");
+            "RESUMPTION NOTE: History compacted. Evidence entries (file writes, commands) above are " +
+            "ground-truth from durable records. Contract status reflects disk state at compaction time " +
+            $"and may be superseded by evidence in the retained turns below \u2014 verify from disk " +
+            $"before acting on any \u2717 failures.{stateHint}");
 
         return new AgentMessage
         {
