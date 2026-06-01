@@ -15,7 +15,7 @@ namespace fuseraft.Infrastructure.Plugins;
 /// constrained to that root. Commands that omit a <c>workingDirectory</c> argument default
 /// to the sandbox root rather than the process current directory.
 /// </summary>
-public sealed class ShellPlugin : IDisposable
+public sealed class ShellPlugin : IDisposable, ITurnResettable
 {
     private static readonly string Shell     = OperatingSystem.IsWindows() ? "cmd"  : ResolveUnixShell();
     private static readonly string ShellFlag = OperatingSystem.IsWindows() ? "/c"   : "-c";
@@ -35,6 +35,13 @@ public sealed class ShellPlugin : IDisposable
     private readonly ShellPolicy? _shellPolicy;
     private readonly object _tempDirLock = new();
     private string? _sessionTempDir;
+
+    // Per-turn command dedup cache: maps (command + workingDir) → previous output so
+    // running the exact same command twice in one agent turn returns the cached result
+    // instead of re-executing it. Cleared by BeginTurn() at the start of each turn.
+    private readonly Dictionary<string, string> _runThisTurn = new(StringComparer.Ordinal);
+
+    void ITurnResettable.BeginTurn() => _runThisTurn.Clear();
 
     // Background job registry
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, BackgroundJob> _jobs = new();
@@ -117,11 +124,21 @@ public sealed class ShellPlugin : IDisposable
         var denial = ValidateWorkingDirectory(workingDirectory, out var resolvedDir);
         if (denial is not null) return denial;
 
+        // Per-turn command dedup: if the exact same command has already run in this turn,
+        // return the cached output. Re-running an identical command in the same turn almost
+        // always means the agent is looping — returning the previous result breaks the loop
+        // and keeps the previous output in context where the agent can act on it.
+        var cacheKey = command.Trim() + "\0" + (resolvedDir ?? "(default)");
+        if (_runThisTurn.TryGetValue(cacheKey, out var cachedOutput))
+            return $"[Command already ran this turn — cached output follows]\n\n{cachedOutput}";
+
         var result = await ProcessHelper.RunAsync(
             Shell, [ShellFlag, command],
             resolvedDir, timeoutSeconds);
 
-        return result.ToPluginOutput();
+        var output = result.ToPluginOutput();
+        _runThisTurn[cacheKey] = output;
+        return output;
     }
 
     [Description("Write a script to a temp file and execute it.")]

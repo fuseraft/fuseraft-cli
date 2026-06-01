@@ -57,25 +57,28 @@ public static partial class InitTemplates
             Description: Designs the targeted change based on the discovery brief.
             Instructions: |
               You are a software architect working on an existing codebase. Your job is to:
-              1. Check if {FuseraftPaths.LocalBrief} already exists. If it does, read it — if it
+              1. {ContextReadStep}
+              2. Check if {FuseraftPaths.LocalBrief} already exists. If it does, read it — if it
                  still covers the current task, call handoff(route_keyword: "HANDOFF TO DEVELOPER")
                  immediately without rewriting it.
-              2. Read {FuseraftPaths.LocalBrownfieldBrief} to understand the codebase shape and risks.
-              3. Read {FuseraftPaths.LocalConventions} to understand the project's conventions — follow them exactly.
-              4. Use sub_agent_explore for any additional targeted questions. For direct file
+              3. Read {FuseraftPaths.LocalBrownfieldBrief} to understand the codebase shape and risks.
+              4. Read {FuseraftPaths.LocalConventions} to understand the project's conventions — follow them exactly.
+              5. Use sub_agent_explore for any additional targeted questions. For direct file
                  reads: {LargeFileProtocol}
-              5. Write a scoped brief to {FuseraftPaths.LocalBrief} with fields:
+              6. Write a scoped brief to {FuseraftPaths.LocalBrief} with fields:
                    goal — one-sentence description of the change
                    findings — summary of relevant existing code to modify
-                   files_to_change — only the files that genuinely need to change
+                   files_to_change — only the files that genuinely need to change (paths relative to sandbox root)
                    acceptance_criteria — observable code properties the change must satisfy
                    convention_notes — specific conventions to follow from the profile
+              7. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
               - FileSystem
               - Search
+              - SessionContext
               - SubAgent
               - Handoff
             FunctionChoice: required
@@ -87,12 +90,14 @@ public static partial class InitTemplates
             Description: Implements the change staying strictly within the scoped file list.
             Instructions: |
               You are a developer working carefully inside an existing codebase. Your job is to:
-              1. Read {FuseraftPaths.LocalBrief} — implement ONLY the files listed in files_to_change.
-              2. Read {FuseraftPaths.LocalConventions} — follow the project's naming, import, and style conventions exactly.
-              3. Before modifying an existing file: {LargeFileProtocolDeveloper} Never overwrite blindly.
-              4. Use patch_file for surgical edits to existing files; use write_file only for new files.
-              5. Run the build command from the convention profile to confirm nothing is broken.
-              6. Commit with git_add and git_commit.
+              1. {ContextReadStep}
+              2. Read {FuseraftPaths.LocalBrief} — implement ONLY the files listed in files_to_change.
+              3. Read {FuseraftPaths.LocalConventions} — follow the project's naming, import, and style conventions exactly.
+              4. Before modifying an existing file: {LargeFileProtocolDeveloper} Never overwrite blindly.
+              5. Use patch_file for surgical edits to existing files; use write_file only for new files.
+              6. Run the build command from the convention profile to confirm nothing is broken.
+              7. Commit with git_add and git_commit.
+              8. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO REVIEWER").
               If the brief is fundamentally unclear or the approach is wrong, call handoff(route_keyword: "REPLAN REQUIRED").
             Model:
@@ -102,9 +107,11 @@ public static partial class InitTemplates
               - Shell
               - Git
               - Changes
+              - SessionContext
               - Handoff
             FunctionChoice: required
             MaxInTurnToolPairs: 12
+            {DeveloperContextWindow}
             {AgentFileOptions}
             """;
 
@@ -113,14 +120,15 @@ public static partial class InitTemplates
             Description: Verifies the change via code inspection and runtime execution; routes to Developer, Planner, or final approval.
             Instructions: |
               You are a principal engineer reviewing a change to an existing codebase. Your job is to:
-              1. For each file listed in {FuseraftPaths.LocalBrief} under files_to_change:
+              1. {ContextReadStep}
+              2. For each file listed in {FuseraftPaths.LocalBrief} under files_to_change:
                  {LargeFileProtocolReviewer}
-              2. Inspect the code against every acceptance criterion.
-              3. Check that the change follows conventions from {FuseraftPaths.LocalConventions}.
-              4. Confirm no files outside files_to_change were modified (use changes_read_latest).
-              5. Run the build command from the convention profile (e.g. shell_run("dotnet build"),
+              3. Inspect the code against every acceptance criterion.
+              4. Check that the change follows conventions from {FuseraftPaths.LocalConventions}.
+              5. Confirm no files outside files_to_change were modified (use changes_read_latest).
+              6. Run the build command from the convention profile (e.g. shell_run("dotnet build"),
                  shell_run("cargo build"), shell_run("make"), etc.) to confirm the project compiles.
-              6. Run the test command (e.g. shell_run("dotnet test"), shell_run("cargo test"),
+              7. Run the test command (e.g. shell_run("dotnet test"), shell_run("cargo test"),
                  shell_run("pytest"), etc.) to confirm the test suite passes.
               Emit a JSON review block covering every acceptance criterion with verdict (PASS/FAIL)
               and evidence — including what you ran and what you observed — before your routing keyword.
@@ -133,6 +141,7 @@ public static partial class InitTemplates
               - FileSystem
               - Shell
               - Changes
+              - SessionContext
               - Handoff
             FunctionChoice: auto
             ContextWindow:
@@ -181,6 +190,8 @@ public static partial class InitTemplates
 
               Events:
                 Path: {FuseraftPaths.LocalEventsLog}
+
+              WarnTurnTokens: 300000
 
               # Each agent lives in its own YAML file in agents/ — edit, version, or reuse
               # them independently across configs. Inline fields override the file at load time.

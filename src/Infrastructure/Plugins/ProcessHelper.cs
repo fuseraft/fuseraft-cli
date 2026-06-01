@@ -176,9 +176,14 @@ internal readonly record struct ProcessResult(string Stdout, string Stderr, int 
     /// </summary>
     // Maximum combined output characters returned to the model per shell command.
     // Large read-oriented commands (sed -n on big files, grep over many matches) can
-    // otherwise balloon the within-turn context. Failure output is exempt from the
-    // hard cap so compiler errors are always surfaced in full.
-    private const int MaxOutputChars = 30_000;
+    // otherwise balloon the within-turn context.
+    private const int MaxOutputChars        = 15_000;
+    // Failure output cap: head shows the first errors; tail shows the final summary line
+    // (e.g. "X failed, Y passed"). Middle section is elided with a char count so the agent
+    // knows how much was omitted.
+    private const int MaxFailureOutputChars = 20_000;
+    private const int FailureHeadChars      = 14_000;
+    private const int FailureTailChars      =  5_000;
 
     public string ToPluginOutput()
     {
@@ -206,11 +211,25 @@ internal readonly record struct ProcessResult(string Stdout, string Stderr, int 
             return combined;
         }
 
-        // Failure output: always return in full so agents see the complete error.
+        // Failure output: cap with head+tail so both the first errors AND the final summary
+        // (e.g. "3 failed, 47 passed") are always visible. Uncapped failure output from large
+        // test suites is the primary driver of 600k+ input-token turns.
         var failParts = new List<string> { $"[EXIT {ExitCode}]" };
         if (!string.IsNullOrEmpty(stdout)) failParts.Add(stdout);
         if (!string.IsNullOrEmpty(stderr)) failParts.Add($"[stderr] {stderr}");
-        return string.Join("\n", failParts);
+        var failOutput = string.Join("\n", failParts);
+
+        if (failOutput.Length > MaxFailureOutputChars)
+        {
+            var head    = failOutput[..FailureHeadChars];
+            var tail    = failOutput[^FailureTailChars..];
+            var omitted = failOutput.Length - FailureHeadChars - FailureTailChars;
+            failOutput  = head
+                + $"\n\n[... {omitted:N0} chars omitted — fix the first errors above, or use grep/sed to inspect the full log ...]\n\n"
+                + tail;
+        }
+
+        return failOutput;
     }
 }
 
