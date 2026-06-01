@@ -603,14 +603,18 @@ Per-agent cumulative input-token budget enforcement. Unlike `MaxTotalTokens` (wh
 
 ```yaml
 ContextBudget:
-  WarnAt: 80000    # warn when any agent accumulates this many input tokens
-  CutoverAt: 120000  # compact when any agent accumulates this many input tokens
+  WarnAt: 60000                  # warn when any agent accumulates this many input tokens
+  CutoverAt: 100000              # compact when cumulative input tokens reach this value
+  MaxSingleTurnInputTokens: 200000  # compact before next turn if a single turn exceeded this
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `WarnAt` | int | `0` | Cumulative input-token threshold per agent that triggers a warning. When an agent's accumulated input tokens since the last compaction reach this value, a `⚠` warning is printed to the console and a `context_budget_warn` event is emitted. Fires at most once per agent per compaction cycle. `0` disables the warning. |
-| `CutoverAt` | int | `0` | Cumulative input-token threshold per agent that triggers automatic compaction. When reached, compaction runs before the next agent turn and the per-agent counters reset so the next window starts clean. **Requires `Compaction` to be configured** — compaction cannot fire without a compactor. `WarnAt`, when set, must be less than `CutoverAt`. `0` disables token-based cutover. |
+| `CutoverAt` | int | `0` | Cumulative input-token threshold per agent that triggers automatic compaction. When reached, compaction runs before the next agent turn and the per-agent counters reset so the next window starts clean. **Requires `Compaction` to be configured.** `WarnAt`, when set, must be less than `CutoverAt`. `0` disables token-based cutover. |
+| `MaxSingleTurnInputTokens` | int | `0` | Per-turn input-token ceiling. When a completed turn's input-token count exceeds this value, compaction fires before the *next* turn begins — independently of the cumulative `CutoverAt` counter. Guards against single-turn explosions (an agent reading many large files at once) that exhaust the cumulative budget in one shot and would leave the next turn with an already-bloated history. **Requires `Compaction` to be configured.** `0` disables per-turn enforcement. |
+
+**Threshold alignment:** set `WarnTurnTokens` (the per-turn warning) below `CutoverAt` so the warning fires before compaction is forced. If `WarnTurnTokens >= CutoverAt`, both fire in the same turn, making the warning redundant — `fuseraft validate` emits a warning when this condition is detected.
 
 **How it differs from `MaxTotalTokens`**
 
@@ -620,18 +624,16 @@ ContextBudget:
 | Response | terminates the session | triggers compaction, session continues |
 | Resets | never | after each compaction cycle |
 
-**Counter reset:** after each compaction cycle, all per-agent cumulative-input-token counters reset to zero. A session with `Compaction` configured can therefore run indefinitely — each new context window starts with a fresh budget.
+**Counter reset and post-compaction grace:** after each compaction cycle, all per-agent cumulative-input-token counters reset to zero. The first turn after compaction is granted a grace period — `CutoverAt` and `MaxSingleTurnInputTokens` are not enforced on that turn — preventing a thrash loop where the compacted history itself is expensive enough to trigger another immediate compaction.
 
-**Validation:** `fuseraft validate` reports an error if `CutoverAt > 0` without a `Compaction` section, or if `WarnAt >= CutoverAt` when both are non-zero.
+**Validation:** `fuseraft validate` reports an error if `CutoverAt > 0` or `MaxSingleTurnInputTokens > 0` without a `Compaction` section, or if `WarnAt >= CutoverAt` when both are non-zero.
 
 **Events emitted:**
 
 | Event | When |
 |-------|------|
 | `context_budget_warn` | Agent's cumulative input tokens ≥ `WarnAt` (once per agent per cycle) |
-| `context_budget_cutover` | Agent's cumulative input tokens ≥ `CutoverAt` (immediately before compaction fires) |
-
-Both events include `{ cumulative_input_tokens, warn_at, cutover_at }` in the payload.
+| `context_budget_cutover` | Cumulative tokens ≥ `CutoverAt`, or single-turn input > `MaxSingleTurnInputTokens` (payload includes `reason: "single_turn_limit"` for the latter) |
 
 **Omit** `ContextBudget` entirely to disable per-agent token tracking. Use `MaxTotalTokens` instead when you want a hard stop rather than transparent recovery.
 
@@ -1156,9 +1158,12 @@ FailureHandling:
   NoProgress:
     Action: Abort
     Threshold: 3
+  # Global backstops (apply across all failure types and states):
+  MaxConsecutiveContractFailures: 6   # escalate after N contract failures on any transition
+  MaxConsecutiveTurnsWithoutSignal: 8 # escalate after N turns with no routing signal emitted
 ```
 
-The values shown are the defaults — omitting `FailureHandling` entirely produces identical behaviour.
+The per-type values shown are the defaults — omitting `FailureHandling` entirely produces identical per-type behaviour. The two global backstops default to `0` (disabled) and must be set explicitly.
 
 **Failure types**
 
@@ -1179,6 +1184,12 @@ The values shown are the defaults — omitting `FailureHandling` entirely produc
 | `Abort` | Continue injecting corrections until `Threshold` consecutive failures are reached, then escalate to HITL. |
 
 **Threshold** controls how many consecutive failures of that type trigger escalation (for `Abort`). `EscalateToHuman` and `ActivateRecovery` ignore the threshold and fire immediately.
+
+**Global backstops** plug two gaps that per-type thresholds cannot close:
+
+- `MaxConsecutiveContractFailures` — a hard cap across all failure types on a single transition. When any transition accumulates this many consecutive contract failures — regardless of the per-type `Action` — the orchestrator escalates to HITL. This prevents a `Reinstruct` policy from looping indefinitely when a contract cannot be satisfied: the Reinstruct action has no built-in exit condition, so without this cap a broken contract traps the session until `MaxIterations` kills it.
+
+- `MaxConsecutiveTurnsWithoutSignal` — escalates when a state machine agent runs this many consecutive turns without emitting any routing signal. This is the *silent stuck* case: the agent completed its work but never called `handoff()`. Unlike the loop-warning injection (which scans live history and resets after compaction), this counter lives in strategy state and accumulates correctly across compaction boundaries. It resets when the agent emits any valid signal or when a transition succeeds. `0` (default) disables this guard.
 
 ---
 
