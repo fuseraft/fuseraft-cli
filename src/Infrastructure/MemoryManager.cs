@@ -15,12 +15,21 @@ public sealed class MemoryManager : IDisposable
 {
     private readonly IReadOnlyList<IMemoryProvider> _providers;
     private readonly ILogger<MemoryManager>? _logger;
+    private RepositoryMemoryStore? _repositoryStore;
 
     public MemoryManager(IReadOnlyList<IMemoryProvider> providers, ILogger<MemoryManager>? logger = null)
     {
         _providers = providers;
         _logger    = logger;
     }
+
+    /// <summary>
+    /// Attaches a <see cref="RepositoryMemoryStore"/> so that <c>Approved</c>,
+    /// high-confidence repository memories are injected into agent prompts via
+    /// <see cref="PreTurnAsync"/>. Call this after construction when the store is
+    /// available (e.g. from <c>OrchestratorBuilder</c>).
+    /// </summary>
+    public void AttachRepositoryMemory(RepositoryMemoryStore store) => _repositoryStore = store;
 
     /// <summary>
     /// Builds a <see cref="MemoryManager"/> from orchestration config.
@@ -52,6 +61,8 @@ public sealed class MemoryManager : IDisposable
     /// Called before each agent turn.
     /// Returns a memory block to prepend to the agent's system instructions,
     /// or <see langword="null"/> when no memory applies.
+    /// Includes <c>Approved</c>, high-confidence repository memories when a
+    /// <see cref="RepositoryMemoryStore"/> has been attached via <see cref="AttachRepositoryMemory"/>.
     /// </summary>
     public async Task<string?> PreTurnAsync(string agentName, CancellationToken ct = default)
     {
@@ -69,6 +80,32 @@ public sealed class MemoryManager : IDisposable
             catch (Exception ex)
             {
                 _logger?.LogWarning(ex, "MemoryManager: provider load error for '{Agent}'.", agentName);
+            }
+        }
+
+        // Repository scope: inject Approved, high-confidence entries only.
+        if (_repositoryStore is not null)
+        {
+            try
+            {
+                var approved = await _repositoryStore.LoadApprovedAsync(ct);
+                var highConf = approved.Where(e =>
+                    e.Confidence.Equals("Verified", StringComparison.OrdinalIgnoreCase) ||
+                    e.Confidence.Equals("Inferred", StringComparison.OrdinalIgnoreCase)).ToList();
+
+                if (highConf.Count > 0)
+                {
+                    var sb = new System.Text.StringBuilder();
+                    sb.AppendLine("REPOSITORY MEMORY — patterns observed across sessions:");
+                    foreach (var m in highConf.OrderByDescending(m => m.ReinforcementCount).Take(20))
+                        sb.AppendLine($"  [{m.Confidence}] (×{m.ReinforcementCount}) {m.Pattern}");
+                    blocks.Add(sb.ToString().TrimEnd());
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "MemoryManager: repository memory load error.");
             }
         }
 

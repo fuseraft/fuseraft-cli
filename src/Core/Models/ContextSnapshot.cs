@@ -6,6 +6,11 @@ namespace fuseraft.Core.Models;
 public sealed record ContractCheckResult(string Name, bool Passed, string? Error);
 
 /// <summary>
+/// Lightweight ADR summary carried in a <see cref="ContextSnapshot"/>.
+/// </summary>
+public sealed record AdrSummary(string Id, string Title, string Status);
+
+/// <summary>
 /// A point-in-time snapshot of the orchestration state used for lossless context
 /// reconstruction. All fields are derived from durable disk artifacts so the snapshot
 /// carries no hallucination risk, unlike an LLM-generated summary.
@@ -35,4 +40,39 @@ public sealed record ContextSnapshot
 
     /// <summary>UTC time the snapshot was taken.</summary>
     public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.UtcNow;
+
+    // ── Knowledge layer fields (Gap 9 cross-cutting) ─────────────────────────
+
+    /// <summary>
+    /// Active (Accepted-status) ADRs at snapshot time. Populated by
+    /// <see cref="fuseraft.Infrastructure.KnowledgeSnapshotEnricher"/> when an ADR registry
+    /// is available. Empty when knowledge enrichment is not configured.
+    /// </summary>
+    public IReadOnlyList<AdrSummary> ActiveAdrs { get; init; } = [];
+
+    /// <summary>
+    /// Formatted summary of active long-horizon objectives at snapshot time, or <c>null</c>
+    /// when no objectives are active or the objective manager is unavailable.
+    /// </summary>
+    public string? ObjectiveState { get; init; }
+
+    /// <summary>
+    /// Architecture layer violations found at snapshot time. Each entry is a short
+    /// human-readable description. Empty when no manifest is configured or no violations exist.
+    /// </summary>
+    public IReadOnlyList<string> ArchitectureViolations { get; init; } = [];
+
+    /// <summary>
+    /// Patterns from the top approved repository memories (by reinforcement count).
+    /// Injected at snapshot time so agents resuming after compaction see stable cross-session
+    /// knowledge without relying on the pre-turn memory injection path.
+    /// </summary>
+    public IReadOnlyList<string> TopRepositoryMemories { get; init; } = [];
+
+    /// <summary>
+    /// Human-readable summaries of provenance claims that have expired (past their
+    /// <c>ExpiresAt</c>). Agents should re-verify any artifact referenced in these warnings
+    /// before acting on it.
+    /// </summary>
+    public IReadOnlyList<string> ExpiredProvenanceWarnings { get; init; } = [];
 }

@@ -71,6 +71,7 @@ public static class FuseraftPaths
     public const string LocalIntents        = ".fuseraft/state/sessions/{session_id}/intents.json";
     public const string LocalSessionContext = ".fuseraft/state/sessions/{session_id}/context_summary.md";
     public const string LocalEvidence       = ".fuseraft/state/evidence.json";
+    public const string LocalProvenance     = ".fuseraft/state/provenance.json";
     public const string LocalFileVersions   = ".fuseraft/state/file_versions.json";
 
     // artifacts/ — structured agent-written documents read by validators
@@ -93,6 +94,21 @@ public static class FuseraftPaths
 
     // docs/ — agent-written markdown documents (research, reports, drafts, notes)
     public const string LocalDocs = ".fuseraft/docs";
+
+    // knowledge/ — durable cross-session knowledge (ADRs, repository memory, objectives)
+    public const string LocalKnowledge          = ".fuseraft/knowledge";
+    public const string LocalDecisions          = ".fuseraft/knowledge/decisions";
+    public const string LocalDecisionsArchive   = ".fuseraft/knowledge/decisions/archive";
+    public const string LocalRepositoryMemory   = ".fuseraft/knowledge/repository";
+    public const string LocalObjectives         = ".fuseraft/knowledge/objectives";
+    public const string LocalLifecycleConfig    = ".fuseraft/knowledge/lifecycle.yaml";
+    public const string LocalProvenanceArchive  = ".fuseraft/state/provenance.archive.json";
+
+    // Repository semantic graph — nodes + edges for all symbols in the project.
+    public const string LocalRepositoryGraph = ".fuseraft/state/repository.graph";
+
+    // Architecture drift detection — user-authored layer manifest.
+    public const string LocalArchitectureManifest = ".fuseraft/architecture.yaml";
 
     // checkpoints/ — session checkpoint files written when Checkpoint.Mode is set
     public const string LocalCheckpoints = ".fuseraft/checkpoints";
@@ -187,7 +203,9 @@ public static class FuseraftPaths
         sb.AppendLine("  .fuseraft/tests/                          — write all test scripts and test support files here");
         sb.AppendLine("  .fuseraft/tests/fixtures/                 — seed data, stubs, and fixture files");
         sb.AppendLine("  .fuseraft/context/                        — injected reference documents (see .fuseraft/context/index.json)");
-        sb.Append(    "  .fuseraft/summaries/                      — compaction summaries");
+        sb.AppendLine("  .fuseraft/summaries/                      — compaction summaries");
+        sb.AppendLine("  .fuseraft/knowledge/decisions/            — architecture decision records (use decision_search / decision_read)");
+        sb.Append(    "  .fuseraft/state/repository.graph          — repository semantic graph (use graph_search / graph_refs / graph_dependents)");
         return sb.ToString();
     }
 }

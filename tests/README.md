@@ -37,3 +37,4 @@ dotnet test tests/FuseraftCli.Tests
 | `StateHandoffTests.cs` | State is transferred correctly between agents on handoff |
 | `StrategyFactoryTests.cs` | `StrategyFactory` resolves the right selection strategy per config |
 | `ValidateConfigCommandTests.cs` | `validate-config` CLI command catches malformed configs |
+| `KnowledgeLayerRoundTripTests.cs` | Full knowledge layer round-trip: graph build → ADR creation → graph traversal → broker context assembly → provenance claim recording → lifecycle GC; also covers `ConfidenceComputer` tiers and GC dry-run correctness |

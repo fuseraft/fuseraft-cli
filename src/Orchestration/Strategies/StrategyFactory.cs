@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
+using fuseraft.Infrastructure;
 using fuseraft.Orchestration.Contracts;
 using fuseraft.Orchestration.Validation;
 using fuseraft.Orchestration;
@@ -15,12 +16,13 @@ namespace fuseraft.Orchestration.Strategies;
 /// <summary>
 /// Builds agent selection and termination strategies from configuration.
 /// </summary>
-public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatClient, EventEmitter? eventEmitter = null, ILoggerFactory? loggerFactory = null, GovernanceKernel? governanceKernel = null, IHumanApprovalService? humanApprovalService = null, EvidenceStore? evidenceStore = null, TestSelectorConfig? testSelector = null, string? sandboxRoot = null, ContextAssembler? contextAssembler = null)
+public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatClient, EventEmitter? eventEmitter = null, ILoggerFactory? loggerFactory = null, GovernanceKernel? governanceKernel = null, IHumanApprovalService? humanApprovalService = null, EvidenceStore? evidenceStore = null, ProvenanceRegistry? provenanceRegistry = null, TestSelectorConfig? testSelector = null, string? sandboxRoot = null, ContextAssembler? contextAssembler = null)
 {
     private readonly EventEmitter? _eventEmitter = eventEmitter;
     private readonly GovernanceKernel? _governanceKernel = governanceKernel;
     private readonly IHumanApprovalService? _humanApprovalService = humanApprovalService;
     private readonly EvidenceStore? _evidenceStore = evidenceStore;
+    private readonly ProvenanceRegistry? _provenanceRegistry = provenanceRegistry;
     private readonly TestSelectorConfig? _testSelector = testSelector;
     private readonly string? _sandboxRoot = sandboxRoot;
     private readonly ContextAssembler? _contextAssembler = contextAssembler;
@@ -78,7 +80,7 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
         if (config.Routes is not { Count: > 0 })
             throw new InvalidOperationException("Keyword selection strategy requires at least one entry in 'Routes'.");
 
-        var validators = BuildValidators(validationConfig, testSelector: _testSelector, sandboxRoot: _sandboxRoot);
+        var validators = BuildValidators(validationConfig, testSelector: _testSelector, sandboxRoot: _sandboxRoot, provenanceRegistry: _provenanceRegistry);
 
         // Build the contract engine once — shared across all routes that reference contracts.
         ContractEngine? contractEngine = contracts is { Count: > 0 }
@@ -235,7 +237,8 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
         ValidationConfig? config,
         bool isTermination = false,
         TestSelectorConfig? testSelector = null,
-        string? sandboxRoot = null)
+        string? sandboxRoot = null,
+        ProvenanceRegistry? provenanceRegistry = null)
     {
         var registry = new Dictionary<string, IRoutingValidator>(StringComparer.OrdinalIgnoreCase)
         {
@@ -244,7 +247,8 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
             // entry from an earlier turn satisfying the check when APPROVED fires.
             ["RequireShellPass"] = new RequireShellPassValidator(
                 changeLogPath: config?.ChangeLogPath,
-                requireCurrentTurn: isTermination)
+                requireCurrentTurn: isTermination,
+                provenanceRegistry: provenanceRegistry)
         };
 
         if (config is not null)
@@ -272,8 +276,13 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
             registry["RequireRelatedTestsPass"] = new RequireRelatedTestsPassValidator(
                 testSelector,
                 changeLogPath: config?.ChangeLogPath,
-                sandboxRoot: sandboxRoot);
+                sandboxRoot: sandboxRoot,
+                provenanceRegistry: provenanceRegistry);
         }
+
+        registry["ArchitectureValidator"] = new ArchitectureValidator(
+            projectRoot: sandboxRoot,
+            provenanceRegistry: provenanceRegistry);
 
         return registry;
     }
@@ -301,7 +310,7 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
 
         if (validatorNames is not null && config.Type != "maxiterations")
         {
-            var validatorRegistry = BuildValidators(validationConfig, isTermination: true, testSelector: _testSelector, sandboxRoot: _sandboxRoot);
+            var validatorRegistry = BuildValidators(validationConfig, isTermination: true, testSelector: _testSelector, sandboxRoot: _sandboxRoot, provenanceRegistry: _provenanceRegistry);
             var validatorList = validatorNames
                 .Select(name => validatorRegistry.TryGetValue(name, out var v) ? v : null)
                 .Where(v => v is not null)

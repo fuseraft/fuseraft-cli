@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
+using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Plugins;
 
 namespace fuseraft.Orchestration.Validation;
@@ -23,7 +24,8 @@ namespace fuseraft.Orchestration.Validation;
 public sealed class RequireRelatedTestsPassValidator(
     TestSelectorConfig testSelector,
     string? changeLogPath = null,
-    string? sandboxRoot = null) : IRoutingValidator
+    string? sandboxRoot = null,
+    ProvenanceRegistry? provenanceRegistry = null) : IRoutingValidator
 {
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -67,6 +69,18 @@ public sealed class RequireRelatedTestsPassValidator(
                 $"Handoff blocked: targeted tests failed (exit {result.ExitCode}).\n\n" +
                 $"Command: {testCommand}\n\n" +
                 TrimOutput(result.Stdout, result.Stderr));
+        }
+
+        if (provenanceRegistry is not null)
+        {
+            var record = new ClaimRecord
+            {
+                Claim   = $"Targeted tests passed: {testCommand}",
+                // TestResult + ExitCode → Verified
+                Support = [EvidenceClass.TestResult, EvidenceClass.ExitCode],
+            };
+            try { await provenanceRegistry.RecordAsync(record, cancellationToken); }
+            catch { /* best-effort */ }
         }
 
         return RoutingValidationResult.Pass();

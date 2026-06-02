@@ -57,3 +57,4 @@ hashnode/
 !.fuseraft/context/
 !.fuseraft/context/**
 temp/TestMetadata/
+CHECKLIST.md
