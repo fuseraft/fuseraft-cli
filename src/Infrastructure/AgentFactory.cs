@@ -29,7 +29,8 @@ public sealed class AgentFactory(
     IdentityRegistry? identityRegistry = null,
     EventEmitter? eventEmitter = null,
     ILoggerFactory? loggerFactory = null,
-    AgentSkillsProvider? skillsProvider = null)
+    AgentSkillsProvider? skillsProvider = null,
+    ToolResultArtifactStore? toolArtifactStore = null)
 {
     private string? _sessionId;
     private readonly ILogger _logger =
@@ -399,6 +400,12 @@ public sealed class AgentFactory(
             if (pluginRegistry.TryGet(pluginName, out var obj) && obj is ITurnResettable tr)
                 lock (_resettablesLock) _turnResettables.Add(tr);
         }
+
+        // Wrap every tool with an offload filter so oversized results are stored to disk
+        // before they enter the conversation history. Applied before the notification proxy
+        // so the stub is what the provider receives, not the raw large content.
+        if (toolArtifactStore is not null)
+            tools = tools.Select(f => (AIFunction)new ToolResultOffloadFilter(f, toolArtifactStore)).ToList();
 
         // Wrap every tool with a notifying proxy so onToolCalling fires the moment the
         // tool begins execution, not after the whole batch finishes.
