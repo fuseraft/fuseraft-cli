@@ -12,4 +12,6 @@ public sealed record AdrEntry
     public List<string> Consequences { get; init; } = [];
     public List<string> Supersedes { get; init; } = [];
     public List<string> Tags { get; init; } = [];
+    /// <summary>File paths or SymbolId strings this decision governs; used to build adr_governs edges in the repository graph.</summary>
+    public List<string> Governs { get; init; } = [];
 }

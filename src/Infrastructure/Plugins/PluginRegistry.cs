@@ -92,8 +92,13 @@ public sealed class PluginRegistry : IDisposable
 
         Register("Compaction", () => new CompactionPlugin());
 
+        var graphStoreForDecision = new RepositoryGraphStore(FuseraftPaths.LocalRepositoryGraph);
+        var graphBuilderForDecision = new RepositoryGraphBuilder(graphStoreForDecision);
         Register("Decision", () => new DecisionPlugin(
-            new AdrRegistry(new AdrStore(FuseraftPaths.LocalDecisions))));
+            new AdrRegistry(new AdrStore(FuseraftPaths.LocalDecisions)),
+            graphBuilderForDecision));
+
+        Register("Graph", () => new GraphPlugin(graphStoreForDecision));
 
         // Stub — OrchestratorBuilder replaces this with a session-scoped instance.
         Register("SessionContext", () => new SessionContextPlugin(

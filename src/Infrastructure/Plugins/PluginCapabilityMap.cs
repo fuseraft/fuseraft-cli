@@ -141,6 +141,11 @@ internal static class PluginCapabilityMap
         ["decision_create"]                = "write",
         ["decision_supersede"]             = "write",
 
+        // Graph (repository semantic graph — all tools are read-only)
+        ["graph_search"]                   = "read",
+        ["graph_refs"]                     = "read",
+        ["graph_dependents"]               = "read",
+
         // CodeExecution
         ["code_execution_check_docker"]    = "read",
         ["code_execution_sandbox_run"]     = "execute",
