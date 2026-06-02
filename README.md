@@ -2,15 +2,17 @@
 
 <img src="docs/.assets/fuseraft-banner.png" alt="fuseraft — an agent orchestration framework">
 
-fuseraft turns a YAML config into a running multi-agent pipeline. Define a team of AI agents — each with its own role, model, skills, and tools — and describe how they hand off to each other. Then give them a task.
+fuseraft orchestrates teams of AI agents and mechanically enforces that they did what they claim to have done before the pipeline can advance.
 
-Build a software development team that plans, writes, tests, and reviews its own code. A research pipeline that fans out to specialists and synthesizes their findings. A decision workflow with a human approval gate at every critical step. Whatever you can describe, fuseraft can coordinate.
+Agents write confident prose. An agent might say "I implemented the feature" without ever calling `write_file`. "All tests pass" without running a command. Without enforcement, a pipeline advances on claims rather than facts. fuseraft blocks handoffs unless real evidence is on disk: routing validators inspect tool-call records, verify file presence, and check shell exit codes. Claims are not evidence. Artifacts and command results are.
+
+You define a pipeline in YAML: agents, a routing strategy, and the mechanical contracts each agent must satisfy to hand off. fuseraft runs the loop, enforces the contracts, and accumulates durable knowledge across sessions — architecture decisions, a structural index of the codebase, provenance-tracked claims, and long-horizon objectives — so agents grow more informed over time rather than starting cold each run.
 
 Works with Anthropic, xAI, OpenAI, Azure OpenAI, Ollama, and any OpenAI-compatible provider. Agents can be local or remote — the [A2A protocol](https://a2a-protocol.org/) lets you federate agent slots to independently deployed services. Built on [Microsoft Agent Framework](https://github.com/microsoft/agents).
 
 ---
 
-## What you can build
+## Pipeline topologies
 
 Pipelines range from a single task-routed assistant:
 
@@ -197,26 +199,36 @@ The binary lands in `./bin/`.
 
 ## Features
 
-**Orchestration**
-- Nine routing modes: sequential, round-robin, keyword, structured (JSON-field routing), state machine, declarative directed graph (with parallel fan-out/fan-in), LLM-based selection, fully autonomous Magentic, and adversarial generate→critique→revise pipelines
-- Routing validators that block handoffs unless real evidence is present on disk — no hallucinated progress
-- `HandoffContext` on state machine transitions — inject targeted artifact snapshots into shared history at the moment a transition fires, so the receiving agent sees only what it needs
-- Saga orchestration wraps any pipeline with compensating rollback if a step fails
+**Enforcement**
+- Routing validators block handoffs unless real evidence is present on disk — `RequireBrief`, `RequireWriteFile`, `RequireShellPass`, `TestReportValid`, and others verify disk artifacts and tool-call records, not agent assertions
+- Change tracking records every `write_file`, `shell_run`, and `git_commit` call to a tamper-evident JSONL log; downstream agents and validators read the log, not the conversation
+- Evidence contracts gate transitions with reusable predicate chains: `FileExists`, `FilesWritten`, `CommandSucceeded`, `TestReport`
+- Compaction grounding cross-references `changes.json` when summarizing old turns — fabricated claims that contradict the log are corrected at compaction time rather than baked into the summary
+- `HandoffContext` on transitions injects targeted artifact snapshots at the moment a handoff fires, so receiving agents see only what they need
 
-**Agents**
+**Orchestration**
+- Nine routing modes: sequential, round-robin, keyword, structured (JSON-field routing), state machine, declarative directed graph (with parallel fan-out/fan-in), LLM-based selection, fully autonomous Magentic, and adversarial generate→critique→revise
+- Saga orchestration wraps any pipeline with compensating rollback if a step fails
 - Declare agents inline or as standalone `AgentFile` YAML — reuse and version agent definitions across configs
 - Mix any combination of LLM providers within a single pipeline
 - Federate agent slots to remote services via the [A2A protocol](https://a2a-protocol.org/) — remote agents participate identically to local ones
 
+**Knowledge**
+- Accumulates durable cross-session knowledge: architecture decisions (ADRs), a structural repository graph, provenance-tracked claims, repository memory patterns, and long-horizon objectives
+- Agents query the knowledge layer through plugin tools (`decision_*`, `graph_*`, `objective_*`); the context broker ranks and injects relevant knowledge at session start without blowing the context budget
+- Architecture drift detection (`fuseraft arch check`) validates source files against declared layer boundaries
+- Knowledge lifecycle GC (`fuseraft knowledge gc`) archives superseded ADRs, decays stale provenance claims, and prunes orphaned graph nodes
+
 **Tools**
-- Built-in plugins: filesystem, shell, git, HTTP, JSON, search, Docker sandboxes, MCP servers, persistent scratchpad, and a shared chatroom
+- Built-in plugins: filesystem, shell, git, HTTP, JSON, search, Docker code sandboxes, persistent scratchpad, and a shared agent chatroom
 - Connect any MCP server — its tools are automatically registered and available to agents
+- Skills packages bundle reusable agent procedures; fuseraft auto-curates skills from qualifying sessions and injects relevant ones at session start via a full-text index
 
 **Reliability**
 - Checkpoints after every turn — sessions can always be resumed exactly where they left off
 - Token tracking per turn; enforce per-model context caps and a session-wide hard spending limit
-- Conversation compaction keeps long sessions within context window limits
-- Per-agent **`Context` spec** — declare exactly which artifact sources (files, brief fields, recent changes, own history) each agent receives instead of filtering the shared transcript. When set, history replay is skipped entirely; context cost is proportional to what you declare, not session length
+- Conversation compaction keeps long sessions within context window limits without losing grounding
+- Per-agent `Context` spec — declare exactly which artifact sources each agent receives; when set, history replay is skipped entirely and context cost is proportional to what you declare
 
 **Governance**
 - Per-agent execution rings, prompt injection detection, circuit breaker, and a hash-chain audit log
@@ -225,7 +237,7 @@ The binary lands in `./bin/`.
 
 **Developer experience**
 - Browser-based DevUI (`--devui`) for real-time session visualization
-- Interactive **Orchestration Designer** (`fuseraft init --template designer`) — describe your use case, get a validated config back
+- Interactive Orchestration Designer (`fuseraft init --template designer`) — describe your use case, get a validated config back
 - VS Code extension with CodeLens, IntelliSense, and a session viewer
 
 ---
@@ -247,6 +259,8 @@ The binary lands in `./bin/`.
 | [Governance](docs/governance.md) | Execution rings, audit log, circuit breaker, SLO tracking |
 | [Context Store](docs/context-store.md) | Importing files and directories into the session context |
 | [Sessions](docs/sessions.md) | Resumption, HITL, cost tracking, compaction |
+| [Knowledge Layer](docs/knowledge.md) | ADR registry, repository graph, provenance, objectives, context broker |
+| [Skills](docs/skills.md) | Portable skill packages, skill curation, and the cross-session skill index |
 | [Examples](docs/examples.md) | Ready-to-use config examples |
 | [Design](docs/design.md) | Architecture, layer map, MAF usage, and decision log |
 
@@ -268,15 +282,13 @@ The [fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) br
 ▶ Run Task   ✓ Validate   ⎇ Diagram
 ```
 
-**Task files** — right-click any `.md` or `.txt` file in the explorer or editor to run it directly as a fuseraft task. Write your task as a markdown spec, then run it without copying anything.
+**Task files** — right-click any `.md` or `.txt` file in the explorer or editor to run it directly as a fuseraft task.
 
-**REPL** — `fuseraft: Open REPL` starts an interactive single-agent chat session without a config file. Good for quick experiments.
+**REPL** — `fuseraft: Open REPL` starts an interactive single-agent chat session without a config file.
 
-**Set Up Provider** — a guided first-run panel for configuring your binary path, provider, model, endpoint, and API key. Runs automatically when the binary isn't found; available any time from the command palette.
+**YAML / JSON IntelliSense** — full JSON Schema for fuseraft configs ships with the extension. Autocomplete, inline docs, and validation for every field.
 
-**YAML / JSON IntelliSense** — full JSON Schema for fuseraft configs ships with the extension. Autocomplete, inline docs, and validation for every field — agents, models, plugins, routes, contracts, security, and more.
-
-**Status bar** — a persistent `fuseraft` button always visible at the bottom of the editor. Click to run a task.
+**Status bar** — a persistent `fuseraft` button always visible at the bottom of the editor.
 
 ---
 
