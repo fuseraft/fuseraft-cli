@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text;
+using fuseraft.Core;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 
@@ -17,12 +18,12 @@ namespace fuseraft.Infrastructure.Plugins;
 public sealed class DecisionPlugin
 {
     private readonly AdrRegistry _registry;
-    private readonly RepositoryGraphBuilder? _graphBuilder;
+    private readonly IKnowledgeLayer? _knowledgeLayer;
 
-    public DecisionPlugin(AdrRegistry registry, RepositoryGraphBuilder? graphBuilder = null)
+    public DecisionPlugin(AdrRegistry registry, IKnowledgeLayer? knowledgeLayer = null)
     {
-        _registry     = registry;
-        _graphBuilder = graphBuilder;
+        _registry       = registry;
+        _knowledgeLayer = knowledgeLayer;
     }
 
     [Description("Search architecture decision records by keyword, status, or tag.")]
@@ -100,7 +101,13 @@ public sealed class DecisionPlugin
             Governs      = SplitCsv(governs),
         };
 
-        await _registry.SaveAsync(entry);
+        // Route through IKnowledgeLayer when available — it handles both the ADR store
+        // write and the graph node upsert so the ADR subsystem doesn't directly call
+        // into the graph subsystem.
+        if (_knowledgeLayer is not null)
+            await _knowledgeLayer.RecordDecisionAsync(entry);
+        else
+            await _registry.SaveAsync(entry);
 
         foreach (var supersededId in entry.Supersedes)
         {
@@ -108,9 +115,6 @@ public sealed class DecisionPlugin
             if (old is not null && !old.Status.Equals("Superseded", StringComparison.OrdinalIgnoreCase))
                 await _registry.SaveAsync(old with { Status = "Superseded" });
         }
-
-        if (_graphBuilder is not null && entry.Governs.Count > 0)
-            _ = _graphBuilder.UpsertAdrNodeAsync(entry); // fire-and-forget; graph is best-effort
 
         return PluginResult.Ok($"Created {id}: {entry.Title}");
     }

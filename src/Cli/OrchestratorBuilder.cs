@@ -418,6 +418,23 @@ public static class OrchestratorBuilder
         if (config.EvidenceStore is { } esCfg)
             evidenceStore = new EvidenceStore(esCfg.Path, loggerFactory.CreateLogger<EvidenceStore>());
 
+        // Knowledge layer — single shared instance for the session.
+        // Wired here so the ChangeTracker (incremental graph rebuild) and ContextAssembler
+        // (adr_graph traversal) share the same underlying stores instead of creating
+        // independent instances that diverge mid-session.
+        var knowledgeSandbox = config.Security?.FileSystemSandboxPath is { Length: > 0 } ks
+            ? FuseraftPaths.ExpandPath(ks)
+            : Directory.GetCurrentDirectory();
+        var knowledgeGraphPath = Path.Combine(knowledgeSandbox, FuseraftPaths.LocalRepositoryGraph);
+        var knowledgeLayer = new fuseraft.Infrastructure.KnowledgeLayer(
+            new fuseraft.Infrastructure.AdrRegistry(
+                new fuseraft.Infrastructure.AdrStore(FuseraftPaths.LocalDecisions)),
+            new fuseraft.Infrastructure.RepositoryGraphStore(knowledgeGraphPath),
+            new fuseraft.Infrastructure.RepositoryGraphBuilder(
+                new fuseraft.Infrastructure.RepositoryGraphStore(knowledgeGraphPath),
+                knowledgeSandbox));
+        pluginRegistry.ConfigureKnowledge(knowledgeLayer);
+
         // Change tracking: hook a filter into every agent kernel that records tool results.
         // Pass eventEmitter, evidenceStore, and intentLog so tracked tool calls emit flat
         // entries, typed graph nodes, and pre-execution intent records.
@@ -425,15 +442,8 @@ public static class OrchestratorBuilder
         IntentLog? intentLog = null;
         if (config.ChangeTracking is { } ctConfig)
         {
-            var sandboxForGraph = config.Security?.FileSystemSandboxPath is { Length: > 0 } sfg
-                ? FuseraftPaths.ExpandPath(sfg)
-                : Directory.GetCurrentDirectory();
-            var graphBuilderForTracker = new fuseraft.Infrastructure.RepositoryGraphBuilder(
-                new fuseraft.Infrastructure.RepositoryGraphStore(
-                    Path.Combine(sandboxForGraph, FuseraftPaths.LocalRepositoryGraph)),
-                sandboxForGraph);
             intentLog     = new IntentLog(ctConfig.ResolveIntentLogPath(), loggerFactory.CreateLogger<IntentLog>());
-            changeTracker = new ChangeTracker(ctConfig.Path, eventEmitter, evidenceStore, intentLog, loggerFactory.CreateLogger<ChangeTracker>(), graphBuilderForTracker);
+            changeTracker = new ChangeTracker(ctConfig.Path, eventEmitter, evidenceStore, intentLog, loggerFactory.CreateLogger<ChangeTracker>(), knowledgeLayer.GraphBuilder);
             pluginRegistry.Register("Changes", () => new ChangesPlugin(ctConfig.Path));
         }
 
@@ -791,23 +801,16 @@ public static class OrchestratorBuilder
         var resolvedSandbox = config.Security?.FileSystemSandboxPath is { Length: > 0 } sbx
             ? FuseraftPaths.ExpandPath(sbx) : null;
 
-        // Repository graph store and ADR registry — injected into the context assembler
-        // so the adr_graph source type can walk adr_governs edges at handoff time.
-        var graphStorePath   = config.Security?.FileSystemSandboxPath is { Length: > 0 } gsp
-            ? Path.Combine(FuseraftPaths.ExpandPath(gsp), FuseraftPaths.LocalRepositoryGraph)
-            : FuseraftPaths.LocalRepositoryGraph;
-        var graphStore       = new fuseraft.Infrastructure.RepositoryGraphStore(graphStorePath);
-        var adrStore         = new fuseraft.Infrastructure.AdrStore(FuseraftPaths.LocalDecisions);
-        var adrRegistryForCtx = new fuseraft.Infrastructure.AdrRegistry(adrStore);
-
         // Shared assembler used by both the state machine (HandoffContext) and the
         // orchestrator (AgentConfig.Context). One instance so session ID updates propagate.
+        // Sources the graph store and ADR registry from the shared knowledge layer so
+        // adr_graph traversal sees the same state as the plugins and change tracker.
         var contextAssembler = new ContextAssembler(
             sandboxRoot:   resolvedSandbox,
             changeLogPath: config.Validation?.ChangeLogPath,
             briefPath:     config.Validation?.BriefPath,
-            graphStore:    graphStore,
-            adrRegistry:   adrRegistryForCtx);
+            graphStore:    knowledgeLayer.GraphStore,
+            adrRegistry:   knowledgeLayer.AdrRegistry);
         if (!string.IsNullOrEmpty(sessionId))
             contextAssembler.SetSessionId(sessionId);
 
