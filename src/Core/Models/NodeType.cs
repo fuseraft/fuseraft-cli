@@ -15,4 +15,6 @@ public enum NodeType
     Property,
     Field,
     Adr,
+    /// <summary>An architecture layer violation detected by <c>ArchitectureValidator</c>.</summary>
+    Violation,
 }

@@ -75,6 +75,42 @@ public sealed class AdrStore
         finally { _lock.Release(); }
     }
 
+    /// <summary>
+    /// Moves the file for <paramref name="id"/> into the <c>archive/</c> subdirectory.
+    /// Archived entries are excluded from <see cref="LoadAllAsync"/> but remain queryable
+    /// via <see cref="LoadArchivedAsync"/>.
+    /// </summary>
+    public async Task<bool> ArchiveAsync(string id, CancellationToken ct = default)
+    {
+        await _lock.WaitAsync(ct);
+        try
+        {
+            var src = FilePath(id);
+            if (!File.Exists(src)) return false;
+            var archiveDir = Path.Combine(_dir, "archive");
+            Directory.CreateDirectory(archiveDir);
+            var dst = Path.Combine(archiveDir, Path.GetFileName(src));
+            File.Move(src, dst, overwrite: true);
+            return true;
+        }
+        finally { _lock.Release(); }
+    }
+
+    /// <summary>Returns all archived ADR entries from the <c>archive/</c> subdirectory.</summary>
+    public async Task<List<AdrEntry>> LoadArchivedAsync(CancellationToken ct = default)
+    {
+        var archiveDir = Path.Combine(_dir, "archive");
+        if (!Directory.Exists(archiveDir)) return [];
+
+        var results = new List<AdrEntry>();
+        foreach (var file in Directory.GetFiles(archiveDir, "ADR-*.json").OrderBy(f => f))
+        {
+            var entry = await LoadFileAsync(file, ct);
+            if (entry is not null) results.Add(entry);
+        }
+        return results;
+    }
+
     // ID allocation
 
     /// <summary>Returns the next available ADR ID in the format <c>ADR-NNNN</c>.</summary>

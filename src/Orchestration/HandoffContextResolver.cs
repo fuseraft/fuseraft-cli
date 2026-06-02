@@ -31,6 +31,8 @@ public sealed class ContextAssembler
     private readonly string? _briefPath;
     private readonly RepositoryGraphStore? _graphStore;
     private readonly AdrRegistry? _adrRegistry;
+    private readonly fuseraft.Infrastructure.ObjectiveManager? _objectiveManager;
+    private readonly ContextBroker? _contextBroker;
 
     private string _sessionId = string.Empty;
 
@@ -49,14 +51,18 @@ public sealed class ContextAssembler
         string? sandboxRoot   = null,
         string? changeLogPath = null,
         string? briefPath     = null,
-        RepositoryGraphStore? graphStore  = null,
-        AdrRegistry?          adrRegistry = null)
+        RepositoryGraphStore? graphStore       = null,
+        AdrRegistry?          adrRegistry      = null,
+        fuseraft.Infrastructure.ObjectiveManager? objectiveManager = null,
+        ContextBroker?        contextBroker    = null)
     {
-        _sandboxRoot   = sandboxRoot;
-        _changeLogPath = changeLogPath;
-        _briefPath     = briefPath;
-        _graphStore    = graphStore;
-        _adrRegistry   = adrRegistry;
+        _sandboxRoot      = sandboxRoot;
+        _changeLogPath    = changeLogPath;
+        _briefPath        = briefPath;
+        _graphStore       = graphStore;
+        _adrRegistry      = adrRegistry;
+        _objectiveManager = objectiveManager;
+        _contextBroker    = contextBroker;
     }
 
     public void SetSessionId(string sessionId) => _sessionId = sessionId;
@@ -201,15 +207,35 @@ public sealed class ContextAssembler
         var (type, param) = ParseSource(src.Source);
         return type switch
         {
-            "session_context" => await ResolveSessionContextAsync(ct),
-            "changes_recent"  => await ResolveChangesRecentAsync(
-                                     int.TryParse(param, out var n) ? Math.Max(1, n) : 3,
-                                     maxChars, ct),
-            "brief_field"     => await ResolveBriefFieldAsync(param ?? string.Empty, maxChars, ct),
-            "file"            => await ResolveFileAsync(param ?? string.Empty, maxChars, ct),
-            "adr_graph"       => await ResolveAdrGraphAsync(maxChars, ct),
-            _                 => null,
+            "session_context"   => await ResolveSessionContextAsync(ct),
+            "changes_recent"    => await ResolveChangesRecentAsync(
+                                       int.TryParse(param, out var n) ? Math.Max(1, n) : 3,
+                                       maxChars, ct),
+            "brief_field"       => await ResolveBriefFieldAsync(param ?? string.Empty, maxChars, ct),
+            "file"              => await ResolveFileAsync(param ?? string.Empty, maxChars, ct),
+            "adr_graph"         => await ResolveAdrGraphAsync(maxChars, ct),
+            "active_objectives" => await ResolveActiveObjectivesAsync(maxChars, ct),
+            "broker"            => await ResolveBrokerAsync(param ?? string.Empty, maxChars, ct),
+            _                   => null,
         };
+    }
+
+    private async Task<string?> ResolveBrokerAsync(string query, int maxChars, CancellationToken ct)
+    {
+        if (_contextBroker is null) return null;
+        try   { return await _contextBroker.ResolveAsync(query, maxChars, ct); }
+        catch { return null; }
+    }
+
+    private async Task<string?> ResolveActiveObjectivesAsync(int maxChars, CancellationToken ct)
+    {
+        if (_objectiveManager is null) return null;
+        try
+        {
+            var summary = await _objectiveManager.BuildActiveSummaryAsync(ct);
+            return summary is null ? null : Truncate(summary, maxChars);
+        }
+        catch { return null; }
     }
 
     // Walks adr_governs edges in the repository graph for every file recently touched
@@ -443,8 +469,10 @@ public sealed class ContextAssembler
             "changes_recent"  => "Recent Changes",
             "brief_field"     => $"Task: {param}",
             "file"            => param is not null ? Path.GetFileName(param) : "File",
-            "adr_graph"       => "Governing ADRs",
-            _                 => source,
+            "adr_graph"         => "Governing ADRs",
+            "active_objectives" => "Active Objectives",
+            "broker"            => string.IsNullOrEmpty(param) ? "Adaptive Context" : $"Adaptive Context: {param}",
+            _                   => source,
         };
     }
 

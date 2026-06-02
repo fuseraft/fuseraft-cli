@@ -232,6 +232,21 @@ public record AgentConfig
     public int SubAgentMaxToolCalls { get; init; } = 0;
 
     /// <summary>
+    /// Tokens produced by this agent when its turn completes successfully.
+    /// Used by <see cref="fuseraft.Orchestration.DependencyPlanner"/> to mark dependencies as fulfilled.
+    /// Supported token types: <c>artifact:&lt;name&gt;</c>, <c>file:&lt;path&gt;</c>,
+    /// <c>symbol:&lt;name&gt;</c>, or plain coarse-capability strings (e.g. <c>analyzed_codebase</c>).
+    /// </summary>
+    public List<string> Produces { get; init; } = [];
+
+    /// <summary>
+    /// Tokens that must be in the fulfilled set before this agent is eligible to run.
+    /// The orchestrator blocks this agent until all listed tokens are produced.
+    /// Token format mirrors <see cref="Produces"/>.
+    /// </summary>
+    public List<string> Requires { get; init; } = [];
+
+    /// <summary>
     /// When set, this agent is hosted remotely and accessed via the A2A protocol.
     /// <see cref="RemoteAgentConfig.Url"/> is the base URL of the remote agent;
     /// its agent card is fetched from <c>{Url}/.well-known/agent.json</c> at session startup.

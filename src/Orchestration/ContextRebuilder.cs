@@ -79,6 +79,45 @@ public static class ContextRebuilder
             sb.AppendLine();
         }
 
+        if (snapshot.ActiveAdrs.Count > 0)
+        {
+            sb.AppendLine("ACTIVE ARCHITECTURE DECISIONS:");
+            foreach (var adr in snapshot.ActiveAdrs)
+                sb.AppendLine($"  [{adr.Id}] {adr.Title} (status: {adr.Status})");
+            sb.AppendLine();
+        }
+
+        if (!string.IsNullOrWhiteSpace(snapshot.ObjectiveState))
+        {
+            sb.AppendLine("ACTIVE OBJECTIVES:");
+            sb.AppendLine(snapshot.ObjectiveState.TrimEnd());
+            sb.AppendLine();
+        }
+
+        if (snapshot.ArchitectureViolations.Count > 0)
+        {
+            sb.AppendLine($"ARCHITECTURE VIOLATIONS ({snapshot.ArchitectureViolations.Count} at compaction time \u2014 verify before merging):");
+            foreach (var v in snapshot.ArchitectureViolations)
+                sb.AppendLine($"  \u26a0 {v}");
+            sb.AppendLine();
+        }
+
+        if (snapshot.TopRepositoryMemories.Count > 0)
+        {
+            sb.AppendLine("REPOSITORY MEMORY (approved cross-session patterns):");
+            foreach (var mem in snapshot.TopRepositoryMemories)
+                sb.AppendLine($"  \u2022 {mem}");
+            sb.AppendLine();
+        }
+
+        if (snapshot.ExpiredProvenanceWarnings.Count > 0)
+        {
+            sb.AppendLine("EXPIRED PROVENANCE WARNINGS (re-verify before acting on these artifacts):");
+            foreach (var w in snapshot.ExpiredProvenanceWarnings)
+                sb.AppendLine($"  \u26a0 {w}");
+            sb.AppendLine();
+        }
+
         var stateHint = snapshot.CurrentStateName is not null
             ? $" Continue from state '{snapshot.CurrentStateName}'."
             : string.Empty;

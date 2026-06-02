@@ -40,12 +40,15 @@ public interface IKnowledgeLayer
     Task<KnowledgeArtifact?> RetrieveAsync(string id, CancellationToken ct = default);
 
     /// <summary>
-    /// Records a verifiable claim with supporting evidence.
-    /// Implemented in Gap 3 (Provenance and Confidence Tracking).
+    /// Records a verifiable claim with supporting evidence. Confidence tier is computed
+    /// automatically from the <paramref name="support"/> composition by
+    /// <see cref="fuseraft.Infrastructure.ConfidenceComputer"/>.
     /// </summary>
     Task<ClaimRecord> RecordClaimAsync(
         string claim,
-        IReadOnlyList<string> support,
+        IReadOnlyList<EvidenceClass> support,
+        string? artifactId = null,
+        DateTimeOffset? expiresAt = null,
         CancellationToken ct = default);
 
     /// <summary>

@@ -112,12 +112,19 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
         }
 
         await EnsureGitignoreEntryAsync(cancellationToken);
+        var knowledgeScaffold = await ScaffoldKnowledgeAsync(cancellationToken);
 
         var selected        = Array.Find(Templates, t => t.Key == templateKey)!;
         var endpointDisplay = string.IsNullOrWhiteSpace(endpoint) ? "[dim](default)[/]" : Markup.Escape(endpoint);
         AnsiConsole.MarkupLine($"[green]✓[/] Config written → [bold]{Markup.Escape(output)}[/]");
         foreach (var (relativePath, _) in generated.AgentFiles)
             AnsiConsole.MarkupLine($"  [green]↳[/] {Markup.Escape(Path.Combine(configDir, relativePath))}");
+        foreach (var (path, created) in knowledgeScaffold)
+        {
+            var icon  = created ? "[green]✓[/]" : "[dim]·[/]";
+            var label = created ? string.Empty  : " [dim](already exists)[/]";
+            AnsiConsole.MarkupLine($"{icon} {Markup.Escape(path)}{label}");
+        }
         AnsiConsole.MarkupLine($"[dim]Template:[/] {selected.Label}   [dim]Model:[/] {model}   [dim]Endpoint:[/] {endpointDisplay}");
         AnsiConsole.WriteLine();
 
@@ -200,6 +207,104 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
                 .AllowEmpty());
         return string.IsNullOrWhiteSpace(path) ? defaultPath : path;
     }
+
+    private static async Task<IReadOnlyList<(string Path, bool Created)>> ScaffoldKnowledgeAsync(
+        CancellationToken cancellationToken)
+    {
+        var result = new List<(string, bool)>();
+
+        // Directories — always created (idempotent).
+        var dirs = new[]
+        {
+            ".fuseraft/knowledge/decisions/archive",
+            ".fuseraft/knowledge/repository",
+            ".fuseraft/knowledge/objectives",
+        };
+        foreach (var d in dirs)
+            Directory.CreateDirectory(d);
+
+        // architecture.yaml — only if absent.
+        const string archPath = ".fuseraft/architecture.yaml";
+        if (!File.Exists(archPath))
+        {
+            await File.WriteAllTextAsync(archPath, DefaultArchitectureYaml, cancellationToken);
+            result.Add((archPath, true));
+        }
+        else
+        {
+            result.Add((archPath, false));
+        }
+
+        // lifecycle.yaml — only if absent.
+        const string lcPath = ".fuseraft/knowledge/lifecycle.yaml";
+        if (!File.Exists(lcPath))
+        {
+            await File.WriteAllTextAsync(lcPath, DefaultLifecycleYaml, cancellationToken);
+            result.Add((lcPath, true));
+        }
+        else
+        {
+            result.Add((lcPath, false));
+        }
+
+        return result;
+    }
+
+    private const string DefaultArchitectureYaml = """
+        # Architecture layer manifest — fuseraft arch check reads this file.
+        # Edit Paths and MayDependOn to match your project structure.
+        # Run: fuseraft arch check
+        Layers:
+          - Name: Core
+            Paths:
+              - src/Core/
+            MayDependOn: []
+
+          - Name: Infrastructure
+            Paths:
+              - src/Infrastructure/
+            MayDependOn:
+              - Core
+
+          - Name: Orchestration
+            Paths:
+              - src/Orchestration/
+            MayDependOn:
+              - Core
+              - Infrastructure
+
+          - Name: Cli
+            Paths:
+              - src/Cli/
+            MayDependOn:
+              - Core
+              - Infrastructure
+              - Orchestration
+        """;
+
+    private const string DefaultLifecycleYaml = """
+        # Knowledge lifecycle policy — fuseraft knowledge gc reads this file.
+        # All values are in days. Run: fuseraft knowledge gc
+        #
+        # AdrRetentionDays: days after Superseded status before archiving (0 = immediate).
+        AdrRetentionDays: 0
+        #
+        # MemoryReinforceWindowDays: Approved memories not reinforced within this window
+        #   are demoted back to Candidate for re-review.
+        MemoryReinforceWindowDays: 90
+        #
+        # ConfidenceDecayDays: Verified provenance claims older than this (with no ExpiresAt)
+        #   decay to Inferred. Set to 0 to disable decay.
+        ConfidenceDecayDays: 30
+        #
+        # OrphanedNodeGracePeriodDays: graph nodes with no edges and no recent file touch
+        #   are pruned after this many days. Set to 0 to disable.
+        OrphanedNodeGracePeriodDays: 7
+        #
+        # MaxProvenanceAgeDays: expired provenance records (past ExpiresAt) are archived
+        #   after this many additional days. 0 = archive immediately.
+        MaxProvenanceAgeDays: 0
+        """;
 
     private static async Task EnsureGitignoreEntryAsync(CancellationToken cancellationToken)
     {
