@@ -425,8 +425,15 @@ public static class OrchestratorBuilder
         IntentLog? intentLog = null;
         if (config.ChangeTracking is { } ctConfig)
         {
+            var sandboxForGraph = config.Security?.FileSystemSandboxPath is { Length: > 0 } sfg
+                ? FuseraftPaths.ExpandPath(sfg)
+                : Directory.GetCurrentDirectory();
+            var graphBuilderForTracker = new fuseraft.Infrastructure.RepositoryGraphBuilder(
+                new fuseraft.Infrastructure.RepositoryGraphStore(
+                    Path.Combine(sandboxForGraph, FuseraftPaths.LocalRepositoryGraph)),
+                sandboxForGraph);
             intentLog     = new IntentLog(ctConfig.ResolveIntentLogPath(), loggerFactory.CreateLogger<IntentLog>());
-            changeTracker = new ChangeTracker(ctConfig.Path, eventEmitter, evidenceStore, intentLog, loggerFactory.CreateLogger<ChangeTracker>());
+            changeTracker = new ChangeTracker(ctConfig.Path, eventEmitter, evidenceStore, intentLog, loggerFactory.CreateLogger<ChangeTracker>(), graphBuilderForTracker);
             pluginRegistry.Register("Changes", () => new ChangesPlugin(ctConfig.Path));
         }
 
@@ -784,12 +791,23 @@ public static class OrchestratorBuilder
         var resolvedSandbox = config.Security?.FileSystemSandboxPath is { Length: > 0 } sbx
             ? FuseraftPaths.ExpandPath(sbx) : null;
 
+        // Repository graph store and ADR registry — injected into the context assembler
+        // so the adr_graph source type can walk adr_governs edges at handoff time.
+        var graphStorePath   = config.Security?.FileSystemSandboxPath is { Length: > 0 } gsp
+            ? Path.Combine(FuseraftPaths.ExpandPath(gsp), FuseraftPaths.LocalRepositoryGraph)
+            : FuseraftPaths.LocalRepositoryGraph;
+        var graphStore       = new fuseraft.Infrastructure.RepositoryGraphStore(graphStorePath);
+        var adrStore         = new fuseraft.Infrastructure.AdrStore(FuseraftPaths.LocalDecisions);
+        var adrRegistryForCtx = new fuseraft.Infrastructure.AdrRegistry(adrStore);
+
         // Shared assembler used by both the state machine (HandoffContext) and the
         // orchestrator (AgentConfig.Context). One instance so session ID updates propagate.
         var contextAssembler = new ContextAssembler(
             sandboxRoot:   resolvedSandbox,
             changeLogPath: config.Validation?.ChangeLogPath,
-            briefPath:     config.Validation?.BriefPath);
+            briefPath:     config.Validation?.BriefPath,
+            graphStore:    graphStore,
+            adrRegistry:   adrRegistryForCtx);
         if (!string.IsNullOrEmpty(sessionId))
             contextAssembler.SetSessionId(sessionId);
 

@@ -17,8 +17,13 @@ namespace fuseraft.Infrastructure.Plugins;
 public sealed class DecisionPlugin
 {
     private readonly AdrRegistry _registry;
+    private readonly RepositoryGraphBuilder? _graphBuilder;
 
-    public DecisionPlugin(AdrRegistry registry) => _registry = registry;
+    public DecisionPlugin(AdrRegistry registry, RepositoryGraphBuilder? graphBuilder = null)
+    {
+        _registry     = registry;
+        _graphBuilder = graphBuilder;
+    }
 
     [Description("Search architecture decision records by keyword, status, or tag.")]
     public async Task<string> SearchAsync(
@@ -71,7 +76,9 @@ public sealed class DecisionPlugin
         [Description("Comma-separated tags for categorization (e.g. persistence,security).")]
         string? tags = null,
         [Description("Comma-separated IDs of earlier decisions this supersedes (e.g. ADR-0017,ADR-0021).")]
-        string? supersedes = null)
+        string? supersedes = null,
+        [Description("Comma-separated file paths or symbol IDs this decision governs (e.g. src/Auth.cs,type:fuseraft.Auth.TokenManager).")]
+        string? governs = null)
     {
         if (string.IsNullOrWhiteSpace(title))    return PluginResult.Error("title must not be empty.");
         if (string.IsNullOrWhiteSpace(context))  return PluginResult.Error("context must not be empty.");
@@ -90,6 +97,7 @@ public sealed class DecisionPlugin
             Consequences = SplitCsv(consequences),
             Tags         = SplitCsv(tags),
             Supersedes   = SplitCsv(supersedes),
+            Governs      = SplitCsv(governs),
         };
 
         await _registry.SaveAsync(entry);
@@ -100,6 +108,9 @@ public sealed class DecisionPlugin
             if (old is not null && !old.Status.Equals("Superseded", StringComparison.OrdinalIgnoreCase))
                 await _registry.SaveAsync(old with { Status = "Superseded" });
         }
+
+        if (_graphBuilder is not null && entry.Governs.Count > 0)
+            _ = _graphBuilder.UpsertAdrNodeAsync(entry); // fire-and-forget; graph is best-effort
 
         return PluginResult.Ok($"Created {id}: {entry.Title}");
     }
