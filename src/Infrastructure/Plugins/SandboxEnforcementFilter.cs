@@ -74,6 +74,15 @@ public sealed class SandboxEnforcementFilter
     private static readonly string[] FileSystemFunctions =
         ["read_file", "write_file", "delete_file", "list_files"];
 
+    // Write-type extended functions that must always be routed through InspectFileSystem for
+    // sandbox boundary checks, even when no FileSystemPermissions glob matchers are configured.
+    // These functions create, modify, or remove paths and must stay within the sandbox root.
+    private static readonly HashSet<string> SandboxedExtendedWriteFunctions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "patch_file", "create_directory", "delete_directory", "set_permissions",
+        "copy_file", "move_file",
+    };
+
     private static readonly string[] ShellFunctions =
         ["shell_run", "shell_run_script"];
 
@@ -205,11 +214,13 @@ public sealed class SandboxEnforcementFilter
         var ringDenial = InspectRing(functionName);
         if (ringDenial is not null) return ringDenial;
 
-        // Core FS functions are always sandboxed; extended functions are routed when any glob
-        // matcher is configured so they get sandbox + deny/read/write checks.
+        // Core FS functions are always sandboxed; write-type extended functions are also
+        // always sandboxed (boundary check only). Other extended functions are routed when
+        // any glob matcher is configured so they get sandbox + deny/read/write checks.
         bool hasGlobMatcher = _fsDenyMatcher is not null || _fsReadMatcher is not null || _fsWriteMatcher is not null;
         bool isFsFunction = FileSystemFunctions.Any(f =>
                 string.Equals(f, functionName, StringComparison.OrdinalIgnoreCase))
+            || SandboxedExtendedWriteFunctions.Contains(functionName)
             || (hasGlobMatcher && AllExtendedFsFunctions.Contains(functionName));
 
         if (isFsFunction)

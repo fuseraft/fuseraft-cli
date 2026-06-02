@@ -51,13 +51,20 @@ public sealed class ConversationCompactor(
     /// <summary>
     /// Returns true when <paramref name="messages"/> has reached or exceeded
     /// the configured trigger. In <c>window</c> mode the trigger is the estimated
-    /// token count vs <see cref="CompactionConfig.TokenBudget"/>; in all other
-    /// modes it is the assistant-turn count vs <see cref="CompactionConfig.TriggerTurnCount"/>.
+    /// token count (characters ÷ 4) vs <see cref="CompactionConfig.TokenBudget"/>, using
+    /// the same estimate as <see cref="TrimToWindow"/> so the two stay in sync; in all
+    /// other modes it is the assistant-turn count vs <see cref="CompactionConfig.TriggerTurnCount"/>.
     /// </summary>
     public bool ShouldCompact(IReadOnlyList<AgentMessage> messages)
     {
         if (IsWindowMode)
         {
+            // Use the same chars/4 estimate as TrimToWindow so the trigger and the trim
+            // measure the same quantity. Usage.TotalTokens is the cumulative API call cost
+            // (InputTokens = full context at that turn, not just this message), so summing
+            // it across messages grows quadratically and diverges from the char-based budget
+            // that TokenBudget is calibrated against — causing the trigger to fire while
+            // TrimToWindow finds nothing to drop.
             var estimated = messages.Sum(m => (m.Content?.Length ?? 0) / 4);
             if (estimated > config.TokenBudget)
             {
@@ -88,7 +95,9 @@ public sealed class ConversationCompactor(
 
     /// <summary>
     /// Drops the oldest user+assistant pairs from <paramref name="messages"/> until
-    /// the estimated token count is within <see cref="CompactionConfig.TokenBudget"/>.
+    /// the estimated token count (characters ÷ 4) is within <see cref="CompactionConfig.TokenBudget"/>.
+    /// Uses the same estimation as <see cref="ShouldCompact"/> so the trigger and the
+    /// trim always agree on when the budget is met.
     /// No LLM call is made; no summary message is injected.
     /// </summary>
     public IReadOnlyList<AgentMessage> TrimToWindow(IReadOnlyList<AgentMessage> messages)
@@ -154,6 +163,9 @@ public sealed class ConversationCompactor(
         var prefixBlock     = CombineBlocks(symbolBlock, reasoningBlock);
 
         // Intent mode: reconstruct from the intent log — fully deterministic, no LLM call.
+        // When the intent log is unavailable, record a visible fallback notice so agents
+        // resuming after compaction know the summary was degraded.
+        string? intentFallbackNotice = null;
         if (mode == "intent")
         {
             if (intentLog is not null)
@@ -162,6 +174,11 @@ public sealed class ConversationCompactor(
                     toCompact[0].TurnIndex, toCompact[^1].TurnIndex, cancellationToken);
                 var intentSummary = BuildIntentDerivedSummary(
                     toCompact[0].TurnIndex, toCompact[^1].TurnIndex, intents, prefixBlock);
+                intentSummary = intentSummary with
+                {
+                    Usage     = AccumulateCompactedUsage(toCompact, null),
+                    ToolCalls = AccumulateCompactedToolCalls(toCompact),
+                };
                 logger.LogInformation(
                     "Intent compaction: {Compacted} turns replaced by intent log reconstruction ({IntentCount} intents).",
                     toCompact.Count, intents.Count);
@@ -169,7 +186,12 @@ public sealed class ConversationCompactor(
             }
 
             logger.LogWarning(
-                "Compaction mode is 'intent' but no intent log is available — falling back to lossless/llm.");
+                "Compaction mode is 'intent' but no intent log is available — falling back to lossless/llm. " +
+                "Configure ChangeTracking.IntentLogPath to enable deterministic intent compaction.");
+            intentFallbackNotice =
+                "[COMPACTION WARNING: 'intent' mode was requested but no intent log is wired — " +
+                "this summary was generated using fallback compaction (lossless or LLM). " +
+                "Configure ChangeTracking.IntentLogPath to suppress this warning.]";
             // Fall through to lossless / llm.
         }
 
@@ -185,10 +207,15 @@ public sealed class ConversationCompactor(
                 };
             if (ExpandedNote is not null)
                 reconstructed = reconstructed with { Content = reconstructed.Content + "\n\n---\n" + ExpandedNote };
+            reconstructed = reconstructed with
+            {
+                Usage     = AccumulateCompactedUsage(toCompact, null),
+                ToolCalls = AccumulateCompactedToolCalls(toCompact),
+            };
             logger.LogInformation(
                 "Lossless compaction: {Compacted} turns replaced by evidence reconstruction.",
                 toCompact.Count);
-            return (reconstructed, toRetain);
+            return (PrependFallbackNotice(reconstructed, intentFallbackNotice), toRetain);
         }
 
         // Hybrid: prepend reconstruction before the LLM summary.
@@ -215,9 +242,8 @@ public sealed class ConversationCompactor(
                     Role                = "user",
                     TurnIndex           = toCompact[^1].TurnIndex,
                     IsCompactionSummary = true,
-                    Usage               = summUsage is not null
-                        ? new TokenUsage(summUsage.InputTokens, summUsage.OutputTokens)
-                        : null
+                    Usage               = AccumulateCompactedUsage(toCompact, summUsage),
+                    ToolCalls           = AccumulateCompactedToolCalls(toCompact),
                 };
 
                 logger.LogInformation(
@@ -231,7 +257,7 @@ public sealed class ConversationCompactor(
                 // LLM summary failed; return the lossless reconstruction alone so the session survives.
                 logger.LogError(ex,
                     "Hybrid compaction: LLM summary call failed — returning lossless reconstruction only.");
-                return (reconstructed, toRetain);
+                return (reconstructed with { Usage = AccumulateCompactedUsage(toCompact, null) }, toRetain);
             }
         }
 
@@ -256,16 +282,15 @@ public sealed class ConversationCompactor(
                 Role                = "user",
                 TurnIndex           = toCompact[^1].TurnIndex,
                 IsCompactionSummary = true,
-                Usage               = summaryUsage is not null
-                    ? new TokenUsage(summaryUsage.InputTokens, summaryUsage.OutputTokens)
-                    : null
+                Usage               = AccumulateCompactedUsage(toCompact, summaryUsage),
+                ToolCalls           = AccumulateCompactedToolCalls(toCompact),
             };
 
             logger.LogInformation(
                 "Compaction complete. Turns 0–{Last} replaced by summary.",
                 toCompact[^1].TurnIndex);
 
-            return (summary, toRetain);
+            return (PrependFallbackNotice(summary, intentFallbackNotice), toRetain);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
@@ -273,11 +298,51 @@ public sealed class ConversationCompactor(
             logger.LogError(ex,
                 "LLM compaction failed; inserting fallback marker for turns {First}–{Last}.",
                 toCompact[0].TurnIndex, toCompact[^1].TurnIndex);
-            return (BuildFallbackSummary(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, ex.Message), toRetain);
+            var fallback = BuildFallbackSummary(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, ex.Message)
+                with { ToolCalls = AccumulateCompactedToolCalls(toCompact) };
+            return (PrependFallbackNotice(fallback, intentFallbackNotice), toRetain);
         }
     }
 
     // Internals
+
+    // Collects all ToolCallRecord entries from the compacted turns into a flat list so the
+    // summary message preserves them. Downstream consumers (telemetry, BuildModifiedFilesNote)
+    // inspect ToolCalls on AgentMessages; without this they silently drop records for any turn
+    // that was compacted, producing incomplete data for succeeded/failed tool tracking.
+    private static IReadOnlyList<ToolCallRecord>? AccumulateCompactedToolCalls(
+        IReadOnlyList<AgentMessage> compacted)
+    {
+        List<ToolCallRecord>? all = null;
+        foreach (var m in compacted)
+        {
+            if (m.ToolCalls is not { Count: > 0 }) continue;
+            all ??= [];
+            all.AddRange(m.ToolCalls);
+        }
+        return all;
+    }
+
+    // Sums the token costs of all compacted turns and folds in the summary-call cost.
+    // The total is stored on the summary AgentMessage so AgentOrchestrator can seed
+    // cumulativeTokens correctly on the next StreamAsync call (after resume/compaction),
+    // keeping MaxTotalTokens enforcement accurate across compaction boundaries.
+    private static TokenUsage? AccumulateCompactedUsage(
+        IReadOnlyList<AgentMessage> compacted,
+        TokenUsage? summaryCallUsage)
+    {
+        int totalInput  = summaryCallUsage?.InputTokens  ?? 0;
+        int totalOutput = summaryCallUsage?.OutputTokens ?? 0;
+        foreach (var m in compacted)
+        {
+            if (m.Usage is null) continue;
+            totalInput  += m.Usage.InputTokens;
+            totalOutput += m.Usage.OutputTokens;
+        }
+        return (totalInput > 0 || totalOutput > 0)
+            ? new TokenUsage(totalInput, totalOutput)
+            : null;
+    }
 
     private AgentMessage BuildIntentDerivedSummary(
         int firstTurn,
@@ -475,6 +540,9 @@ public sealed class ConversationCompactor(
         while (_recentSavings.Count > Math.Max(1, config.AntiThrashWindow))
             _recentSavings.Dequeue();
     }
+
+    private static AgentMessage PrependFallbackNotice(AgentMessage msg, string? notice) =>
+        notice is null ? msg : msg with { Content = notice + "\n\n" + msg.Content };
 
     private AgentMessage BuildFallbackSummary(int firstTurn, int lastTurn, string errorMessage)
     {

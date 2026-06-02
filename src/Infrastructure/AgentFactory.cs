@@ -171,7 +171,12 @@ public sealed class AgentFactory(
         // Deterministic sliding-window cap: always keep only the last N tool call/result
         // pairs in full, replacing older ones with placeholders unconditionally.
         // Applied before the budget-reactive trim so the window runs first.
-        var maxInTurnToolPairs = config.MaxInTurnToolPairs;
+        // When MaxContextTokens is set but no explicit pair limit is configured, default
+        // to 12 pairs to prevent O(N²) tool-result accumulation within a turn.
+        const int DefaultToolPairsWhenBudgeted = 12;
+        var maxInTurnToolPairs = config.MaxInTurnToolPairs > 0
+            ? config.MaxInTurnToolPairs
+            : (resolvedModel.MaxContextTokens > 0 ? DefaultToolPairsWhenBudgeted : 0);
 
         // Tool schema overhead: computed once at build time since the tool list is fixed
         // for the lifetime of this agent. Included in the context budget and payload
