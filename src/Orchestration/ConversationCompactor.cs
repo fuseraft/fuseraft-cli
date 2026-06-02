@@ -167,7 +167,11 @@ public sealed class ConversationCompactor(
                     toCompact[0].TurnIndex, toCompact[^1].TurnIndex, cancellationToken);
                 var intentSummary = BuildIntentDerivedSummary(
                     toCompact[0].TurnIndex, toCompact[^1].TurnIndex, intents, prefixBlock);
-                intentSummary = intentSummary with { Usage = AccumulateCompactedUsage(toCompact, null) };
+                intentSummary = intentSummary with
+                {
+                    Usage     = AccumulateCompactedUsage(toCompact, null),
+                    ToolCalls = AccumulateCompactedToolCalls(toCompact),
+                };
                 logger.LogInformation(
                     "Intent compaction: {Compacted} turns replaced by intent log reconstruction ({IntentCount} intents).",
                     toCompact.Count, intents.Count);
@@ -191,7 +195,11 @@ public sealed class ConversationCompactor(
                 };
             if (ExpandedNote is not null)
                 reconstructed = reconstructed with { Content = reconstructed.Content + "\n\n---\n" + ExpandedNote };
-            reconstructed = reconstructed with { Usage = AccumulateCompactedUsage(toCompact, null) };
+            reconstructed = reconstructed with
+            {
+                Usage     = AccumulateCompactedUsage(toCompact, null),
+                ToolCalls = AccumulateCompactedToolCalls(toCompact),
+            };
             logger.LogInformation(
                 "Lossless compaction: {Compacted} turns replaced by evidence reconstruction.",
                 toCompact.Count);
@@ -222,7 +230,8 @@ public sealed class ConversationCompactor(
                     Role                = "user",
                     TurnIndex           = toCompact[^1].TurnIndex,
                     IsCompactionSummary = true,
-                    Usage               = AccumulateCompactedUsage(toCompact, summUsage)
+                    Usage               = AccumulateCompactedUsage(toCompact, summUsage),
+                    ToolCalls           = AccumulateCompactedToolCalls(toCompact),
                 };
 
                 logger.LogInformation(
@@ -261,7 +270,8 @@ public sealed class ConversationCompactor(
                 Role                = "user",
                 TurnIndex           = toCompact[^1].TurnIndex,
                 IsCompactionSummary = true,
-                Usage               = AccumulateCompactedUsage(toCompact, summaryUsage)
+                Usage               = AccumulateCompactedUsage(toCompact, summaryUsage),
+                ToolCalls           = AccumulateCompactedToolCalls(toCompact),
             };
 
             logger.LogInformation(
@@ -276,11 +286,29 @@ public sealed class ConversationCompactor(
             logger.LogError(ex,
                 "LLM compaction failed; inserting fallback marker for turns {First}–{Last}.",
                 toCompact[0].TurnIndex, toCompact[^1].TurnIndex);
-            return (BuildFallbackSummary(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, ex.Message), toRetain);
+            return (BuildFallbackSummary(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, ex.Message)
+                with { ToolCalls = AccumulateCompactedToolCalls(toCompact) }, toRetain);
         }
     }
 
     // Internals
+
+    // Collects all ToolCallRecord entries from the compacted turns into a flat list so the
+    // summary message preserves them. Downstream consumers (telemetry, BuildModifiedFilesNote)
+    // inspect ToolCalls on AgentMessages; without this they silently drop records for any turn
+    // that was compacted, producing incomplete data for succeeded/failed tool tracking.
+    private static IReadOnlyList<ToolCallRecord>? AccumulateCompactedToolCalls(
+        IReadOnlyList<AgentMessage> compacted)
+    {
+        List<ToolCallRecord>? all = null;
+        foreach (var m in compacted)
+        {
+            if (m.ToolCalls is not { Count: > 0 }) continue;
+            all ??= [];
+            all.AddRange(m.ToolCalls);
+        }
+        return all;
+    }
 
     // Sums the token costs of all compacted turns and folds in the summary-call cost.
     // The total is stored on the summary AgentMessage so AgentOrchestrator can seed
