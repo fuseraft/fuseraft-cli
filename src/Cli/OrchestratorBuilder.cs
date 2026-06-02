@@ -474,6 +474,14 @@ public static class OrchestratorBuilder
             : null;
         var sessionReadCache = new fuseraft.Infrastructure.SessionReadCache(readCachePath);
 
+        // Tool-result artifact store: offloads tool results that exceed the size threshold
+        // to disk so they never accumulate verbatim in the conversation history. Only active
+        // when a session ID is known (so each session gets its own artifact subdirectory).
+        var toolArtifactsDir = sessionId is { Length: > 0 }
+            ? Path.Combine(readCacheRoot, FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalSessionToolArtifacts, sessionId))
+            : null;
+        var toolArtifactStore = new fuseraft.Infrastructure.ToolResultArtifactStore(toolArtifactsDir);
+
         // Re-configure the FileSystem plugin with the version store and session read cache
         // so write_file, stat_file, and read_file participate in version-aware conflict
         // detection and cross-turn read deduplication.
@@ -718,7 +726,7 @@ public static class OrchestratorBuilder
                 "The Graph block will be ignored. Set Selection.Type: graph to enable it.",
                 config.Selection.Type);
 
-        var agentFactory      = new AgentFactory(chatClientFactory, pluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, identityRegistry, eventEmitter, loggerFactory, BuildSkillsProvider());
+        var agentFactory      = new AgentFactory(chatClientFactory, pluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, identityRegistry, eventEmitter, loggerFactory, BuildSkillsProvider(), toolArtifactStore);
         var aoLogger          = loggerFactory.CreateLogger<AgentOrchestrator>();
         var goLogger          = loggerFactory.CreateLogger<GraphOrchestrator>();
 

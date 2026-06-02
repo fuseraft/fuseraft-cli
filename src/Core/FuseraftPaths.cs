@@ -76,7 +76,8 @@ public static class FuseraftPaths
 
     // artifacts/ — structured agent-written documents read by validators
     // Brief paths include {session_id}, expanded at runtime via ExpandSessionId.
-    public const string LocalSessionReadCache = ".fuseraft/artifacts/sessions/{session_id}/read_cache.json";
+    public const string LocalSessionReadCache    = ".fuseraft/artifacts/sessions/{session_id}/read_cache.json";
+    public const string LocalSessionToolArtifacts = ".fuseraft/artifacts/sessions/{session_id}/tool-results";
     public const string LocalBrief            = ".fuseraft/artifacts/sessions/{session_id}/brief.json";
     public const string LocalTestReport      = ".fuseraft/artifacts/test-report.json";
     public const string LocalConventions     = ".fuseraft/artifacts/sessions/{session_id}/conventions.json";
