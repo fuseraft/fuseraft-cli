@@ -6,6 +6,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using fuseraft.Core;
 using fuseraft.Core.Models;
+using fuseraft.Infrastructure;
 
 namespace fuseraft.Infrastructure.Plugins;
 
@@ -90,6 +91,9 @@ public sealed class PluginRegistry : IDisposable
         Register("SubAgent", () => new SubAgentPlugin(chatClient: null, explorerTools: []));
 
         Register("Compaction", () => new CompactionPlugin());
+
+        Register("Decision", () => new DecisionPlugin(
+            new AdrRegistry(new AdrStore(FuseraftPaths.LocalDecisions))));
 
         // Stub — OrchestratorBuilder replaces this with a session-scoped instance.
         Register("SessionContext", () => new SessionContextPlugin(
