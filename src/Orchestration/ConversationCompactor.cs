@@ -27,7 +27,9 @@ public sealed class ConversationCompactor(
     string? changeLogPath = null,
     IntentLog? intentLog = null,
     string? eventsLogPath = null,
-    EvidenceStore? evidenceStore = null)
+    EvidenceStore? evidenceStore = null,
+    fuseraft.Infrastructure.ObjectiveManager? objectiveManager = null,
+    fuseraft.Infrastructure.KnowledgeSnapshotEnricher? knowledgeEnricher = null)
 {
     // Tracks savings ratios from the last AntiThrashWindow compactions so we can detect
     // conversations that are thrashing (repeatedly compacting but saving very little).
@@ -160,7 +162,8 @@ public sealed class ConversationCompactor(
             toCompact[0].TurnIndex, toCompact[^1].TurnIndex);
         var reasoningBlock  = BuildReasoningBlock(reasoningExcerpts);
         var symbolBlock     = await BuildSymbolGraphBlockAsync(cancellationToken);
-        var prefixBlock     = CombineBlocks(symbolBlock, reasoningBlock);
+        var objectiveBlock  = await BuildObjectiveBlockAsync(cancellationToken);
+        var prefixBlock     = CombineBlocks(CombineBlocks(symbolBlock, objectiveBlock), reasoningBlock);
 
         // Intent mode: reconstruct from the intent log — fully deterministic, no LLM call.
         // When the intent log is unavailable, record a visible fallback notice so agents
@@ -198,7 +201,9 @@ public sealed class ConversationCompactor(
         // Lossless: skip LLM call entirely; rebuild from durable state.
         if ((mode == "lossless" || mode == "intent") && snapshotter is not null)
         {
-            var snapshot      = await snapshotter.SnapshotAsync(cancellationToken);
+            var snapshot = await snapshotter.SnapshotAsync(cancellationToken);
+            if (knowledgeEnricher is not null)
+                snapshot = await knowledgeEnricher.EnrichAsync(snapshot, cancellationToken);
             var reconstructed = ContextRebuilder.BuildContextMessage(snapshot, toCompact[^1].TurnIndex);
             if (!string.IsNullOrEmpty(prefixBlock))
                 reconstructed = reconstructed with
@@ -221,7 +226,9 @@ public sealed class ConversationCompactor(
         // Hybrid: prepend reconstruction before the LLM summary.
         if (mode == "hybrid" && snapshotter is not null)
         {
-            var snapshot      = await snapshotter.SnapshotAsync(cancellationToken);
+            var snapshot = await snapshotter.SnapshotAsync(cancellationToken);
+            if (knowledgeEnricher is not null)
+                snapshot = await knowledgeEnricher.EnrichAsync(snapshot, cancellationToken);
             var reconstructed = ContextRebuilder.BuildContextMessage(snapshot, toCompact[^1].TurnIndex);
 
             try
@@ -646,6 +653,17 @@ public sealed class ConversationCompactor(
     // Combines symbolBlock and reasoningBlock into a single prefix, separated by a divider
     // when both are non-empty. Symbol graph comes first so the dependency map frames the
     // reasoning excerpts that follow.
+    private async Task<string> BuildObjectiveBlockAsync(CancellationToken ct)
+    {
+        if (objectiveManager is null) return string.Empty;
+        try
+        {
+            var summary = await objectiveManager.BuildActiveSummaryAsync(ct);
+            return summary ?? string.Empty;
+        }
+        catch { return string.Empty; }
+    }
+
     private static string CombineBlocks(string symbolBlock, string reasoningBlock)
     {
         if (string.IsNullOrEmpty(symbolBlock) && string.IsNullOrEmpty(reasoningBlock))

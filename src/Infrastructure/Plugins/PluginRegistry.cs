@@ -6,6 +6,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using fuseraft.Core;
 using fuseraft.Core.Models;
+using fuseraft.Infrastructure;
 
 namespace fuseraft.Infrastructure.Plugins;
 
@@ -91,12 +92,39 @@ public sealed class PluginRegistry : IDisposable
 
         Register("Compaction", () => new CompactionPlugin());
 
+        // Stub registrations for introspection (fuseraft plugins). OrchestratorBuilder
+        // calls ConfigureKnowledge() to replace these with a shared-instance version.
+        var graphStoreForDecision = new RepositoryGraphStore(FuseraftPaths.LocalRepositoryGraph);
+        Register("Decision", () => new DecisionPlugin(
+            new AdrRegistry(new AdrStore(FuseraftPaths.LocalDecisions)),
+            knowledgeLayer: null));
+
+        Register("Graph", () => new GraphPlugin(graphStoreForDecision));
+
+        Register("Objective", () => new ObjectivePlugin(
+            new ObjectiveManager(new ObjectiveStore(FuseraftPaths.LocalObjectives))));
+
         // Stub — OrchestratorBuilder replaces this with a session-scoped instance.
         Register("SessionContext", () => new SessionContextPlugin(
             Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "state", "sessions", "default", "context_summary.md")));
 
         // Stub — ReplCommand replaces this with a real instance bound to the live session.
         Register("Session", () => new ReplSessionPlugin("stub", DateTime.UtcNow, "unknown", Directory.GetCurrentDirectory()));
+        return this;
+    }
+
+    /// <summary>
+    /// Re-registers the knowledge plugins (Decision, Graph) using the shared
+    /// <see cref="IKnowledgeLayer"/> instance created by <c>OrchestratorBuilder</c>.
+    /// Call this after the knowledge layer is created so all agents in the session share
+    /// the same underlying stores rather than the stub instances from <see cref="RegisterDefaults"/>.
+    /// </summary>
+    public PluginRegistry ConfigureKnowledge(IKnowledgeLayer knowledgeLayer)
+    {
+        var layer = (KnowledgeLayer)knowledgeLayer;
+        Register("Decision",  () => new DecisionPlugin(layer.AdrRegistry, knowledgeLayer));
+        Register("Graph",     () => new GraphPlugin(layer.GraphStore));
+        Register("Objective", () => new ObjectivePlugin(new ObjectiveManager(layer.ObjectiveStore)));
         return this;
     }
 
