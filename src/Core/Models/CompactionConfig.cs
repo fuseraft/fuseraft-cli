@@ -67,19 +67,21 @@ public record CompactionConfig
     /// When <c>true</c>, reasoning excerpts from the compacted turn range are prepended to
     /// the compaction summary. Each excerpt is truncated to approximately 500 tokens so agents
     /// resuming after compaction can see the WHY behind prior decisions, not just the artifacts.
-    /// Reads <c>reasoning</c> events from the session's events log. Default: <c>false</c>.
+    /// Reads <c>reasoning</c> events from the session's events log. When the events log is
+    /// absent or contains no reasoning events the block is omitted silently.
+    /// Default: <c>true</c>.
     /// </summary>
-    public bool IncludeReasoning { get; init; } = false;
+    public bool IncludeReasoning { get; init; } = true;
 
     /// <summary>
     /// When <c>true</c>, a symbol dependency graph derived from the session's changed files is
     /// prepended to the compaction summary (before reasoning excerpts when both are enabled).
     /// Queries <c>SymbolDefinition</c> and <c>SymbolReference</c> nodes from the evidence store
     /// for every file written during the session, giving agents an explicit map of what symbols
-    /// were in scope across the compacted turns. Requires an active <c>EvidenceStore</c>.
-    /// Default: <c>false</c>.
+    /// were in scope across the compacted turns. When no evidence store is wired or no symbol
+    /// nodes are found the block is omitted silently. Default: <c>true</c>.
     /// </summary>
-    public bool IncludeSymbolGraph { get; init; } = false;
+    public bool IncludeSymbolGraph { get; init; } = true;
 
     /// <summary>
     /// Optional custom prompt template for LLM-mode compaction. When set, replaces the

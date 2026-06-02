@@ -54,6 +54,14 @@ public sealed class ContextAssembler
 
     public void SetSessionId(string sessionId) => _sessionId = sessionId;
 
+    /// <summary>
+    /// Returns the current session context summary, or <c>null</c> when the file does not
+    /// exist or is empty. Used by orchestrators to auto-inject context for agents that do not
+    /// declare an explicit <c>Context</c> spec.
+    /// </summary>
+    public Task<string?> ReadSessionContextAsync(CancellationToken ct = default)
+        => ResolveSessionContextAsync(ct);
+
     // ── Handoff injection (state machine transitions) ────────────────────────
 
     /// <summary>

@@ -166,7 +166,46 @@ public static class ContextWindowFilter
         if (window.MaxToolResultChars > 0)
             list = TruncateToolResults(list, window.MaxToolResultChars, window.ToolResultCharOverrides);
 
+        // Step 7: Truncate verbose assistant messages.
+        // When MaxReplayChars is set, assistant text content that exceeds the limit is
+        // truncated. Compaction-summary messages (marked by their header prefix) are exempt.
+        if (window.MaxReplayChars > 0)
+            list = TruncateAssistantContent(list, window.MaxReplayChars);
+
         return list;
+    }
+
+    private static List<ChatMessage> TruncateAssistantContent(List<ChatMessage> list, int maxChars)
+    {
+        var result = new List<ChatMessage>(list.Count);
+        foreach (var msg in list)
+        {
+            if (msg.Role != ChatRole.Assistant)
+            {
+                result.Add(msg);
+                continue;
+            }
+
+            var textContent = string.Concat(msg.Contents.OfType<TextContent>().Select(t => t.Text));
+            // Compaction summaries are already compact — skip them unconditionally.
+            if (textContent.StartsWith("[CONVERSATION SUMMARY", StringComparison.Ordinal) ||
+                textContent.Length <= maxChars)
+            {
+                result.Add(msg);
+                continue;
+            }
+
+            var truncated = textContent[..maxChars] +
+                $"\n[...truncated — {textContent.Length - maxChars:N0} chars omitted to reduce context size...]";
+
+            var newContents = msg.Contents
+                .Where(c => c is not TextContent)
+                .Prepend(new TextContent(truncated))
+                .ToList<AIContent>();
+
+            result.Add(new ChatMessage(ChatRole.Assistant, newContents) { AuthorName = msg.AuthorName });
+        }
+        return result;
     }
 
     // How much of a consumed read_file result to keep for structural context (file shape,
@@ -421,6 +460,9 @@ public static class ContextWindowFilter
         "VERIFICATION FINDING",
         "Files written this turn",
         "No handoff keyword",
+        "EVIDENCE INCONSISTENCY",   // ConflictingEvidence (KeywordSelectionStrategy)
+        "EVIDENCE AUDIT REQUIRED",  // ConflictingEvidence (StateMachineSelectionStrategy)
+        "MISSING ARTIFACT",         // MissingEvidence (both strategies)
     ];
 
     /// <summary>
@@ -440,28 +482,28 @@ public static class ContextWindowFilter
         return false;
     }
 
-    // Maximum number of characters to replay from a single non-summary assistant message.
+    // Global default applied during checkpoint-resume replay when no per-agent limit is set.
     // Agents sometimes produce verbose stream-of-consciousness reasoning text (3–5k output
     // tokens). When that text is replayed verbatim in every subsequent turn it causes
     // compaction summaries to grow each cycle and in-turn input tokens to balloon (450k+).
     // Compaction summaries (IsCompactionSummary) are already compact and are never truncated.
-    private const int MaxReplayChars = 2_000;
+    internal const int DefaultMaxReplayChars = 2_000;
 
     /// <summary>
     /// Returns the content string to replay for <paramref name="message"/> into the next
     /// <c>StreamAsync</c> call's history. Verbose non-summary assistant messages are
-    /// truncated at <see cref="MaxReplayChars"/> to prevent compounding context growth.
+    /// truncated at <paramref name="maxReplayChars"/> to prevent compounding context growth.
     /// </summary>
-    public static string TruncateReplayContent(AgentMessage message)
+    public static string TruncateReplayContent(AgentMessage message, int maxReplayChars = DefaultMaxReplayChars)
     {
         var content = message.Content ?? string.Empty;
 
         if (message.IsCompactionSummary
             || message.Role != "assistant"
-            || content.Length <= MaxReplayChars)
+            || content.Length <= maxReplayChars)
             return content;
 
-        return content[..MaxReplayChars] +
-               $"\n[...truncated — {content.Length - MaxReplayChars:N0} chars omitted to reduce context size...]";
+        return content[..maxReplayChars] +
+               $"\n[...truncated — {content.Length - maxReplayChars:N0} chars omitted to reduce context size...]";
     }
 }

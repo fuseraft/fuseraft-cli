@@ -159,6 +159,9 @@ public sealed class ConversationCompactor(
         var prefixBlock     = CombineBlocks(symbolBlock, reasoningBlock);
 
         // Intent mode: reconstruct from the intent log — fully deterministic, no LLM call.
+        // When the intent log is unavailable, record a visible fallback notice so agents
+        // resuming after compaction know the summary was degraded.
+        string? intentFallbackNotice = null;
         if (mode == "intent")
         {
             if (intentLog is not null)
@@ -179,7 +182,12 @@ public sealed class ConversationCompactor(
             }
 
             logger.LogWarning(
-                "Compaction mode is 'intent' but no intent log is available — falling back to lossless/llm.");
+                "Compaction mode is 'intent' but no intent log is available — falling back to lossless/llm. " +
+                "Configure ChangeTracking.IntentLogPath to enable deterministic intent compaction.");
+            intentFallbackNotice =
+                "[COMPACTION WARNING: 'intent' mode was requested but no intent log is wired — " +
+                "this summary was generated using fallback compaction (lossless or LLM). " +
+                "Configure ChangeTracking.IntentLogPath to suppress this warning.]";
             // Fall through to lossless / llm.
         }
 
@@ -203,7 +211,7 @@ public sealed class ConversationCompactor(
             logger.LogInformation(
                 "Lossless compaction: {Compacted} turns replaced by evidence reconstruction.",
                 toCompact.Count);
-            return (reconstructed, toRetain);
+            return (PrependFallbackNotice(reconstructed, intentFallbackNotice), toRetain);
         }
 
         // Hybrid: prepend reconstruction before the LLM summary.
@@ -278,7 +286,7 @@ public sealed class ConversationCompactor(
                 "Compaction complete. Turns 0–{Last} replaced by summary.",
                 toCompact[^1].TurnIndex);
 
-            return (summary, toRetain);
+            return (PrependFallbackNotice(summary, intentFallbackNotice), toRetain);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
@@ -286,8 +294,9 @@ public sealed class ConversationCompactor(
             logger.LogError(ex,
                 "LLM compaction failed; inserting fallback marker for turns {First}–{Last}.",
                 toCompact[0].TurnIndex, toCompact[^1].TurnIndex);
-            return (BuildFallbackSummary(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, ex.Message)
-                with { ToolCalls = AccumulateCompactedToolCalls(toCompact) }, toRetain);
+            var fallback = BuildFallbackSummary(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, ex.Message)
+                with { ToolCalls = AccumulateCompactedToolCalls(toCompact) };
+            return (PrependFallbackNotice(fallback, intentFallbackNotice), toRetain);
         }
     }
 
@@ -527,6 +536,9 @@ public sealed class ConversationCompactor(
         while (_recentSavings.Count > Math.Max(1, config.AntiThrashWindow))
             _recentSavings.Dequeue();
     }
+
+    private static AgentMessage PrependFallbackNotice(AgentMessage msg, string? notice) =>
+        notice is null ? msg : msg with { Content = notice + "\n\n" + msg.Content };
 
     private AgentMessage BuildFallbackSummary(int firstTurn, int lastTurn, string errorMessage)
     {
