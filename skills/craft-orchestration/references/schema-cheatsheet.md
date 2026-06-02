@@ -162,6 +162,9 @@ Orchestration:
 | `Compaction` | compact_conversation |
 | `Document` | document_extract_text, document_get_info, document_list_sheets |
 | `Session` | repl_session_current, repl_session_list, repl_session_read_log |
+| `Decision` | decision_search, decision_read (capability: read); decision_create, decision_supersede (capability: write) |
+| `Graph` | graph_search, graph_refs, graph_dependents — all read-only; requires `fuseraft graph build` |
+| `Objective` | objective_create, objective_read, objective_update, objective_list, objective_link_task |
 
 ---
 
