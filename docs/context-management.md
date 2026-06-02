@@ -165,6 +165,10 @@ Agents:
       MaxTailMessages: 40     # hard cap after the above filters
       ContextCapFraction: 0.8 # emit context_cap_warning when at 80% of MaxTailMessages
       MaxToolResultChars: 8000  # truncate individual tool results in replayed history
+      ToolResultCharOverrides:  # raise the cap for specific tools
+        search_content: 20000
+        grep_file: 20000
+      MaxReplayChars: 4000    # truncate verbose assistant messages in replayed history
 ```
 
 ### TextOnly
@@ -201,13 +205,22 @@ Hard cap applied after the other filters. When the filtered list still exceeds t
 the oldest messages are dropped. Set `ContextCapFraction` to receive a `context_cap_warning`
 event as an early signal before the hard cap is reached.
 
-### Replay truncation
+### Replay truncation (`MaxReplayChars`)
 
 Agents sometimes produce verbose stream-of-consciousness output (3–5k tokens). When that text
 is replayed verbatim in every subsequent turn, compaction summaries grow each cycle and input
-tokens balloon. fuseraft automatically truncates verbose non-summary assistant messages to
-2,000 characters when replaying them into the next turn's history. Compaction summaries are
-never truncated.
+tokens balloon. fuseraft truncates verbose non-summary assistant messages to 2,000 characters
+by default when replaying them; set `MaxReplayChars` to override this cap per agent.
+Compaction summaries are never truncated regardless of this setting.
+
+```yaml
+Agents:
+  - Name: Developer
+    ContextWindow:
+      MaxReplayChars: 4000   # truncate replayed assistant messages to 4 000 chars
+```
+
+Default: `0` (uses the global 2,000-character fallback).
 
 ### Tool-result truncation (`MaxToolResultChars`)
 
@@ -225,9 +238,12 @@ Agents:
   - Name: Developer
     ContextWindow:
       MaxToolResultChars: 8000   # truncate tool results in replayed history to 8 000 chars
+      ToolResultCharOverrides:   # per-tool overrides (search tools can afford a higher cap)
+        search_content: 20000
+        grep_file: 20000
 ```
 
-Default: `0` (no truncation).
+Default: `0` (no truncation). `ToolResultCharOverrides` is only meaningful when `MaxToolResultChars` is also set; a value of `0` in the overrides map disables truncation for that specific tool entirely.
 
 **Consumed-read optimisation:** fuseraft distinguishes between `read_file` results that
 the agent has already acted on and those that are still load-bearing:
@@ -396,23 +412,25 @@ Compaction:
 Two optional flags add structured context blocks before the LLM summary text. Both are
 prefixed in this order when both are enabled: symbol graph first, then reasoning excerpts.
 
-**`IncludeReasoning`** — prepends a `[REASONING EXCERPTS]` block containing the model's
-thinking for each compacted turn (truncated to ~500 tokens per turn). Useful when the *why*
-behind prior decisions matters as much as the *what*. Requires `Events` to be configured
-(reasoning excerpts are read from the session events log).
+**`IncludeReasoning`** (default `true`) — prepends a `[REASONING EXCERPTS]` block containing
+the model's thinking for each compacted turn (truncated to ~500 tokens per turn). Useful when
+the *why* behind prior decisions matters as much as the *what*. Requires `Events` to be
+configured (reasoning excerpts are read from the session events log). When the events log is
+absent or contains no reasoning events the block is omitted silently.
 
-**`IncludeSymbolGraph`** — prepends a `[SYMBOL DEPENDENCY GRAPH]` block listing every
-`SymbolDefinition` and `SymbolReference` node in the evidence store for files written during
-the session. Gives agents an explicit map of what symbols were in scope during the compacted
-turns. Requires `EvidenceStore` and `ChangeTracking` to be configured.
+**`IncludeSymbolGraph`** (default `true`) — prepends a `[SYMBOL DEPENDENCY GRAPH]` block
+listing every `SymbolDefinition` and `SymbolReference` node in the evidence store for files
+written during the session. Gives agents an explicit map of what symbols were in scope during
+the compacted turns. Requires `EvidenceStore` and `ChangeTracking` to be configured. When no
+evidence store is wired the block is omitted silently.
 
 ```yaml
 Compaction:
   TriggerTurnCount: 40
   KeepRecentTurns: 8
   Mode: hybrid
-  IncludeReasoning: true
-  IncludeSymbolGraph: true
+  IncludeReasoning: true    # default; set to false to suppress
+  IncludeSymbolGraph: true  # default; set to false to suppress
 ```
 
 ### History pre-pruning
@@ -441,7 +459,7 @@ If repeated compactions save very little — for example, a conversation that is
 threshold but whose LLM summary is nearly as long as the history it replaced — fuseraft
 suppresses further compaction until the history grows meaningfully.
 
-The guard tracks the savings ratio of the last `AntiThrashWindow` compactions (default 3). If
+The guard tracks the savings ratio of the last `AntiThrashWindow` compactions (default 10). If
 every entry in that window is below `AntiThrashMinSavingsRatio` (default 10%), `ShouldCompact`
 returns `false`. The guard resets automatically as new turns extend the conversation past the
 trigger again.
@@ -450,8 +468,8 @@ trigger again.
 Compaction:
   TriggerTurnCount: 20
   KeepRecentTurns: 5
-  AntiThrashMinSavingsRatio: 0.15   # suppress if saving less than 15%
-  AntiThrashWindow: 4               # look at last 4 compactions
+  AntiThrashMinSavingsRatio: 0.15   # suppress if saving less than 15% (default: 0.10)
+  AntiThrashWindow: 4               # look at last 4 compactions (default: 10)
 ```
 
 Set either field to `0` to disable the guard entirely.
