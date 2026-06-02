@@ -1072,6 +1072,266 @@ Validate: fuseraft validate .fuseraft/config/orchestration.yaml
 Run:      fuseraft run --config .fuseraft/config/orchestration.yaml "Your task"
 ```
 
+`init` also scaffolds the knowledge directory tree and writes default config files the first time it is run in a directory:
+
+| File created | Purpose |
+|---|---|
+| `.fuseraft/architecture.yaml` | Architecture layer manifest for `fuseraft arch check` |
+| `.fuseraft/knowledge/lifecycle.yaml` | Retention policy for `fuseraft knowledge gc` |
+| `.fuseraft/knowledge/decisions/` | Architecture decision records (ADRs) |
+| `.fuseraft/knowledge/repository/` | Cross-session repository memory patterns |
+| `.fuseraft/knowledge/objectives/` | Long-horizon objective tracking |
+
+These files are skipped if they already exist.
+
+---
+
+## `fuseraft graph`
+
+Repository semantic graph — index and query symbols across the codebase.
+
+### `fuseraft graph build`
+
+Scan all `.cs` source files under the project root and write (or overwrite) the repository semantic graph to `.fuseraft/state/repository.graph`. The graph records every file, namespace, type, interface, method, property, field, and ADR as a node; edges express structural relationships (`defines`, `imports`, `inherits`, `implements`, `references`, `adr_governs`).
+
+Agents use the graph via the `graph_search`, `graph_refs`, and `graph_dependents` plugin tools. The graph is also updated incrementally by the harness whenever an agent writes a `.cs` file.
+
+```
+fuseraft graph build [options]
+```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-d, --dir <path>` | current directory | Root directory to scan. |
+| `-o, --output <path>` | `.fuseraft/state/repository.graph` | Output path for the graph file. |
+
+**Examples**
+
+```bash
+# Build the graph for the current project
+fuseraft graph build
+
+# Scan only a subdirectory
+fuseraft graph build --dir src/
+
+# Write to a custom location
+fuseraft graph build --output /tmp/my-project.graph
+```
+
+---
+
+## `fuseraft arch`
+
+Architecture drift detection — check that source files respect the layer boundaries defined in `.fuseraft/architecture.yaml`.
+
+### `fuseraft arch check`
+
+Parse `using` directives in all `.cs` files under the project root and compare them against the layer manifest. Exits `0` when no violations are found, `1` when at least one violation is detected.
+
+`fuseraft init` writes a default `.fuseraft/architecture.yaml` on first run. Edit its `Layers` and `MayDependOn` lists to match your project's actual layer structure.
+
+```
+fuseraft arch check [options]
+```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-m, --manifest <path>` | `.fuseraft/architecture.yaml` | Path to the architecture manifest. |
+| `-d, --dir <path>` | current directory | Root directory to scan. |
+
+**Examples**
+
+```bash
+# Check against the default manifest
+fuseraft arch check
+
+# Use a custom manifest
+fuseraft arch check --manifest config/arch.yaml
+
+# Scan only the src/ subtree
+fuseraft arch check --dir src/
+```
+
+**Output**
+
+When violations are found the command prints a table:
+
+```
+File                      Line  Source Layer    Target Layer  Namespace
+src/Cli/FooCommand.cs       12  Cli             Core          fuseraft.Infrastructure.Bar
+```
+
+Each row identifies the offending file, the line number of the illegal `using` directive, the layer that owns the source file, the layer that owns the imported namespace, and the namespace itself.
+
+---
+
+## `fuseraft knowledge`
+
+Knowledge lifecycle management — archive superseded ADRs, demote stale repository memories, decay old provenance claims, prune orphaned graph nodes, and compact the provenance registry.
+
+### `fuseraft knowledge gc`
+
+Run all lifecycle policies configured in `.fuseraft/knowledge/lifecycle.yaml`. **Dry-run by default** — pass `--apply` to commit changes to disk.
+
+```
+fuseraft knowledge gc [options]
+```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--apply` | off | Commit lifecycle changes to disk. Without this flag the command reports what would change without touching any files. |
+| `-l, --lifecycle <path>` | `.fuseraft/knowledge/lifecycle.yaml` | Path to the lifecycle policy file. |
+| `--graph <path>` | `.fuseraft/state/repository.graph` | Override the repository graph path. |
+
+**Policy fields** (in `lifecycle.yaml`)
+
+| Field | Default | Effect |
+|-------|---------|--------|
+| `AdrRetentionDays` | `0` | Days after a decision reaches `Superseded` status before it is archived. `0` = archive immediately on the next gc run. |
+| `MemoryReinforceWindowDays` | `90` | Demote `Approved` repository memories to `Candidate` when they have not been reinforced for this many days. |
+| `ConfidenceDecayDays` | `30` | Downgrade `Verified` provenance claims to `Inferred` when their `VerifiedAt` is older than this many days and no `ExpiresAt` is set. `0` = disable decay. |
+| `OrphanedNodeGracePeriodDays` | `7` | Prune graph nodes with no edges and no recent file touch after this many days. `0` = disable. |
+| `MaxProvenanceAgeDays` | `0` | Archive provenance records past `ExpiresAt` after this many additional days. `0` = archive immediately. |
+
+**Examples**
+
+```bash
+# Preview what would be archived/demoted/decayed (dry-run)
+fuseraft knowledge gc
+
+# Apply all lifecycle policies
+fuseraft knowledge gc --apply
+
+# Use a custom lifecycle config
+fuseraft knowledge gc --apply --lifecycle custom/lifecycle.yaml
+```
+
+Archived ADRs are moved to `.fuseraft/knowledge/decisions/archive/` and remain queryable via `decision_search`. Archived provenance records are appended to `.fuseraft/state/provenance.archive.json`.
+
+---
+
+## `fuseraft memory`
+
+Repository memory — cross-session patterns extracted from the evidence graph after each session closes. Candidates must be approved before they are injected into agent prompts.
+
+### `fuseraft memory review`
+
+Interactively review candidate repository memories and approve or reject them. Approved memories are injected into the system prompt of every subsequent agent session; rejected memories are suppressed.
+
+```
+fuseraft memory review [options]
+```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--dir <path>` | `.fuseraft/knowledge/repository` | Repository memory directory. |
+| `--all` | off | Show all entries including `Approved` and `Rejected`, not just `Candidate` entries. |
+
+**Examples**
+
+```bash
+# Review pending candidates (interactive)
+fuseraft memory review
+
+# Browse all entries including already-decided ones
+fuseraft memory review --all
+```
+
+For each candidate you are prompted to **Approve**, **Reject**, or **Skip**. The decision is written to disk immediately; the command can be interrupted and re-run.
+
+---
+
+## `fuseraft objective`
+
+Long-horizon objective tracking — create and monitor objectives that span multiple sessions.
+
+Active objectives are summarised in the system prompt of every agent session and in compaction summaries so the team never loses sight of the big picture.
+
+### `fuseraft objective create`
+
+Create a new long-horizon objective.
+
+```
+fuseraft objective create [options]
+```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-t, --title <text>` | interactive | Short title for the objective. |
+| `-d, --description <text>` | — | What the objective achieves and why it matters. |
+| `--tasks <list>` | — | Comma-separated initial remaining tasks. |
+
+**Examples**
+
+```bash
+# Interactive (prompts for title)
+fuseraft objective create
+
+# Non-interactive
+fuseraft objective create --title "Ship auth refactor" --description "Replace session tokens with JWTs" --tasks "Design,Implement,Test,Deploy"
+```
+
+---
+
+### `fuseraft objective list`
+
+List all objectives, optionally filtered by status.
+
+```
+fuseraft objective list [options]
+```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-s, --status <status>` | — | Filter: `Active`, `Paused`, `Completed`, `Abandoned`. |
+| `-a, --all` | off | Show all objectives regardless of status. |
+
+**Examples**
+
+```bash
+# Show all objectives
+fuseraft objective list
+
+# Show only active objectives
+fuseraft objective list --status Active
+```
+
+---
+
+### `fuseraft objective status`
+
+Show detailed status and progress for a single objective.
+
+```
+fuseraft objective status <id>
+```
+
+**Arguments**
+
+| Argument | Description |
+|----------|-------------|
+| `<id>` | Objective ID (e.g. `OBJ-0001`). |
+
+**Examples**
+
+```bash
+fuseraft objective status OBJ-0001
+```
+
+Output includes the title, description, status, computed completion percentage, completed and remaining task lists, and all session IDs that contributed work.
+
 ---
 
 ## `fuseraft context`

@@ -45,6 +45,7 @@ public record EvidenceNode
     ///   <item><c>TestResult</c> — a test result was recorded in the test report.</item>
     ///   <item><c>SymbolDefinition</c> — a symbol was analyzed during recon (name, kind, file).</item>
     ///   <item><c>SymbolReference</c> — a cross-file reference was mapped by the Archaeologist (source file, symbol name, target file).</item>
+    ///   <item><c>Violation</c> — an architecture layer violation; <see cref="Path"/> is the offending file, <see cref="SymbolName"/> is the illegal namespace, <see cref="Evidence"/> is "SourceLayer → TargetLayer".</item>
     /// </list>
     /// </summary>
     public string NodeType { get; init; } = string.Empty;
@@ -127,6 +128,13 @@ public record EvidenceNode
     /// <see cref="Path"/> carries the file where the reference occurs.
     /// </summary>
     public string? TargetFile { get; init; }
+
+    /// <summary>
+    /// ID of the <see cref="ClaimRecord"/> in the provenance registry that verifies the
+    /// observable outcome represented by this node. Null until a validator or the provenance
+    /// registry explicitly associates a claim with this node.
+    /// </summary>
+    public string? ProvenanceRef { get; init; }
 }
 
 /// <summary>

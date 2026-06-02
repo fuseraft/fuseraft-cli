@@ -30,14 +30,16 @@ namespace fuseraft.Cli;
 /// together with all runtime components the session runner needs.
 /// </summary>
 public sealed record OrchestratorBuildResult(
-    IOrchestrator          Orchestrator,
-    OrchestrationConfig    Config,
-    McpSessionManager      McpManager,
-    ConversationCompactor? Compactor,
-    ChangeTracker?         ChangeTracker,
-    EventEmitter?          EventEmitter,
-    GovernanceKernel       GovernanceKernel,
-    SkillCurator?          SkillCurator);
+    IOrchestrator                Orchestrator,
+    OrchestrationConfig          Config,
+    McpSessionManager            McpManager,
+    ConversationCompactor?       Compactor,
+    ChangeTracker?               ChangeTracker,
+    EventEmitter?                EventEmitter,
+    GovernanceKernel             GovernanceKernel,
+    SkillCurator?                SkillCurator,
+    RepositoryMemoryExtractor?   RepositoryMemoryExtractor,
+    fuseraft.Orchestration.DependencyPlanner? DependencyPlanner = null);
 
 /// <summary>
 /// Builds a ready-to-use <see cref="IOrchestrator"/> directly from a config file path,
@@ -426,13 +428,17 @@ public static class OrchestratorBuilder
             ? FuseraftPaths.ExpandPath(ks)
             : Directory.GetCurrentDirectory();
         var knowledgeGraphPath = Path.Combine(knowledgeSandbox, FuseraftPaths.LocalRepositoryGraph);
+        var objectiveStore = new fuseraft.Infrastructure.ObjectiveStore(FuseraftPaths.LocalObjectives);
+        var objectiveManager = new fuseraft.Infrastructure.ObjectiveManager(objectiveStore);
+
         var knowledgeLayer = new fuseraft.Infrastructure.KnowledgeLayer(
             new fuseraft.Infrastructure.AdrRegistry(
                 new fuseraft.Infrastructure.AdrStore(FuseraftPaths.LocalDecisions)),
             new fuseraft.Infrastructure.RepositoryGraphStore(knowledgeGraphPath),
             new fuseraft.Infrastructure.RepositoryGraphBuilder(
                 new fuseraft.Infrastructure.RepositoryGraphStore(knowledgeGraphPath),
-                knowledgeSandbox));
+                knowledgeSandbox),
+            objectiveStore: objectiveStore);
         pluginRegistry.ConfigureKnowledge(knowledgeLayer);
 
         // Change tracking: hook a filter into every agent kernel that records tool results.
@@ -582,6 +588,24 @@ public static class OrchestratorBuilder
             }
         }
 
+        // Dependency planner: validate Produces/Requires graph and detect cycles at startup.
+        // Active only when at least one agent declares a dependency token.
+        fuseraft.Orchestration.DependencyPlanner? dependencyPlanner = null;
+        if (config.Agents.Any(a => a.Produces.Count > 0 || a.Requires.Count > 0))
+        {
+            // Constructor throws InvalidOperationException on cycles.
+            dependencyPlanner = new fuseraft.Orchestration.DependencyPlanner(config.Agents);
+
+            if (dependencyPlanner.ExecutionLayers.Count > 0)
+            {
+                var layerSummary = string.Join(" → ",
+                    dependencyPlanner.ExecutionLayers.Select(layer => $"[{string.Join(", ", layer)}]"));
+                loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogInformation(
+                    "DependencyPlanner active — {LayerCount} layer(s): {Layers}",
+                    dependencyPlanner.ExecutionLayers.Count, layerSummary);
+            }
+        }
+
         // Eagerly validate the adversarial config when that strategy is selected.
         if (config.Selection.Type.Equals("adversarial", StringComparison.OrdinalIgnoreCase))
         {
@@ -726,10 +750,22 @@ public static class OrchestratorBuilder
             var resumptionNote = suppressResumptionNote ? null : ConversationCompactor.WorkflowResumptionNote;
             var changeLogPath  = suppressResumptionNote ? null
                 : (config.Validation?.ChangeLogPath ?? config.ChangeTracking?.Path);
+
+            // Knowledge snapshot enricher: augments lossless/hybrid snapshots with ADR,
+            // objective, architecture-violation, memory, and provenance-expiry state.
+            var snapshotEnricher = new fuseraft.Infrastructure.KnowledgeSnapshotEnricher(
+                adrRegistry:      knowledgeLayer.AdrRegistry,
+                objectiveManager: objectiveManager,
+                memoryStore:      new fuseraft.Infrastructure.RepositoryMemoryStore(FuseraftPaths.LocalRepositoryMemory),
+                provenance:       knowledgeLayer.ProvenanceRegistry,
+                manifestPath:     FuseraftPaths.LocalArchitectureManifest,
+                projectRoot:      knowledgeSandbox);
+
             compactor = new ConversationCompactor(
                 chatClientFactory.Create(summaryModel), compactionConfig,
                 loggerFactory.CreateLogger<ConversationCompactor>(),
-                resumptionNote, changeLogPath, intentLog, config.Events?.Path, evidenceStore);
+                resumptionNote, changeLogPath, intentLog, config.Events?.Path, evidenceStore,
+                objectiveManager, snapshotEnricher);
 
             if ((compactionConfig.Mode ?? string.Empty).Equals("intent", StringComparison.OrdinalIgnoreCase)
                 && intentLog is null)
@@ -801,20 +837,29 @@ public static class OrchestratorBuilder
         var resolvedSandbox = config.Security?.FileSystemSandboxPath is { Length: > 0 } sbx
             ? FuseraftPaths.ExpandPath(sbx) : null;
 
+        // Context Broker (Gap 8): adaptive context pipeline backed by the shared knowledge layer.
+        var brokerMemoryStore = new fuseraft.Infrastructure.RepositoryMemoryStore(FuseraftPaths.LocalRepositoryMemory);
+        var contextBroker = new fuseraft.Orchestration.ContextBroker(
+            knowledgeLayer,
+            brokerMemoryStore,
+            knowledgeLayer.ProvenanceRegistry);
+
         // Shared assembler used by both the state machine (HandoffContext) and the
         // orchestrator (AgentConfig.Context). One instance so session ID updates propagate.
         // Sources the graph store and ADR registry from the shared knowledge layer so
         // adr_graph traversal sees the same state as the plugins and change tracker.
         var contextAssembler = new ContextAssembler(
-            sandboxRoot:   resolvedSandbox,
-            changeLogPath: config.Validation?.ChangeLogPath,
-            briefPath:     config.Validation?.BriefPath,
-            graphStore:    knowledgeLayer.GraphStore,
-            adrRegistry:   knowledgeLayer.AdrRegistry);
+            sandboxRoot:       resolvedSandbox,
+            changeLogPath:     config.Validation?.ChangeLogPath,
+            briefPath:         config.Validation?.BriefPath,
+            graphStore:        knowledgeLayer.GraphStore,
+            adrRegistry:       knowledgeLayer.AdrRegistry,
+            objectiveManager:  objectiveManager,
+            contextBroker:     contextBroker);
         if (!string.IsNullOrEmpty(sessionId))
             contextAssembler.SetSessionId(sessionId);
 
-        var strategyFactory = new StrategyFactory(chatClientFactory.Create, eventEmitter, loggerFactory, governanceKernel, humanApprovalService, evidenceStore, config.TestSelector, resolvedSandbox, contextAssembler);
+        var strategyFactory = new StrategyFactory(chatClientFactory.Create, eventEmitter, loggerFactory, governanceKernel, humanApprovalService, evidenceStore, knowledgeLayer.ProvenanceRegistry, config.TestSelector, resolvedSandbox, contextAssembler);
 
         // Validate verifier config: the named agent must exist in the agent pool.
         if (config.Verifier is { AgentName: { Length: > 0 } verifierAgentName })
@@ -978,7 +1023,24 @@ public static class OrchestratorBuilder
         else
         {
             var memoryManager = MemoryManager.FromConfig(config.Memory);
-            orchestrator = new AgentOrchestrator(config, agentFactory, strategyFactory, aoLogger, changeTracker, eventEmitter, governanceKernel, memoryManager, contextAssembler);
+
+            // Repository memory scope: inject Approved entries into every agent's system prompt.
+            var repoMemoryStore = new fuseraft.Infrastructure.RepositoryMemoryStore(
+                FuseraftPaths.LocalRepositoryMemory);
+            memoryManager?.AttachRepositoryMemory(repoMemoryStore);
+
+            orchestrator = new AgentOrchestrator(config, agentFactory, strategyFactory, aoLogger, changeTracker, eventEmitter, governanceKernel, memoryManager, contextAssembler, dependencyPlanner);
+        }
+
+        // Repository memory extractor — runs after the session to generate candidates.
+        // Requires an evidence store to query; skipped when evidence tracking is disabled.
+        fuseraft.Infrastructure.RepositoryMemoryExtractor? repoMemoryExtractor = null;
+        if (evidenceStore is not null)
+        {
+            var extractorStore = new fuseraft.Infrastructure.RepositoryMemoryStore(
+                FuseraftPaths.LocalRepositoryMemory);
+            repoMemoryExtractor = new fuseraft.Infrastructure.RepositoryMemoryExtractor(
+                evidenceStore, extractorStore);
         }
 
         // Wrap with SagaOrchestrator when the saga pattern is enabled.
@@ -987,7 +1049,7 @@ public static class OrchestratorBuilder
         if (config.Saga?.Enabled == true)
             orchestrator = new SagaOrchestrator(orchestrator, config.Saga, compensators: null, eventEmitter);
 
-        return new OrchestratorBuildResult(orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator);
+        return new OrchestratorBuildResult(orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, dependencyPlanner);
     }
 
     /// <summary>

@@ -13,7 +13,11 @@ using fuseraft.Cli.Commands.Context;
 using fuseraft.Cli.Commands.Log;
 using fuseraft.Cli.Commands.Repl;
 using fuseraft.Cli.Commands.Schedule;
+using fuseraft.Cli.Commands.Arch;
+using fuseraft.Cli.Commands.Knowledge;
+using fuseraft.Cli.Commands.Objective;
 using fuseraft.Cli.Commands.Graph;
+using fuseraft.Cli.Commands.Memory;
 using fuseraft.Cli.Commands.Skills;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
@@ -136,6 +140,12 @@ services.AddTransient<LogReplCommand>();
 services.AddTransient<LogAppCommand>();
 services.AddTransient<UpdateCommand>();
 services.AddTransient<GraphBuildCommand>();
+services.AddTransient<MemoryReviewCommand>();
+services.AddTransient<ArchCheckCommand>();
+services.AddTransient<KnowledgeGcCommand>();
+services.AddTransient<ObjectiveCreateCommand>();
+services.AddTransient<ObjectiveListCommand>();
+services.AddTransient<ObjectiveStatusCommand>();
 
 // Use CommandApp<ReplCommand> so bare `fuseraft` drops straight into the REPL.
 var registrar = new ServiceCollectionRegistrar(services);
@@ -340,6 +350,57 @@ app.Configure(cfg =>
             .WithExample(["graph", "build"])
             .WithExample(["graph", "build", "--dir", "src/"])
             .WithExample(["graph", "build", "--output", ".fuseraft/state/repository.graph"]);
+    });
+
+    cfg.AddBranch("memory", branch =>
+    {
+        branch.SetDescription("Repository memory — cross-session patterns extracted from evidence.");
+
+        branch.AddCommand<MemoryReviewCommand>("review")
+            .WithDescription("Review candidate repository memories and approve or reject them.")
+            .WithExample(["memory", "review"])
+            .WithExample(["memory", "review", "--all"]);
+    });
+
+    cfg.AddBranch("objective", branch =>
+    {
+        branch.SetDescription("Long-horizon objective tracking across sessions.");
+
+        branch.AddCommand<ObjectiveCreateCommand>("create")
+            .WithDescription("Create a new long-horizon objective.")
+            .WithExample(["objective", "create", "--title", "Ship knowledge layer", "--description", "Implement all gaps"])
+            .WithExample(["objective", "create", "--title", "Refactor auth", "--tasks", "Design,Implement,Test"]);
+
+        branch.AddCommand<ObjectiveListCommand>("list")
+            .WithDescription("List objectives, optionally filtered by status.")
+            .WithExample(["objective", "list"])
+            .WithExample(["objective", "list", "--status", "Active"]);
+
+        branch.AddCommand<ObjectiveStatusCommand>("status")
+            .WithDescription("Show detailed status and progress for a specific objective.")
+            .WithExample(["objective", "status", "OBJ-0001"]);
+    });
+
+    cfg.AddBranch("arch", branch =>
+    {
+        branch.SetDescription("Architecture drift detection — check layer boundary compliance.");
+
+        branch.AddCommand<ArchCheckCommand>("check")
+            .WithDescription("Scan source files for architecture layer violations.")
+            .WithExample(["arch", "check"])
+            .WithExample(["arch", "check", "--manifest", ".fuseraft/architecture.yaml"])
+            .WithExample(["arch", "check", "--dir", "src/"]);
+    });
+
+    cfg.AddBranch("knowledge", branch =>
+    {
+        branch.SetDescription("Knowledge lifecycle management — archive, decay, and prune stale artifacts.");
+
+        branch.AddCommand<KnowledgeGcCommand>("gc")
+            .WithDescription("Run knowledge lifecycle policies (dry-run by default; --apply to commit changes).")
+            .WithExample(["knowledge", "gc"])
+            .WithExample(["knowledge", "gc", "--apply"])
+            .WithExample(["knowledge", "gc", "--apply", "--lifecycle", ".fuseraft/knowledge/lifecycle.yaml"]);
     });
 });
 
