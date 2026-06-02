@@ -164,7 +164,7 @@ public static class ContextWindowFilter
         // When MaxToolResultChars is set, any FunctionResultContent string that exceeds
         // the limit is truncated and annotated with the omitted character count.
         if (window.MaxToolResultChars > 0)
-            list = TruncateToolResults(list, window.MaxToolResultChars);
+            list = TruncateToolResults(list, window.MaxToolResultChars, window.ToolResultCharOverrides);
 
         return list;
     }
@@ -174,7 +174,10 @@ public static class ContextWindowFilter
     // The rest is elided — the model's mental model of the file is stale at that point anyway.
     private const int ConsumedReadCapChars = 500;
 
-    private static List<ChatMessage> TruncateToolResults(List<ChatMessage> list, int maxChars)
+    private static List<ChatMessage> TruncateToolResults(
+        List<ChatMessage> list,
+        int maxChars,
+        IReadOnlyDictionary<string, int>? overrides = null)
     {
         // Fast path: no ChatRole.Tool messages in the slice.
         if (!list.Any(m => m.Role == ChatRole.Tool)) return list;
@@ -183,6 +186,16 @@ public static class ContextWindowFilter
         // path. Those results are stale and can be aggressively capped; unconsumed reads that
         // the model hasn't yet acted on are left at the normal maxChars limit.
         var consumedReadIds = BuildConsumedReadCallIds(list);
+
+        // Build callId → toolName so per-tool overrides can be resolved for each result.
+        var callToolNames = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var msg in list)
+        {
+            if (msg.Role != ChatRole.Assistant) continue;
+            foreach (var c in msg.Contents)
+                if (c is FunctionCallContent fc && fc.CallId is not null)
+                    callToolNames[fc.CallId] = fc.Name ?? string.Empty;
+        }
 
         var result = new List<ChatMessage>(list.Count);
         foreach (var msg in list)
@@ -211,10 +224,29 @@ public static class ContextWindowFilter
                             $"file was written or patched later this session; " +
                             $"call read_file again if current content is needed]";
                     }
-                    else if (s.Length > maxChars)
+                    else
                     {
-                        truncated = s[..maxChars] +
-                            $"\n[...truncated — {s.Length - maxChars:N0} chars omitted to reduce context size...]";
+                        // Resolve the per-tool limit: check overrides first, then fall back to maxChars.
+                        // A zero override value disables truncation for that tool entirely.
+                        int limit = maxChars;
+                        if (overrides is { Count: > 0 } &&
+                            callToolNames.TryGetValue(fr.CallId ?? string.Empty, out var toolName))
+                        {
+                            foreach (var kv in overrides)
+                            {
+                                if (string.Equals(kv.Key, toolName, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    limit = kv.Value;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (limit > 0 && s.Length > limit)
+                        {
+                            truncated = s[..limit] +
+                                $"\n[...truncated — {s.Length - limit:N0} chars omitted to reduce context size...]";
+                        }
                     }
 
                     if (truncated is not null)
