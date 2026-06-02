@@ -92,11 +92,12 @@ public sealed class PluginRegistry : IDisposable
 
         Register("Compaction", () => new CompactionPlugin());
 
+        // Stub registrations for introspection (fuseraft plugins). OrchestratorBuilder
+        // calls ConfigureKnowledge() to replace these with a shared-instance version.
         var graphStoreForDecision = new RepositoryGraphStore(FuseraftPaths.LocalRepositoryGraph);
-        var graphBuilderForDecision = new RepositoryGraphBuilder(graphStoreForDecision);
         Register("Decision", () => new DecisionPlugin(
             new AdrRegistry(new AdrStore(FuseraftPaths.LocalDecisions)),
-            graphBuilderForDecision));
+            knowledgeLayer: null));
 
         Register("Graph", () => new GraphPlugin(graphStoreForDecision));
 
@@ -106,6 +107,20 @@ public sealed class PluginRegistry : IDisposable
 
         // Stub — ReplCommand replaces this with a real instance bound to the live session.
         Register("Session", () => new ReplSessionPlugin("stub", DateTime.UtcNow, "unknown", Directory.GetCurrentDirectory()));
+        return this;
+    }
+
+    /// <summary>
+    /// Re-registers the knowledge plugins (Decision, Graph) using the shared
+    /// <see cref="IKnowledgeLayer"/> instance created by <c>OrchestratorBuilder</c>.
+    /// Call this after the knowledge layer is created so all agents in the session share
+    /// the same underlying stores rather than the stub instances from <see cref="RegisterDefaults"/>.
+    /// </summary>
+    public PluginRegistry ConfigureKnowledge(IKnowledgeLayer knowledgeLayer)
+    {
+        var layer = (KnowledgeLayer)knowledgeLayer;
+        Register("Decision", () => new DecisionPlugin(layer.AdrRegistry, knowledgeLayer));
+        Register("Graph",    () => new GraphPlugin(layer.GraphStore));
         return this;
     }
 
