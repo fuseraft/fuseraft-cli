@@ -47,6 +47,9 @@ Ask these questions. If the user already described the workflow in detail, extra
 - Which need git (`Git`)?
 - Which need web search or HTTP (`Search`, `Http`)?
 - Which need scratchpad memory across sessions (`Scratchpad`)?
+- Which need architecture decision records (`Decision`)? Tools: `decision_search`, `decision_read` (read capability); `decision_create`, `decision_supersede` (write capability). Add `Capabilities: {Decision: [read]}` to restrict to read-only.
+- Which need repository semantic graph queries (`Graph`)? Tools: `graph_search`, `graph_refs`, `graph_dependents` (all read-only). Requires `fuseraft graph build` to have been run at least once.
+- Which need long-horizon objective tracking (`Objective`)? Tools: `objective_create`, `objective_read`, `objective_update`, `objective_list`, `objective_link_task`.
 - Add `Handoff` to every agent that advances the pipeline.
 
 **Validators / evidence contracts** (ask only if the user wants enforcement — skip for simple prototypes)
