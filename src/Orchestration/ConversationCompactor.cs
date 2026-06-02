@@ -51,19 +51,21 @@ public sealed class ConversationCompactor(
     /// <summary>
     /// Returns true when <paramref name="messages"/> has reached or exceeded
     /// the configured trigger. In <c>window</c> mode the trigger is the estimated
-    /// token count vs <see cref="CompactionConfig.TokenBudget"/>; in all other
-    /// modes it is the assistant-turn count vs <see cref="CompactionConfig.TriggerTurnCount"/>.
+    /// token count (characters ÷ 4) vs <see cref="CompactionConfig.TokenBudget"/>, using
+    /// the same estimate as <see cref="TrimToWindow"/> so the two stay in sync; in all
+    /// other modes it is the assistant-turn count vs <see cref="CompactionConfig.TriggerTurnCount"/>.
     /// </summary>
     public bool ShouldCompact(IReadOnlyList<AgentMessage> messages)
     {
         if (IsWindowMode)
         {
-            // Prefer provider-reported token counts when available — they include reasoning
-            // tokens that TruncateIntermediateAssistantReasoning strips from Content, so
-            // the char-based estimate would undercount them. Fall back to chars/4 only for
-            // messages that have no Usage record (e.g. injected system messages).
-            var estimated = messages.Sum(m =>
-                m.Usage is { } u ? u.TotalTokens : (m.Content?.Length ?? 0) / 4);
+            // Use the same chars/4 estimate as TrimToWindow so the trigger and the trim
+            // measure the same quantity. Usage.TotalTokens is the cumulative API call cost
+            // (InputTokens = full context at that turn, not just this message), so summing
+            // it across messages grows quadratically and diverges from the char-based budget
+            // that TokenBudget is calibrated against — causing the trigger to fire while
+            // TrimToWindow finds nothing to drop.
+            var estimated = messages.Sum(m => (m.Content?.Length ?? 0) / 4);
             if (estimated > config.TokenBudget)
             {
                 logger.LogDebug(
@@ -93,7 +95,9 @@ public sealed class ConversationCompactor(
 
     /// <summary>
     /// Drops the oldest user+assistant pairs from <paramref name="messages"/> until
-    /// the estimated token count is within <see cref="CompactionConfig.TokenBudget"/>.
+    /// the estimated token count (characters ÷ 4) is within <see cref="CompactionConfig.TokenBudget"/>.
+    /// Uses the same estimation as <see cref="ShouldCompact"/> so the trigger and the
+    /// trim always agree on when the budget is met.
     /// No LLM call is made; no summary message is injected.
     /// </summary>
     public IReadOnlyList<AgentMessage> TrimToWindow(IReadOnlyList<AgentMessage> messages)
