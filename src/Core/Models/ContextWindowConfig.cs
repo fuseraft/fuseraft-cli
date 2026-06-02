@@ -107,6 +107,21 @@ public sealed record ContextWindowConfig
     public int MaxToolResultChars { get; init; }
 
     /// <summary>
+    /// Maximum characters to replay from a single non-summary assistant message in the
+    /// history slice passed to this agent. When an assistant message text exceeds this limit
+    /// the content is truncated and annotated with the omitted character count.
+    ///
+    /// <para>
+    /// Agents sometimes produce multi-thousand-character reasoning blocks that are replayed
+    /// verbatim on every subsequent turn, compounding input-token growth. Compaction-summary
+    /// messages are never truncated regardless of this setting.
+    /// </para>
+    ///
+    /// Default: <c>0</c> (uses the global 2,000-char fallback applied during session replay).
+    /// </summary>
+    public int MaxReplayChars { get; init; }
+
+    /// <summary>
     /// Per-tool-name character limit overrides applied during tool result truncation.
     /// When a key matches a tool function name (case-insensitive), its value is used as the
     /// character cap for that tool's results instead of <see cref="MaxToolResultChars"/>.
