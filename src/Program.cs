@@ -13,6 +13,7 @@ using fuseraft.Cli.Commands.Context;
 using fuseraft.Cli.Commands.Log;
 using fuseraft.Cli.Commands.Repl;
 using fuseraft.Cli.Commands.Schedule;
+using fuseraft.Cli.Commands.Graph;
 using fuseraft.Cli.Commands.Skills;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
@@ -134,6 +135,7 @@ services.AddTransient<LogEventsCommand>();
 services.AddTransient<LogReplCommand>();
 services.AddTransient<LogAppCommand>();
 services.AddTransient<UpdateCommand>();
+services.AddTransient<GraphBuildCommand>();
 
 // Use CommandApp<ReplCommand> so bare `fuseraft` drops straight into the REPL.
 var registrar = new ServiceCollectionRegistrar(services);
@@ -328,6 +330,17 @@ app.Configure(cfg =>
         .WithDescription("Fetch the latest fuseraft release from GitHub and replace the running binary.")
         .WithExample(["update"])
         .WithExample(["update", "--check"]);
+
+    cfg.AddBranch("graph", branch =>
+    {
+        branch.SetDescription("Repository semantic graph — index and query symbols across the codebase.");
+
+        branch.AddCommand<GraphBuildCommand>("build")
+            .WithDescription("Scan the project and build (or rebuild) the repository semantic graph.")
+            .WithExample(["graph", "build"])
+            .WithExample(["graph", "build", "--dir", "src/"])
+            .WithExample(["graph", "build", "--output", ".fuseraft/state/repository.graph"]);
+    });
 });
 
 try

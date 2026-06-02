@@ -5,6 +5,7 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using fuseraft.Core.Models;
+using fuseraft.Infrastructure;
 
 namespace fuseraft.Orchestration;
 
@@ -36,6 +37,7 @@ public sealed class ChangeTracker
     private readonly EventEmitter? _eventEmitter;
     private readonly EvidenceStore? _evidenceStore;
     private readonly IntentLog? _intentLog;
+    private readonly RepositoryGraphBuilder? _graphBuilder;
     private readonly ILogger<ChangeTracker>? _logger;
     private readonly ConcurrentQueue<InvocationRecord> _pending = new();
     private readonly SemaphoreSlim _fileLock = new(1, 1);
@@ -78,12 +80,13 @@ public sealed class ChangeTracker
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    public ChangeTracker(string logPath, EventEmitter? eventEmitter = null, EvidenceStore? evidenceStore = null, IntentLog? intentLog = null, ILogger<ChangeTracker>? logger = null)
+    public ChangeTracker(string logPath, EventEmitter? eventEmitter = null, EvidenceStore? evidenceStore = null, IntentLog? intentLog = null, ILogger<ChangeTracker>? logger = null, RepositoryGraphBuilder? graphBuilder = null)
     {
         _logPath        = logPath;
         _eventEmitter   = eventEmitter;
         _evidenceStore  = evidenceStore;
         _intentLog      = intentLog;
+        _graphBuilder   = graphBuilder;
         _logger         = logger;
     }
 
@@ -402,6 +405,26 @@ public sealed class ChangeTracker
         }
 
         await _evidenceStore!.RecordAsync(nodes, edges, ct);
+
+        // Incrementally rebuild repository graph nodes for every written .cs file so that
+        // graph_search and adr_governs traversal reflect the latest source structure.
+        if (_graphBuilder is not null)
+        {
+            var writtenPaths = records
+                .Where(r =>
+                    (FunctionNameMatches(r.Name, "write_file") || FunctionNameMatches(r.Name, "patch_file") ||
+                     FunctionNameMatches(r.Name, "copy_file")  || FunctionNameMatches(r.Name, "move_file"))
+                    && r.Succeeded)
+                .Select(r => GetArg(r.Args, "destination") ?? GetArg(r.Args, "path"))
+                .OfType<string>()
+                .Where(p => p.EndsWith(".cs", StringComparison.OrdinalIgnoreCase));
+
+            foreach (var path in writtenPaths)
+            {
+                var abs = Path.GetFullPath(path);
+                _ = _graphBuilder.RebuildFileAsync(abs, CancellationToken.None); // fire-and-forget
+            }
+        }
     }
 
     // Parses search_symbol output to extract SymbolDefinition nodes for the evidence graph.

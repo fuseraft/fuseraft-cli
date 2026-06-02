@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 using fuseraft.Core;
 using fuseraft.Core.Models;
+using fuseraft.Infrastructure;
 
 namespace fuseraft.Orchestration;
 
@@ -28,6 +29,8 @@ public sealed class ContextAssembler
     private readonly string? _sandboxRoot;
     private readonly string? _changeLogPath;
     private readonly string? _briefPath;
+    private readonly RepositoryGraphStore? _graphStore;
+    private readonly AdrRegistry? _adrRegistry;
 
     private string _sessionId = string.Empty;
 
@@ -45,11 +48,15 @@ public sealed class ContextAssembler
     public ContextAssembler(
         string? sandboxRoot   = null,
         string? changeLogPath = null,
-        string? briefPath     = null)
+        string? briefPath     = null,
+        RepositoryGraphStore? graphStore  = null,
+        AdrRegistry?          adrRegistry = null)
     {
         _sandboxRoot   = sandboxRoot;
         _changeLogPath = changeLogPath;
         _briefPath     = briefPath;
+        _graphStore    = graphStore;
+        _adrRegistry   = adrRegistry;
     }
 
     public void SetSessionId(string sessionId) => _sessionId = sessionId;
@@ -200,8 +207,67 @@ public sealed class ContextAssembler
                                      maxChars, ct),
             "brief_field"     => await ResolveBriefFieldAsync(param ?? string.Empty, maxChars, ct),
             "file"            => await ResolveFileAsync(param ?? string.Empty, maxChars, ct),
+            "adr_graph"       => await ResolveAdrGraphAsync(maxChars, ct),
             _                 => null,
         };
+    }
+
+    // Walks adr_governs edges in the repository graph for every file recently touched
+    // in this session. Returns a formatted block of governing ADR IDs and titles.
+    private async Task<string?> ResolveAdrGraphAsync(int maxChars, CancellationToken ct)
+    {
+        if (_graphStore is null || _adrRegistry is null) return null;
+        try
+        {
+            // Collect recently written files from the change log.
+            var touchedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var logPath = _changeLogPath ?? FuseraftPaths.LocalChanges;
+            if (File.Exists(logPath))
+            {
+                try
+                {
+                    var raw = await File.ReadAllTextAsync(logPath, ct);
+                    var log = JsonSerializer.Deserialize<ChangeLog>(raw, JsonOpts);
+                    if (log is not null)
+                    {
+                        foreach (var entry in log.Entries
+                            .Where(e => string.IsNullOrEmpty(_sessionId) || e.SessionId == _sessionId)
+                            .TakeLast(20))
+                        {
+                            foreach (var f in entry.FilesWritten)
+                                touchedFiles.Add(f.Replace('\\', '/'));
+                        }
+                    }
+                }
+                catch { /* best-effort */ }
+            }
+            if (touchedFiles.Count == 0) return null;
+
+            // Load the graph and find ADR nodes governing any of the touched files.
+            var graph      = await _graphStore.LoadAsync(ct);
+            var adrIds     = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var filePath in touchedFiles)
+            {
+                var fileId = $"file:{filePath}";
+                // Walk adr_governs edges: ADR node --adr_governs--> file/symbol node
+                foreach (var edge in graph.EdgesTo(fileId, EdgeType.AdrGoverns))
+                    adrIds.Add(edge.From.StartsWith("adr:") ? edge.From[4..] : edge.From);
+            }
+            if (adrIds.Count == 0) return null;
+
+            var sb = new StringBuilder();
+            sb.AppendLine("Governing architecture decisions for recently touched files:");
+            foreach (var id in adrIds)
+            {
+                var entry = await _adrRegistry.GetByIdAsync(id, ct);
+                if (entry is not null)
+                    sb.AppendLine($"  [{entry.Id}] {entry.Title} (status: {entry.Status})");
+                else
+                    sb.AppendLine($"  [{id}]");
+            }
+            return Truncate(sb.ToString().TrimEnd(), maxChars);
+        }
+        catch { return null; }
     }
 
     private async Task<string?> ResolveSessionContextAsync(CancellationToken ct)
@@ -377,6 +443,7 @@ public sealed class ContextAssembler
             "changes_recent"  => "Recent Changes",
             "brief_field"     => $"Task: {param}",
             "file"            => param is not null ? Path.GetFileName(param) : "File",
+            "adr_graph"       => "Governing ADRs",
             _                 => source,
         };
     }

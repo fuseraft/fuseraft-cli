@@ -98,6 +98,9 @@ public static class FuseraftPaths
     public const string LocalKnowledge = ".fuseraft/knowledge";
     public const string LocalDecisions = ".fuseraft/knowledge/decisions";
 
+    // Repository semantic graph — nodes + edges for all symbols in the project.
+    public const string LocalRepositoryGraph = ".fuseraft/state/repository.graph";
+
     // checkpoints/ — session checkpoint files written when Checkpoint.Mode is set
     public const string LocalCheckpoints = ".fuseraft/checkpoints";
 
@@ -192,7 +195,8 @@ public static class FuseraftPaths
         sb.AppendLine("  .fuseraft/tests/fixtures/                 — seed data, stubs, and fixture files");
         sb.AppendLine("  .fuseraft/context/                        — injected reference documents (see .fuseraft/context/index.json)");
         sb.AppendLine("  .fuseraft/summaries/                      — compaction summaries");
-        sb.Append(    "  .fuseraft/knowledge/decisions/            — architecture decision records (use decision_search / decision_read)");
+        sb.AppendLine("  .fuseraft/knowledge/decisions/            — architecture decision records (use decision_search / decision_read)");
+        sb.Append(    "  .fuseraft/state/repository.graph          — repository semantic graph (use graph_search / graph_refs / graph_dependents)");
         return sb.ToString();
     }
 }
