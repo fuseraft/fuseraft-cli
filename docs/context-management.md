@@ -14,6 +14,7 @@ Session start
 Each agent turn
   └─ Layer 2b: Memory Provider   → fresh context fetched from pluggable store (Memory:)
   └─ Layer 3: ContextWindow      → per-agent history filter (every turn)
+  └─ Artifact offloading         → tool results > 40k chars stored to disk; stub replaces inline (always on)
 
 History too long
   └─ Layer 4: Compaction         → replace old turns with a summary
@@ -564,6 +565,33 @@ the full content again.
 
 ---
 
+## Tool-result artifact offloading
+
+When a tool returns a result that exceeds 40,000 characters (~10k tokens), fuseraft offloads the full content to disk and replaces the inline result with a compact reference stub before it enters the conversation history.
+
+**Why this matters:** a large result injected once is replayed on every subsequent agent turn. In a long session with many tool calls, that compounds quadratically. Offloading prevents the payload from ever landing in history — the stub is what all future turns replay, not the raw content.
+
+**What the agent sees instead of the full result:**
+
+```
+[result offloaded — 52,000 chars stored to artifact store]
+Tool: read_file | path=src/LargeService.cs
+Artifact: a3f9c20b1d7e
+Use targeted tools (e.g. read_file with startLine/maxLines, or grep_in_file) for specific sections.
+```
+
+The stub is actionable: it tells the agent what happened, which tool produced the result, and how to access specific sections without pulling the full payload back into context.
+
+**Storage:** the full content is written to `.fuseraft/artifacts/sessions/{sessionId}/tool-results/{id}.json`. Nothing is lost — the artifact is available for inspection or future retrieval.
+
+**Coverage:** applies to all tools in both `fuseraft run` sessions and `fuseraft repl` sessions. No configuration is required.
+
+**Threshold:** 40,000 characters (approximately 10,000 tokens at 4 chars/token). Results below this threshold are passed through unchanged.
+
+**Relationship to `MaxToolResultChars`:** these two mechanisms are complementary and both may be active simultaneously. Artifact offloading fires at production time — large results never enter history. `MaxToolResultChars` fires at replay time — medium-sized results already in history are truncated before being sent to the model. Together they form a two-stage defence against context inflation from tool outputs.
+
+---
+
 ## Adaptive context-trim retry
 
 When a provider call fails due to a context or payload size error — HTTP 413, a Bedrock
@@ -648,6 +676,7 @@ Here is the full sequence from session start through a long-running session:
    │  └─ SanitizeToolPairs — strip orphaned assistant tool-call frames (strict providers)
    ├─ Layer 3a: Context spec (when Context: is declared) → task + own_history + artifact block assembled from disk
    └─ Filtered slice or artifact-assembled context → sent to LLM
+      ├─ Tool-result artifact offloading — results > 40k chars stored to disk; stub replaces inline content
       ├─ MaxInTurnToolPairs — sliding window: keep only last N tool pairs per inner call
       ├─ MaxInTurnContextTokens — budget-reactive: trim oldest pairs when over budget
       └─ On context/413 error → adaptive trim retry (up to 3 stages)
