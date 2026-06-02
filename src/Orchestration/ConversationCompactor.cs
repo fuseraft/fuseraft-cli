@@ -58,7 +58,12 @@ public sealed class ConversationCompactor(
     {
         if (IsWindowMode)
         {
-            var estimated = messages.Sum(m => (m.Content?.Length ?? 0) / 4);
+            // Prefer provider-reported token counts when available — they include reasoning
+            // tokens that TruncateIntermediateAssistantReasoning strips from Content, so
+            // the char-based estimate would undercount them. Fall back to chars/4 only for
+            // messages that have no Usage record (e.g. injected system messages).
+            var estimated = messages.Sum(m =>
+                m.Usage is { } u ? u.TotalTokens : (m.Content?.Length ?? 0) / 4);
             if (estimated > config.TokenBudget)
             {
                 logger.LogDebug(
@@ -162,6 +167,7 @@ public sealed class ConversationCompactor(
                     toCompact[0].TurnIndex, toCompact[^1].TurnIndex, cancellationToken);
                 var intentSummary = BuildIntentDerivedSummary(
                     toCompact[0].TurnIndex, toCompact[^1].TurnIndex, intents, prefixBlock);
+                intentSummary = intentSummary with { Usage = AccumulateCompactedUsage(toCompact, null) };
                 logger.LogInformation(
                     "Intent compaction: {Compacted} turns replaced by intent log reconstruction ({IntentCount} intents).",
                     toCompact.Count, intents.Count);
@@ -185,6 +191,7 @@ public sealed class ConversationCompactor(
                 };
             if (ExpandedNote is not null)
                 reconstructed = reconstructed with { Content = reconstructed.Content + "\n\n---\n" + ExpandedNote };
+            reconstructed = reconstructed with { Usage = AccumulateCompactedUsage(toCompact, null) };
             logger.LogInformation(
                 "Lossless compaction: {Compacted} turns replaced by evidence reconstruction.",
                 toCompact.Count);
@@ -215,9 +222,7 @@ public sealed class ConversationCompactor(
                     Role                = "user",
                     TurnIndex           = toCompact[^1].TurnIndex,
                     IsCompactionSummary = true,
-                    Usage               = summUsage is not null
-                        ? new TokenUsage(summUsage.InputTokens, summUsage.OutputTokens)
-                        : null
+                    Usage               = AccumulateCompactedUsage(toCompact, summUsage)
                 };
 
                 logger.LogInformation(
@@ -231,7 +236,7 @@ public sealed class ConversationCompactor(
                 // LLM summary failed; return the lossless reconstruction alone so the session survives.
                 logger.LogError(ex,
                     "Hybrid compaction: LLM summary call failed — returning lossless reconstruction only.");
-                return (reconstructed, toRetain);
+                return (reconstructed with { Usage = AccumulateCompactedUsage(toCompact, null) }, toRetain);
             }
         }
 
@@ -256,9 +261,7 @@ public sealed class ConversationCompactor(
                 Role                = "user",
                 TurnIndex           = toCompact[^1].TurnIndex,
                 IsCompactionSummary = true,
-                Usage               = summaryUsage is not null
-                    ? new TokenUsage(summaryUsage.InputTokens, summaryUsage.OutputTokens)
-                    : null
+                Usage               = AccumulateCompactedUsage(toCompact, summaryUsage)
             };
 
             logger.LogInformation(
@@ -278,6 +281,27 @@ public sealed class ConversationCompactor(
     }
 
     // Internals
+
+    // Sums the token costs of all compacted turns and folds in the summary-call cost.
+    // The total is stored on the summary AgentMessage so AgentOrchestrator can seed
+    // cumulativeTokens correctly on the next StreamAsync call (after resume/compaction),
+    // keeping MaxTotalTokens enforcement accurate across compaction boundaries.
+    private static TokenUsage? AccumulateCompactedUsage(
+        IReadOnlyList<AgentMessage> compacted,
+        TokenUsage? summaryCallUsage)
+    {
+        int totalInput  = summaryCallUsage?.InputTokens  ?? 0;
+        int totalOutput = summaryCallUsage?.OutputTokens ?? 0;
+        foreach (var m in compacted)
+        {
+            if (m.Usage is null) continue;
+            totalInput  += m.Usage.InputTokens;
+            totalOutput += m.Usage.OutputTokens;
+        }
+        return (totalInput > 0 || totalOutput > 0)
+            ? new TokenUsage(totalInput, totalOutput)
+            : null;
+    }
 
     private AgentMessage BuildIntentDerivedSummary(
         int firstTurn,
