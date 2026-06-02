@@ -475,6 +475,22 @@ public sealed class AgentOrchestrator(
                 history.Count,
                 filtered.Count);
 
+            // Pre-turn budget guard: estimate the input token cost of this context slice and
+            // abort before the LLM call if cumulative + estimated input would exceed the limit.
+            // Prevents the one-turn overshoot that occurs when the post-yield check fires too
+            // late (e.g. a file-read turn that consumes tens of thousands of tokens).
+            if (config.MaxTotalTokens is { } preTurnLimit)
+            {
+                var estimatedInputTokens = EstimateContextTokens(context);
+                if (cumulativeTokens + estimatedInputTokens > preTurnLimit)
+                {
+                    logger.LogWarning(
+                        "[Orchestrator] Pre-turn budget guard: cumulative {Cumulative:N0} + estimated input {Estimated:N0} > limit {Limit:N0} — aborting before turn.",
+                        cumulativeTokens, estimatedInputTokens, preTurnLimit);
+                    throw new BudgetExceededException(cumulativeTokens + estimatedInputTokens, preTurnLimit);
+                }
+            }
+
             AgentResponse response = governanceKernel?.CircuitBreaker is { } cb
                 ? await cb.ExecuteAsync(() => agent.RunAsync(context, null, null, cancellationToken))
                 : await agent.RunAsync(context, null, null, cancellationToken);
@@ -769,4 +785,23 @@ public sealed class AgentOrchestrator(
     }
 
     private static string GenerateSessionId() => Guid.NewGuid().ToString("N")[..8];
+
+    // Estimates the input token cost of a context slice by summing all content chars across
+    // message types and dividing by 4. Used for the pre-turn budget guard; intentionally
+    // conservative (actual tokenisation may differ but is rarely smaller than chars/4).
+    private static int EstimateContextTokens(IEnumerable<ChatMessage> messages)
+    {
+        int chars = 0;
+        foreach (var msg in messages)
+            foreach (var content in msg.Contents)
+                chars += content switch
+                {
+                    TextContent tc        => tc.Text?.Length ?? 0,
+                    FunctionCallContent fc => (fc.Name?.Length ?? 0) +
+                        (fc.Arguments?.Values.Sum(v => v?.ToString()?.Length ?? 0) ?? 0),
+                    FunctionResultContent fr => fr.Result?.ToString()?.Length ?? 0,
+                    _ => 0,
+                };
+        return chars / 4;
+    }
 }

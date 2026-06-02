@@ -111,7 +111,7 @@ public record CompactionConfig
     /// <summary>
     /// Number of recent compaction outcomes to examine for the anti-thrash guard.
     /// Only suppresses compaction once this many outcomes have been recorded.
-    /// Default: <c>3</c>. Set to <c>0</c> to disable the anti-thrash check.
+    /// Default: <c>10</c>. Set to <c>0</c> to disable the anti-thrash check.
     /// </summary>
-    public int AntiThrashWindow { get; init; } = 3;
+    public int AntiThrashWindow { get; init; } = 10;
 }

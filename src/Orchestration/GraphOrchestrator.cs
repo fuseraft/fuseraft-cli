@@ -1165,7 +1165,8 @@ public sealed class GraphOrchestrator(
 
             int histBefore2 = ctx.History.Count;
             await CorrectionEngine.InjectNoKeywordCorrection(
-                ctx.History, responseText, agentName, consecutiveFails, routeTable, eventEmitter);
+                ctx.History, responseText, agentName, consecutiveFails, routeTable, eventEmitter,
+                agentMsg.ToolCalls);
             await PersistCorrectionsAsync(ctx, histBefore2, ct).ConfigureAwait(false);
 
             if (consecutiveFails >= maxRetries)
@@ -1623,7 +1624,8 @@ public sealed class GraphOrchestrator(
 
             int histBefore2 = ctx.History.Count;
             await CorrectionEngine.InjectNoKeywordCorrection(
-                ctx.History, responseText, agentName, consecutiveFails, routeTable, eventEmitter);
+                ctx.History, responseText, agentName, consecutiveFails, routeTable, eventEmitter,
+                agentMsg.ToolCalls);
             await PersistCorrectionsAsync(ctx, histBefore2, ct).ConfigureAwait(false);
 
             if (consecutiveFails >= maxRetries)
