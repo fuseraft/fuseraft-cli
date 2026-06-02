@@ -86,6 +86,9 @@ For each agent:
 4. **`Git` plugin:** Instructions mentioning `git_commit`, `git_status`, etc. require `Git`.
 5. **`Changes` plugin:** Instructions mentioning `changes_read` or `changes_read_latest` require both `Changes` in `Plugins` and `ChangeTracking` in the config.
 6. **`Scratchpad` plugin:** Instructions mentioning `scratchpad_read` or `scratchpad_write` require `Scratchpad`.
+7. **`Decision` plugin:** Instructions mentioning `decision_search` or `decision_read` require `Decision`. Instructions using `decision_create` or `decision_supersede` additionally require the `write` capability (`Capabilities: {Decision: [read, write]}` or no `Capabilities` restriction for that plugin).
+8. **`Graph` plugin:** Instructions mentioning `graph_search`, `graph_refs`, or `graph_dependents` require `Graph`. All three tools are read-only; no capability restriction needed.
+9. **`Objective` plugin:** Instructions mentioning `objective_create`, `objective_read`, `objective_update`, `objective_list`, or `objective_link_task` require `Objective`. Objective tools are not in the capability map — they cannot be restricted and are always passed through.
 
 ---
 
