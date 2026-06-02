@@ -713,6 +713,15 @@ public static class OrchestratorBuilder
                 chatClientFactory.Create(summaryModel), compactionConfig,
                 loggerFactory.CreateLogger<ConversationCompactor>(),
                 resumptionNote, changeLogPath, intentLog, config.Events?.Path, evidenceStore);
+
+            if ((compactionConfig.Mode ?? string.Empty).Equals("intent", StringComparison.OrdinalIgnoreCase)
+                && intentLog is null)
+            {
+                loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
+                    "Compaction.Mode is 'intent' but no ChangeTracking.IntentLogPath is configured — " +
+                    "compaction will fall back to lossless or LLM mode at runtime. " +
+                    "Set ChangeTracking.IntentLogPath to enable deterministic intent compaction.");
+            }
         }
 
         // Build the post-session skill curator when curation is enabled.
