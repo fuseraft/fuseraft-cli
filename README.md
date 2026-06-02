@@ -129,14 +129,16 @@ The binary lands in `./bin/`.
 - Per-agent `Context` spec — declare exactly which artifact sources each agent receives; when set, history replay is skipped entirely and context cost is proportional to what you declare
 
 **Governance**
-- Per-agent execution rings, prompt injection detection, circuit breaker, and a hash-chain audit log
-- Sandbox file and shell access to a configured directory tree
-- Human-in-the-loop support at any point in a pipeline
-
-**Developer experience**
-- Browser-based DevUI (`--devui`) for real-time session visualization
-- Interactive Orchestration Designer (`fuseraft init --template designer`) — describe your use case, get a validated config back
-- VS Code extension with CodeLens, IntelliSense, and a session viewer
+- Per-agent execution rings derived from `TrustScore`: Ring 1 (trusted, full access), Ring 2 (standard), Ring 3 (read-only sandbox) — ring assignments are enforced at every tool call
+- Prompt injection detection scans `shell_run` and `read_file` results for adversarial instruction overrides before they reach the agent; blocked calls are recorded in the audit log
+- SHA-256 hash-chain audit log links every governance event to its predecessor, making the record tamper-evident and suitable for post-session review
+- Circuit breaker stops runaway agents after 5 consecutive API failures; the checkpoint is saved so the session can be resumed when the API recovers
+- Rate limiter escalates to a `ValidatorStuckException` after 3 consecutive bad turns, preventing infinite correction loops where an agent keeps emitting broken handoffs without making progress
+- SLO tracking monitors routing validator pass rate within the session; burn-rate alerts fire at 2× and 5× speed when compliance degrades
+- Per-agent [Decentralized Identifiers](https://www.w3.org/TR/did-core/) correlate audit events across agents and sessions
+- Sandbox file and shell access to a configured directory tree; rings extend the sandbox — both path allowlist and operation type checks must pass
+- Human-in-the-loop support at any point in a pipeline; HITL turns are saved in the checkpoint and re-injected on resume
+- Optional YAML policy files extend or override default governance rules without code changes
 
 ---
 
