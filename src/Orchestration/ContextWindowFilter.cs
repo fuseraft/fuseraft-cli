@@ -118,8 +118,37 @@ public static class ContextWindowFilter
         }
 
         // Step 4: Tail limit — keep only the last N messages.
+        // Correction messages (RETRY, STAGNATION, [fuseraft:blocked, etc.) are pinned so they
+        // always survive the position-based cut. Non-correction messages are trimmed to the tail
+        // window; the final list preserves original message order.
         if (window.MaxTailMessages > 0 && list.Count > window.MaxTailMessages)
-            list = list.Skip(list.Count - window.MaxTailMessages).ToList();
+        {
+            var pinnedSet = new HashSet<int>(
+                Enumerable.Range(0, list.Count).Where(i => IsCorrectionMessage(list[i])));
+
+            if (pinnedSet.Count == 0)
+            {
+                list = list.Skip(list.Count - window.MaxTailMessages).ToList();
+            }
+            else
+            {
+                var unpinnedIndices = Enumerable.Range(0, list.Count)
+                    .Where(i => !pinnedSet.Contains(i))
+                    .ToList();
+
+                int firstKeptUnpinned = unpinnedIndices.Count > window.MaxTailMessages
+                    ? unpinnedIndices[unpinnedIndices.Count - window.MaxTailMessages]
+                    : 0;
+
+                var kept = new List<ChatMessage>(list.Count);
+                for (int i = 0; i < list.Count; i++)
+                {
+                    if (i >= firstKeptUnpinned || pinnedSet.Contains(i))
+                        kept.Add(list[i]);
+                }
+                list = kept;
+            }
+        }
 
         // Step 5: Sanitize tool_use/tool_result pairing at slice boundaries.
         // Steps 3 and 4 cut by position; either cut can land inside a tool-call/result
@@ -340,6 +369,43 @@ public static class ContextWindowFilter
             i++;
         }
         return result;
+    }
+
+    // Prefixes that unambiguously identify a ChatRole.User correction injected by
+    // CorrectionEngine, routing strategies, or the orchestrator's verifier hook.
+    private static readonly string[] CorrectionPrefixes =
+    [
+        "RETRY ",
+        "NO TOOL CALLS",
+        "CRITICAL:",
+        "APPROVED rejected:",
+        "WRONG KEYWORD:",
+        "JSON block correct",
+        "BUILD FAILURE:",
+        "STAGNATION (",
+        "STUCK ",
+        "HALLUCINATION:",
+        "PERSISTENT BUILD FAILURE",
+        "VERIFICATION FINDING",
+        "Files written this turn",
+        "No handoff keyword",
+    ];
+
+    /// <summary>
+    /// Returns <c>true</c> when <paramref name="message"/> is a correction injected by
+    /// <see cref="fuseraft.Orchestration.Workflow.CorrectionEngine"/>, a routing strategy,
+    /// or the orchestrator's verifier hook. Used to pin corrections so they survive
+    /// <see cref="ContextWindowConfig.MaxTailMessages"/> trimming, and to re-inject them
+    /// into assembled agent contexts.
+    /// </summary>
+    public static bool IsCorrectionMessage(ChatMessage message)
+    {
+        if (message.Role != ChatRole.User) return false;
+        var text = message.Text ?? string.Empty;
+        if (text.Contains("[fuseraft:blocked", StringComparison.Ordinal)) return true;
+        foreach (var prefix in CorrectionPrefixes)
+            if (text.StartsWith(prefix, StringComparison.Ordinal)) return true;
+        return false;
     }
 
     // Maximum number of characters to replay from a single non-summary assistant message.
