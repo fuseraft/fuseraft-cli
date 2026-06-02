@@ -135,6 +135,12 @@ internal static class PluginCapabilityMap
         ["probe_compare_outputs"]          = "run",
         ["probe_run_hypothesis"]           = "run",
 
+        // Decision (ADR Registry)
+        ["decision_search"]                = "read",
+        ["decision_read"]                  = "read",
+        ["decision_create"]                = "write",
+        ["decision_supersede"]             = "write",
+
         // CodeExecution
         ["code_execution_check_docker"]    = "read",
         ["code_execution_sandbox_run"]     = "execute",
