@@ -39,7 +39,8 @@ Ask these questions. If the user already described the workflow in detail, extra
 **Routing strategy**
 - Keyword routing: agents emit a keyword string; simple, good for linear flows.
 - State machine routing: explicit states and transitions; good for branching, recovery agents, or terminal states.
-- Ask only if the user hasn't indicated a preference. Default to state machine for pipelines with 3+ agents or any retry logic.
+- Graph topology (`Selection.Type: graph`): declare nodes and edges explicitly; best when back-edges must target specific earlier nodes, per-branch isolated histories are needed, or terminal-node validator gates are required. Use `fuseraft init --template graph` to scaffold.
+- Ask only if the user hasn't indicated a preference. Default to state machine for pipelines with 3+ agents or any retry logic; suggest graph when the user describes an explicit directed-graph structure or named cycle targets.
 
 **Plugins per agent**
 - Which agents need filesystem access (`FileSystem`)?
@@ -69,6 +70,8 @@ Pick the appropriate skeleton based on routing type and agent count. Load `refer
 
 **State machine with parallel fan-out** — use when two or more agents can do independent work simultaneously and their outputs need to be combined before the pipeline continues. The fan-out transition uses `Parallel: true`, lists branch states in `Targets`, and sets `To` to the join state entered after merge.
 
+**Graph topology** (`Selection.Type: graph`) — when exact node/edge structure matters: back-edges to specific earlier nodes, per-branch isolated histories, or terminal-node validator gates. Node `Id` values must be unique, lowercase, and stable. `Compaction.Mode: lossless` and `hybrid` are unsupported — use `Mode: intent` (with `ChangeTracking`) or `Mode: llm`. See `references/schema-cheatsheet.md` for the full `Selection.Graph` field reference.
+
 ### Step 3: Build the YAML
 
 Construct the YAML from the gathered answers. Apply these rules:
@@ -90,6 +93,7 @@ Construct the YAML from the gathered answers. Apply these rules:
    - Branch agents do not need the `Handoff` plugin.
    - If `Merge.Strategy` is `ranked` or `semantic_diff`, set `Merge.Agent` to a named agent (declared in `Agents`) that will evaluate or reconcile the outputs. This agent needs no special plugins — it receives the branch outputs as context and returns text.
    - `Merge.Strategy: union` (default) concatenates all branch outputs in declaration order — no merge agent needed.
+11. **Graph sessions** (`Selection.Type: graph`): `Compaction.Mode: lossless` and `hybrid` are unsupported — the graph orchestrator has no snapshotter and silently falls back to LLM compaction. Use `Mode: intent` (requires `ChangeTracking`) or `Mode: llm`.
 
 Write instructions for each agent using this pattern:
 ```
@@ -118,6 +122,10 @@ Fix all reported errors before writing the file. Common issues:
 - Missing `ChangeTracking` when `Changes` plugin is listed or when `TestReportValid` cross-references `changes.json`
 - Agent references a plugin that is not in its `Plugins` list
 - `EvidenceStore` missing when `Contracts` reference `FilesWritten` or `TestReport` predicates
+- Graph session: `Selection.Graph` block missing when `Selection.Type: graph` is set
+- Graph session: `EntryNode` does not match any declared node `Id`
+- Graph session: edge `From` or `To` references an undefined node `Id`
+- Graph session: `Compaction.Mode: lossless` or `hybrid` used (unsupported — switch to `intent` or `llm`)
 
 ### Step 5: Write and Confirm
 

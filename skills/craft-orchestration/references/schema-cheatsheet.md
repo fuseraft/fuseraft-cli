@@ -324,6 +324,89 @@ Selection:
 
 ---
 
+## Routing: graph
+
+Nodes bind agents to named positions; edges declare control flow explicitly. Forward edges advance the graph; back-edges return to earlier nodes (cycles allowed). `Compaction.Mode: lossless` and `hybrid` are not supported — use `intent` or `llm`.
+
+```yaml
+Selection:
+  Type: graph
+  Graph:
+    EntryNode: planner        # defaults to first node if omitted
+    MaxRetries: 4             # consecutive validator failures per node before HITL (default 4)
+    Nodes:
+      - Id: planner
+        Agent: Planner
+      - Id: developer
+        Agent: Developer
+      - Id: tester
+        Agent: Tester
+      - Id: reviewer
+        Agent: Reviewer
+        Terminal: true        # session ends after this agent runs once
+        Validators: [RequireReviewJudgement]   # checked before terminal exit
+    Edges:
+      - From: planner
+        To: developer
+        Keyword: "HANDOFF TO DEVELOPER"
+        Validators: [RequireBrief]
+      - From: developer
+        To: tester
+        Keyword: "HANDOFF TO TESTER"
+        Validators: [RequireWriteFile]
+        RecoveryAgent: Planner   # one-turn intervention after 2+ consecutive failures
+      - From: tester
+        To: reviewer
+        Keyword: "HANDOFF TO REVIEWER"
+        Validators: [TestReportValid]
+      - From: tester
+        To: developer
+        Keyword: "BUGS FOUND"          # back-edge
+      - From: reviewer
+        To: developer
+        Keyword: "REVISION REQUIRED"   # back-edge
+```
+
+**Key rules:**
+- Node `Id` must be unique (case-insensitive), lowercase, and stable — appears in event log payloads.
+- `Agent` must match a name in `Orchestration.Agents`.
+- Edges are evaluated in declaration order — the first matching edge fires.
+- A `Keyword`-less edge fires unconditionally — only safe on nodes with exactly one outgoing edge.
+- `Terminal: true` ends the session after the agent runs once; attach `Validators` to the node (not an edge) to gate the exit.
+- `Compaction.Mode: lossless` and `hybrid` are unsupported — use `Mode: intent` (with `ChangeTracking`) or `Mode: llm`.
+
+**Parallel fan-out (graph):** Mark destination nodes `Parallel: true` and use the same `Keyword` on all edges from the source node. All parallel nodes run concurrently with isolated history snapshots; their outputs are merged before control passes to the common forward-edge target. Parallel nodes do not need `Handoff` and should not emit a handoff signal.
+
+```yaml
+    Nodes:
+      - Id: coordinator
+        Agent: Coordinator
+      - Id: analyzer_a
+        Agent: AnalyzerA
+        Parallel: true
+      - Id: analyzer_b
+        Agent: AnalyzerB
+        Parallel: true
+      - Id: synthesizer
+        Agent: Synthesizer
+        Terminal: true
+    Edges:
+      - From: coordinator
+        To: analyzer_a
+        Keyword: "BEGIN PARALLEL ANALYSIS"
+      - From: coordinator
+        To: analyzer_b
+        Keyword: "BEGIN PARALLEL ANALYSIS"
+      - From: analyzer_a
+        To: synthesizer
+        Keyword: "ANALYSIS COMPLETE"
+      - From: analyzer_b
+        To: synthesizer
+        Keyword: "ANALYSIS COMPLETE"
+```
+
+---
+
 ## Termination
 
 ```yaml

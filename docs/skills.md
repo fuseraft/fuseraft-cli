@@ -111,6 +111,14 @@ The skill detects the project stack, selects the appropriate library (`python-do
 
 ---
 
+### `knowledge-setup`
+
+Bootstraps the fuseraft knowledge layer in a new or existing project. Triggers when the user wants to set up ADR tracking, the repository semantic graph, architecture drift detection, or objective tracking — or when `Decision`, `Graph`, or `Objective` plugins are wired in a config but the backing stores have not been initialized.
+
+The skill scaffolds `.fuseraft/knowledge/` via `fuseraft init`, builds the repository semantic graph with `fuseraft graph build`, guides authoring of `.fuseraft/architecture.yaml` for `fuseraft arch check`, tunes the lifecycle policy for `fuseraft knowledge gc`, and wires the knowledge plugins (`Decision`, `Graph`, `Objective`) to the right agents in the orchestration config.
+
+---
+
 ## Cross-session handoff: `/compact`
 
 To pass context from the current REPL session to a new one, use the `/compact` command. `/compact` generates a concise summary of what was worked on, key decisions, current state, and what comes next; it then replaces the conversation history with that summary so the session can continue with a clean context window.
