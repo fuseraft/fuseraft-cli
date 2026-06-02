@@ -185,7 +185,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             return 1;
         }
 
-        var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator) = built;
+        var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, _) = built;
 
         await using var _mcp = mcpManager;
         using var _governance = governanceKernel;
@@ -494,6 +494,24 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             catch (Exception ex)
             {
                 AnsiConsole.MarkupLine($"[dim yellow]Skill curation failed:[/] {Markup.Escape(ex.Message)}");
+            }
+        }
+
+        // Post-session repository memory extraction (best-effort — never fails the run).
+        if (repoMemoryExtractor is not null && result.Succeeded)
+        {
+            try
+            {
+                var candidates = await repoMemoryExtractor.ExtractAsync(
+                    sessionId: checkpoint.SessionId, CancellationToken.None);
+                if (candidates.Count > 0)
+                    AnsiConsole.MarkupLine(
+                        $"[dim]Repository memory: {candidates.Count} new candidate(s) extracted. " +
+                        $"Run [bold]fuseraft memory review[/] to approve.[/]");
+            }
+            catch (Exception ex)
+            {
+                AnsiConsole.MarkupLine($"[dim yellow]Repository memory extraction failed:[/] {Markup.Escape(ex.Message)}");
             }
         }
 

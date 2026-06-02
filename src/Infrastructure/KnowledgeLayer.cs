@@ -23,15 +23,23 @@ public sealed class KnowledgeLayer : IKnowledgeLayer
     private readonly AdrRegistry            _adrRegistry;
     private readonly RepositoryGraphStore   _graphStore;
     private readonly RepositoryGraphBuilder _graphBuilder;
+    private readonly ProvenanceRegistry     _provenanceRegistry;
+    private readonly ObjectiveStore         _objectiveStore;
 
     public KnowledgeLayer(
         AdrRegistry            adrRegistry,
         RepositoryGraphStore   graphStore,
-        RepositoryGraphBuilder graphBuilder)
+        RepositoryGraphBuilder graphBuilder,
+        ProvenanceRegistry?    provenanceRegistry = null,
+        ObjectiveStore?        objectiveStore     = null)
     {
-        _adrRegistry  = adrRegistry;
-        _graphStore   = graphStore;
-        _graphBuilder = graphBuilder;
+        _adrRegistry        = adrRegistry;
+        _graphStore         = graphStore;
+        _graphBuilder       = graphBuilder;
+        _provenanceRegistry = provenanceRegistry
+            ?? new ProvenanceRegistry(fuseraft.Core.FuseraftPaths.LocalProvenance);
+        _objectiveStore     = objectiveStore
+            ?? new ObjectiveStore(fuseraft.Core.FuseraftPaths.LocalObjectives);
     }
 
     // ── Exposed subsystem accessors (for callers that need direct subsystem access) ──
@@ -44,6 +52,9 @@ public sealed class KnowledgeLayer : IKnowledgeLayer
 
     /// <summary>Direct access to the graph builder for incremental rebuilds (e.g. from ChangeTracker).</summary>
     public RepositoryGraphBuilder GraphBuilder => _graphBuilder;
+
+    /// <summary>Direct access to the provenance registry for validators and context assembly.</summary>
+    public ProvenanceRegistry ProvenanceRegistry => _provenanceRegistry;
 
     // ── IKnowledgeLayer ────────────────────────────────────────────────────────────
 
@@ -127,15 +138,30 @@ public sealed class KnowledgeLayer : IKnowledgeLayer
     }
 
     /// <inheritdoc/>
-    /// <remarks>Not yet implemented — Gap 3 (Provenance and Confidence Tracking).</remarks>
     public Task<ClaimRecord> RecordClaimAsync(
         string claim,
-        IReadOnlyList<string> support,
+        IReadOnlyList<EvidenceClass> support,
+        string? artifactId = null,
+        DateTimeOffset? expiresAt = null,
         CancellationToken ct = default)
-        => throw new NotImplementedException("RecordClaimAsync is implemented in Gap 3.");
+    {
+        var record = new ClaimRecord
+        {
+            Claim      = claim,
+            Support    = [..support],
+            ArtifactId = artifactId,
+            ExpiresAt  = expiresAt,
+        };
+        return _provenanceRegistry.RecordAsync(record, ct);
+    }
 
     /// <inheritdoc/>
-    /// <remarks>Not yet implemented — Gap 7 (Long-Horizon Objective Tracking).</remarks>
-    public Task<Objective> RecordObjectiveAsync(Objective objective, CancellationToken ct = default)
-        => throw new NotImplementedException("RecordObjectiveAsync is implemented in Gap 7.");
+    public async Task<Objective> RecordObjectiveAsync(Objective objective, CancellationToken ct = default)
+    {
+        await _objectiveStore.SaveAsync(objective, ct);
+        return objective;
+    }
+
+    /// <summary>Direct access to the objective store for queries not expressible through <see cref="IKnowledgeLayer"/>.</summary>
+    public ObjectiveStore ObjectiveStore => _objectiveStore;
 }

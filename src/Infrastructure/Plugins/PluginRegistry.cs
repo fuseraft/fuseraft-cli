@@ -101,6 +101,9 @@ public sealed class PluginRegistry : IDisposable
 
         Register("Graph", () => new GraphPlugin(graphStoreForDecision));
 
+        Register("Objective", () => new ObjectivePlugin(
+            new ObjectiveManager(new ObjectiveStore(FuseraftPaths.LocalObjectives))));
+
         // Stub — OrchestratorBuilder replaces this with a session-scoped instance.
         Register("SessionContext", () => new SessionContextPlugin(
             Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "state", "sessions", "default", "context_summary.md")));
@@ -119,8 +122,9 @@ public sealed class PluginRegistry : IDisposable
     public PluginRegistry ConfigureKnowledge(IKnowledgeLayer knowledgeLayer)
     {
         var layer = (KnowledgeLayer)knowledgeLayer;
-        Register("Decision", () => new DecisionPlugin(layer.AdrRegistry, knowledgeLayer));
-        Register("Graph",    () => new GraphPlugin(layer.GraphStore));
+        Register("Decision",  () => new DecisionPlugin(layer.AdrRegistry, knowledgeLayer));
+        Register("Graph",     () => new GraphPlugin(layer.GraphStore));
+        Register("Objective", () => new ObjectivePlugin(new ObjectiveManager(layer.ObjectiveStore)));
         return this;
     }
 
