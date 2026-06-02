@@ -12,108 +12,6 @@ Works with Anthropic, xAI, OpenAI, Azure OpenAI, Ollama, and any OpenAI-compatib
 
 ---
 
-## Pipeline topologies
-
-Pipelines range from a single task-routed assistant:
-
-```mermaid
-flowchart LR
-    Task((Task)) --> Assistant[Assistant]
-```
-
-...to multi-agent workflows with conditional keyword routing and anti-hallucination validators enforced at every handoff:
-
-```mermaid
-flowchart TD
-    Task((Task))
-    Planner[Planner]
-    Developer[Developer]
-    Tester[Tester]
-    Reviewer[Reviewer]
-    Done(["✓ Done"])
-
-    Task --> Planner
-    Planner      -->|"HANDOFF TO DEVELOPER · RequireBrief"| Developer
-    Developer    -->|"HANDOFF TO TESTER · RequireWriteFile · RequireShellPass"| Tester
-    Tester       -->|"HANDOFF TO REVIEWER · TestReportValid"| Reviewer
-    Reviewer     -->|"APPROVED"| Done
-    Reviewer     -->|"REVISION REQUIRED"| Developer
-    Reviewer     -->|"REPLAN REQUIRED"| Planner
-    Tester       -->|"BUGS FOUND"| Developer
-```
-
-...to declarative directed-graph pipelines where back-edges express review cycles without duplicating states:
-
-```mermaid
-flowchart TD
-    Planner([Planner])
-    Developer([Developer])
-    Tester([Tester])
-    Reviewer([Reviewer])
-    Terminal(["Reviewer\n✓ terminal"])
-
-    Planner   -->|"HANDOFF TO DEVELOPER · RequireBrief"| Developer
-    Developer -->|"HANDOFF TO TESTER · RequireWriteFile"| Tester
-    Tester    -->|"HANDOFF TO REVIEWER · TestReportValid"| Reviewer
-    Reviewer  -->|"APPROVED · RequireReviewJudgement"| Terminal
-    Reviewer  -->|"REPLAN REQUIRED"| Planner
-    Tester    -->|"BUGS FOUND"| Developer
-    Reviewer  -->|"REVISION REQUIRED"| Developer
-```
-
-...to parallel fan-out/fan-in where a coordinator spawns concurrent workers that merge into a single downstream node:
-
-```mermaid
-flowchart TD
-    Coordinator([Coordinator])
-    AnalyzerA(["Analyzer A\nparallel"])
-    AnalyzerB(["Analyzer B\nparallel"])
-    Synthesizer(["Synthesizer\n✓ terminal"])
-
-    Coordinator -->|"BEGIN PARALLEL ANALYSIS"| AnalyzerA
-    Coordinator -->|"BEGIN PARALLEL ANALYSIS"| AnalyzerB
-    AnalyzerA   -->|"ANALYSIS COMPLETE"| Synthesizer
-    AnalyzerB   -->|"ANALYSIS COMPLETE"| Synthesizer
-```
-
-...to fully autonomous [Magentic](https://arxiv.org/abs/2411.04468) orchestration where a Manager dynamically selects agents and collects their reports:
-
-```mermaid
-flowchart LR
-    Task((Task))
-    Manager([Manager])
-    Researcher[Researcher]
-    Developer[Developer]
-
-    Task       --> Manager
-    Manager    -->|"selects"| Researcher
-    Manager    -->|"selects"| Developer
-    Researcher -.->|"reports"| Manager
-    Developer  -.->|"reports"| Manager
-```
-
-...to adversarial pipelines where generator agents produce artifacts and critic agents review them with fresh, isolated context windows — no shared history, no inherited blind spots:
-
-```mermaid
-flowchart TD
-    Task((Task))
-    Planner["Planner\ngenerator"]
-    PlanReviewer["PlanReviewer\ncritic · isolated context"]
-    Developer["Developer\ngenerator"]
-    CodeReviewer["CodeReviewer\ncritic · isolated context"]
-    Done(["✓ Done"])
-
-    Task         --> Planner
-    Planner      -->|artifact| PlanReviewer
-    PlanReviewer -->|"APPROVED"| Developer
-    PlanReviewer -.->|revise| Planner
-    Developer    -->|artifact| CodeReviewer
-    CodeReviewer -->|"APPROVED"| Done
-    CodeReviewer -.->|revise| Developer
-```
-
----
-
 ## Quick start
 
 ```bash
@@ -263,6 +161,108 @@ The binary lands in `./bin/`.
 | [Skills](docs/skills.md) | Portable skill packages, skill curation, and the cross-session skill index |
 | [Examples](docs/examples.md) | Ready-to-use config examples |
 | [Design](docs/design.md) | Architecture, layer map, MAF usage, and decision log |
+
+---
+
+## Pipeline topologies
+
+Pipelines range from a single task-routed assistant:
+
+```mermaid
+flowchart LR
+    Task((Task)) --> Assistant[Assistant]
+```
+
+...to multi-agent workflows with conditional keyword routing and anti-hallucination validators enforced at every handoff:
+
+```mermaid
+flowchart TD
+    Task((Task))
+    Planner[Planner]
+    Developer[Developer]
+    Tester[Tester]
+    Reviewer[Reviewer]
+    Done(["✓ Done"])
+
+    Task --> Planner
+    Planner      -->|"HANDOFF TO DEVELOPER · RequireBrief"| Developer
+    Developer    -->|"HANDOFF TO TESTER · RequireWriteFile · RequireShellPass"| Tester
+    Tester       -->|"HANDOFF TO REVIEWER · TestReportValid"| Reviewer
+    Reviewer     -->|"APPROVED"| Done
+    Reviewer     -->|"REVISION REQUIRED"| Developer
+    Reviewer     -->|"REPLAN REQUIRED"| Planner
+    Tester       -->|"BUGS FOUND"| Developer
+```
+
+...to declarative directed-graph pipelines where back-edges express review cycles without duplicating states:
+
+```mermaid
+flowchart TD
+    Planner([Planner])
+    Developer([Developer])
+    Tester([Tester])
+    Reviewer([Reviewer])
+    Terminal(["Reviewer\n✓ terminal"])
+
+    Planner   -->|"HANDOFF TO DEVELOPER · RequireBrief"| Developer
+    Developer -->|"HANDOFF TO TESTER · RequireWriteFile"| Tester
+    Tester    -->|"HANDOFF TO REVIEWER · TestReportValid"| Reviewer
+    Reviewer  -->|"APPROVED · RequireReviewJudgement"| Terminal
+    Reviewer  -->|"REPLAN REQUIRED"| Planner
+    Tester    -->|"BUGS FOUND"| Developer
+    Reviewer  -->|"REVISION REQUIRED"| Developer
+```
+
+...to parallel fan-out/fan-in where a coordinator spawns concurrent workers that merge into a single downstream node:
+
+```mermaid
+flowchart TD
+    Coordinator([Coordinator])
+    AnalyzerA(["Analyzer A\nparallel"])
+    AnalyzerB(["Analyzer B\nparallel"])
+    Synthesizer(["Synthesizer\n✓ terminal"])
+
+    Coordinator -->|"BEGIN PARALLEL ANALYSIS"| AnalyzerA
+    Coordinator -->|"BEGIN PARALLEL ANALYSIS"| AnalyzerB
+    AnalyzerA   -->|"ANALYSIS COMPLETE"| Synthesizer
+    AnalyzerB   -->|"ANALYSIS COMPLETE"| Synthesizer
+```
+
+...to fully autonomous [Magentic](https://arxiv.org/abs/2411.04468) orchestration where a Manager dynamically selects agents and collects their reports:
+
+```mermaid
+flowchart LR
+    Task((Task))
+    Manager([Manager])
+    Researcher[Researcher]
+    Developer[Developer]
+
+    Task       --> Manager
+    Manager    -->|"selects"| Researcher
+    Manager    -->|"selects"| Developer
+    Researcher -.->|"reports"| Manager
+    Developer  -.->|"reports"| Manager
+```
+
+...to adversarial pipelines where generator agents produce artifacts and critic agents review them with fresh, isolated context windows — no shared history, no inherited blind spots:
+
+```mermaid
+flowchart TD
+    Task((Task))
+    Planner["Planner\ngenerator"]
+    PlanReviewer["PlanReviewer\ncritic · isolated context"]
+    Developer["Developer\ngenerator"]
+    CodeReviewer["CodeReviewer\ncritic · isolated context"]
+    Done(["✓ Done"])
+
+    Task         --> Planner
+    Planner      -->|artifact| PlanReviewer
+    PlanReviewer -->|"APPROVED"| Developer
+    PlanReviewer -.->|revise| Planner
+    Developer    -->|artifact| CodeReviewer
+    CodeReviewer -->|"APPROVED"| Done
+    CodeReviewer -.->|revise| Developer
+```
 
 ---
 
