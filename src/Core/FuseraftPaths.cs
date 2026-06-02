@@ -94,6 +94,10 @@ public static class FuseraftPaths
     // docs/ — agent-written markdown documents (research, reports, drafts, notes)
     public const string LocalDocs = ".fuseraft/docs";
 
+    // knowledge/ — durable cross-session knowledge (ADRs, repository memory, objectives)
+    public const string LocalKnowledge = ".fuseraft/knowledge";
+    public const string LocalDecisions = ".fuseraft/knowledge/decisions";
+
     // checkpoints/ — session checkpoint files written when Checkpoint.Mode is set
     public const string LocalCheckpoints = ".fuseraft/checkpoints";
 
@@ -187,7 +191,8 @@ public static class FuseraftPaths
         sb.AppendLine("  .fuseraft/tests/                          — write all test scripts and test support files here");
         sb.AppendLine("  .fuseraft/tests/fixtures/                 — seed data, stubs, and fixture files");
         sb.AppendLine("  .fuseraft/context/                        — injected reference documents (see .fuseraft/context/index.json)");
-        sb.Append(    "  .fuseraft/summaries/                      — compaction summaries");
+        sb.AppendLine("  .fuseraft/summaries/                      — compaction summaries");
+        sb.Append(    "  .fuseraft/knowledge/decisions/            — architecture decision records (use decision_search / decision_read)");
         return sb.ToString();
     }
 }
