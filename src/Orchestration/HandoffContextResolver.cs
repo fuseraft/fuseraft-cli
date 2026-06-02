@@ -54,6 +54,14 @@ public sealed class ContextAssembler
 
     public void SetSessionId(string sessionId) => _sessionId = sessionId;
 
+    /// <summary>
+    /// Returns the current session context summary, or <c>null</c> when the file does not
+    /// exist or is empty. Used by orchestrators to auto-inject context for agents that do not
+    /// declare an explicit <c>Context</c> spec.
+    /// </summary>
+    public Task<string?> ReadSessionContextAsync(CancellationToken ct = default)
+        => ResolveSessionContextAsync(ct);
+
     // ── Handoff injection (state machine transitions) ────────────────────────
 
     /// <summary>
@@ -166,6 +174,14 @@ public sealed class ContextAssembler
                 result.Add(new ChatMessage(ChatRole.User, sb.ToString().TrimEnd()));
             }
         }
+
+        // 4. Pending corrections — user correction messages injected into shared history after
+        // this agent's last turn. Context-spec agents replace shared-history replay entirely,
+        // so corrections written to shared history (by CorrectionEngine, routing strategies,
+        // or the verifier hook) would otherwise be invisible on the next invocation. Re-inject
+        // them here so the agent always sees the most recent feedback addressed to it.
+        var pendingCorrections = ExtractPendingCorrections(agentName, sharedHistory);
+        result.AddRange(pendingCorrections);
 
         return result;
     }
@@ -312,6 +328,35 @@ public sealed class ContextAssembler
         }
 
         return ownTurns.Select(t => t.Msg).ToList();
+    }
+
+    // ── Pending-correction extraction ───────────────────────────────────────
+
+    // Returns all correction messages in shared history that appear after the last
+    // assistant turn by agentName. These are unread corrections the agent has not yet
+    // acted on; they must be included in the assembled context so the agent sees them.
+    private static IReadOnlyList<ChatMessage> ExtractPendingCorrections(
+        string agentName,
+        IList<ChatMessage> history)
+    {
+        int lastOwnIdx = -1;
+        for (int i = history.Count - 1; i >= 0; i--)
+        {
+            if (history[i].Role == ChatRole.Assistant &&
+                string.Equals(history[i].AuthorName, agentName, StringComparison.OrdinalIgnoreCase))
+            {
+                lastOwnIdx = i;
+                break;
+            }
+        }
+
+        var corrections = new List<ChatMessage>();
+        for (int i = lastOwnIdx + 1; i < history.Count; i++)
+        {
+            if (ContextWindowFilter.IsCorrectionMessage(history[i]))
+                corrections.Add(history[i]);
+        }
+        return corrections;
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

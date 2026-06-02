@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using fuseraft.Core;
+using fuseraft.Core.Models;
 
 namespace fuseraft.Orchestration.Workflow;
 
@@ -43,7 +44,8 @@ internal static class CorrectionEngine
         string agentName,
         int consecutiveCount,
         AgentRouteTable routeTable,
-        EventEmitter? eventEmitter = null)
+        EventEmitter? eventEmitter = null,
+        IReadOnlyList<ToolCallRecord>? turnToolCalls = null)
     {
         var validKeywordList = BuildValidKeywordList(routeTable);
         bool isReviewerType  = routeTable.PhaseBreakKeywords.Contains("APPROVED");
@@ -51,7 +53,10 @@ internal static class CorrectionEngine
         if (TryInjectForeignKeywordCorrection(history, responseText, routeTable, agentName, validKeywordList)) return;
         if (TryInjectCodeBlockCorrection(history, responseText, isReviewerType, validKeywordList)) return;
 
-        if (!CurrentTurnHasToolCalls(history))
+        // Also treat as "has tool calls" when the AgentMessage records sub-agent tool calls
+        // that ran inside a SubAgentPlugin — those don't produce ChatRole.Tool entries in the
+        // outer history so CurrentTurnHasToolCalls would return false without this check.
+        if (!CurrentTurnHasToolCalls(history) && (turnToolCalls is null || turnToolCalls.Count == 0))
         {
             InjectNoToolCallsCorrection(history, isReviewerType, validKeywordList);
             return;

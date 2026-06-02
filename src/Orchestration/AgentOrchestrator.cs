@@ -419,7 +419,11 @@ public sealed class AgentOrchestrator(
             }
 
             // Select the next agent.
+            // Capture the history count before selection so correction messages injected by
+            // the strategy (ConflictingEvidence / NoProgress) can be identified afterwards.
+            int preSelectCount = history.Count;
             var agent = await selection.SelectAsync(agents, history, cancellationToken);
+            int postSelectCount = history.Count;
             if (agent is null) break;
 
             logger.LogDebug(
@@ -445,7 +449,9 @@ public sealed class AgentOrchestrator(
             // sees only what it needs rather than the full session transcript. The shared
             // history list is still updated after the turn so routing/termination strategies
             // continue to work normally.
-            // When no Context spec is set, fall back to the traditional ContextWindow filter.
+            // When no Context spec is set, fall back to the traditional ContextWindow filter
+            // and auto-inject the session context summary (context_summary.md) as the second
+            // message when it exists, preventing agents from wasting turns re-reading brief.json.
             var agentCfg = agentConfigs.GetValueOrDefault(agent.Name ?? "");
             IReadOnlyList<ChatMessage> filtered;
             if (agentCfg?.Context is { Count: > 0 } agentContextSources && contextAssembler is not null)
@@ -459,7 +465,22 @@ public sealed class AgentOrchestrator(
             }
             else
             {
-                filtered = ContextWindowFilter.Apply(history, agentCfg?.ContextWindow);
+                var raw = ContextWindowFilter.Apply(history, agentCfg?.ContextWindow);
+                if (contextAssembler is not null)
+                {
+                    var sessionCtx = await contextAssembler.ReadSessionContextAsync(cancellationToken);
+                    if (sessionCtx is not null)
+                    {
+                        var withCtx = new List<ChatMessage>(raw.Count + 1);
+                        if (raw.Count > 0) withCtx.Add(raw[0]);
+                        withCtx.Add(new ChatMessage(ChatRole.User,
+                            $"[Session Context]\n\n{sessionCtx.Trim()}"));
+                        withCtx.AddRange(raw.Skip(1));
+                        filtered = withCtx;
+                    }
+                    else filtered = raw;
+                }
+                else filtered = raw;
             }
 
             IEnumerable<ChatMessage> context = (hasInstructions || memoryManager is not null) && instructions is not null
@@ -474,6 +495,22 @@ public sealed class AgentOrchestrator(
                 hasInstructions,
                 history.Count,
                 filtered.Count);
+
+            // Pre-turn budget guard: estimate the input token cost of this context slice and
+            // abort before the LLM call if cumulative + estimated input would exceed the limit.
+            // Prevents the one-turn overshoot that occurs when the post-yield check fires too
+            // late (e.g. a file-read turn that consumes tens of thousands of tokens).
+            if (config.MaxTotalTokens is { } preTurnLimit)
+            {
+                var estimatedInputTokens = EstimateContextTokens(context);
+                if (cumulativeTokens + estimatedInputTokens > preTurnLimit)
+                {
+                    logger.LogWarning(
+                        "[Orchestrator] Pre-turn budget guard: cumulative {Cumulative:N0} + estimated input {Estimated:N0} > limit {Limit:N0} — aborting before turn.",
+                        cumulativeTokens, estimatedInputTokens, preTurnLimit);
+                    throw new BudgetExceededException(cumulativeTokens + estimatedInputTokens, preTurnLimit);
+                }
+            }
 
             AgentResponse response = governanceKernel?.CircuitBreaker is { } cb
                 ? await cb.ExecuteAsync(() => agent.RunAsync(context, null, null, cancellationToken))
@@ -581,13 +618,16 @@ public sealed class AgentOrchestrator(
             if (memoryManager is not null)
                 await memoryManager.PostTurnAsync(agentMessage.AgentName, [..history], cancellationToken);
 
-            // Periodic verifier: run the meta-agent every N turns to audit evidence.
-            // Skipped when the verifier itself just ran to prevent self-loops.
-            if (config.Verifier is { EveryNTurns: > 0 } verCfg
+            // Periodic verifier: run the meta-agent every N turns to audit evidence, OR
+            // immediately when a ConflictingEvidence / NoProgress correction was injected this
+            // turn (evidence-driven trigger). Skipped when the verifier itself just ran.
+            if (config.Verifier is { } verCfg
                 && verifierAgent is not null
-                && agentMessage.TurnIndex > 0
-                && agentMessage.TurnIndex % verCfg.EveryNTurns == 0
-                && !string.Equals(agentMessage.AgentName, verCfg.AgentName, StringComparison.OrdinalIgnoreCase))
+                && !string.Equals(agentMessage.AgentName, verCfg.AgentName, StringComparison.OrdinalIgnoreCase)
+                && (
+                    (verCfg.EveryNTurns > 0 && agentMessage.TurnIndex > 0 && agentMessage.TurnIndex % verCfg.EveryNTurns == 0)
+                    || (verCfg.TriggerOnSuspiciousTransition && HasSuspiciousTransitionSignal(history, preSelectCount, postSelectCount))
+                ))
             {
                 AgentStarting?.Invoke(verifierAgent.Name ?? "Verifier");
                 agentFactory.OnAgentTurnStarting();
@@ -769,4 +809,42 @@ public sealed class AgentOrchestrator(
     }
 
     private static string GenerateSessionId() => Guid.NewGuid().ToString("N")[..8];
+
+    // Scans messages at indices [from, to) for ConflictingEvidence or NoProgress correction
+    // signals injected by the selection strategy. Returns true when any such signal is found,
+    // indicating the verifier should audit the current turn's output.
+    private static bool HasSuspiciousTransitionSignal(IList<ChatMessage> history, int from, int to)
+    {
+        for (int i = from; i < to && i < history.Count; i++)
+        {
+            var msg = history[i];
+            if (msg.Role != ChatRole.User) continue;
+            var text = msg.Text ?? string.Empty;
+            if (text.StartsWith("NO TOOL CALLS",         StringComparison.Ordinal) ||
+                text.StartsWith("CRITICAL:",              StringComparison.Ordinal) ||
+                text.Contains("EVIDENCE INCONSISTENCY",  StringComparison.Ordinal) ||
+                text.Contains("EVIDENCE AUDIT REQUIRED", StringComparison.Ordinal))
+                return true;
+        }
+        return false;
+    }
+
+    // Estimates the input token cost of a context slice by summing all content chars across
+    // message types and dividing by 4. Used for the pre-turn budget guard; intentionally
+    // conservative (actual tokenisation may differ but is rarely smaller than chars/4).
+    private static int EstimateContextTokens(IEnumerable<ChatMessage> messages)
+    {
+        int chars = 0;
+        foreach (var msg in messages)
+            foreach (var content in msg.Contents)
+                chars += content switch
+                {
+                    TextContent tc        => tc.Text?.Length ?? 0,
+                    FunctionCallContent fc => (fc.Name?.Length ?? 0) +
+                        (fc.Arguments?.Values.Sum(v => v?.ToString()?.Length ?? 0) ?? 0),
+                    FunctionResultContent fr => fr.Result?.ToString()?.Length ?? 0,
+                    _ => 0,
+                };
+        return chars / 4;
+    }
 }
