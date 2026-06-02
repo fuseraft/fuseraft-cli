@@ -772,21 +772,36 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
         return false;
     }
 
-    // Returns true when a turn-boundary marker already exists after keywordIndex for
-    // the target state's agent — meaning this signal was consumed in a prior turn.
+    // Returns true when this specific transition was already consumed after signalIndex.
+    //
+    // Two marker types are checked:
+    //   "[fuseraft:blocked {state}→{targetState}]" — the transition was evaluated and
+    //     its contract failed; the signal must not be re-evaluated for that target.
+    //     Markers for OTHER targets do not suppress this transition.
+    //   Any other "[fuseraft: ...]" — a different transition fired, meaning the state
+    //     machine already advanced; the signal is consumed regardless of target.
     private static bool TransitionAlreadyFired(IList<ChatMessage> history, int signalIndex, string targetState)
     {
-        // We look for "[fuseraft: X → Y]" markers after the signal message.
-        // Since we don't know the target agent name from here (only the target state),
-        // we use a simplified check: any turn-boundary marker after this index means
-        // the selector already processed this turn.
         for (int j = signalIndex + 1; j < history.Count; j++)
         {
             var m = history[j];
             if (m.Role != ChatRole.User) continue;
             var text = m.Text;
-            if (!string.IsNullOrEmpty(text) && text.StartsWith("[fuseraft:", StringComparison.Ordinal))
-                return true;
+            if (string.IsNullOrEmpty(text)) continue;
+            if (!text.StartsWith("[fuseraft:", StringComparison.Ordinal)) continue;
+
+            // Blocking markers suppress only the transition they name.
+            // "[fuseraft:blocked A→B]" blocks A→B but must not block A→C.
+            if (text.StartsWith("[fuseraft:blocked ", StringComparison.Ordinal))
+            {
+                if (text.Contains($"→{targetState}", StringComparison.OrdinalIgnoreCase))
+                    return true;
+                continue; // Different target — does not apply to this transition.
+            }
+
+            // Any non-blocking marker means the state machine already acted on a signal
+            // in this lookback window (transition fired or parallel dispatched).
+            return true;
         }
         return false;
     }

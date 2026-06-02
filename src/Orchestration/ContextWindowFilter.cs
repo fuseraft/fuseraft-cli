@@ -118,8 +118,37 @@ public static class ContextWindowFilter
         }
 
         // Step 4: Tail limit — keep only the last N messages.
+        // Correction messages (RETRY, STAGNATION, [fuseraft:blocked, etc.) are pinned so they
+        // always survive the position-based cut. Non-correction messages are trimmed to the tail
+        // window; the final list preserves original message order.
         if (window.MaxTailMessages > 0 && list.Count > window.MaxTailMessages)
-            list = list.Skip(list.Count - window.MaxTailMessages).ToList();
+        {
+            var pinnedSet = new HashSet<int>(
+                Enumerable.Range(0, list.Count).Where(i => IsCorrectionMessage(list[i])));
+
+            if (pinnedSet.Count == 0)
+            {
+                list = list.Skip(list.Count - window.MaxTailMessages).ToList();
+            }
+            else
+            {
+                var unpinnedIndices = Enumerable.Range(0, list.Count)
+                    .Where(i => !pinnedSet.Contains(i))
+                    .ToList();
+
+                int firstKeptUnpinned = unpinnedIndices.Count > window.MaxTailMessages
+                    ? unpinnedIndices[unpinnedIndices.Count - window.MaxTailMessages]
+                    : 0;
+
+                var kept = new List<ChatMessage>(list.Count);
+                for (int i = 0; i < list.Count; i++)
+                {
+                    if (i >= firstKeptUnpinned || pinnedSet.Contains(i))
+                        kept.Add(list[i]);
+                }
+                list = kept;
+            }
+        }
 
         // Step 5: Sanitize tool_use/tool_result pairing at slice boundaries.
         // Steps 3 and 4 cut by position; either cut can land inside a tool-call/result
@@ -135,9 +164,48 @@ public static class ContextWindowFilter
         // When MaxToolResultChars is set, any FunctionResultContent string that exceeds
         // the limit is truncated and annotated with the omitted character count.
         if (window.MaxToolResultChars > 0)
-            list = TruncateToolResults(list, window.MaxToolResultChars);
+            list = TruncateToolResults(list, window.MaxToolResultChars, window.ToolResultCharOverrides);
+
+        // Step 7: Truncate verbose assistant messages.
+        // When MaxReplayChars is set, assistant text content that exceeds the limit is
+        // truncated. Compaction-summary messages (marked by their header prefix) are exempt.
+        if (window.MaxReplayChars > 0)
+            list = TruncateAssistantContent(list, window.MaxReplayChars);
 
         return list;
+    }
+
+    private static List<ChatMessage> TruncateAssistantContent(List<ChatMessage> list, int maxChars)
+    {
+        var result = new List<ChatMessage>(list.Count);
+        foreach (var msg in list)
+        {
+            if (msg.Role != ChatRole.Assistant)
+            {
+                result.Add(msg);
+                continue;
+            }
+
+            var textContent = string.Concat(msg.Contents.OfType<TextContent>().Select(t => t.Text));
+            // Compaction summaries are already compact — skip them unconditionally.
+            if (textContent.StartsWith("[CONVERSATION SUMMARY", StringComparison.Ordinal) ||
+                textContent.Length <= maxChars)
+            {
+                result.Add(msg);
+                continue;
+            }
+
+            var truncated = textContent[..maxChars] +
+                $"\n[...truncated — {textContent.Length - maxChars:N0} chars omitted to reduce context size...]";
+
+            var newContents = msg.Contents
+                .Where(c => c is not TextContent)
+                .Prepend(new TextContent(truncated))
+                .ToList<AIContent>();
+
+            result.Add(new ChatMessage(ChatRole.Assistant, newContents) { AuthorName = msg.AuthorName });
+        }
+        return result;
     }
 
     // How much of a consumed read_file result to keep for structural context (file shape,
@@ -145,7 +213,10 @@ public static class ContextWindowFilter
     // The rest is elided — the model's mental model of the file is stale at that point anyway.
     private const int ConsumedReadCapChars = 500;
 
-    private static List<ChatMessage> TruncateToolResults(List<ChatMessage> list, int maxChars)
+    private static List<ChatMessage> TruncateToolResults(
+        List<ChatMessage> list,
+        int maxChars,
+        IReadOnlyDictionary<string, int>? overrides = null)
     {
         // Fast path: no ChatRole.Tool messages in the slice.
         if (!list.Any(m => m.Role == ChatRole.Tool)) return list;
@@ -154,6 +225,16 @@ public static class ContextWindowFilter
         // path. Those results are stale and can be aggressively capped; unconsumed reads that
         // the model hasn't yet acted on are left at the normal maxChars limit.
         var consumedReadIds = BuildConsumedReadCallIds(list);
+
+        // Build callId → toolName so per-tool overrides can be resolved for each result.
+        var callToolNames = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var msg in list)
+        {
+            if (msg.Role != ChatRole.Assistant) continue;
+            foreach (var c in msg.Contents)
+                if (c is FunctionCallContent fc && fc.CallId is not null)
+                    callToolNames[fc.CallId] = fc.Name ?? string.Empty;
+        }
 
         var result = new List<ChatMessage>(list.Count);
         foreach (var msg in list)
@@ -182,10 +263,29 @@ public static class ContextWindowFilter
                             $"file was written or patched later this session; " +
                             $"call read_file again if current content is needed]";
                     }
-                    else if (s.Length > maxChars)
+                    else
                     {
-                        truncated = s[..maxChars] +
-                            $"\n[...truncated — {s.Length - maxChars:N0} chars omitted to reduce context size...]";
+                        // Resolve the per-tool limit: check overrides first, then fall back to maxChars.
+                        // A zero override value disables truncation for that tool entirely.
+                        int limit = maxChars;
+                        if (overrides is { Count: > 0 } &&
+                            callToolNames.TryGetValue(fr.CallId ?? string.Empty, out var toolName))
+                        {
+                            foreach (var kv in overrides)
+                            {
+                                if (string.Equals(kv.Key, toolName, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    limit = kv.Value;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (limit > 0 && s.Length > limit)
+                        {
+                            truncated = s[..limit] +
+                                $"\n[...truncated — {s.Length - limit:N0} chars omitted to reduce context size...]";
+                        }
                     }
 
                     if (truncated is not null)
@@ -342,28 +442,68 @@ public static class ContextWindowFilter
         return result;
     }
 
-    // Maximum number of characters to replay from a single non-summary assistant message.
+    // Prefixes that unambiguously identify a ChatRole.User correction injected by
+    // CorrectionEngine, routing strategies, or the orchestrator's verifier hook.
+    private static readonly string[] CorrectionPrefixes =
+    [
+        "RETRY ",
+        "NO TOOL CALLS",
+        "CRITICAL:",
+        "APPROVED rejected:",
+        "WRONG KEYWORD:",
+        "JSON block correct",
+        "BUILD FAILURE:",
+        "STAGNATION (",
+        "STUCK ",
+        "HALLUCINATION:",
+        "PERSISTENT BUILD FAILURE",
+        "VERIFICATION FINDING",
+        "Files written this turn",
+        "No handoff keyword",
+        "EVIDENCE INCONSISTENCY",   // ConflictingEvidence (KeywordSelectionStrategy)
+        "EVIDENCE AUDIT REQUIRED",  // ConflictingEvidence (StateMachineSelectionStrategy)
+        "MISSING ARTIFACT",         // MissingEvidence (both strategies)
+    ];
+
+    /// <summary>
+    /// Returns <c>true</c> when <paramref name="message"/> is a correction injected by
+    /// <see cref="fuseraft.Orchestration.Workflow.CorrectionEngine"/>, a routing strategy,
+    /// or the orchestrator's verifier hook. Used to pin corrections so they survive
+    /// <see cref="ContextWindowConfig.MaxTailMessages"/> trimming, and to re-inject them
+    /// into assembled agent contexts.
+    /// </summary>
+    public static bool IsCorrectionMessage(ChatMessage message)
+    {
+        if (message.Role != ChatRole.User) return false;
+        var text = message.Text ?? string.Empty;
+        if (text.Contains("[fuseraft:blocked", StringComparison.Ordinal)) return true;
+        foreach (var prefix in CorrectionPrefixes)
+            if (text.StartsWith(prefix, StringComparison.Ordinal)) return true;
+        return false;
+    }
+
+    // Global default applied during checkpoint-resume replay when no per-agent limit is set.
     // Agents sometimes produce verbose stream-of-consciousness reasoning text (3–5k output
     // tokens). When that text is replayed verbatim in every subsequent turn it causes
     // compaction summaries to grow each cycle and in-turn input tokens to balloon (450k+).
     // Compaction summaries (IsCompactionSummary) are already compact and are never truncated.
-    private const int MaxReplayChars = 2_000;
+    internal const int DefaultMaxReplayChars = 2_000;
 
     /// <summary>
     /// Returns the content string to replay for <paramref name="message"/> into the next
     /// <c>StreamAsync</c> call's history. Verbose non-summary assistant messages are
-    /// truncated at <see cref="MaxReplayChars"/> to prevent compounding context growth.
+    /// truncated at <paramref name="maxReplayChars"/> to prevent compounding context growth.
     /// </summary>
-    public static string TruncateReplayContent(AgentMessage message)
+    public static string TruncateReplayContent(AgentMessage message, int maxReplayChars = DefaultMaxReplayChars)
     {
         var content = message.Content ?? string.Empty;
 
         if (message.IsCompactionSummary
             || message.Role != "assistant"
-            || content.Length <= MaxReplayChars)
+            || content.Length <= maxReplayChars)
             return content;
 
-        return content[..MaxReplayChars] +
-               $"\n[...truncated — {content.Length - MaxReplayChars:N0} chars omitted to reduce context size...]";
+        return content[..maxReplayChars] +
+               $"\n[...truncated — {content.Length - maxReplayChars:N0} chars omitted to reduce context size...]";
     }
 }

@@ -15,13 +15,12 @@ Security:
 
 ### What is checked
 
-| Plugin | Argument | Check type |
-|--------|----------|-----------|
-| `FileSystem` | `path` | Hard deny if resolved path is outside sandbox |
-| `FileSystem` | `directory` | Hard deny if resolved path is outside sandbox |
-| `Shell` | `workingDirectory` | Hard deny if resolved path is outside sandbox |
-| `Shell` | `command` | Best-effort scan for absolute paths escaping sandbox |
-| `Shell` | `script` | Best-effort scan for absolute paths escaping sandbox |
+| Plugin | Functions / Argument | Check type |
+|--------|----------------------|-----------|
+| `FileSystem` | `read_file`, `write_file`, `delete_file`, `list_files` — `path` / `directory` | Hard deny if resolved path is outside sandbox |
+| `FileSystem` | `patch_file`, `create_directory`, `delete_directory`, `set_permissions`, `copy_file`, `move_file` | Hard deny if resolved path is outside sandbox (always enforced, regardless of whether `FileSystemPermissions` globs are configured) |
+| `Shell` | `shell_run`, `shell_run_script` — `workingDirectory` | Hard deny if resolved path is outside sandbox |
+| `Shell` | `shell_run`, `shell_run_script` — `command` / `script` | Best-effort scan for absolute paths escaping sandbox |
 
 ### Path resolution
 
