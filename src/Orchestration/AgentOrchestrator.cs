@@ -29,7 +29,8 @@ public sealed class AgentOrchestrator(
     EventEmitter? eventEmitter = null,
     GovernanceKernel? governanceKernel = null,
     fuseraft.Infrastructure.MemoryManager? memoryManager = null,
-    ContextAssembler? contextAssembler = null) : IOrchestrator
+    ContextAssembler? contextAssembler = null,
+    DependencyPlanner? dependencyPlanner = null) : IOrchestrator
 {
     // IOrchestrator
 
@@ -426,6 +427,26 @@ public sealed class AgentOrchestrator(
             int postSelectCount = history.Count;
             if (agent is null) break;
 
+            // Prerequisite enforcement: if DependencyPlanner is active and the selected agent
+            // has unmet Requires tokens, inject a blocker message into history so the selector
+            // knows to route elsewhere, then skip this turn.
+            if (dependencyPlanner is { HasDependencies: true } &&
+                !dependencyPlanner.CanExecute(agent.Name ?? string.Empty))
+            {
+                var unmet = dependencyPlanner.GetUnmetRequirements(agent.Name ?? string.Empty);
+                var blockerText =
+                    $"[DependencyPlanner] Agent '{agent.Name}' is blocked — waiting for prerequisites: " +
+                    string.Join(", ", unmet.Select(t => $"'{t}'")) + ". " +
+                    "Route to an agent that can produce these tokens first.";
+
+                logger.LogInformation(
+                    "[Orchestrator] Prerequisite block: agent '{Agent}' waiting for [{Tokens}].",
+                    agent.Name, string.Join(", ", unmet));
+
+                history.Add(new ChatMessage(ChatRole.User, blockerText));
+                continue;
+            }
+
             logger.LogDebug(
                 "[Orchestrator] Turn {Turn}: selected agent '{Agent}' (Name property='{NameProp}') | history={HistCount} msgs",
                 turn, agent.Name, agent.Name, history.Count);
@@ -548,6 +569,9 @@ public sealed class AgentOrchestrator(
                 Usage     = ExtractUsage(response),
                 ToolCalls = ExtractToolCalls(response.Messages, agent.Name ?? "Unknown")
             };
+
+            // Fulfill this agent's produced tokens now that its turn is complete.
+            dependencyPlanner?.Fulfill(agent.Name ?? string.Empty);
 
             cumulativeTokens += agentMessage.Usage?.TotalTokens ?? 0;
 

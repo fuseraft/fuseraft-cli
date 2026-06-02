@@ -4,6 +4,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
+using fuseraft.Infrastructure;
 
 namespace fuseraft.Orchestration.Validation;
 
@@ -31,7 +32,8 @@ public sealed class RequireShellPassValidator(
     string? requiredCommandPattern = null,
     string? changeLogPath = null,
     bool requireCurrentTurn = false,
-    ILogger<RequireShellPassValidator>? logger = null) : IRoutingValidator
+    ILogger<RequireShellPassValidator>? logger = null,
+    ProvenanceRegistry? provenanceRegistry = null) : IRoutingValidator
 {
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -49,7 +51,7 @@ public sealed class RequireShellPassValidator(
         //   - hitBoundary = true → a user message was reached before finding a shell pass,
         //                          meaning the current turn definitely had no shell run.
         var (shellPass, hitBoundary) = ScanHistory(history);
-        if (shellPass) return RoutingValidationResult.Pass();
+        if (shellPass) return await PassWithClaimAsync("Shell command completed successfully (current turn)", cancellationToken);
 
         // When requireCurrentTurn is true (typically used for termination validators) and
         // a user boundary was found, the current turn had no shell run — do not consult
@@ -70,7 +72,7 @@ public sealed class RequireShellPassValidator(
                 "  2. Emit the handoff keyword in the same response.");
         }
 
-        return RoutingValidationResult.Pass();
+        return await PassWithClaimAsync("Shell command completed successfully (change log)", cancellationToken);
     }
 
     // Change-log check — reads the most recent entry for the active session and checks
@@ -105,6 +107,22 @@ public sealed class RequireShellPassValidator(
             logger?.LogWarning(ex, "RequireShellPassValidator: failed to read change log at '{Path}' — treating as no shell pass.", logPath);
             return false;
         }
+    }
+
+    // Emits a ClaimRecord to ProvenanceRegistry (if wired) and returns Pass().
+    private async Task<RoutingValidationResult> PassWithClaimAsync(string claimText, CancellationToken ct)
+    {
+        if (provenanceRegistry is not null)
+        {
+            var record = new ClaimRecord
+            {
+                Claim   = claimText,
+                Support = [EvidenceClass.ExitCode],
+            };
+            try { await provenanceRegistry.RecordAsync(record, ct); }
+            catch { /* best-effort */ }
+        }
+        return RoutingValidationResult.Pass();
     }
 
     // History scan — returns (shellPass, hitBoundary).

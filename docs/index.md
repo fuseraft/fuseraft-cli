@@ -17,6 +17,7 @@ fuseraft-cli is actively maintained and in production use. New features ship reg
 - Auto-curates reusable skills from completed sessions and injects relevant ones at session start via a SQLite FTS5 index
 - Schedules recurring sessions via cron expressions (`fuseraft schedule add/list/run`)
 - Rotates API keys automatically on 429 rate-limit responses when a key pool is configured
+- Accumulates durable cross-session knowledge: architecture decisions, repository graph, provenance claims, repository memory patterns, and long-horizon objectives — all queryable by agents via the adaptive context broker
 
 ## Guides
 
@@ -39,6 +40,7 @@ fuseraft-cli is actively maintained and in production use. New features ship reg
 | [Context Management](context-management.md) | How fuseraft manages context across a long session |
 | [Context Store](context-store.md) | Importing reference material for agents |
 | [Skills](skills.md) | Portable skill packages, skill curation, and the cross-session skill index |
+| [Knowledge Layer](knowledge.md) | ADR registry, repository graph, provenance tracking, repository memory, objectives, context broker, and lifecycle GC |
 | [Examples](examples.md) | Ready-to-use config examples |
 
 ## VS Code Extension
