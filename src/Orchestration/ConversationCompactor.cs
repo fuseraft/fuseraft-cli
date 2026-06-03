@@ -29,7 +29,8 @@ public sealed class ConversationCompactor(
     string? eventsLogPath = null,
     EvidenceStore? evidenceStore = null,
     fuseraft.Infrastructure.ObjectiveManager? objectiveManager = null,
-    fuseraft.Infrastructure.KnowledgeSnapshotEnricher? knowledgeEnricher = null)
+    fuseraft.Infrastructure.KnowledgeSnapshotEnricher? knowledgeEnricher = null,
+    string? readCachePath = null)
 {
     // Tracks savings ratios from the last AntiThrashWindow compactions so we can detect
     // conversations that are thrashing (repeatedly compacting but saving very little).
@@ -160,10 +161,13 @@ public sealed class ConversationCompactor(
 
         var reasoningExcerpts = await ReadReasoningForRangeAsync(
             toCompact[0].TurnIndex, toCompact[^1].TurnIndex);
-        var reasoningBlock  = BuildReasoningBlock(reasoningExcerpts);
-        var symbolBlock     = await BuildSymbolGraphBlockAsync(cancellationToken);
-        var objectiveBlock  = await BuildObjectiveBlockAsync(cancellationToken);
-        var prefixBlock     = CombineBlocks(CombineBlocks(symbolBlock, objectiveBlock), reasoningBlock);
+        var reasoningBlock    = BuildReasoningBlock(reasoningExcerpts);
+        var symbolBlock       = await BuildSymbolGraphBlockAsync(cancellationToken);
+        var objectiveBlock    = await BuildObjectiveBlockAsync(cancellationToken);
+        var explorationBlock  = await BuildExplorationBlockAsync(cancellationToken);
+        var prefixBlock       = CombineBlocks(
+                                    CombineBlocks(CombineBlocks(symbolBlock, objectiveBlock), reasoningBlock),
+                                    explorationBlock);
 
         // Intent mode: reconstruct from the intent log — fully deterministic, no LLM call.
         // When the intent log is unavailable, record a visible fallback notice so agents
@@ -584,7 +588,10 @@ public sealed class ConversationCompactor(
         "RESUMPTION NOTE: History compacted. Before acting: " +
         $"(1) read_file {FuseraftPaths.LocalBrief}, " +
         "(2) changes_read_latest to confirm what is already done, " +
-        "(3) do not redo work changes.json confirms is complete.";
+        "(3) if an EXPLORATION HISTORY block appears above, use it — " +
+        "those files were already investigated; jump directly to the candidate locations listed, " +
+        "do not re-read files from scratch, " +
+        "(4) do not redo work changes.json confirms is complete.";
 
     private string FormatSummaryContent(int firstTurn, int lastTurn, string summaryText, string prefixBlock = "")
     {
@@ -755,6 +762,171 @@ public sealed class ConversationCompactor(
                 "Compaction: failed to read change log for symbol graph at '{Path}'.", changeLogPath);
             return [];
         }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Exploration block — derived automatically from observed tool-call behavior.
+    // No model participation required: the framework already knows which files were
+    // read, grepped, and searched. This survives compaction even when no code was
+    // written, preserving investigation history that lossless reconstruction drops.
+    // ---------------------------------------------------------------------------
+
+    private async Task<string> BuildExplorationBlockAsync(CancellationToken ct)
+    {
+        if (!config.IncludeExploration) return string.Empty;
+        if (eventsLogPath is null || _sessionId is not { Length: > 0 }) return string.Empty;
+
+        var (fileReads, fileGreps) = await ParseToolCallEventsAsync();
+        var shellPatterns          = await ExtractShellGrepPatternsAsync(ct);
+        var fileSizes              = ReadFileSizesFromCache();
+
+        if (fileReads.Count == 0 && fileGreps.Count == 0 && shellPatterns.Count == 0)
+            return string.Empty;
+
+        return BuildExplorationText(fileReads, fileGreps, shellPatterns, fileSizes);
+    }
+
+    // Scans events.jsonl for tool_call events in this session and counts read_file / grep_file calls.
+    private async Task<(Dictionary<string, int> Reads, HashSet<string> Greps)> ParseToolCallEventsAsync()
+    {
+        var reads = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var greps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            if (!File.Exists(eventsLogPath)) return (reads, greps);
+            foreach (var line in await File.ReadAllLinesAsync(eventsLogPath!))
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                try
+                {
+                    using var doc  = JsonDocument.Parse(line);
+                    var root = doc.RootElement;
+                    if (!root.TryGetProperty("session", out var ses) || ses.GetString() != _sessionId) continue;
+                    if (!root.TryGetProperty("event_type", out var et) || et.GetString() != "tool_call") continue;
+                    if (!root.TryGetProperty("payload", out var payload)) continue;
+                    if (!payload.TryGetProperty("tool", out var toolEl)) continue;
+
+                    var tool = toolEl.GetString() ?? string.Empty;
+                    var arg  = payload.TryGetProperty("arg", out var argEl) ? argEl.GetString() ?? string.Empty : string.Empty;
+                    if (string.IsNullOrWhiteSpace(arg)) continue;
+
+                    if (tool.Equals("read_file", StringComparison.OrdinalIgnoreCase))
+                        reads[arg] = reads.TryGetValue(arg, out var c) ? c + 1 : 1;
+                    else if (tool.Equals("grep_file", StringComparison.OrdinalIgnoreCase))
+                        greps.Add(arg);
+                }
+                catch { /* skip malformed lines */ }
+            }
+        }
+        catch { /* best effort */ }
+        return (reads, greps);
+    }
+
+    // Reads shell_run intent entries to extract grep/find command patterns performed this session.
+    private async Task<List<string>> ExtractShellGrepPatternsAsync(CancellationToken ct)
+    {
+        if (intentLog is null) return [];
+        try
+        {
+            var intents  = await intentLog.GetAllIntentsAsync(ct);
+            var patterns = new List<string>();
+            foreach (var intent in intents)
+            {
+                if (!string.Equals(intent.Operation.FunctionName, "shell_run", StringComparison.OrdinalIgnoreCase)) continue;
+                var cmd = intent.Operation.ArgsSummary?.TryGetValue("command", out var v) == true
+                    ? v?.ToString() : null;
+                if (cmd is { Length: > 0 } &&
+                    (cmd.Contains("grep", StringComparison.OrdinalIgnoreCase) ||
+                     cmd.Contains("find", StringComparison.OrdinalIgnoreCase)))
+                    patterns.Add(cmd.Length > 120 ? cmd[..120] + "…" : cmd);
+            }
+            return patterns;
+        }
+        catch { return []; }
+    }
+
+    // Reads file-size metadata from read_cache.json so the exploration block can annotate large files.
+    private Dictionary<string, long> ReadFileSizesFromCache()
+    {
+        if (readCachePath is null || !File.Exists(readCachePath)) return [];
+        try
+        {
+            using var doc  = JsonDocument.Parse(File.ReadAllText(readCachePath));
+            var sizes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            foreach (var prop in doc.RootElement.EnumerateObject())
+                if (prop.Value.TryGetProperty("size", out var sz) && sz.TryGetInt64(out var bytes))
+                    sizes[prop.Name] = bytes;
+            return sizes;
+        }
+        catch { return []; }
+    }
+
+    private static string BuildExplorationText(
+        Dictionary<string, int>     fileReads,
+        HashSet<string>             fileGreps,
+        List<string>                shellPatterns,
+        Dictionary<string, long>    fileSizes)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("[EXPLORATION HISTORY — investigation performed before compaction]");
+        sb.AppendLine();
+
+        if (fileReads.Count > 0)
+        {
+            sb.AppendLine("Files read (read_file calls, most-accessed first):");
+            foreach (var (path, count) in fileReads.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key))
+            {
+                var shortPath = path.Contains('/') || path.Contains('\\')
+                    ? path[(path.LastIndexOfAny(['/', '\\']) + 1)..]
+                    : path;
+                var display   = path.Length > 60 ? "…" + path[^57..] : path;
+                var sizeNote  = fileSizes.TryGetValue(path, out var bytes) && bytes > 0
+                    ? $"  ({bytes / 1024.0:F0} KB)" : string.Empty;
+                sb.AppendLine($"  {display,-62} ×{count}{sizeNote}");
+            }
+            sb.AppendLine();
+        }
+
+        // Grepped files (deduped with reads: only list files NOT already in the reads list)
+        var grepsOnly = fileGreps.Where(f => !fileReads.ContainsKey(f)).ToList();
+        if (grepsOnly.Count > 0)
+        {
+            sb.AppendLine("Files grepped (grep_file calls, not already listed above):");
+            foreach (var path in grepsOnly.OrderBy(p => p))
+            {
+                var display = path.Length > 60 ? "…" + path[^57..] : path;
+                sb.AppendLine($"  {display}");
+            }
+            sb.AppendLine();
+        }
+
+        if (shellPatterns.Count > 0)
+        {
+            sb.AppendLine("Shell searches performed:");
+            foreach (var cmd in shellPatterns)
+                sb.AppendLine($"  {cmd}");
+            sb.AppendLine();
+        }
+
+        // Inferred candidates: files read ≥3 times (excluding artifact files)
+        var candidates = fileReads
+            .Where(kv => kv.Value >= 3 && !kv.Key.Contains(".fuseraft"))
+            .OrderByDescending(kv => kv.Value)
+            .ToList();
+        if (candidates.Count > 0)
+        {
+            sb.AppendLine("Inferred candidate locations (read ≥3 times — likely relevant):");
+            foreach (var (path, count) in candidates)
+            {
+                var display = path.Length > 60 ? "…" + path[^57..] : path;
+                sb.AppendLine($"  {display}  (read {count}×)");
+            }
+            sb.AppendLine();
+        }
+
+        sb.Append("Do not re-read these files from scratch. " +
+                  "Jump directly to specific regions, or proceed to implementation.");
+        return sb.ToString().TrimEnd();
     }
 
     private const string SummaryPrompt = """

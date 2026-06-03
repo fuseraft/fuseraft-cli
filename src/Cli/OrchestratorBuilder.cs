@@ -773,7 +773,7 @@ public static class OrchestratorBuilder
                 chatClientFactory.Create(summaryModel), compactionConfig,
                 loggerFactory.CreateLogger<ConversationCompactor>(),
                 resumptionNote, changeLogPath, intentLog, config.Events?.Path, evidenceStore,
-                objectiveManager, snapshotEnricher);
+                objectiveManager, snapshotEnricher, readCachePath);
 
             if ((compactionConfig.Mode ?? string.Empty).Equals("intent", StringComparison.OrdinalIgnoreCase)
                 && intentLog is null)

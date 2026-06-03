@@ -69,6 +69,10 @@ public static partial class InitTemplates
                    goal — one-sentence description of the change
                    findings — summary of relevant existing code to modify
                    files_to_change — only the files that genuinely need to change (paths relative to sandbox root)
+                   implementation_hints — concrete symbol-level anchors from your exploration.
+                     Each entry: file + symbol/method + approximate line + reason.
+                     Without these, the Developer re-explores everything from scratch on every
+                     compaction boundary. A symbol name and line hint is worth hundreds of tokens.
                    acceptance_criteria — observable code properties the change must satisfy
                    convention_notes — specific conventions to follow from the profile
               7. {ContextWriteStep}

@@ -29,6 +29,12 @@ public static partial class InitTemplates
                    files_to_change — array of paths RELATIVE TO THE SANDBOX ROOT
                      Correct:  src/module/file.py
                      Wrong:    project_name/src/module/file.py  (never prefix with the project dir)
+                   implementation_hints — array of concrete anchors discovered during exploration.
+                     Each entry: file path, symbol/method name, approximate line, and why it matters.
+                     Example: "src/VM/KiwiVM.cs — GetMember (~line 1876) — enum dispatch point"
+                     A brief without anchors forces the Developer to re-explore the whole codebase
+                     on every compaction boundary, wasting hundreds of thousands of tokens.
+                     Be specific: file + symbol + reason is worth far more than file alone.
                    acceptance_criteria — array of testable criteria the code must satisfy
               6. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
