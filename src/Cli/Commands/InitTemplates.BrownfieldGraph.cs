@@ -58,8 +58,16 @@ public static partial class InitTemplates
             Instructions: |
               You are a software architect working on an existing codebase. Your job is to:
               1. {ContextReadStep}
-              2. Check if {FuseraftPaths.LocalBrief} already exists. If it does, read it — if it
-                 still covers the current task, call handoff(route_keyword: "HANDOFF TO DEVELOPER")
+              2. Check for a REPLAN signal: read changes_read_latest and look for failed
+                 commands or "REPLAN REQUIRED" in the session context.
+                 IF a failure signal is present:
+                   - Read any available test output or reviewer notes in the handoff context.
+                   - Update {FuseraftPaths.LocalBrief}: revise implementation_hints to target
+                     the root cause, add a failure_analysis field describing what went wrong
+                     and why the previous approach failed.
+                   - Do NOT re-handoff with the same brief — the Developer already tried it.
+                 IF no failure signal and {FuseraftPaths.LocalBrief} already exists and still
+                 covers the current task: call handoff(route_keyword: "HANDOFF TO DEVELOPER")
                  immediately without rewriting it.
               3. Read {FuseraftPaths.LocalBrownfieldBrief} to understand the codebase shape and risks.
               4. Read {FuseraftPaths.LocalConventions} to understand the project's conventions — follow them exactly.
@@ -73,6 +81,9 @@ public static partial class InitTemplates
                      Each entry: file + symbol/method + approximate line + reason.
                      Without these, the Developer re-explores everything from scratch on every
                      compaction boundary. A symbol name and line hint is worth hundreds of tokens.
+                   verify_command — the exact shell command to verify runtime correctness, not
+                     just compilation. The Developer runs this before committing. Example:
+                     "dotnet run --project src/app.csproj -- tests/test.kiwi"
                    acceptance_criteria — observable code properties the change must satisfy
                    convention_notes — specific conventions to follow from the profile
               7. {ContextWriteStep}
@@ -95,13 +106,17 @@ public static partial class InitTemplates
             Instructions: |
               You are a developer working carefully inside an existing codebase. Your job is to:
               1. {ContextReadStep}
-              2. Read {FuseraftPaths.LocalBrief} — implement ONLY the files listed in files_to_change.
+              2. Read {FuseraftPaths.LocalBrief}. If the handoff context includes reviewer notes
+                 or a failure summary, read it before writing any code — root-cause first,
+                 patch second. Read the source of any failing call before patching it.
               3. Read {FuseraftPaths.LocalConventions} — follow the project's naming, import, and style conventions exactly.
               4. Before modifying an existing file: {LargeFileProtocolDeveloper} Never overwrite blindly.
               5. Use patch_file for surgical edits to existing files; use write_file only for new files.
-              6. Run the build command from the convention profile to confirm nothing is broken.
-              7. Commit with git_add and git_commit.
-              8. {ContextWriteStep}
+              6. Run the build command from the convention profile to confirm compilation.
+              7. Run verify_command from the brief to confirm runtime correctness. This must
+                 exit 0 before you proceed. Do NOT commit until verify_command passes.
+              8. Commit with git_add and git_commit.
+              9. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO REVIEWER").
               If the brief is fundamentally unclear or the approach is wrong, call handoff(route_keyword: "REPLAN REQUIRED").
             Model:
