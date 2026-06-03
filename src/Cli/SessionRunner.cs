@@ -598,6 +598,12 @@ public sealed class SessionRunner(
             return checkpoint;
         }
 
+        if (checkpoint.Messages.Count < 2)
+        {
+            AnsiConsole.MarkupLine("[yellow]  Compaction skipped: fewer than 2 messages in history — nothing to compact.[/]");
+            return checkpoint;
+        }
+
         var (summary, retained) = await compactor.CompactAsync(task, checkpoint.Messages, cancellationToken, snapshotter);
 
         if (modifiedFilesNote.Length > 0)
