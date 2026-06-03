@@ -143,7 +143,11 @@ public sealed class ConversationCompactor(
         IContextSnapshotter? snapshotter = null)
     {
         if (messages.Count < 2)
-            throw new ArgumentException("Cannot compact a message list with fewer than 2 messages.", nameof(messages));
+        {
+            logger.LogWarning("Compaction skipped: message list has {Count} message(s) — nothing to compact.", messages.Count);
+            var passthrough = messages.Count == 1 ? messages[0] : new AgentMessage { Role = "user", Content = "(empty session)", AgentName = "System" };
+            return (passthrough, []);
+        }
 
         var keepCount  = Math.Clamp(config.KeepRecentTurns, 1, messages.Count - 1);
         var toCompact  = messages.Take(messages.Count - keepCount).ToList();
