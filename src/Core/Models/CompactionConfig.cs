@@ -69,9 +69,11 @@ public record CompactionConfig
     /// resuming after compaction can see the WHY behind prior decisions, not just the artifacts.
     /// Reads <c>reasoning</c> events from the session's events log. When the events log is
     /// absent or contains no reasoning events the block is omitted silently.
-    /// Default: <c>true</c>.
+    /// Default: <c>false</c>. Reasoning excerpts injected into the user-role compaction summary
+    /// can confuse reasoning models (grok, o-series) that interpret internal deliberation text
+    /// as user instructions. Enable only when the compaction model is known to handle it cleanly.
     /// </summary>
-    public bool IncludeReasoning { get; init; } = true;
+    public bool IncludeReasoning { get; init; } = false;
 
     /// <summary>
     /// When <c>true</c>, a symbol dependency graph derived from the session's changed files is
