@@ -758,7 +758,7 @@ public sealed class AgentFactory(
         for (int i = 0; i < list.Count; i++)
             if (list[i].Role == ChatRole.Tool) trimCandidates.Enqueue(i);
 
-        // Replace oldest tool results with a tiny placeholder until we're under the limit.
+        // Phase 1: replace oldest tool results with a tiny placeholder until under budget.
         var result = new List<ChatMessage>(list);
         const string Placeholder = "[result omitted — in-turn context trimmed]";
         while (total > maxChars && trimCandidates.Count > 0)
@@ -780,6 +780,52 @@ public sealed class AgentFactory(
             result[idx] = new ChatMessage(old.Role, trimmedContents);
             int newChars = result[idx].Contents.Sum(c => EstimateContentChars(c));
             total -= oldChars - newChars;
+        }
+
+        // Phase 2: if still over budget because individual retained results are larger than
+        // maxChars (e.g. a single read_file of a large file), truncate their content
+        // proportionally. Phase 1 cannot help when the last N messages alone exceed the budget.
+        if (total > maxChars)
+        {
+            var remainingToolIndices = new List<int>();
+            int nonToolChars = 0;
+            for (int i = 0; i < result.Count; i++)
+            {
+                if (result[i].Role == ChatRole.Tool)
+                    remainingToolIndices.Add(i);
+                else
+                    nonToolChars += result[i].Contents.Sum(c => EstimateContentChars(c));
+            }
+
+            if (remainingToolIndices.Count > 0)
+            {
+                int toolBudget    = Math.Max(maxChars - nonToolChars, 0);
+                int perResultMax  = Math.Max(toolBudget / remainingToolIndices.Count, 200);
+                const string TruncSuffix = "\n[...truncated — in-turn budget exceeded]";
+
+                foreach (int idx in remainingToolIndices)
+                {
+                    var old     = result[idx];
+                    bool changed = false;
+                    var rebuilt  = new List<AIContent>(old.Contents.Count);
+                    foreach (var content in old.Contents)
+                    {
+                        if (content is FunctionResultContent fr &&
+                            fr.Result is string s && s.Length > perResultMax)
+                        {
+                            rebuilt.Add(new FunctionResultContent(
+                                fr.CallId!, s[..perResultMax] + TruncSuffix));
+                            changed = true;
+                        }
+                        else
+                        {
+                            rebuilt.Add(content);
+                        }
+                    }
+                    if (changed)
+                        result[idx] = new ChatMessage(old.Role, rebuilt);
+                }
+            }
         }
 
         return result;

@@ -49,10 +49,13 @@ public sealed class SessionRunner(
     private readonly Dictionary<string, int> _perAgentCumulativeInputTokens = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _warnedAgents = new(StringComparer.OrdinalIgnoreCase);
 
-    // Set to true after each compaction cycle. Suppresses CutoverAt and MaxSingleTurnInputTokens
-    // enforcement for exactly one turn so a post-compaction turn can run without immediately
-    // triggering another compaction — the history is already at minimum after compaction and
-    // re-compacting before the agent makes any progress would thrash indefinitely.
+    // Set to true after each compaction cycle. Suppresses CutoverAt (cumulative) enforcement
+    // for exactly one turn so a post-compaction turn can run without immediately triggering
+    // another compaction — the history is already at minimum after compaction and re-compacting
+    // before the agent makes any progress would thrash indefinitely.
+    // MaxSingleTurnInputTokens is NOT suppressed: a single-turn explosion should always trigger
+    // compaction regardless of whether we just compacted, since the compaction summary itself
+    // may be large enough to start the next turn already over the per-turn limit.
     private bool _justCompacted;
 
     public async Task<SessionResult> RunAsync(
@@ -691,8 +694,25 @@ public sealed class SessionRunner(
             }
         }
 
-        // Post-compaction grace: skip all compaction triggers for exactly one turn.
-        // Token accumulation above still runs so budget recording stays accurate.
+        // Post-compaction grace: skip cumulative-budget compaction triggers for exactly one turn
+        // to avoid thrashing. Token accumulation above still runs so budget recording stays accurate.
+        // MaxSingleTurnInputTokens is checked first and is NOT suppressed — a single-turn explosion
+        // must always trigger compaction even on the turn immediately after compaction.
+        if (contextBudget is not null && inputToks > 0 &&
+            contextBudget.MaxSingleTurnInputTokens > 0 && inputToks > contextBudget.MaxSingleTurnInputTokens)
+        {
+            _justCompacted = false;
+            AnsiConsole.MarkupLine(
+                $"[yellow]  ⚡ {Markup.Escape(agentName)} single-turn input ({inputToks:N0}) exceeded " +
+                $"MaxSingleTurnInputTokens ({contextBudget.MaxSingleTurnInputTokens:N0}). " +
+                $"Compacting before next turn...[/]");
+            if (eventEmitter is not null)
+                await eventEmitter.EmitAsync("context_budget_cutover",
+                    agent: agentName,
+                    payload: new { input_tokens = inputToks, cutover_at = contextBudget.MaxSingleTurnInputTokens, reason = "single_turn_limit" });
+            return true;
+        }
+
         if (_justCompacted)
         {
             _justCompacted = false;
@@ -708,22 +728,6 @@ public sealed class SessionRunner(
 
         if (contextBudget is not null && inputToks > 0)
         {
-            // Per-turn ceiling: fires when a single turn's input exceeds the threshold,
-            // independently of the cumulative counter. Catches single-turn explosions
-            // that exhaust the cumulative budget in one shot.
-            if (contextBudget.MaxSingleTurnInputTokens > 0 && inputToks > contextBudget.MaxSingleTurnInputTokens)
-            {
-                AnsiConsole.MarkupLine(
-                    $"[yellow]  ⚡ {Markup.Escape(agentName)} single-turn input ({inputToks:N0}) exceeded " +
-                    $"MaxSingleTurnInputTokens ({contextBudget.MaxSingleTurnInputTokens:N0}). " +
-                    $"Compacting before next turn...[/]");
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("context_budget_cutover",
-                        agent: agentName,
-                        payload: new { input_tokens = inputToks, cutover_at = contextBudget.MaxSingleTurnInputTokens, reason = "single_turn_limit" });
-                return true;
-            }
-
             if (contextBudget.CutoverAt > 0 && cumulative >= contextBudget.CutoverAt)
             {
                 AnsiConsole.MarkupLine(
