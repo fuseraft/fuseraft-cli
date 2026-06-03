@@ -21,8 +21,16 @@ public static partial class InitTemplates
               2. Read and understand the task thoroughly.
               3. Use sub_agent_explore for broad codebase questions without filling your context
                  with raw file contents. For any direct file reads: {LargeFileProtocol}
-              4. Check if {FuseraftPaths.LocalBrief} already exists. If it does, read it — if it
-                 still covers the current task, call handoff(route_keyword: "HANDOFF TO DEVELOPER")
+              4. Check for a REPLAN signal: read changes_read_latest and look for failed
+                 commands, test failures, or "REPLAN REQUIRED" in the session context.
+                 IF a failure signal is present:
+                   - Read the test report and recent changes to understand the specific failure.
+                   - Update {FuseraftPaths.LocalBrief}: revise implementation_hints to target
+                     the root cause, add a failure_analysis field describing what went wrong
+                     and why the previous approach failed.
+                   - Do NOT re-handoff with the same brief — the Developer already tried it.
+                 IF no failure signal and {FuseraftPaths.LocalBrief} already exists and still
+                 covers the current task: call handoff(route_keyword: "HANDOFF TO DEVELOPER")
                  immediately without rewriting it.
               5. Write a brief to {FuseraftPaths.LocalBrief} with fields:
                    goal — one-sentence description of what to build
@@ -35,6 +43,13 @@ public static partial class InitTemplates
                      A brief without anchors forces the Developer to re-explore the whole codebase
                      on every compaction boundary, wasting hundreds of thousands of tokens.
                      Be specific: file + symbol + reason is worth far more than file alone.
+                   verify_command — the exact shell command to run to verify runtime correctness.
+                     This must execute the actual code, not just compile it. Examples:
+                       "dotnet run --project src/app.csproj -- tests/test.kiwi"
+                       "python -m pytest tests/test_feature.py"
+                       "cargo test -- feature_tests"
+                     The Developer runs this before committing; the ImplementationComplete
+                     contract requires it to succeed. Wrong: "dotnet build" (compile only).
                    acceptance_criteria — array of testable criteria the code must satisfy
               6. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
@@ -56,13 +71,22 @@ public static partial class InitTemplates
             Instructions: |
               You are a senior software engineer. Your job is to:
               1. {ContextReadStep}
-              2. Read {FuseraftPaths.LocalBrief} — implement every file in files_to_change.
+              2. Read {FuseraftPaths.LocalBrief}. If the handoff context includes a test report
+                 or failure summary, read it before writing any code — understand what specifically
+                 failed. Root-cause first, patch second. Read the source of the failing call
+                 before patching; a patch without understanding the failure will fail again.
+              3. Implement every file in files_to_change.
                  Use patch_file for targeted edits to existing files; use write_file only for
                  new files. All paths are relative to the sandbox root — never double-nest the
                  project directory name.
-              3. Run a build or test command with shell_run to confirm correctness.
-              4. Commit with git_add and git_commit.
-              5. {ContextWriteStep}
+              4. Build with shell_run to confirm compilation succeeds.
+              5. Run verify_command from the brief with shell_run. This is the authoritative
+                 correctness check — it must exit 0 before you proceed. Do NOT commit until
+                 verify_command passes. If it fails, diagnose the runtime error (read the
+                 relevant source files to understand the failure), fix, and re-run. Do not
+                 commit known-broken code.
+              6. Commit with git_add and git_commit.
+              7. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO TESTER").
               If the brief is missing or contradictory: handoff(route_keyword: "REPLAN REQUIRED").
             Model:
@@ -207,6 +231,8 @@ public static partial class InitTemplates
                       Field: files_to_change
                     - Type: CommandSucceeded
                       Pattern: "build|compile"
+                    - Type: CommandSucceeded
+                      PatternField: "verify_command"
 
                 - Name: TestsValid
                   Requires:
@@ -298,6 +324,10 @@ public static partial class InitTemplates
                             - Source: brief_field:test_targets
                         - To: Planning
                           Signal: "REPLAN REQUIRED"
+                          HandoffContext:
+                            - Source: session_context
+                            - Source: changes_recent
+                            - Source: file:{FuseraftPaths.LocalTestReport}
 
                     Testing:
                       Agent: Tester
@@ -314,6 +344,7 @@ public static partial class InitTemplates
                           HandoffContext:
                             - Source: session_context
                             - Source: changes_recent
+                            - Source: file:{FuseraftPaths.LocalTestReport}
 
                     Review:
                       Agent: Reviewer
