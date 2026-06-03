@@ -86,6 +86,16 @@ public record CompactionConfig
     public bool IncludeSymbolGraph { get; init; } = true;
 
     /// <summary>
+    /// When <c>true</c>, an exploration history block is prepended to the compaction summary.
+    /// The block is derived entirely from observed runtime behavior — tool calls recorded in the
+    /// session events log — with no model participation required. It lists which files were read
+    /// (with access counts), which files were grepped, and shell search patterns, allowing an
+    /// agent resuming after compaction to skip re-exploration and jump directly to implementation.
+    /// Default: <c>true</c>.
+    /// </summary>
+    public bool IncludeExploration { get; init; } = true;
+
+    /// <summary>
     /// Optional custom prompt template for LLM-mode compaction. When set, replaces the
     /// built-in structured summary prompt entirely. Use the same placeholders as the default:
     /// <c>{{$task}}</c>, <c>{{$turn_count}}</c>, <c>{{$change_log}}</c>, <c>{{$history}}</c>.
