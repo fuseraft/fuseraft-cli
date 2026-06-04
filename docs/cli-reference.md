@@ -1128,9 +1128,9 @@ Architecture drift detection — check that source files respect the layer bound
 
 ### `fuseraft arch check`
 
-Parse `using` directives in all `.cs` files under the project root and compare them against the layer manifest. Exits `0` when no violations are found, `1` when at least one violation is detected.
+Scan import statements in all source files under the project root and compare them against the layer manifest. Exits `0` when no violations are found, `1` when at least one violation is detected.
 
-`fuseraft init` writes a default `.fuseraft/architecture.yaml` on first run. Edit its `Layers` and `MayDependOn` lists to match your project's actual layer structure.
+`fuseraft init` writes a default `.fuseraft/architecture.yaml` on first run. Edit its `Language`, `Layers`, and `MayDependOn` lists to match your project.
 
 ```
 fuseraft arch check [options]
@@ -1161,11 +1161,128 @@ fuseraft arch check --dir src/
 When violations are found the command prints a table:
 
 ```
-File                      Line  Source Layer    Target Layer  Namespace
-src/Cli/FooCommand.cs       12  Cli             Core          fuseraft.Infrastructure.Bar
+File                        Line  Source Layer    Target Layer  Namespace
+src/cli/commands/run.py       8   Cli             Core          myapp.infrastructure.db
 ```
 
-Each row identifies the offending file, the line number of the illegal `using` directive, the layer that owns the source file, the layer that owns the imported namespace, and the namespace itself.
+Each row identifies the offending file, the line number of the illegal import, the layer that owns the source file, the layer that owns the imported namespace, and the namespace itself.
+
+---
+
+### Manifest format
+
+The manifest is a YAML file with a top-level `Language` field and a `Layers` list.
+
+**`Language`** — selects the file glob and import-statement parser. Supported values:
+
+| Value | Files scanned | Import syntax detected |
+|-------|--------------|------------------------|
+| `csharp` (default) | `*.cs` | `using Foo.Bar;` |
+| `python` | `*.py` | `import foo.bar` · `from foo.bar import …` |
+| `java` | `*.java` | `import com.example.Foo;` · `import static …` |
+| `typescript` | `*.ts`, `*.tsx` | `import … from '…'` · `require('…')` |
+| `javascript` | `*.js`, `*.jsx` | `import … from '…'` · `require('…')` |
+| `go` | `*.go` | `import "pkg/path"` · import block lines |
+| `rust` | `*.rs` | `use foo::bar::Baz;` |
+| `ruby` | `*.rb` | `require 'foo/bar'` |
+
+Unknown values fall back to `csharp`. Relative imports (e.g. `./foo`, `../bar`) are automatically ignored for TypeScript, JavaScript, and Ruby.
+
+**`Layers`** — each entry has:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `Name` | yes | Display name used in violation reports. |
+| `Paths` | yes | Source path prefixes owned by this layer, relative to project root. |
+| `Namespaces` | no | Module/namespace prefixes owned by this layer. For `csharp`, defaults to `fuseraft.<Name>` when omitted. For all other languages, must be declared explicitly. |
+| `MayDependOn` | no | Names of other layers this layer may import from. Omit or leave empty to forbid all cross-layer imports. |
+
+**`Namespaces` format by language:**
+
+| Language | Example |
+|----------|---------|
+| `python` | `myapp.core` |
+| `java` | `com.example.core` |
+| `typescript` / `javascript` | `src/core` or `@myorg/core` |
+| `go` | `github.com/myorg/myrepo/core` |
+| `rust` | `myapp::core` |
+| `ruby` | `myapp/core` |
+
+**Example — Python project:**
+
+```yaml
+Language: python
+
+Layers:
+  - Name: Domain
+    Paths:
+      - myapp/domain/
+    Namespaces:
+      - myapp.domain
+    MayDependOn: []
+
+  - Name: Infrastructure
+    Paths:
+      - myapp/infra/
+    Namespaces:
+      - myapp.infra
+    MayDependOn:
+      - Domain
+
+  - Name: Api
+    Paths:
+      - myapp/api/
+    Namespaces:
+      - myapp.api
+    MayDependOn:
+      - Domain
+      - Infrastructure
+```
+
+**Example — Go project:**
+
+```yaml
+Language: go
+
+Layers:
+  - Name: Domain
+    Paths:
+      - internal/domain/
+    Namespaces:
+      - github.com/myorg/myrepo/internal/domain
+    MayDependOn: []
+
+  - Name: Repository
+    Paths:
+      - internal/repository/
+    Namespaces:
+      - github.com/myorg/myrepo/internal/repository
+    MayDependOn:
+      - Domain
+
+  - Name: Handler
+    Paths:
+      - internal/handler/
+    Namespaces:
+      - github.com/myorg/myrepo/internal/handler
+    MayDependOn:
+      - Domain
+      - Repository
+```
+
+**Quick start with the REPL:**
+
+```
+fuseraft repl
+```
+
+Then paste this prompt to auto-populate the manifest for your project:
+
+```
+Read the source tree and populate .fuseraft/architecture.yaml with the actual
+layers, source paths, namespace prefixes, and MayDependOn rules for this project.
+Set Language to the project's primary language. Use write_file to save the result.
+```
 
 ---
 
