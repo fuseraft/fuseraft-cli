@@ -54,7 +54,9 @@ public sealed class GraphOrchestrator(
     ChangeTracker? changeTracker = null,
     EventEmitter? eventEmitter = null,
     GovernanceKernel? governanceKernel = null,
-    IHumanApprovalService? humanApprovalService = null) : IOrchestrator
+    IHumanApprovalService? humanApprovalService = null,
+    fuseraft.Core.Interfaces.IContextAssemblyPipeline? contextPipeline = null,
+    fuseraft.Infrastructure.RepositoryKnowledgeStore? repositoryKnowledgeStore = null) : IOrchestrator
 {
     // Default consecutive-failure limit per node. CorrectionEngine uses this same value
     // in its RETRY n/4 messages, so both stay in sync via this constant.
@@ -68,6 +70,8 @@ public sealed class GraphOrchestrator(
 
     private string _sessionId = string.Empty;
     private string? _resumeNodeId;
+    // Captured from StreamAsync for use in per-node executor helpers.
+    private string _task = string.Empty;
     private fuseraft.Core.Models.TaskModel? _structuredTask;
 
     // Computed once per StreamAsync call from the graph config.
@@ -124,6 +128,7 @@ public sealed class GraphOrchestrator(
     {
         _sessionId = sessionId;
         agentFactory.SetSessionId(sessionId);
+        contextPipeline?.SetSessionId(sessionId);
     }
 
     /// <inheritdoc/>
@@ -210,6 +215,7 @@ public sealed class GraphOrchestrator(
         IReadOnlyList<AgentMessage>? priorHistory = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        _task = task;
         var graphCfg = config.Selection.Graph
             ?? throw new InvalidOperationException(
                 "Selection.Graph must be configured when Selection.Type is 'graph'.");
@@ -677,15 +683,32 @@ public sealed class GraphOrchestrator(
                 throw new ValidatorStuckException(agentName, "total-turns", totalTurns,
                     $"Node '{nodeId}' ({agentName}) exceeded {maxTotalTurns} total turns without completing.");
 
-            // Apply the agent's ContextWindow filter.
-            var filtered = ContextWindowFilter.Apply(ctx.History, agentCfg.ContextWindow);
-
-            // Emit a soft context-cap warning before the turn if approaching the cap.
-            await EmitContextCapWarningAsync(agentName, agentCfg, filtered, ctx);
-
-            IEnumerable<ChatMessage> context = !string.IsNullOrWhiteSpace(instructions)
-                ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
-                : filtered;
+            // Assemble context through the unified pipeline (or legacy filter when pipeline is absent).
+            IEnumerable<ChatMessage> context;
+            if (contextPipeline is not null)
+            {
+                var assembled = await contextPipeline.AssembleAsync(
+                    new fuseraft.Core.Models.AgentExecutionRequest
+                    {
+                        AgentName     = agentName,
+                        Task          = _task,
+                        SharedHistory = ctx.History,
+                        AgentConfig   = agentCfg,
+                        SessionId     = _sessionId,
+                    }, ct);
+                context = assembled.Messages;
+                await EmitContextCapWarningAsync(agentName, agentCfg, assembled.Messages, ctx);
+                if (eventEmitter is not null)
+                    await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, ctx.TurnIndex);
+            }
+            else
+            {
+                var filtered = ContextWindowFilter.Apply(ctx.History, agentCfg.ContextWindow);
+                await EmitContextCapWarningAsync(agentName, agentCfg, filtered, ctx);
+                context = !string.IsNullOrWhiteSpace(instructions)
+                    ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
+                    : filtered;
+            }
 
             if (eventEmitter is not null)
                 await eventEmitter.EmitAsync("turn_start", agent: agentName, turn: ctx.TurnIndex);
@@ -1256,8 +1279,53 @@ public sealed class GraphOrchestrator(
             }
         }
 
+        // Persist entity-scoped findings from tool calls for future session retrieval.
+        if (repositoryKnowledgeStore is not null && !string.IsNullOrEmpty(_sessionId))
+        {
+            try
+            {
+                var observations = ObservationExtractor.Extract(
+                    (IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>)response.Messages,
+                    agentName, agentMsg.TurnIndex);
+                foreach (var obs in observations)
+                {
+                    if (string.IsNullOrWhiteSpace(obs.Entity)) continue;
+                    await repositoryKnowledgeStore.AddAsync(new fuseraft.Core.Models.RepositoryKnowledgeFinding
+                    {
+                        Entity     = obs.Entity!,
+                        Finding    = obs.Finding,
+                        Source     = _sessionId,
+                        Confidence = obs.Confidence,
+                        AgentName  = obs.AgentName,
+                        Kind       = obs.Source is "write_file" or "patch_file" or "delete_file"
+                                     ? "change" : "observation",
+                    }, CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+            catch { /* best-effort */ }
+        }
+
         return agentMsg;
     }
+
+    private static Task EmitContextAssemblyAsync(
+        EventEmitter emitter,
+        fuseraft.Core.Models.ContextAssemblyMetrics metrics,
+        int turn) =>
+        emitter.EmitAsync("context_assembly",
+            agent: metrics.AgentName,
+            turn:  turn,
+            payload: new
+            {
+                knowledge_retrieved  = metrics.KnowledgeItemsRetrieved,
+                knowledge_included   = metrics.KnowledgeItemsIncluded,
+                memory_loaded        = metrics.MemoryEntriesLoaded,
+                memory_included      = metrics.MemoryEntriesIncluded,
+                artifacts            = metrics.ArtifactsAssembled,
+                context_chars        = metrics.TotalContextChars,
+                system_prompt_chars  = metrics.SystemPromptChars,
+                assembly_ms          = (int)metrics.AssemblyDuration.TotalMilliseconds,
+            });
 
     private static async ValueTask PersistCorrectionsAsync(
         AgentContext ctx,
@@ -1315,10 +1383,29 @@ public sealed class GraphOrchestrator(
 
         try
         {
-            var filtered = ContextWindowFilter.Apply(ctx.History, recoveryCfg.ContextWindow);
-            IEnumerable<ChatMessage> context = !string.IsNullOrWhiteSpace(recoveryInstructions)
-                ? [new ChatMessage(ChatRole.System, recoveryInstructions), .. filtered]
-                : filtered;
+            IEnumerable<ChatMessage> context;
+            if (contextPipeline is not null)
+            {
+                var assembled = await contextPipeline.AssembleAsync(
+                    new fuseraft.Core.Models.AgentExecutionRequest
+                    {
+                        AgentName     = recoveryAgentName,
+                        Task          = _task,
+                        SharedHistory = ctx.History,
+                        AgentConfig   = recoveryCfg,
+                        SessionId     = _sessionId,
+                    }, ct);
+                context = assembled.Messages;
+                if (eventEmitter is not null)
+                    await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, ctx.TurnIndex);
+            }
+            else
+            {
+                var filtered = ContextWindowFilter.Apply(ctx.History, recoveryCfg.ContextWindow);
+                context = !string.IsNullOrWhiteSpace(recoveryInstructions)
+                    ? [new ChatMessage(ChatRole.System, recoveryInstructions), .. filtered]
+                    : filtered;
+            }
 
             var response = governanceKernel?.CircuitBreaker is { } cb
                 ? await cb.ExecuteAsync(() => recoveryAgent.RunAsync(context, null, null, ct)).ConfigureAwait(false)
@@ -1473,12 +1560,31 @@ public sealed class GraphOrchestrator(
                 throw new ValidatorStuckException(agentName, "total-turns", totalTurns,
                     $"Parallel node '{nodeId}' ({agentName}) exceeded {maxTotalTurns} total turns without completing.");
 
-            var filtered = ContextWindowFilter.Apply(ctx.History, agentCfg.ContextWindow);
-            await EmitContextCapWarningAsync(agentName, agentCfg, filtered, ctx);
-
-            IEnumerable<ChatMessage> context = !string.IsNullOrWhiteSpace(instructions)
-                ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
-                : filtered;
+            IEnumerable<ChatMessage> context;
+            if (contextPipeline is not null)
+            {
+                var assembled = await contextPipeline.AssembleAsync(
+                    new fuseraft.Core.Models.AgentExecutionRequest
+                    {
+                        AgentName     = agentName,
+                        Task          = _task,
+                        SharedHistory = ctx.History,
+                        AgentConfig   = agentCfg,
+                        SessionId     = _sessionId,
+                    }, ct);
+                context = assembled.Messages;
+                await EmitContextCapWarningAsync(agentName, agentCfg, assembled.Messages, ctx);
+                if (eventEmitter is not null)
+                    await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, ctx.TurnIndex);
+            }
+            else
+            {
+                var filtered = ContextWindowFilter.Apply(ctx.History, agentCfg.ContextWindow);
+                await EmitContextCapWarningAsync(agentName, agentCfg, filtered, ctx);
+                context = !string.IsNullOrWhiteSpace(instructions)
+                    ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
+                    : filtered;
+            }
 
             if (eventEmitter is not null)
                 await eventEmitter.EmitAsync("turn_start", agent: agentName, turn: ctx.TurnIndex);
