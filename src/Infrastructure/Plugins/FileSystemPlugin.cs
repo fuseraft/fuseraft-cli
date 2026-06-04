@@ -21,6 +21,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     private readonly string  _summaryDir;
     private readonly FileVersionStore?  _versionStore;
     private readonly SessionReadCache?  _sessionCache;
+    private readonly Action?            _onWrite;
 
     // Per-turn read cache: cleared at the start of each agent turn so re-reading the same
     // file within a single turn is caught and short-circuited before dumping redundant
@@ -48,7 +49,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     // maxLines: 99999 is asking for everything and should be gated the same as omitting it.
     private const int LargeFileColdReadLines  = 500;
 
-    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null)
+    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null, Action? onWrite = null)
     {
         _sandboxRoot       = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _readFileSizeLimit = readFileSizeLimit > 0 ? readFileSizeLimit : 20_000;
@@ -57,6 +58,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         _summaryDir        = Path.Combine(baseDir, ".fuseraft", "summaries");
         _versionStore      = versionStore;
         _sessionCache      = sessionCache;
+        _onWrite           = onWrite;
     }
 
     /// <inheritdoc cref="ITurnResettable.BeginTurn"/>
@@ -374,6 +376,7 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         // Record that this path was patched so write_file can detect the pattern.
         _patchedThisTurn.Add(resolved);
+        _onWrite?.Invoke();
 
         var oldLines = normalOld.Split('\n').Length;
         var newLines = normalNew.Split('\n').Length;
@@ -666,6 +669,7 @@ public sealed class FileSystemPlugin : ITurnResettable
             ? $" (content was normalised: code fences or over-escaped quotes were stripped)"
             : string.Empty;
         var versionNote = newVersion.HasValue ? $" [v{newVersion}]" : string.Empty;
+        _onWrite?.Invoke();
         return PluginResult.Ok($"Written {content.Length} chars to {resolved}{note}{versionNote}");
     }
 

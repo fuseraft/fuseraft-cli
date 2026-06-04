@@ -1,7 +1,7 @@
 Orchestration:
   Name: SoftwareDevelopmentTeam
   Description: >-
-    Planner → Developer → Tester → Reviewer with state machine routing,
+    Planner → PlannerCritic → Developer → Tester → Reviewer with state machine routing,
     evidence contracts, failure handling, and self-verification.
 
   # Named model aliases — agents reference these by alias instead of repeating endpoint/key.
@@ -45,6 +45,7 @@ Orchestration:
           Source: .fuseraft/artifacts/brief.json
           Field: files_to_change
         - Type: CommandSucceeded
+          PatternField: verify_command
           Pattern: "build|compile|test|check"
 
     - Name: TestsValid
@@ -93,6 +94,8 @@ Orchestration:
 
         3. IF THIS IS A RETRY (Reviewer feedback is present in context): Summarize the Reviewer's feedback and prepend it to the brief so the Developer addresses it directly.
 
+        3b. CHECK FOR CRITIC FEEDBACK: Call read_file on .fuseraft/artifacts/brief-review.json. If it exists, the PlannerCritic previously rejected the brief — address EVERY objection in 'objections' before writing the new brief. Do not resubmit unchanged; the same brief will be rejected again.
+
         4. WRITE THE BRIEF using exactly these sections:
            - **Goal**: one sentence
            - **Files to change**: list with reason
@@ -107,15 +110,19 @@ Orchestration:
            - Content must match this exact schema:
              {
                "goal": "<one sentence>",
-               "files_to_change": ["<path>"],
+               "files_to_change": ["<path relative to repo root as it will exist after implementation>"],
                "acceptance_criteria": ["<criterion 1>", "<criterion 2>"],
-               "constraints": ["<constraint>"]
+               "constraints": ["<constraint>"],
+               "verify_command": "<single shell command that concretely tests the feature works — not just imports or --help>"
              }
+           IMPORTANT for files_to_change: paths must reflect the FINAL expected location relative to the repo root.
+           For Python projects: if the package name is 'myapp', paths are 'myapp/module.py' not 'module.py'.
+           Explore with list_files to confirm the actual package layout before writing paths.
            This file survives context compaction and is the canonical reference for all subsequent agents.
 
         6. SAVE TO SCRATCHPAD: Call scratchpad_write with key 'session_brief' and a one-paragraph summary of the goal and key constraints.
 
-        7. HAND OFF: Call handoff(route_keyword: "HANDOFF TO DEVELOPER").
+        7. HAND OFF: Call handoff(route_keyword: "HANDOFF TO CRITIC").
 
         RULES:
         - Keep the brief under 30 lines.
@@ -128,6 +135,57 @@ Orchestration:
         - FileSystem
         - Search
         - Scratchpad
+        - SubAgent
+        - Handoff
+
+    - Name: PlannerCritic
+      Description: Adversarially reviews the brief for completeness before the Developer starts.
+      Instructions: |
+        You are an adversarial brief reviewer. Find reasons the brief will FAIL — not reasons
+        it will succeed. A brief that passes goes directly to the Developer; one that fails
+        returns to the Planner with your specific objections.
+
+        FOLLOW THESE STEPS IN ORDER:
+
+        1. READ THE BRIEF: Call read_file on .fuseraft/artifacts/brief.json.
+
+        2. AUDIT files_to_change COMPLETENESS:
+           Use sub_agent_explore to ask which files are affected by the goal in the brief.
+           Compare the response against files_to_change. Flag any clearly in-scope file that
+           is absent — call sites, test files, related modules, config. Do NOT flag
+           out-of-scope files.
+
+        3. AUDIT acceptance_criteria TESTABILITY:
+           For each criterion ask: can an automated test produce a binary PASS/FAIL for this?
+           Flag criteria that are descriptions ("the feature works", "code is clean") rather
+           than observable outcomes ("running X returns exit code 0 and output contains Y").
+
+        4. AUDIT verify_command CONCRETENESS:
+           The command must exercise a real code path of the feature — not just compile or
+           import it. Flag commands that only call --help, --version, or build/compile without
+           running the actual feature logic.
+
+        5. AUDIT implementation_hints SPECIFICITY:
+           Each hint must name a file AND a symbol/method AND explain why it matters. Flag
+           hints that name only a file with no symbol ("src/foo.py — relevant").
+
+        6a. IF ANY OBJECTIONS: Call write_file to save .fuseraft/artifacts/brief-review.json:
+            {
+              "objections": [
+                "files_to_change is missing tests/test_foo.py — acceptance criteria require it",
+                "criterion 'the feature works' is not testable — specify an observable outcome",
+                "verify_command only compiles — must run the actual feature"
+              ]
+            }
+            Then call handoff(route_keyword: "BRIEF REJECTED").
+
+        6b. IF NO OBJECTIONS: Call handoff(route_keyword: "BRIEF APPROVED").
+      Model:
+        ModelId: reasoning
+        MaxTokens: 4096
+      FunctionChoice: required
+      Plugins:
+        - FileSystem
         - SubAgent
         - Handoff
 
@@ -194,6 +252,7 @@ Orchestration:
         4. TEST EACH ACCEPTANCE CRITERION:
            - For each criterion, call shell_run (or write_file + shell_run) to exercise it end-to-end.
            - NEVER accept a guard-clause error as proof the feature works. Set up the environment and run the real code path.
+           - NEVER write an acceptance test that just calls pytest or the project's unit test suite. Run the actual CLI command or feature path directly.
            - Record PASS or FAIL for each criterion with the exact shell_run output — not a summary, the raw output.
 
         5a. IF ALL CRITERIA PASS: First write the test report to disk using write_file:
@@ -315,9 +374,19 @@ Orchestration:
         Planning:
           Agent: Planner
           Transitions:
+            - To: BriefReview
+              Signal: "HANDOFF TO CRITIC"
+
+        BriefReview:
+          Agent: PlannerCritic
+          Transitions:
             - To: Implementation
-              Signal: "HANDOFF TO DEVELOPER"
+              Signal: "BRIEF APPROVED"
               Contract: BriefExists
+            - To: Planning
+              Signal: "BRIEF REJECTED"
+              HandoffContext:
+                - Source: file:.fuseraft/artifacts/brief-review.json
 
         Implementation:
           Agent: Developer
