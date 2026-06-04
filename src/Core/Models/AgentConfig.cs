@@ -191,11 +191,22 @@ public record AgentConfig
     public int MaxInTurnToolPairs { get; init; } = 0;
 
     /// <summary>
-    /// When true, loads this agent's persistent memory from
-    /// <c>~/.fuseraft/memory/agents/{Name}/</c> and prepends it to <see cref="Instructions"/>
-    /// at creation time so the agent has recall across sessions without an explicit
-    /// scratchpad_read_all call.
+    /// Controls how much knowledge retrieval the context assembly pipeline performs
+    /// for this agent. Retrieval is always on by default; <c>None</c> is the only
+    /// way to disable it for latency-sensitive agents.
     /// </summary>
+    public KnowledgeWeight KnowledgeWeight { get; init; } = KnowledgeWeight.Default;
+
+    /// <summary>
+    /// Superseded by <see cref="KnowledgeWeight"/>. Memory is now always injected at
+    /// runtime through <see cref="fuseraft.Orchestration.ContextAssemblyPipeline"/>
+    /// rather than baked into agent instructions at construction time.
+    /// This property is kept for configuration compatibility but has no effect when
+    /// <c>ContextAssemblyPipeline</c> is active (which is always the case for
+    /// <see cref="fuseraft.Orchestration.AgentOrchestrator"/>).
+    /// </summary>
+    [Obsolete("Memory is now always runtime-injected through ContextAssemblyPipeline. " +
+              "Set KnowledgeWeight instead to control retrieval breadth.")]
     public bool EnableMemory { get; init; } = false;
 
     /// <summary>

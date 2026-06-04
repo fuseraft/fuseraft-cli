@@ -1037,7 +1037,23 @@ public static class OrchestratorBuilder
                 FuseraftPaths.LocalRepositoryMemory);
             memoryManager?.AttachRepositoryMemory(repoMemoryStore);
 
-            orchestrator = new AgentOrchestrator(config, agentFactory, strategyFactory, aoLogger, changeTracker, eventEmitter, governanceKernel, memoryManager, contextAssembler, dependencyPlanner);
+            // Unified context assembly pipeline — single entry point for all agent context.
+            // Replaces the per-path ContextWindowFilter.Apply() + MemoryManager.AugmentInstructionsAsync()
+            // calls that previously diverged between sequential, parallel, and verifier paths.
+            var graphExpander   = new fuseraft.Orchestration.GraphExpansionRetriever(knowledgeLayer.GraphStore);
+            var knowledgeStore  = new fuseraft.Infrastructure.RepositoryKnowledgeStore(FuseraftPaths.LocalKnowledgeFindings);
+            var pipelineLogger  = loggerFactory.CreateLogger<fuseraft.Orchestration.ContextAssemblyPipeline>();
+            var contextPipeline = new fuseraft.Orchestration.ContextAssemblyPipeline(
+                knowledgeLayer:   knowledgeLayer,
+                memoryManager:    memoryManager,
+                contextAssembler: contextAssembler,
+                graphExpander:    graphExpander,
+                knowledgeStore:   knowledgeStore,
+                logger:           pipelineLogger);
+            if (!string.IsNullOrEmpty(sessionId))
+                contextPipeline.SetSessionId(sessionId);
+
+            orchestrator = new AgentOrchestrator(config, agentFactory, strategyFactory, aoLogger, changeTracker, eventEmitter, governanceKernel, memoryManager, contextAssembler, dependencyPlanner, contextPipeline, knowledgeStore);
         }
 
         // Repository memory extractor — runs after the session to generate candidates.
@@ -1390,7 +1406,9 @@ public static class OrchestratorBuilder
             MaxToolCallsPerTurn    = inline.MaxToolCallsPerTurn    != 0                 ? inline.MaxToolCallsPerTurn    : baseConfig.MaxToolCallsPerTurn,
             MaxInTurnContextTokens = inline.MaxInTurnContextTokens != 0                 ? inline.MaxInTurnContextTokens : baseConfig.MaxInTurnContextTokens,
             MaxInTurnToolPairs     = inline.MaxInTurnToolPairs     != 0                 ? inline.MaxInTurnToolPairs     : baseConfig.MaxInTurnToolPairs,
+#pragma warning disable CS0618 // EnableMemory is obsolete but still merged for backward-compat configs
             EnableMemory           = inline.EnableMemory || baseConfig.EnableMemory,
+#pragma warning restore CS0618
             SubAgentModel          = inline.SubAgentModel                               ?? baseConfig.SubAgentModel,
             SubAgentPlugins        = inline.SubAgentPlugins                             ?? baseConfig.SubAgentPlugins,
             RemoteAgent            = inline.RemoteAgent                                 ?? baseConfig.RemoteAgent,

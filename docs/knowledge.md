@@ -1,24 +1,35 @@
 # Knowledge Layer
 
-The knowledge layer is a set of persistent, cross-session subsystems that let agents accumulate and query durable knowledge about a codebase — architectural decisions, structural symbols, verified claims, recurring patterns, and long-horizon objectives. All subsystems share a single `IKnowledgeLayer` interface and are wired together through the `ContextBroker` at session start.
+The knowledge layer is a set of persistent, cross-session subsystems that let agents accumulate and query durable knowledge about a codebase — architectural decisions, structural symbols, verified claims, recurring patterns, long-horizon objectives, and session-discovered findings. All subsystems share a single `IKnowledgeLayer` interface and are queried automatically on every agent turn by the `ContextAssemblyPipeline`.
 
 ## Overview
 
 ```
-Session input (task/brief)
+Each agent turn
         │
         ▼
-  IntentAnalyzer   → extract keywords, symbols, failure patterns
+  IntentAnalyzer      → extract keywords, PascalCase symbols, failure patterns
         │
         ▼
-  KnowledgeRetriever → query ADR registry, repository graph, repository memory
+  KnowledgeRetriever  → query ADR registry, repository graph, repository memory,
+        │                 knowledge findings store (entity-driven, cross-session)
         │
         ▼
-  ContextBudgeter  → rank by confidence tier, trim to token budget
+  ContextBudgeter     → rank by confidence tier, trim to 6 000-char budget
         │
         ▼
-  ContextBroker    → assemble formatted context block → agent system prompt
+  ContextAssemblyPipeline → inject as [Pipeline Knowledge] user message
 ```
+
+Knowledge retrieval is **always on** — no per-agent config is required. Use `KnowledgeWeight`
+on an agent config to control retrieval depth:
+
+| Value | Behaviour |
+|---|---|
+| `None` | Skip retrieval entirely |
+| `Low` | `Verified` and `Inferred` items only |
+| `Default` | All non-expired items (default for all agents) |
+| `High` | Default + one-hop graph expansion on seed symbols |
 
 Agents interact with the knowledge layer through plugin tools (`decision_*`, `graph_*`, `objective_*`). Validators write provenance claims after successful checks. The lifecycle manager (`fuseraft knowledge gc`) periodically archives stale artifacts.
 
@@ -162,16 +173,61 @@ Progress is computed on demand from `CompletedTasks.Count / (CompletedTasks.Coun
 
 ---
 
-### Adaptive Context Broker
+### Session Knowledge Findings Store
 
-The broker ties all subsystems together. When an agent config declares a `broker:*` context source, the broker runs before each turn:
+Factual discoveries made during agent tool calls are persisted to `.fuseraft/state/knowledge_findings.json` after every turn and surfaced in future sessions without any embedding index.
+
+After each agent turn, `ObservationExtractor` inspects the turn's tool call results and creates an `Observation` for each discovery or state-change tool. The entity is derived from the tool's arguments — the file path for `read_file`, the search pattern for `grep_file`, etc. Observations with a non-null entity are written to `RepositoryKnowledgeStore` as `RepositoryKnowledgeFinding` records.
+
+**Example finding:**
+```json
+{
+  "id": "a3f29c1e8b4d7f20",
+  "entity": "src/Infrastructure/AgentFactory.cs",
+  "finding": "File content: ...",
+  "source": "session-20260603-1",
+  "confidence": 0.85,
+  "agentName": "Developer",
+  "kind": "observation",
+  "recordedAt": "2026-06-03T14:22:11Z"
+}
+```
+
+**Finding kinds:** `observation` (read/search), `change` (write/patch/delete), `ownership`, `architectural_decision`, `dependency`, `pitfall`.
+
+`KnowledgeRetriever` queries the store during the retrieval phase by matching entity names against the current intent signals. This makes knowledge cumulative across sessions: an agent that reads `AuthService.cs` in session 1 leaves a finding; an agent working on auth in session 2 retrieves that finding automatically.
+
+---
+
+### Context Assembly Pipeline
+
+The `ContextAssemblyPipeline` is the unified entry point for all agent context construction. Every invocation — sequential, parallel, and verifier agents — goes through the same pipeline stages. The pipeline emits a `context_assembly` event via `EventEmitter` after each turn with the following fields:
+
+| Field | What it measures |
+|---|---|
+| `knowledge_retrieved` | Items returned by `KnowledgeRetriever` before budget trimming |
+| `knowledge_included` | Items that survived the 6 000-char budget and were injected |
+| `memory_loaded` | Memory entries loaded from the agent's store |
+| `memory_included` | Entries that fit within the 8 000-char memory block budget |
+| `artifacts` | Typed context artifacts assembled (knowledge + session_context) |
+| `context_chars` | Total character count of all messages in the assembled context |
+| `system_prompt_chars` | Character length of the system prompt |
+| `assembly_ms` | Wall-clock time spent in `AssembleAsync` |
+
+These events are written to `.fuseraft/logs/events.jsonl` alongside `turn_end` and `reasoning` events and can be consumed by dashboards or CI pipelines to track context utilization over time.
+
+---
+
+### Adaptive Context Pipeline (formerly Context Broker)
+
+The pipeline ties all subsystems together. Retrieval runs automatically before every agent turn:
 
 1. **IntentAnalyzer** — extracts keywords, PascalCase symbols, and failure patterns from the task description.
-2. **KnowledgeRetriever** — queries the ADR registry, repository graph, and approved repository memories for each signal.
-3. **ContextBudgeter** — ranks results by confidence tier (`Verified` > `Inferred` > `Assumed` > `Guessed`), excludes expired claims, and trims to the configured token budget.
-4. **Prompt assembly** — formats the surviving items into a labelled context block injected into the agent system prompt.
+2. **KnowledgeRetriever** — queries the ADR registry, repository graph, approved repository memories, and the session knowledge findings store for each signal.
+3. **ContextBudgeter** — ranks results by confidence tier (`Verified` > `Inferred` > `Assumed` > `Guessed`), excludes expired claims, and trims to the 6 000-character budget (~1 500 tokens).
+4. **Prompt assembly** — formats the surviving items into a `[Pipeline Knowledge]` user message appended to the context.
 
-When the broker produces no results it falls back gracefully to static context assembly.
+When retrieval produces no results the pipeline proceeds without a knowledge block — there is no fallback needed because the agent's instructions and memory block are always present.
 
 ---
 
@@ -213,6 +269,7 @@ Configure retention windows in `.fuseraft/knowledge/lifecycle.yaml` (created by 
 │       └── OBJ-0001.yaml               ← long-horizon objectives
 └── state/
     ├── repository.graph                ← repository semantic graph
+    ├── knowledge_findings.json         ← entity-scoped findings from all sessions
     ├── provenance.json                 ← active claim records
     └── provenance.archive.json         ← archived (expired) claim records
 ```

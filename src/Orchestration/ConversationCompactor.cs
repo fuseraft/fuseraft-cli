@@ -241,10 +241,11 @@ public sealed class ConversationCompactor(
 
             try
             {
-                var histText = BuildHistoryText(toCompact, config.MaxCharsPerHistoryMessage);
-                var clText   = ReadChangeLog();
+                var histText       = BuildHistoryText(toCompact, config.MaxCharsPerHistoryMessage);
+                var clText         = ReadChangeLog();
+                var hybridTrace    = ObservationExtractor.BuildToolTraceBlock(toCompact);
                 var (summText, summUsage) = await GenerateSummaryAsync(
-                    task, histText, clText, toCompact.Count, cancellationToken);
+                    task, histText, clText, hybridTrace, toCompact.Count, cancellationToken);
 
                 var hybridContent =
                     reconstructed.Content + "\n\n---\n\n" +
@@ -284,11 +285,12 @@ public sealed class ConversationCompactor(
 
         var historyText   = BuildHistoryText(toCompact, config.MaxCharsPerHistoryMessage);
         var changeLogText = ReadChangeLog();
+        var toolTrace     = ObservationExtractor.BuildToolTraceBlock(toCompact);
 
         try
         {
             var (summaryText, summaryUsage) = await GenerateSummaryAsync(
-                task, historyText, changeLogText, toCompact.Count, cancellationToken);
+                task, historyText, changeLogText, toolTrace, toCompact.Count, cancellationToken);
 
             var summary = new AgentMessage
             {
@@ -440,6 +442,7 @@ public sealed class ConversationCompactor(
         string task,
         string historyText,
         string? changeLogText,
+        string? toolTraceText,
         int turnCount,
         CancellationToken cancellationToken)
     {
@@ -454,13 +457,20 @@ public sealed class ConversationCompactor(
               """
             : string.Empty;
 
+        // Tool trace: structured list of what each agent actually called (tool name + args +
+        // success/fail). Gives the summariser ground-truth operation coverage even when the
+        // raw tool results are truncated or absent from the conversation text.
+        var toolTraceBlock = toolTraceText is not null
+            ? $"\n\n{toolTraceText}\n\n"
+            : string.Empty;
+
         var template = !string.IsNullOrWhiteSpace(config.SummaryTemplate)
             ? config.SummaryTemplate
             : SummaryPrompt;
         var prompt = template
             .Replace("{{$task}}",        task)
             .Replace("{{$turn_count}}",  turnCount.ToString())
-            .Replace("{{$change_log}}", changeLogBlock)
+            .Replace("{{$change_log}}", changeLogBlock + toolTraceBlock)
             .Replace("{{$history}}",     historyText);
 
         ChatResponse result;

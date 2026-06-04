@@ -70,10 +70,15 @@ Orchestration/
   MagenticOrchestrator.cs    — Magentic-One style two-level manager/participant loop
   GraphOrchestrator.cs       — Directed-graph orchestrator; BFS-layer topology, forward-edge phases, back-edge phase restarts
   AdversarialOrchestrator.cs — GAN-style adversarial loop; paired generator/critic stages; context firewall isolates the critic
-  ConversationCompactor.cs — LLM-based history summarization for long sessions
-  ChangeTracker.cs        — Intercepts tool calls to record file/shell/git activity
-  ContextWindowFilter.cs  — Applies per-agent context window config to conversation history
-  EventEmitter.cs         — Appends structured JSONL events to a log file
+  ContextAssemblyPipeline.cs — Unified context assembly: intent → memory → knowledge → history → prompt; single entry point for all agent invocations
+  ConversationCompactor.cs   — LLM-based history summarization; injects tool-call trace into summary prompt
+  ChangeTracker.cs           — Intercepts tool calls to record file/shell/git activity
+  ContextWindowFilter.cs     — Applies per-agent context window config to conversation history
+  EventEmitter.cs            — Appends structured JSONL events to a log file (turn_end, context_assembly, reasoning, ...)
+  GraphExpansionRetriever.cs — One-hop graph traversal for KnowledgeWeight.High agents
+  KnowledgeRetriever.cs      — Queries IKnowledgeLayer + RepositoryMemoryStore + RepositoryKnowledgeStore
+  ObservationExtractor.cs    — Extracts entity-scoped findings from tool call results; builds compaction tool traces
+  RelevanceMemoryRanker.cs   — Ranks MemoryEntry records by keyword overlap + type priority
   Saga/                   — SagaOrchestrator: compensating rollback wrapper
   Strategies/             — Selection and termination strategy implementations
   Validation/             — Routing validator implementations
