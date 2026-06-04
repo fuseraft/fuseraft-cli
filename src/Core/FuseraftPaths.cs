@@ -185,7 +185,7 @@ public static class FuseraftPaths
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("## .fuseraft/ — fuseraft-cli runtime metadata (do not scan)");
-        sb.AppendLine("This directory is managed by fuseraft-cli. Never call list_files or explore .fuseraft/ — reference these paths directly when needed:");
+        sb.AppendLine("This directory is managed by fuseraft-cli. list_files is blocked here — reference these paths directly when needed:");
         if (includeLogs)
         {
             sb.AppendLine("  .fuseraft/logs/events.jsonl               — agent/orchestration event log (JSONL)");
