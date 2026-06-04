@@ -102,7 +102,7 @@ The agent then sees all tools from the Puppeteer server alongside the built-in F
 
 ## Building your own MCP server
 
-Any MCP-compliant server works. For .NET, use the `ModelContextProtocol` NuGet package (the same one used by the included demo server).
+Any MCP-compliant server works. For .NET, use the `ModelContextProtocol` NuGet package.
 
 **Minimal .NET MCP server** (`Program.cs`):
 
