@@ -180,7 +180,7 @@ public sealed class ContractEngine
         var written = await LoadWrittenFilesAsync(ct);
 
         var missing = expectedPaths
-            .Where(req => !written.Any(w => PathHelpers.PathsMatch(w, req)) && !File.Exists(req))
+            .Where(req => !written.Any(w => PathHelpers.PathsMatch(w, req)) && !FileExistsInSandbox(req))
             .ToList();
 
         if (missing.Count == 0)
@@ -510,6 +510,22 @@ public sealed class ContractEngine
             workingDirectory: _sandboxRoot,
             timeoutSeconds:   120,
             cancellationToken: ct);
+    }
+
+    // Path helpers
+
+    // Checks whether a relative path exists under the sandbox root (preferred) or the
+    // current working directory (fallback). Avoids false negatives when the CLI process
+    // runs from a directory that differs from the project sandbox root.
+    private bool FileExistsInSandbox(string path)
+    {
+        if (Path.IsPathRooted(path)) return File.Exists(path);
+        if (_sandboxRoot is not null)
+        {
+            var absolute = Path.Combine(_sandboxRoot, path);
+            if (File.Exists(absolute)) return true;
+        }
+        return File.Exists(path);
     }
 
     // Evidence-source helpers (prefer graph, fall back to flat log)
