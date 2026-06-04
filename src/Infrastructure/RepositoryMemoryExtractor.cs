@@ -13,16 +13,17 @@ namespace fuseraft.Infrastructure;
 ///   <item>Shell commands that exited successfully (<see cref="EvidenceClass.ExitCode"/>)</item>
 ///   <item>Test results that passed (<see cref="EvidenceClass.TestResult"/>)</item>
 ///   <item>Files written more than once in a session (<see cref="EvidenceClass.EvidenceGraph"/>)</item>
+///   <item>Shell commands that exited non-zero more than once — flags precondition problems</item>
 /// </list>
 /// </para>
 ///
 /// <para>
 /// New candidates are written with <c>Status = Candidate</c>. When the same pattern
-/// has already been <c>Approved</c>, the existing entry's
-/// <see cref="RepositoryMemoryEntry.ReinforcementCount"/> is incremented and
-/// <see cref="RepositoryMemoryEntry.Confidence"/> is recomputed. Candidates are never
-/// promoted to <c>Approved</c> here — that requires explicit human review
-/// (<c>fuseraft memory review</c>) or a reviewer agent.
+/// recurs in a later session, <see cref="RepositoryMemoryEntry.ReinforcementCount"/> is
+/// incremented regardless of whether the entry is <c>Approved</c> or still <c>Candidate</c>.
+/// Promotion from <c>Candidate</c> to <c>Approved</c> still requires explicit human review
+/// (<c>fuseraft memory review</c>) or a reviewer agent — reinforcement only makes
+/// high-value candidates surface first in the index.
 /// </para>
 /// </summary>
 public sealed class RepositoryMemoryExtractor
@@ -97,6 +98,30 @@ public sealed class RepositoryMemoryExtractor
                     existing, newCandidates, sessionId, ct);
         }
 
+        // Shell commands that failed more than once in a session. These flag precondition
+        // problems, missing dependencies, or brittle invocations that future agents should
+        // verify before relying on.
+        var failedCommandNodes = await _evidenceStore.QueryNodes(
+            n => n.NodeType == "CommandRun" && n.ExitCode != 0 &&
+                 !string.IsNullOrWhiteSpace(n.Command) &&
+                 (sessionId is null || n.SessionId == sessionId), ct);
+
+        var failCounts = failedCommandNodes
+            .GroupBy(n =>
+            {
+                var cmd = n.Command!;
+                return cmd.Length > 120 ? cmd[..120] + "…" : cmd;
+            }, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1);
+
+        foreach (var group in failCounts)
+        {
+            var pattern = $"Shell command fails repeatedly: {group.Key}";
+            if (seenPatterns.Add(pattern))
+                await RecordOrReinforceAsync(pattern, [EvidenceClass.ExitCode],
+                    existing, newCandidates, sessionId, ct);
+        }
+
         return newCandidates;
     }
 
@@ -128,10 +153,31 @@ public sealed class RepositoryMemoryExtractor
             return;
         }
 
-        // Skip duplicate candidates.
+        // Reinforce an existing candidate when the same pattern recurs across sessions.
+        // This does not promote the entry — promotion requires explicit review — but it
+        // makes the cross-session signal visible so high-value candidates surface first.
+        var candidate = existing.FirstOrDefault(e =>
+            e.Status.Equals("Candidate", StringComparison.OrdinalIgnoreCase) &&
+            IsSamePattern(e.Pattern, pattern) &&
+            !string.Equals(e.SourceSessionId, sessionId, StringComparison.OrdinalIgnoreCase));
+
+        if (candidate is not null)
+        {
+            var merged = MergeEvidence(candidate.Evidence, evidence);
+            await _memoryStore.SaveAsync(candidate with
+            {
+                ReinforcementCount = candidate.ReinforcementCount + 1,
+                LastReinforcedAt   = DateTimeOffset.UtcNow,
+                Evidence           = merged,
+            }, ct);
+            return;
+        }
+
+        // Skip exact duplicates from the same session.
         if (existing.Any(e =>
             e.Status.Equals("Candidate", StringComparison.OrdinalIgnoreCase) &&
-            IsSamePattern(e.Pattern, pattern)))
+            IsSamePattern(e.Pattern, pattern) &&
+            string.Equals(e.SourceSessionId, sessionId, StringComparison.OrdinalIgnoreCase)))
             return;
 
         var entry = new RepositoryMemoryEntry

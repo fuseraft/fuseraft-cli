@@ -96,10 +96,23 @@ Claims carry an optional `ExpiresAt` timestamp set by the caller based on the vo
 
 Cross-session patterns extracted from the evidence graph and change log after each session closes. Entries start as `Candidate` and are never injected into agent prompts until a human approves them via `fuseraft memory review` or an automated reviewer agent promotes them.
 
-Once approved, repository memories are prepended to every agent session's system prompt. When the same pattern recurs across sessions, its `ReinforcementCount` is incremented and its confidence tier is recomputed.
+Once approved, repository memories are prepended to every agent session's system prompt.
+
+**Pattern sources** — extraction is deterministic; no LLM call is made:
+
+| Source | Pattern prefix | Evidence class |
+|--------|---------------|----------------|
+| Shell commands that exited 0 | `Shell command succeeds: …` | `ExitCode` |
+| Test results that passed | `Test passes: …` | `TestResult`, `ExitCode` |
+| Files written more than once in a session | `File is modified repeatedly in sessions: …` | `EvidenceGraph` |
+| Shell commands that exited non-zero more than once | `Shell command fails repeatedly: …` | `ExitCode` |
+
+Failure patterns flag commands with unstable preconditions — missing dependencies, write-block loops, or brittle invocations — so future agents verify the environment before relying on them.
+
+**Reinforcement** — when the same pattern recurs in a later session, `ReinforcementCount` is incremented regardless of whether the entry is `Approved` or still `Candidate`. This does not promote a Candidate; promotion requires explicit review. It does make high-reinforcement candidates surface first in `MEMORY.md` and in `fuseraft memory review` output, so the most reliably observed patterns are easiest to approve.
 
 ```bash
-# Review pending candidates
+# Review pending candidates (sorted by reinforcement count descending)
 fuseraft memory review
 
 # Browse all entries
@@ -243,7 +256,7 @@ fuseraft knowledge gc --apply  # applies all policies
 | Policy | What it does |
 |--------|-------------|
 | Archive superseded ADRs | Moves `Superseded` ADRs to `.fuseraft/knowledge/decisions/archive/` |
-| Demote aged memories | Demotes `Approved` memories not reinforced within the window back to `Candidate` |
+| Demote aged memories | Demotes `Approved` memories not reinforced within the window back to `Candidate` (does not affect `Candidate` entries — their counts accumulate indefinitely until reviewed) |
 | Decay provenance confidence | Downgrades `Verified` claims older than `ConfidenceDecayDays` to `Inferred` |
 | Prune orphaned graph nodes | Removes nodes with no edges and no recent file touch |
 | Compact provenance registry | Archives expired `ClaimRecord` entries to `.fuseraft/state/provenance.archive.json` |
