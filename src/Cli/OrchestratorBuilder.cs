@@ -999,6 +999,27 @@ public static class OrchestratorBuilder
             }
         }
 
+        // Unified context assembly pipeline — shared across all orchestrator types.
+        // Provides always-on knowledge retrieval, relevance-ranked memory, and metrics
+        // telemetry for every agent invocation regardless of which orchestrator is active.
+        var memoryManager   = MemoryManager.FromConfig(config.Memory);
+        var repoMemoryStore = new fuseraft.Infrastructure.RepositoryMemoryStore(
+            FuseraftPaths.LocalRepositoryMemory);
+        memoryManager?.AttachRepositoryMemory(repoMemoryStore);
+
+        var graphExpander   = new fuseraft.Orchestration.GraphExpansionRetriever(knowledgeLayer.GraphStore);
+        var knowledgeStore  = new fuseraft.Infrastructure.RepositoryKnowledgeStore(FuseraftPaths.LocalKnowledgeFindings);
+        var pipelineLogger  = loggerFactory.CreateLogger<fuseraft.Orchestration.ContextAssemblyPipeline>();
+        var contextPipeline = new fuseraft.Orchestration.ContextAssemblyPipeline(
+            knowledgeLayer:   knowledgeLayer,
+            memoryManager:    memoryManager,
+            contextAssembler: contextAssembler,
+            graphExpander:    graphExpander,
+            knowledgeStore:   knowledgeStore,
+            logger:           pipelineLogger);
+        if (!string.IsNullOrEmpty(sessionId))
+            contextPipeline.SetSessionId(sessionId);
+
         IOrchestrator orchestrator;
 
         if (useGraph)
@@ -1006,7 +1027,8 @@ public static class OrchestratorBuilder
             orchestrator = new GraphOrchestrator(
                 config, agentFactory, goLogger,
                 changeTracker, eventEmitter, governanceKernel,
-                hitlMode ? humanApprovalService : null);
+                hitlMode ? humanApprovalService : null,
+                contextPipeline, knowledgeStore);
         }
         else if (useAdversarial)
         {
@@ -1026,33 +1048,11 @@ public static class OrchestratorBuilder
             orchestrator = new MagenticOrchestrator(
                 config, agentFactory, managerClient, magLogger,
                 hitlMode ? humanApprovalService : null,
-                changeTracker, eventEmitter, governanceKernel);
+                changeTracker, eventEmitter, governanceKernel,
+                contextPipeline, knowledgeStore);
         }
         else
         {
-            var memoryManager = MemoryManager.FromConfig(config.Memory);
-
-            // Repository memory scope: inject Approved entries into every agent's system prompt.
-            var repoMemoryStore = new fuseraft.Infrastructure.RepositoryMemoryStore(
-                FuseraftPaths.LocalRepositoryMemory);
-            memoryManager?.AttachRepositoryMemory(repoMemoryStore);
-
-            // Unified context assembly pipeline — single entry point for all agent context.
-            // Replaces the per-path ContextWindowFilter.Apply() + MemoryManager.AugmentInstructionsAsync()
-            // calls that previously diverged between sequential, parallel, and verifier paths.
-            var graphExpander   = new fuseraft.Orchestration.GraphExpansionRetriever(knowledgeLayer.GraphStore);
-            var knowledgeStore  = new fuseraft.Infrastructure.RepositoryKnowledgeStore(FuseraftPaths.LocalKnowledgeFindings);
-            var pipelineLogger  = loggerFactory.CreateLogger<fuseraft.Orchestration.ContextAssemblyPipeline>();
-            var contextPipeline = new fuseraft.Orchestration.ContextAssemblyPipeline(
-                knowledgeLayer:   knowledgeLayer,
-                memoryManager:    memoryManager,
-                contextAssembler: contextAssembler,
-                graphExpander:    graphExpander,
-                knowledgeStore:   knowledgeStore,
-                logger:           pipelineLogger);
-            if (!string.IsNullOrEmpty(sessionId))
-                contextPipeline.SetSessionId(sessionId);
-
             orchestrator = new AgentOrchestrator(config, agentFactory, strategyFactory, aoLogger, changeTracker, eventEmitter, governanceKernel, memoryManager, contextAssembler, dependencyPlanner, contextPipeline, knowledgeStore);
         }
 

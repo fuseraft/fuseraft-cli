@@ -36,7 +36,9 @@ public sealed class MagenticOrchestrator(
     IHumanApprovalService? approvalService = null,
     ChangeTracker? changeTracker = null,
     EventEmitter? eventEmitter = null,
-    GovernanceKernel? governanceKernel = null) : IOrchestrator
+    GovernanceKernel? governanceKernel = null,
+    fuseraft.Core.Interfaces.IContextAssemblyPipeline? contextPipeline = null,
+    fuseraft.Infrastructure.RepositoryKnowledgeStore? repositoryKnowledgeStore = null) : IOrchestrator
 {
     // Agent name tags used in the message stream so the UI and checkpoints can identify them.
     private const string ManagerPlanTag     = "[MagenticManager:Plan]";
@@ -80,6 +82,7 @@ public sealed class MagenticOrchestrator(
     {
         _sessionId = sessionId;
         agentFactory.SetSessionId(sessionId);
+        contextPipeline?.SetSessionId(sessionId);
     }
 
     /// <summary>
@@ -514,15 +517,36 @@ public sealed class MagenticOrchestrator(
                 ? "The orchestrator could not evaluate progress. Please summarize your work so far and describe your next steps."
                 : ledger.InstructionOrQuestion ?? "Please continue working on the task.";
 
-            // Participant context: system instructions + (filtered) shared history + manager instruction.
-            // Apply per-agent ContextWindow filter so agents with ExcludeAgents / TextOnly / MaxTailMessages
-            // configured receive the same filtered slice they would in AgentOrchestrator or GraphOrchestrator.
-            bool hasInstructions = agentInstructions.TryGetValue(nextAgent.Name ?? "", out var sysInstructions);
+            // Participant context: pipeline-assembled context (memory + knowledge + filtered history)
+            // with the manager's targeted instruction appended as the final user message.
             var agentCfg = agentConfigs.GetValueOrDefault(nextAgent.Name ?? "");
-            var filteredHistory = ContextWindowFilter.Apply(sharedHistory, agentCfg?.ContextWindow);
-            IEnumerable<ChatMessage> participantContext = hasInstructions
-                ? [new ChatMessage(ChatRole.System, sysInstructions), .. filteredHistory, new ChatMessage(ChatRole.User, instruction)]
-                : [.. filteredHistory, new ChatMessage(ChatRole.User, instruction)];
+            IEnumerable<ChatMessage> participantContext;
+            if (contextPipeline is not null)
+            {
+                var assembled = await contextPipeline.AssembleAsync(
+                    new fuseraft.Core.Models.AgentExecutionRequest
+                    {
+                        AgentName     = nextAgent.Name ?? string.Empty,
+                        Task          = task,
+                        SharedHistory = sharedHistory,
+                        AgentConfig   = agentCfg,
+                        SessionId     = _sessionId,
+                    }, cancellationToken);
+                // Append the manager's targeted instruction after the assembled context.
+                var msgs = assembled.Messages.ToList();
+                msgs.Add(new ChatMessage(ChatRole.User, instruction));
+                participantContext = msgs;
+                if (eventEmitter is not null)
+                    await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, turn);
+            }
+            else
+            {
+                bool hasInstructions = agentInstructions.TryGetValue(nextAgent.Name ?? "", out var sysInstructions);
+                var filteredHistory  = ContextWindowFilter.Apply(sharedHistory, agentCfg?.ContextWindow);
+                participantContext = hasInstructions
+                    ? [new ChatMessage(ChatRole.System, sysInstructions), .. filteredHistory, new ChatMessage(ChatRole.User, instruction)]
+                    : [.. filteredHistory, new ChatMessage(ChatRole.User, instruction)];
+            }
 
             logger.LogDebug("[MagenticOrchestrator] Invoking '{Agent}' (round {Round}): {Instruction}",
                 nextAgent.Name, roundIndex, StringHelpers.Truncate(instruction, 120));
@@ -584,6 +608,32 @@ public sealed class MagenticOrchestrator(
                         "ChangeTracker flush failed for turn {Turn} ({Agent}).", agentMsg.TurnIndex, agentMsg.AgentName);
                 }
             }
+
+            // Persist entity-scoped findings from tool calls for future session retrieval.
+            if (repositoryKnowledgeStore is not null && !string.IsNullOrEmpty(_sessionId))
+            {
+                try
+                {
+                    var observations = ObservationExtractor.Extract(
+                        (IReadOnlyList<ChatMessage>)response.Messages,
+                        agentMsg.AgentName, agentMsg.TurnIndex);
+                    foreach (var obs in observations)
+                    {
+                        if (string.IsNullOrWhiteSpace(obs.Entity)) continue;
+                        await repositoryKnowledgeStore.AddAsync(new fuseraft.Core.Models.RepositoryKnowledgeFinding
+                        {
+                            Entity     = obs.Entity!,
+                            Finding    = obs.Finding,
+                            Source     = _sessionId,
+                            Confidence = obs.Confidence,
+                            AgentName  = obs.AgentName,
+                            Kind       = obs.Source is "write_file" or "patch_file" or "delete_file"
+                                         ? "change" : "observation",
+                        }, CancellationToken.None);
+                    }
+                }
+                catch { /* best-effort */ }
+            }
         }
 
         // Emit a terminal message when the loop exhausted MaxRoundCount without self-terminating
@@ -599,6 +649,25 @@ public sealed class MagenticOrchestrator(
                 turn, null);
         }
     }
+
+    private static Task EmitContextAssemblyAsync(
+        EventEmitter emitter,
+        fuseraft.Core.Models.ContextAssemblyMetrics metrics,
+        int turn) =>
+        emitter.EmitAsync("context_assembly",
+            agent: metrics.AgentName,
+            turn:  turn,
+            payload: new
+            {
+                knowledge_retrieved  = metrics.KnowledgeItemsRetrieved,
+                knowledge_included   = metrics.KnowledgeItemsIncluded,
+                memory_loaded        = metrics.MemoryEntriesLoaded,
+                memory_included      = metrics.MemoryEntriesIncluded,
+                artifacts            = metrics.ArtifactsAssembled,
+                context_chars        = metrics.TotalContextChars,
+                system_prompt_chars  = metrics.SystemPromptChars,
+                assembly_ms          = (int)metrics.AssemblyDuration.TotalMilliseconds,
+            });
 
     // Manager invocation
 
