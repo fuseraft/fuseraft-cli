@@ -83,6 +83,7 @@ public static class FuseraftPaths
     public const string LocalTestReport      = ".fuseraft/artifacts/test-report.json";
     public const string LocalConventions     = ".fuseraft/artifacts/sessions/{session_id}/conventions.json";
     public const string LocalBrownfieldBrief = ".fuseraft/artifacts/sessions/{session_id}/brief.brownfield.json";
+    public const string LocalBriefReview    = ".fuseraft/artifacts/sessions/{session_id}/brief-review.json";
 
     /// <summary>Expands the <c>{session_id}</c> token in a path with the given session ID.</summary>
     public static string ExpandSessionId(string path, string sessionId) =>

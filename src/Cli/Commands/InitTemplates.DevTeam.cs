@@ -5,7 +5,8 @@ namespace fuseraft.Cli.Commands;
 public static partial class InitTemplates
 {
     /// <summary>
-    /// Generates the default <c>devteam</c> template: Planner → Developer → Tester → Reviewer
+    /// Generates the default <c>devteam</c> template:
+    /// Planner → PlannerCritic → Developer → Tester → Reviewer
     /// state-machine pipeline with evidence contracts, failure handling, lossless compaction,
     /// and a periodic Verifier agent that audits the evidence graph for inconsistencies.
     /// This is the most fully-featured template and serves as the reference implementation.
@@ -30,8 +31,12 @@ public static partial class InitTemplates
                      and why the previous approach failed.
                    - Do NOT re-handoff with the same brief — the Developer already tried it.
                  IF no failure signal and {FuseraftPaths.LocalBrief} already exists and still
-                 covers the current task: call handoff(route_keyword: "HANDOFF TO DEVELOPER")
+                 covers the current task: call handoff(route_keyword: "HANDOFF TO CRITIC")
                  immediately without rewriting it.
+              4b. Check for Critic feedback: call read_file on {FuseraftPaths.LocalBriefReview}.
+                  IF it exists, address EVERY objection listed in 'objections' before rewriting
+                  the brief — the same brief will be rejected again. Do NOT re-handoff with an
+                  unchanged brief.
               5. Write a brief to {FuseraftPaths.LocalBrief} with fields:
                    goal — one-sentence description of what to build
                    files_to_change — array of paths RELATIVE TO THE SANDBOX ROOT
@@ -52,13 +57,62 @@ public static partial class InitTemplates
                      contract requires it to succeed. Wrong: "dotnet build" (compile only).
                    acceptance_criteria — array of testable criteria the code must satisfy
               6. {ContextWriteStep}
-              When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
+              When done, call handoff(route_keyword: "HANDOFF TO CRITIC").
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
               - FileSystem
               - Search
               - SessionContext
+              - SubAgent
+              - Handoff
+            FunctionChoice: required
+            {AgentFileOptions}
+            """;
+
+        var plannerCritic = $"""
+            Name: PlannerCritic
+            Description: Adversarially reviews the brief for completeness before the Developer starts.
+            Instructions: |
+              You are an adversarial brief reviewer. Find reasons the brief will FAIL — not reasons
+              it will succeed. A brief that passes your review goes directly to the Developer; one
+              that fails returns to the Planner with your specific objections.
+
+              FOLLOW THESE STEPS IN ORDER:
+
+              1. READ THE BRIEF: Call read_file on {FuseraftPaths.LocalBrief}.
+
+              2. AUDIT files_to_change COMPLETENESS:
+                 Use sub_agent_explore to ask which files are affected by the goal in the brief.
+                 Compare the response against files_to_change. Flag any clearly in-scope file that
+                 is absent — call sites, test files, related modules, config. Do NOT flag
+                 out-of-scope files.
+
+              3. AUDIT acceptance_criteria TESTABILITY:
+                 For each criterion ask: can an automated test produce a binary PASS/FAIL for this?
+                 Flag criteria that are descriptions ("the feature works", "code is clean") rather
+                 than observable outcomes ("running X returns exit code 0 and output contains Y").
+
+              4. AUDIT verify_command CONCRETENESS:
+                 The command must exercise a real code path of the feature — not just compile or
+                 import it. Flag commands that only call --help, --version, or build/compile without
+                 running the actual feature logic.
+
+              5. AUDIT implementation_hints SPECIFICITY:
+                 Each hint must name a file AND a symbol/method AND explain why it matters. Flag
+                 hints that name only a file with no symbol ("src/foo.py — relevant").
+
+              6a. IF ANY OBJECTIONS: Call write_file to save {FuseraftPaths.LocalBriefReview} as
+                  a JSON object with a single field "objections" containing an array of strings —
+                  one entry per gap found (e.g. "files_to_change missing tests/foo.py",
+                  "criterion 'feature works' is not testable", "verify_command only compiles").
+                  Then call handoff(route_keyword: "BRIEF REJECTED").
+
+              6b. IF NO OBJECTIONS: Call handoff(route_keyword: "BRIEF APPROVED").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - FileSystem
               - SubAgent
               - Handoff
             FunctionChoice: required
@@ -201,7 +255,7 @@ public static partial class InitTemplates
             Orchestration:
               Name: Software Development Team
               Description: >-
-                Planner → Developer → Tester → Reviewer with state machine routing,
+                Planner → PlannerCritic → Developer → Tester → Reviewer with state machine routing,
                 evidence contracts, failure handling, and self-verification.
 
               Security:
@@ -294,6 +348,7 @@ public static partial class InitTemplates
               # them independently across configs. Inline fields override the file at load time.
               Agents:
                 - AgentFile: agents/planner.yaml
+                - AgentFile: agents/planner-critic.yaml
                 - AgentFile: agents/developer.yaml
                 - AgentFile: agents/tester.yaml
                 - AgentFile: agents/reviewer.yaml
@@ -308,9 +363,19 @@ public static partial class InitTemplates
                     Planning:
                       Agent: Planner
                       Transitions:
+                        - To: BriefReview
+                          Signal: "HANDOFF TO CRITIC"
+
+                    BriefReview:
+                      Agent: PlannerCritic
+                      Transitions:
                         - To: Implementation
-                          Signal: "HANDOFF TO DEVELOPER"
+                          Signal: "BRIEF APPROVED"
                           Contract: BriefExists
+                        - To: Planning
+                          Signal: "BRIEF REJECTED"
+                          HandoffContext:
+                            - Source: file:{FuseraftPaths.LocalBriefReview}
 
                     Implementation:
                       Agent: Developer
@@ -391,11 +456,12 @@ public static partial class InitTemplates
             """;
 
         return new GeneratedConfig(mainConfig, [
-            ("agents/planner.yaml",   planner),
-            ("agents/developer.yaml", developer),
-            ("agents/tester.yaml",    tester),
-            ("agents/reviewer.yaml",  reviewer),
-            ("agents/verifier.yaml",  verifier),
+            ("agents/planner.yaml",        planner),
+            ("agents/planner-critic.yaml", plannerCritic),
+            ("agents/developer.yaml",      developer),
+            ("agents/tester.yaml",         tester),
+            ("agents/reviewer.yaml",       reviewer),
+            ("agents/verifier.yaml",       verifier),
         ]);
     }
 }

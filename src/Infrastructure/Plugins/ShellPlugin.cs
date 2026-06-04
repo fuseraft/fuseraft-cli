@@ -43,6 +43,13 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
 
     void ITurnResettable.BeginTurn() => _runThisTurn.Clear();
 
+    /// <summary>
+    /// Clears the per-turn command cache so that the next shell_run call executes
+    /// fresh even within the same turn. Called by FileSystemPlugin after a successful
+    /// write_file or patch_file so verify commands pick up changes immediately.
+    /// </summary>
+    internal void InvalidateRunCache() => _runThisTurn.Clear();
+
     // Background job registry
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, BackgroundJob> _jobs = new();
 
