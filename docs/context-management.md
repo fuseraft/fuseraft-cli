@@ -27,9 +27,11 @@ After each run
   └─ Visualization               → HTML chart of cumulative input tokens per agent
 ```
 
-The pipeline is the single entry point for every agent invocation — sequential, parallel, and
-verifier agents all receive identically assembled context. Most layers are always-on; use
-`KnowledgeWeight` on an agent's config to tune retrieval depth.
+The pipeline is the single entry point for every agent invocation across all orchestrator
+types — `AgentOrchestrator` (sequential, parallel, verifier), `MagenticOrchestrator`
+(participant agents), and `GraphOrchestrator` (node executors, parallel nodes, recovery
+agents) all call `AssembleAsync` identically. Most layers are always-on; use `KnowledgeWeight`
+on an agent's config to tune retrieval depth.
 
 > **Upgrading from `EnableMemory`:** `EnableMemory: true` is deprecated. Memory is now
 > runtime-injected by the pipeline every turn and ranked by relevance to the current task.

@@ -229,33 +229,37 @@ event Action<string, int, int>? TokenBudgetWarning        // (agentName, inputTo
 The general-purpose path. Drives any selection strategy through a single `while(true)` loop:
 
 1. Call `IAgentSelector.SelectAsync(agents, history)` → get next agent (null = session ends)
-2. Build the context slice for the agent — two paths depending on `AgentConfig.Context`:
-   - **Context spec declared:** `ContextAssembler.AssembleForAgentAsync` reads declared artifact sources from disk and returns `[task, own_history_turns, artifact_block]`. Shared history is not replayed. Token cost is proportional to the declared sources, not session length.
-   - **No Context spec:** `ContextWindowFilter.Apply` filters the shared history by `TextOnly`, `MaxTurnAge`, `MaxTailMessages`, etc. (traditional path).
-3. Prepend the agent's system instruction (MAF's `ChatClientAgent.RunAsync` does not inject instructions automatically when `session = null`)
-4. Call `agent.RunAsync(context, null, null, ct)` via the governance circuit breaker
-5. Append all response messages (including tool calls/results) to shared history with `AuthorName` set — regardless of which context path was used, so routing/termination strategies always read from the full history
-6. Yield the final text response as an `AgentMessage`
-7. Check `ITerminationCondition.ShouldTerminateAsync(history)` — break if true
-8. Check `MaxIterations` hard cap
+2. Call `IContextAssemblyPipeline.AssembleAsync` — single entry point for all context construction:
+   - Extracts intent signals (keywords, symbols, failure patterns) from the task
+   - Loads and relevance-ranks the agent's persistent memories
+   - Retrieves knowledge from the ADR registry, repository graph, repository memory, and session findings store
+   - Applies the agent's `ContextWindow` filter to the shared history (or `ContextAssembler.AssembleForAgentAsync` when a `Context:` spec is declared)
+   - Injects session context and the knowledge artifact (`[Pipeline Knowledge]`) into the message list
+   - Returns `AssembledContext` containing the final message list and `ContextAssemblyMetrics`
+3. Call `agent.RunAsync(assembled.Messages, null, null, ct)` via the governance circuit breaker
+4. Append all response messages to shared history with `AuthorName` set — routing/termination strategies always read from the full history
+5. Persist entity-scoped observations to `RepositoryKnowledgeStore` (post-turn)
+6. Emit `context_assembly` event with assembly metrics
+7. Yield the final text response as an `AgentMessage`
+8. Check `ITerminationCondition.ShouldTerminateAsync(history)` — break if true
 
 **Execution model:**
 
 ```
 START
-  → SelectAgent           (IAgentSelector.SelectAsync)
-  → BuildContext          (ContextAssembler  if AgentConfig.Context is set)
-                          (ContextWindowFilter  otherwise)
-  → InvokeAgent           (agent.RunAsync via circuit breaker)
-  → AppendHistory         (always writes to shared history for routing)
-  → CheckTermination      (ITerminationCondition.ShouldTerminateAsync)
+  → SelectAgent             (IAgentSelector.SelectAsync)
+  → AssembleContext         (IContextAssemblyPipeline.AssembleAsync)
+      intent → memory → knowledge → history filter → artifact injection
+  → InvokeAgent             (agent.RunAsync via circuit breaker)
+  → AppendHistory           (always writes to shared history for routing)
+  → PersistFindings         (RepositoryKnowledgeStore, post-turn)
+  → EmitContextAssembly     (EventEmitter context_assembly event)
+  → CheckTermination        (ITerminationCondition.ShouldTerminateAsync)
   → CheckIterationCap
   → (terminated or capped ? END : SelectAgent)
 ```
 
-**Why instructions are injected manually:** When calling `RunAsync` without a session, MAF does not prepend the agent's `Instructions` as a system message. Agents must see their role definition and routing keywords on every turn, so we prepend it explicitly.
-
-**Shared history:** All agents read from and write to the same `List<ChatMessage>`. This is intentional — routing strategies (especially `KeywordSelectionStrategy`) read `AuthorName` from the most recent assistant message to determine who just spoke and where they want to route. The `Context` spec changes what the *model* sees, not what the orchestrator's routing layer sees.
+**Shared history:** All agents read from and write to the same `List<ChatMessage>`. This is intentional — routing strategies (especially `KeywordSelectionStrategy`) read `AuthorName` from the most recent assistant message to determine who just spoke and where they want to route. `AssembledContext.Messages` is what the *model* sees; the full shared history is what routing sees.
 
 ### 6.2 MagenticOrchestrator
 
@@ -274,7 +278,7 @@ A Magentic-One style two-level orchestrator. A dedicated manager LLM drives a pl
    - If `IsRequestSatisfied`: synthesize final answer → done
    - If stalled (`!IsProgressBeingMade || IsInLoop`): increment stall counter
    - Manager selects next participant and generates a targeted instruction
-   - Selected participant executes against shared history + instruction
+   - Selected participant context is assembled via `IContextAssemblyPipeline.AssembleAsync` (memory + knowledge + filtered `sharedHistory`); the manager's targeted instruction is appended as the final user message
    - Stall counter ≥ `MaxStallCount` → replan (resets counters); too many replans → terminate
 
 **Why MagenticOrchestrator is not built on `GroupChatWorkflowBuilder`:** The framework's `GroupChatWorkflowBuilder` passes the same shared history to both the manager (`SelectNextAgentAsync`) and participants. Our manager must never see participant messages directly — it reasons from a private ledger. There is also no equivalent to our planning/fact-gathering phases, stall detection, or HITL plan review loop in the framework abstraction. Mapping our design onto `GroupChatManager` would require abusing `UpdateHistoryAsync` to fabricate the manager's context, which would be misleading and fragile. The two-history model is the core architectural invariant that makes this Magentic-style.
@@ -316,6 +320,8 @@ A directed-graph orchestrator for `Selection.Type: graph`. Each node in the conf
 - `_unconditionalBackEdgeValidators` — validators for unconditional back-edges (stored in a parallel dictionary so they are not silently dropped)
 
 **Phase loop:** `RunPhasesAsync` is the outer `while(true)` loop. Each iteration calls `BuildPhaseWorkflow`, which constructs a fresh MAF DAG containing only the forward edges reachable from the current start node. `InProcessExecution.RunStreamingAsync` drives the phase; `WatchStreamAsync` consumes events. A `WorkflowOutputEvent` signals a phase-break (back-edge keyword or unconditional back-edge). The outer loop reads `lastKeyword` to determine the next start node.
+
+**Context assembly:** `RunNodeExecutorAsync` and `RunParallelNodeAsync` call `IContextAssemblyPipeline.AssembleAsync` before each agent invocation (including within the retry loop, so corrections injected between retries are included). `InvokeRecoveryAgentAsync` also goes through the pipeline. When no pipeline is wired (legacy path) the orchestrator falls back to `ContextWindowFilter.Apply` directly.
 
 **Keyword detection:** `RunNodeExecutorAsync` runs inside each `FunctionExecutor`. It calls `agent.RunAsync`, then:
 1. Checks whether the node is `Terminal: true` — if so, the termination check fires first.
@@ -679,6 +685,7 @@ Event consumers may inject messages, trigger external systems, or enforce additi
 | `turn_end` | `AgentOrchestrator`, `GraphOrchestrator`, `MagenticOrchestrator` | Agent name, turn index, input/output tokens |
 | `turn_timeout` | `GraphOrchestrator` | Agent name, timeout value |
 | `reasoning` | `AgentOrchestrator`, `GraphOrchestrator` | Reasoning token content |
+| `context_assembly` | All orchestrators | `knowledge_retrieved`, `knowledge_included`, `memory_loaded`, `memory_included`, `artifacts`, `context_chars`, `system_prompt_chars`, `assembly_ms` |
 
 *Routing and keyword handling* (`GraphOrchestrator`)
 
