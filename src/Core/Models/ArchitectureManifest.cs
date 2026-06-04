@@ -6,6 +6,14 @@ namespace fuseraft.Core.Models;
 /// </summary>
 public sealed class ArchitectureManifest
 {
+    /// <summary>
+    /// Source language used to select the file glob and import-statement parser.
+    /// Supported values: <c>csharp</c> (default), <c>python</c>, <c>java</c>,
+    /// <c>typescript</c>, <c>javascript</c>, <c>go</c>, <c>rust</c>, <c>ruby</c>.
+    /// Unknown values fall back to <c>csharp</c>.
+    /// </summary>
+    public string Language { get; set; } = "csharp";
+
     public List<ArchitectureLayer> Layers { get; set; } = [];
 }
 
