@@ -72,7 +72,8 @@ public static class FuseraftPaths
     public const string LocalSessionContext = ".fuseraft/state/sessions/{session_id}/context_summary.md";
     public const string LocalEvidence       = ".fuseraft/state/evidence.json";
     public const string LocalProvenance     = ".fuseraft/state/provenance.json";
-    public const string LocalFileVersions   = ".fuseraft/state/file_versions.json";
+    public const string LocalFileVersions       = ".fuseraft/state/file_versions.json";
+    public const string LocalKnowledgeFindings  = ".fuseraft/state/knowledge_findings.json";
 
     // artifacts/ — structured agent-written documents read by validators
     // Brief paths include {session_id}, expanded at runtime via ExpandSessionId.

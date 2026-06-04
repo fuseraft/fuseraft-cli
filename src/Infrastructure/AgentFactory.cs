@@ -132,14 +132,10 @@ public sealed class AgentFactory(
         var resolvedModel = chatClientFactory.Resolve(config.Model);
         var chatClient    = chatClientFactory.Create(resolvedModel);
 
-        // Prepend persistent memory to instructions when the agent opts in.
+        // Instructions are used as-is; memory is now injected at runtime by
+        // ContextAssemblyPipeline rather than baked in at construction time.
+        // This ensures memory reflects the current session and is ranked by relevance.
         var instructions = config.Instructions;
-        if (config.EnableMemory)
-        {
-            var memBlock = MemoryStore.ForAgent(config.Name).BuildPromptBlock();
-            if (memBlock is not null)
-                instructions = $"{memBlock}\n\n{instructions}";
-        }
 
         // Build the per-agent tool list. Wrap each tool with a notifying proxy when a
         // ToolCalling callback is registered so notifications fire at invocation time

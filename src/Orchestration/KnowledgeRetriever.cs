@@ -30,18 +30,21 @@ public sealed record RetrievedItem
 /// </summary>
 public sealed class KnowledgeRetriever
 {
-    private readonly IKnowledgeLayer        _layer;
-    private readonly RepositoryMemoryStore? _memoryStore;
-    private readonly ProvenanceRegistry?    _provenance;
+    private readonly IKnowledgeLayer           _layer;
+    private readonly RepositoryMemoryStore?    _memoryStore;
+    private readonly ProvenanceRegistry?       _provenance;
+    private readonly RepositoryKnowledgeStore? _knowledgeStore;
 
     public KnowledgeRetriever(
-        IKnowledgeLayer        layer,
-        RepositoryMemoryStore? memoryStore  = null,
-        ProvenanceRegistry?    provenance   = null)
+        IKnowledgeLayer            layer,
+        RepositoryMemoryStore?     memoryStore     = null,
+        ProvenanceRegistry?        provenance      = null,
+        RepositoryKnowledgeStore?  knowledgeStore  = null)
     {
-        _layer       = layer;
-        _memoryStore = memoryStore;
-        _provenance  = provenance;
+        _layer          = layer;
+        _memoryStore    = memoryStore;
+        _provenance     = provenance;
+        _knowledgeStore = knowledgeStore;
     }
 
     /// <summary>
@@ -127,6 +130,39 @@ public sealed class KnowledgeRetriever
                         Provenance = null,
                         IsExpired  = false,
                     });
+                }
+            }
+            catch { /* best-effort */ }
+        }
+
+        // Knowledge findings store: entity-driven facts discovered in prior sessions.
+        if (_knowledgeStore is not null && queries.Count > 0)
+        {
+            try
+            {
+                foreach (var q in queries.Take(5))
+                {
+                    var findings = await _knowledgeStore.SearchByEntityAsync(q, topN: 10, ct);
+                    foreach (var finding in findings)
+                    {
+                        var findingId = $"knowledge-finding:{finding.Id}";
+                        if (!seen.Add(findingId)) continue;
+
+                        results.Add(new RetrievedItem
+                        {
+                            Result = new KnowledgeResult
+                            {
+                                Id      = findingId,
+                                Kind    = KnowledgeKind.Memory,
+                                Title   = finding.Entity,
+                                Summary = $"[{finding.Kind}] {finding.Finding}" +
+                                          (finding.AgentName is { Length: > 0 } a ? $" (by {a})" : string.Empty),
+                                Status  = "Approved",
+                            },
+                            Provenance = null,
+                            IsExpired  = false,
+                        });
+                    }
                 }
             }
             catch { /* best-effort */ }

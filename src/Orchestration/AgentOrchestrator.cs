@@ -30,7 +30,9 @@ public sealed class AgentOrchestrator(
     GovernanceKernel? governanceKernel = null,
     fuseraft.Infrastructure.MemoryManager? memoryManager = null,
     ContextAssembler? contextAssembler = null,
-    DependencyPlanner? dependencyPlanner = null) : IOrchestrator
+    DependencyPlanner? dependencyPlanner = null,
+    fuseraft.Core.Interfaces.IContextAssemblyPipeline? contextPipeline = null,
+    fuseraft.Infrastructure.RepositoryKnowledgeStore? repositoryKnowledgeStore = null) : IOrchestrator
 {
     // IOrchestrator
 
@@ -140,6 +142,7 @@ public sealed class AgentOrchestrator(
         _sessionId = sessionId;
         agentFactory.SetSessionId(sessionId);
         contextAssembler?.SetSessionId(sessionId);
+        contextPipeline?.SetSessionId(sessionId);
     }
 
     private fuseraft.Core.Models.TaskModel? _structuredTask;
@@ -307,15 +310,35 @@ public sealed class AgentOrchestrator(
                         agentFactory.OnAgentTurnStarting();
                         changeTracker?.BeginTurn(branchAgent.Name ?? "Unknown", turn);
 
-                        bool hasInstr = agentInstructions.TryGetValue(branchAgent.Name ?? "", out var instr);
-                        if (memoryManager is not null)
-                            instr = await memoryManager.AugmentInstructionsAsync(branchAgent.Name ?? "", instr, cancellationToken);
-
-                        var bAgentCfg = agentConfigs.GetValueOrDefault(branchAgent.Name ?? "");
-                        var filtered  = ContextWindowFilter.Apply(snapshot, bAgentCfg?.ContextWindow);
-                        IEnumerable<ChatMessage> context = (hasInstr || memoryManager is not null) && instr is not null
-                            ? [new ChatMessage(ChatRole.System, instr), .. filtered]
-                            : filtered;
+                        IEnumerable<ChatMessage> context;
+                        if (contextPipeline is not null)
+                        {
+                            var bAssembled = await contextPipeline.AssembleAsync(
+                                new AgentExecutionRequest
+                                {
+                                    AgentName  = branchAgent.Name ?? string.Empty,
+                                    Task       = task,
+                                    SharedHistory = snapshot,
+                                    AgentConfig   = agentConfigs.GetValueOrDefault(branchAgent.Name ?? ""),
+                                    SessionId     = _sessionId,
+                                },
+                                cancellationToken);
+                            context = bAssembled.Messages;
+                            if (eventEmitter is not null)
+                                await EmitContextAssemblyAsync(eventEmitter, bAssembled.Metrics, turn);
+                        }
+                        else
+                        {
+                            // Legacy fallback when no pipeline is wired (non-AgentOrchestrator paths).
+                            bool hasInstr = agentInstructions.TryGetValue(branchAgent.Name ?? "", out var instr);
+                            if (memoryManager is not null)
+                                instr = await memoryManager.AugmentInstructionsAsync(branchAgent.Name ?? "", instr, cancellationToken);
+                            var bAgentCfg = agentConfigs.GetValueOrDefault(branchAgent.Name ?? "");
+                            var filtered  = ContextWindowFilter.Apply(snapshot, bAgentCfg?.ContextWindow);
+                            context = (hasInstr || memoryManager is not null) && instr is not null
+                                ? [new ChatMessage(ChatRole.System, instr), .. filtered]
+                                : filtered;
+                        }
 
                         AgentResponse response = governanceKernel?.CircuitBreaker is { } cb
                             ? await cb.ExecuteAsync(() => branchAgent.RunAsync(context, null, null, cancellationToken))
@@ -455,67 +478,74 @@ public sealed class AgentOrchestrator(
             agentFactory.OnAgentTurnStarting();
             changeTracker?.BeginTurn(agent.Name ?? "Unknown", turn);
 
-            // Run the selected agent against the (possibly filtered) shared history.
-            // Passing null session means the agent does not maintain internal state —
-            // the full history IS the context for every call.
-            // Prepend this agent's system instruction so the LLM knows its role and routing keywords.
-            bool hasInstructions = agentInstructions.TryGetValue(agent.Name ?? "", out var instructions);
-
-            // Augment system instructions with the memory block for this agent (if any).
-            if (memoryManager is not null)
-                instructions = await memoryManager.AugmentInstructionsAsync(agent.Name ?? "", instructions, cancellationToken);
-
-            // Build the context slice for this agent.
-            // When the agent declares a Context spec, assemble it from artifacts so the agent
-            // sees only what it needs rather than the full session transcript. The shared
-            // history list is still updated after the turn so routing/termination strategies
-            // continue to work normally.
-            // When no Context spec is set, fall back to the traditional ContextWindow filter
-            // and auto-inject the session context summary (context_summary.md) as the second
-            // message when it exists, preventing agents from wasting turns re-reading brief.json.
+            // Build the full context for this agent through the unified assembly pipeline.
+            // The pipeline handles: system prompt (instructions + ranked memory),
+            // intent-based knowledge retrieval, session context injection, history
+            // filtering, and artifact assembly — all through one code path for both
+            // sequential and parallel execution.
             var agentCfg = agentConfigs.GetValueOrDefault(agent.Name ?? "");
-            IReadOnlyList<ChatMessage> filtered;
-            if (agentCfg?.Context is { Count: > 0 } agentContextSources && contextAssembler is not null)
+            IEnumerable<ChatMessage> context;
+
+            if (contextPipeline is not null)
             {
-                filtered = await contextAssembler.AssembleForAgentAsync(
-                    agent.Name ?? string.Empty,
-                    task,
-                    agentContextSources,
-                    history,
+                var assembled = await contextPipeline.AssembleAsync(
+                    new AgentExecutionRequest
+                    {
+                        AgentName     = agent.Name ?? string.Empty,
+                        Task          = task,
+                        SharedHistory = history,
+                        AgentConfig   = agentCfg,
+                        SessionId     = _sessionId,
+                    },
                     cancellationToken);
+                context = assembled.Messages;
+                if (eventEmitter is not null)
+                    await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, turn);
             }
             else
             {
-                var raw = ContextWindowFilter.Apply(history, agentCfg?.ContextWindow);
-                if (contextAssembler is not null)
+                // Legacy fallback — identical to the pre-pipeline behavior.
+                bool hasInstructions = agentInstructions.TryGetValue(agent.Name ?? "", out var instructions);
+                if (memoryManager is not null)
+                    instructions = await memoryManager.AugmentInstructionsAsync(agent.Name ?? "", instructions, cancellationToken);
+
+                IReadOnlyList<ChatMessage> filtered;
+                if (agentCfg?.Context is { Count: > 0 } agentContextSources && contextAssembler is not null)
                 {
-                    var sessionCtx = await contextAssembler.ReadSessionContextAsync(cancellationToken);
-                    if (sessionCtx is not null)
+                    filtered = await contextAssembler.AssembleForAgentAsync(
+                        agent.Name ?? string.Empty, task, agentContextSources, history, cancellationToken);
+                }
+                else
+                {
+                    var raw = ContextWindowFilter.Apply(history, agentCfg?.ContextWindow);
+                    if (contextAssembler is not null)
                     {
-                        var withCtx = new List<ChatMessage>(raw.Count + 1);
-                        if (raw.Count > 0) withCtx.Add(raw[0]);
-                        withCtx.Add(new ChatMessage(ChatRole.User,
-                            $"[Session Context]\n\n{sessionCtx.Trim()}"));
-                        withCtx.AddRange(raw.Skip(1));
-                        filtered = withCtx;
+                        var sessionCtx = await contextAssembler.ReadSessionContextAsync(cancellationToken);
+                        if (sessionCtx is not null)
+                        {
+                            var withCtx = new List<ChatMessage>(raw.Count + 1);
+                            if (raw.Count > 0) withCtx.Add(raw[0]);
+                            withCtx.Add(new ChatMessage(ChatRole.User, $"[Session Context]\n\n{sessionCtx.Trim()}"));
+                            withCtx.AddRange(raw.Skip(1));
+                            filtered = withCtx;
+                        }
+                        else filtered = raw;
                     }
                     else filtered = raw;
                 }
-                else filtered = raw;
+
+                context = (hasInstructions || memoryManager is not null) && instructions is not null
+                    ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
+                    : filtered;
             }
 
-            IEnumerable<ChatMessage> context = (hasInstructions || memoryManager is not null) && instructions is not null
-                ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
-                : filtered;
-
+            var contextList = context as IList<ChatMessage> ?? context.ToList();
             logger.LogDebug(
                 "[Orchestrator] Invoking '{Agent}' with {ContextCount} context messages " +
-                "(system={HasSystem}, history={HistCount}, filtered={FilteredCount})",
+                "(history={HistCount})",
                 agent.Name,
-                hasInstructions ? filtered.Count + 1 : filtered.Count,
-                hasInstructions,
-                history.Count,
-                filtered.Count);
+                contextList.Count,
+                history.Count);
 
             // Pre-turn budget guard: estimate the input token cost of this context slice and
             // abort before the LLM call if cumulative + estimated input would exceed the limit.
@@ -642,6 +672,32 @@ public sealed class AgentOrchestrator(
             if (memoryManager is not null)
                 await memoryManager.PostTurnAsync(agentMessage.AgentName, [..history], cancellationToken);
 
+            // Persist entity-scoped findings from this turn's tool calls for future session retrieval.
+            if (repositoryKnowledgeStore is not null && !string.IsNullOrEmpty(_sessionId))
+            {
+                try
+                {
+                    var observations = ObservationExtractor.Extract(
+                        (IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>)response.Messages,
+                        agentMessage.AgentName, agentMessage.TurnIndex);
+                    foreach (var obs in observations)
+                    {
+                        if (string.IsNullOrWhiteSpace(obs.Entity)) continue;
+                        await repositoryKnowledgeStore.AddAsync(new fuseraft.Core.Models.RepositoryKnowledgeFinding
+                        {
+                            Entity     = obs.Entity!,
+                            Finding    = obs.Finding,
+                            Source     = _sessionId,
+                            Confidence = obs.Confidence,
+                            AgentName  = obs.AgentName,
+                            Kind       = obs.Source is "write_file" or "patch_file" or "delete_file"
+                                         ? "change" : "observation",
+                        }, CancellationToken.None);
+                    }
+                }
+                catch { /* best-effort — never disrupt the session */ }
+            }
+
             // Periodic verifier: run the meta-agent every N turns to audit evidence, OR
             // immediately when a ConflictingEvidence / NoProgress correction was injected this
             // turn (evidence-driven trigger). Skipped when the verifier itself just ran.
@@ -658,13 +714,33 @@ public sealed class AgentOrchestrator(
                 changeTracker?.BeginTurn(verifierAgent.Name ?? "Verifier", turn);
 
                 var vAgentCfg = agentConfigs.GetValueOrDefault(verifierAgent.Name ?? "");
-                var vFiltered = ContextWindowFilter.Apply(history, vAgentCfg?.ContextWindow);
-                bool vHasInstr = agentInstructions.TryGetValue(verifierAgent.Name ?? "", out var vInstr);
-                if (memoryManager is not null)
-                    vInstr = await memoryManager.AugmentInstructionsAsync(verifierAgent.Name ?? "", vInstr, cancellationToken);
-                IEnumerable<ChatMessage> vContext = (vHasInstr || memoryManager is not null) && vInstr is not null
-                    ? [new ChatMessage(ChatRole.System, vInstr), .. vFiltered]
-                    : vFiltered;
+                IEnumerable<ChatMessage> vContext;
+                if (contextPipeline is not null)
+                {
+                    var vAssembled = await contextPipeline.AssembleAsync(
+                        new AgentExecutionRequest
+                        {
+                            AgentName     = verifierAgent.Name ?? string.Empty,
+                            Task          = task,
+                            SharedHistory = history,
+                            AgentConfig   = vAgentCfg,
+                            SessionId     = _sessionId,
+                        },
+                        cancellationToken);
+                    vContext = vAssembled.Messages;
+                    if (eventEmitter is not null)
+                        await EmitContextAssemblyAsync(eventEmitter, vAssembled.Metrics, turn);
+                }
+                else
+                {
+                    var vFiltered  = ContextWindowFilter.Apply(history, vAgentCfg?.ContextWindow);
+                    bool vHasInstr = agentInstructions.TryGetValue(verifierAgent.Name ?? "", out var vInstr);
+                    if (memoryManager is not null)
+                        vInstr = await memoryManager.AugmentInstructionsAsync(verifierAgent.Name ?? "", vInstr, cancellationToken);
+                    vContext = (vHasInstr || memoryManager is not null) && vInstr is not null
+                        ? [new ChatMessage(ChatRole.System, vInstr), .. vFiltered]
+                        : vFiltered;
+                }
 
                 AgentResponse vResponse = governanceKernel?.CircuitBreaker is { } vcb
                     ? await vcb.ExecuteAsync(() => verifierAgent.RunAsync(vContext, null, null, cancellationToken))
@@ -716,6 +792,25 @@ public sealed class AgentOrchestrator(
     }
 
     // Helpers
+
+    private static Task EmitContextAssemblyAsync(
+        EventEmitter emitter,
+        fuseraft.Core.Models.ContextAssemblyMetrics metrics,
+        int turn) =>
+        emitter.EmitAsync("context_assembly",
+            agent: metrics.AgentName,
+            turn:  turn,
+            payload: new
+            {
+                knowledge_retrieved  = metrics.KnowledgeItemsRetrieved,
+                knowledge_included   = metrics.KnowledgeItemsIncluded,
+                memory_loaded        = metrics.MemoryEntriesLoaded,
+                memory_included      = metrics.MemoryEntriesIncluded,
+                artifacts            = metrics.ArtifactsAssembled,
+                context_chars        = metrics.TotalContextChars,
+                system_prompt_chars  = metrics.SystemPromptChars,
+                assembly_ms          = (int)metrics.AssemblyDuration.TotalMilliseconds,
+            });
 
     private static TokenUsage? ExtractUsage(AgentResponse response)
     {
