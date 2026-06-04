@@ -2,29 +2,38 @@
 
 Context is the most important resource in a long-running agent session. Every token an agent
 sees costs money and time; everything it misses is a potential hallucination or regression.
-fuseraft manages context through four layers that fire at different points in a session's
-lifetime:
+fuseraft manages context through a unified assembly pipeline that fires every agent turn, plus
+several independent layers that augment it:
 
 ```
 Session start
   └─ Auto-injection              → runtime environment + .gitignore (always on, no config)
   └─ Layer 1: Context Store      → files imported before the session
-  └─ Layer 2: Persistent Memory  → facts recalled from prior sessions (EnableMemory)
 
-Each agent turn
-  └─ Layer 2b: Memory Provider   → fresh context fetched from pluggable store (Memory:)
-  └─ Layer 3: ContextWindow      → per-agent history filter (every turn)
+Each agent turn — ContextAssemblyPipeline (always on)
+  └─ Intent analysis             → keywords, PascalCase symbols, failure patterns extracted from task
+  └─ Memory block                → per-agent memories ranked by relevance (not alphabetical)
+  └─ Knowledge retrieval         → ADRs, graph nodes, repository memory, session findings (KnowledgeWeight)
+  └─ Graph expansion             → one-hop symbol neighbours for KnowledgeWeight.High agents
+  └─ Context window filter       → per-agent history slice (ContextWindow config)
+  └─ Session context injection   → session summary prepended (if present)
   └─ Artifact offloading         → tool results > 40k chars stored to disk; stub replaces inline (always on)
 
 History too long
-  └─ Layer 4: Compaction         → replace old turns with a summary
-  └─ Layer 5: Context Budget     → token-based compaction trigger per agent
+  └─ Compaction                  → replace old turns with a summary + tool-call trace
+  └─ Context Budget              → token-based compaction trigger per agent
 
 After each run
   └─ Visualization               → HTML chart of cumulative input tokens per agent
 ```
 
-Each layer is optional and independently configured. Most sessions need only one or two.
+The pipeline is the single entry point for every agent invocation — sequential, parallel, and
+verifier agents all receive identically assembled context. Most layers are always-on; use
+`KnowledgeWeight` on an agent's config to tune retrieval depth.
+
+> **Upgrading from `EnableMemory`:** `EnableMemory: true` is deprecated. Memory is now
+> runtime-injected by the pipeline every turn and ranked by relevance to the current task.
+> Remove `EnableMemory` from your agent configs — it will be ignored in a future release.
 
 ---
 
@@ -75,27 +84,25 @@ See [Context Store](context-store.md) for the full CLI reference.
 
 ---
 
-## Layer 2: Persistent Memory
+## Layer 2: Persistent Memory (pipeline-injected)
 
-When `EnableMemory: true` is set on an agent, fuseraft loads that agent's persistent memory
-store at session start and prepends a structured block to its instructions. Memories survive
-between sessions — they accumulate over time, giving agents a working knowledge of the project.
+Every agent's persistent memory store is loaded and ranked by relevance before each turn.
+Memories survive between sessions — they accumulate over time, giving agents a working
+knowledge of the project.
 
-```yaml
-Agents:
-  - Name: Developer
-    EnableMemory: true
-    Instructions: |
-      You are a Go developer. Write idiomatic, tested code.
-```
-
-At session start, the agent sees:
+The memory block is automatically injected into the agent's system prompt by the pipeline.
+No per-agent config is required.
 
 ```
 MEMORY — facts recalled from prior sessions:
-[preference] preferred-test-runner: Use `go test -race ./...` for all test runs.
+[feedback] preferred-test-runner: Use `go test -race ./...` for all test runs.
 [fact] auth-middleware: The auth middleware was rewritten in v2.3 — do not touch the legacy layer.
 ```
+
+**Ranking:** Memories are now ranked by relevance to the current task — entries whose name,
+description, or body contain keywords or symbols extracted from the task score higher. Type
+priority (`feedback` > `project` > `user` > `reference`) is used as a tiebreaker.
+The prompt block is capped at 8,000 characters; entries that do not fit are silently dropped.
 
 **Storage locations:**
 
@@ -111,8 +118,8 @@ directory are loaded. Directories without `.fuseraft/` fall back to all global m
 automatically at the end of each session and scoped to the working directory via
 `.fuseraft/memory/sessions/{session_id}/memory_refs.json`. Use `/memory` commands to inspect or delete them.
 
-**Memory cap:** The prompt block is capped at 8,000 characters. Entries are ordered by type
-then name; entries that would exceed the cap are dropped (header only is kept for visibility).
+> **Deprecated:** `EnableMemory: true` on an agent config is no longer needed. Memory is now
+> injected at runtime by the pipeline regardless of this flag.
 
 See [Configuration — Memory](configuration.md#memory) for the full field reference.
 
@@ -120,7 +127,7 @@ See [Configuration — Memory](configuration.md#memory) for the full field refer
 
 ## Layer 2b: Memory provider (per-turn)
 
-The `Memory:` top-level config key activates a live provider that runs pre- and post-turn hooks around every agent turn. Unlike `EnableMemory` (one-shot at session start), the provider fetches a fresh context block before each turn and can persist the accumulated history after each turn.
+The `Memory:` top-level config key activates a live provider that runs pre- and post-turn hooks around every agent turn. The provider can persist the accumulated history after each turn and supply additional context from external sources.
 
 ```yaml
 Memory:
@@ -129,10 +136,8 @@ Memory:
 
 Two built-in providers are available:
 
-- **`local`** — re-reads from the same file-backed `MemoryStore` as `EnableMemory`, but refreshes every turn rather than once at startup. Useful when another process is writing new memories during the session.
+- **`local`** — refreshes the file-backed memory store every turn. Useful when another process is writing new memories during the session.
 - **`webhook`** — delegates load and save to an HTTP endpoint you control (vector store, knowledge graph, managed memory service).
-
-`EnableMemory` and `Memory:` are additive: the `EnableMemory` block is baked into the agent's static instructions at creation time; the `Memory:` block is prepended at turn time. Both can be active simultaneously.
 
 See [Configuration — Pluggable memory provider](configuration.md#pluggable-memory-provider) for the full reference.
 
@@ -662,24 +667,35 @@ Here is the full sequence from session start through a long-running session:
 ```
 1. fuseraft run
    ├─ Auto-injection     → runtime environment block + .gitignore (always on)
-   ├─ Context Store index → injected into every agent's system prompt
-   └─ Persistent Memory  → prepended to each agent's instructions (if EnableMemory: true)
+   └─ Context Store index → injected into every agent's system prompt
 
-2. Each agent turn
-   ├─ Memory provider pre-turn → fresh block prepended to instructions (if Memory: set)
+2. Each agent turn — ContextAssemblyPipeline
+   ├─ Intent analysis    → keywords + PascalCase symbols + failure patterns from task
+   ├─ Memory block       → ranked by task relevance (RelevanceMemoryRanker), capped at 8k chars
+   ├─ Knowledge retrieval → ADR registry + graph nodes + repository memory + session findings
+   │     KnowledgeWeight.None    → skip retrieval entirely
+   │     KnowledgeWeight.Low     → Verified/Inferred items only
+   │     KnowledgeWeight.Default → all non-expired items (default)
+   │     KnowledgeWeight.High    → Default + one-hop graph expansion on seed symbols
+   ├─ System prompt      → instructions + memory block (unified)
    ├─ HandoffContext injection (state machine only) → artifact block written into shared history when a transition fires
-   ├─ ContextWindow filter applied to conversation history (skipped when Context: is declared)
+   ├─ ContextWindow filter or Context: spec
    │  ├─ TextOnly / ExcludeAgents strip tool noise
    │  ├─ MaxTurnAge semantic cut
    │  ├─ MaxTailMessages hard cap
    │  ├─ MaxToolResultChars — truncate large tool results in replayed history
    │  └─ SanitizeToolPairs — strip orphaned assistant tool-call frames (strict providers)
-   ├─ Layer 3a: Context spec (when Context: is declared) → task + own_history + artifact block assembled from disk
-   └─ Filtered slice or artifact-assembled context → sent to LLM
+   ├─ Session context injection → context_summary.md prepended when present
+   ├─ Knowledge artifact appended as [Pipeline Knowledge] user message
+   └─ Assembled context → sent to LLM
       ├─ Tool-result artifact offloading — results > 40k chars stored to disk; stub replaces inline content
       ├─ MaxInTurnToolPairs — sliding window: keep only last N tool pairs per inner call
       ├─ MaxInTurnContextTokens — budget-reactive: trim oldest pairs when over budget
       └─ On context/413 error → adaptive trim retry (up to 3 stages)
+
+   Post-turn
+   ├─ Memory provider    → post-turn hooks (if Memory: is configured)
+   └─ Knowledge findings → entity-scoped observations persisted to knowledge_findings.json
 
 3. After each checkpoint save
    └─ Compaction check
