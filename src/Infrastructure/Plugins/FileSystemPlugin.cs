@@ -685,7 +685,10 @@ public sealed class FileSystemPlugin : ITurnResettable
             return PluginResult.Error($"Directory not found: {resolved}");
 
         const int maxFiles = 500;
+        var sep = Path.DirectorySeparatorChar;
+        string[] ignoredDirs = [".git", "node_modules", "bin", "obj", ".vs", ".idea", ".nuget", ".venv", "__pycache__", ".fuseraft"];
         var files = Directory.EnumerateFiles(resolved, pattern, SearchOption.AllDirectories)
+            .Where(f => !ignoredDirs.Any(d => f.Contains($"{sep}{d}{sep}") || f.EndsWith($"{sep}{d}")))
             .Take(maxFiles + 1)
             .ToList();
 
