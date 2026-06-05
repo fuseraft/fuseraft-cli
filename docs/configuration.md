@@ -1080,9 +1080,6 @@ Named, composable transition gates that check what must be true on disk before a
 Contracts:
   - Name: ImplementationComplete
     Requires:
-      - FilesWritten:
-          Source: .fuseraft/artifacts/brief.json
-          Field: files_to_change
       - CommandSucceeded:
           PatternField: "verify_command"   # reads the verify command from brief.json
 
