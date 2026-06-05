@@ -371,9 +371,16 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
             _currentState, state.Agent);
 
         if (_eventEmitter is not null)
+        {
+            var expectedSignals = state.Transitions
+                .Where(t => !string.IsNullOrWhiteSpace(t.Signal))
+                .Select(t => t.Signal!)
+                .Distinct()
+                .ToList();
             _ = _eventEmitter.EmitAsync("keyword_not_found",
                 agent: state.Agent,
-                payload: new { state = _currentState, agent = state.Agent });
+                payload: new { state = _currentState, agent = state.Agent, expected_signals = expectedSignals });
+        }
 
         // Accumulate consecutive no-signal turns in strategy state so the counter
         // survives compaction (unlike the history-scan used by InjectLoopWarningIfNeeded).
