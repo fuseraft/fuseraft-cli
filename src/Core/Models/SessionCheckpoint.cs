@@ -22,6 +22,13 @@ public record SessionCheckpoint
     public required string ConfigPath { get; init; }
 
     /// <summary>
+    /// Absolute working directory at session start. Used by the session index to
+    /// group and filter sessions by project. Null for sessions created before this
+    /// field was introduced (backward compatible).
+    /// </summary>
+    public string? WorkingDirectory { get; init; }
+
+    /// <summary>
     /// All agent messages produced so far, in order.
     /// </summary>
     public List<AgentMessage> Messages { get; init; } = [];
