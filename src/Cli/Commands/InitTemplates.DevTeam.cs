@@ -68,6 +68,8 @@ public static partial class InitTemplates
               - Search
               - SessionContext
               - SubAgent
+              - Decision
+              - Objective
               - Handoff
             FunctionChoice: required
             {AgentFileOptions}
