@@ -185,7 +185,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             return 1;
         }
 
-        var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, _) = built;
+        var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, _, sessionMetrics) = built;
 
         await using var _mcp = mcpManager;
         using var _governance = governanceKernel;
@@ -447,7 +447,8 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             eventEmitter, telemetry, modelIdByAgent, devUI, configPath,
             maxIterations: config.Termination?.ResolveMaxIterations() ?? 0,
             contextBudget: config.ContextBudget,
-            contextWindowRecorder: ctxRecorder);
+            contextWindowRecorder: ctxRecorder,
+            sessionMetrics: sessionMetrics);
 
         var result = await runner.RunAsync(task, checkpoint, settings.HumanInTheLoop, settings.ShowTools, cts.Token);
 

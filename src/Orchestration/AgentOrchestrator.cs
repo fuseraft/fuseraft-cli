@@ -325,7 +325,8 @@ public sealed class AgentOrchestrator(
                                 cancellationToken);
                             context = bAssembled.Messages;
                             if (eventEmitter is not null)
-                                await EmitContextAssemblyAsync(eventEmitter, bAssembled.Metrics, turn);
+                                await EmitContextAssemblyAsync(eventEmitter, bAssembled.Metrics, turn,
+                                    agentFactory.GetToolCount(branchAgent.Name ?? ""));
                         }
                         else
                         {
@@ -500,7 +501,8 @@ public sealed class AgentOrchestrator(
                     cancellationToken);
                 context = assembled.Messages;
                 if (eventEmitter is not null)
-                    await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, turn);
+                    await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, turn,
+                        agentFactory.GetToolCount(agent.Name ?? ""));
             }
             else
             {
@@ -540,6 +542,13 @@ public sealed class AgentOrchestrator(
             }
 
             var contextList = context as IList<ChatMessage> ?? context.ToList();
+
+            // Sliding tool-result window: replace oldest tool results with tombstones
+            // when the estimated token cost exceeds MaxToolResultTokens. Applied to the
+            // context slice only — shared history is never modified.
+            if (config.ContextBudget is { MaxToolResultTokens: > 0 } toolBudget)
+                contextList = ToolResultWindowTrimmer.Apply(contextList, toolBudget);
+
             logger.LogDebug(
                 "[Orchestrator] Invoking '{Agent}' with {ContextCount} context messages " +
                 "(history={HistCount})",
@@ -729,7 +738,8 @@ public sealed class AgentOrchestrator(
                         cancellationToken);
                     vContext = vAssembled.Messages;
                     if (eventEmitter is not null)
-                        await EmitContextAssemblyAsync(eventEmitter, vAssembled.Metrics, turn);
+                        await EmitContextAssemblyAsync(eventEmitter, vAssembled.Metrics, turn,
+                            agentFactory.GetToolCount(verifierAgent.Name ?? ""));
                 }
                 else
                 {
@@ -742,9 +752,13 @@ public sealed class AgentOrchestrator(
                         : vFiltered;
                 }
 
+                var vContextList = vContext as IList<ChatMessage> ?? vContext.ToList();
+                if (config.ContextBudget is { MaxToolResultTokens: > 0 } vToolBudget)
+                    vContextList = ToolResultWindowTrimmer.Apply(vContextList, vToolBudget);
+
                 AgentResponse vResponse = governanceKernel?.CircuitBreaker is { } vcb
-                    ? await vcb.ExecuteAsync(() => verifierAgent.RunAsync(vContext, null, null, cancellationToken))
-                    : await verifierAgent.RunAsync(vContext, null, null, cancellationToken);
+                    ? await vcb.ExecuteAsync(() => verifierAgent.RunAsync(vContextList, null, null, cancellationToken))
+                    : await verifierAgent.RunAsync(vContextList, null, null, cancellationToken);
 
                 foreach (var vMsg in vResponse.Messages)
                 {
@@ -793,23 +807,44 @@ public sealed class AgentOrchestrator(
 
     // Helpers
 
+    // Average tokens per tool schema definition — used to estimate the tool-schema overhead
+    // that is counted in the LLM's input_tokens but absent from context_chars. Fuseraft tools
+    // have detailed descriptions and multi-parameter schemas; 450 tokens/tool is a conservative
+    // mid-point calibrated against observed grok/claude session data.
+    private const int AvgToolSchemaTokens = 450;
+
     private static Task EmitContextAssemblyAsync(
         EventEmitter emitter,
         fuseraft.Core.Models.ContextAssemblyMetrics metrics,
-        int turn) =>
+        int turn,
+        int toolCount = 0) =>
         emitter.EmitAsync("context_assembly",
             agent: metrics.AgentName,
             turn:  turn,
             payload: new
             {
-                knowledge_retrieved  = metrics.KnowledgeItemsRetrieved,
-                knowledge_included   = metrics.KnowledgeItemsIncluded,
-                memory_loaded        = metrics.MemoryEntriesLoaded,
-                memory_included      = metrics.MemoryEntriesIncluded,
-                artifacts            = metrics.ArtifactsAssembled,
-                context_chars        = metrics.TotalContextChars,
-                system_prompt_chars  = metrics.SystemPromptChars,
-                assembly_ms          = (int)metrics.AssemblyDuration.TotalMilliseconds,
+                knowledge_retrieved      = metrics.KnowledgeItemsRetrieved,
+                knowledge_included       = metrics.KnowledgeItemsIncluded,
+                memory_loaded            = metrics.MemoryEntriesLoaded,
+                memory_included          = metrics.MemoryEntriesIncluded,
+                artifacts                = metrics.ArtifactsAssembled,
+                context_chars            = metrics.TotalContextChars,
+                system_prompt_chars      = metrics.SystemPromptChars,
+                assembly_ms              = (int)metrics.AssemblyDuration.TotalMilliseconds,
+                // Per-source char breakdown — shows which source dominates startup context.
+                context_chars_breakdown  = new
+                {
+                    system_prompt    = metrics.SystemPromptChars,
+                    memory           = metrics.MemoryChars,
+                    session_context  = metrics.SessionContextChars,
+                    knowledge        = metrics.KnowledgeChars,
+                    history          = metrics.HistoryChars,
+                },
+                // Tool-schema tokens are sent as the API `tools` parameter, not as messages,
+                // so they are invisible to context_chars. This estimate fills the gap so
+                // total input_tokens ≈ context_chars/4 + tool_schema_est_tokens.
+                tool_count               = toolCount,
+                tool_schema_est_tokens   = toolCount * AvgToolSchemaTokens,
             });
 
     private static TokenUsage? ExtractUsage(AgentResponse response)
