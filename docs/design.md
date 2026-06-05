@@ -98,6 +98,7 @@ All runtime artifacts are written under `.fuseraft/` in the current working dire
 | `~/.fuseraft/config` | Model ID, endpoint URL (no secrets) |
 | `~/.fuseraft/.key` | Plain-text fallback API key (mode 0600; used only when no keychain) |
 | `~/.fuseraft/sessions/` | Session checkpoint files (`<sessionId>.json`, mode 0600) |
+| `~/.fuseraft/sessions/index.json` | Lightweight session index (no message history) for fast listing |
 | `~/.fuseraft/logs/sessions/{project_slug}/{session_id}/events.jsonl` | Structured JSONL session events (`EventEmitter`) |
 | `~/.fuseraft/logs/sessions/{project_slug}/{session_id}/ctx_snapshots.jsonl` | Per-turn context-window token snapshots |
 | `~/.fuseraft/crashdump/` | Crash dump JSON files |
@@ -498,6 +499,7 @@ Every session is backed by a `SessionCheckpoint` persisted after each agent turn
 | `SessionId` | 8-character hex ID (`Guid.NewGuid().ToString("N")[..8]`) |
 | `Task` | Original task string |
 | `ConfigPath` | Config file that produced this session (used on resume) |
+| `WorkingDirectory` | Absolute working directory at session start (used by the session index) |
 | `Messages` | Ordered `List<AgentMessage>` — the complete conversation transcript |
 | `StartedAt` | UTC timestamp of session creation (immutable) |
 | `LastUpdatedAt` | UTC timestamp of last save (set by `SaveAsync`) |
@@ -508,13 +510,16 @@ Every session is backed by a `SessionCheckpoint` persisted after each agent turn
 
 **`AgentMessage` fields:** `AgentName`, `Content`, `Role`, `TurnIndex`, `Timestamp`, `Usage` (tokens + cost), `IsCompactionSummary`, `ToolCalls` (name, args summary, succeeded).
 
-**`ISessionStore` contract:**
-- `SaveAsync` — create or overwrite; sets `LastUpdatedAt`
-- `LoadAsync` — load by session ID, null if not found
-- `DeleteAsync`
-- `ListAsync` — all checkpoints sorted by `LastUpdatedAt` descending
+**`SessionIndexEntry` fields:** `SessionId`, `Task` (first non-empty line, ≤120 chars), `WorkingDirectory`, `ConfigPath`, `StartedAt`, `LastUpdatedAt`, `IsComplete`, `TurnCount`. Written to `~/.fuseraft/sessions/index.json` (keyed by session ID) on every `SaveAsync` and `DeleteAsync` so listing never requires opening checkpoint files.
 
-**`JsonSessionStore`** (default): one JSON file per session at `~/.fuseraft/sessions/<sessionId>.json`. Unix file permissions set to 0600 on non-Windows. `ListAsync` deserializes all `.json` files in the directory with error logging for unreadable files.
+**`ISessionStore` contract:**
+- `SaveAsync` — create or overwrite; sets `LastUpdatedAt`; updates `index.json`
+- `LoadAsync` — load by session ID, null if not found
+- `DeleteAsync` — removes checkpoint file and removes entry from `index.json`
+- `ListAsync` — all checkpoints sorted by `LastUpdatedAt` descending (opens every checkpoint file)
+- `ListIndexAsync` — all index entries sorted by `LastUpdatedAt` descending (reads `index.json` only; bootstraps from checkpoint files on first call if index is absent)
+
+**`JsonSessionStore`** (default): one JSON file per session at `~/.fuseraft/sessions/<sessionId>.json`. Unix file permissions set to 0600 on non-Windows. Maintains `index.json` as a side-effect of every save and delete. `fuseraft sessions` and the `--resume` prompt use `ListIndexAsync` — message history is never loaded for listing.
 
 **`InMemorySessionStore`**: `ConcurrentDictionary` backed; sessions lost on process exit. Used when `Checkpoint.Mode = "memory"` in config or when no config-level checkpoint path is set and the user explicitly opts in.
 
