@@ -344,6 +344,10 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
         # MaxProvenanceAgeDays: expired provenance records (past ExpiresAt) are archived
         #   after this many additional days. 0 = archive immediately.
         MaxProvenanceAgeDays: 0
+        #
+        # MemoryCandidatePruningDays: Candidate memories not reinforced within this window
+        #   are permanently deleted from knowledge/repository/. Set to 0 to disable.
+        MemoryCandidatePruningDays: 180
         """;
 
     private const string DefaultFuseraftIgnore = """
