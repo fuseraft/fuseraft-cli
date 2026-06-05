@@ -109,7 +109,7 @@ REPL agents can inspect their own session and diagnostic logs using the built-in
 | Log name | Path | Contents |
 |----------|------|----------|
 | `repl_events` | `.fuseraft/logs/repl_events.jsonl` | REPL lifecycle events (session start/end, each turn) tagged with session ID |
-| `events` | `.fuseraft/logs/events.jsonl` | Orchestration events from `fuseraft run` sessions |
+| `events` | `.fuseraft/logs/sessions/{session_id}/events.jsonl` | Orchestration events from `fuseraft run` sessions |
 | `provider_errors` | `.fuseraft/logs/provider_errors.jsonl` | Provider API errors and retry attempts |
 | `app` | `.fuseraft/logs/app.log` | Application diagnostic log |
 

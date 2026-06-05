@@ -675,7 +675,7 @@ Emit a structured JSONL stream of session events to a file on disk:
 
 ```yaml
 Events:
-  Path: .fuseraft/logs/events.jsonl
+  Path: .fuseraft/logs/sessions/{session_id}/events.jsonl
 ```
 
 > **App log** — In addition to this configurable event stream, fuseraft-cli always writes `Warning`-level and higher diagnostic messages to `.fuseraft/logs/app.log` via an always-on Serilog file sink (5 MB per file, 3 retained). This includes store-corruption warnings from `ChangeTracker`, `IntentLog`, `EvidenceStore`, and `FileVersionStore`, as well as structured retry and model-fallover events from the HTTP layer. No configuration needed.
@@ -859,7 +859,7 @@ Possible `outcome` values:
 | `no_skill` | The LLM reviewed the session and determined no portable skill is warranted. |
 | `failed` | An error occurred (empty LLM response, malformed output, write failure). Check `failure_reason`. |
 
-`skill_curation_start` and `skill_curation_complete` events are also emitted to the session event log (`.fuseraft/logs/events.jsonl` for `fuseraft run`, `.fuseraft/logs/repl_events.jsonl` for REPL) so you can correlate curation with the rest of the session timeline. Use `--verbose` to see debug-level output including the LLM response preview.
+`skill_curation_start` and `skill_curation_complete` events are also emitted to the session event log (`.fuseraft/logs/sessions/{session_id}/events.jsonl` for `fuseraft run`, `.fuseraft/logs/repl_events.jsonl` for REPL) so you can correlate curation with the rest of the session timeline. Use `--verbose` to see debug-level output including the LLM response preview.
 
 **Skill injection at session start (`fuseraft run` only)**
 
