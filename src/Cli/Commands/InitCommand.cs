@@ -247,6 +247,18 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
             result.Add((lcPath, false));
         }
 
+        // .fuseraftignore — only if absent.
+        const string ignorePath = ".fuseraft/.fuseraftignore";
+        if (!File.Exists(ignorePath))
+        {
+            await File.WriteAllTextAsync(ignorePath, DefaultFuseraftIgnore, cancellationToken);
+            result.Add((ignorePath, true));
+        }
+        else
+        {
+            result.Add((ignorePath, false));
+        }
+
         return result;
     }
 
@@ -334,6 +346,37 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
         MaxProvenanceAgeDays: 0
         """;
 
+    private const string DefaultFuseraftIgnore = """
+        # .fuseraftignore — marks which .fuseraft/ files fuseraft tooling treats as ephemeral.
+        # Paths are relative to .fuseraft/. Syntax is gitignore-style; prefix ! to un-ignore.
+        #
+        # Respected by: fuseraft cleanup, fuseraft gc, fuseraft archive-session
+        # Does not affect .gitignore — git tracking is controlled by your project's .gitignore.
+
+        # ── Ephemeral session data ──────────────────────────────────────────────────
+        # Large, agent-internal files that are reproducible and not useful to retain.
+        sessions/**/read_cache.json
+        sessions/**/tool-results/
+        sessions/**/ctx_viz.html
+        sessions/**/events.jsonl
+        sessions/**/brief-review.json
+
+        # ── Logs ───────────────────────────────────────────────────────────────────
+        logs/**
+
+        # ── State ──────────────────────────────────────────────────────────────────
+        state/knowledge_findings.json
+        state/provenance.archive.json
+
+        # ── Keep these ─────────────────────────────────────────────────────────────
+        # Session artifacts worth retaining for inspection and handoff continuity.
+        !sessions/*/brief.json
+        !sessions/*/brief.brownfield.json
+        !sessions/*/conventions.json
+        !sessions/*/context_summary.md
+        !sessions/*/intents.json
+        """;
+
     private static async Task EnsureGitignoreEntryAsync(CancellationToken cancellationToken)
     {
         var gitignorePath = Path.Combine(Directory.GetCurrentDirectory(), ".gitignore");
@@ -356,8 +399,9 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
 
         const string block = """
 
-            # fuseraft runtime artifacts — config/ and context/ remain tracked
+            # fuseraft runtime artifacts — config/, context/, and .fuseraftignore remain tracked
             .fuseraft/*
+            !.fuseraft/.fuseraftignore
             !.fuseraft/config/
             !.fuseraft/config/**
             !.fuseraft/context/
@@ -365,7 +409,7 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
             """;
 
         await File.AppendAllTextAsync(gitignorePath, block + Environment.NewLine, cancellationToken);
-        AnsiConsole.MarkupLine("[green]✓[/] Updated [bold].gitignore[/] — [dim].fuseraft/config/[/] and [dim].fuseraft/context/[/] will be tracked");
+        AnsiConsole.MarkupLine("[green]✓[/] Updated [bold].gitignore[/] — [dim].fuseraft/config/[/], [dim].fuseraft/context/[/], and [dim].fuseraft/.fuseraftignore[/] will be tracked");
     }
 
     private static string DetectDefaultModel()
