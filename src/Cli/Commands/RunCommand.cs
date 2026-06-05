@@ -364,9 +364,10 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         var isNewSession = checkpoint is null;
         checkpoint ??= new SessionCheckpoint
         {
-            SessionId  = pendingSessionId,
-            Task       = task,
-            ConfigPath = configPath
+            SessionId        = pendingSessionId,
+            Task             = task,
+            ConfigPath       = configPath,
+            WorkingDirectory = Directory.GetCurrentDirectory(),
         };
 
         // Write a seed checkpoint immediately so this session appears in the sessions list
@@ -659,8 +660,8 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
     {
         if (string.IsNullOrWhiteSpace(sessionIdHint))
         {
-            var all = await store.ListAsync();
-            var incomplete = all.Where(s => !s.IsComplete).ToList();
+            var index    = await store.ListIndexAsync();
+            var incomplete = index.Where(e => !e.IsComplete).ToList();
 
             if (incomplete.Count == 0)
             {
@@ -668,13 +669,20 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
                 return null;
             }
 
-            return AnsiConsole.Prompt(
-                new SelectionPrompt<SessionCheckpoint>()
+            var selected = AnsiConsole.Prompt(
+                new SelectionPrompt<Core.Models.SessionIndexEntry>()
                     .Title("Select a session to resume:")
-                    .UseConverter(s =>
-                        $"[bold]{s.SessionId}[/]  {s.Messages.Count} turns  " +
-                        $"[dim]{s.LastUpdatedAt:yyyy-MM-dd HH:mm}  {StringHelpers.Truncate(s.Task, 60)}[/]")
+                    .UseConverter(e =>
+                    {
+                        var proj = e.WorkingDirectory is { } wd
+                            ? string.Join("/", wd.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries)[^Math.Min(2, wd.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries).Length)..])
+                            : "?";
+                        return $"[bold]{e.SessionId}[/]  {e.TurnCount} turns  " +
+                               $"[dim]{e.LastUpdatedAt:yyyy-MM-dd HH:mm}  {proj}  {StringHelpers.Truncate(e.Task, 50)}[/]";
+                    })
                     .AddChoices(incomplete));
+
+            return await store.LoadAsync(selected.SessionId);
         }
 
         var checkpoint = await store.LoadAsync(sessionIdHint);
