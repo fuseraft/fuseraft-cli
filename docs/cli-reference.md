@@ -786,6 +786,10 @@ fuseraft sessions [options]
 |------|---------|-------------|
 | `-a, --all` | off | Include completed sessions (default shows only incomplete). |
 | `-d, --delete <target>` | — | Delete session by ID, or `all` to delete all completed sessions. |
+| `--prune` | off | Delete sessions whose config file no longer exists on disk. |
+| `--project <fragment>` | — | Filter by working directory fragment (e.g. `brewer` or `fuseraft-cli`). |
+
+The listing is read from `~/.fuseraft/sessions/index.json` — a lightweight per-session metadata file kept in sync by the session store. No checkpoint files are opened, so listing is fast regardless of message history size.
 
 **Examples**
 
@@ -796,11 +800,17 @@ fuseraft sessions
 # List all sessions including completed
 fuseraft sessions --all
 
+# List only sessions for a specific project
+fuseraft sessions --all --project brewer
+
 # Delete a specific session
 fuseraft sessions --delete a3f92c1d
 
 # Purge all completed sessions
 fuseraft sessions --delete all
+
+# Remove sessions whose config file is gone
+fuseraft sessions --prune
 ```
 
 Session files are stored in `~/.fuseraft/sessions/` with owner-only permissions.
