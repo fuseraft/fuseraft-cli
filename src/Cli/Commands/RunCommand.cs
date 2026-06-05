@@ -376,7 +376,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
 
         // Set up the context window recorder — appends per-turn snapshots for post-run visualization.
         var ctxSnapshotsPath = Path.Combine(fuseraft.Core.FuseraftPaths.LocalLogs,
-            $"ctx_snapshots_{checkpoint.SessionId}.jsonl");
+            "sessions", checkpoint.SessionId, "ctx_snapshots.jsonl");
         using var ctxRecorder = new fuseraft.Orchestration.ContextWindowRecorder(ctxSnapshotsPath);
         ctxRecorder.SetSessionId(checkpoint.SessionId);
 
@@ -518,7 +518,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
 
         // Context window visualization — render after the run so all snapshot data is flushed.
         var ctxVizPath = Path.Combine(fuseraft.Core.FuseraftPaths.LocalLogs,
-            $"ctx_viz_{checkpoint.SessionId}.html");
+            "sessions", checkpoint.SessionId, "ctx_viz.html");
         if (await fuseraft.Cli.Display.ContextWindowRenderer.RenderAsync(ctxSnapshotsPath, ctxVizPath, checkpoint.SessionId))
             AnsiConsole.MarkupLine($"[dim]Context viz → {Markup.Escape(ctxVizPath)}[/]");
 

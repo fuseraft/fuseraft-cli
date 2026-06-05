@@ -11,30 +11,43 @@ internal static class EventLogViewer
         PropertyNameCaseInsensitive = true,
     };
 
-    internal static async Task<int> RenderAsync(
+    internal static Task<int> RenderAsync(
         string path,
+        int? last,
+        string? sessionFilter,
+        string? eventFilter,
+        CancellationToken ct) =>
+        RenderAsync([path], last, sessionFilter, eventFilter, ct);
+
+    internal static async Task<int> RenderAsync(
+        IReadOnlyList<string> paths,
         int? last,
         string? sessionFilter,
         string? eventFilter,
         CancellationToken ct)
     {
-        if (!File.Exists(path))
+        var existing = paths.Where(File.Exists).ToList();
+        if (existing.Count == 0)
         {
             AnsiConsole.MarkupLine("[dim]No event log found.[/]");
-            AnsiConsole.MarkupLine($"[dim]Expected path: {Markup.Escape(path)}[/]");
+            if (paths.Count == 1)
+                AnsiConsole.MarkupLine($"[dim]Expected path: {Markup.Escape(paths[0])}[/]");
             return 0;
         }
 
         var entries = new List<EventLogEntry>();
-        await foreach (var line in File.ReadLinesAsync(path, ct))
+        foreach (var path in existing)
         {
-            if (string.IsNullOrWhiteSpace(line)) continue;
-            try
+            await foreach (var line in File.ReadLinesAsync(path, ct))
             {
-                var entry = JsonSerializer.Deserialize<EventLogEntry>(line, JsonOpts);
-                if (entry is not null) entries.Add(entry);
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                try
+                {
+                    var entry = JsonSerializer.Deserialize<EventLogEntry>(line, JsonOpts);
+                    if (entry is not null) entries.Add(entry);
+                }
+                catch { /* skip malformed lines */ }
             }
-            catch { /* skip malformed lines */ }
         }
 
         if (entries.Count == 0)
@@ -102,7 +115,8 @@ internal static class EventLogViewer
             .Select(g => $"{g.Count()} {g.Key}");
         AnsiConsole.MarkupLine(
             $"[dim]{entries.Count} entr{(entries.Count == 1 ? "y" : "ies")}  ·  {string.Join("  · ", eventCounts)}[/]");
-        AnsiConsole.MarkupLine($"[dim]log: {Markup.Escape(path)}[/]");
+        var logLabel = existing.Count == 1 ? existing[0] : $"{existing.Count} session log(s)";
+        AnsiConsole.MarkupLine($"[dim]log: {Markup.Escape(logLabel)}[/]");
 
         return 0;
     }

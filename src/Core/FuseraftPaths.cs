@@ -60,7 +60,7 @@ public static class FuseraftPaths
 
     // logs/ — append-only diagnostic and observability files
     public const string LocalLogs           = ".fuseraft/logs";
-    public const string LocalEventsLog      = ".fuseraft/logs/events.jsonl";
+    public const string LocalEventsLog       = ".fuseraft/logs/sessions/{session_id}/events.jsonl";
     public const string LocalReplEventsLog  = ".fuseraft/logs/repl_events.jsonl";
     public const string LocalProviderErrors = ".fuseraft/logs/provider_errors.jsonl";
     public const string LocalAppLog         = ".fuseraft/logs/app.log";
@@ -188,7 +188,7 @@ public static class FuseraftPaths
         sb.AppendLine("This directory is managed by fuseraft-cli. list_files is blocked here — reference these paths directly when needed:");
         if (includeLogs)
         {
-            sb.AppendLine("  .fuseraft/logs/events.jsonl               — agent/orchestration event log (JSONL)");
+            sb.AppendLine("  .fuseraft/logs/sessions/{session_id}/events.jsonl — agent/orchestration event log (JSONL)");
             sb.AppendLine("  .fuseraft/logs/repl_events.jsonl          — REPL event log (JSONL)");
             sb.AppendLine("  .fuseraft/logs/app.log                    — application log");
         }
