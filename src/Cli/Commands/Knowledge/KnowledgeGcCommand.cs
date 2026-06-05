@@ -94,6 +94,15 @@ public sealed class KnowledgeGcCommand : AsyncCommand<KnowledgeGcSettings>
             AnsiConsole.WriteLine();
         }
 
+        if (report.PrunedMemoryIds.Count > 0)
+        {
+            var v2 = applied ? "deleted" : "would delete";
+            AnsiConsole.MarkupLine($"[bold]Stale candidate memories[/] {v2} ({report.PrunedMemoryIds.Count}):");
+            foreach (var id in report.PrunedMemoryIds)
+                AnsiConsole.MarkupLine($"  [dim]→[/] {Markup.Escape(id)}  [dim](Candidate, unreinforced past retention window)[/]");
+            AnsiConsole.WriteLine();
+        }
+
         if (report.DecayedClaimIds.Count > 0)
         {
             var v2 = applied ? "decayed" : "would decay";
