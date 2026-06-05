@@ -32,10 +32,10 @@ public sealed class MemoryStore
 {
     private const string IndexFile    = "MEMORY.md";
     private const string IndexHeader  = "# Memory Index";
-    // Relative path from cwd to the memory refs index (kept in sync with FuseraftPaths.LocalMemoryRefs).
+    // Relative path from .fuseraft/ to the memory refs index (kept in sync with FuseraftPaths.LocalMemoryRefs).
     private static string LocalRefsFile(string? sessionId) =>
         sessionId is { Length: > 0 }
-            ? $"memory/sessions/{sessionId}/memory_refs.json"
+            ? $"sessions/{sessionId}/memory_refs.json"
             : "memory/memory_refs.json";
 
     private readonly string _dir;
@@ -265,11 +265,11 @@ public sealed class MemoryStore
         return entries;
     }
 
-    // Collects all GUIDs from every session refs file under {cwd}/.fuseraft/memory/sessions/
+    // Collects all GUIDs from every session refs file under {cwd}/.fuseraft/sessions/
     // so that a new REPL session in the same workspace sees memories saved by prior sessions.
     private async Task<List<MemoryEntry>> LoadFromWorkspaceSessionsAsync(string fuseraftDir, CancellationToken ct)
     {
-        var sessionsDir = Path.Combine(fuseraftDir, "memory", "sessions");
+        var sessionsDir = Path.Combine(fuseraftDir, "sessions");
         if (!Directory.Exists(sessionsDir)) return [];
 
         var guids = new HashSet<string>();

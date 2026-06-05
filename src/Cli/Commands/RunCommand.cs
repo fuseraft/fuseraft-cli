@@ -520,8 +520,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         }
 
         // Context window visualization — render after the run so all snapshot data is flushed.
-        var ctxVizPath = Path.Combine(fuseraft.Core.FuseraftPaths.LocalLogs,
-            "sessions", checkpoint.SessionId, "ctx_viz.html");
+        var ctxVizPath = fuseraft.Core.FuseraftPaths.ExpandSessionId(fuseraft.Core.FuseraftPaths.LocalCtxViz, checkpoint.SessionId);
         if (await fuseraft.Cli.Display.ContextWindowRenderer.RenderAsync(ctxSnapshotsPath, ctxVizPath, checkpoint.SessionId))
             AnsiConsole.MarkupLine($"[dim]Context viz → {Markup.Escape(ctxVizPath)}[/]");
 
