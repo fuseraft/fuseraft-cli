@@ -44,7 +44,7 @@ repo-summary.sh
 tests/FuseraftCli.Tests/obj/**
 .venv/
 analyze.kiwi
-PLAN.md
+PLAN*.md
 DEBUGGING.md
 *.lscache
 
