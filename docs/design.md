@@ -672,9 +672,11 @@ Event consumers may inject messages, trigger external systems, or enforce additi
 |---|---|---|
 | `session_start` | `GraphOrchestrator`, `ReplCommand` | `task` (raw task string), `start_node`, `resume` |
 | `session_end` | `GraphOrchestrator`, `ReplCommand` | Turn count, succeeded |
+| `session_summary` | `SessionMetrics` | `total_turns`, `total_input_tokens`, `total_output_tokens`, `max_turn_input_tokens`, `total_tool_calls`, `total_patch_failures`, `total_duplicate_reads`, `total_compactions` |
 | `phase_start` | `GraphOrchestrator` | Phase name, starting executor |
 | `phase_end` | `GraphOrchestrator` | Phase name, turn count |
-| `compaction` | `SessionRunner` | Turn count before/after |
+| `compaction` | `SessionRunner` | Turn count before/after, `reason` |
+| `compaction_resume_candidate` | `SessionRunner` | `last_assistant_agent`, `current_state_name`, `reason`, `total_messages` — emitted at compaction time to diagnose handoff-then-compaction resume divergence |
 | `session_error` | `SessionRunner` | Exception message |
 
 *Per-turn*
@@ -685,7 +687,7 @@ Event consumers may inject messages, trigger external systems, or enforce additi
 | `turn_end` | `AgentOrchestrator`, `GraphOrchestrator`, `MagenticOrchestrator` | Agent name, turn index, input/output tokens |
 | `turn_timeout` | `GraphOrchestrator` | Agent name, timeout value |
 | `reasoning` | `AgentOrchestrator`, `GraphOrchestrator` | Reasoning token content |
-| `context_assembly` | All orchestrators | `knowledge_retrieved`, `knowledge_included`, `memory_loaded`, `memory_included`, `artifacts`, `context_chars`, `system_prompt_chars`, `assembly_ms` |
+| `context_assembly` | All orchestrators | `knowledge_retrieved`, `knowledge_included`, `memory_loaded`, `memory_included`, `artifacts`, `context_chars`, `system_prompt_chars`, `assembly_ms`, `context_chars_breakdown` (per-source: `system_prompt`, `memory`, `session_context`, `knowledge`, `history`), `tool_count`, `tool_schema_est_tokens` |
 
 *Routing and keyword handling* (`GraphOrchestrator`)
 
@@ -697,6 +699,7 @@ Event consumers may inject messages, trigger external systems, or enforce additi
 | `keyword_not_found` | `KeywordSelectionStrategy` | Last message author, content excerpt |
 | `agent_routed` | `GraphOrchestrator` | From agent, to agent, keyword |
 | `state_advanced` | `GraphOrchestrator` | New `AgentState` version, destination executor |
+| `back_edge_escalation` | `StateMachineSelectionStrategy` | `from_state`, `to_state`, `visit_count`, `max_revisits`, objections from `ReviewArtifactPath` — fired when a back-edge exceeds `MaxRevisits` |
 | `context_cap_warning` | `GraphOrchestrator` | Agent name, current message count, soft threshold |
 | `correction_injected` | `CorrectionEngine` | Correction message text, reason |
 

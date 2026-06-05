@@ -662,7 +662,7 @@ Orchestration:
             Source: .fuseraft/artifacts/brief.json
             Field: files_to_change
         - CommandSucceeded:
-            Pattern: "build|compile|go build|cargo build"
+            PatternField: "verify_command"   # reads the verify command from brief.json
 
     - Name: TestsValid
       Requires:
