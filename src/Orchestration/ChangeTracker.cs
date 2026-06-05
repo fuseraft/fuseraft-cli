@@ -620,9 +620,18 @@ public sealed class ChangeTracker
                     : resultText;
             }
 
+            string? toolError = null;
+            if (!succeeded && !FunctionNameMatches(name, "shell_run") && resultText.Length > 0)
+            {
+                const int MaxEventError = 300;
+                toolError = resultText.Length > MaxEventError
+                    ? resultText[..MaxEventError] + $"…[{resultText.Length - MaxEventError} chars truncated]"
+                    : resultText;
+            }
+
             _ = _eventEmitter.EmitAsync("tool_call",
                 agent:   agentName,
-                payload: new { tool = name, arg, ok = succeeded, output = shellOutput });
+                payload: new { tool = name, arg, ok = succeeded, output = shellOutput, error = toolError });
         }
 
         // Intercept search_symbol results to populate SymbolDefinition evidence nodes.
