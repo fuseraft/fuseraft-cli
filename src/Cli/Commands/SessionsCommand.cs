@@ -23,6 +23,14 @@ public sealed class SessionsSettings : CommandSettings
     [CommandOption("--project")]
     [Description("Filter by project path fragment (e.g. 'brewer' or 'fuseraft-cli').")]
     public string? Project { get; set; }
+
+    [CommandOption("--cleanup")]
+    [Description("Delete sessions older than --older-than, removing both global checkpoints and local session directories.")]
+    public bool Cleanup { get; set; }
+
+    [CommandOption("--older-than <age>")]
+    [Description("Age threshold for --cleanup (e.g. 7d, 2w, 24h). Defaults to 30d when omitted.")]
+    public string? OlderThan { get; set; }
 }
 
 /// <summary>
@@ -50,6 +58,51 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
                 await sessionStore.DeleteAsync(s.SessionId, cancellationToken);
 
             AnsiConsole.MarkupLine($"[green]✓ Pruned {orphaned.Count} orphaned session(s).[/]");
+            return 0;
+        }
+
+        // Cleanup mode — age-based deletion of checkpoints + local session directories
+        if (settings.Cleanup)
+        {
+            var age    = ParseAge(settings.OlderThan);
+            var cutoff = DateTime.UtcNow - age;
+            var all    = await sessionStore.ListIndexAsync(cancellationToken);
+
+            IEnumerable<Core.Models.SessionIndexEntry> candidates = all
+                .Where(s => s.LastUpdatedAt < cutoff);
+
+            if (!string.IsNullOrWhiteSpace(settings.Project))
+                candidates = candidates.Where(s => s.WorkingDirectory is { } wd &&
+                    wd.Contains(settings.Project, StringComparison.OrdinalIgnoreCase));
+
+            var toDelete = candidates.ToList();
+
+            if (toDelete.Count == 0)
+            {
+                AnsiConsole.MarkupLine($"[green]✓ No sessions older than {FormatAge(age)} found.[/]");
+                return 0;
+            }
+
+            int localDirsRemoved = 0;
+            foreach (var s in toDelete)
+            {
+                await sessionStore.DeleteAsync(s.SessionId, cancellationToken);
+
+                if (s.WorkingDirectory is { Length: > 0 })
+                {
+                    var localDir = Path.Combine(s.WorkingDirectory, FuseraftPaths.LocalSessions, s.SessionId);
+                    if (Directory.Exists(localDir))
+                    {
+                        Directory.Delete(localDir, recursive: true);
+                        localDirsRemoved++;
+                    }
+                }
+            }
+
+            AnsiConsole.MarkupLine(
+                $"[green]✓ Deleted {toDelete.Count} session(s) older than {FormatAge(age)}" +
+                (localDirsRemoved > 0 ? $" ({localDirsRemoved} local director{(localDirsRemoved == 1 ? "y" : "ies")} removed)" : string.Empty) +
+                ".[/]");
             return 0;
         }
 
@@ -144,6 +197,20 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
 
         return 0;
     }
+
+    private static TimeSpan ParseAge(string? age)
+    {
+        if (string.IsNullOrWhiteSpace(age)) return TimeSpan.FromDays(30);
+        var s = age.Trim().ToLowerInvariant();
+        if (s.EndsWith('w') && int.TryParse(s[..^1], out var weeks)) return TimeSpan.FromDays(weeks * 7);
+        if (s.EndsWith('d') && int.TryParse(s[..^1], out var days))  return TimeSpan.FromDays(days);
+        if (s.EndsWith('h') && int.TryParse(s[..^1], out var hours)) return TimeSpan.FromHours(hours);
+        if (int.TryParse(s, out var n)) return TimeSpan.FromDays(n);
+        return TimeSpan.FromDays(30);
+    }
+
+    private static string FormatAge(TimeSpan age) =>
+        age.TotalDays >= 1 ? $"{(int)age.TotalDays}d" : $"{(int)age.TotalHours}h";
 
     /// <summary>Returns the last two path components, e.g. "fuseraft/brewer".</summary>
     private static string ProjectLabel(string? workingDir)
