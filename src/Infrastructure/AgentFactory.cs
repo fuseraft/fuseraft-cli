@@ -42,11 +42,22 @@ public sealed class AgentFactory(
     // Maps agent name → DID for the current session. Populated by Create().
     private readonly ConcurrentDictionary<string, AgentIdentity> _identities = new(StringComparer.OrdinalIgnoreCase);
 
+    // Maps agent name → number of registered tool functions. Used by the telemetry layer to
+    // estimate tool-schema token overhead (which is not counted in context_chars).
+    private readonly ConcurrentDictionary<string, int> _toolCounts = new(StringComparer.OrdinalIgnoreCase);
+
     // All ITurnResettable plugin instances seen across Create() calls (deduplicated).
     // OnAgentTurnStarting() calls BeginTurn() on every entry before each agent turn.
     // _resettablesLock guards both Add (from Create) and the snapshot (from OnAgentTurnStarting).
     private readonly HashSet<ITurnResettable> _turnResettables = [];
     private readonly object _resettablesLock = new();
+
+    /// <summary>
+    /// Returns the number of tool functions registered for the named agent, or 0 if the
+    /// agent has not been created in this session. Used to estimate tool-schema token overhead.
+    /// </summary>
+    public int GetToolCount(string agentName)
+        => _toolCounts.TryGetValue(agentName, out var c) ? c : 0;
 
     /// <summary>
     /// Resets the per-turn state of all registered <see cref="ITurnResettable"/> plugins
@@ -141,6 +152,7 @@ public sealed class AgentFactory(
         // ToolCalling callback is registered so notifications fire at invocation time
         // (real-time) rather than after the whole batch finishes executing.
         var tools = BuildTools(config, resolvedModel, config.Name, onToolCalling);
+        _toolCounts[config.Name] = tools.Count;
 
         // Build ChatOptions (temperature, max tokens, tool mode).
         // The tool list is passed so that MergeOptions can always fall back to the

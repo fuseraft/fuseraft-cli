@@ -14,6 +14,18 @@ using MagenticOrchestrator = fuseraft.Orchestration.MagenticOrchestrator;
 
 namespace fuseraft.Cli;
 
+// Compaction trigger classification — informs the session_summary event and the
+// compaction event reason field so post-session analysis can identify the primary
+// cause of each compaction cycle.
+file static class CompactionReason
+{
+    public const string SingleTurnLimit = "single_turn_limit";
+    public const string CumulativeBudget = "cumulative_budget";
+    public const string ShouldCompact = "window_size";
+    public const string AgentRequested = "agent_requested";
+    public const string ContextExceeded = "context_exceeded";
+}
+
 /// <summary>
 /// The outcome of a completed session run.
 /// </summary>
@@ -41,13 +53,19 @@ public sealed class SessionRunner(
     string? configPath = null,
     int maxIterations = 0,
     ContextBudgetConfig? contextBudget = null,
-    ContextWindowRecorder? contextWindowRecorder = null)
+    ContextWindowRecorder? contextWindowRecorder = null,
+    SessionMetrics? sessionMetrics = null)
 {
     // Session-lifetime assistant-turn counter. Only ever increments — never reset after
     // compaction. Used solely for the MaxIterations hard cap.
     private int _totalAssistantTurnCount;
     private readonly Dictionary<string, int> _perAgentCumulativeInputTokens = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _warnedAgents = new(StringComparer.OrdinalIgnoreCase);
+
+    // Reason for the pending compaction cycle — set just before compactionNeeded=true,
+    // cleared after the compaction event is emitted. Informs session_summary and the
+    // compaction event reason field so post-hoc analysis can identify the cause.
+    private string _pendingCompactionReason = CompactionReason.ShouldCompact;
 
     // Set to true after each compaction cycle. Suppresses CutoverAt (cumulative) enforcement
     // for exactly one turn so a post-compaction turn can run without immediately triggering
@@ -228,6 +246,7 @@ public sealed class SessionRunner(
                 AnsiConsole.MarkupLine(
                     $"\n[yellow]⚠ Context window exceeded — fallover chain exhausted.[/] Compacting history and retrying...\n" +
                     $"  [dim]{Markup.Escape(TrimTo(ex.Message, 200))}[/]\n");
+                _pendingCompactionReason = CompactionReason.ContextExceeded;
                 compactionNeeded = true;
             }
             catch (Exception ex) when (ProviderErrorClassifier.Classify(ex) == FailoverReason.ContextExceeded)
@@ -359,6 +378,10 @@ public sealed class SessionRunner(
         }
 
         sessionClock.Stop();
+
+        if (sessionMetrics is not null)
+            try { await sessionMetrics.PrintSummaryAsync(eventEmitter, checkpoint.SessionId); } catch { }
+
         return new SessionResult(succeeded, errorMessage, messages, sessionClock.Elapsed);
     }
 
@@ -546,12 +569,17 @@ public sealed class SessionRunner(
         // Skip for Magentic: SetResumeExecutorId is a no-op there, and the last assistant
         // message in a Magentic session is often a manager tag like "[MagenticManager:Final]"
         // which would write a misleading executor ID into the checkpoint.
+        // Capture which executor is active before discarding full history so the next
+        // StreamAsync starts from the correct agent. Skip for Magentic.
+        string? lastAssistantAgent = null;
         if (orchestrator is not MagenticOrchestrator)
         {
-            checkpoint.ResumeExecutorId = checkpoint.Messages
+            lastAssistantAgent = checkpoint.Messages
                 .LastOrDefault(m => m.Role == "assistant" && !string.IsNullOrWhiteSpace(m.AgentName))
                 ?.AgentName
                 ?.ToLowerInvariant();
+
+            checkpoint.ResumeExecutorId = lastAssistantAgent;
         }
 
         string modifiedFilesNote = BuildModifiedFilesNote(checkpoint.Messages);
@@ -573,6 +601,19 @@ public sealed class SessionRunner(
             catch { /* non-fatal: state inference from history is the fallback */ }
         }
 
+        // Diagnostic (Phase 5): log both the last-message agent and the state machine's
+        // current state so post-hoc analysis can confirm whether the wrong agent is resumed
+        // after a handoff-then-compaction sequence.
+        if (orchestrator is not MagenticOrchestrator && eventEmitter is not null)
+            _ = eventEmitter.EmitAsync("compaction_resume_candidate",
+                payload: new
+                {
+                    last_assistant_agent = lastAssistantAgent,
+                    current_state_name   = checkpoint.CurrentStateName,
+                    reason               = _pendingCompactionReason,
+                    total_messages       = checkpoint.Messages.Count,
+                });
+
         int turnsBefore = checkpoint.Messages.Count;
 
         if (compactor.IsWindowMode)
@@ -584,11 +625,13 @@ public sealed class SessionRunner(
             checkpoint.Messages.AddRange(trimmed);
             checkpoint.LastUpdatedAt = DateTime.UtcNow;
 
+            sessionMetrics?.RecordCompaction(_pendingCompactionReason);
             if (eventEmitter is not null)
                 await eventEmitter.EmitAsync("compaction",
                     payload: new
                     {
                         mode            = "window",
+                        reason          = _pendingCompactionReason,
                         turns_dropped   = dropped,
                         turns_retained  = trimmed.Count,
                         resume_from     = checkpoint.ResumeExecutorId ?? "planner"
@@ -614,12 +657,14 @@ public sealed class SessionRunner(
         checkpoint.Messages.AddRange(retained);
         checkpoint.LastUpdatedAt = DateTime.UtcNow;
 
+        sessionMetrics?.RecordCompaction(_pendingCompactionReason);
         if (eventEmitter is not null)
             await eventEmitter.EmitAsync("compaction",
                 payload: new
                 {
                     turns_compacted = turnsBefore - retained.Count,
                     turns_retained  = retained.Count,
+                    reason          = _pendingCompactionReason,
                     resume_from     = checkpoint.ResumeExecutorId ?? "planner"
                 });
 
@@ -647,7 +692,11 @@ public sealed class SessionRunner(
     {
         messages.Add(msg);
         checkpoint.Messages.Add(msg);
-        if (msg.Role == "assistant") _totalAssistantTurnCount++;
+        if (msg.Role == "assistant")
+        {
+            _totalAssistantTurnCount++;
+            sessionMetrics?.RecordTurn(msg);
+        }
         checkpoint.LastUpdatedAt = DateTime.UtcNow;
         if (orchestrator is MagenticOrchestrator mo) checkpoint.MagenticState = mo.CurrentState;
         if (orchestrator is GraphOrchestrator go) checkpoint.StateHistory = [..go.StateHistory];
@@ -708,6 +757,7 @@ public sealed class SessionRunner(
             contextBudget.MaxSingleTurnInputTokens > 0 && inputToks > contextBudget.MaxSingleTurnInputTokens)
         {
             _justCompacted = false;
+            _pendingCompactionReason = CompactionReason.SingleTurnLimit;
             AnsiConsole.MarkupLine(
                 $"[yellow]  ⚡ {Markup.Escape(agentName)} single-turn input ({inputToks:N0}) exceeded " +
                 $"MaxSingleTurnInputTokens ({contextBudget.MaxSingleTurnInputTokens:N0}). " +
@@ -715,7 +765,7 @@ public sealed class SessionRunner(
             if (eventEmitter is not null)
                 await eventEmitter.EmitAsync("context_budget_cutover",
                     agent: agentName,
-                    payload: new { input_tokens = inputToks, cutover_at = contextBudget.MaxSingleTurnInputTokens, reason = "single_turn_limit" });
+                    payload: new { input_tokens = inputToks, cutover_at = contextBudget.MaxSingleTurnInputTokens, reason = CompactionReason.SingleTurnLimit });
             return true;
         }
 
@@ -726,16 +776,23 @@ public sealed class SessionRunner(
         }
 
         if (compactor?.ShouldCompact(checkpoint.Messages) == true)
+        {
+            _pendingCompactionReason = CompactionReason.ShouldCompact;
             return true;
+        }
 
         if (compactor is not null &&
             msg.ToolCalls?.Any(tc => tc.Name == CompactionPlugin.FunctionName) == true)
+        {
+            _pendingCompactionReason = CompactionReason.AgentRequested;
             return true;
+        }
 
         if (contextBudget is not null && inputToks > 0)
         {
             if (contextBudget.CutoverAt > 0 && cumulative >= contextBudget.CutoverAt)
             {
+                _pendingCompactionReason = CompactionReason.CumulativeBudget;
                 AnsiConsole.MarkupLine(
                     $"[yellow]  ⚡ {Markup.Escape(agentName)} reached context budget cutover " +
                     $"({cumulative:N0} ≥ {contextBudget.CutoverAt:N0} input tokens). Compacting history...[/]");

@@ -116,21 +116,26 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
 
         // ── Stage 5: History / Context Assembly ──────────────────────────────
         IReadOnlyList<ChatMessage> baseMessages;
+        int sessionContextChars = 0;
+        int historyChars        = 0;
 
         if (agentCfg?.Context is { Count: > 0 } contextSources && _contextAssembler is not null)
         {
             baseMessages = await _contextAssembler.AssembleForAgentAsync(
                 agentName, task, contextSources, (IList<ChatMessage>)history, ct);
+            historyChars = baseMessages.Sum(m => m.Text?.Length ?? 0);
         }
         else
         {
             var filtered   = ContextWindowFilter.Apply(history, agentCfg?.ContextWindow);
+            historyChars   = filtered.Sum(m => m.Text?.Length ?? 0);
             var sessionCtx = _contextAssembler is not null
                 ? await _contextAssembler.ReadSessionContextAsync(ct)
                 : null;
 
             if (sessionCtx is not null)
             {
+                sessionContextChars = sessionCtx.Length;
                 artifacts.Add(new ContextArtifact(
                     Type:     "session_context",
                     Title:    "Session Context",
@@ -148,6 +153,7 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
 
         finalMessages.AddRange(baseMessages);
 
+        int knowledgeChars = 0;
         if (artifacts.Any(a => a.Type == "knowledge"))
         {
             bool hasExplicitBroker = agentCfg?.Context?.Any(s =>
@@ -156,6 +162,7 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
             if (!hasExplicitBroker)
             {
                 var knowledgeArtifact = artifacts.First(a => a.Type == "knowledge");
+                knowledgeChars = knowledgeArtifact.Content.Length;
                 finalMessages.Add(new ChatMessage(ChatRole.User,
                     $"[Pipeline Knowledge]\n\n{knowledgeArtifact.Content}"));
             }
@@ -173,6 +180,10 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
             ArtifactsAssembled      = artifacts.Count,
             TotalContextChars       = finalMessages.Sum(m => m.Text?.Length ?? 0),
             SystemPromptChars       = systemPrompt.Length,
+            MemoryChars             = memoryBlock?.Length ?? 0,
+            SessionContextChars     = sessionContextChars,
+            KnowledgeChars          = knowledgeChars,
+            HistoryChars            = historyChars,
             AssemblyDuration        = sw.Elapsed,
         };
 

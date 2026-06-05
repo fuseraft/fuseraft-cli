@@ -139,7 +139,8 @@ public sealed class PluginRegistry : IDisposable
         IReadOnlyDictionary<string, ApiProfileConfig>? apiProfiles = null,
         Func<string, Task<bool>>? shellCommandApprover = null,
         FileVersionStore? fileVersionStore = null,
-        SessionReadCache? sessionReadCache = null)
+        SessionReadCache? sessionReadCache = null,
+        Action? onCacheHit = null)
     {
         var sandboxRoot       = security.FileSystemSandboxPath;
         var allowedHosts      = security.HttpAllowedHosts is { Count: > 0 } h ? (IReadOnlyList<string>)h : null;
@@ -149,7 +150,7 @@ public sealed class PluginRegistry : IDisposable
         // Both are registered as singletons — the factory lambda returns the same instance.
         var shellInstance = new ShellPlugin(sandboxRoot, shellCommandApprover, security.ShellPolicy);
         Register("Shell",      () => shellInstance);
-        Register("FileSystem", () => new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore, sessionCache: sessionReadCache, onWrite: shellInstance.InvalidateRunCache));
+        Register("FileSystem", () => new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore, sessionCache: sessionReadCache, onWrite: shellInstance.InvalidateRunCache, onCacheHit: onCacheHit));
         Register("Http",       () => new HttpPlugin(_sharedHttpClient, allowedHosts, apiProfiles, allowPrivateHosts, _loggerFactory?.CreateLogger<HttpPlugin>()));
         Register("Document",   () => new DocumentPlugin(sandboxRoot));
         return this;
