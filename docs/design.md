@@ -107,7 +107,7 @@ All runtime artifacts are written under `.fuseraft/` in the current working dire
 
 | Path | Contents |
 |------|----------|
-| `.fuseraft/logs/events.jsonl` | Structured JSONL session events (`EventEmitter`) |
+| `.fuseraft/logs/sessions/{session_id}/events.jsonl` | Structured JSONL session events (`EventEmitter`) |
 | `.fuseraft/logs/repl_events.jsonl` | REPL session events |
 | `.fuseraft/logs/provider_errors.jsonl` | LLM provider error records |
 | `.fuseraft/logs/app.log` | Warning+ diagnostic log (always-on Serilog file sink, 5 MB rolling, 3 retained) |
