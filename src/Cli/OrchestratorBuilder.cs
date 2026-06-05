@@ -497,7 +497,7 @@ public static class OrchestratorBuilder
         // and read on re-entry. Scoped to the same root as the read cache.
         var ctxSummaryPath = sessionId is { Length: > 0 }
             ? Path.Combine(readCacheRoot, FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalSessionContext, sessionId))
-            : Path.Combine(readCacheRoot, ".fuseraft", "state", "sessions", "default", "context_summary.md");
+            : Path.Combine(readCacheRoot, FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalSessionContext, "default"));
         pluginRegistry.Register("SessionContext", () => new fuseraft.Infrastructure.Plugins.SessionContextPlugin(ctxSummaryPath));
 
         // Governance kernel: load default policy if one exists alongside the config file.
