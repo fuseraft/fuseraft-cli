@@ -1900,7 +1900,7 @@ fuseraft log events [options]
 | `-n, --last <N>` | all | Show only the last N entries. |
 | `--session <id>` | — | Filter by session ID (prefix match). |
 | `--event <type>` | — | Filter by event type (e.g. `session_error`, `tool_blocked`, `validation_fail`). |
-| `--path <path>` | `.fuseraft/logs/events.jsonl` | Override the log file path. |
+| `--path <path>` | session-scoped | Override the log file path. Omit to read all sessions, or use `--session` to scope to one. |
 
 **Examples**
 
