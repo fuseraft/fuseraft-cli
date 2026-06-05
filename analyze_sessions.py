@@ -11,6 +11,7 @@ from pathlib import Path
 SESSIONS_DIR = Path.home() / ".fuseraft" / "repl-sessions"
 CRASHDUMP_DIR = Path.home() / ".fuseraft" / "crashdump"
 GLOBAL_EVENT_LOG = Path.home() / ".fuseraft" / "repl_events.jsonl"
+GLOBAL_TOKEN_SESSIONS_DIR = Path.home() / ".fuseraft" / "logs" / "sessions"
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -417,6 +418,246 @@ def print_key_findings(session_analyses: list[dict], crash_analyses: list[dict])
         print("\n".join(lines))
 
 
+# ── brewer token-usage analysis ───────────────────────────────────────────────
+
+def _load_session_dir(sid_dir: Path, slug: str | None, sessions: list) -> None:
+    snap_file = sid_dir / "ctx_snapshots.jsonl"
+    evt_file  = sid_dir / "events.jsonl"
+    if not snap_file.exists():
+        return
+    try:
+        snaps  = [json.loads(l) for l in snap_file.read_text().splitlines() if l.strip()]
+        events = [json.loads(l) for l in evt_file.read_text().splitlines() if l.strip()] if evt_file.exists() else []
+        sessions.append({"sid": sid_dir.name, "project": slug, "snaps": snaps, "events": events})
+    except Exception as e:
+        print(f"  [warn] {sid_dir.name}: {e}", file=sys.stderr)
+
+
+def load_token_sessions(base: Path, project: str | None = None) -> list[dict]:
+    """Load ctx_snapshots.jsonl + events.jsonl for all sessions under base.
+
+    Handles both the new project-scoped layout (base/project_slug/session_id/)
+    and the legacy flat layout (base/session_id/) for backward compatibility.
+    """
+    sessions = []
+    if not base.exists():
+        return sessions
+    for entry in sorted(base.iterdir()):
+        if not entry.is_dir():
+            continue
+        # Detect layout by checking whether ctx_snapshots.jsonl is directly inside.
+        if (entry / "ctx_snapshots.jsonl").exists():
+            # Legacy flat layout: entry IS the session directory.
+            _load_session_dir(entry, slug=None, sessions=sessions)
+        else:
+            # New layout: entry is a project-slug directory.
+            slug = entry.name
+            if project and slug != project:
+                continue
+            for sid_dir in sorted(entry.iterdir()):
+                if sid_dir.is_dir():
+                    _load_session_dir(sid_dir, slug=slug, sessions=sessions)
+    return sessions
+
+
+def _agent_group(snaps: list[dict]) -> dict[str, list[dict]]:
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for s in snaps:
+        agent = s.get("agent") or "system"
+        groups[agent].append(s)
+    return groups
+
+
+def analyze_token_session(sess: dict) -> dict:
+    sid    = sess["sid"]
+    snaps  = sess["snaps"]
+    events = sess["events"]
+
+    # ── per-agent snapshot stats ──────────────────────────────────────────────
+    by_agent = _agent_group(snaps)
+    agent_stats: dict[str, dict] = {}
+    for agent, ss in by_agent.items():
+        if agent == "system":
+            continue
+        tokens = [s.get("turn_input_tokens", 0) for s in ss]
+        agent_stats[agent] = {
+            "turns":      len(ss),
+            "max_input":  max(tokens, default=0),
+            "min_input":  min(tokens, default=0),
+            "total_input": sum(tokens),
+            "tokens":     tokens,
+        }
+
+    # ── context_assembly events: estimate vs actual ───────────────────────────
+    # build map (agent, turn) -> assembly payload
+    assemblies: dict[tuple, dict] = {}
+    for e in events:
+        if e.get("event_type") == "context_assembly":
+            assemblies[(e.get("agent"), e.get("turn"))] = e.get("payload", {})
+
+    # match snapshots to assembly estimates
+    efficiency_rows: list[dict] = []
+    for s in snaps:
+        agent = s.get("agent") or "system"
+        turn  = s.get("turn")
+        actual = s.get("turn_input_tokens", 0)
+        if not actual:
+            continue
+        asm = assemblies.get((agent, turn), {})
+        ctx_chars    = asm.get("context_chars", 0)
+        schema_est   = asm.get("tool_schema_est_tokens", 0)
+        breakdown    = asm.get("context_chars_breakdown", {})
+        history_chars = breakdown.get("history", 0)
+        estimated    = ctx_chars // 4 + schema_est
+        unaccounted  = actual - estimated if estimated else actual
+        ratio        = actual / estimated if estimated > 0 else None
+        efficiency_rows.append({
+            "agent":       agent,
+            "turn":        turn,
+            "actual":      actual,
+            "ctx_chars":   ctx_chars,
+            "history_chars": history_chars,
+            "schema_est":  schema_est,
+            "estimated":   estimated,
+            "unaccounted": unaccounted,
+            "ratio":       ratio,
+        })
+
+    # ── compaction effectiveness ───────────────────────────────────────────────
+    compaction_events = [e for e in events if e.get("event_type") == "compaction"]
+    cutover_events    = [e for e in events if e.get("event_type") == "context_budget_cutover"]
+
+    # group cutovers by agent
+    cutover_by_agent: dict[str, list[int]] = defaultdict(list)
+    for e in cutover_events:
+        p = e.get("payload", {})
+        tokens = p.get("input_tokens", p.get("cumulative_input_tokens", 0))
+        agent  = e.get("agent") or "?"
+        reason = p.get("reason", "")
+        cutover_by_agent[agent].append(tokens)
+
+    # detect compaction-ineffective: tokens grow after compaction
+    compaction_failures = []
+    dev_snaps = [s for s in snaps if s.get("agent") == "Developer"]
+    for i in range(1, len(dev_snaps)):
+        prev_tokens = dev_snaps[i-1].get("turn_input_tokens", 0)
+        curr_tokens = dev_snaps[i].get("turn_input_tokens", 0)
+        if curr_tokens > prev_tokens * 1.2 and curr_tokens > 100_000:
+            compaction_failures.append({
+                "prev_turn": dev_snaps[i-1].get("turn"),
+                "prev_tokens": prev_tokens,
+                "curr_turn": dev_snaps[i].get("turn"),
+                "curr_tokens": curr_tokens,
+                "growth_pct": int((curr_tokens / prev_tokens - 1) * 100),
+            })
+
+    # ── cross-agent history leakage ───────────────────────────────────────────
+    # Compare Developer's first-turn actual tokens vs context_assembly estimate
+    dev_first = next((r for r in efficiency_rows if r["agent"] == "Developer"), None)
+    history_leak_tokens = dev_first["unaccounted"] if dev_first else 0
+
+    # ── tool call frequency ───────────────────────────────────────────────────
+    dev_tool_freq: Counter = Counter()
+    for e in events:
+        if e.get("event_type") == "tool_call" and e.get("agent") == "Developer":
+            tool = e.get("payload", {}).get("tool", "?")
+            dev_tool_freq[tool] += 1
+
+    # ── session summary ───────────────────────────────────────────────────────
+    summary_events = [e for e in events if e.get("event_type") == "session_summary"]
+    summary = summary_events[-1].get("payload", {}) if summary_events else {}
+
+    return {
+        "sid":                 sid,
+        "project":             sess.get("project"),
+        "agent_stats":         agent_stats,
+        "efficiency_rows":     efficiency_rows,
+        "compaction_count":    len(compaction_events),
+        "cutover_count":       len(cutover_events),
+        "cutover_by_agent":    dict(cutover_by_agent),
+        "compaction_failures": compaction_failures,
+        "history_leak_tokens": history_leak_tokens,
+        "dev_tool_freq":       dev_tool_freq,
+        "summary":             summary,
+    }
+
+
+def print_token_report(analyses: list[dict]) -> None:
+    section(f"TOKEN-USAGE ANALYSIS  ({len(analyses)} sessions)")
+
+    overall_leaks:    list[int]  = []
+    all_cutover_agents: Counter  = Counter()
+    all_comp_failures: list[dict] = []
+
+    for a in analyses:
+        sid   = a["sid"]
+        stats = a["agent_stats"]
+        summ  = a["summary"]
+
+        max_turn_tok  = summ.get("max_turn_input_tokens") or max(
+            (v["max_input"] for v in stats.values()), default=0)
+        total_tok     = summ.get("total_input_tokens")  or sum(
+            v["total_input"] for v in stats.values())
+        avg_turn_tok  = summ.get("avg_turn_input_tokens") or (
+            total_tok // sum(v["turns"] for v in stats.values()) if stats else 0)
+
+        project_label = f"  [{a.get('project') or '?'}]" if a.get("project") else ""
+        print(f"\n  ── {sid}{project_label} ──")
+        print(f"    total_input={total_tok:>10,}  max_turn={max_turn_tok:>8,}  avg_turn={avg_turn_tok:>7,}")
+        print(f"    compactions={a['compaction_count']}  cutovers={a['cutover_count']}")
+
+        # per-agent summary
+        for agent, st in sorted(stats.items()):
+            toks_str = "  ".join(f"{t:,}" for t in st["tokens"])
+            over = " ***" if st["max_input"] > 200_000 else (" **" if st["max_input"] > 100_000 else ("  *" if st["max_input"] > 60_000 else ""))
+            print(f"    {agent:<15} turns={st['turns']}  max={st['max_input']:>8,}{over}  seq=[{toks_str}]")
+
+        # cross-agent history leakage
+        if a["history_leak_tokens"] > 20_000:
+            overall_leaks.append(a["history_leak_tokens"])
+            print(f"    !! history_leak: ~{a['history_leak_tokens']:,} tokens unaccounted in Developer turn-1")
+
+        # compaction failures (tokens grew after compaction)
+        for cf in a["compaction_failures"]:
+            all_comp_failures.append(cf)
+            print(f"    !! compaction_ineffective: Developer turn {cf['prev_turn']} "
+                  f"({cf['prev_tokens']:,}) → turn {cf['curr_turn']} "
+                  f"({cf['curr_tokens']:,}, +{cf['growth_pct']}%)")
+
+        # cutovers per agent
+        for agent, tok_list in sorted(a["cutover_by_agent"].items()):
+            all_cutover_agents[agent] += len(tok_list)
+            worst = max(tok_list)
+            print(f"    !! cutover: {agent} ×{len(tok_list)}, worst={worst:,}")
+
+        # top developer tools
+        if a["dev_tool_freq"]:
+            top = a["dev_tool_freq"].most_common(5)
+            top_str = "  ".join(f"{t}×{c}" for t, c in top)
+            print(f"    dev_tools: {top_str}")
+
+        # efficiency: rows where ratio > 5
+        high_ratio = [r for r in a["efficiency_rows"] if r.get("ratio") and r["ratio"] > 5]
+        for r in high_ratio:
+            print(f"    !! efficiency {r['agent']} turn={r['turn']}: "
+                  f"actual={r['actual']:,}  est={r['estimated']:,}  ratio={r['ratio']:.1f}x  "
+                  f"unaccounted={r['unaccounted']:,}")
+
+    # aggregate
+    section("TOKEN-USAGE AGGREGATE")
+    print(f"  Sessions analyzed:       {len(analyses)}")
+    if overall_leaks:
+        print(f"  History-leak incidents:  {len(overall_leaks)}  "
+              f"(avg {sum(overall_leaks)//len(overall_leaks):,} unaccounted tokens each)")
+    if all_comp_failures:
+        print(f"  Compaction failures:     {len(all_comp_failures)}  "
+              f"(tokens grew ≥20% after compaction)")
+    if all_cutover_agents:
+        print(f"  Cutover hits by agent:")
+        for agent, count in all_cutover_agents.most_common():
+            print(f"    {count:3d}×  {agent}")
+
+
 # ── main ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -429,6 +670,13 @@ def main() -> None:
                         help="Limit crash dumps analyzed (default: all)")
     parser.add_argument("--no-events", action="store_true",
                         help="Skip event log analysis")
+    parser.add_argument("--dir", type=Path, default=None,
+                        help="Sessions directory to scan "
+                             "(default: ~/.fuseraft/logs/sessions)")
+    parser.add_argument("--project", type=str, default=None,
+                        help="Filter by project slug, e.g. home-scs-github-fuseraft-brewer")
+    parser.add_argument("--no-token-analysis", action="store_true",
+                        help="Skip token-usage analysis")
     args = parser.parse_args()
 
     print(f"fuseraft session analyzer  —  {datetime.now().strftime('%Y-%m-%d %H:%M')}")
@@ -453,6 +701,16 @@ def main() -> None:
 
     # Key findings
     print_key_findings(session_analyses, crash_analyses)
+
+    # Token-usage analysis
+    if not args.no_token_analysis:
+        token_sessions_dir = args.dir or GLOBAL_TOKEN_SESSIONS_DIR
+        token_sessions = load_token_sessions(token_sessions_dir, project=args.project)
+        if token_sessions:
+            token_analyses = [analyze_token_session(s) for s in token_sessions]
+            print_token_report(token_analyses)
+        else:
+            print(f"\n  (no session logs found under {token_sessions_dir})")
 
     print(f"\n{'─' * 70}\n")
 

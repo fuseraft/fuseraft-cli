@@ -173,19 +173,23 @@ public sealed class AgentFactory(
         // FunctionInvokingChatClient loop resends all prior tool results. When set, the
         // oldest tool-result messages are replaced with compact placeholders before each
         // inner LLM call so the context stays roughly constant across iterations.
+        // When neither MaxInTurnContextTokens nor MaxContextTokens is configured, fall
+        // back to a 500 k-char (≈ 125 k-token) floor so unconfigured agents are still
+        // protected against within-turn accumulation.
+        const int DefaultMaxInTurnChars = 500_000;
         var maxInTurnChars = config.MaxInTurnContextTokens > 0
             ? config.MaxInTurnContextTokens * 4
-            : 0;
+            : (maxContextChars > 0 ? maxContextChars : DefaultMaxInTurnChars);
 
         // Deterministic sliding-window cap: always keep only the last N tool call/result
         // pairs in full, replacing older ones with placeholders unconditionally.
         // Applied before the budget-reactive trim so the window runs first.
-        // When MaxContextTokens is set but no explicit pair limit is configured, default
-        // to 12 pairs to prevent O(N²) tool-result accumulation within a turn.
+        // Default unconditionally — O(N²) tool-result accumulation is never desirable
+        // regardless of whether MaxContextTokens is configured.
         const int DefaultToolPairsWhenBudgeted = 12;
         var maxInTurnToolPairs = config.MaxInTurnToolPairs > 0
             ? config.MaxInTurnToolPairs
-            : (resolvedModel.MaxContextTokens > 0 ? DefaultToolPairsWhenBudgeted : 0);
+            : DefaultToolPairsWhenBudgeted;
 
         // Tool schema overhead: computed once at build time since the tool list is fixed
         // for the lifetime of this agent. Included in the context budget and payload

@@ -230,7 +230,7 @@ The `ContextAssemblyPipeline` is the unified entry point for all agent context c
 | `tool_count` | Number of tool schemas included in the API `tools` parameter |
 | `tool_schema_est_tokens` | Estimated token cost of tool schemas (`tool_count × 450`). Tool schemas are sent as the API `tools` parameter, not as messages, so they are invisible to `context_chars`. This estimate closes the gap between `context_chars` and actual input tokens reported by the provider. |
 
-These events are written to `.fuseraft/logs/sessions/{session_id}/events.jsonl` alongside `turn_end` and `reasoning` events and can be consumed by dashboards or CI pipelines to track context utilization over time.
+These events are written to `~/.fuseraft/logs/sessions/{project_slug}/{session_id}/events.jsonl` alongside `turn_end` and `reasoning` events and can be consumed by dashboards or CI pipelines to track context utilization over time.
 
 ---
 
