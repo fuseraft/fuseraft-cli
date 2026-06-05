@@ -1516,7 +1516,7 @@ internal static class ReplCommands
             var effortDisplay = ctx.ModelConfig.ReasoningEffort is { } e
                 ? $"  [dim]Reasoning:[/] [bold]{Markup.Escape(e)}[/]" : string.Empty;
             AnsiConsole.MarkupLine($"  [dim]Model:[/] [bold]{Markup.Escape(ctx.ModelId)}[/]{effortDisplay}");
-            AnsiConsole.MarkupLine("[dim]Run[/] [bold]/model <id> [effort][/] [dim]to switch models. Effort: none, low, medium, high.[/]");
+            AnsiConsole.MarkupLine("[dim]Run[/] [bold]/model <id> [[effort]][/] [dim]to switch models. Effort: none, low, medium, high.[/]");
             return CommandResult.Continue;
         }
 
