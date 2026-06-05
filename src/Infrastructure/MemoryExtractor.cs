@@ -157,11 +157,9 @@ public sealed class MemoryExtractor(IChatClient client)
     {
         var t = StripCodeFences(text.Trim());
 
-        // No brackets at all → model likely responded with prose saying nothing to save.
-        // Treat as empty rather than a failure so no warning is shown.
-        var s = t.IndexOf('[');
+        var s = t.LastIndexOf('[');
         var e = t.LastIndexOf(']');
-        if (s < 0 || e <= s) return [];
+        if (s < 0 || e <= s) return null;
 
         try
         {
