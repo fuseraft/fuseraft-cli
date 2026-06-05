@@ -33,6 +33,21 @@ public sealed record ContextAssemblyMetrics
     /// <summary>Character length of the system prompt (0 when no system message).</summary>
     public int SystemPromptChars { get; init; }
 
+    /// <summary>Character length of the memory block injected into the system prompt.</summary>
+    public int MemoryChars { get; init; }
+
+    /// <summary>
+    /// Character length of the session context summary injected from disk (context_summary.md).
+    /// 0 when the file does not exist or the agent uses an explicit Context: spec.
+    /// </summary>
+    public int SessionContextChars { get; init; }
+
+    /// <summary>Character length of the knowledge artifact block injected into context.</summary>
+    public int KnowledgeChars { get; init; }
+
+    /// <summary>Sum of characters across filtered shared-history messages included in context.</summary>
+    public int HistoryChars { get; init; }
+
     /// <summary>Wall-clock time spent inside <c>AssembleAsync</c>.</summary>
     public TimeSpan AssemblyDuration { get; init; }
 

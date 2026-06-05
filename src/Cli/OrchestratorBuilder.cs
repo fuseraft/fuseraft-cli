@@ -39,7 +39,8 @@ public sealed record OrchestratorBuildResult(
     GovernanceKernel             GovernanceKernel,
     SkillCurator?                SkillCurator,
     RepositoryMemoryExtractor?   RepositoryMemoryExtractor,
-    fuseraft.Orchestration.DependencyPlanner? DependencyPlanner = null);
+    fuseraft.Orchestration.DependencyPlanner? DependencyPlanner = null,
+    fuseraft.Cli.Telemetry.SessionMetrics?    SessionMetrics    = null);
 
 /// <summary>
 /// Builds a ready-to-use <see cref="IOrchestrator"/> directly from a config file path,
@@ -482,10 +483,15 @@ public static class OrchestratorBuilder
             : null;
         var toolArtifactStore = new fuseraft.Infrastructure.ToolResultArtifactStore(toolArtifactsDir);
 
+        // Session metrics: accumulates per-turn quality data (tokens, tool calls, cache hits,
+        // patch failures) and renders a summary table at session end.
+        var sessionMetrics = new fuseraft.Cli.Telemetry.SessionMetrics();
+
         // Re-configure the FileSystem plugin with the version store and session read cache
         // so write_file, stat_file, and read_file participate in version-aware conflict
-        // detection and cross-turn read deduplication.
-        pluginRegistry.Configure(config.Security ?? new SecurityConfig(), profiles, shellApprover, fileVersionStore, sessionReadCache);
+        // detection and cross-turn read deduplication. Thread the cache-hit callback so
+        // SessionMetrics can count duplicate reads across the session.
+        pluginRegistry.Configure(config.Security ?? new SecurityConfig(), profiles, shellApprover, fileVersionStore, sessionReadCache, onCacheHit: sessionMetrics.RecordCacheHit);
 
         // Session context plugin: shared handoff notes that agents write before routing
         // and read on re-entry. Scoped to the same root as the read cache.
@@ -1073,7 +1079,7 @@ public static class OrchestratorBuilder
         if (config.Saga?.Enabled == true)
             orchestrator = new SagaOrchestrator(orchestrator, config.Saga, compensators: null, eventEmitter);
 
-        return new OrchestratorBuildResult(orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, dependencyPlanner);
+        return new OrchestratorBuildResult(orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, dependencyPlanner, sessionMetrics);
     }
 
     /// <summary>
