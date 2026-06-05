@@ -317,7 +317,7 @@ app.Configure(cfg =>
         branch.SetDescription("View fuseraft log files.");
 
         branch.AddCommand<LogEventsCommand>("events")
-            .WithDescription("View the orchestration event log (.fuseraft/logs/events.jsonl).")
+            .WithDescription("View orchestration event logs (.fuseraft/logs/sessions/{id}/events.jsonl).")
             .WithExample(["log", "events"])
             .WithExample(["log", "events", "--last", "50"])
             .WithExample(["log", "events", "--event", "session_error"])
