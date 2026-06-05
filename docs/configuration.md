@@ -616,6 +616,8 @@ ContextBudget:
 | `WarnAt` | int | `0` | Cumulative input-token threshold per agent that triggers a warning. When an agent's accumulated input tokens since the last compaction reach this value, a `⚠` warning is printed to the console and a `context_budget_warn` event is emitted. Fires at most once per agent per compaction cycle. `0` disables the warning. |
 | `CutoverAt` | int | `0` | Cumulative input-token threshold per agent that triggers automatic compaction. When reached, compaction runs before the next agent turn and the per-agent counters reset so the next window starts clean. **Requires `Compaction` to be configured.** `WarnAt`, when set, must be less than `CutoverAt`. `0` disables token-based cutover. |
 | `MaxSingleTurnInputTokens` | int | `0` | Per-turn input-token ceiling. When a completed turn's input-token count exceeds this value, compaction fires before the *next* turn begins — independently of the cumulative `CutoverAt` counter. Guards against single-turn explosions (an agent reading many large files at once) that exhaust the cumulative budget in one shot and would leave the next turn with an already-bloated history. **Requires `Compaction` to be configured.** `0` disables per-turn enforcement. |
+| `MaxToolResultTokens` | int | `0` | Maximum estimated tokens that tool-result messages may contribute to the context slice sent on any single agent invocation. When exceeded, the oldest tool results beyond `InTurnToolWindow` are replaced with one-line tombstones before the LLM call — keeping the model aware of what was done without replaying raw content. The full results remain in the shared history for compaction and audit; only the model's view is trimmed. `0` disables the tool-result window. |
+| `InTurnToolWindow` | int | `20` | Number of most-recent tool results to always retain verbatim when `MaxToolResultTokens` is exceeded. Older results beyond this count are tombstoned. Only meaningful when `MaxToolResultTokens > 0`. |
 
 **Threshold alignment:** set `WarnTurnTokens` (the per-turn warning) below `CutoverAt` so the warning fires before compaction is forced. If `WarnTurnTokens >= CutoverAt`, both fire in the same turn, making the warning redundant — `fuseraft validate` emits a warning when this condition is detected.
 
@@ -693,7 +695,7 @@ Each line is a JSON object:
 | `session` | Session ID |
 | `agent` | Agent name (null for session-level events) |
 | `turn` | 1-based turn counter |
-| `event_type` | Event identifier. Session lifecycle: `session_start`, `session_end`, `phase_start`, `phase_end`, `compaction`, `session_error`. Per-turn: `turn_start`, `turn_end`, `turn_timeout`, `reasoning`. Routing: `keyword_detected`, `multi_keyword`, `no_keyword`, `keyword_not_found`, `agent_routed`, `state_advanced`, `context_cap_warning`, `correction_injected`. Validation: `validation_fail`, `hitl_escalation`. Context budget: `context_budget_warn`, `context_budget_cutover`. Saga: `saga_compensating`, `saga_compensated`. Magentic: `magentic_plan`, `magentic_replan`, `magentic_complete`. Infrastructure: `tool_blocked`, `tool_call`, `circuit_breaker_open`, `http_reasoning`. Sub-agent: `sub_agent_start`, `sub_agent_tool_call`, `sub_agent_end`. |
+| `event_type` | Event identifier. Session lifecycle: `session_start`, `session_end`, `session_summary`, `phase_start`, `phase_end`, `compaction`, `compaction_resume_candidate`, `session_error`. Per-turn: `turn_start`, `turn_end`, `turn_timeout`, `reasoning`, `context_assembly`. Routing: `keyword_detected`, `multi_keyword`, `no_keyword`, `keyword_not_found`, `agent_routed`, `state_advanced`, `back_edge_escalation`, `context_cap_warning`, `correction_injected`. Validation: `validation_fail`, `hitl_escalation`. Context budget: `context_budget_warn`, `context_budget_cutover`. Saga: `saga_compensating`, `saga_compensated`. Magentic: `magentic_plan`, `magentic_replan`, `magentic_complete`. Infrastructure: `tool_blocked`, `tool_call`, `circuit_breaker_open`, `http_reasoning`. Sub-agent: `sub_agent_start`, `sub_agent_tool_call`, `sub_agent_end`. |
 | `payload` | Event-specific JSON object |
 
 **`session_start` payload:** `{ task, start_node, resume }` — `task` is the raw task string passed to the session (inline `--task` value or full contents of `--task-file`); `start_node` is the initial graph node; `resume` is true when replaying prior history.
@@ -1082,7 +1084,7 @@ Contracts:
           Source: .fuseraft/artifacts/brief.json
           Field: files_to_change
       - CommandSucceeded:
-          Pattern: "build|compile|go build|cargo build"
+          PatternField: "verify_command"   # reads the verify command from brief.json
 
   - Name: TestsValid
     Requires:
@@ -1100,7 +1102,7 @@ Contracts are referenced by name from keyword route `Contracts` lists or from st
 | Type | Fields | Passes when |
 |------|--------|-------------|
 | `FilesWritten` | `Source`, `Field` | Every path listed in the `Field` array of the `Source` JSON file has been written to disk (current session). |
-| `CommandSucceeded` | `Pattern` | At least one shell command whose text matches any pipe-separated alternative in `Pattern` exited 0 this session. |
+| `CommandSucceeded` | `Pattern` or `PatternField` | At least one shell command whose text matches any pipe-separated alternative in `Pattern` (literal string) or in the value of the field named by `PatternField` inside `PatternSource` (defaults to brief.json) exited 0 this session. Use `PatternField: "verify_command"` to read the pattern from the brief, making the predicate language-agnostic. `Pattern` and `PatternField` are mutually exclusive. |
 | `FileExists` | `Path` | The file at `Path` exists on disk. |
 | `TestReport` | `NoFailures`, `HasAssertions` | `test-report.json` exists, has results, and satisfies the declared checks. |
 | `RelatedTestsPass` | _(none)_ | Resolves changed files for the session from `ChangeTracking`, discovers related test targets via `TestSelector.FindRelatedCommand`, runs them (falling back to `TestSelector.FullSuiteCommand`), and passes only when the test command exits 0. Requires `TestSelector` and `ChangeTracking` to be configured. |
