@@ -1883,7 +1883,7 @@ See [Configuration → Skill curation](configuration.md#skill-curation) for the 
 
 ## `fuseraft log`
 
-View fuseraft log files. All subcommands default to log files in the current project's `.fuseraft/logs/` directory.
+View fuseraft log files. Orchestration session logs (`fuseraft log events`) are read from the global `~/.fuseraft/logs/sessions/` directory. REPL and application logs are read from the current project's `.fuseraft/logs/` directory.
 
 ### `fuseraft log events`
 

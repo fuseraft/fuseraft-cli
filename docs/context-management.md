@@ -659,7 +659,7 @@ context error.
 After every `fuseraft run`, fuseraft automatically writes a Chart.js HTML file that shows
 how each agent's cumulative input token count grew turn by turn.
 
-**Files written to `.fuseraft/logs/sessions/{sessionId}/`:**
+**Files written to `~/.fuseraft/logs/sessions/{project_slug}/{session_id}/`:**
 
 | File | Contents |
 |------|----------|
@@ -669,7 +669,7 @@ how each agent's cumulative input token count grew turn by turn.
 The path to the HTML file is printed at the end of the run:
 
 ```
-Context viz → .fuseraft/logs/sessions/abc123/ctx_viz.html
+Context viz → ~/.fuseraft/logs/sessions/home-scs-github-myproject/abc123/ctx_viz.html
 ```
 
 Open the file in a browser. It requires internet access for the Chart.js CDN.
@@ -739,7 +739,7 @@ Here is the full sequence from session start through a long-running session:
             YES → compact (same as turn-count trigger)
 
 4. After run completes
-   └─ Context window visualization rendered to .fuseraft/logs/sessions/{sessionId}/ctx_viz.html
+   └─ Context window visualization rendered to ~/.fuseraft/logs/sessions/{project_slug}/{session_id}/ctx_viz.html
 ```
 
 ---

@@ -375,8 +375,10 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             await activeStore.SaveAsync(checkpoint, cancellationToken);
 
         // Set up the context window recorder — appends per-turn snapshots for post-run visualization.
-        var ctxSnapshotsPath = Path.Combine(fuseraft.Core.FuseraftPaths.LocalLogs,
-            "sessions", checkpoint.SessionId, "ctx_snapshots.jsonl");
+        var ctxSnapshotsPath = fuseraft.Core.FuseraftPaths.ExpandSessionPaths(
+            fuseraft.Core.FuseraftPaths.GlobalCtxSnapshotsTemplate,
+            checkpoint.SessionId,
+            fuseraft.Core.FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory()));
         using var ctxRecorder = new fuseraft.Orchestration.ContextWindowRecorder(ctxSnapshotsPath);
         ctxRecorder.SetSessionId(checkpoint.SessionId);
 

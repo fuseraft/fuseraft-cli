@@ -103,7 +103,7 @@ public static class OrchestratorBuilder
         // downstream consumer receives pre-interpolated values without needing to know
         // about the token.
         if (sessionId is { Length: > 0 })
-            config = InterpolateSessionId(config, sessionId);
+            config = InterpolateSessionId(config, sessionId, FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory()));
 
         // --no-replan: strip all state-machine transitions whose Signal contains "REPLAN"
         // so the session never routes back to the planning phase. Useful in CI or when the
@@ -1537,9 +1537,9 @@ public static class OrchestratorBuilder
         };
     }
 
-    private static OrchestrationConfig InterpolateSessionId(OrchestrationConfig config, string sessionId)
+    private static OrchestrationConfig InterpolateSessionId(OrchestrationConfig config, string sessionId, string projectSlug)
     {
-        string  E(string  s) => FuseraftPaths.ExpandSessionId(s, sessionId);
+        string  E(string  s) => FuseraftPaths.ExpandSessionPaths(s, sessionId, projectSlug);
         string? En(string? s) => s is null ? null : E(s);
 
         return config with

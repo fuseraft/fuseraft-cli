@@ -85,9 +85,55 @@ public static class FuseraftPaths
     public const string LocalBrownfieldBrief = ".fuseraft/artifacts/sessions/{session_id}/brief.brownfield.json";
     public const string LocalBriefReview    = ".fuseraft/artifacts/sessions/{session_id}/brief-review.json";
 
+    // ── Global session log templates ──────────────────────────────────────────
+    // Session logs (events + ctx_snapshots) live under ~/.fuseraft/logs/sessions/
+    // organised as {project_slug}/{session_id}/ so all projects share one root and
+    // sessions are trivially filterable by project without scanning content.
+
+    /// <summary>
+    /// Template for the per-session event log under the global fuseraft home.
+    /// Call <see cref="ExpandSessionPaths"/> to resolve both tokens.
+    /// </summary>
+    public const string GlobalEventsLogTemplate =
+        "~/.fuseraft/logs/sessions/{project_slug}/{session_id}/events.jsonl";
+
+    /// <summary>
+    /// Template for the per-session context-window snapshot log under the global fuseraft home.
+    /// Call <see cref="ExpandSessionPaths"/> to resolve both tokens.
+    /// </summary>
+    public const string GlobalCtxSnapshotsTemplate =
+        "~/.fuseraft/logs/sessions/{project_slug}/{session_id}/ctx_snapshots.jsonl";
+
+    /// <summary>
+    /// Converts an absolute project path to a filesystem-safe slug used as the
+    /// project subdirectory under <c>~/.fuseraft/logs/sessions/</c>.
+    /// Example: <c>/home/scs/github/fuseraft/brewer</c> → <c>home-scs-github-fuseraft-brewer</c>
+    /// </summary>
+    public static string ProjectSlug(string absolutePath)
+    {
+        var path = absolutePath;
+        // Strip Windows drive letter ("C:") before normalising separators.
+        if (path.Length >= 2 && path[1] == ':')
+            path = path[2..];
+        return path
+            .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Replace(Path.DirectorySeparatorChar,    '-')
+            .Replace(Path.AltDirectorySeparatorChar, '-')
+            .ToLowerInvariant();
+    }
+
     /// <summary>Expands the <c>{session_id}</c> token in a path with the given session ID.</summary>
     public static string ExpandSessionId(string path, string sessionId) =>
         path.Replace("{session_id}", sessionId, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Expands <c>{session_id}</c>, <c>{project_slug}</c>, and a leading <c>~</c> in a path.
+    /// Use this for any path that may contain either global-template token.
+    /// </summary>
+    public static string ExpandSessionPaths(string path, string sessionId, string projectSlug) =>
+        ExpandPath(
+            path.Replace("{session_id}",   sessionId,   StringComparison.Ordinal)
+                .Replace("{project_slug}", projectSlug, StringComparison.Ordinal));
 
     // comms/ — cross-agent communication channels
     public const string LocalChatroom = ".fuseraft/comms/sessions/{session_id}/chatroom.jsonl";

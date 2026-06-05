@@ -98,16 +98,19 @@ All runtime artifacts are written under `.fuseraft/` in the current working dire
 | `~/.fuseraft/config` | Model ID, endpoint URL (no secrets) |
 | `~/.fuseraft/.key` | Plain-text fallback API key (mode 0600; used only when no keychain) |
 | `~/.fuseraft/sessions/` | Session checkpoint files (`<sessionId>.json`, mode 0600) |
+| `~/.fuseraft/logs/sessions/{project_slug}/{session_id}/events.jsonl` | Structured JSONL session events (`EventEmitter`) |
+| `~/.fuseraft/logs/sessions/{project_slug}/{session_id}/ctx_snapshots.jsonl` | Per-turn context-window token snapshots |
 | `~/.fuseraft/crashdump/` | Crash dump JSON files |
 | `~/.fuseraft/scratchpad/` | Default per-agent scratchpad directory |
 | `~/.fuseraft/memory/repl/` | REPL persistent memories |
 | `~/.fuseraft/memory/agents/<name>/` | Per-agent persistent memories |
 
+`{project_slug}` is the absolute project path with separators replaced by hyphens and lowercased (e.g. `/home/scs/github/myproject` → `home-scs-github-myproject`). This keeps all session observability data in one global location while remaining trivially filterable by project.
+
 **Local (`.fuseraft/` relative to CWD)**
 
 | Path | Contents |
 |------|----------|
-| `.fuseraft/logs/sessions/{session_id}/events.jsonl` | Structured JSONL session events (`EventEmitter`) |
 | `.fuseraft/logs/repl_events.jsonl` | REPL session events |
 | `.fuseraft/logs/provider_errors.jsonl` | LLM provider error records |
 | `.fuseraft/logs/app.log` | Warning+ diagnostic log (always-on Serilog file sink, 5 MB rolling, 3 retained) |

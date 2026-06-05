@@ -36,18 +36,33 @@ public sealed class LogEventsCommand : AsyncCommand<LogEventsSettings>
             return await EventLogViewer.RenderAsync(path, settings.Last, settings.Session, settings.Event, cancellationToken);
         }
 
+        var globalSessionsRoot = System.IO.Path.Combine(FuseraftPaths.GlobalRoot, "logs", "sessions");
+
         if (!string.IsNullOrWhiteSpace(settings.Session))
         {
-            var path = System.IO.Path.GetFullPath(
+            // Search all project-slug subdirs in the global sessions root for a
+            // matching session ID prefix, then fall back to the legacy local path.
+            string? path = null;
+            if (Directory.Exists(globalSessionsRoot))
+            {
+                path = Directory.GetDirectories(globalSessionsRoot)
+                    .SelectMany(Directory.GetDirectories)
+                    .FirstOrDefault(d => System.IO.Path.GetFileName(d)
+                        .StartsWith(settings.Session, StringComparison.OrdinalIgnoreCase));
+                if (path is not null)
+                    path = System.IO.Path.Combine(path, "events.jsonl");
+            }
+            path ??= System.IO.Path.GetFullPath(
                 FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalEventsLog, settings.Session));
             return await EventLogViewer.RenderAsync(path, settings.Last, null, settings.Event, cancellationToken);
         }
 
-        // No session specified — collect all session event logs.
-        var sessionsDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(FuseraftPaths.LocalLogs, "sessions"));
-        IReadOnlyList<string> paths = Directory.Exists(sessionsDir)
-            ? Directory.GetDirectories(sessionsDir)
+        // No session specified — collect all global session event logs.
+        IReadOnlyList<string> paths = Directory.Exists(globalSessionsRoot)
+            ? Directory.GetDirectories(globalSessionsRoot)
+                .SelectMany(Directory.GetDirectories)
                 .Select(d => System.IO.Path.Combine(d, "events.jsonl"))
+                .Where(File.Exists)
                 .OrderBy(p => p)
                 .ToList()
             : [];
