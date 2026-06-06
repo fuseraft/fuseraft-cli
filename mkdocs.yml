@@ -49,6 +49,7 @@ nav:
   - MCP: mcp.md
   - Security: security.md
   - Governance: governance.md
+  - Evals: evals.md
   - Sessions: sessions.md
   - Context Management: context-management.md
   - Context Store: context-store.md

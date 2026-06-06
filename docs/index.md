@@ -36,6 +36,7 @@ fuseraft-cli is actively maintained and in production use. New features ship reg
 | [MCP Integration](mcp.md) | Connecting external MCP servers |
 | [Security & Sandbox](security.md) | File and network containment |
 | [Governance](governance.md) | Execution rings, audit log, circuit breaker, SLO tracking |
+| [Evals](evals.md) | Running agent teams against scored test cases; CI integration |
 | [Sessions](sessions.md) | Resumption, HITL, cost tracking, compaction |
 | [Context Management](context-management.md) | How fuseraft manages context across a long session |
 | [Context Store](context-store.md) | Importing reference material for agents |
