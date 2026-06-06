@@ -18,6 +18,7 @@ using fuseraft.Cli.Commands.Knowledge;
 using fuseraft.Cli.Commands.Objective;
 using fuseraft.Cli.Commands.Graph;
 using fuseraft.Cli.Commands.Memory;
+using fuseraft.Cli.Commands.Eval;
 using fuseraft.Cli.Commands.Skills;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
@@ -146,6 +147,8 @@ services.AddTransient<KnowledgeGcCommand>();
 services.AddTransient<ObjectiveCreateCommand>();
 services.AddTransient<ObjectiveListCommand>();
 services.AddTransient<ObjectiveStatusCommand>();
+services.AddTransient<EvalCommand>();
+services.AddTransient<EvalInitCommand>();
 
 // Use CommandApp<ReplCommand> so bare `fuseraft` drops straight into the REPL.
 var registrar = new ServiceCollectionRegistrar(services);
@@ -403,6 +406,25 @@ app.Configure(cfg =>
             .WithExample(["knowledge", "gc"])
             .WithExample(["knowledge", "gc", "--apply"])
             .WithExample(["knowledge", "gc", "--apply", "--lifecycle", ".fuseraft/knowledge/lifecycle.yaml"]);
+    });
+
+    cfg.AddBranch("eval", branch =>
+    {
+        branch.SetDescription("Run and manage eval suites against agent teams.");
+
+        branch.AddCommand<EvalCommand>("run")
+            .WithDescription("Run an eval suite and report pass/fail per case.")
+            .WithExample(["eval", "run", ".fuseraft/evals/suite.yaml"])
+            .WithExample(["eval", "run", ".fuseraft/evals/suite.yaml", "--filter", "smoke"])
+            .WithExample(["eval", "run", ".fuseraft/evals/suite.yaml", "--output", "results.jsonl"])
+            .WithExample(["eval", "run", ".fuseraft/evals/suite.yaml", "--ci"]);
+
+        branch.AddCommand<EvalInitCommand>("init")
+            .WithDescription("Scaffold a new eval suite YAML with annotated example cases.")
+            .WithExample(["eval", "init"])
+            .WithExample(["eval", "init", ".fuseraft/evals/my-suite.yaml"])
+            .WithExample(["eval", "init", "--name", "Smoke Tests", "--config", ".fuseraft/config/orchestration.yaml"])
+            .WithExample(["eval", "init", "--no-interactive"]);
     });
 });
 
