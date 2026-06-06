@@ -250,8 +250,11 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             memoryStore, toolsByCategory, systemPrompt, pendingSave,
             verbose: settings.Verbose, subAgent: subAgent)
         {
-            JsonMode = jsonMode,
+            JsonMode     = jsonMode,
+            SkillsPlugin = skillsPlugin,
         };
+        if (skillsPlugin is not null)
+            ctx.LineReader.SetSkillSlugs([.. skillsPlugin.Slugs]);
 
         if (snapshot is not null)
         {

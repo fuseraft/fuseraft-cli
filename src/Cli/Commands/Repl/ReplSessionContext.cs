@@ -38,6 +38,7 @@ internal sealed class ReplSessionContext
     public readonly Dictionary<string, List<AIFunction>> ToolsByCategory;
     public readonly SubAgentPlugin?     SubAgent;
     public readonly bool                Verbose;
+    public SkillsPlugin?                SkillsPlugin { get; set; }
 
     // Mutable provider state (may be replaced by /provider setup)
     public string      ModelId     { get; set; }
