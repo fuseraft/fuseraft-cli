@@ -1585,7 +1585,7 @@ public static class OrchestratorBuilder
                 : null,
 
             ChangeTracking = config.ChangeTracking is { } ct
-                ? ct with { IntentLogPath = E(ct.ResolveIntentLogPath()) }
+                ? ct with { Path = E(ct.Path), IntentLogPath = E(ct.ResolveIntentLogPath()) }
                 : null,
 
             Events = config.Events is { } ev
