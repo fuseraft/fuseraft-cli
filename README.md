@@ -2,13 +2,11 @@
 
 <img src="docs/.assets/fuseraft-banner.png" alt="fuseraft — an agent orchestration framework">
 
-fuseraft orchestrates teams of AI agents and mechanically enforces that they did what they claim to have done before the pipeline can advance.
+fuseraft runs teams of AI agents and mechanically enforces that they did what they claim before advancing the pipeline.
 
-Agents write confident prose. An agent might say "I implemented the feature" without ever calling `write_file`. "All tests pass" without running a command. Without enforcement, a pipeline advances on claims rather than facts. fuseraft blocks handoffs unless real evidence is on disk: routing validators inspect tool-call records, verify file presence, and check shell exit codes. Claims are not evidence. Artifacts and command results are.
+Validators inspect tool-call records, file presence, and shell exit codes — not agent assertions. Claims are not evidence; artifacts and command results are.
 
-You define a pipeline in YAML: agents, a routing strategy, and the mechanical contracts each agent must satisfy to hand off. fuseraft runs the loop, enforces the contracts, and accumulates durable knowledge across sessions — architecture decisions, a structural index of the codebase, provenance-tracked claims, and long-horizon objectives — so agents grow more informed over time rather than starting cold each run.
-
-Works with Anthropic, xAI, OpenAI, Azure OpenAI, Ollama, and any OpenAI-compatible provider. Agents can be local or remote — the [A2A protocol](https://a2a-protocol.org/) lets you federate agent slots to independently deployed services. Built on [Microsoft Agent Framework](https://github.com/microsoft/agents).
+Define pipelines in YAML with agents, routing strategy, and contracts. Works with Anthropic, xAI, OpenAI, Azure, Ollama, and any OpenAI-compatible provider. Built on Microsoft Agent Framework.
 
 ---
 
@@ -98,68 +96,50 @@ The binary lands in `./bin/`.
 ## Features
 
 **Enforcement**
-- Routing validators block handoffs unless real evidence is present on disk — `RequireBrief`, `RequireWriteFile`, `RequireShellPass`, `TestReportValid`, and others verify disk artifacts and tool-call records, not agent assertions
-- Change tracking records every `write_file`, `shell_run`, and `git_commit` call to a tamper-evident JSONL log; downstream agents and validators read the log, not the conversation
-- Evidence contracts gate transitions with reusable predicate chains: `FileExists`, `FilesWritten`, `CommandSucceeded`, `TestReport`
-- Compaction grounding cross-references `changes.json` when summarizing old turns — fabricated claims that contradict the log are corrected at compaction time rather than baked into the summary
-- `HandoffContext` on transitions injects targeted artifact snapshots at the moment a handoff fires, so receiving agents see only what they need
+- Routing validators block handoffs until evidence exists on disk (`RequireBrief`, `RequireWriteFile`, `RequireShellPass`, `TestReportValid`, etc.)
+- Change tracker logs every `write_file`, `shell_run`, and `git_commit` to a JSONL audit log
+- Evidence contracts gate transitions with predicates: `FileExists`, `FilesWritten`, `CommandSucceeded`
 
 **Orchestration**
-- Nine routing modes: sequential, round-robin, keyword, structured (JSON-field routing), state machine, declarative directed graph (with parallel fan-out/fan-in), LLM-based selection, fully autonomous Magentic, and adversarial generate→critique→revise
-- Saga orchestration wraps any pipeline with compensating rollback if a step fails
-- Declare agents inline or as standalone `AgentFile` YAML — reuse and version agent definitions across configs
-- Mix any combination of LLM providers within a single pipeline
-- Federate agent slots to remote services via the [A2A protocol](https://a2a-protocol.org/) — remote agents participate identically to local ones
+- Nine routing modes: sequential, round-robin, keyword, structured, state machine, graph (with parallel fan-out), LLM, Magentic, adversarial generate→critique
+- Saga mode adds compensating rollback on failure
+- Inline agents or reusable `AgentFile` YAML; mix providers in one pipeline
+- Federate slots via A2A protocol
 
-**Knowledge**
-- Accumulates durable cross-session knowledge: architecture decisions (ADRs), a structural repository graph, provenance-tracked claims, repository memory patterns, and long-horizon objectives
-- Agents query the knowledge layer through plugin tools (`decision_*`, `graph_*`, `objective_*`); the context broker ranks and injects relevant knowledge at session start without blowing the context budget
-- Architecture drift detection (`fuseraft arch check`) validates source files against declared layer boundaries
-- Knowledge lifecycle GC (`fuseraft knowledge gc`) archives superseded ADRs, decays stale provenance claims, and prunes orphaned graph nodes
+**Knowledge & Tools**
+- Cross-session knowledge: ADRs, repository graph, provenance claims, objectives
+- Architecture drift detection, knowledge life cycle GC
+- Built-in [plugins](docs/plugins.md), Docker sandboxes, MCP servers, skills
 
-**Tools**
-- Built-in plugins: filesystem, shell, git, HTTP, JSON, search, Docker code sandboxes, persistent scratchpad, and a shared agent chatroom
-- Connect any MCP server — its tools are automatically registered and available to agents
-- Skills packages bundle reusable agent procedures; fuseraft auto-curates skills from qualifying sessions and injects relevant ones at session start via a full-text index
-
-**Reliability**
-- Checkpoints after every turn — sessions can always be resumed exactly where they left off
-- Token tracking per turn; enforce per-model context caps and a session-wide hard spending limit
-- Conversation compaction keeps long sessions within context window limits without losing grounding
-- Per-agent `Context` spec — declare exactly which artifact sources each agent receives; when set, history replay is skipped entirely and context cost is proportional to what you declare
-
-**Governance**
-- Per-agent execution rings derived from `TrustScore`: Ring 1 (trusted, full access), Ring 2 (standard), Ring 3 (read-only sandbox) — ring assignments are enforced at every tool call
-- Prompt injection detection scans `shell_run` and `read_file` results for adversarial instruction overrides before they reach the agent; blocked calls are recorded in the audit log
-- SHA-256 hash-chain audit log links every governance event to its predecessor, making the record tamper-evident and suitable for post-session review
-- Circuit breaker stops runaway agents after 5 consecutive API failures; the checkpoint is saved so the session can be resumed when the API recovers
-- Rate limiter escalates to a `ValidatorStuckException` after 3 consecutive bad turns, preventing infinite correction loops where an agent keeps emitting broken handoffs without making progress
-- SLO tracking monitors routing validator pass rate within the session; burn-rate alerts fire at 2× and 5× speed when compliance degrades
-- Per-agent [Decentralized Identifiers](https://www.w3.org/TR/did-core/) correlate audit events across agents and sessions
-- Sandbox file and shell access to a configured directory tree; rings extend the sandbox — both path allowlist and operation type checks must pass
-- Human-in-the-loop support at any point in a pipeline; HITL turns are saved in the checkpoint and re-injected on resume
-- Optional YAML policy files extend or override default governance rules without code changes
+**Reliability & Governance**
+- Checkpoints after every turn; resume anywhere
+- Token tracking, compaction, per-agent context specs
+- Execution rings, prompt-injection detection, circuit breakers, rate limiting, SLO tracking, sandboxing, HITL
+- Prompt injection scans, blocked calls recorded in audit logs
+- Hash-chain audit logging, per-agent [decentralized identifiers](https://www.w3.org/TR/did-core/)
 
 ---
 
 ## Documentation
 
-| Doc | What it covers |
-|-----|----------------|
-| [Getting Started](docs/getting-started.md) | Prerequisites, build, first run |
-| [CLI Reference](docs/cli-reference.md) | All commands and flags |
-| [Configuration](docs/configuration.md) | Full config schema (YAML and JSON) |
+| Doc | Covers |
+|-----|--------|
+| [Getting Started](docs/getting-started.md) | Prerequisites, first run |
+| [CLI Reference](docs/cli-reference.md) | Commands and flags |
+| [Configuration](docs/configuration.md) | YAML/JSON schema |
 | [Models & Providers](docs/models.md) | Model configuration and provider auto-detection |
 | [Plugins](docs/plugins.md) | All built-in tools agents can call |
+| [Strategies](docs/strategies.md) | Routing & termination |
+| [Validators](docs/validators.md) | Anti-hallucination guards |
 | [Strategies](docs/strategies.md) | Selection and termination strategies |
 | [Routing Validators](docs/validators.md) | Anti-hallucination handoff guards |
-| [Harness Engineering](docs/harness-engineering.md) | Designing configs that enforce real progress mechanically |
+| [Harness Engineering](docs/harness-engineering.md) | Configs that enforce real progress mechanically |
 | [MCP Integration](docs/mcp.md) | Connecting external MCP servers |
 | [Security & Sandbox](docs/security.md) | File and network containment |
 | [Governance](docs/governance.md) | Execution rings, audit log, circuit breaker, SLO tracking |
 | [Context Store](docs/context-store.md) | Importing files and directories into the session context |
 | [Sessions](docs/sessions.md) | Resumption, HITL, cost tracking, compaction |
-| [Knowledge Layer](docs/knowledge.md) | ADR registry, repository graph, provenance, objectives, context broker |
+| [Knowledge Layer](docs/knowledge.md) | ADRs, graph, provenance |
 | [Skills](docs/skills.md) | Portable skill packages, skill curation, and the cross-session skill index |
 | [Examples](docs/examples.md) | Ready-to-use config examples |
 | [Design](docs/design.md) | Architecture, layer map, MAF usage, and decision log |
@@ -168,14 +148,13 @@ The binary lands in `./bin/`.
 
 ## Pipeline topologies
 
-Pipelines range from a single task-routed assistant:
-
+**Simple**
 ```mermaid
 flowchart LR
     Task((Task)) --> Assistant[Assistant]
 ```
 
-...to multi-agent workflows with conditional keyword routing and anti-hallucination validators enforced at every handoff:
+**Keyword routing with validators**
 
 ```mermaid
 flowchart TD
@@ -196,7 +175,7 @@ flowchart TD
     Tester       -->|"BUGS FOUND"| Developer
 ```
 
-...to declarative directed-graph pipelines where back-edges express review cycles without duplicating states:
+**Declarative directed-graph pipelines**
 
 ```mermaid
 flowchart TD
@@ -230,7 +209,7 @@ flowchart TD
     AnalyzerB   -->|"ANALYSIS COMPLETE"| Synthesizer
 ```
 
-...to fully autonomous [Magentic](https://arxiv.org/abs/2411.04468) orchestration where a Manager dynamically selects agents and collects their reports:
+**Fully autonomous [Magentic](https://arxiv.org/abs/2411.04468) pipelines**
 
 ```mermaid
 flowchart LR
@@ -246,7 +225,7 @@ flowchart LR
     Developer  -.->|"reports"| Manager
 ```
 
-...to adversarial pipelines where generator agents produce artifacts and critic agents review them with fresh, isolated context windows — no shared history, no inherited blind spots:
+**Adversarial pipelines**:
 
 ```mermaid
 flowchart TD
