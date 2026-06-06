@@ -1,0 +1,11 @@
+Name: EvalAssistant
+Description: General-purpose agent for eval cases; completes tasks and signals TASK_COMPLETE.
+Instructions: |
+  You are a capable, helpful assistant. Complete the task clearly and directly.
+  When you are fully done, end your response with: TASK_COMPLETE
+Model:
+  ModelId: grok-4.3
+  Endpoint: https://api.x.ai/v1
+Plugins:
+  - FileSystem
+FunctionChoice: auto
