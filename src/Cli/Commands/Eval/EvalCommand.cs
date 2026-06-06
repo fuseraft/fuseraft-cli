@@ -30,6 +30,10 @@ public sealed class EvalSettings : CommandSettings
     [Description("Run only cases whose id or tag contains this value (case-insensitive substring).")]
     public string? Filter { get; set; }
 
+    [CommandOption("--timeout")]
+    [Description("Per-case timeout in seconds. 0 = no timeout (default).")]
+    public int TimeoutSeconds { get; set; }
+
     [CommandOption("--no-banner")]
     [Description("Skip the suite header.")]
     public bool NoBanner { get; set; }
@@ -41,17 +45,17 @@ public sealed class EvalSettings : CommandSettings
 
 /// <summary>
 /// Runs an eval suite against a team config and reports pass/fail per case.
-/// Usage: fuseraft eval [suite.yaml] [--config team.yaml] [--filter tag] [--output results.jsonl]
+/// Usage: fuseraft eval run [suite.yaml] [--config team.yaml] [--filter tag] [--output results.jsonl]
 /// </summary>
 public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry pluginRegistry)
     : AsyncCommand<EvalSettings>
 {
-    private static readonly IDeserializer YamlDeserializer = new DeserializerBuilder()
+    internal static readonly IDeserializer YamlDeserializer = new DeserializerBuilder()
         .WithNamingConvention(UnderscoredNamingConvention.Instance)
         .IgnoreUnmatchedProperties()
         .Build();
 
-    private static readonly JsonSerializerOptions JsonOpts = new()
+    internal static readonly JsonSerializerOptions JsonReadOpts = new()
     {
         PropertyNameCaseInsensitive = true,
     };
@@ -98,6 +102,8 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
         if (!settings.NoBanner)
         {
             AnsiConsole.MarkupLine($"[bold]Eval suite:[/] {Markup.Escape(suite.Name)}  [dim]{cases.Count} case(s)[/]");
+            if (settings.TimeoutSeconds > 0)
+                AnsiConsole.MarkupLine($"[dim]Per-case timeout: {settings.TimeoutSeconds}s[/]");
             AnsiConsole.WriteLine();
         }
 
@@ -148,6 +154,13 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
             var sessionId = Guid.NewGuid().ToString("N")[..8];
             AnsiConsole.Markup($"  {Markup.Escape(evalCase.Id.PadRight(42))}");
 
+            // Per-case timeout: cancel this case independently of the suite-level token.
+            using var caseCts = settings.TimeoutSeconds > 0
+                ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
+                : null;
+            caseCts?.CancelAfter(TimeSpan.FromSeconds(settings.TimeoutSeconds));
+            var caseToken = caseCts?.Token ?? cancellationToken;
+
             SessionResult sessionResult;
             try
             {
@@ -171,7 +184,7 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
                     ConfigPath       = configPath,
                     WorkingDirectory = Directory.GetCurrentDirectory(),
                 };
-                await evalStore.SaveAsync(checkpoint, cancellationToken);
+                await evalStore.SaveAsync(checkpoint, caseToken);
 
                 eventEmitter?.SetSessionId(sessionId);
                 orchestrator.SetSessionId(sessionId);
@@ -190,9 +203,17 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
                     configPath:     configPath,
                     maxIterations:  config.Termination?.ResolveMaxIterations() ?? 0,
                     contextBudget:  config.ContextBudget,
-                    sessionMetrics: sessionMetrics);
+                    sessionMetrics: sessionMetrics,
+                    quiet:          true);
 
-                sessionResult = await runner.RunAsync(task, checkpoint, hitlMode: false, showTools: false, cancellationToken);
+                sessionResult = await runner.RunAsync(task, checkpoint, hitlMode: false, showTools: false, caseToken);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // Case-level timeout fired; the suite-level token is still live.
+                AnsiConsole.MarkupLine("[yellow]TIMEOUT[/]");
+                results.Add(Failed(evalCase.Id, sessionId, $"timed out after {settings.TimeoutSeconds}s"));
+                continue;
             }
             catch (Exception ex)
             {
@@ -215,9 +236,10 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
         return settings.Ci && results.Any(r => !r.Passed) ? 1 : 0;
     }
 
-    // ── Scoring ──────────────────────────────────────────────────────────────
+    // ── Scoring ─────────────────────────────────────────────────────────────
+    // internal so tests can call directly without spinning up an orchestrator.
 
-    private static EvalCaseResult Score(EvalCase evalCase, SessionResult result, string sessionId)
+    internal static EvalCaseResult Score(EvalCase evalCase, SessionResult result, string sessionId)
     {
         var failures = new List<string>();
 
@@ -265,7 +287,30 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
         };
     }
 
-    // ── Display ───────────────────────────────────────────────────────────────
+    internal static EvalSuite LoadSuite(string path)
+    {
+        var ext     = Path.GetExtension(path).ToLowerInvariant();
+        var content = File.ReadAllText(path);
+
+        if (ext is ".yaml" or ".yml")
+            return YamlDeserializer.Deserialize<EvalSuite>(content)
+                   ?? throw new InvalidDataException("Suite file is empty.");
+
+        return JsonSerializer.Deserialize<EvalSuite>(content, JsonReadOpts)
+               ?? throw new InvalidDataException("Suite file is empty.");
+    }
+
+    internal static List<EvalCase> ApplyFilter(List<EvalCase> cases, string? filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter)) return cases;
+        return cases
+            .Where(c =>
+                c.Id.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+                c.Tags.Any(t => t.Contains(filter, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+    }
+
+    // ── Display ──────────────────────────────────────────────────────────────
 
     private static void PrintCaseResult(EvalCaseResult r)
     {
@@ -274,7 +319,8 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
             ? $"  [dim]in:{r.TotalInputTokens:N0} out:{r.TotalOutputTokens:N0}[/]"
             : string.Empty;
 
-        AnsiConsole.MarkupLine($"{icon}  [dim]{r.TotalTurns} turn(s)  {r.DurationMs:N0}ms{tokens}[/]");
+        AnsiConsole.MarkupLine(
+            $"{icon}  [dim]{r.TotalTurns} turn(s)  {r.DurationMs:N0}ms{tokens}  [{r.SessionId}][/]");
 
         foreach (var reason in r.FailureReasons)
             AnsiConsole.MarkupLine($"    [red]→[/] {Markup.Escape(reason)}");
@@ -282,16 +328,21 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
 
     private static void PrintSummary(List<EvalCaseResult> results)
     {
-        var passed = results.Count(r => r.Passed);
-        var total  = results.Count;
-        var color  = passed == total ? "green" : passed == 0 ? "red" : "yellow";
+        var passed   = results.Count(r => r.Passed);
+        var total    = results.Count;
+        var color    = passed == total ? "green" : passed == 0 ? "red" : "yellow";
+        var totalMs  = results.Sum(r => r.DurationMs);
+        var totalIn  = results.Sum(r => r.TotalInputTokens);
+        var totalOut = results.Sum(r => r.TotalOutputTokens);
 
         AnsiConsole.MarkupLine(
             $"[{color}]{passed}/{total} passed[/]" +
-            (passed < total ? $"  [red]{total - passed} failed[/]" : string.Empty));
+            (passed < total ? $"  [red]{total - passed} failed[/]" : string.Empty) +
+            $"  [dim]{totalMs:N0}ms total[/]" +
+            (totalIn > 0 ? $"  [dim]in:{totalIn:N0} out:{totalOut:N0} tokens[/]" : string.Empty));
     }
 
-    // ── I/O ───────────────────────────────────────────────────────────────────
+    // ── I/O ──────────────────────────────────────────────────────────────────
 
     private static async Task WriteJsonlAsync(List<EvalCaseResult> results, string path)
     {
@@ -310,29 +361,6 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
         {
             AnsiConsole.MarkupLine($"[yellow]⚠ Could not write results: {Markup.Escape(ex.Message)}[/]");
         }
-    }
-
-    private static EvalSuite LoadSuite(string path)
-    {
-        var ext     = Path.GetExtension(path).ToLowerInvariant();
-        var content = File.ReadAllText(path);
-
-        if (ext is ".yaml" or ".yml")
-            return YamlDeserializer.Deserialize<EvalSuite>(content)
-                   ?? throw new InvalidDataException("Suite file is empty.");
-
-        return JsonSerializer.Deserialize<EvalSuite>(content, JsonOpts)
-               ?? throw new InvalidDataException("Suite file is empty.");
-    }
-
-    private static List<EvalCase> ApplyFilter(List<EvalCase> cases, string? filter)
-    {
-        if (string.IsNullOrWhiteSpace(filter)) return cases;
-        return cases
-            .Where(c =>
-                c.Id.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
-                c.Tags.Any(t => t.Contains(filter, StringComparison.OrdinalIgnoreCase)))
-            .ToList();
     }
 
     private static EvalCaseResult Failed(string caseId, string sessionId, string reason, string? error = null) =>
