@@ -151,7 +151,7 @@ public sealed class PluginRegistry : IDisposable
         // Both are registered as singletons — the factory lambda returns the same instance.
         var shellInstance = new ShellPlugin(sandboxRoot, shellCommandApprover, security.ShellPolicy);
         Register("Shell",      () => shellInstance);
-        Register("FileSystem", () => new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore, sessionCache: sessionReadCache, onWrite: shellInstance.InvalidateRunCache, onCacheHit: onCacheHit));
+        Register("FileSystem", () => new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore, sessionCache: sessionReadCache, onWrite: shellInstance.InvalidateRunCache, onCacheHit: onCacheHit, exemptedPaths: ["~/.fuseraft/"]));
         Register("Http",       () => new HttpPlugin(_sharedHttpClient, allowedHosts, apiProfiles, allowPrivateHosts, _loggerFactory?.CreateLogger<HttpPlugin>()));
         Register("Document",   () => new DocumentPlugin(sandboxRoot));
         return this;
