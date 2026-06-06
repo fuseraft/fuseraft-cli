@@ -198,38 +198,38 @@ public sealed class ChangeTracker
 
             FilesWritten = [.. records
                 .Where(r => (FunctionNameMatches(r.Name, "write_file") || FunctionNameMatches(r.Name, "patch_file")) && r.Succeeded)
-                .Select(r => GetArg(r.Args, "path"))
+                .Select(r => OrchestratorHelpers.GetArg(r.Args, "path"))
                 .Concat(records
                     .Where(r => FunctionNameMatches(r.Name, "copy_file") && r.Succeeded)
-                    .Select(r => GetArg(r.Args, "destination")))
+                    .Select(r => OrchestratorHelpers.GetArg(r.Args, "destination")))
                 .Concat(records
                     .Where(r => FunctionNameMatches(r.Name, "move_file") && r.Succeeded)
-                    .Select(r => GetArg(r.Args, "destination")))
+                    .Select(r => OrchestratorHelpers.GetArg(r.Args, "destination")))
                 .OfType<string>()],
 
             FilesDeleted = [.. records
                 .Where(r => FunctionNameMatches(r.Name, "delete_file") && r.Succeeded)
-                .Select(r => GetArg(r.Args, "path"))
+                .Select(r => OrchestratorHelpers.GetArg(r.Args, "path"))
                 .Concat(records
                     .Where(r => FunctionNameMatches(r.Name, "delete_directory") && r.Succeeded)
-                    .Select(r => GetArg(r.Args, "path")))
+                    .Select(r => OrchestratorHelpers.GetArg(r.Args, "path")))
                 .Concat(records
                     .Where(r => FunctionNameMatches(r.Name, "move_file") && r.Succeeded)
-                    .Select(r => GetArg(r.Args, "source")))
+                    .Select(r => OrchestratorHelpers.GetArg(r.Args, "source")))
                 .OfType<string>()],
 
             CommandsRun = [.. records
                 .Where(r => FunctionNameMatches(r.Name, "shell_run"))
                 .Select(r => new CommandRecord
                 {
-                    Command   = GetArg(r.Args, "command") ?? GetArg(r.Args, "script") ?? "(script)",
+                    Command   = OrchestratorHelpers.GetArg(r.Args, "command") ?? OrchestratorHelpers.GetArg(r.Args, "script") ?? "(script)",
                     Succeeded = r.Succeeded,
                     Output    = r.Output
                 })],
 
             GitCommits = [.. records
                 .Where(r => FunctionNameMatches(r.Name, "git_commit") && r.Succeeded)
-                .Select(r => GetArg(r.Args, "message"))
+                .Select(r => OrchestratorHelpers.GetArg(r.Args, "message"))
                 .OfType<string>()]
         };
 
@@ -290,8 +290,8 @@ public sealed class ChangeTracker
              FunctionNameMatches(r.Name, "copy_file")  || FunctionNameMatches(r.Name, "move_file"))
             && r.Succeeded))
         {
-            var path = GetArg(r.Args, "destination") // copy_file / move_file use "destination"
-                    ?? GetArg(r.Args, "path");
+            var path = OrchestratorHelpers.GetArg(r.Args, "destination") // copy_file / move_file use "destination"
+                    ?? OrchestratorHelpers.GetArg(r.Args, "path");
             if (string.IsNullOrWhiteSpace(path)) continue;
 
             // Compute content hash from the file on disk if it exists.
@@ -325,8 +325,8 @@ public sealed class ChangeTracker
             && r.Succeeded))
         {
             var path = FunctionNameMatches(r.Name, "move_file")
-                ? GetArg(r.Args, "source")
-                : GetArg(r.Args, "path");
+                ? OrchestratorHelpers.GetArg(r.Args, "source")
+                : OrchestratorHelpers.GetArg(r.Args, "path");
             if (string.IsNullOrWhiteSpace(path)) continue;
 
             nodes.Add(new EvidenceNode
@@ -343,7 +343,7 @@ public sealed class ChangeTracker
         // Shell commands — one node per shell_run call (succeeded or not).
         foreach (var r in records.Where(r => FunctionNameMatches(r.Name, "shell_run")))
         {
-            var command = GetArg(r.Args, "command") ?? GetArg(r.Args, "script") ?? "(script)";
+            var command = OrchestratorHelpers.GetArg(r.Args, "command") ?? OrchestratorHelpers.GetArg(r.Args, "script") ?? "(script)";
             var output  = r.Output;
             var exitCode = r.Succeeded ? 0 : 1;
 
@@ -372,7 +372,7 @@ public sealed class ChangeTracker
         // Git commits.
         foreach (var r in records.Where(r => FunctionNameMatches(r.Name, "git_commit") && r.Succeeded))
         {
-            var message = GetArg(r.Args, "message");
+            var message = OrchestratorHelpers.GetArg(r.Args, "message");
             if (string.IsNullOrWhiteSpace(message)) continue;
 
             nodes.Add(new EvidenceNode
@@ -415,7 +415,7 @@ public sealed class ChangeTracker
                     (FunctionNameMatches(r.Name, "write_file") || FunctionNameMatches(r.Name, "patch_file") ||
                      FunctionNameMatches(r.Name, "copy_file")  || FunctionNameMatches(r.Name, "move_file"))
                     && r.Succeeded)
-                .Select(r => GetArg(r.Args, "destination") ?? GetArg(r.Args, "path"))
+                .Select(r => OrchestratorHelpers.GetArg(r.Args, "destination") ?? OrchestratorHelpers.GetArg(r.Args, "path"))
                 .OfType<string>()
                 .Where(p => p.EndsWith(".cs", StringComparison.OrdinalIgnoreCase));
 
@@ -602,14 +602,14 @@ public sealed class ChangeTracker
         // Fire-and-forget — never block the tool call itself.
         if (_eventEmitter is not null)
         {
-            var arg = GetArg(context.Arguments, "path")
-                   ?? GetArg(context.Arguments, "source")
-                   ?? GetArg(context.Arguments, "destination")
-                   ?? GetArg(context.Arguments, "command")
-                   ?? GetArg(context.Arguments, "script")
-                   ?? GetArg(context.Arguments, "message")
-                   ?? GetArg(context.Arguments, "directory")
-                   ?? GetArg(context.Arguments, "query");
+            var arg = OrchestratorHelpers.GetArg(context.Arguments, "path")
+                   ?? OrchestratorHelpers.GetArg(context.Arguments, "source")
+                   ?? OrchestratorHelpers.GetArg(context.Arguments, "destination")
+                   ?? OrchestratorHelpers.GetArg(context.Arguments, "command")
+                   ?? OrchestratorHelpers.GetArg(context.Arguments, "script")
+                   ?? OrchestratorHelpers.GetArg(context.Arguments, "message")
+                   ?? OrchestratorHelpers.GetArg(context.Arguments, "directory")
+                   ?? OrchestratorHelpers.GetArg(context.Arguments, "query");
 
             string? shellOutput = null;
             if (FunctionNameMatches(name, "shell_run") && resultText.Length > 0)
@@ -640,7 +640,7 @@ public sealed class ChangeTracker
             && succeeded
             && SymbolTrackedSubstrings.Any(s => FunctionNameMatches(name, s)))
         {
-            var sym = GetArg(context.Arguments, "symbol") ?? string.Empty;
+            var sym = OrchestratorHelpers.GetArg(context.Arguments, "symbol") ?? string.Empty;
             _symbolPending.Enqueue(new SymbolSearchRecord(sym, resultText));
         }
 
@@ -651,7 +651,7 @@ public sealed class ChangeTracker
             && succeeded
             && CallerTrackedSubstrings.Any(s => FunctionNameMatches(name, s)))
         {
-            var sym = GetArg(context.Arguments, "symbol") ?? string.Empty;
+            var sym = OrchestratorHelpers.GetArg(context.Arguments, "symbol") ?? string.Empty;
             _callerPending.Enqueue(new CallerSearchRecord(sym, resultText));
         }
 
@@ -680,13 +680,5 @@ public sealed class ChangeTracker
         return result;
     }
 
-    // Helpers
-
-    private static string? GetArg(IReadOnlyDictionary<string, object?>? args, string key)
-    {
-        if (args is null) return null;
-        if (!args.TryGetValue(key, out var val)) return null;
-        return val?.ToString();
-    }
 }
 

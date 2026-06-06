@@ -638,7 +638,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         if (File.Exists(configPath))
         {
             try { checkpointConfig = OrchestratorBuilder.LoadConfig(configPath).Checkpoint; }
-            catch { /* errors will surface later during full BuildAsync */ }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[BuildActiveStore] {ex.Message}"); }
         }
 
         if (checkpointConfig?.Mode?.Equals("memory", StringComparison.OrdinalIgnoreCase) == true)
@@ -886,7 +886,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
                 if (!string.IsNullOrWhiteSpace(sandboxPath))
                     return FuseraftPaths.ExpandPath(sandboxPath);
             }
-            catch { /* errors surface later in full BuildAsync */ }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[ResolveWorkDir] {ex.Message}"); }
         }
 
         return null; // keep CWD

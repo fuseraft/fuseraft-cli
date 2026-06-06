@@ -47,13 +47,6 @@ public sealed class KeywordSelectionStrategy : IAgentSelector
     private string _sessionId = "unknown";
     private Func<string, string>? _didResolver;
 
-    // How many agent text messages to look back through when scanning for routing keywords.
-    private const int AgentMessageLookback = 3;
-
-    // Inject a loop-warning message when the same agent has been invoked this many
-    // consecutive turns without completing its task.
-    private const int ConsecutiveTurnWarningThreshold = 5;
-
     // After this many consecutive JSON parse failures on a PreferStructuredOutput route,
     // stop injecting corrections and fall back to keyword matching.
     private const int MaxStructuredParseRetries = 2;
@@ -152,15 +145,15 @@ public sealed class KeywordSelectionStrategy : IAgentSelector
         CancellationToken cancellationToken = default)
     {
         // Scan agent text messages newest-first, skipping tool call/result messages.
-        // Only Role=Assistant messages with text count toward the AgentMessageLookback limit.
+        // Only Role=Assistant messages with text count toward the OrchestratorHelpers.AgentMessageLookback limit.
         // User messages (error injections, turn-boundary markers) are scanned for
         // keywords but do not consume a lookback slot.
         int scanned = 0;
         _logger.LogDebug(
             "[Selection] Scanning history ({Count} messages) for route keywords (lookback={Lookback})",
-            history.Count, AgentMessageLookback);
+            history.Count, OrchestratorHelpers.AgentMessageLookback);
 
-        for (int i = history.Count - 1; i >= 0 && scanned < AgentMessageLookback; i--)
+        for (int i = history.Count - 1; i >= 0 && scanned < OrchestratorHelpers.AgentMessageLookback; i--)
         {
             var msg = history[i];
 
@@ -833,18 +826,9 @@ public sealed class KeywordSelectionStrategy : IAgentSelector
     {
         if (_history is null) return;
 
-        int consecutive = 0;
-        for (int i = history.Count - 1; i >= 0; i--)
-        {
-            var msg = history[i];
-            if (msg.Role == ChatRole.Tool) continue;
-            if (string.IsNullOrEmpty(msg.Text)) continue;
-            if (msg.Role == ChatRole.User) break;
-            if (!string.Equals(msg.AuthorName, agent.Name, StringComparison.OrdinalIgnoreCase)) break;
-            consecutive++;
-        }
+        int consecutive = OrchestratorHelpers.CountConsecutiveAgentTurns(history, agent.Name ?? string.Empty);
 
-        if (consecutive > 0 && consecutive % ConsecutiveTurnWarningThreshold == 0)
+        if (consecutive > 0 && consecutive % OrchestratorHelpers.ConsecutiveTurnWarningThreshold == 0)
         {
             _history.Add(new ChatMessage(ChatRole.User,
                 $"LOOP WARNING: {agent.Name} — {consecutive} consecutive turns, task incomplete.\n" +

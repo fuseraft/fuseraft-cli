@@ -71,13 +71,6 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
     private readonly bool _triggerVerifierOnConflict;
     private bool _runVerifierNext;
 
-    // How many recent agent messages to scan for signals.
-    private const int AgentMessageLookback = 3;
-
-    // Consecutive turns the same state's agent can run without emitting a signal before
-    // a loop-warning is injected.
-    private const int ConsecutiveTurnWarningThreshold = 5;
-
     public StateMachineSelectionStrategy(
         StateMachineConfig machine,
         ContractEngine? contractEngine = null,
@@ -172,7 +165,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
 
         // Scan the last few agent messages for signals from the current state's agent.
         int scanned = 0;
-        for (int i = history.Count - 1; i >= 0 && scanned < AgentMessageLookback; i--)
+        for (int i = history.Count - 1; i >= 0 && scanned < OrchestratorHelpers.AgentMessageLookback; i--)
         {
             var msg = history[i];
             if (msg.Role == ChatRole.Tool) continue;
@@ -428,7 +421,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
             return Task.FromResult<ParallelAgentBatch?>(null);
 
         int scanned = 0;
-        for (int i = history.Count - 1; i >= 0 && scanned < AgentMessageLookback; i--)
+        for (int i = history.Count - 1; i >= 0 && scanned < OrchestratorHelpers.AgentMessageLookback; i--)
         {
             var msg = history[i];
             if (msg.Role == ChatRole.Tool) continue;
@@ -786,18 +779,9 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
     {
         if (_history is null) return;
 
-        int consecutive = 0;
-        for (int i = history.Count - 1; i >= 0; i--)
-        {
-            var msg = history[i];
-            if (msg.Role == ChatRole.Tool) continue;
-            if (string.IsNullOrEmpty(msg.Text)) continue;
-            if (msg.Role == ChatRole.User) break;
-            if (!string.Equals(msg.AuthorName, agentName, StringComparison.OrdinalIgnoreCase)) break;
-            consecutive++;
-        }
+        int consecutive = OrchestratorHelpers.CountConsecutiveAgentTurns(history, agentName);
 
-        if (consecutive > 0 && consecutive % ConsecutiveTurnWarningThreshold == 0)
+        if (consecutive > 0 && consecutive % OrchestratorHelpers.ConsecutiveTurnWarningThreshold == 0)
         {
             _history.Add(new ChatMessage(ChatRole.User,
                 $"LOOP WARNING: {agentName} has been invoked {consecutive} consecutive turns " +

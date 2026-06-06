@@ -1,3 +1,4 @@
+using fuseraft.Cli.Display;
 using fuseraft.Core.Interfaces;
 using Spectre.Console;
 
@@ -40,7 +41,7 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
     public Task<bool> PromptShellCommandAsync(string command)
     {
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine($"[yellow]⏸ Shell command requested:[/]");
+        AnsiConsole.MarkupLine($"[{ThemeDetector.Warning}]⏸ Shell command requested:[/]");
         AnsiConsole.MarkupLine($"  [dim]{Markup.Escape(command)}[/]");
         AnsiConsole.Markup("[dim]Allow? (y/N):[/]  ");
         var input = Console.ReadLine()?.Trim() ?? string.Empty;
@@ -63,7 +64,7 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
     public Task<bool> PromptRouteApprovalAsync(string keyword, string sourceAgent, string targetAgent)
     {
         AnsiConsole.MarkupLine(
-            $"\n[bold yellow]⏸ Route approval required.[/]\n" +
+            $"\n[bold {ThemeDetector.Warning}]⏸ Route approval required.[/]\n" +
             $"  From:    [bold]{Markup.Escape(sourceAgent)}[/]\n" +
             $"  To:      [bold]{Markup.Escape(targetAgent)}[/]\n" +
             $"  Keyword: [bold]{Markup.Escape(keyword)}[/]\n");
@@ -76,7 +77,7 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
 
     public Task<string?> PromptPlanReviewAsync(string planText)
     {
-        AnsiConsole.MarkupLine("\n[bold yellow]⏸ Magentic Plan Review[/]");
+        AnsiConsole.MarkupLine($"\n[bold {ThemeDetector.Warning}]⏸ Magentic Plan Review[/]");
         AnsiConsole.MarkupLine("[dim]─────────────────────────────────────────[/]");
         AnsiConsole.MarkupLine(Markup.Escape(planText));
         AnsiConsole.MarkupLine("[dim]─────────────────────────────────────────[/]");

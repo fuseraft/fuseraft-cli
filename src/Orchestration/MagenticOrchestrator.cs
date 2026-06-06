@@ -569,8 +569,8 @@ public sealed class MagenticOrchestrator(
                 Content   = response.Text ?? string.Empty,
                 Role      = "assistant",
                 TurnIndex = turn++,
-                Usage     = ExtractUsage(response),
-                ToolCalls = ExtractToolCalls(response.Messages)
+                Usage     = OrchestratorHelpers.ExtractUsage(response),
+                ToolCalls = OrchestratorHelpers.ExtractToolCalls(response.Messages)
             };
 
             cumulativeTokens += agentMsg.Usage?.TotalTokens ?? 0;
@@ -971,53 +971,5 @@ public sealed class MagenticOrchestrator(
             Usage     = usage,
         };
 
-    // Usage extraction (mirrors AgentOrchestrator)
-
-    private static TokenUsage? ExtractUsage(AgentResponse response)
-    {
-        if (response.Usage is null) return null;
-
-        var inputTokens  = (int)(response.Usage.InputTokenCount  ?? 0L);
-        var outputTokens = (int)(response.Usage.OutputTokenCount ?? 0L);
-        if (inputTokens == 0 && outputTokens == 0) return null;
-
-        return new TokenUsage(inputTokens, outputTokens);
-    }
-
-    private static IReadOnlyList<ToolCallRecord>? ExtractToolCalls(IList<ChatMessage> messages)
-    {
-        var calls   = new List<(string CallId, string Name, string? ArgsSummary)>();
-        var results = new Dictionary<string, bool>(StringComparer.Ordinal);
-
-        try
-        {
-            foreach (var msg in messages)
-            {
-                foreach (var content in msg.Contents)
-                {
-                    if (content is FunctionCallContent fc)
-                        calls.Add((fc.CallId ?? fc.Name, fc.Name, ToolCallHelper.SummarizeArgs(fc.Arguments)));
-                    else if (content is FunctionResultContent fr)
-                    {
-                        var key  = fr.CallId ?? string.Empty;
-                        var text = fr.Result?.ToString() ?? string.Empty;
-                        var ok   = !text.StartsWith("[ERROR]",     StringComparison.Ordinal)
-                                && !text.StartsWith("[DENIED]",    StringComparison.Ordinal)
-                                && !text.StartsWith("[TIMEOUT]",   StringComparison.Ordinal)
-                                && !text.StartsWith("[NOT FOUND]", StringComparison.Ordinal)
-                                && !text.StartsWith("[EXIT ",      StringComparison.Ordinal);
-                        if (!string.IsNullOrEmpty(key)) results[key] = ok;
-                    }
-                }
-            }
-        }
-        catch (Exception) { /* best-effort extraction; do not let parsing errors propagate */ }
-
-        if (calls.Count == 0) return null;
-
-        return calls
-            .Select(c => new ToolCallRecord(c.Name, c.ArgsSummary, results.TryGetValue(c.CallId, out var s) ? s : true))
-            .ToList();
-    }
 
 }
