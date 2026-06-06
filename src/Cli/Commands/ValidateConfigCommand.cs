@@ -980,6 +980,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
         {
             Console.WriteLine(label);
             Console.WriteLine($"  {resolved}");
+            Console.WriteLine();
         }
 
         AnsiConsole.WriteLine();
