@@ -84,6 +84,9 @@ public static partial class InitTemplates
                    verify_command — the exact shell command to verify runtime correctness, not
                      just compilation. The Developer runs this before committing. Example:
                      "dotnet run --project src/app.csproj -- tests/test.kiwi"
+                     IMPORTANT: write the full literal command — never abbreviate with "...".
+                     Abbreviated commands cannot be matched against the session log and will
+                     cause ImplementationComplete to loop indefinitely.
                    acceptance_criteria — observable code properties the change must satisfy
                    convention_notes — specific conventions to follow from the profile
               7. {ContextWriteStep}
