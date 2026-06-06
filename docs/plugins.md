@@ -496,6 +496,56 @@ Read rich document formats as plain text. All operations are read-only. Sandbox 
 
 ---
 
+## Decision
+
+Architecture Decision Registry (ADR) — record, search, and supersede architecture decisions across sessions. Each decision gets a stable ID (`ADR-NNNN`) and tracks title, context, rationale, alternatives, consequences, and tags.
+
+| Function | Parameters | Description |
+|----------|-----------|-------------|
+| `decision_search` | `query` (default `""`), `status` (optional), `tag` (optional) | Search ADRs by keyword across title, context, decision text, and tags. Filter by status (`Proposed`, `Accepted`, `Deprecated`, `Superseded`) or tag. Leave `query` empty to list all. |
+| `decision_read` | `id` | Fetch a single ADR by ID (e.g. `ADR-0042`). Returns full detail including alternatives, consequences, and governed files. |
+| `decision_create` | `title`, `context`, `decision`, `alternatives` (optional), `consequences` (optional), `tags` (optional), `supersedes` (optional), `governs` (optional) | Record a new architecture decision. `alternatives` and `consequences` are comma-separated lists. `supersedes` is a comma-separated list of ADR IDs; those records are automatically marked Superseded. `governs` is a comma-separated list of file paths or symbol IDs the decision applies to. |
+| `decision_supersede` | `id`, `newId` | Mark an existing ADR as Superseded. `newId` is the replacement ADR (recorded for traceability). |
+
+---
+
+## Graph
+
+Read the repository semantic graph — nodes (files, types, methods, interfaces, ADRs) and edges (references, inheritance, implementation, dependencies). The graph is populated automatically by the `search_symbol` and `search_callers` tools and by `decision_create`.
+
+| Function | Parameters | Description |
+|----------|-----------|-------------|
+| `graph_search` | `query` (default `""`), `kind` (optional), `file` (optional) | Find graph nodes by name, kind, or file path. `kind` accepts `File`, `Namespace`, `Type`, `Interface`, `Method`, `Property`, `Field`, or `Adr`. Returns up to 50 results. |
+| `graph_refs` | `symbolId` | Find all nodes that reference, implement, or inherit from the given symbol ID (e.g. `type:fuseraft.Core.Models.AdrEntry`). Returns inbound `references`, `implements`, and `inherits` edges. |
+| `graph_dependents` | `symbolId`, `depth` (default 3) | Transitively walk inbound `depends_on`, `references`, `implements`, and `inherits` edges up to `depth` hops (max 10). Shows every node that directly or indirectly depends on the target. |
+
+---
+
+## Objective
+
+Long-horizon objective tracking — record multi-session goals, attach tasks, and track progress across orchestration runs.
+
+| Function | Parameters | Description |
+|----------|-----------|-------------|
+| `objective_create` | `title`, `description` (optional), `tasks` (optional) | Create a new objective. `tasks` is a comma-separated list of remaining task descriptions. Returns the assigned ID (`OBJ-NNNN`). |
+| `objective_read` | `id` | Fetch a single objective by ID with full detail: description, status, completed/remaining tasks, linked sessions, and timestamps. |
+| `objective_update` | `id`, `title` (optional), `description` (optional), `status` (optional) | Update an objective's title, description, or status. `status` accepts `Active`, `Paused`, `Completed`, or `Abandoned`. |
+| `objective_list` | `status` (optional) | List all objectives. Filter by status (`Active`, `Paused`, `Completed`, `Abandoned`). Shows title, status, and completion percentage. |
+| `objective_link_task` | `id`, `task`, `completed` (default `true`), `sessionId` (optional) | Add a task to an objective or mark an existing task as completed. When `completed=false`, the task is added to the remaining list. Tracks the current session ID when provided. |
+
+---
+
+## SessionContext
+
+Shared writable context summary for the current orchestration session. Agents write a plain-text summary before handing off; the successor reads it to catch up without re-reading every source file. The summary is stored at `.fuseraft/state/sessions/{session_id}/context_summary.md` — each `session_context_write` call replaces the previous content so the file always reflects current state.
+
+| Function | Parameters | Description |
+|----------|-----------|-------------|
+| `session_context_read` | — | Read the context summary written by the previous agent. Returns a truncation notice if the file exceeds 8,000 characters. Call this at the start of every turn before reading source files. |
+| `session_context_write` | `summary` | Write or replace the session context summary. Overwrites any previous summary. Call this before every handoff. Bullet-point format works well — include what was accomplished, which files changed, and any open issues the next agent should know about. |
+
+---
+
 ## Skills
 
 Exposes installed skills as callable tools in the REPL. Only present when at least one skill is found at startup — see [Skills](skills.md) for how discovery works.
