@@ -467,7 +467,7 @@ internal static class ReplTurn
             if (!Console.IsOutputRedirected)
                 ClearSpinnerLine();
             AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[dim]A:[/]");
+            AnsiConsole.MarkupLine("[dim]fuseraft agent:[/]");
             AnsiConsole.Write(MarkdownRenderer.Render(responseText));
         }
         if (!ctx.JsonMode) AnsiConsole.WriteLine();
