@@ -75,7 +75,8 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
                 candidates = candidates.Where(s => s.WorkingDirectory is { } wd &&
                     wd.Contains(settings.Project, StringComparison.OrdinalIgnoreCase));
 
-            var toDelete = candidates.ToList();
+            var toDelete    = candidates.ToList();
+            var ignoreRules = Core.FuseraftIgnoreRules.Load();
 
             if (toDelete.Count == 0)
             {
@@ -90,11 +91,20 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
 
                 if (s.WorkingDirectory is { Length: > 0 })
                 {
-                    var slug      = FuseraftPaths.ProjectSlug(s.WorkingDirectory);
-                    var globalDir = Path.Combine(FuseraftPaths.GlobalProjectSessions(slug), s.SessionId);
+                    var slug         = FuseraftPaths.ProjectSlug(s.WorkingDirectory);
+                    var sessionsRoot  = FuseraftPaths.GlobalProjectSessions(slug);
+                    var globalDir    = Path.Combine(sessionsRoot, s.SessionId);
                     if (Directory.Exists(globalDir))
                     {
-                        Directory.Delete(globalDir, recursive: true);
+                        if (ignoreRules.HasRules)
+                            DeleteEphemeral(globalDir, sessionsRoot, "sessions", ignoreRules);
+                        else
+                            Directory.Delete(globalDir, recursive: true);
+
+                        if (Directory.Exists(globalDir) &&
+                            !Directory.EnumerateFileSystemEntries(globalDir).Any())
+                            Directory.Delete(globalDir, recursive: false);
+
                         localDirsRemoved++;
                     }
                 }
@@ -221,5 +231,30 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
         return parts.Length >= 2
             ? string.Join("/", parts[^2..])
             : parts[^1];
+    }
+
+    /// <summary>
+    /// Deletes files inside <paramref name="dir"/> that are marked ephemeral by
+    /// <paramref name="rules"/>, then removes empty subdirectories bottom-up.
+    /// Virtual paths are formed as: <c>{virtualPrefix}/{relativeTo(projectRoot, file)}</c>.
+    /// </summary>
+    private static void DeleteEphemeral(
+        string dir, string projectRoot, string virtualPrefix, Core.FuseraftIgnoreRules rules)
+    {
+        foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+        {
+            var rel         = Path.GetRelativePath(projectRoot, file).Replace('\\', '/');
+            var virtualPath = $"{virtualPrefix}/{rel}";
+            if (rules.IsEphemeral(virtualPath))
+                File.Delete(file);
+        }
+
+        // Remove empty subdirectories bottom-up (longest path first = deepest first).
+        foreach (var sub in Directory.EnumerateDirectories(dir, "*", SearchOption.AllDirectories)
+            .OrderByDescending(d => d.Length))
+        {
+            if (Directory.Exists(sub) && !Directory.EnumerateFileSystemEntries(sub).Any())
+                Directory.Delete(sub, recursive: false);
+        }
     }
 }
