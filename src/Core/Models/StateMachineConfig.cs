@@ -251,6 +251,26 @@ public record TransitionConfig
     /// </summary>
     public List<ContextSource>? HandoffContext { get; init; }
 
+    /// <summary>
+    /// Maximum times this transition may fire as a back-edge (i.e. routing back to a state
+    /// that already ran) before an escalation message is injected naming the outstanding
+    /// objections from the prior review artifact. 0 (default) disables the cap.
+    ///
+    /// <para>
+    /// When the threshold is exceeded the agent is re-invoked with a message listing each
+    /// objection explicitly rather than force-approving — the Critic's quality guarantee
+    /// is preserved while the loop is broken.
+    /// </para>
+    /// </summary>
+    public int MaxRevisits { get; init; } = 0;
+
+    /// <summary>
+    /// Path to the artifact file containing the reviewer's objections, injected into the
+    /// escalation message when <see cref="MaxRevisits"/> is exceeded. Relative to the
+    /// sandbox root. When null the escalation message is generic.
+    /// </summary>
+    public string? ReviewArtifactPath { get; init; }
+
     /// <summary>Returns all contract names declared on this transition (Contract + Contracts merged).</summary>
     internal IReadOnlyList<string> AllContracts
     {

@@ -76,6 +76,7 @@ public sealed class KnowledgeLifecycleManager
     {
         var archivedDecisions  = await ArchiveSupersededAdrsAsync(policy, apply, ct);
         var demotedMemories    = await DemoteAgedMemoriesAsync(policy, apply, ct);
+        var prunedMemories     = await PruneStaleMemoriesAsync(policy, apply, ct);
         var decayedClaims      = await DecayProvenanceAsync(policy, apply, ct);
         var prunedNodes        = await PruneOrphanedNodesAsync(policy, apply, ct);
         var archivedProvenance = await CompactProvenanceAsync(policy, apply, ct);
@@ -84,6 +85,7 @@ public sealed class KnowledgeLifecycleManager
         {
             ArchivedDecisionIds   = archivedDecisions,
             DemotedMemoryIds      = demotedMemories,
+            PrunedMemoryIds       = prunedMemories,
             DecayedClaimIds       = decayedClaims,
             PrunedNodeIds         = prunedNodes,
             ArchivedProvenanceIds = archivedProvenance,
@@ -148,7 +150,32 @@ public sealed class KnowledgeLifecycleManager
         return demoted;
     }
 
-    // ── Step 3 — Decay provenance confidence ─────────────────────────────────
+    // ── Step 3 — Prune stale Candidate memories ──────────────────────────────
+
+    private async Task<IReadOnlyList<string>> PruneStaleMemoriesAsync(
+        LifecyclePolicy policy, bool apply, CancellationToken ct)
+    {
+        if (policy.MemoryCandidatePruningDays <= 0) return [];
+
+        var cutoff    = DateTimeOffset.UtcNow.AddDays(-policy.MemoryCandidatePruningDays);
+        var candidates = await _memoryStore.LoadCandidatesAsync(ct);
+
+        var eligible = candidates
+            .Where(e => e.LastReinforcedAt < cutoff)
+            .ToList();
+
+        if (!apply) return eligible.Select(e => e.Id).ToList();
+
+        var pruned = new List<string>();
+        foreach (var entry in eligible)
+        {
+            await _memoryStore.DeleteAsync(entry.Id, ct);
+            pruned.Add(entry.Id);
+        }
+        return pruned;
+    }
+
+    // ── Step 4 — Decay provenance confidence ─────────────────────────────────
 
     private async Task<IReadOnlyList<string>> DecayProvenanceAsync(
         LifecyclePolicy policy, bool apply, CancellationToken ct)
@@ -157,7 +184,7 @@ public sealed class KnowledgeLifecycleManager
         return await _provenance.DecayAsync(policy.ConfidenceDecayDays, apply, ct);
     }
 
-    // ── Step 4 — Prune orphaned graph nodes ──────────────────────────────────
+    // ── Step 5 — Prune orphaned graph nodes ──────────────────────────────────
 
     private async Task<IReadOnlyList<string>> PruneOrphanedNodesAsync(
         LifecyclePolicy policy, bool apply, CancellationToken ct)
@@ -194,7 +221,7 @@ public sealed class KnowledgeLifecycleManager
         return orphans;
     }
 
-    // ── Step 5 — Compact provenance registry ─────────────────────────────────
+    // ── Step 6 — Compact provenance registry ─────────────────────────────────
 
     private async Task<IReadOnlyList<string>> CompactProvenanceAsync(
         LifecyclePolicy policy, bool apply, CancellationToken ct)
@@ -216,11 +243,10 @@ public sealed class KnowledgeLifecycleManager
             return false;
         }
 
-        var archived = await _provenance.CompactAsync(
-            ShouldArchive,
+        var archivePath = FuseraftPaths.ExpandProjectPaths(
             FuseraftPaths.LocalProvenanceArchive,
-            apply,
-            ct);
+            FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory()));
+        var archived = await _provenance.CompactAsync(ShouldArchive, archivePath, apply, ct);
 
         return archived.Select(r => r.Id).ToList();
     }

@@ -32,7 +32,7 @@ public sealed class LogReplCommand : AsyncCommand<LogReplSettings>
     {
         var path = !string.IsNullOrWhiteSpace(settings.Path)
             ? FuseraftPaths.ExpandPath(settings.Path)
-            : System.IO.Path.GetFullPath(FuseraftPaths.LocalReplEventsLog);
+            : FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalReplEventsLog, FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory()));
 
         return await EventLogViewer.RenderAsync(path, settings.Last, settings.Session, settings.Event, cancellationToken);
     }

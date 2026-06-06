@@ -293,6 +293,10 @@ Selection:
 | `Contract` | string | — | Single named contract that must pass. Referenced by name from `Orchestration.Contracts`. |
 | `Contracts` | array | — | Multiple named contracts (AND semantics — all must pass). Use instead of or together with `Contract`. |
 | `SourceAgents` | array | any | Optional. Restrict this transition to messages authored by agents in this list. |
+| `MaxRevisits` | int | `0` | Maximum times this back-edge may fire before an escalation message is injected. When exceeded the agent is re-invoked with a message listing the outstanding objections from `ReviewArtifactPath` rather than force-approving — preserving the reviewer's quality guarantee while breaking the loop. `0` disables the cap. |
+| `ReviewArtifactPath` | string | — | Path (relative to the sandbox root) to the artifact containing reviewer objections. Injected into the escalation message when `MaxRevisits` is exceeded. When omitted the escalation message is generic. Only meaningful when `MaxRevisits > 0`. |
+| `HandoffContext` | array | — | Context sources to inject for the receiving agent when this transition fires. Each entry has `Source` (required) and optional `MaxChars` / `Label`. Supported sources: `session_context`, `changes_recent[:N]`, `brief_field:FIELD`, `file:PATH`. |
+| `RecoveryAgent` | string | — | Agent to invoke when this transition's contract fails repeatedly. Fires at most once per state/transition pair. |
 | `Parallel` | bool | `false` | When `true`, fans out to all states listed in `Targets` concurrently instead of routing to a single state. Each branch runs one agent turn with an isolated history snapshot. Outputs are merged via `Merge` before control advances to the join state in `To`. |
 | `Targets` | array | — | Branch state names for parallel fan-out. Required when `Parallel: true`. Each must exist in `States`. |
 | `Merge` | object | — | Merge strategy for parallel fan-out. See `MergeConfig` below. Ignored when `Parallel` is `false`. |
@@ -310,7 +314,7 @@ Orchestration:
             Source: .fuseraft/artifacts/brief.json
             Field: files_to_change
         - CommandSucceeded:
-            Pattern: "build|compile"
+            PatternField: "verify_command"   # reads the verify command from brief.json
 
   Selection:
     Type: statemachine

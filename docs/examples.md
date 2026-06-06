@@ -46,7 +46,7 @@ Orchestration:
             Source: .fuseraft/artifacts/brief.json
             Field: files_to_change
         - CommandSucceeded:
-            Pattern: "build|compile"
+            PatternField: "verify_command"   # reads the verify command from brief.json
 
     - Name: TestsValid
       Requires:
@@ -277,7 +277,7 @@ Orchestration:
             Source: .fuseraft/artifacts/brief.json
             Field: files_to_change
         - CommandSucceeded:
-            Pattern: "build|compile|test"
+            PatternField: "verify_command"   # reads the verify command from brief.json
 
     - Name: TestsValid
       Requires:
@@ -575,7 +575,7 @@ Orchestration:
     - Name: ImplementationComplete
       Requires:
         - CommandSucceeded:
-            Pattern: "build|compile|test|make"
+            Pattern: "build|compile|test|make"   # use PatternField: "verify_command" when a brief is available
 
   FailureHandling:
     MissingEvidence:

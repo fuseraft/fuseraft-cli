@@ -189,7 +189,7 @@ public sealed class AdversarialOrchestrator(
 
             var genMsg = MakeMessage(
                 $"{stageTag}:{generator.Name}",
-                artifact, turn++, ExtractUsage(genResponse), ExtractToolCalls(genResponse.Messages));
+                artifact, turn++, OrchestratorHelpers.ExtractUsage(genResponse), OrchestratorHelpers.ExtractToolCalls(genResponse.Messages));
             cumulativeTokens += genMsg.Usage?.TotalTokens ?? 0;
             FireTokenBudgetWarning(genMsg);
             yield return genMsg;
@@ -219,7 +219,7 @@ public sealed class AdversarialOrchestrator(
 
                 var critiqueMsg = MakeMessage(
                     $"{stageTag}:{critic.Name}:Round{round}",
-                    critiqueText, turn++, ExtractUsage(critiqueResponse), ExtractToolCalls(critiqueResponse.Messages));
+                    critiqueText, turn++, OrchestratorHelpers.ExtractUsage(critiqueResponse), OrchestratorHelpers.ExtractToolCalls(critiqueResponse.Messages));
                 cumulativeTokens += critiqueMsg.Usage?.TotalTokens ?? 0;
                 FireTokenBudgetWarning(critiqueMsg);
 
@@ -261,7 +261,7 @@ public sealed class AdversarialOrchestrator(
 
                     var revisionMsg = MakeMessage(
                         $"{stageTag}:{generator.Name}:Revision{round}",
-                        artifact, turn++, ExtractUsage(revisionResponse), ExtractToolCalls(revisionResponse.Messages));
+                        artifact, turn++, OrchestratorHelpers.ExtractUsage(revisionResponse), OrchestratorHelpers.ExtractToolCalls(revisionResponse.Messages));
                     cumulativeTokens += revisionMsg.Usage?.TotalTokens ?? 0;
                     FireTokenBudgetWarning(revisionMsg);
                     yield return revisionMsg;
@@ -415,50 +415,4 @@ public sealed class AdversarialOrchestrator(
             ToolCalls = toolCalls,
         };
 
-    private static TokenUsage? ExtractUsage(AgentResponse response)
-    {
-        if (response.Usage is null) return null;
-
-        var inputTokens  = (int)(response.Usage.InputTokenCount  ?? 0L);
-        var outputTokens = (int)(response.Usage.OutputTokenCount ?? 0L);
-        if (inputTokens == 0 && outputTokens == 0) return null;
-
-        return new TokenUsage(inputTokens, outputTokens);
-    }
-
-    private static IReadOnlyList<ToolCallRecord>? ExtractToolCalls(IList<ChatMessage> messages)
-    {
-        var calls   = new List<(string CallId, string Name, string? ArgsSummary)>();
-        var results = new Dictionary<string, bool>(StringComparer.Ordinal);
-
-        try
-        {
-            foreach (var msg in messages)
-            {
-                foreach (var content in msg.Contents)
-                {
-                    if (content is FunctionCallContent fc)
-                        calls.Add((fc.CallId ?? fc.Name, fc.Name, ToolCallHelper.SummarizeArgs(fc.Arguments)));
-                    else if (content is FunctionResultContent fr)
-                    {
-                        var key  = fr.CallId ?? string.Empty;
-                        var text = fr.Result?.ToString() ?? string.Empty;
-                        var ok   = !text.StartsWith("[ERROR]",     StringComparison.Ordinal)
-                                && !text.StartsWith("[DENIED]",    StringComparison.Ordinal)
-                                && !text.StartsWith("[TIMEOUT]",   StringComparison.Ordinal)
-                                && !text.StartsWith("[NOT FOUND]", StringComparison.Ordinal)
-                                && !text.StartsWith("[EXIT ",      StringComparison.Ordinal);
-                        if (!string.IsNullOrEmpty(key)) results[key] = ok;
-                    }
-                }
-            }
-        }
-        catch (Exception) { /* best-effort */ }
-
-        if (calls.Count == 0) return null;
-
-        return calls
-            .Select(c => new ToolCallRecord(c.Name, c.ArgsSummary, results.TryGetValue(c.CallId, out var s) ? s : true))
-            .ToList();
-    }
 }

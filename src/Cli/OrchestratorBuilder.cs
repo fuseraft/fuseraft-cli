@@ -39,7 +39,8 @@ public sealed record OrchestratorBuildResult(
     GovernanceKernel             GovernanceKernel,
     SkillCurator?                SkillCurator,
     RepositoryMemoryExtractor?   RepositoryMemoryExtractor,
-    fuseraft.Orchestration.DependencyPlanner? DependencyPlanner = null);
+    fuseraft.Orchestration.DependencyPlanner? DependencyPlanner = null,
+    fuseraft.Cli.Telemetry.SessionMetrics?    SessionMetrics    = null);
 
 /// <summary>
 /// Builds a ready-to-use <see cref="IOrchestrator"/> directly from a config file path,
@@ -98,11 +99,13 @@ public static class OrchestratorBuilder
         // Expand ${ENV_VAR} tokens in security and API profile config before use.
         config = ExpandEnvVars(config);
 
+        var projectSlug = FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory());
+
         // Expand {session_id} across all path-bearing and instruction fields so every
         // downstream consumer receives pre-interpolated values without needing to know
         // about the token.
         if (sessionId is { Length: > 0 })
-            config = InterpolateSessionId(config, sessionId);
+            config = InterpolateSessionId(config, sessionId, projectSlug);
 
         // --no-replan: strip all state-machine transitions whose Signal contains "REPLAN"
         // so the session never routes back to the planning phase. Useful in CI or when the
@@ -266,7 +269,7 @@ public static class OrchestratorBuilder
 
         // Orient every agent to the local .fuseraft/ folder layout so they never
         // scan it with list_files to discover what is there — they already know.
-        var folderOrientationBlock = FuseraftPaths.BuildFolderOrientationBlock();
+        var folderOrientationBlock = FuseraftPaths.BuildFolderOrientationBlock(sessionId ?? "default");
         config = config with
         {
             Agents = config.Agents
@@ -424,10 +427,10 @@ public static class OrchestratorBuilder
         // Wired here so the ChangeTracker (incremental graph rebuild) and ContextAssembler
         // (adr_graph traversal) share the same underlying stores instead of creating
         // independent instances that diverge mid-session.
-        var knowledgeSandbox = config.Security?.FileSystemSandboxPath is { Length: > 0 } ks
+        var knowledgeSandbox   = config.Security?.FileSystemSandboxPath is { Length: > 0 } ks
             ? FuseraftPaths.ExpandPath(ks)
             : Directory.GetCurrentDirectory();
-        var knowledgeGraphPath = Path.Combine(knowledgeSandbox, FuseraftPaths.LocalRepositoryGraph);
+        var knowledgeGraphPath = FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryGraph, projectSlug);
         var objectiveStore = new fuseraft.Infrastructure.ObjectiveStore(FuseraftPaths.LocalObjectives);
         var objectiveManager = new fuseraft.Infrastructure.ObjectiveManager(objectiveStore);
 
@@ -458,19 +461,16 @@ public static class OrchestratorBuilder
         // Path is derived from the (sandbox-resolved) change-tracking path so the store
         // lands in the same .fuseraft/state directory as changes.json and intents.json.
         var versionStorePath = config.ChangeTracking is { } ct2
-            ? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(ct2.Path)) ?? FuseraftPaths.LocalState, "file_versions.json")
-            : FuseraftPaths.LocalFileVersions;
+            ? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(ct2.Path)) ?? FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalState, projectSlug), "file_versions.json")
+            : FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalFileVersions, projectSlug);
         var fileVersionStore = new fuseraft.Infrastructure.FileVersionStore(versionStorePath, loggerFactory.CreateLogger<fuseraft.Infrastructure.FileVersionStore>());
 
         // Session-level read cache: short-circuits cross-turn re-reads of unchanged files
         // so agents receive a "content unchanged since last read" hint instead of re-dumping
-        // full file content into context every turn. Persisted to the session artifacts dir
+        // full file content into context every turn. Persisted to the global session dir
         // so the cache survives process restarts within the same session.
-        var readCacheRoot = config.Security?.FileSystemSandboxPath is { Length: > 0 } rcs
-            ? FuseraftPaths.ExpandPath(rcs)
-            : Directory.GetCurrentDirectory();
         var readCachePath = sessionId is { Length: > 0 }
-            ? Path.Combine(readCacheRoot, FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalSessionReadCache, sessionId))
+            ? FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionReadCache, sessionId, projectSlug)
             : null;
         var sessionReadCache = new fuseraft.Infrastructure.SessionReadCache(readCachePath);
 
@@ -478,20 +478,25 @@ public static class OrchestratorBuilder
         // to disk so they never accumulate verbatim in the conversation history. Only active
         // when a session ID is known (so each session gets its own artifact subdirectory).
         var toolArtifactsDir = sessionId is { Length: > 0 }
-            ? Path.Combine(readCacheRoot, FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalSessionToolArtifacts, sessionId))
+            ? FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionToolArtifacts, sessionId, projectSlug)
             : null;
         var toolArtifactStore = new fuseraft.Infrastructure.ToolResultArtifactStore(toolArtifactsDir);
 
+        // Session metrics: accumulates per-turn quality data (tokens, tool calls, cache hits,
+        // patch failures) and renders a summary table at session end.
+        var sessionMetrics = new fuseraft.Cli.Telemetry.SessionMetrics();
+
         // Re-configure the FileSystem plugin with the version store and session read cache
         // so write_file, stat_file, and read_file participate in version-aware conflict
-        // detection and cross-turn read deduplication.
-        pluginRegistry.Configure(config.Security ?? new SecurityConfig(), profiles, shellApprover, fileVersionStore, sessionReadCache);
+        // detection and cross-turn read deduplication. Thread the cache-hit callback so
+        // SessionMetrics can count duplicate reads across the session.
+        pluginRegistry.Configure(config.Security ?? new SecurityConfig(), profiles, shellApprover, fileVersionStore, sessionReadCache, onCacheHit: sessionMetrics.RecordCacheHit);
 
         // Session context plugin: shared handoff notes that agents write before routing
-        // and read on re-entry. Scoped to the same root as the read cache.
+        // and read on re-entry. Stored in the global session directory.
         var ctxSummaryPath = sessionId is { Length: > 0 }
-            ? Path.Combine(readCacheRoot, FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalSessionContext, sessionId))
-            : Path.Combine(readCacheRoot, ".fuseraft", "state", "sessions", "default", "context_summary.md");
+            ? FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionContext, sessionId,  projectSlug)
+            : FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionContext, "default", projectSlug);
         pluginRegistry.Register("SessionContext", () => new fuseraft.Infrastructure.Plugins.SessionContextPlugin(ctxSummaryPath));
 
         // Governance kernel: load default policy if one exists alongside the config file.
@@ -570,8 +575,8 @@ public static class OrchestratorBuilder
 
         var identityRegistry  = new IdentityRegistry();
         var providerErrorLog  = config.Events is { } evtPath
-            ? Path.Combine(Path.GetDirectoryName(evtPath.Path) ?? FuseraftPaths.LocalLogs, "provider_errors.jsonl")
-            : FuseraftPaths.LocalProviderErrors;
+            ? Path.Combine(Path.GetDirectoryName(evtPath.Path) ?? FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalLogs, projectSlug), "provider_errors.jsonl")
+            : FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalProviderErrors, projectSlug);
         var chatClientFactory = new ChatClientFactory(config.Models.Count > 0 ? config.Models : null, providerErrorLog, eventEmitter, loggerFactory);
 
         // Eagerly resolve every agent's model config so that undefined aliases
@@ -764,7 +769,7 @@ public static class OrchestratorBuilder
             var snapshotEnricher = new fuseraft.Infrastructure.KnowledgeSnapshotEnricher(
                 adrRegistry:      knowledgeLayer.AdrRegistry,
                 objectiveManager: objectiveManager,
-                memoryStore:      new fuseraft.Infrastructure.RepositoryMemoryStore(FuseraftPaths.LocalRepositoryMemory),
+                memoryStore:      new fuseraft.Infrastructure.RepositoryMemoryStore(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, projectSlug)),
                 provenance:       knowledgeLayer.ProvenanceRegistry,
                 manifestPath:     FuseraftPaths.LocalArchitectureManifest,
                 projectRoot:      knowledgeSandbox);
@@ -846,7 +851,7 @@ public static class OrchestratorBuilder
             ? FuseraftPaths.ExpandPath(sbx) : null;
 
         // Context Broker (Gap 8): adaptive context pipeline backed by the shared knowledge layer.
-        var brokerMemoryStore = new fuseraft.Infrastructure.RepositoryMemoryStore(FuseraftPaths.LocalRepositoryMemory);
+        var brokerMemoryStore = new fuseraft.Infrastructure.RepositoryMemoryStore(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, projectSlug));
         var contextBroker = new fuseraft.Orchestration.ContextBroker(
             knowledgeLayer,
             brokerMemoryStore,
@@ -1004,7 +1009,7 @@ public static class OrchestratorBuilder
         // telemetry for every agent invocation regardless of which orchestrator is active.
         var memoryManager   = MemoryManager.FromConfig(config.Memory);
         var repoMemoryStore = new fuseraft.Infrastructure.RepositoryMemoryStore(
-            FuseraftPaths.LocalRepositoryMemory);
+            FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, projectSlug));
         memoryManager?.AttachRepositoryMemory(repoMemoryStore);
 
         var graphExpander   = new fuseraft.Orchestration.GraphExpansionRetriever(knowledgeLayer.GraphStore);
@@ -1062,7 +1067,7 @@ public static class OrchestratorBuilder
         if (evidenceStore is not null)
         {
             var extractorStore = new fuseraft.Infrastructure.RepositoryMemoryStore(
-                FuseraftPaths.LocalRepositoryMemory);
+                FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, projectSlug));
             repoMemoryExtractor = new fuseraft.Infrastructure.RepositoryMemoryExtractor(
                 evidenceStore, extractorStore);
         }
@@ -1073,7 +1078,7 @@ public static class OrchestratorBuilder
         if (config.Saga?.Enabled == true)
             orchestrator = new SagaOrchestrator(orchestrator, config.Saga, compensators: null, eventEmitter);
 
-        return new OrchestratorBuildResult(orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, dependencyPlanner);
+        return new OrchestratorBuildResult(orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, dependencyPlanner, sessionMetrics);
     }
 
     /// <summary>
@@ -1531,9 +1536,9 @@ public static class OrchestratorBuilder
         };
     }
 
-    private static OrchestrationConfig InterpolateSessionId(OrchestrationConfig config, string sessionId)
+    private static OrchestrationConfig InterpolateSessionId(OrchestrationConfig config, string sessionId, string projectSlug)
     {
-        string  E(string  s) => FuseraftPaths.ExpandSessionId(s, sessionId);
+        string  E(string  s) => FuseraftPaths.ExpandSessionPaths(s, sessionId, projectSlug);
         string? En(string? s) => s is null ? null : E(s);
 
         return config with
@@ -1581,6 +1586,10 @@ public static class OrchestratorBuilder
 
             ChangeTracking = config.ChangeTracking is { } ct
                 ? ct with { IntentLogPath = E(ct.ResolveIntentLogPath()) }
+                : null,
+
+            Events = config.Events is { } ev
+                ? ev with { Path = E(ev.Path) }
                 : null,
         };
     }
