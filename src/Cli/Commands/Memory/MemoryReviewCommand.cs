@@ -26,7 +26,8 @@ public sealed class MemoryReviewCommand : AsyncCommand<MemoryReviewSettings>
         MemoryReviewSettings settings,
         CancellationToken cancellationToken)
     {
-        var dir   = settings.Directory ?? FuseraftPaths.LocalRepositoryMemory;
+        var dir   = settings.Directory
+            ?? FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory()));
         var store = new RepositoryMemoryStore(dir);
 
         var entries = settings.All

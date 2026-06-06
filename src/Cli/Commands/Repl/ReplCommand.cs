@@ -174,7 +174,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         }
 
         var cwd        = Directory.GetCurrentDirectory();
-        var eventsPath = Path.Combine(cwd, FuseraftPaths.LocalReplEventsLog);
+        var eventsPath = FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalReplEventsLog, FuseraftPaths.ProjectSlug(cwd));
 
         // Load snapshot when --resume is specified.
         ReplSessionSnapshot? snapshot = null;
@@ -433,7 +433,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 $"Session ID: {sessionId}\n" +
                 $"Started:    {sessionStarted}\n" +
                 $"Snapshot:   {snapshotPath}\n" +
-                $"Event log:  {Path.Combine(cwd, FuseraftPaths.LocalReplEventsLog)}\n" +
+                $"Event log:  {FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalReplEventsLog, FuseraftPaths.ProjectSlug(cwd))}\n" +
                 $"Use the repl_session_* tools to inspect session metadata, list past sessions, or read log files.";
         }
 
@@ -442,7 +442,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // Logs are excluded here — the session block above already lists them
         // and directs the agent to use the repl_session_* tools for log access.
         if (toolCount > 0)
-            prompt += $"\n\n{FuseraftPaths.BuildFolderOrientationBlock(includeLogs: false)}";
+            prompt += $"\n\n{FuseraftPaths.BuildFolderOrientationBlock(sessionId ?? "default", includeLogs: false)}";
 
         var agentsBlock = ReadAgentsMd(cwd);
         if (agentsBlock is not null)

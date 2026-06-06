@@ -90,10 +90,11 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
 
                 if (s.WorkingDirectory is { Length: > 0 })
                 {
-                    var localDir = Path.Combine(s.WorkingDirectory, FuseraftPaths.LocalSessions, s.SessionId);
-                    if (Directory.Exists(localDir))
+                    var slug      = FuseraftPaths.ProjectSlug(s.WorkingDirectory);
+                    var globalDir = Path.Combine(FuseraftPaths.GlobalProjectSessions(slug), s.SessionId);
+                    if (Directory.Exists(globalDir))
                     {
-                        Directory.Delete(localDir, recursive: true);
+                        Directory.Delete(globalDir, recursive: true);
                         localDirsRemoved++;
                     }
                 }

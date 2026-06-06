@@ -85,7 +85,7 @@ var logConfig = new LoggerConfiguration()
 // runtime warnings survive past the terminal session.
 logConfig = logConfig.WriteTo.File(
     formatter: maskedFormatter,
-    path: FuseraftPaths.LocalAppLog,
+    path: FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalAppLog, FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory())),
     restrictedToMinimumLevel: LogEventLevel.Warning,
     fileSizeLimitBytes: 5_000_000,
     rollOnFileSizeLimit: true,

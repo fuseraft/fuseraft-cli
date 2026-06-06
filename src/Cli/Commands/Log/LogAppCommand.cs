@@ -29,7 +29,7 @@ public sealed class LogAppCommand : AsyncCommand<LogAppSettings>
     {
         var path = !string.IsNullOrWhiteSpace(settings.Path)
             ? FuseraftPaths.ExpandPath(settings.Path)
-            : System.IO.Path.GetFullPath(FuseraftPaths.LocalAppLog);
+            : FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalAppLog, FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory()));
 
         if (!File.Exists(path))
         {
