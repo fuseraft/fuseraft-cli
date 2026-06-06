@@ -540,10 +540,13 @@ public sealed class SessionRunner(
         {
             statusUpdate?.Invoke($"[yellow]{Markup.Escape(agent)} thinking...[/]");
             if (statusUpdate is not null)
+            {
+                AnsiConsole.WriteLine();
                 AnsiConsole.MarkupLine(
                     $"[yellow]  ⚠ {Markup.Escape(agent)} used {inputTokens:N0} input tokens this turn " +
                     $"(warning threshold: {threshold:N0}). " +
                     $"Reduce file reads and shell output to avoid a budget blowup.[/]");
+            }
         };
 
         orchestrator.AgentStarting     += onAgentStarting;
@@ -571,7 +574,7 @@ public sealed class SessionRunner(
 
                 try { telemetry?.RecordTurn(msg, elapsed, modelIdByAgent.GetValueOrDefault(msg.AgentName)); } catch { }
                 try { devUI?.BroadcastMessage(msg, elapsed); } catch { }
-                if (await RecordMessageAsync(msg, messages, checkpoint, cancellationToken))
+                if (await RecordMessageAsync(msg, messages, checkpoint, cancellationToken, statusActive: statusUpdate is not null))
                 {
                     compactionNeeded = true;
                     break;
@@ -718,7 +721,8 @@ public sealed class SessionRunner(
         AgentMessage msg,
         List<AgentMessage> messages,
         SessionCheckpoint checkpoint,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool statusActive = false)
     {
         messages.Add(msg);
         checkpoint.Messages.Add(msg);
@@ -739,6 +743,7 @@ public sealed class SessionRunner(
         {
             // Checkpoint save failed (e.g. disk full, permissions). Non-fatal: session continues
             // in memory. The next successful save will catch up.
+            if (statusActive) AnsiConsole.WriteLine();
             AnsiConsole.MarkupLine(
                 $"[yellow]  ⚠ Checkpoint save failed: {Markup.Escape(TrimTo(saveEx.Message, 200))}[/]");
         }
@@ -768,6 +773,7 @@ public sealed class SessionRunner(
             if (contextBudget?.WarnAt > 0 && cumulative >= contextBudget.WarnAt
                 && _warnedAgents.Add(agentName))
             {
+                if (statusActive) AnsiConsole.WriteLine();
                 AnsiConsole.MarkupLine(
                     $"[yellow]  ⚠ {Markup.Escape(agentName)} has accumulated {cumulative:N0} cumulative " +
                     $"input tokens (warn_at: {contextBudget.WarnAt:N0}). " +
@@ -788,6 +794,7 @@ public sealed class SessionRunner(
         {
             _justCompacted = false;
             _pendingCompactionReason = CompactionReason.SingleTurnLimit;
+            if (statusActive) AnsiConsole.WriteLine();
             AnsiConsole.MarkupLine(
                 $"[yellow]  ⚡ {Markup.Escape(agentName)} single-turn input ({inputToks:N0}) exceeded " +
                 $"MaxSingleTurnInputTokens ({contextBudget.MaxSingleTurnInputTokens:N0}). " +

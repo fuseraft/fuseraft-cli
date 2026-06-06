@@ -249,6 +249,7 @@ internal static class ReplTurn
         var reqCts    = new CancellationTokenSource();
         ctx.ActiveCts = reqCts;
         var spinCts   = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
+        if (!ctx.JsonMode && !isStepRequest) AnsiConsole.WriteLine();
         var spinTask  = ctx.JsonMode
             ? Task.CompletedTask
             : RunSpinnerAsync(capturePlan ? "planning…" : "thinking…", spinCts.Token, turnStart);
@@ -434,6 +435,7 @@ internal static class ReplTurn
         {
             if (!Console.IsOutputRedirected)
                 ClearSpinnerLine();
+            AnsiConsole.WriteLine();
             AnsiConsole.MarkupLine("[dim]assistant:[/]");
             AnsiConsole.Write(MarkdownRenderer.Render(responseText));
         }

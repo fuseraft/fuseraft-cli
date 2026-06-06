@@ -231,7 +231,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         if (skillsCatalog is not null)
             systemPrompt += $"\n\n{skillsCatalog}";
 
-        if (!jsonMode)
+        if (!jsonMode && !settings.NoBanner)
         {
             // Build plugin name list: tool categories + "Memory" if memories are loaded.
             var pluginNames = new List<string>(toolsByCategory.Keys);
