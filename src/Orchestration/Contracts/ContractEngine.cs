@@ -137,7 +137,7 @@ public sealed class ContractEngine
         List<string> expectedPaths;
         try
         {
-            var raw = await File.ReadAllTextAsync(source, ct);
+            var raw = TryUnwrapDoubleSerializedJson(await File.ReadAllTextAsync(source, ct));
             using var doc = JsonDocument.Parse(raw);
             var root = doc.RootElement;
 
@@ -224,7 +224,7 @@ public sealed class ContractEngine
 
             try
             {
-                var raw = await File.ReadAllTextAsync(sourcePath, ct);
+                var raw = TryUnwrapDoubleSerializedJson(await File.ReadAllTextAsync(sourcePath, ct));
                 using var doc = JsonDocument.Parse(raw);
                 var root = doc.RootElement;
 
@@ -260,11 +260,15 @@ public sealed class ContractEngine
         // A pipe-separated pattern matches when ANY alternative is satisfied.
         // An &&-chained alternative is satisfied when ALL its sub-commands appear
         // as successful shell_run calls — each may be a separate invocation.
+        // Whitespace is normalized before comparison so multi-line or reformatted
+        // variants of the verify_command still match the compact form stored in brief.json.
         bool found = alternatives.Any(alt =>
         {
-            var subCmds = alt.Split("&&", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var subCmds = alt.Split("&&", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                             .Select(NormalizeWhitespace)
+                             .ToList();
             return subCmds.All(sub =>
-                commands.Any(cmd => cmd.Contains(sub, StringComparison.OrdinalIgnoreCase)));
+                commands.Any(cmd => NormalizeWhitespace(cmd).Contains(sub, StringComparison.OrdinalIgnoreCase)));
         });
 
         if (found)
@@ -661,5 +665,31 @@ public sealed class ContractEngine
 
         [JsonPropertyName("evidence")]
         public string? Evidence { get; init; }
+    }
+
+    // Collapses any whitespace sequence (tabs, newlines, multiple spaces) to a single space
+    // so that multi-line or reformatted commands match their compact brief.json equivalents.
+    private static string NormalizeWhitespace(string s) =>
+        string.Join(' ', s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+    // Detects double-serialized JSON — where an agent wrote a JSON object as a JSON string
+    // (i.e., the file content is "\"{ ... }\"" instead of "{ ... }"). Unwraps the string
+    // and returns the inner JSON so downstream parse code can work correctly.
+    private static string TryUnwrapDoubleSerializedJson(string raw)
+    {
+        var trimmed = raw.AsSpan().Trim();
+        if (trimmed.Length < 2 || trimmed[0] != '"') return raw;
+        try
+        {
+            var inner = JsonSerializer.Deserialize<string>(trimmed);
+            if (inner is not null)
+            {
+                var innerTrimmed = inner.AsSpan().TrimStart();
+                if (innerTrimmed.Length > 0 && (innerTrimmed[0] == '{' || innerTrimmed[0] == '['))
+                    return inner;
+            }
+        }
+        catch { /* fall through */ }
+        return raw;
     }
 }
