@@ -889,66 +889,8 @@ public sealed class AgentOrchestrator(
                 WireDidResolver(child, resolver);
     }
 
-    /// <summary>
-    /// Scans the raw response messages for function call / result pairs and returns a
-    /// slim summary list suitable for terminal display. Fails gracefully on any parse error.
-    /// Logs tool call failures and parse errors.
-    /// </summary>
     private IReadOnlyList<ToolCallRecord>? ExtractToolCalls(IList<ChatMessage> messages, string agentName = "Unknown")
-    {
-        var calls   = new List<(string CallId, string Name, string? ArgsSummary)>();
-        var results = new Dictionary<string, bool>(StringComparer.Ordinal); // callId → succeeded
-
-        try
-        {
-            foreach (var msg in messages)
-            {
-                foreach (var content in msg.Contents)
-                {
-                    if (content is FunctionCallContent fc)
-                    {
-                        calls.Add((fc.CallId ?? fc.Name, fc.Name, ToolCallHelper.SummarizeArgs(fc.Arguments)));
-                    }
-                    else if (content is FunctionResultContent fr)
-                    {
-                        var key     = fr.CallId ?? string.Empty;
-                        var text    = fr.Result?.ToString() ?? string.Empty;
-                        var success = !text.StartsWith("[ERROR]",     StringComparison.Ordinal)
-                                   && !text.StartsWith("[DENIED]",    StringComparison.Ordinal)
-                                   && !text.StartsWith("[TIMEOUT]",   StringComparison.Ordinal)
-                                   && !text.StartsWith("[NOT FOUND]", StringComparison.Ordinal)
-                                   && !text.StartsWith("[EXIT ",      StringComparison.Ordinal);
-                        if (!string.IsNullOrEmpty(key))
-                            results[key] = success;
-
-                        if (!success)
-                        {
-                            var toolName = calls.LastOrDefault(c => c.CallId == key).Name ?? key;
-                            logger.LogWarning(
-                                "[{Agent}] Tool '{Tool}' failed: {ResultPreview}",
-                                agentName, toolName,
-                                text.Length > 120 ? text[..120].Replace('\n', ' ') : text.Replace('\n', ' '));
-                        }
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "[{Agent}] Failed to parse tool calls from agent response — tool call records will be incomplete.",
-                agentName);
-        }
-
-        if (calls.Count == 0) return null;
-
-        return calls
-            .Select(c => new ToolCallRecord(
-                c.Name,
-                c.ArgsSummary,
-                results.TryGetValue(c.CallId, out var ok) ? ok : true))
-            .ToList();
-    }
+        => OrchestratorHelpers.ExtractToolCalls(messages, logger, agentName);
 
     private static string GenerateSessionId() => Guid.NewGuid().ToString("N")[..8];
 

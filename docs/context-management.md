@@ -697,7 +697,7 @@ Here is the full sequence from session start through a long-running session:
 
 2. Each agent turn — ContextAssemblyPipeline
    ├─ Intent analysis    → keywords + PascalCase symbols + failure patterns from task
-   ├─ Memory block       → ranked by task relevance (RelevanceMemoryRanker), capped at 8k chars
+   ├─ Memory block       → aggregated via MemoryManager (all providers + repository-approved entries)
    ├─ Knowledge retrieval → ADR registry + graph nodes + repository memory + session findings
    │     KnowledgeWeight.None    → skip retrieval entirely
    │     KnowledgeWeight.Low     → Verified/Inferred items only
