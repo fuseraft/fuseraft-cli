@@ -72,9 +72,9 @@ public sealed class IntentLog
             Operation = new IntentOperation
             {
                 FunctionName = functionName,
-                TargetPath   = GetArg(args, "path")
-                            ?? GetArg(args, "destination")
-                            ?? GetArg(args, "source"),
+                TargetPath   = OrchestratorHelpers.GetArg(args, "path")
+                            ?? OrchestratorHelpers.GetArg(args, "destination")
+                            ?? OrchestratorHelpers.GetArg(args, "source"),
                 ArgsSummary  = BuildArgsSummary(args)
             }
         };
@@ -185,12 +185,6 @@ public sealed class IntentLog
         var dir = Path.GetDirectoryName(Path.GetFullPath(_logPath));
         if (dir is not null) Directory.CreateDirectory(dir);
         await File.WriteAllTextAsync(_logPath, JsonSerializer.Serialize(store, JsonOpts), ct);
-    }
-
-    private static string? GetArg(IReadOnlyDictionary<string, object?>? args, string key)
-    {
-        if (args is null || !args.TryGetValue(key, out var val)) return null;
-        return val?.ToString();
     }
 
     private static Dictionary<string, string?> BuildArgsSummary(IReadOnlyDictionary<string, object?>? args)

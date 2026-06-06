@@ -9,6 +9,7 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using fuseraft.Cli;
 using fuseraft.Cli.Commands;
+using fuseraft.Cli.Display;
 using fuseraft.Cli.Commands.Context;
 using fuseraft.Cli.Commands.Log;
 using fuseraft.Cli.Commands.Repl;
@@ -37,7 +38,7 @@ AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         var path = CrashDumper.Write(ex, args);
         AnsiConsole.MarkupLine($"[red]Unhandled crash — dump written to:[/] {Markup.Escape(path)}");
     }
-    catch { /* never let the crash reporter itself crash */ }
+    catch (Exception crashEx) { System.Diagnostics.Debug.WriteLine($"[CrashReporter] {crashEx.Message}"); }
 };
 
 // --version: print and exit before Spectre starts.
@@ -164,6 +165,10 @@ app.Configure(cfg =>
 {
     cfg.SetApplicationName("fuseraft");
     cfg.SetApplicationVersion(version);
+
+    var helpStyle = ThemeDetector.HelpStyle;
+    if (helpStyle is not null)
+        cfg.Settings.HelpProviderStyles = helpStyle;
     cfg.SetExceptionHandler((ex, _) =>
     {
         AnsiConsole.WriteLine();
@@ -171,7 +176,7 @@ app.Configure(cfg =>
         if (ex is CommandParseException or CommandRuntimeException { InnerException: null })
         {
             AnsiConsole.MarkupLine($"[red]Error:[/] {Markup.Escape(ex.Message)}");
-            AnsiConsole.MarkupLine("[grey]Run [white]fuseraft --help[/] for usage information.[/]");
+            AnsiConsole.MarkupLine($"[grey]Run [{ThemeDetector.Human}]fuseraft --help[/] for usage information.[/]");
             return 1;
         }
 
@@ -179,7 +184,7 @@ app.Configure(cfg =>
         // if the terminal scrolls away from the stack trace.
         string? dumpPath = null;
         try { dumpPath = CrashDumper.Write(ex, args); }
-        catch { /* never let the crash reporter itself crash */ }
+        catch (Exception crashEx) { System.Diagnostics.Debug.WriteLine($"[CrashReporter] {crashEx.Message}"); }
 
         AnsiConsole.WriteException(ex, ExceptionFormats.ShortenPaths);
 
@@ -191,7 +196,7 @@ app.Configure(cfg =>
                 var body = cre.GetRawResponse()?.Content.ToString();
                 if (!string.IsNullOrWhiteSpace(body))
                 {
-                    AnsiConsole.MarkupLine("[yellow]API response body:[/]");
+                    AnsiConsole.MarkupLine($"[{ThemeDetector.Warning}]API response body:[/]");
                     AnsiConsole.WriteLine(body);
                 }
                 break;
