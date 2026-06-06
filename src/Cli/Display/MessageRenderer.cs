@@ -11,10 +11,17 @@ namespace fuseraft.Cli.Display;
 public static class MessageRenderer
 {
     // Palette is assigned round-robin as new agent names appear.
-    private static readonly Color[] Palette =
+    private static readonly Color[] DarkPalette =
     [
         Color.Aqua, Color.Yellow, Color.Fuchsia, Color.Green,
         Color.Orange1, Color.CornflowerBlue, Color.Plum1,
+    ];
+
+    // Darker variants used when the terminal has a light background.
+    private static readonly Color[] LightPalette =
+    [
+        Color.Teal, Color.Olive, Color.Purple, Color.Green,
+        Color.Maroon, Color.Navy, Color.Grey,
     ];
 
     private static readonly Dictionary<string, Color> _colorMap = new(StringComparer.OrdinalIgnoreCase);
@@ -197,11 +204,12 @@ public static class MessageRenderer
 
     public static void RenderHumanMessage(AgentMessage message)
     {
+        var humanColor = ThemeDetector.Human;
         var panel = new Panel(new Markup($"[bold]{Markup.Escape(message.Content)}[/]"))
         {
-            Header      = new PanelHeader(" [bold white]Human[/]  [dim]redirecting...[/] ", Justify.Left),
+            Header      = new PanelHeader($" [bold {humanColor}]Human[/]  [dim]redirecting...[/] ", Justify.Left),
             Border      = BoxBorder.Heavy,
-            BorderStyle = Style.Parse("bold white"),
+            BorderStyle = Style.Parse($"bold {humanColor}"),
             Padding     = new Padding(1, 0),
             Expand      = true
         };
@@ -305,7 +313,8 @@ public static class MessageRenderer
     public static Color GetColor(string agentName)
     {
         if (_colorMap.TryGetValue(agentName, out var c)) return c;
-        var assigned = Palette[_colorMap.Count % Palette.Length];
+        var palette  = ThemeDetector.IsLightBackground ? LightPalette : DarkPalette;
+        var assigned = palette[_colorMap.Count % palette.Length];
         _colorMap[agentName] = assigned;
         return assigned;
     }

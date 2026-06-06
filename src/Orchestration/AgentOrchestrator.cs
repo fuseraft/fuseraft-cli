@@ -402,7 +402,7 @@ public sealed class AgentOrchestrator(
                             Content   = branchResponse.Text ?? string.Empty,
                             Role      = "assistant",
                             TurnIndex = turn++,
-                            Usage     = ExtractUsage(branchResponse),
+                            Usage     = OrchestratorHelpers.ExtractUsage(branchResponse),
                             ToolCalls = ExtractToolCalls(branchResponse.Messages, branchAgent.Name ?? "Unknown"),
                         };
 
@@ -605,7 +605,7 @@ public sealed class AgentOrchestrator(
                 Content   = response.Text ?? string.Empty,
                 Role      = "assistant",
                 TurnIndex = turn++,
-                Usage     = ExtractUsage(response),
+                Usage     = OrchestratorHelpers.ExtractUsage(response),
                 ToolCalls = ExtractToolCalls(response.Messages, agent.Name ?? "Unknown")
             };
 
@@ -783,7 +783,7 @@ public sealed class AgentOrchestrator(
                     Content   = vResponse.Text ?? string.Empty,
                     Role      = "assistant",
                     TurnIndex = turn++,
-                    Usage     = ExtractUsage(vResponse),
+                    Usage     = OrchestratorHelpers.ExtractUsage(vResponse),
                     ToolCalls = ExtractToolCalls(vResponse.Messages, verifierAgent.Name ?? "Verifier")
                 };
 
@@ -846,18 +846,6 @@ public sealed class AgentOrchestrator(
                 tool_count               = toolCount,
                 tool_schema_est_tokens   = toolCount * AvgToolSchemaTokens,
             });
-
-    private static TokenUsage? ExtractUsage(AgentResponse response)
-    {
-        if (response.Usage is null) return null;
-
-        var inputTokens  = (int)(response.Usage.InputTokenCount  ?? 0L);
-        var outputTokens = (int)(response.Usage.OutputTokenCount ?? 0L);
-
-        if (inputTokens == 0 && outputTokens == 0) return null;
-
-        return new TokenUsage(inputTokens, outputTokens);
-    }
 
     /// <summary>
     /// Recursively walks the termination strategy tree and calls

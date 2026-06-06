@@ -628,7 +628,7 @@ public sealed class SessionRunner(
                     checkpoint.CurrentStateName = snap.CurrentStateName;
             }
             catch (OperationCanceledException) { throw; }
-            catch { /* non-fatal: state inference from history is the fallback */ }
+            catch (Exception ex) { Debug.WriteLine($"[SessionRunner] state snapshot failed: {ex.Message}"); }
         }
 
         // Diagnostic (Phase 5): log both the last-message agent and the state machine's

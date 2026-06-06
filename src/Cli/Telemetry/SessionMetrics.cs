@@ -21,9 +21,6 @@ public sealed class SessionMetrics
     private int  _totalCompactions;
     private string? _lastCompactionReason;
 
-    // Per-turn running list for the turn_metrics event.
-    private readonly List<TurnSnapshot> _turns = [];
-
     /// <summary>
     /// Called by <see cref="SessionRunner"/> for every yielded <see cref="AgentMessage"/>.
     /// Non-assistant messages are ignored.
@@ -45,14 +42,6 @@ public sealed class SessionMetrics
 
         _totalToolCalls    += tools;
         _totalPatchFailures += patchFailures;
-
-        _turns.Add(new TurnSnapshot(
-            msg.TurnIndex,
-            msg.AgentName,
-            input,
-            output,
-            tools,
-            patchFailures));
     }
 
     /// <summary>Increment the duplicate-read counter. Wired to <see cref="Infrastructure.Plugins.FileSystemPlugin"/> via callback.</summary>
@@ -109,11 +98,4 @@ public sealed class SessionMetrics
                 });
     }
 
-    private sealed record TurnSnapshot(
-        int    TurnIndex,
-        string AgentName,
-        int    InputTokens,
-        int    OutputTokens,
-        int    ToolCalls,
-        int    PatchFailures);
 }
