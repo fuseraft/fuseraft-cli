@@ -907,7 +907,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
     {
         var cwd        = Directory.GetCurrentDirectory();
         var slug       = fuseraft.Core.FuseraftPaths.ProjectSlug(cwd);
-        var sessionId  = sessionIdOverride ?? "preview-" + Guid.NewGuid().ToString()[..6];
+        var sessionId  = sessionIdOverride ?? "{session_id}";
         var expanded   = OrchestratorBuilder.InterpolateSessionId(raw, sessionId, slug);
 
         AnsiConsole.WriteLine();
