@@ -227,9 +227,21 @@ fuseraft sessions --delete all
 
 # Remove orphaned sessions (config file no longer exists on disk)
 fuseraft sessions --prune
+
+# Age-based cleanup — deletes sessions older than 30 days (default)
+fuseraft sessions --cleanup
+
+# Cleanup with a custom threshold, scoped to one project
+fuseraft sessions --cleanup --older-than 2w --project brewer
 ```
 
 A session is **orphaned** when its `ConfigPath` points to an orchestration config file that no longer exists — for example, after a project directory is deleted or the `.fuseraft/` workspace is reset. Orphaned sessions cannot be resumed and accumulate silently over time. `--prune` removes all of them in one pass.
+
+**Age-based cleanup (`--cleanup`)**
+
+`--cleanup` removes session index entries and artifact directories for sessions older than the `--older-than` threshold (`30d` by default; accepts `Nd`, `Nw`, `Nh`).
+
+When `.fuseraft/.fuseraftignore` is present, only files marked ephemeral by the ignore rules are deleted — large reproducible artifacts like `read_cache.json`, `tool-results/`, `events.jsonl`, and `ctx_viz.html`. Handoff artifacts (`brief.json`, `conventions.json`, `context_summary.md`, `intents.json`) are preserved by the default `!`-prefixed keep rules. Empty directories are removed after the file sweep. When no `.fuseraftignore` exists, the entire session directory is deleted.
 
 ---
 
