@@ -27,6 +27,14 @@ public sealed class ValidateConfigSettings : CommandSettings
     [CommandOption("-c|--check-connectivity")]
     [Description("Make a minimal test call to each unique provider endpoint to verify the API key is valid and the endpoint is reachable. Incurs a small API cost (~1 token per unique endpoint).")]
     public bool CheckConnectivity { get; set; }
+
+    [CommandOption("--show-paths")]
+    [Description("Print all interpolated runtime paths after token expansion so you can verify {project_slug} and {session_id} resolve correctly.")]
+    public bool ShowPaths { get; set; }
+
+    [CommandOption("--session-id")]
+    [Description("Session ID to use when previewing interpolated paths (default: a synthetic preview ID).")]
+    public string? SessionId { get; set; }
 }
 
 /// <summary>
@@ -295,6 +303,9 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
             if (settings.Diagram)
                 PrintDiagram(config);
 
+            if (settings.ShowPaths)
+                PrintInterpolatedPaths(config, settings.SessionId);
+
             return 0;
         }
 
@@ -302,6 +313,9 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
         if (settings.Diagram)
             PrintDiagram(config);
+
+        if (settings.ShowPaths)
+            PrintInterpolatedPaths(config, settings.SessionId);
 
         return 1;
     }
@@ -887,6 +901,97 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
         Console.WriteLine(WorkflowDiagramGenerator.ToMermaid(config));
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[dim]Paste into https://mermaid.live to render.[/]");
+    }
+
+    private static void PrintInterpolatedPaths(OrchestrationConfig raw, string? sessionIdOverride)
+    {
+        var cwd        = Directory.GetCurrentDirectory();
+        var slug       = fuseraft.Core.FuseraftPaths.ProjectSlug(cwd);
+        var sessionId  = sessionIdOverride ?? "preview-" + Guid.NewGuid().ToString()[..6];
+        var expanded   = OrchestratorBuilder.InterpolateSessionId(raw, sessionId, slug);
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine($"[bold]Interpolated paths[/]  [dim]project_slug={Markup.Escape(slug)}  session_id={Markup.Escape(sessionId)}[/]");
+        AnsiConsole.WriteLine();
+
+        var rows = new List<(string Label, string Template, string Resolved)>();
+
+        void Add(string label, string? template, string? resolved)
+        {
+            if (template is null && resolved is null) return;
+            rows.Add((label, template ?? "", resolved ?? ""));
+        }
+
+        // Session / state paths
+        if (raw.Events is { } evRaw && expanded.Events is { } evExp)
+            Add("Events.Path", evRaw.Path, evExp.Path);
+
+        if (raw.ChangeTracking is { } ctRaw && expanded.ChangeTracking is { } ctExp)
+        {
+            Add("ChangeTracking.Path",          ctRaw.Path,                    ctExp.Path);
+            Add("ChangeTracking.IntentLogPath", ctRaw.ResolveIntentLogPath(),  ctExp.IntentLogPath);
+        }
+
+        if (raw.EvidenceStore is { } esRaw && expanded.EvidenceStore is { } esExp)
+            Add("EvidenceStore.Path", esRaw.Path, esExp.Path);
+
+        if (raw.Validation is { } vRaw && expanded.Validation is { } vExp)
+        {
+            Add("Validation.BriefPath",      vRaw.BriefPath,      vExp.BriefPath);
+            Add("Validation.TestReportPath", vRaw.TestReportPath, vExp.TestReportPath);
+            Add("Validation.ChangeLogPath",  vRaw.ChangeLogPath,  vExp.ChangeLogPath);
+        }
+
+        if (raw.Brownfield is { } bfRaw && expanded.Brownfield is { } bfExp)
+        {
+            Add("Brownfield.DiscoveryBriefPath",    bfRaw.DiscoveryBriefPath,    bfExp.DiscoveryBriefPath);
+            Add("Brownfield.ConventionProfilePath", bfRaw.ConventionProfilePath, bfExp.ConventionProfilePath);
+        }
+
+        if (raw.Chatroom is { } chRaw && expanded.Chatroom is { } chExp)
+            Add("Chatroom.Path", chRaw.Path, chExp.Path);
+
+        // Contracts — only path-bearing predicates
+        var rawContracts = raw.Contracts ?? [];
+        var expContracts = expanded.Contracts ?? [];
+        for (int ci = 0; ci < rawContracts.Count; ci++)
+        {
+            var cr = rawContracts[ci];
+            var ce = expContracts.Count > ci ? expContracts[ci] : cr;
+            for (int pi = 0; pi < cr.Requires.Count; pi++)
+            {
+                var pr = cr.Requires[pi];
+                var pe = ce.Requires.Count > pi ? ce.Requires[pi] : pr;
+                var pfx = $"Contracts[{cr.Name}].Requires[{pi}]";
+                if (pr.Path        is not null) Add($"{pfx}.Path",          pr.Path,          pe.Path);
+                if (pr.Source      is not null) Add($"{pfx}.Source",        pr.Source,        pe.Source);
+                if (pr.PatternSource is not null) Add($"{pfx}.PatternSource", pr.PatternSource, pe.PatternSource);
+            }
+        }
+
+        if (rows.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[dim]No path-bearing fields found in this config.[/]");
+            AnsiConsole.WriteLine();
+            return;
+        }
+
+        var labelWidth = rows.Max(r => r.Label.Length) + 2;
+
+        foreach (var (label, _, resolved) in rows)
+        {
+            string existsMark;
+            if (string.IsNullOrEmpty(resolved) || resolved.Contains('{'))
+                existsMark = "?";
+            else if (resolved.EndsWith('/') || resolved.EndsWith(Path.DirectorySeparatorChar))
+                existsMark = Directory.Exists(resolved)  ? "✓" : "–";
+            else
+                existsMark = File.Exists(resolved) ? "✓" : "–";
+
+            Console.WriteLine($"  {label.PadRight(labelWidth)}{resolved}  [{existsMark}]");
+        }
+
+        AnsiConsole.WriteLine();
     }
 
     private static void PrintIssues(List<(string Level, string Message)> issues)
