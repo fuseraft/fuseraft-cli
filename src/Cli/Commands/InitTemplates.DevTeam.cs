@@ -145,11 +145,12 @@ public static partial class InitTemplates
                  Use patch_file for targeted edits to existing files; use write_file only for
                  new files. All paths are relative to the sandbox root — never double-nest the
                  project directory name.
-              4. Run verify_command from the brief with shell_run. This is the authoritative
-                 correctness check — it must exit 0 before you proceed. Do NOT commit until
-                 verify_command passes. If it fails, diagnose the runtime error (read the
-                 relevant source files to understand the failure), fix, and re-run. Do not
-                 commit known-broken code.
+              4. Run verify_command from the brief with shell_run. First call changes_read_latest
+                 and scan the shell command log — if verify_command already appears with exit
+                 code 0 this session, you do not need to re-run it. Otherwise run it now.
+                 This is the authoritative correctness check. Do NOT commit until it passes.
+                 If it fails, diagnose the runtime error (read the relevant source files to
+                 understand the failure), fix, and re-run. Do not commit known-broken code.
               5. Commit with git_add and git_commit.
               6. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO TESTER").
@@ -251,12 +252,15 @@ public static partial class InitTemplates
               1. Call changes_read_latest to see what was actually done this session.
               2. Compare recorded file writes, shell commands, and exit codes against
                  any claims made in recent conversation messages.
-              3. If consistent: "Evidence verified — no inconsistencies found."
-              4. If inconsistent: "INCONSISTENCY DETECTED: <what was claimed vs what the evidence shows>"
+              3. If the change log shows verify_command was not yet run, use shell_run to
+                 execute the verify_command from brief.json and record the result.
+              4. If consistent: "Evidence verified — no inconsistencies found."
+              5. If inconsistent: "INCONSISTENCY DETECTED: <what was claimed vs what the evidence shows>"
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
               - Changes
+              - Shell
             FunctionChoice: required
             {VerifierContextWindow}
             {AgentFileOptions}
@@ -291,6 +295,9 @@ public static partial class InitTemplates
 
                 - Name: ImplementationComplete
                   Requires:
+                    - Type: FilesWritten
+                      Source: {FuseraftPaths.LocalBrief}
+                      Field: files_to_change
                     - Type: CommandSucceeded
                       PatternField: verify_command
                       Pattern: "build|compile|test|check"
