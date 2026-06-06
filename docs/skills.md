@@ -25,6 +25,7 @@ fuseraft uses a progressive-disclosure pattern to keep context lean:
 1. **Catalog injection** — At session start, the names and descriptions of all discovered skills are appended to the system prompt so the model knows what is available without loading every full body.
 2. **On-demand load** — When the model decides a skill is relevant, it calls `load_skill("<slug>")` to retrieve the full `SKILL.md` content, then follows those step-by-step instructions using its other tools.
 3. **Script execution** — If a skill bundles executable scripts alongside its `SKILL.md`, the model can run them with `run_skill_script("<slug>", "<filename>")`.
+4. **Direct invocation** — Type `$<slug>` at the REPL prompt to invoke a skill immediately without describing what you want. The `SKILL.md` content is loaded directly into the turn so the model applies the skill right away. Append arguments after the slug to pass context: `$commit fix typo in readme`. Tab completion cycles through matching skill slugs.
 
 At startup, the skill count appears in the compact info line alongside the active tool categories (e.g. `… · 3 skills · …`). Run `/tools` at any time to list all active tools by category, including the `Skills` category.
 
@@ -44,6 +45,23 @@ fuseraft ships with the following built-in skills. Install any of them globally 
 ```bash
 fuseraft skills add path/to/fuseraft/skills/sandbox-test
 ```
+
+---
+
+### `commit`
+
+Stages and commits changes using the conventional commit format. Triggers when an agent finishes implementing, after a fix, or when a Developer or Tester instruction says to commit.
+
+When it triggers, the agent will:
+
+1. Run `git status` and `git diff HEAD` to see what changed.
+2. Choose the right commit type (`feat`, `fix`, `refactor`, `docs`, `chore`, etc.).
+3. Write a subject line in imperative mood, ≤ 72 characters, lowercase after the colon.
+4. Add a body with `why` bullets when the change is non-trivial.
+5. Stage only the relevant files (never `git add -A`).
+6. Commit and verify with `git log --oneline -1`.
+
+Does not push to remote or amend prior commits — use `shell_run` for those directly.
 
 ---
 
