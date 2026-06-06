@@ -56,39 +56,46 @@ public static class FuseraftPaths
     public static string GlobalMemoryRepl => Path.Combine(GlobalRoot, "memory", "repl");
     public static string GlobalMemoryAgent(string name) => Path.Combine(GlobalRoot, "memory", "agents", name);
 
-    // Local (.fuseraft/ relative to CWD)
+    // ── Project-local (.fuseraft/ relative to CWD) — user-authored, all tracked by git ──
 
-    // logs/ — non-session-scoped diagnostics (app, repl, provider errors)
-    public const string LocalLogs           = ".fuseraft/logs";
-    public const string LocalReplEventsLog  = ".fuseraft/logs/repl_events.jsonl";
-    public const string LocalProviderErrors = ".fuseraft/logs/provider_errors.jsonl";
-    public const string LocalAppLog         = ".fuseraft/logs/app.log";
+    // artifacts/ — non-session-scoped outputs (local, agent-generated per run)
+    public const string LocalTestReport = ".fuseraft/artifacts/test-report.json";
+
+    // ── Global project-scoped runtime paths (~/.fuseraft/) — keyed by {project_slug} ──
+    // These are templates; expand with ExpandProjectPaths(path, slug) or
+    // ExpandSessionPaths(path, sessionId, slug). ExpandSessionId also auto-expands
+    // {project_slug} from CWD so existing callers work without change.
+
+    // logs/ — project diagnostics (not session-specific)
+    public const string LocalLogs           = "~/.fuseraft/logs/{project_slug}";
+    public const string LocalReplEventsLog  = "~/.fuseraft/logs/{project_slug}/repl_events.jsonl";
+    public const string LocalProviderErrors = "~/.fuseraft/logs/{project_slug}/provider_errors.jsonl";
+    public const string LocalAppLog         = "~/.fuseraft/logs/{project_slug}/app.log";
 
     // state/ — cross-session mutable runtime state
-    public const string LocalState          = ".fuseraft/state";
-    public const string LocalChanges        = ".fuseraft/state/changes.json";
-    public const string LocalEvidence       = ".fuseraft/state/evidence.json";
-    public const string LocalProvenance     = ".fuseraft/state/provenance.json";
-    public const string LocalFileVersions       = ".fuseraft/state/file_versions.json";
-    public const string LocalKnowledgeFindings  = ".fuseraft/state/knowledge_findings.json";
+    public const string LocalState                = "~/.fuseraft/state/{project_slug}";
+    public const string LocalChanges              = "~/.fuseraft/state/{project_slug}/changes.json";
+    public const string LocalEvidence             = "~/.fuseraft/state/{project_slug}/evidence.json";
+    public const string LocalProvenance           = "~/.fuseraft/state/{project_slug}/provenance.json";
+    public const string LocalFileVersions         = "~/.fuseraft/state/{project_slug}/file_versions.json";
+    public const string LocalKnowledgeFindings    = "~/.fuseraft/state/{project_slug}/knowledge_findings.json";
+    public const string LocalProvenanceArchive    = "~/.fuseraft/state/{project_slug}/provenance.archive.json";
+    public const string LocalRepositoryGraph      = "~/.fuseraft/state/{project_slug}/repository.graph";
 
-    // sessions/ — all session-scoped runtime data, keyed by {session_id}
-    public const string LocalSessions             = ".fuseraft/sessions";
-    public const string LocalEventsLog            = ".fuseraft/sessions/{session_id}/events.jsonl";
-    public const string LocalIntents              = ".fuseraft/sessions/{session_id}/intents.json";
-    public const string LocalSessionContext       = ".fuseraft/sessions/{session_id}/context_summary.md";
-    public const string LocalSessionReadCache     = ".fuseraft/sessions/{session_id}/read_cache.json";
-    public const string LocalSessionToolArtifacts = ".fuseraft/sessions/{session_id}/tool-results";
-    public const string LocalBrief                = ".fuseraft/sessions/{session_id}/brief.json";
-    public const string LocalConventions          = ".fuseraft/sessions/{session_id}/conventions.json";
-    public const string LocalBrownfieldBrief      = ".fuseraft/sessions/{session_id}/brief.brownfield.json";
-    public const string LocalBriefReview          = ".fuseraft/sessions/{session_id}/brief-review.json";
-    public const string LocalChatroom             = ".fuseraft/sessions/{session_id}/chatroom.jsonl";
-    public const string LocalMemoryRefs           = ".fuseraft/sessions/{session_id}/memory_refs.json";
-    public const string LocalCtxViz               = ".fuseraft/sessions/{session_id}/ctx_viz.html";
-
-    // artifacts/ — non-session-scoped outputs
-    public const string LocalTestReport = ".fuseraft/artifacts/test-report.json";
+    // sessions/ — all session-scoped runtime data, keyed by {project_slug}/{session_id}
+    public const string LocalSessions             = "~/.fuseraft/sessions/{project_slug}";
+    public const string LocalEventsLog            = "~/.fuseraft/sessions/{project_slug}/{session_id}/events.jsonl";
+    public const string LocalIntents              = "~/.fuseraft/sessions/{project_slug}/{session_id}/intents.json";
+    public const string LocalSessionContext       = "~/.fuseraft/sessions/{project_slug}/{session_id}/context_summary.md";
+    public const string LocalSessionReadCache     = "~/.fuseraft/sessions/{project_slug}/{session_id}/read_cache.json";
+    public const string LocalSessionToolArtifacts = "~/.fuseraft/sessions/{project_slug}/{session_id}/tool-results";
+    public const string LocalBrief                = "~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json";
+    public const string LocalConventions          = "~/.fuseraft/sessions/{project_slug}/{session_id}/conventions.json";
+    public const string LocalBrownfieldBrief      = "~/.fuseraft/sessions/{project_slug}/{session_id}/brief.brownfield.json";
+    public const string LocalBriefReview          = "~/.fuseraft/sessions/{project_slug}/{session_id}/brief-review.json";
+    public const string LocalChatroom             = "~/.fuseraft/sessions/{project_slug}/{session_id}/chatroom.jsonl";
+    public const string LocalMemoryRefs           = "~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json";
+    public const string LocalCtxViz               = "~/.fuseraft/sessions/{project_slug}/{session_id}/ctx_viz.html";
 
     // ── Global session log templates ──────────────────────────────────────────
     // Session logs (events + ctx_snapshots) live under ~/.fuseraft/logs/sessions/
@@ -127,9 +134,26 @@ public static class FuseraftPaths
             .ToLowerInvariant();
     }
 
-    /// <summary>Expands the <c>{session_id}</c> token in a path with the given session ID.</summary>
-    public static string ExpandSessionId(string path, string sessionId) =>
-        path.Replace("{session_id}", sessionId, StringComparison.Ordinal);
+    /// <summary>
+    /// Returns the per-project sessions directory under the global fuseraft home.
+    /// All session artifact directories for a project live here.
+    /// </summary>
+    public static string GlobalProjectSessions(string slug) => Path.Combine(GlobalRoot, "sessions", slug);
+
+    /// <summary>
+    /// Expands <c>{session_id}</c> in a path. When the path also contains
+    /// <c>{project_slug}</c> (runtime-artifact templates), the token is resolved
+    /// from <see cref="Directory.GetCurrentDirectory"/> automatically so callers
+    /// that only know the session ID continue to work without change.
+    /// Also expands a leading <c>~</c> to the user home directory.
+    /// </summary>
+    public static string ExpandSessionId(string path, string sessionId)
+    {
+        var result = path.Replace("{session_id}", sessionId, StringComparison.Ordinal);
+        if (result.Contains("{project_slug}"))
+            result = result.Replace("{project_slug}", ProjectSlug(Directory.GetCurrentDirectory()), StringComparison.Ordinal);
+        return result.StartsWith("~/") || result == "~" ? ExpandPath(result) : result;
+    }
 
     /// <summary>
     /// Expands <c>{session_id}</c>, <c>{project_slug}</c>, and a leading <c>~</c> in a path.
@@ -140,20 +164,24 @@ public static class FuseraftPaths
             path.Replace("{session_id}",   sessionId,   StringComparison.Ordinal)
                 .Replace("{project_slug}", projectSlug, StringComparison.Ordinal));
 
+    /// <summary>
+    /// Expands <c>{project_slug}</c> and a leading <c>~</c> in a path.
+    /// Use for project-scoped runtime paths that have no <c>{session_id}</c> token.
+    /// </summary>
+    public static string ExpandProjectPaths(string path, string projectSlug) =>
+        ExpandPath(path.Replace("{project_slug}", projectSlug, StringComparison.Ordinal));
+
     // docs/ — agent-written markdown documents (research, reports, drafts, notes)
     public const string LocalDocs = ".fuseraft/docs";
 
     // knowledge/ — durable cross-session knowledge (ADRs, repository memory, objectives)
+    // knowledge/repository/ (agent-managed hashes) is global; the rest are user-authored and local.
     public const string LocalKnowledge          = ".fuseraft/knowledge";
     public const string LocalDecisions          = ".fuseraft/knowledge/decisions";
     public const string LocalDecisionsArchive   = ".fuseraft/knowledge/decisions/archive";
-    public const string LocalRepositoryMemory   = ".fuseraft/knowledge/repository";
+    public const string LocalRepositoryMemory   = "~/.fuseraft/knowledge/{project_slug}/repository";
     public const string LocalObjectives         = ".fuseraft/knowledge/objectives";
     public const string LocalLifecycleConfig    = ".fuseraft/knowledge/lifecycle.yaml";
-    public const string LocalProvenanceArchive  = ".fuseraft/state/provenance.archive.json";
-
-    // Repository semantic graph — nodes + edges for all symbols in the project.
-    public const string LocalRepositoryGraph = ".fuseraft/state/repository.graph";
 
     // Architecture drift detection — user-authored layer manifest.
     public const string LocalArchitectureManifest = ".fuseraft/architecture.yaml";
@@ -226,34 +254,40 @@ public static class FuseraftPaths
             .ToString();
     }
 
-    public static string BuildFolderOrientationBlock(bool includeLogs = true)
+    public static string BuildFolderOrientationBlock(string sessionId, bool includeLogs = true)
     {
+        var slug = ProjectSlug(Directory.GetCurrentDirectory());
+
+        string Expand(string template) => ExpandSessionPaths(template, sessionId, slug);
+        string ExpandP(string template) => ExpandProjectPaths(template, slug);
+
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine("## .fuseraft/ — fuseraft-cli runtime metadata (do not scan)");
-        sb.AppendLine("This directory is managed by fuseraft-cli. list_files is blocked here — reference these paths directly when needed:");
+        sb.AppendLine("## Runtime artifacts — all stored globally under ~/.fuseraft/ (do not scan)");
+        sb.AppendLine("Reference these paths directly when needed:");
         if (includeLogs)
         {
-            sb.AppendLine("  .fuseraft/sessions/{session_id}/events.jsonl     — agent/orchestration event log (JSONL)");
-            sb.AppendLine("  .fuseraft/logs/repl_events.jsonl                 — REPL event log (JSONL)");
-            sb.AppendLine("  .fuseraft/logs/app.log                           — application log");
+            sb.AppendLine($"  {Expand(LocalEventsLog),-70} — agent/orchestration event log (JSONL)");
+            sb.AppendLine($"  {ExpandP(LocalReplEventsLog),-70} — REPL event log (JSONL)");
+            sb.AppendLine($"  {ExpandP(LocalAppLog),-70} — application log");
         }
-        sb.AppendLine("  .fuseraft/state/changes.json              — tool-call change log");
-        sb.AppendLine($"  {LocalIntents,-42} — in-progress intent records (consult before repeating work)");
-        sb.AppendLine($"  {LocalSessionContext,-42} — shared handoff notes (read at turn start; write before handoff)");
-        sb.AppendLine("  .fuseraft/state/evidence.json             — structured evidence graph");
-        sb.AppendLine("  .fuseraft/state/file_versions.json        — per-file versioned write counters");
-        sb.AppendLine($"  {LocalBrief,-42} — task brief (if present)");
-        sb.AppendLine($"  {LocalBrownfieldBrief,-42} — brownfield discovery brief (if present)");
-        sb.AppendLine("  .fuseraft/artifacts/test-report.json      — tester output / validator input (if present)");
-        sb.AppendLine($"  {LocalConventions,-42} — brownfield convention profile (if present)");
-        sb.AppendLine($"  {LocalChatroom,-42} — cross-agent chatroom messages (if present)");
-        sb.AppendLine("  .fuseraft/docs/                           — write all markdown notes, reports, and drafts here");
-        sb.AppendLine("  .fuseraft/tests/                          — write all test scripts and test support files here");
-        sb.AppendLine("  .fuseraft/tests/fixtures/                 — seed data, stubs, and fixture files");
-        sb.AppendLine("  .fuseraft/context/                        — injected reference documents (see .fuseraft/context/index.json)");
-        sb.AppendLine("  .fuseraft/summaries/                      — compaction summaries");
-        sb.AppendLine("  .fuseraft/knowledge/decisions/            — architecture decision records (use decision_search / decision_read)");
-        sb.Append(    "  .fuseraft/state/repository.graph          — repository semantic graph (use graph_search / graph_refs / graph_dependents)");
+        sb.AppendLine($"  {ExpandP(LocalChanges),-70} — tool-call change log");
+        sb.AppendLine($"  {Expand(LocalIntents),-70} — in-progress intent records (consult before repeating work)");
+        sb.AppendLine($"  {Expand(LocalSessionContext),-70} — shared handoff notes (read at turn start; write before handoff)");
+        sb.AppendLine($"  {ExpandP(LocalEvidence),-70} — structured evidence graph");
+        sb.AppendLine($"  {ExpandP(LocalFileVersions),-70} — per-file versioned write counters");
+        sb.AppendLine($"  {Expand(LocalBrief),-70} — task brief (if present)");
+        sb.AppendLine($"  {Expand(LocalBrownfieldBrief),-70} — brownfield discovery brief (if present)");
+        sb.AppendLine($"  {LocalTestReport,-70} — tester output / validator input (if present)");
+        sb.AppendLine($"  {Expand(LocalConventions),-70} — brownfield convention profile (if present)");
+        sb.AppendLine($"  {Expand(LocalChatroom),-70} — cross-agent chatroom messages (if present)");
+        sb.AppendLine("## User-authored project files — tracked by git (in .fuseraft/)");
+        sb.AppendLine("  .fuseraft/docs/                 — write all markdown notes, reports, and drafts here");
+        sb.AppendLine("  .fuseraft/tests/                — write all test scripts and test support files here");
+        sb.AppendLine("  .fuseraft/tests/fixtures/       — seed data, stubs, and fixture files");
+        sb.AppendLine("  .fuseraft/context/              — injected reference documents (see .fuseraft/context/index.json)");
+        sb.AppendLine("  .fuseraft/summaries/            — compaction summaries");
+        sb.AppendLine("  .fuseraft/knowledge/decisions/  — architecture decision records (use decision_search / decision_read)");
+        sb.Append(    $"  {ExpandP(LocalRepositoryGraph),-70} — repository semantic graph (use graph_search / graph_refs / graph_dependents)");
         return sb.ToString();
     }
 }

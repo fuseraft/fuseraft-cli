@@ -83,8 +83,9 @@ public sealed class PluginRegistry : IDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".fuseraft", "scratchpad");
         Register("Scratchpad", () => new ScratchpadPlugin("agent", scratchpadBase));
-        Register("Chatroom",   () => new ChatroomPlugin("agent", FuseraftPaths.LocalChatroom));
-        Register("Changes",    () => new ChangesPlugin(FuseraftPaths.LocalChanges));
+        var slug = FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory());
+        Register("Chatroom",   () => new ChatroomPlugin("agent", FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalChatroom, "default")));
+        Register("Changes",    () => new ChangesPlugin(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalChanges, slug)));
 
         // SubAgent stub — AgentFactory replaces this with a real instance that has a
         // live IChatClient and sandboxed FileSystem + Search tools for the sub-agent loop.
@@ -94,7 +95,7 @@ public sealed class PluginRegistry : IDisposable
 
         // Stub registrations for introspection (fuseraft plugins). OrchestratorBuilder
         // calls ConfigureKnowledge() to replace these with a shared-instance version.
-        var graphStoreForDecision = new RepositoryGraphStore(FuseraftPaths.LocalRepositoryGraph);
+        var graphStoreForDecision = new RepositoryGraphStore(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryGraph, slug));
         Register("Decision", () => new DecisionPlugin(
             new AdrRegistry(new AdrStore(FuseraftPaths.LocalDecisions)),
             knowledgeLayer: null));

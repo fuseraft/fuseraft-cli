@@ -32,15 +32,16 @@ public sealed class KnowledgeGcCommand : AsyncCommand<KnowledgeGcSettings>
         CancellationToken  cancellationToken)
     {
         var policy = KnowledgeLifecycleManager.LoadPolicy(settings.LifecyclePath);
+        var slug   = FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory());
 
         var graphPath = settings.GraphPath
-            ?? Path.Combine(Directory.GetCurrentDirectory(), FuseraftPaths.LocalRepositoryGraph);
+            ?? FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryGraph, slug);
 
         var manager = new KnowledgeLifecycleManager(
             new AdrStore(FuseraftPaths.LocalDecisions),
-            new RepositoryMemoryStore(FuseraftPaths.LocalRepositoryMemory),
+            new RepositoryMemoryStore(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, slug)),
             new RepositoryGraphStore(graphPath),
-            new ProvenanceRegistry(FuseraftPaths.LocalProvenance));
+            new ProvenanceRegistry(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalProvenance, slug)));
 
         if (!settings.Apply)
         {
