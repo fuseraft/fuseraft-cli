@@ -320,7 +320,7 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
             : string.Empty;
 
         AnsiConsole.MarkupLine(
-            $"{icon}  [dim]{r.TotalTurns} turn(s)  {r.DurationMs:N0}ms{tokens}  [{r.SessionId}][/]");
+            $"{icon}  [dim]{r.TotalTurns} turn(s)  {r.DurationMs:N0}ms{tokens}  {Markup.Escape($"[{r.SessionId}]")}[/]");
 
         foreach (var reason in r.FailureReasons)
             AnsiConsole.MarkupLine($"    [red]→[/] {Markup.Escape(reason)}");

@@ -461,7 +461,7 @@ public sealed class AgentFactory(
         }
 
         // Default: expanded read-oriented set. FileSystem (sandboxed, read ops only).
-        var fsPlugin = new FileSystemPlugin(securityConfig?.FileSystemSandboxPath);
+        var fsPlugin = new FileSystemPlugin(securityConfig?.FileSystemSandboxPath, exemptedPaths: ["~/.fuseraft/"]);
         var fsReadTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             { "read_file", "list_files", "grep_file", "get_file_summary", "get_file_info" };
         tools.AddRange(
