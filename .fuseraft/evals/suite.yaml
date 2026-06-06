@@ -1,0 +1,58 @@
+name: Suite
+# Suite-level default config. Override per-case with the 'config' key.
+config: .fuseraft/config/eval.yaml
+
+cases:
+  # Smoke test: quick sanity check that the team responds at all.
+  - id: smoke-basic
+    task: "Say hello and confirm you are ready."
+    must_succeed: true
+    expect_keywords:
+      - hello
+    max_turns: 3
+    tags:
+      - smoke
+
+  # Keyword check: verify the output contains required content.
+  - id: code-generation
+    task: "Write a Python function named reverse_string that returns the reverse of its input."
+    must_succeed: true
+    expect_keywords:
+      - def reverse_string
+      - return
+    expect_regex:
+      - "def reverse_string\\("
+    max_turns: 5
+    tags:
+      - coding
+
+  # Forbidden-keyword check: guard against undesirable response patterns.
+  - id: no-refusal
+    task: "List three benefits of automated testing."
+    must_succeed: true
+    forbidden_keywords:
+      - "I cannot"
+      - "I'm unable"
+      - "I am unable"
+    tags:
+      - quality
+
+  # Task from file: useful for long or multi-line prompts.
+  # Create the file at the path below before running this case.
+  # - id: file-task
+  #   task_file: .fuseraft/evals/tasks/my-task.txt
+  #   must_succeed: true
+  #   max_turns: 10
+  #   tags:
+  #     - file-task
+
+  # Full dev-team pipeline: use config: orchestration.yaml for tasks that
+  # require Planner → PlannerCritic → Developer → Tester → Reviewer routing.
+  # - id: full-pipeline-check
+  #   config: .fuseraft/config/orchestration.yaml
+  #   task: "Add a hello_world() function to src/hello.py that prints 'Hello, world!'."
+  #   must_succeed: true
+  #   expect_keywords:
+  #     - hello_world
+  #   tags:
+  #     - pipeline

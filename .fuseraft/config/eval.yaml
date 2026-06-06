@@ -1,0 +1,20 @@
+Orchestration:
+  Name: Eval Assistant
+  Description: Minimal single-agent config for eval cases; no multi-step pipeline or contracts.
+
+  Security:
+    FileSystemSandboxPath: .
+
+  Agents:
+    - AgentFile: agents/eval-assistant.yaml
+
+  Selection:
+    Type: sequential
+
+  Termination:
+    Type: composite
+    Strategies:
+      - Type: regex
+        Pattern: TASK_COMPLETE
+      - Type: maxiterations
+        MaxIterations: 10
