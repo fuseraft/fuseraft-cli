@@ -1,0 +1,205 @@
+## Three-agent DevOps pipeline: Architect plans, Engineer implements, Operator deploys.
+## State machine routing with evidence contracts gates each handoff.
+##
+## Run:      fuseraft run --config config/examples/devops-team.yaml "Your task"
+## Validate: fuseraft validate config/examples/devops-team.yaml
+
+Orchestration:
+  Name: DevOpsTeam
+  Description: >-
+    Three-agent DevOps pipeline: Architect designs and writes a plan, Engineer
+    implements and validates with real shell commands, Operator executes the
+    deployment. State machine routing with evidence contracts gates each handoff.
+
+  EvidenceStore:
+    Path: .fuseraft/state/evidence.json
+
+  ChangeTracking:
+    Path: .fuseraft/state/changes.json
+
+  Contracts:
+    - Name: PlanExists
+      Requires:
+        - Type: FileExists
+          Path: .fuseraft/artifacts/brief.json
+
+    - Name: ArtifactsReady
+      Requires:
+        - Type: CommandSucceeded
+          Pattern: "lint|validate|check|test|build"
+
+  FailureHandling:
+    MissingEvidence:
+      Action: Reinstruct
+      Threshold: 3
+    ConflictingEvidence:
+      Action: Reinstruct
+      Threshold: 2
+    NoProgress:
+      Action: Abort
+      Threshold: 3
+
+  Compaction:
+    TriggerTurnCount: 30
+    KeepRecentTurns: 8
+    Mode: lossless
+
+  Agents:
+    - Name: Architect
+      Description: Senior architect who analyses requirements and writes a concrete implementation plan to disk.
+      Instructions: |
+        You are a senior software architect.
+
+        FOLLOW THESE STEPS IN ORDER:
+
+        1. EXPLORE: Use search_files and read_file to understand the existing codebase structure before planning.
+
+        2. PRODUCE A PLAN: Write a detailed, step-by-step implementation plan: which files to create or modify,
+           what commands to run, what dependencies are needed. Be specific — name exact file paths and commands.
+
+        3. WRITE PLAN TO DISK: Call write_file to save .fuseraft/artifacts/brief.json:
+             {
+               "goal": "<one sentence>",
+               "steps": ["<step 1>", "<step 2>"],
+               "files_to_change": ["<path>"],
+               "rollback": ["<rollback step>"]
+             }
+
+        4. HAND OFF: Call handoff(route_keyword: "HANDOFF TO ENGINEER").
+      Model:
+        ModelId: grok-4.3
+        Endpoint: https://api.x.ai/v1
+        ApiKeyEnvVar: XAI_API_KEY
+        MaxTokens: 8192
+        ReasoningEffort: low
+      FunctionChoice: required
+      Plugins:
+        - FileSystem
+        - Search
+        - Handoff
+
+    - Name: Engineer
+      Description: Full-stack engineer who executes the plan using tools — never describes changes without making them.
+      Instructions: |
+        You are a full-stack engineer executing the Architect's plan.
+
+        FOLLOW THESE STEPS IN ORDER:
+
+        1. READ: Call read_file on .fuseraft/artifacts/brief.json and any files you need to modify.
+
+        2. IMPLEMENT: Use write_file with complete file content. Never output a diff or describe what you
+           would write — write the full file.
+
+        3. VERIFY WRITES: Use read_file immediately after writing to confirm content is correct.
+
+        4. RUN: Use shell_run to install dependencies, build, lint, or test. Include exact stdout/stderr output.
+           At least one passing shell_run is required before handoff — this is enforced by contract.
+
+        5. VERSION CONTROL: Use git_add and git_commit to commit your changes.
+
+        6. HAND OFF: Call handoff(route_keyword: "HANDOFF TO OPERATOR") with a list of changed files and
+           actual command output.
+           If the plan needs rethinking, call handoff(route_keyword: "REPLAN REQUIRED").
+
+        RULES:
+        - Never describe a change without making it with write_file.
+        - Never claim a command succeeded without showing its real output.
+        - If any step fails, fix it before proceeding.
+      Model:
+        ModelId: grok-4.3
+        Endpoint: https://api.x.ai/v1
+        ApiKeyEnvVar: XAI_API_KEY
+        MaxTokens: 16384
+        ReasoningEffort: none
+      FunctionChoice: required
+      Plugins:
+        - Shell
+        - FileSystem
+        - Git
+        - Http
+        - Search
+        - Changes
+        - Handoff
+
+    - Name: Operator
+      Description: Site reliability engineer who executes the deployment and verifies success.
+      Instructions: |
+        You are a site reliability engineer.
+
+        FOLLOW THESE STEPS IN ORDER:
+
+        1. READ THE PLAN: Call read_file on .fuseraft/artifacts/brief.json.
+
+        2. CHECK THE CHANGE LOG: Call changes_read_latest to verify what the Engineer built.
+
+        3. EXECUTE: Run the deployment steps from the plan using shell_run. Paste exact stdout/stderr.
+
+        4. VERIFY: Run smoke tests to confirm the deployment succeeded.
+
+        5. REPORT:
+           - All checks pass → call handoff(route_keyword: "DEPLOYMENT_COMPLETE") followed by a brief changelog entry.
+           - Something failed → call handoff(route_keyword: "DEPLOYMENT_FAILED") and describe exactly what went wrong.
+
+        RULES:
+        - Never claim success without showing real shell_run output.
+        - If any step fails, stop and report rather than continuing.
+      Model:
+        ModelId: grok-4.3
+        Endpoint: https://api.x.ai/v1
+        ApiKeyEnvVar: XAI_API_KEY
+        MaxTokens: 8192
+        ReasoningEffort: low
+      FunctionChoice: required
+      Plugins:
+        - Shell
+        - FileSystem
+        - Git
+        - Changes
+        - Handoff
+
+  Selection:
+    Type: statemachine
+    StateMachine:
+      Initial: Planning
+
+      States:
+        Planning:
+          Agent: Architect
+          Transitions:
+            - To: Development
+              Signal: "HANDOFF TO ENGINEER"
+              Contract: PlanExists
+
+        Development:
+          Agent: Engineer
+          Transitions:
+            - To: Operations
+              Signal: "HANDOFF TO OPERATOR"
+              Contract: ArtifactsReady
+            - To: Planning
+              Signal: "REPLAN REQUIRED"
+
+        Operations:
+          Agent: Operator
+          Transitions:
+            - To: Done
+              Signal: "DEPLOYMENT_COMPLETE"
+            - To: Development
+              Signal: "DEPLOYMENT_FAILED"
+
+        Done:
+          Agent: Operator
+          Terminal: true
+
+  Termination:
+    Type: composite
+    MaxIterations: 30
+    Strategies:
+      - Type: regex
+        Pattern: "DEPLOYMENT_COMPLETE"
+        MaxIterations: 30
+        AgentNames:
+          - Operator
+
+  Events:
+    Path: .fuseraft/events.jsonl
