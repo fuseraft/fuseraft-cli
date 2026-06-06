@@ -262,12 +262,20 @@ public sealed class ContractEngine
         // as successful shell_run calls — each may be a separate invocation.
         // Whitespace is normalized before comparison so multi-line or reformatted
         // variants of the verify_command still match the compact form stored in brief.json.
+        // Sub-commands containing "..." are skipped — agents commonly abbreviate the
+        // verify_command in brief.json, and an abbreviated segment can never satisfy
+        // a literal .Contains() check against the full expanded command.
+        // Backslash-escaped quotes (e.g. \" from double JSON encoding by the Planner)
+        // are unescaped to literal quotes before matching because recorded shell commands
+        // always store literal unescaped quote characters.
         bool found = alternatives.Any(alt =>
         {
             var subCmds = alt.Split("&&", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                              .Select(NormalizeWhitespace)
+                             .Select(s => s.Replace("\\\"", "\""))
+                             .Where(sub => !sub.Contains("..."))
                              .ToList();
-            return subCmds.All(sub =>
+            return subCmds.Count > 0 && subCmds.All(sub =>
                 commands.Any(cmd => NormalizeWhitespace(cmd).Contains(sub, StringComparison.OrdinalIgnoreCase)));
         });
 
