@@ -263,6 +263,7 @@ fuseraft knowledge gc --apply  # applies all policies
 | Decay provenance confidence | Downgrades `Verified` claims older than `ConfidenceDecayDays` to `Inferred` |
 | Prune orphaned graph nodes | Removes nodes with no edges and no recent file touch |
 | Compact provenance registry | Archives expired `ClaimRecord` entries to `.fuseraft/state/provenance.archive.json` |
+| Delete ephemeral state files | When `.fuseraft/.fuseraftignore` is present, deletes state files marked ephemeral (e.g. `knowledge_findings.json`). `provenance.archive.json` is never deleted — gc writes to it. |
 
 Configure retention windows in `.fuseraft/knowledge/lifecycle.yaml` (created by `fuseraft init`).
 

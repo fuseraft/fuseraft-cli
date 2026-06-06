@@ -788,8 +788,14 @@ fuseraft sessions [options]
 | `-d, --delete <target>` | — | Delete session by ID, or `all` to delete all completed sessions. |
 | `--prune` | off | Delete sessions whose config file no longer exists on disk. |
 | `--project <fragment>` | — | Filter by working directory fragment (e.g. `brewer` or `fuseraft-cli`). |
+| `--cleanup` | off | Delete sessions older than `--older-than`, removing both index entries and session artifact directories. |
+| `--older-than <age>` | `30d` | Age threshold for `--cleanup`. Accepts `Nd` (days), `Nw` (weeks), `Nh` (hours). |
 
 The listing is read from `~/.fuseraft/sessions/index.json` — a lightweight per-session metadata file kept in sync by the session store. No checkpoint files are opened, so listing is fast regardless of message history size.
+
+**`--cleanup` and `.fuseraftignore`**
+
+When `.fuseraft/.fuseraftignore` is present, `--cleanup` deletes only the files within each session directory that are marked ephemeral by the ignore rules — preserving handoff artifacts such as `brief.json`, `conventions.json`, `context_summary.md`, and `intents.json`. Empty directories are removed after the file sweep. When `.fuseraftignore` is absent, the entire session directory is deleted.
 
 **Examples**
 
@@ -811,6 +817,12 @@ fuseraft sessions --delete all
 
 # Remove sessions whose config file is gone
 fuseraft sessions --prune
+
+# Delete sessions older than 30 days (default threshold)
+fuseraft sessions --cleanup
+
+# Delete sessions older than 2 weeks, scoped to one project
+fuseraft sessions --cleanup --older-than 2w --project brewer
 ```
 
 Session files are stored in `~/.fuseraft/sessions/` with owner-only permissions.
@@ -1315,6 +1327,10 @@ fuseraft knowledge gc [options]
 | `--apply` | off | Commit lifecycle changes to disk. Without this flag the command reports what would change without touching any files. |
 | `-l, --lifecycle <path>` | `.fuseraft/knowledge/lifecycle.yaml` | Path to the lifecycle policy file. |
 | `--graph <path>` | `.fuseraft/state/repository.graph` | Override the repository graph path. |
+
+**`.fuseraftignore` integration**
+
+When `.fuseraft/.fuseraftignore` is present and `--apply` is set, `fuseraft knowledge gc` also deletes ephemeral state files listed in the ignore file (e.g. `state/knowledge_findings.json`). Files produced by gc itself — such as `provenance.archive.json` — are never deleted.
 
 **Policy fields** (in `lifecycle.yaml`)
 
