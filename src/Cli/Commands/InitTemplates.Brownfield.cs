@@ -187,9 +187,8 @@ public static partial class InitTemplates
 
                 - Name: ImplementationComplete
                   Requires:
-                    - Type: FilesWritten
-                      Source: {FuseraftPaths.LocalBrief}
-                      Field: files_to_change
+                    - Type: CommandSucceeded
+                      Pattern: "build|compile|test|check"
 
               FailureHandling:
                 MissingEvidence:

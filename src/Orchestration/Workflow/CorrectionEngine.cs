@@ -12,9 +12,6 @@ namespace fuseraft.Orchestration.Workflow;
 /// </summary>
 internal static class CorrectionEngine
 {
-    // Default consecutive-failure limit; matches GraphOrchestrator.DefaultMaxRetries.
-    private const int DefaultMaxRetries = 4;
-
     // Well-known phase-break keywords used to detect foreign-keyword errors.
     internal static readonly HashSet<string> PhaseBreakKeywords = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -82,7 +79,8 @@ internal static class CorrectionEngine
         int consecutiveCount,
         string responseText,
         string foundKeyword,
-        EventEmitter? eventEmitter = null)
+        EventEmitter? eventEmitter = null,
+        int maxRetries = GraphOrchestrator.DefaultMaxRetries)
     {
         // On second+ retry, check whether the agent actually called any tools.
         if (consecutiveCount > 1 && !CurrentTurnHasToolCalls(history))
@@ -126,7 +124,7 @@ internal static class CorrectionEngine
             : string.Empty;
 
         var errorToInject = consecutiveCount > 1
-            ? $"RETRY {consecutiveCount}/{DefaultMaxRetries} — Previous attempt did not resolve this. Do not repeat it.\n\n" +
+            ? $"RETRY {consecutiveCount}/{maxRetries} — Previous attempt did not resolve this. Do not repeat it.\n\n" +
               errorMessage + buildDetail
             : errorMessage + buildDetail;
 

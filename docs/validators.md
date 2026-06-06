@@ -658,11 +658,8 @@ Orchestration:
   Contracts:
     - Name: ImplementationComplete
       Requires:
-        - FilesWritten:
-            Source: .fuseraft/artifacts/brief.json
-            Field: files_to_change
         - CommandSucceeded:
-            Pattern: "build|compile|go build|cargo build"
+            PatternField: "verify_command"   # reads the verify command from brief.json
 
     - Name: TestsValid
       Requires:
@@ -696,6 +693,8 @@ Orchestration:
 Contracts and validators compose: a route may declare both `Validators` and `Contracts`. All must pass (AND semantics).
 
 For full predicate reference, see [Evidence contracts](configuration.md#evidence-contracts).
+
+> **Why not include `FilesWritten` in `ImplementationComplete`?** Adding `FilesWritten` alongside `CommandSucceeded` creates two separate satisfaction points: the contract partially passes when files land on disk, giving the agent a checkpoint before the verify command runs. In practice this causes agents to commit early — once on file write, then again after verify — producing duplicate commits with identical messages. `CommandSucceeded` on the `verify_command` is sufficient: if the verify command passes, the files were obviously written correctly.
 
 ---
 

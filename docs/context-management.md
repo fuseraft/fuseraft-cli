@@ -572,6 +572,30 @@ the full content again.
 
 ---
 
+### Token-budget-based tool-result window (`MaxToolResultTokens` / `InTurnToolWindow`)
+
+A complementary mechanism in `ContextBudget` applies a token-budget cap across all tool results in the context slice sent to the model on any single invocation — not just per agent-config:
+
+```yaml
+ContextBudget:
+  MaxToolResultTokens: 80000   # evict oldest tool results once total exceeds this
+  InTurnToolWindow:    20      # always retain at least the last 20 results verbatim
+```
+
+When the cumulative estimated token cost of all tool-result messages in the context slice exceeds `MaxToolResultTokens`, the oldest results beyond the last `InTurnToolWindow` are replaced with one-line tombstones of the form:
+
+```
+[tool result — evicted after tool window exceeded]
+```
+
+**Key difference from `MaxInTurnToolPairs`:** `MaxInTurnToolPairs` is an agent-level count-based cap applied unconditionally before every inner LLM call. `MaxToolResultTokens` is a session-level token-budget cap applied at the `ContextBudget` layer — it only fires when the total tool-result token footprint actually exceeds the threshold, preserving full context for turns with few or small results.
+
+**Audit trail:** the full tool results remain in the shared conversation history and on-disk artifacts. Only the slice passed to the model is trimmed — compaction and session replay are unaffected.
+
+**Recommended values:** set `MaxToolResultTokens` to 50–80% of your model's context window and `InTurnToolWindow` to 15–25 for action agents that call many tools per turn.
+
+---
+
 ## Tool-result artifact offloading
 
 When a tool returns a result that exceeds 40,000 characters (~10k tokens), fuseraft offloads the full content to disk and replaces the inline result with a compact reference stub before it enters the conversation history.
@@ -635,17 +659,17 @@ context error.
 After every `fuseraft run`, fuseraft automatically writes a Chart.js HTML file that shows
 how each agent's cumulative input token count grew turn by turn.
 
-**Files written to `.fuseraft/logs/`:**
+**Files written to `~/.fuseraft/logs/sessions/{project_slug}/{session_id}/`:**
 
 | File | Contents |
 |------|----------|
-| `ctx_snapshots_{sessionId}.jsonl` | Raw per-turn snapshots (one JSON line per turn) |
-| `ctx_viz_{sessionId}.html` | Self-contained Chart.js visualization |
+| `ctx_snapshots.jsonl` | Raw per-turn snapshots (one JSON line per turn) |
+| `ctx_viz.html` | Self-contained Chart.js visualization |
 
 The path to the HTML file is printed at the end of the run:
 
 ```
-Context viz → .fuseraft/logs/ctx_viz_abc123.html
+Context viz → ~/.fuseraft/logs/sessions/home-scs-github-myproject/abc123/ctx_viz.html
 ```
 
 Open the file in a browser. It requires internet access for the Chart.js CDN.
@@ -673,7 +697,7 @@ Here is the full sequence from session start through a long-running session:
 
 2. Each agent turn — ContextAssemblyPipeline
    ├─ Intent analysis    → keywords + PascalCase symbols + failure patterns from task
-   ├─ Memory block       → ranked by task relevance (RelevanceMemoryRanker), capped at 8k chars
+   ├─ Memory block       → aggregated via MemoryManager (all providers + repository-approved entries)
    ├─ Knowledge retrieval → ADR registry + graph nodes + repository memory + session findings
    │     KnowledgeWeight.None    → skip retrieval entirely
    │     KnowledgeWeight.Low     → Verified/Inferred items only
@@ -693,6 +717,7 @@ Here is the full sequence from session start through a long-running session:
       ├─ Tool-result artifact offloading — results > 40k chars stored to disk; stub replaces inline content
       ├─ MaxInTurnToolPairs — sliding window: keep only last N tool pairs per inner call
       ├─ MaxInTurnContextTokens — budget-reactive: trim oldest pairs when over budget
+      ├─ MaxToolResultTokens / InTurnToolWindow — tombstone oldest tool results beyond token budget
       └─ On context/413 error → adaptive trim retry (up to 3 stages)
 
    Post-turn
@@ -714,7 +739,7 @@ Here is the full sequence from session start through a long-running session:
             YES → compact (same as turn-count trigger)
 
 4. After run completes
-   └─ Context window visualization rendered to .fuseraft/logs/ctx_viz_{sessionId}.html
+   └─ Context window visualization rendered to ~/.fuseraft/logs/sessions/{project_slug}/{session_id}/ctx_viz.html
 ```
 
 ---

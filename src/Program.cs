@@ -9,6 +9,7 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using fuseraft.Cli;
 using fuseraft.Cli.Commands;
+using fuseraft.Cli.Display;
 using fuseraft.Cli.Commands.Context;
 using fuseraft.Cli.Commands.Log;
 using fuseraft.Cli.Commands.Repl;
@@ -18,6 +19,7 @@ using fuseraft.Cli.Commands.Knowledge;
 using fuseraft.Cli.Commands.Objective;
 using fuseraft.Cli.Commands.Graph;
 using fuseraft.Cli.Commands.Memory;
+using fuseraft.Cli.Commands.Eval;
 using fuseraft.Cli.Commands.Skills;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
@@ -36,7 +38,7 @@ AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         var path = CrashDumper.Write(ex, args);
         AnsiConsole.MarkupLine($"[red]Unhandled crash — dump written to:[/] {Markup.Escape(path)}");
     }
-    catch { /* never let the crash reporter itself crash */ }
+    catch (Exception crashEx) { System.Diagnostics.Debug.WriteLine($"[CrashReporter] {crashEx.Message}"); }
 };
 
 // --version: print and exit before Spectre starts.
@@ -85,7 +87,7 @@ var logConfig = new LoggerConfiguration()
 // runtime warnings survive past the terminal session.
 logConfig = logConfig.WriteTo.File(
     formatter: maskedFormatter,
-    path: FuseraftPaths.LocalAppLog,
+    path: FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalAppLog, FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory())),
     restrictedToMinimumLevel: LogEventLevel.Warning,
     fileSizeLimitBytes: 5_000_000,
     rollOnFileSizeLimit: true,
@@ -146,6 +148,8 @@ services.AddTransient<KnowledgeGcCommand>();
 services.AddTransient<ObjectiveCreateCommand>();
 services.AddTransient<ObjectiveListCommand>();
 services.AddTransient<ObjectiveStatusCommand>();
+services.AddTransient<EvalCommand>();
+services.AddTransient<EvalInitCommand>();
 
 // Use CommandApp<ReplCommand> so bare `fuseraft` drops straight into the REPL.
 var registrar = new ServiceCollectionRegistrar(services);
@@ -161,6 +165,10 @@ app.Configure(cfg =>
 {
     cfg.SetApplicationName("fuseraft");
     cfg.SetApplicationVersion(version);
+
+    var helpStyle = ThemeDetector.HelpStyle;
+    if (helpStyle is not null)
+        cfg.Settings.HelpProviderStyles = helpStyle;
     cfg.SetExceptionHandler((ex, _) =>
     {
         AnsiConsole.WriteLine();
@@ -168,7 +176,7 @@ app.Configure(cfg =>
         if (ex is CommandParseException or CommandRuntimeException { InnerException: null })
         {
             AnsiConsole.MarkupLine($"[red]Error:[/] {Markup.Escape(ex.Message)}");
-            AnsiConsole.MarkupLine("[grey]Run [white]fuseraft --help[/] for usage information.[/]");
+            AnsiConsole.MarkupLine($"[grey]Run [{ThemeDetector.Human}]fuseraft --help[/] for usage information.[/]");
             return 1;
         }
 
@@ -176,7 +184,7 @@ app.Configure(cfg =>
         // if the terminal scrolls away from the stack trace.
         string? dumpPath = null;
         try { dumpPath = CrashDumper.Write(ex, args); }
-        catch { /* never let the crash reporter itself crash */ }
+        catch (Exception crashEx) { System.Diagnostics.Debug.WriteLine($"[CrashReporter] {crashEx.Message}"); }
 
         AnsiConsole.WriteException(ex, ExceptionFormats.ShortenPaths);
 
@@ -188,7 +196,7 @@ app.Configure(cfg =>
                 var body = cre.GetRawResponse()?.Content.ToString();
                 if (!string.IsNullOrWhiteSpace(body))
                 {
-                    AnsiConsole.MarkupLine("[yellow]API response body:[/]");
+                    AnsiConsole.MarkupLine($"[{ThemeDetector.Warning}]API response body:[/]");
                     AnsiConsole.WriteLine(body);
                 }
                 break;
@@ -230,7 +238,9 @@ app.Configure(cfg =>
         .WithExample(["sessions", "--all"])
         .WithExample(["sessions", "--delete", "a1b2c3d4"])
         .WithExample(["sessions", "--delete", "all"])
-        .WithExample(["sessions", "--prune"]);
+        .WithExample(["sessions", "--prune"])
+        .WithExample(["sessions", "--cleanup", "--older-than", "30d"])
+        .WithExample(["sessions", "--cleanup", "--older-than", "2w", "--project", "brewer"]);
 
     cfg.AddCommand<InitCommand>("init")
         .WithDescription("Generate a ready-to-run orchestration config from an interactive wizard.")
@@ -317,7 +327,7 @@ app.Configure(cfg =>
         branch.SetDescription("View fuseraft log files.");
 
         branch.AddCommand<LogEventsCommand>("events")
-            .WithDescription("View the orchestration event log (.fuseraft/logs/events.jsonl).")
+            .WithDescription("View orchestration event logs (.fuseraft/sessions/{id}/events.jsonl).")
             .WithExample(["log", "events"])
             .WithExample(["log", "events", "--last", "50"])
             .WithExample(["log", "events", "--event", "session_error"])
@@ -401,6 +411,25 @@ app.Configure(cfg =>
             .WithExample(["knowledge", "gc"])
             .WithExample(["knowledge", "gc", "--apply"])
             .WithExample(["knowledge", "gc", "--apply", "--lifecycle", ".fuseraft/knowledge/lifecycle.yaml"]);
+    });
+
+    cfg.AddBranch("eval", branch =>
+    {
+        branch.SetDescription("Run and manage eval suites against agent teams.");
+
+        branch.AddCommand<EvalCommand>("run")
+            .WithDescription("Run an eval suite and report pass/fail per case.")
+            .WithExample(["eval", "run", ".fuseraft/evals/suite.yaml"])
+            .WithExample(["eval", "run", ".fuseraft/evals/suite.yaml", "--filter", "smoke"])
+            .WithExample(["eval", "run", ".fuseraft/evals/suite.yaml", "--output", "results.jsonl"])
+            .WithExample(["eval", "run", ".fuseraft/evals/suite.yaml", "--ci"]);
+
+        branch.AddCommand<EvalInitCommand>("init")
+            .WithDescription("Scaffold a new eval suite YAML with annotated example cases.")
+            .WithExample(["eval", "init"])
+            .WithExample(["eval", "init", ".fuseraft/evals/my-suite.yaml"])
+            .WithExample(["eval", "init", "--name", "Smoke Tests", "--config", ".fuseraft/config/orchestration.yaml"])
+            .WithExample(["eval", "init", "--no-interactive"]);
     });
 });
 

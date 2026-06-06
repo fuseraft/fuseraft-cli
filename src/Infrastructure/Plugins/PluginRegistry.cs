@@ -83,8 +83,9 @@ public sealed class PluginRegistry : IDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".fuseraft", "scratchpad");
         Register("Scratchpad", () => new ScratchpadPlugin("agent", scratchpadBase));
-        Register("Chatroom",   () => new ChatroomPlugin("agent", FuseraftPaths.LocalChatroom));
-        Register("Changes",    () => new ChangesPlugin(FuseraftPaths.LocalChanges));
+        var slug = FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory());
+        Register("Chatroom",   () => new ChatroomPlugin("agent", FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalChatroom, "default")));
+        Register("Changes",    () => new ChangesPlugin(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalChanges, slug)));
 
         // SubAgent stub — AgentFactory replaces this with a real instance that has a
         // live IChatClient and sandboxed FileSystem + Search tools for the sub-agent loop.
@@ -94,7 +95,7 @@ public sealed class PluginRegistry : IDisposable
 
         // Stub registrations for introspection (fuseraft plugins). OrchestratorBuilder
         // calls ConfigureKnowledge() to replace these with a shared-instance version.
-        var graphStoreForDecision = new RepositoryGraphStore(FuseraftPaths.LocalRepositoryGraph);
+        var graphStoreForDecision = new RepositoryGraphStore(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryGraph, slug));
         Register("Decision", () => new DecisionPlugin(
             new AdrRegistry(new AdrStore(FuseraftPaths.LocalDecisions)),
             knowledgeLayer: null));
@@ -139,7 +140,8 @@ public sealed class PluginRegistry : IDisposable
         IReadOnlyDictionary<string, ApiProfileConfig>? apiProfiles = null,
         Func<string, Task<bool>>? shellCommandApprover = null,
         FileVersionStore? fileVersionStore = null,
-        SessionReadCache? sessionReadCache = null)
+        SessionReadCache? sessionReadCache = null,
+        Action? onCacheHit = null)
     {
         var sandboxRoot       = security.FileSystemSandboxPath;
         var allowedHosts      = security.HttpAllowedHosts is { Count: > 0 } h ? (IReadOnlyList<string>)h : null;
@@ -149,7 +151,7 @@ public sealed class PluginRegistry : IDisposable
         // Both are registered as singletons — the factory lambda returns the same instance.
         var shellInstance = new ShellPlugin(sandboxRoot, shellCommandApprover, security.ShellPolicy);
         Register("Shell",      () => shellInstance);
-        Register("FileSystem", () => new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore, sessionCache: sessionReadCache, onWrite: shellInstance.InvalidateRunCache));
+        Register("FileSystem", () => new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore, sessionCache: sessionReadCache, onWrite: shellInstance.InvalidateRunCache, onCacheHit: onCacheHit));
         Register("Http",       () => new HttpPlugin(_sharedHttpClient, allowedHosts, apiProfiles, allowPrivateHosts, _loggerFactory?.CreateLogger<HttpPlugin>()));
         Register("Document",   () => new DocumentPlugin(sandboxRoot));
         return this;

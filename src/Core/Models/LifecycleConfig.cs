@@ -38,6 +38,13 @@ public sealed record LifecyclePolicy
     /// Default: archive all expired records (any record past ExpiresAt is eligible).
     /// </summary>
     public int MaxProvenanceAgeDays { get; init; } = 0;
+
+    /// <summary>
+    /// Delete Candidate repository memories whose <c>LastReinforcedAt</c> is older than
+    /// this many days. Candidate entries that never gain enough evidence to be Approved
+    /// are pruned once they exceed this window. 0 = disable pruning. Default: 180 days.
+    /// </summary>
+    public int MemoryCandidatePruningDays { get; init; } = 180;
 }
 
 /// <summary>
@@ -48,6 +55,7 @@ public sealed record GcReport
 {
     public IReadOnlyList<string> ArchivedDecisionIds   { get; init; } = [];
     public IReadOnlyList<string> DemotedMemoryIds      { get; init; } = [];
+    public IReadOnlyList<string> PrunedMemoryIds       { get; init; } = [];
     public IReadOnlyList<string> DecayedClaimIds       { get; init; } = [];
     public IReadOnlyList<string> PrunedNodeIds         { get; init; } = [];
     public IReadOnlyList<string> ArchivedProvenanceIds { get; init; } = [];
@@ -55,6 +63,7 @@ public sealed record GcReport
     public bool IsEmpty =>
         ArchivedDecisionIds.Count   == 0 &&
         DemotedMemoryIds.Count      == 0 &&
+        PrunedMemoryIds.Count       == 0 &&
         DecayedClaimIds.Count       == 0 &&
         PrunedNodeIds.Count         == 0 &&
         ArchivedProvenanceIds.Count == 0;

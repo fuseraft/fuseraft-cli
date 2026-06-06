@@ -49,7 +49,9 @@ public static partial class InitTemplates
                 SubAgent — spawn a focused sub-agent for wide exploration (avoids context flooding);
                 Handoff — explicit routing via handoff(route_keyword: "KEYWORD");
                 Changes — read the session change log; Json — JSON read/merge;
-                Probe — run arbitrary diagnostic probes; CodeExecution — sandboxed code execution.
+                Probe — run arbitrary diagnostic probes; CodeExecution — sandboxed code execution;
+                Decision — record and search architecture decision records (ADRs; use decision_create, decision_search, decision_read);
+                Objective — create and track long-horizon objectives across sessions (use objective_create, objective_list, objective_link_task).
 
                 AGENT FIELDS:
                 Name (required), Instructions (required), Description (one sentence, used by LLM selectors),
@@ -97,7 +99,7 @@ public static partial class InitTemplates
                 Events: {FuseraftPaths.LocalEventsLog}
 
                 COMMON AGENT PATTERNS:
-                - Planner: FunctionChoice required, Plugins: FileSystem + Search + SubAgent + Handoff
+                - Planner: FunctionChoice required, Plugins: FileSystem + Search + SubAgent + Decision + Objective + Handoff
                 - Developer: FunctionChoice required, Plugins: FileSystem + Shell + Git + Changes + Handoff
                 - Tester: FunctionChoice required, Plugins: FileSystem + Shell + Changes + Handoff
                 - Reviewer: FunctionChoice auto, ContextWindow.TextOnly true, Plugins: FileSystem + Changes + Handoff

@@ -9,7 +9,9 @@ namespace fuseraft.Infrastructure;
 
 /// <summary>
 /// File-backed session store. Each checkpoint is saved as an individual JSON file
-/// under <c>~/.fuseraft/sessions/&lt;sessionId&gt;.json</c>.
+/// under <c>~/.fuseraft/sessions/&lt;sessionId&gt;.json</c>. A lightweight
+/// <c>index.json</c> in the same directory is kept in sync on every save and delete
+/// so that listing sessions never requires loading the full checkpoint files.
 /// </summary>
 public sealed class JsonSessionStore(ILogger<JsonSessionStore> logger, string? sessionDir = null) : ISessionStore
 {
@@ -38,6 +40,8 @@ public sealed class JsonSessionStore(ILogger<JsonSessionStore> logger, string? s
         if (!OperatingSystem.IsWindows())
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
+        await UpdateIndexAsync(checkpoint, cancellationToken);
+
         if (checkpoint.IsComplete)
             logger.LogDebug("Session complete: {SessionId} ({Turns} turns)", checkpoint.SessionId, checkpoint.Messages.Count);
         else
@@ -53,19 +57,27 @@ public sealed class JsonSessionStore(ILogger<JsonSessionStore> logger, string? s
         return await JsonSerializer.DeserializeAsync<SessionCheckpoint>(stream, JsonOptions, cancellationToken);
     }
 
-    public Task DeleteAsync(string sessionId, CancellationToken cancellationToken = default)
+    public async Task DeleteAsync(string sessionId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var path = FilePath(sessionId);
         if (File.Exists(path)) File.Delete(path);
-        return Task.CompletedTask;
+
+        var indexPath = IndexPath();
+        if (File.Exists(indexPath))
+        {
+            var entries = await ReadIndexAsync(indexPath, cancellationToken);
+            if (entries.Remove(sessionId))
+                await WriteIndexAsync(indexPath, entries, cancellationToken);
+        }
     }
 
     public async Task<IReadOnlyList<SessionCheckpoint>> ListAsync(CancellationToken cancellationToken = default)
     {
         EnsureDir();
-        var files = Directory.GetFiles(SessionDir, "*.json");
-        var results = new List<SessionCheckpoint>(files.Length);
+        var files = Directory.GetFiles(SessionDir, "*.json")
+            .Where(f => !Path.GetFileName(f).Equals("index.json", StringComparison.OrdinalIgnoreCase));
+        var results = new List<SessionCheckpoint>();
 
         foreach (var file in files)
         {
@@ -83,6 +95,89 @@ public sealed class JsonSessionStore(ILogger<JsonSessionStore> logger, string? s
 
         results.Sort((a, b) => b.LastUpdatedAt.CompareTo(a.LastUpdatedAt));
         return results;
+    }
+
+    public async Task<IReadOnlyList<SessionIndexEntry>> ListIndexAsync(CancellationToken cancellationToken = default)
+    {
+        EnsureDir();
+        var indexPath = IndexPath();
+
+        if (!File.Exists(indexPath))
+        {
+            // No index yet — build it from the checkpoint files and persist it.
+            var all = await ListAsync(cancellationToken);
+            if (all.Count > 0)
+            {
+                var built = all.ToDictionary(c => c.SessionId, ToIndexEntry);
+                await WriteIndexAsync(indexPath, built, cancellationToken);
+                return built.Values.OrderByDescending(e => e.LastUpdatedAt).ToList();
+            }
+            return [];
+        }
+
+        var entries = await ReadIndexAsync(indexPath, cancellationToken);
+        return entries.Values
+            .OrderByDescending(e => e.LastUpdatedAt)
+            .ToList();
+    }
+
+    // ── index helpers ──────────────────────────────────────────────────────────
+
+    private string IndexPath() => Path.Combine(SessionDir, "index.json");
+
+    private async Task UpdateIndexAsync(SessionCheckpoint checkpoint, CancellationToken ct)
+    {
+        var indexPath = IndexPath();
+        var entries   = await ReadIndexAsync(indexPath, ct);
+        entries[checkpoint.SessionId] = ToIndexEntry(checkpoint);
+        await WriteIndexAsync(indexPath, entries, ct);
+    }
+
+    private static async Task<Dictionary<string, SessionIndexEntry>> ReadIndexAsync(string path, CancellationToken ct)
+    {
+        if (!File.Exists(path)) return new();
+        try
+        {
+            var json = await File.ReadAllTextAsync(path, ct);
+            return JsonSerializer.Deserialize<Dictionary<string, SessionIndexEntry>>(json, JsonOptions) ?? new();
+        }
+        catch
+        {
+            return new();
+        }
+    }
+
+    private static async Task WriteIndexAsync(
+        string path,
+        Dictionary<string, SessionIndexEntry> entries,
+        CancellationToken ct)
+    {
+        var json = JsonSerializer.Serialize(entries, JsonOptions);
+        await File.WriteAllTextAsync(path, json, ct);
+    }
+
+    private static SessionIndexEntry ToIndexEntry(SessionCheckpoint c) => new()
+    {
+        SessionId       = c.SessionId,
+        Task            = IndexTask(c.Task),
+        WorkingDirectory = c.WorkingDirectory,
+        ConfigPath      = c.ConfigPath,
+        StartedAt       = c.StartedAt,
+        LastUpdatedAt   = c.LastUpdatedAt,
+        IsComplete      = c.IsComplete,
+        TurnCount       = c.Messages.Count,
+    };
+
+    /// <summary>Returns the first non-empty line of a task string, capped at 120 chars.</summary>
+    private static string IndexTask(string task)
+    {
+        foreach (var raw in task.Split('\n'))
+        {
+            var line = raw.TrimStart('#', ' ').Trim();
+            if (line.Length == 0) continue;
+            return line.Length > 120 ? line[..120] + "…" : line;
+        }
+        return task.Length > 120 ? task[..120] + "…" : task;
     }
 
     private string FilePath(string sessionId)

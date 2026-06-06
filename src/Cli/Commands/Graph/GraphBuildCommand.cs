@@ -30,7 +30,8 @@ public sealed class GraphBuildCommand : AsyncCommand<GraphBuildSettings>
             ? Path.GetFullPath(settings.Directory)
             : Directory.GetCurrentDirectory();
 
-        var outputPath = settings.OutputPath ?? FuseraftPaths.LocalRepositoryGraph;
+        var outputPath = settings.OutputPath
+            ?? FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryGraph, FuseraftPaths.ProjectSlug(root));
         var store      = new RepositoryGraphStore(outputPath);
         var builder    = new RepositoryGraphBuilder(store, root);
 

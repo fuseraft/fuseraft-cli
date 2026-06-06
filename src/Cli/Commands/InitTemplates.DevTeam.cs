@@ -34,9 +34,12 @@ public static partial class InitTemplates
                  covers the current task: call handoff(route_keyword: "HANDOFF TO CRITIC")
                  immediately without rewriting it.
               4b. Check for Critic feedback: call read_file on {FuseraftPaths.LocalBriefReview}.
-                  IF it exists, address EVERY objection listed in 'objections' before rewriting
-                  the brief — the same brief will be rejected again. Do NOT re-handoff with an
-                  unchanged brief.
+                  IF it exists, the JSON contains:
+                    "blocking_issues"       — MUST ALL be fixed before re-handoff.
+                    "optional_improvements" — address if straightforward; safe to skip.
+                  Address every blocking issue explicitly in the revised brief.
+                  Do NOT re-handoff with blocking issues unresolved — the same brief will
+                  be rejected again. For each fix, note what you changed in implementation_hints.
               5. Write a brief to {FuseraftPaths.LocalBrief} with fields:
                    goal — one-sentence description of what to build
                    files_to_change — array of paths RELATIVE TO THE SANDBOX ROOT
@@ -65,6 +68,8 @@ public static partial class InitTemplates
               - Search
               - SessionContext
               - SubAgent
+              - Decision
+              - Objective
               - Handoff
             FunctionChoice: required
             {AgentFileOptions}
@@ -102,13 +107,20 @@ public static partial class InitTemplates
                  Each hint must name a file AND a symbol/method AND explain why it matters. Flag
                  hints that name only a file with no symbol ("src/foo.py — relevant").
 
-              6a. IF ANY OBJECTIONS: Call write_file to save {FuseraftPaths.LocalBriefReview} as
-                  a JSON object with a single field "objections" containing an array of strings —
-                  one entry per gap found (e.g. "files_to_change missing tests/foo.py",
-                  "criterion 'feature works' is not testable", "verify_command only compiles").
+              6a. IF ANY BLOCKING ISSUES: Call write_file to save {FuseraftPaths.LocalBriefReview}
+                  as a JSON object with two fields:
+                    "blocking_issues"      — array of strings, each a mandatory fix the Planner
+                                             MUST address before the brief can be approved
+                                             (missing files, untestable criteria, hollow commands)
+                    "optional_improvements" — array of strings, each a suggestion the Planner
+                                              MAY incorporate but that will not block approval
                   Then call handoff(route_keyword: "BRIEF REJECTED").
+                  Only use blocking_issues for real gaps that will cause the Developer to fail —
+                  do not inflate this list with stylistic preferences.
 
-              6b. IF NO OBJECTIONS: Call handoff(route_keyword: "BRIEF APPROVED").
+              6b. IF NO BLOCKING ISSUES: Call handoff(route_keyword: "BRIEF APPROVED").
+                  Optional improvements may still be written to {FuseraftPaths.LocalBriefReview}
+                  as a record, but do not block on them.
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
@@ -133,14 +145,13 @@ public static partial class InitTemplates
                  Use patch_file for targeted edits to existing files; use write_file only for
                  new files. All paths are relative to the sandbox root — never double-nest the
                  project directory name.
-              4. Build with shell_run to confirm compilation succeeds.
-              5. Run verify_command from the brief with shell_run. This is the authoritative
+              4. Run verify_command from the brief with shell_run. This is the authoritative
                  correctness check — it must exit 0 before you proceed. Do NOT commit until
                  verify_command passes. If it fails, diagnose the runtime error (read the
                  relevant source files to understand the failure), fix, and re-run. Do not
                  commit known-broken code.
-              6. Commit with git_add and git_commit.
-              7. {ContextWriteStep}
+              5. Commit with git_add and git_commit.
+              6. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO TESTER").
               If the brief is missing or contradictory: handoff(route_keyword: "REPLAN REQUIRED").
             Model:
@@ -280,13 +291,9 @@ public static partial class InitTemplates
 
                 - Name: ImplementationComplete
                   Requires:
-                    - Type: FilesWritten
-                      Source: {FuseraftPaths.LocalBrief}
-                      Field: files_to_change
                     - Type: CommandSucceeded
-                      Pattern: "build|compile"
-                    - Type: CommandSucceeded
-                      PatternField: "verify_command"
+                      PatternField: verify_command
+                      Pattern: "build|compile|test|check"
 
                 - Name: TestsValid
                   Requires:
@@ -374,6 +381,8 @@ public static partial class InitTemplates
                           Contract: BriefExists
                         - To: Planning
                           Signal: "BRIEF REJECTED"
+                          MaxRevisits: 3
+                          ReviewArtifactPath: {FuseraftPaths.LocalBriefReview}
                           HandoffContext:
                             - Source: file:{FuseraftPaths.LocalBriefReview}
 

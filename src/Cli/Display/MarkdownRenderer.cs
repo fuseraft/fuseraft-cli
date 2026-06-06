@@ -31,7 +31,7 @@ public static class MarkdownRenderer
     private static List<IRenderable> ParseBlocks(string text)
     {
         var blocks = new List<IRenderable>();
-        var lines  = text.Split('\n');
+        var lines  = text.ReplaceLineEndings("\n").Split('\n');
         var i      = 0;
 
         while (i < lines.Length)
@@ -160,7 +160,7 @@ public static class MarkdownRenderer
                 if (ListPattern.IsMatch(pLine)) break;
                 if (OListPattern.IsMatch(pLine)) break;
                 if (HrPattern.IsMatch(pTrimmed)) break;
-                if (para.Length > 0) para.Append(' ');
+                if (para.Length > 0) para.Append('\n');
                 para.Append(pLine.TrimEnd());
                 i++;
             }

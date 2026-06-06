@@ -61,17 +61,15 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
     // Tracks which state+transition pairs have already had their recovery logic fire.
     private readonly HashSet<string> _recoveryActivated = new(StringComparer.OrdinalIgnoreCase);
 
+    // Counts how many times each specific back-edge (sourceState→targetState where
+    // target already ran) has fired. Key format: "FromState::ToState".
+    // Used to inject escalation prompts when MaxRevisits is exceeded.
+    private readonly Dictionary<string, int> _backEdgeVisits = new(StringComparer.OrdinalIgnoreCase);
+
     // Verifier support.
     private readonly string? _verifierAgentName;
     private readonly bool _triggerVerifierOnConflict;
     private bool _runVerifierNext;
-
-    // How many recent agent messages to scan for signals.
-    private const int AgentMessageLookback = 3;
-
-    // Consecutive turns the same state's agent can run without emitting a signal before
-    // a loop-warning is injected.
-    private const int ConsecutiveTurnWarningThreshold = 5;
 
     public StateMachineSelectionStrategy(
         StateMachineConfig machine,
@@ -167,7 +165,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
 
         // Scan the last few agent messages for signals from the current state's agent.
         int scanned = 0;
-        for (int i = history.Count - 1; i >= 0 && scanned < AgentMessageLookback; i--)
+        for (int i = history.Count - 1; i >= 0 && scanned < OrchestratorHelpers.AgentMessageLookback; i--)
         {
             var msg = history[i];
             if (msg.Role == ChatRole.Tool) continue;
@@ -275,6 +273,48 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                     throw new InvalidOperationException(
                         $"[StateMachine] Transition target state '{targetState}' is not defined.");
 
+                // Back-edge revisit guard: when this transition returns to a previously-visited
+                // state and MaxRevisits is configured, track the visit count and inject an
+                // escalation message once the threshold is exceeded. This breaks Planning loops
+                // without force-approving — the Critic's objections are surfaced explicitly.
+                if (transition.MaxRevisits > 0 && _history is not null)
+                {
+                    var backEdgeKey = $"{_currentState}::{targetState}";
+                    _backEdgeVisits.TryGetValue(backEdgeKey, out var priorVisits);
+                    var newVisits = priorVisits + 1;
+                    _backEdgeVisits[backEdgeKey] = newVisits;
+
+                    if (newVisits > transition.MaxRevisits)
+                    {
+                        _logger.LogWarning(
+                            "[StateMachine] Back-edge '{From}' → '{To}' has fired {Count} times (MaxRevisits={Max}) — injecting escalation.",
+                            _currentState, targetState, newVisits, transition.MaxRevisits);
+
+                        string objections = string.Empty;
+                        if (transition.ReviewArtifactPath is { Length: > 0 } artifactPath
+                            && File.Exists(artifactPath))
+                        {
+                            try { objections = await File.ReadAllTextAsync(artifactPath, cancellationToken); }
+                            catch { /* best-effort */ }
+                        }
+
+                        var escalation =
+                            $"You have received the same critique {newVisits} times (limit: {transition.MaxRevisits}). " +
+                            $"This is escalation attempt {newVisits - transition.MaxRevisits}.\n\n" +
+                            (objections.Length > 0
+                                ? $"Outstanding objections from the last review:\n{objections.Trim()}\n\n"
+                                : string.Empty) +
+                            $"Produce a revised brief that explicitly addresses each objection above, " +
+                            $"or emit \"REPLAN REQUIRED\" if the task is not achievable as specified.";
+
+                        _history.Add(new ChatMessage(ChatRole.User, escalation));
+
+                        if (_eventEmitter is not null)
+                            _ = _eventEmitter.EmitAsync("back_edge_escalation",
+                                payload: new { from = _currentState, to = targetState, visit_count = newVisits, max_revisits = transition.MaxRevisits });
+                    }
+                }
+
                 // Clear failure trackers on successful transition.
                 _transitionFailure = null;
                 _noSignalFailure   = null;
@@ -324,9 +364,16 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
             _currentState, state.Agent);
 
         if (_eventEmitter is not null)
+        {
+            var expectedSignals = state.Transitions
+                .Where(t => !string.IsNullOrWhiteSpace(t.Signal))
+                .Select(t => t.Signal!)
+                .Distinct()
+                .ToList();
             _ = _eventEmitter.EmitAsync("keyword_not_found",
                 agent: state.Agent,
-                payload: new { state = _currentState, agent = state.Agent });
+                payload: new { state = _currentState, agent = state.Agent, expected_signals = expectedSignals });
+        }
 
         // Accumulate consecutive no-signal turns in strategy state so the counter
         // survives compaction (unlike the history-scan used by InjectLoopWarningIfNeeded).
@@ -374,7 +421,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
             return Task.FromResult<ParallelAgentBatch?>(null);
 
         int scanned = 0;
-        for (int i = history.Count - 1; i >= 0 && scanned < AgentMessageLookback; i--)
+        for (int i = history.Count - 1; i >= 0 && scanned < OrchestratorHelpers.AgentMessageLookback; i--)
         {
             var msg = history[i];
             if (msg.Role == ChatRole.Tool) continue;
@@ -732,18 +779,9 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
     {
         if (_history is null) return;
 
-        int consecutive = 0;
-        for (int i = history.Count - 1; i >= 0; i--)
-        {
-            var msg = history[i];
-            if (msg.Role == ChatRole.Tool) continue;
-            if (string.IsNullOrEmpty(msg.Text)) continue;
-            if (msg.Role == ChatRole.User) break;
-            if (!string.Equals(msg.AuthorName, agentName, StringComparison.OrdinalIgnoreCase)) break;
-            consecutive++;
-        }
+        int consecutive = OrchestratorHelpers.CountConsecutiveAgentTurns(history, agentName);
 
-        if (consecutive > 0 && consecutive % ConsecutiveTurnWarningThreshold == 0)
+        if (consecutive > 0 && consecutive % OrchestratorHelpers.ConsecutiveTurnWarningThreshold == 0)
         {
             _history.Add(new ChatMessage(ChatRole.User,
                 $"LOOP WARNING: {agentName} has been invoked {consecutive} consecutive turns " +

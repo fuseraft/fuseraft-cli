@@ -19,6 +19,18 @@ public sealed class SessionsSettings : CommandSettings
     [CommandOption("--prune")]
     [Description("Delete sessions whose config file no longer exists on disk (orphaned sessions).")]
     public bool Prune { get; set; }
+
+    [CommandOption("--project")]
+    [Description("Filter by project path fragment (e.g. 'brewer' or 'fuseraft-cli').")]
+    public string? Project { get; set; }
+
+    [CommandOption("--cleanup")]
+    [Description("Delete sessions older than --older-than, removing both global checkpoints and local session directories.")]
+    public bool Cleanup { get; set; }
+
+    [CommandOption("--older-than <age>")]
+    [Description("Age threshold for --cleanup (e.g. 7d, 2w, 24h). Defaults to 30d when omitted.")]
+    public string? OlderThan { get; set; }
 }
 
 /// <summary>
@@ -28,10 +40,10 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
 {
     protected override async Task<int> ExecuteAsync(CommandContext context, SessionsSettings settings, CancellationToken cancellationToken)
     {
-        // Prune orphaned sessions
+        // Prune orphaned sessions (config file no longer exists on disk).
         if (settings.Prune)
         {
-            var all = await sessionStore.ListAsync();
+            var all = await sessionStore.ListIndexAsync(cancellationToken);
             var orphaned = all
                 .Where(s => string.IsNullOrEmpty(s.ConfigPath) || !File.Exists(s.ConfigPath))
                 .ToList();
@@ -43,9 +55,65 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
             }
 
             foreach (var s in orphaned)
-                await sessionStore.DeleteAsync(s.SessionId);
+                await sessionStore.DeleteAsync(s.SessionId, cancellationToken);
 
             AnsiConsole.MarkupLine($"[green]✓ Pruned {orphaned.Count} orphaned session(s).[/]");
+            return 0;
+        }
+
+        // Cleanup mode — age-based deletion of checkpoints + local session directories
+        if (settings.Cleanup)
+        {
+            var age    = ParseAge(settings.OlderThan);
+            var cutoff = DateTime.UtcNow - age;
+            var all    = await sessionStore.ListIndexAsync(cancellationToken);
+
+            IEnumerable<Core.Models.SessionIndexEntry> candidates = all
+                .Where(s => s.LastUpdatedAt < cutoff);
+
+            if (!string.IsNullOrWhiteSpace(settings.Project))
+                candidates = candidates.Where(s => s.WorkingDirectory is { } wd &&
+                    wd.Contains(settings.Project, StringComparison.OrdinalIgnoreCase));
+
+            var toDelete    = candidates.ToList();
+            var ignoreRules = Core.FuseraftIgnoreRules.Load();
+
+            if (toDelete.Count == 0)
+            {
+                AnsiConsole.MarkupLine($"[green]✓ No sessions older than {FormatAge(age)} found.[/]");
+                return 0;
+            }
+
+            int localDirsRemoved = 0;
+            foreach (var s in toDelete)
+            {
+                await sessionStore.DeleteAsync(s.SessionId, cancellationToken);
+
+                if (s.WorkingDirectory is { Length: > 0 })
+                {
+                    var slug         = FuseraftPaths.ProjectSlug(s.WorkingDirectory);
+                    var sessionsRoot  = FuseraftPaths.GlobalProjectSessions(slug);
+                    var globalDir    = Path.Combine(sessionsRoot, s.SessionId);
+                    if (Directory.Exists(globalDir))
+                    {
+                        if (ignoreRules.HasRules)
+                            DeleteEphemeral(globalDir, sessionsRoot, "sessions", ignoreRules);
+                        else
+                            Directory.Delete(globalDir, recursive: true);
+
+                        if (Directory.Exists(globalDir) &&
+                            !Directory.EnumerateFileSystemEntries(globalDir).Any())
+                            Directory.Delete(globalDir, recursive: false);
+
+                        localDirsRemoved++;
+                    }
+                }
+            }
+
+            AnsiConsole.MarkupLine(
+                $"[green]✓ Deleted {toDelete.Count} session(s) older than {FormatAge(age)}" +
+                (localDirsRemoved > 0 ? $" ({localDirsRemoved} local director{(localDirsRemoved == 1 ? "y" : "ies")} removed)" : string.Empty) +
+                ".[/]");
             return 0;
         }
 
@@ -54,7 +122,7 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
         {
             if (target.Equals("all", StringComparison.OrdinalIgnoreCase))
             {
-                var all = await sessionStore.ListAsync();
+                var all = await sessionStore.ListIndexAsync(cancellationToken);
                 var completed = all.Where(s => s.IsComplete).ToList();
 
                 if (completed.Count == 0)
@@ -64,29 +132,38 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
                 }
 
                 foreach (var s in completed)
-                    await sessionStore.DeleteAsync(s.SessionId);
+                    await sessionStore.DeleteAsync(s.SessionId, cancellationToken);
 
                 AnsiConsole.MarkupLine($"[green]✓ Deleted {completed.Count} completed session(s).[/]");
                 return 0;
             }
 
-            var checkpoint = await sessionStore.LoadAsync(target);
+            var checkpoint = await sessionStore.LoadAsync(target, cancellationToken);
             if (checkpoint is null)
             {
                 AnsiConsole.MarkupLine($"[red]✗ Session not found:[/] {Markup.Escape(target)}");
                 return 1;
             }
 
-            await sessionStore.DeleteAsync(target);
+            await sessionStore.DeleteAsync(target, cancellationToken);
             AnsiConsole.MarkupLine($"[green]✓ Deleted session {Markup.Escape(target)}.[/]");
             return 0;
         }
 
-        // List mode
-        var sessions = await sessionStore.ListAsync();
-        var visible = settings.All ? sessions : sessions.Where(s => !s.IsComplete).ToList();
+        // List mode — uses the lightweight index; no message history loaded.
+        var sessions = await sessionStore.ListIndexAsync(cancellationToken);
 
-        if (visible.Count == 0)
+        IEnumerable<Core.Models.SessionIndexEntry> visible = settings.All
+            ? sessions
+            : sessions.Where(s => !s.IsComplete);
+
+        if (!string.IsNullOrWhiteSpace(settings.Project))
+            visible = visible.Where(s => s.WorkingDirectory is { } wd &&
+                wd.Contains(settings.Project, StringComparison.OrdinalIgnoreCase));
+
+        var list = visible.ToList();
+
+        if (list.Count == 0)
         {
             AnsiConsole.MarkupLine(settings.All
                 ? "[dim]No sessions found.[/]"
@@ -99,20 +176,24 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
             .AddColumn("[bold]Session ID[/]")
             .AddColumn("[bold]Status[/]")
             .AddColumn("[bold]Turns[/]")
+            .AddColumn("[bold]Project[/]")
             .AddColumn("[bold]Started[/]")
             .AddColumn("[bold]Last Updated[/]")
             .AddColumn("[bold]Task[/]");
 
-        foreach (var s in visible)
+        foreach (var s in list)
         {
             var status = s.IsComplete
                 ? "[green]complete[/]"
                 : "[yellow]incomplete[/]";
 
+            var project = ProjectLabel(s.WorkingDirectory);
+
             table.AddRow(
                 $"[bold]{s.SessionId}[/]",
                 status,
-                s.Messages.Count.ToString(),
+                s.TurnCount.ToString(),
+                Markup.Escape(project),
                 s.StartedAt.ToString("yyyy-MM-dd HH:mm"),
                 s.LastUpdatedAt.ToString("yyyy-MM-dd HH:mm"),
                 Markup.Escape(StringHelpers.Truncate(s.Task, 55)));
@@ -122,9 +203,58 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
 
         if (!settings.All)
             AnsiConsole.MarkupLine(
-                $"[dim]{visible.Count} incomplete session(s). " +
+                $"[dim]{list.Count} incomplete session(s). " +
                 $"Resume with: [bold]fuseraft run --resume <id>[/][/]");
 
         return 0;
+    }
+
+    private static TimeSpan ParseAge(string? age)
+    {
+        if (string.IsNullOrWhiteSpace(age)) return TimeSpan.FromDays(30);
+        var s = age.Trim().ToLowerInvariant();
+        if (s.EndsWith('w') && int.TryParse(s[..^1], out var weeks)) return TimeSpan.FromDays(weeks * 7);
+        if (s.EndsWith('d') && int.TryParse(s[..^1], out var days))  return TimeSpan.FromDays(days);
+        if (s.EndsWith('h') && int.TryParse(s[..^1], out var hours)) return TimeSpan.FromHours(hours);
+        if (int.TryParse(s, out var n)) return TimeSpan.FromDays(n);
+        return TimeSpan.FromDays(30);
+    }
+
+    private static string FormatAge(TimeSpan age) =>
+        age.TotalDays >= 1 ? $"{(int)age.TotalDays}d" : $"{(int)age.TotalHours}h";
+
+    /// <summary>Returns the last two path components, e.g. "fuseraft/brewer".</summary>
+    private static string ProjectLabel(string? workingDir)
+    {
+        if (string.IsNullOrEmpty(workingDir)) return "—";
+        var parts = workingDir.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2
+            ? string.Join("/", parts[^2..])
+            : parts[^1];
+    }
+
+    /// <summary>
+    /// Deletes files inside <paramref name="dir"/> that are marked ephemeral by
+    /// <paramref name="rules"/>, then removes empty subdirectories bottom-up.
+    /// Virtual paths are formed as: <c>{virtualPrefix}/{relativeTo(projectRoot, file)}</c>.
+    /// </summary>
+    private static void DeleteEphemeral(
+        string dir, string projectRoot, string virtualPrefix, Core.FuseraftIgnoreRules rules)
+    {
+        foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+        {
+            var rel         = Path.GetRelativePath(projectRoot, file).Replace('\\', '/');
+            var virtualPath = $"{virtualPrefix}/{rel}";
+            if (rules.IsEphemeral(virtualPath))
+                File.Delete(file);
+        }
+
+        // Remove empty subdirectories bottom-up (longest path first = deepest first).
+        foreach (var sub in Directory.EnumerateDirectories(dir, "*", SearchOption.AllDirectories)
+            .OrderByDescending(d => d.Length))
+        {
+            if (Directory.Exists(sub) && !Directory.EnumerateFileSystemEntries(sub).Any())
+                Directory.Delete(sub, recursive: false);
+        }
     }
 }

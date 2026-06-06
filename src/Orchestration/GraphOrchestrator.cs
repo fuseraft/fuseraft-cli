@@ -767,7 +767,7 @@ public sealed class GraphOrchestrator(
                             throw new ValidatorStuckException(agentName, termValidator!, consecutiveFails, termErr!);
 
                         await EmitAndInjectValidationFailureAsync(
-                            agentName, "(terminal)", termValidator!, termErr!, responseText, consecutiveFails, ctx, ct);
+                            agentName, "(terminal)", termValidator!, termErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
                         continue;
                     }
                 }
@@ -831,7 +831,7 @@ public sealed class GraphOrchestrator(
                         throw new ValidatorStuckException(agentName, autoValidator!, consecutiveFails, autoErr!);
 
                     await EmitAndInjectValidationFailureAsync(
-                        agentName, "(unconditional)", autoValidator!, autoErr!, responseText, consecutiveFails, ctx, ct);
+                        agentName, "(unconditional)", autoValidator!, autoErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
                     continue;
                 }
 
@@ -852,7 +852,7 @@ public sealed class GraphOrchestrator(
                                 throw new ValidatorStuckException(agentName, ubValidator!, consecutiveFails, ubErr!);
 
                             await EmitAndInjectValidationFailureAsync(
-                                agentName, "(unconditional-back)", ubValidator!, ubErr!, responseText, consecutiveFails, ctx, ct);
+                                agentName, "(unconditional-back)", ubValidator!, ubErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
                             continue;
                         }
                     }
@@ -958,7 +958,7 @@ public sealed class GraphOrchestrator(
                         }
 
                         await EmitAndInjectValidationFailureAsync(
-                            agentName, foundKeyword, pbValidator!, pbErr!, responseText, consecutiveFails, ctx, ct);
+                            agentName, foundKeyword, pbValidator!, pbErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
                         continue;
                     }
                 }
@@ -1018,7 +1018,7 @@ public sealed class GraphOrchestrator(
                         throw new ValidatorStuckException(agentName, pgValidator!, consecutiveFails, pgErr!);
 
                     await EmitAndInjectValidationFailureAsync(
-                        agentName, foundKeyword, pgValidator!, pgErr!, responseText, consecutiveFails, ctx, ct);
+                        agentName, foundKeyword, pgValidator!, pgErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
                     continue;
                 }
 
@@ -1172,7 +1172,7 @@ public sealed class GraphOrchestrator(
                 }
 
                 await EmitAndInjectValidationFailureAsync(
-                    agentName, foundKeyword, failingValidator!, errMsg!, responseText, consecutiveFails, ctx, ct);
+                    agentName, foundKeyword, failingValidator!, errMsg!, responseText, consecutiveFails, maxRetries, ctx, ct);
                 continue;
             }
 
@@ -1222,8 +1222,8 @@ public sealed class GraphOrchestrator(
             Content   = response.Text ?? string.Empty,
             Role      = "assistant",
             TurnIndex = ctx.TurnIndex++,
-            Usage     = ExtractUsage(response),
-            ToolCalls = ExtractToolCalls(response.Messages)
+            Usage     = OrchestratorHelpers.ExtractUsage(response),
+            ToolCalls = OrchestratorHelpers.ExtractToolCalls(response.Messages)
         };
 
         ctx.CumulativeTokens += agentMsg.Usage?.TotalTokens ?? 0;
@@ -1461,6 +1461,7 @@ public sealed class GraphOrchestrator(
         string errMsg,
         string responseText,
         int consecutiveFails,
+        int maxRetries,
         AgentContext ctx,
         CancellationToken ct)
     {
@@ -1476,7 +1477,7 @@ public sealed class GraphOrchestrator(
                 });
 
         int histBefore = ctx.History.Count;
-        await CorrectionEngine.InjectValidationError(ctx.History, errMsg, consecutiveFails, responseText, keyword, eventEmitter);
+        await CorrectionEngine.InjectValidationError(ctx.History, errMsg, consecutiveFails, responseText, keyword, eventEmitter, maxRetries);
         await PersistCorrectionsAsync(ctx, histBefore, ct).ConfigureAwait(false);
     }
 
@@ -1715,7 +1716,7 @@ public sealed class GraphOrchestrator(
                 }
 
                 await EmitAndInjectValidationFailureAsync(
-                    agentName, foundKeyword, failingValidator!, errMsg!, responseText, consecutiveFails, ctx, ct);
+                    agentName, foundKeyword, failingValidator!, errMsg!, responseText, consecutiveFails, maxRetries, ctx, ct);
                 continue;
             }
 
@@ -2281,7 +2282,7 @@ public sealed class GraphOrchestrator(
 
             // Strip JSON review blocks — they're structural, not human-readable feedback.
             // Keep only lines outside of ``` fences.
-            var stripped = StripCodeFences(content).Trim();
+            var stripped = OrchestratorHelpers.StripCodeFences(content).Trim();
             if (string.IsNullOrWhiteSpace(stripped)) stripped = content;
 
             return stripped.Length > maxChars
@@ -2292,74 +2293,4 @@ public sealed class GraphOrchestrator(
         return null;
     }
 
-    // Removes ``` code-fenced blocks from a string, keeping surrounding prose.
-    private static string StripCodeFences(string text)
-    {
-        var sb   = new System.Text.StringBuilder();
-        bool in_ = false;
-        foreach (var line in text.Split('\n'))
-        {
-            if (line.TrimStart().StartsWith("```", StringComparison.Ordinal))
-            {
-                in_ = !in_;
-                continue;
-            }
-            if (!in_) sb.AppendLine(line);
-        }
-        return sb.ToString();
-    }
-
-    // -------------------------------------------------------------------------
-    // Token / tool-call helpers
-    // -------------------------------------------------------------------------
-
-    private static TokenUsage? ExtractUsage(AgentResponse response)
-    {
-        if (response.Usage is null) return null;
-
-        var inputTokens  = (int)(response.Usage.InputTokenCount  ?? 0L);
-        var outputTokens = (int)(response.Usage.OutputTokenCount ?? 0L);
-        if (inputTokens == 0 && outputTokens == 0) return null;
-
-        return new TokenUsage(inputTokens, outputTokens);
-    }
-
-    private static IReadOnlyList<ToolCallRecord>? ExtractToolCalls(IList<ChatMessage> messages)
-    {
-        var calls   = new List<(string CallId, string Name, string? ArgsSummary)>();
-        var results = new Dictionary<string, bool>(StringComparer.Ordinal);
-
-        try
-        {
-            foreach (var msg in messages)
-            {
-                foreach (var content in msg.Contents)
-                {
-                    if (content is FunctionCallContent fc)
-                        calls.Add((fc.CallId ?? fc.Name, fc.Name, ToolCallHelper.SummarizeArgs(fc.Arguments)));
-                    else if (content is FunctionResultContent fr)
-                    {
-                        var key  = fr.CallId ?? string.Empty;
-                        var text = fr.Result?.ToString() ?? string.Empty;
-                        var ok   = !text.StartsWith("[ERROR]",     StringComparison.Ordinal)
-                                && !text.StartsWith("[DENIED]",    StringComparison.Ordinal)
-                                && !text.StartsWith("[TIMEOUT]",   StringComparison.Ordinal)
-                                && !text.StartsWith("[NOT FOUND]", StringComparison.Ordinal)
-                                && !text.StartsWith("[EXIT ",      StringComparison.Ordinal);
-                        if (!string.IsNullOrEmpty(key)) results[key] = ok;
-                    }
-                }
-            }
-        }
-        catch (Exception) { /* best-effort — return null on any parse error */ }
-
-        if (calls.Count == 0) return null;
-
-        return calls
-            .Select(c => new ToolCallRecord(
-                c.Name,
-                c.ArgsSummary,
-                results.TryGetValue(c.CallId, out var s) ? s : true))
-            .ToList();
-    }
 }

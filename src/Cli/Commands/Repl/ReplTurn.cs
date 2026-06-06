@@ -775,15 +775,19 @@ internal static class ReplTurn
         "git_commit", "git_add",
     };
 
-    private static readonly string[] MutationClaimVerbs =
-        ["updated", "created", "fixed", "modified", "patched", "deleted", "saved", "written"];
+    // Matches "I updated", "I've created", "I have fixed", "I just patched", etc.
+    // First-person anchor prevents false positives when the agent is describing tool failures
+    // or analysing third-party content that happens to mention file paths and past-tense verbs.
+    private static readonly Regex FirstPersonMutationRegex = new(
+        @"\bI(?:'ve| have| just)?\s+(updated|created|fixed|modified|patched|deleted|saved|written)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static bool ContainsMutationClaim(string text)
     {
         if (string.IsNullOrEmpty(text)) return false;
+        if (!FirstPersonMutationRegex.IsMatch(text)) return false;
+        // Require a file-like reference so purely conversational "I fixed the explanation" doesn't fire.
         var lower = text.ToLowerInvariant();
-        if (!MutationClaimVerbs.Any(v => lower.Contains(v))) return false;
-        // Require a file-like reference to reduce false positives on conversational text.
         return lower.Contains('/') ||
                lower.Contains(".md") || lower.Contains(".cs") || lower.Contains(".py") ||
                lower.Contains(".js") || lower.Contains(".ts") || lower.Contains(".json") ||

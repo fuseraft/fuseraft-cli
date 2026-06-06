@@ -26,4 +26,10 @@ public interface ISessionStore
     /// List all stored checkpoints, newest first.
     /// </summary>
     Task<IReadOnlyList<SessionCheckpoint>> ListAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// List lightweight index entries for all sessions, newest first.
+    /// Does not load message history — suitable for display and search.
+    /// </summary>
+    Task<IReadOnlyList<SessionIndexEntry>> ListIndexAsync(CancellationToken cancellationToken = default);
 }

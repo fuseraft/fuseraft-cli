@@ -63,4 +63,29 @@ public record ContextBudgetConfig
     /// </para>
     /// </summary>
     public int MaxSingleTurnInputTokens { get; init; } = 0;
+
+    /// <summary>
+    /// Maximum estimated tokens that tool-result messages may contribute to the context
+    /// sent on any single agent invocation. When the cumulative tool-result token estimate
+    /// in the current context exceeds this value, the oldest results beyond the
+    /// <see cref="InTurnToolWindow"/> are replaced with one-line tombstones before the
+    /// next LLM call — keeping the model aware of what was done without replaying raw content.
+    ///
+    /// <para>
+    /// Applies per-invocation (not per-session). The full tool results remain in the
+    /// shared history for compaction and audit purposes; only the view sent to the model
+    /// is trimmed.
+    /// </para>
+    ///
+    /// <para>0 (default) disables the tool-result window.</para>
+    /// </summary>
+    public int MaxToolResultTokens { get; init; } = 0;
+
+    /// <summary>
+    /// Number of most-recent tool result messages to always retain verbatim when the
+    /// <see cref="MaxToolResultTokens"/> window is exceeded. Older results beyond this
+    /// count are replaced with tombstones.
+    /// Defaults to 20.
+    /// </summary>
+    public int InTurnToolWindow { get; init; } = 20;
 }

@@ -31,7 +31,6 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
     private readonly KnowledgeRetriever?       _retriever;
     private readonly GraphExpansionRetriever?  _graphExpander;
     private readonly MemoryManager?            _memoryManager;
-    private readonly IMemoryRanker             _memoryRanker;
     private readonly ContextAssembler?         _contextAssembler;
     private readonly ILogger?                  _logger;
 
@@ -45,7 +44,6 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
         IKnowledgeLayer?          knowledgeLayer    = null,
         MemoryManager?            memoryManager     = null,
         ContextAssembler?         contextAssembler  = null,
-        IMemoryRanker?            memoryRanker      = null,
         GraphExpansionRetriever?  graphExpander     = null,
         RepositoryKnowledgeStore? knowledgeStore    = null,
         ILogger<ContextAssemblyPipeline>? logger    = null)
@@ -56,7 +54,6 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
             : null;
         _graphExpander    = graphExpander;
         _memoryManager    = memoryManager;
-        _memoryRanker     = memoryRanker ?? new RelevanceMemoryRanker();
         _contextAssembler = contextAssembler;
         _logger           = logger;
     }
@@ -83,7 +80,7 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
 
         // ── Stage 2: Memory Block ────────────────────────────────────────────
         var (memoryBlock, memLoaded, memIncluded) =
-            await BuildMemoryBlockAsync(agentName, signals, ct);
+            await BuildMemoryBlockAsync(agentName, ct);
 
         // ── Stage 3: System Prompt ───────────────────────────────────────────
         var baseInstructions = agentCfg?.Instructions ?? string.Empty;
@@ -93,9 +90,10 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
         var systemPrompt = BuildSystemPrompt(augmentedInstr, memoryBlock);
 
         // ── Stage 4: Knowledge Retrieval ─────────────────────────────────────
-        var knowledgeItems  = new List<KnowledgeItem>();
-        var artifacts       = new List<ContextArtifact>();
-        int knRetrieved     = 0;
+        var knowledgeItems    = new List<KnowledgeItem>();
+        var artifacts         = new List<ContextArtifact>();
+        int knRetrieved       = 0;
+        ContextArtifact? knowledgeArtifact = null;
 
         if (weight != KnowledgeWeight.None && _retriever is not null && !signals.IsEmpty)
         {
@@ -106,37 +104,37 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
             if (knowledgeItems.Count > 0)
             {
                 var block = FormatKnowledgeBlock(knowledgeItems);
-                artifacts.Add(new ContextArtifact(
+                knowledgeArtifact = new ContextArtifact(
                     Type:     "knowledge",
                     Title:    "Retrieved Knowledge",
                     Content:  block,
-                    Priority: 90));
+                    Priority: 90);
+                artifacts.Add(knowledgeArtifact);
             }
         }
 
         // ── Stage 5: History / Context Assembly ──────────────────────────────
         IReadOnlyList<ChatMessage> baseMessages;
+        int sessionContextChars = 0;
+        int historyChars        = 0;
 
         if (agentCfg?.Context is { Count: > 0 } contextSources && _contextAssembler is not null)
         {
             baseMessages = await _contextAssembler.AssembleForAgentAsync(
-                agentName, task, contextSources, (IList<ChatMessage>)history, ct);
+                agentName, task, contextSources,
+                history as IList<ChatMessage> ?? new List<ChatMessage>(history), ct);
+            historyChars = baseMessages.Sum(m => m.Text?.Length ?? 0);
         }
         else
         {
             var filtered   = ContextWindowFilter.Apply(history, agentCfg?.ContextWindow);
+            historyChars   = filtered.Sum(m => m.Text?.Length ?? 0);
             var sessionCtx = _contextAssembler is not null
                 ? await _contextAssembler.ReadSessionContextAsync(ct)
                 : null;
 
             if (sessionCtx is not null)
-            {
-                artifacts.Add(new ContextArtifact(
-                    Type:     "session_context",
-                    Title:    "Session Context",
-                    Content:  sessionCtx,
-                    Priority: 100));
-            }
+                sessionContextChars = sessionCtx.Length;
 
             baseMessages = BuildDefaultMessages(filtered, sessionCtx);
         }
@@ -148,14 +146,15 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
 
         finalMessages.AddRange(baseMessages);
 
-        if (artifacts.Any(a => a.Type == "knowledge"))
+        int knowledgeChars = 0;
+        if (knowledgeArtifact is not null)
         {
             bool hasExplicitBroker = agentCfg?.Context?.Any(s =>
                 s.Source.StartsWith("broker", StringComparison.OrdinalIgnoreCase)) == true;
 
             if (!hasExplicitBroker)
             {
-                var knowledgeArtifact = artifacts.First(a => a.Type == "knowledge");
+                knowledgeChars = knowledgeArtifact.Content.Length;
                 finalMessages.Add(new ChatMessage(ChatRole.User,
                     $"[Pipeline Knowledge]\n\n{knowledgeArtifact.Content}"));
             }
@@ -173,6 +172,10 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
             ArtifactsAssembled      = artifacts.Count,
             TotalContextChars       = finalMessages.Sum(m => m.Text?.Length ?? 0),
             SystemPromptChars       = systemPrompt.Length,
+            MemoryChars             = memoryBlock?.Length ?? 0,
+            SessionContextChars     = sessionContextChars,
+            KnowledgeChars          = knowledgeChars,
+            HistoryChars            = historyChars,
             AssemblyDuration        = sw.Elapsed,
         };
 
@@ -190,56 +193,17 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
     // ── Private helpers ──────────────────────────────────────────────────────
 
     private async Task<(string? Block, int Loaded, int Included)> BuildMemoryBlockAsync(
-        string        agentName,
-        IntentSignals signals,
+        string agentName,
         CancellationToken ct)
     {
         if (_memoryManager is null) return (null, 0, 0);
         try
         {
-            var store   = MemoryStore.ForAgent(agentName);
-            var entries = await store.LoadAllAsync(ct);
-            if (entries.Count == 0) return (null, 0, 0);
-
-            var ranked   = _memoryRanker.Rank(entries, signals);
-            var (block, included) = FormatMemoryBlock(ranked);
-            return (block, entries.Count, included);
+            var block = await _memoryManager.PreTurnAsync(agentName, ct);
+            return block is not null ? (block, 1, 1) : (null, 0, 0);
         }
         catch (OperationCanceledException) { throw; }
         catch { return (null, 0, 0); }
-    }
-
-    private static (string? Block, int Included) FormatMemoryBlock(IReadOnlyList<MemoryEntry> entries)
-    {
-        if (entries.Count == 0) return (null, 0);
-
-        const int MaxChars = 8_000;
-        var sb        = new StringBuilder();
-        var remaining = MaxChars;
-        int included  = 0;
-
-        sb.AppendLine("MEMORY — facts recalled from prior sessions:");
-        foreach (var e in entries)
-        {
-            if (remaining <= 0) break;
-            var header  = $"[{e.Type}] {e.Name}: {e.Description}";
-            if (!string.IsNullOrWhiteSpace(e.Body))
-            {
-                var indented = string.Join("\n", e.Body.Split('\n').Select(l => $"  {l}"));
-                var full     = $"{header}\n{indented}";
-                if (full.Length <= remaining) { sb.AppendLine(full); remaining -= full.Length; }
-                else                          { sb.AppendLine(header); remaining -= header.Length; }
-            }
-            else
-            {
-                sb.AppendLine(header);
-                remaining -= header.Length;
-            }
-            included++;
-        }
-
-        var result = sb.ToString().TrimEnd();
-        return result.Length > 0 ? (result, included) : (null, 0);
     }
 
     private static string BuildSystemPrompt(string instructions, string? memoryBlock)

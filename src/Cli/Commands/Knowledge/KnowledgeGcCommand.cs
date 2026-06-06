@@ -32,20 +32,27 @@ public sealed class KnowledgeGcCommand : AsyncCommand<KnowledgeGcSettings>
         CancellationToken  cancellationToken)
     {
         var policy = KnowledgeLifecycleManager.LoadPolicy(settings.LifecyclePath);
+        var slug   = FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory());
 
         var graphPath = settings.GraphPath
-            ?? Path.Combine(Directory.GetCurrentDirectory(), FuseraftPaths.LocalRepositoryGraph);
+            ?? FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryGraph, slug);
 
         var manager = new KnowledgeLifecycleManager(
             new AdrStore(FuseraftPaths.LocalDecisions),
-            new RepositoryMemoryStore(FuseraftPaths.LocalRepositoryMemory),
+            new RepositoryMemoryStore(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, slug)),
             new RepositoryGraphStore(graphPath),
-            new ProvenanceRegistry(FuseraftPaths.LocalProvenance));
+            new ProvenanceRegistry(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalProvenance, slug)));
 
         if (!settings.Apply)
         {
             AnsiConsole.MarkupLine("[bold yellow]Dry-run mode[/] — pass [bold]--apply[/] to commit changes.\n");
         }
+
+        // Capture ephemeral state files before gc runs so we don't delete gc's own outputs.
+        var ignoreRules        = FuseraftIgnoreRules.Load();
+        var ephemeralStatePaths = settings.Apply && ignoreRules.HasRules
+            ? CollectEphemeralStateFiles(slug, ignoreRules)
+            : [];
 
         GcReport report;
         try
@@ -62,7 +69,38 @@ public sealed class KnowledgeGcCommand : AsyncCommand<KnowledgeGcSettings>
         }
 
         PrintReport(report, settings.Apply);
+
+        if (settings.Apply && ephemeralStatePaths.Count > 0)
+        {
+            var deleted = ephemeralStatePaths.Where(File.Exists).ToList();
+            foreach (var f in deleted) File.Delete(f);
+            if (deleted.Count > 0)
+                AnsiConsole.MarkupLine(
+                    $"[dim]Deleted {deleted.Count} ephemeral state file(s) per .fuseraftignore.[/]");
+        }
+
         return 0;
+    }
+
+    /// <summary>
+    /// Returns state files that exist on disk and are marked ephemeral by <paramref name="rules"/>.
+    /// Excludes provenance.archive.json — gc writes to it; deleting it here would discard
+    /// the records just compacted.
+    /// </summary>
+    private static List<string> CollectEphemeralStateFiles(string slug, FuseraftIgnoreRules rules)
+    {
+        var stateDir = FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalState, slug);
+        if (!Directory.Exists(stateDir)) return [];
+
+        return Directory.EnumerateFiles(stateDir)
+            .Where(f =>
+            {
+                var name = Path.GetFileName(f);
+                if (name.Equals("provenance.archive.json", StringComparison.OrdinalIgnoreCase))
+                    return false;
+                return rules.IsEphemeral("state/" + name);
+            })
+            .ToList();
     }
 
     private static void PrintReport(GcReport report, bool applied)
@@ -91,6 +129,15 @@ public sealed class KnowledgeGcCommand : AsyncCommand<KnowledgeGcSettings>
             AnsiConsole.MarkupLine($"[bold]Repository memories[/] {v2} Approved → Candidate ({report.DemotedMemoryIds.Count}):");
             foreach (var id in report.DemotedMemoryIds)
                 AnsiConsole.MarkupLine($"  [dim]→[/] {Markup.Escape(id)}  [dim](not reinforced within window)[/]");
+            AnsiConsole.WriteLine();
+        }
+
+        if (report.PrunedMemoryIds.Count > 0)
+        {
+            var v2 = applied ? "deleted" : "would delete";
+            AnsiConsole.MarkupLine($"[bold]Stale candidate memories[/] {v2} ({report.PrunedMemoryIds.Count}):");
+            foreach (var id in report.PrunedMemoryIds)
+                AnsiConsole.MarkupLine($"  [dim]→[/] {Markup.Escape(id)}  [dim](Candidate, unreinforced past retention window)[/]");
             AnsiConsole.WriteLine();
         }
 

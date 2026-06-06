@@ -38,4 +38,23 @@ public sealed class InMemorySessionStore : ISessionStore
             .ToList();
         return Task.FromResult<IReadOnlyList<SessionCheckpoint>>(results);
     }
+
+    public Task<IReadOnlyList<SessionIndexEntry>> ListIndexAsync(CancellationToken cancellationToken = default)
+    {
+        var entries = _store.Values
+            .Select(c => new SessionIndexEntry
+            {
+                SessionId        = c.SessionId,
+                Task             = c.Task.Length > 120 ? c.Task[..120] + "…" : c.Task,
+                WorkingDirectory = c.WorkingDirectory,
+                ConfigPath       = c.ConfigPath,
+                StartedAt        = c.StartedAt,
+                LastUpdatedAt    = c.LastUpdatedAt,
+                IsComplete       = c.IsComplete,
+                TurnCount        = c.Messages.Count,
+            })
+            .OrderByDescending(e => e.LastUpdatedAt)
+            .ToList();
+        return Task.FromResult<IReadOnlyList<SessionIndexEntry>>(entries);
+    }
 }
