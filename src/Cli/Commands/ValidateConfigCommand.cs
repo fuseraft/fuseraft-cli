@@ -976,19 +976,10 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
             return;
         }
 
-        var labelWidth = rows.Max(r => r.Label.Length) + 2;
-
         foreach (var (label, _, resolved) in rows)
         {
-            string existsMark;
-            if (string.IsNullOrEmpty(resolved) || resolved.Contains('{'))
-                existsMark = "?";
-            else if (resolved.EndsWith('/') || resolved.EndsWith(Path.DirectorySeparatorChar))
-                existsMark = Directory.Exists(resolved)  ? "✓" : "–";
-            else
-                existsMark = File.Exists(resolved) ? "✓" : "–";
-
-            Console.WriteLine($"  {label.PadRight(labelWidth)}{resolved}  [{existsMark}]");
+            Console.WriteLine(label);
+            Console.WriteLine($"  {resolved}");
         }
 
         AnsiConsole.WriteLine();
