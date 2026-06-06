@@ -42,11 +42,22 @@ public sealed class AgentFactory(
     // Maps agent name → DID for the current session. Populated by Create().
     private readonly ConcurrentDictionary<string, AgentIdentity> _identities = new(StringComparer.OrdinalIgnoreCase);
 
+    // Maps agent name → number of registered tool functions. Used by the telemetry layer to
+    // estimate tool-schema token overhead (which is not counted in context_chars).
+    private readonly ConcurrentDictionary<string, int> _toolCounts = new(StringComparer.OrdinalIgnoreCase);
+
     // All ITurnResettable plugin instances seen across Create() calls (deduplicated).
     // OnAgentTurnStarting() calls BeginTurn() on every entry before each agent turn.
     // _resettablesLock guards both Add (from Create) and the snapshot (from OnAgentTurnStarting).
     private readonly HashSet<ITurnResettable> _turnResettables = [];
     private readonly object _resettablesLock = new();
+
+    /// <summary>
+    /// Returns the number of tool functions registered for the named agent, or 0 if the
+    /// agent has not been created in this session. Used to estimate tool-schema token overhead.
+    /// </summary>
+    public int GetToolCount(string agentName)
+        => _toolCounts.TryGetValue(agentName, out var c) ? c : 0;
 
     /// <summary>
     /// Resets the per-turn state of all registered <see cref="ITurnResettable"/> plugins
@@ -141,6 +152,7 @@ public sealed class AgentFactory(
         // ToolCalling callback is registered so notifications fire at invocation time
         // (real-time) rather than after the whole batch finishes executing.
         var tools = BuildTools(config, resolvedModel, config.Name, onToolCalling);
+        _toolCounts[config.Name] = tools.Count;
 
         // Build ChatOptions (temperature, max tokens, tool mode).
         // The tool list is passed so that MergeOptions can always fall back to the
@@ -161,19 +173,23 @@ public sealed class AgentFactory(
         // FunctionInvokingChatClient loop resends all prior tool results. When set, the
         // oldest tool-result messages are replaced with compact placeholders before each
         // inner LLM call so the context stays roughly constant across iterations.
+        // When neither MaxInTurnContextTokens nor MaxContextTokens is configured, fall
+        // back to a 500 k-char (≈ 125 k-token) floor so unconfigured agents are still
+        // protected against within-turn accumulation.
+        const int DefaultMaxInTurnChars = 500_000;
         var maxInTurnChars = config.MaxInTurnContextTokens > 0
             ? config.MaxInTurnContextTokens * 4
-            : 0;
+            : (maxContextChars > 0 ? maxContextChars : DefaultMaxInTurnChars);
 
         // Deterministic sliding-window cap: always keep only the last N tool call/result
         // pairs in full, replacing older ones with placeholders unconditionally.
         // Applied before the budget-reactive trim so the window runs first.
-        // When MaxContextTokens is set but no explicit pair limit is configured, default
-        // to 12 pairs to prevent O(N²) tool-result accumulation within a turn.
+        // Default unconditionally — O(N²) tool-result accumulation is never desirable
+        // regardless of whether MaxContextTokens is configured.
         const int DefaultToolPairsWhenBudgeted = 12;
         var maxInTurnToolPairs = config.MaxInTurnToolPairs > 0
             ? config.MaxInTurnToolPairs
-            : (resolvedModel.MaxContextTokens > 0 ? DefaultToolPairsWhenBudgeted : 0);
+            : DefaultToolPairsWhenBudgeted;
 
         // Tool schema overhead: computed once at build time since the tool list is fixed
         // for the lifetime of this agent. Included in the context budget and payload

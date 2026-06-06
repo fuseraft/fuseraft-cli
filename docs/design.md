@@ -78,7 +78,7 @@ Orchestration/
   GraphExpansionRetriever.cs — One-hop graph traversal for KnowledgeWeight.High agents
   KnowledgeRetriever.cs      — Queries IKnowledgeLayer + RepositoryMemoryStore + RepositoryKnowledgeStore
   ObservationExtractor.cs    — Extracts entity-scoped findings from tool call results; builds compaction tool traces
-  RelevanceMemoryRanker.cs   — Ranks MemoryEntry records by keyword overlap + type priority
+  MemoryManager.cs           — Aggregates IMemoryProvider instances; PreTurnAsync builds the memory block for every agent turn
   Saga/                   — SagaOrchestrator: compensating rollback wrapper
   Strategies/             — Selection and termination strategy implementations
   Validation/             — Routing validator implementations
@@ -98,16 +98,20 @@ All runtime artifacts are written under `.fuseraft/` in the current working dire
 | `~/.fuseraft/config` | Model ID, endpoint URL (no secrets) |
 | `~/.fuseraft/.key` | Plain-text fallback API key (mode 0600; used only when no keychain) |
 | `~/.fuseraft/sessions/` | Session checkpoint files (`<sessionId>.json`, mode 0600) |
+| `~/.fuseraft/sessions/index.json` | Lightweight session index (no message history) for fast listing |
+| `~/.fuseraft/logs/sessions/{project_slug}/{session_id}/events.jsonl` | Structured JSONL session events (`EventEmitter`) |
+| `~/.fuseraft/logs/sessions/{project_slug}/{session_id}/ctx_snapshots.jsonl` | Per-turn context-window token snapshots |
 | `~/.fuseraft/crashdump/` | Crash dump JSON files |
 | `~/.fuseraft/scratchpad/` | Default per-agent scratchpad directory |
 | `~/.fuseraft/memory/repl/` | REPL persistent memories |
 | `~/.fuseraft/memory/agents/<name>/` | Per-agent persistent memories |
 
+`{project_slug}` is the absolute project path with separators replaced by hyphens and lowercased (e.g. `/home/scs/github/myproject` → `home-scs-github-myproject`). This keeps all session observability data in one global location while remaining trivially filterable by project.
+
 **Local (`.fuseraft/` relative to CWD)**
 
 | Path | Contents |
 |------|----------|
-| `.fuseraft/logs/events.jsonl` | Structured JSONL session events (`EventEmitter`) |
 | `.fuseraft/logs/repl_events.jsonl` | REPL session events |
 | `.fuseraft/logs/provider_errors.jsonl` | LLM provider error records |
 | `.fuseraft/logs/app.log` | Warning+ diagnostic log (always-on Serilog file sink, 5 MB rolling, 3 retained) |
@@ -495,6 +499,7 @@ Every session is backed by a `SessionCheckpoint` persisted after each agent turn
 | `SessionId` | 8-character hex ID (`Guid.NewGuid().ToString("N")[..8]`) |
 | `Task` | Original task string |
 | `ConfigPath` | Config file that produced this session (used on resume) |
+| `WorkingDirectory` | Absolute working directory at session start (used by the session index) |
 | `Messages` | Ordered `List<AgentMessage>` — the complete conversation transcript |
 | `StartedAt` | UTC timestamp of session creation (immutable) |
 | `LastUpdatedAt` | UTC timestamp of last save (set by `SaveAsync`) |
@@ -505,13 +510,16 @@ Every session is backed by a `SessionCheckpoint` persisted after each agent turn
 
 **`AgentMessage` fields:** `AgentName`, `Content`, `Role`, `TurnIndex`, `Timestamp`, `Usage` (tokens + cost), `IsCompactionSummary`, `ToolCalls` (name, args summary, succeeded).
 
-**`ISessionStore` contract:**
-- `SaveAsync` — create or overwrite; sets `LastUpdatedAt`
-- `LoadAsync` — load by session ID, null if not found
-- `DeleteAsync`
-- `ListAsync` — all checkpoints sorted by `LastUpdatedAt` descending
+**`SessionIndexEntry` fields:** `SessionId`, `Task` (first non-empty line, ≤120 chars), `WorkingDirectory`, `ConfigPath`, `StartedAt`, `LastUpdatedAt`, `IsComplete`, `TurnCount`. Written to `~/.fuseraft/sessions/index.json` (keyed by session ID) on every `SaveAsync` and `DeleteAsync` so listing never requires opening checkpoint files.
 
-**`JsonSessionStore`** (default): one JSON file per session at `~/.fuseraft/sessions/<sessionId>.json`. Unix file permissions set to 0600 on non-Windows. `ListAsync` deserializes all `.json` files in the directory with error logging for unreadable files.
+**`ISessionStore` contract:**
+- `SaveAsync` — create or overwrite; sets `LastUpdatedAt`; updates `index.json`
+- `LoadAsync` — load by session ID, null if not found
+- `DeleteAsync` — removes checkpoint file and removes entry from `index.json`
+- `ListAsync` — all checkpoints sorted by `LastUpdatedAt` descending (opens every checkpoint file)
+- `ListIndexAsync` — all index entries sorted by `LastUpdatedAt` descending (reads `index.json` only; bootstraps from checkpoint files on first call if index is absent)
+
+**`JsonSessionStore`** (default): one JSON file per session at `~/.fuseraft/sessions/<sessionId>.json`. Unix file permissions set to 0600 on non-Windows. Maintains `index.json` as a side-effect of every save and delete. `fuseraft sessions` and the `--resume` prompt use `ListIndexAsync` — message history is never loaded for listing.
 
 **`InMemorySessionStore`**: `ConcurrentDictionary` backed; sessions lost on process exit. Used when `Checkpoint.Mode = "memory"` in config or when no config-level checkpoint path is set and the user explicitly opts in.
 
@@ -672,9 +680,11 @@ Event consumers may inject messages, trigger external systems, or enforce additi
 |---|---|---|
 | `session_start` | `GraphOrchestrator`, `ReplCommand` | `task` (raw task string), `start_node`, `resume` |
 | `session_end` | `GraphOrchestrator`, `ReplCommand` | Turn count, succeeded |
+| `session_summary` | `SessionMetrics` | `total_turns`, `total_input_tokens`, `total_output_tokens`, `max_turn_input_tokens`, `total_tool_calls`, `total_patch_failures`, `total_duplicate_reads`, `total_compactions` |
 | `phase_start` | `GraphOrchestrator` | Phase name, starting executor |
 | `phase_end` | `GraphOrchestrator` | Phase name, turn count |
-| `compaction` | `SessionRunner` | Turn count before/after |
+| `compaction` | `SessionRunner` | Turn count before/after, `reason` |
+| `compaction_resume_candidate` | `SessionRunner` | `last_assistant_agent`, `current_state_name`, `reason`, `total_messages` — emitted at compaction time to diagnose handoff-then-compaction resume divergence |
 | `session_error` | `SessionRunner` | Exception message |
 
 *Per-turn*
@@ -685,7 +695,7 @@ Event consumers may inject messages, trigger external systems, or enforce additi
 | `turn_end` | `AgentOrchestrator`, `GraphOrchestrator`, `MagenticOrchestrator` | Agent name, turn index, input/output tokens |
 | `turn_timeout` | `GraphOrchestrator` | Agent name, timeout value |
 | `reasoning` | `AgentOrchestrator`, `GraphOrchestrator` | Reasoning token content |
-| `context_assembly` | All orchestrators | `knowledge_retrieved`, `knowledge_included`, `memory_loaded`, `memory_included`, `artifacts`, `context_chars`, `system_prompt_chars`, `assembly_ms` |
+| `context_assembly` | All orchestrators | `knowledge_retrieved`, `knowledge_included`, `memory_loaded`, `memory_included`, `artifacts`, `context_chars`, `system_prompt_chars`, `assembly_ms`, `context_chars_breakdown` (per-source: `system_prompt`, `memory`, `session_context`, `knowledge`, `history`), `tool_count`, `tool_schema_est_tokens` |
 
 *Routing and keyword handling* (`GraphOrchestrator`)
 
@@ -697,6 +707,7 @@ Event consumers may inject messages, trigger external systems, or enforce additi
 | `keyword_not_found` | `KeywordSelectionStrategy` | Last message author, content excerpt |
 | `agent_routed` | `GraphOrchestrator` | From agent, to agent, keyword |
 | `state_advanced` | `GraphOrchestrator` | New `AgentState` version, destination executor |
+| `back_edge_escalation` | `StateMachineSelectionStrategy` | `from_state`, `to_state`, `visit_count`, `max_revisits`, objections from `ReviewArtifactPath` — fired when a back-edge exceeds `MaxRevisits` |
 | `context_cap_warning` | `GraphOrchestrator` | Agent name, current message count, soft threshold |
 | `correction_injected` | `CorrectionEngine` | Correction message text, reason |
 

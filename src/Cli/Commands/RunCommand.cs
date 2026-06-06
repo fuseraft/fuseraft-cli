@@ -99,7 +99,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         // Resolve the effective working directory: --work-dir > config sandbox path > CWD.
         // This must happen before BuildActiveStore so that all subsequent relative-path
         // resolutions (checkpoint path, validation paths, change log, etc.) are rooted here.
-        var workDir = ResolveWorkDir(settings.WorkDir, configPath);
+        var workDir = ResolveWorkDir(settings.WorkDir, configPath, loggerFactory.CreateLogger<RunCommand>());
         if (workDir is not null)
         {
             if (!Directory.Exists(workDir))
@@ -185,7 +185,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             return 1;
         }
 
-        var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, _) = built;
+        var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, _, sessionMetrics) = built;
 
         await using var _mcp = mcpManager;
         using var _governance = governanceKernel;
@@ -364,9 +364,10 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         var isNewSession = checkpoint is null;
         checkpoint ??= new SessionCheckpoint
         {
-            SessionId  = pendingSessionId,
-            Task       = task,
-            ConfigPath = configPath
+            SessionId        = pendingSessionId,
+            Task             = task,
+            ConfigPath       = configPath,
+            WorkingDirectory = Directory.GetCurrentDirectory(),
         };
 
         // Write a seed checkpoint immediately so this session appears in the sessions list
@@ -375,8 +376,10 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             await activeStore.SaveAsync(checkpoint, cancellationToken);
 
         // Set up the context window recorder — appends per-turn snapshots for post-run visualization.
-        var ctxSnapshotsPath = Path.Combine(fuseraft.Core.FuseraftPaths.LocalLogs,
-            $"ctx_snapshots_{checkpoint.SessionId}.jsonl");
+        var ctxSnapshotsPath = fuseraft.Core.FuseraftPaths.ExpandSessionPaths(
+            fuseraft.Core.FuseraftPaths.GlobalCtxSnapshotsTemplate,
+            checkpoint.SessionId,
+            fuseraft.Core.FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory()));
         using var ctxRecorder = new fuseraft.Orchestration.ContextWindowRecorder(ctxSnapshotsPath);
         ctxRecorder.SetSessionId(checkpoint.SessionId);
 
@@ -447,7 +450,8 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             eventEmitter, telemetry, modelIdByAgent, devUI, configPath,
             maxIterations: config.Termination?.ResolveMaxIterations() ?? 0,
             contextBudget: config.ContextBudget,
-            contextWindowRecorder: ctxRecorder);
+            contextWindowRecorder: ctxRecorder,
+            sessionMetrics: sessionMetrics);
 
         var result = await runner.RunAsync(task, checkpoint, settings.HumanInTheLoop, settings.ShowTools, cts.Token);
 
@@ -516,8 +520,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         }
 
         // Context window visualization — render after the run so all snapshot data is flushed.
-        var ctxVizPath = Path.Combine(fuseraft.Core.FuseraftPaths.LocalLogs,
-            $"ctx_viz_{checkpoint.SessionId}.html");
+        var ctxVizPath = fuseraft.Core.FuseraftPaths.ExpandSessionId(fuseraft.Core.FuseraftPaths.LocalCtxViz, checkpoint.SessionId);
         if (await fuseraft.Cli.Display.ContextWindowRenderer.RenderAsync(ctxSnapshotsPath, ctxVizPath, checkpoint.SessionId))
             AnsiConsole.MarkupLine($"[dim]Context viz → {Markup.Escape(ctxVizPath)}[/]");
 
@@ -635,7 +638,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         if (File.Exists(configPath))
         {
             try { checkpointConfig = OrchestratorBuilder.LoadConfig(configPath).Checkpoint; }
-            catch { /* errors will surface later during full BuildAsync */ }
+            catch (Exception ex) { loggerFactory.CreateLogger<RunCommand>().LogWarning(ex, "[BuildActiveStore] {Message}", ex.Message); }
         }
 
         if (checkpointConfig?.Mode?.Equals("memory", StringComparison.OrdinalIgnoreCase) == true)
@@ -656,8 +659,8 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
     {
         if (string.IsNullOrWhiteSpace(sessionIdHint))
         {
-            var all = await store.ListAsync();
-            var incomplete = all.Where(s => !s.IsComplete).ToList();
+            var index    = await store.ListIndexAsync();
+            var incomplete = index.Where(e => !e.IsComplete).ToList();
 
             if (incomplete.Count == 0)
             {
@@ -665,13 +668,20 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
                 return null;
             }
 
-            return AnsiConsole.Prompt(
-                new SelectionPrompt<SessionCheckpoint>()
+            var selected = AnsiConsole.Prompt(
+                new SelectionPrompt<Core.Models.SessionIndexEntry>()
                     .Title("Select a session to resume:")
-                    .UseConverter(s =>
-                        $"[bold]{s.SessionId}[/]  {s.Messages.Count} turns  " +
-                        $"[dim]{s.LastUpdatedAt:yyyy-MM-dd HH:mm}  {StringHelpers.Truncate(s.Task, 60)}[/]")
+                    .UseConverter(e =>
+                    {
+                        var proj = e.WorkingDirectory is { } wd
+                            ? string.Join("/", wd.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries)[^Math.Min(2, wd.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries).Length)..])
+                            : "?";
+                        return $"[bold]{e.SessionId}[/]  {e.TurnCount} turns  " +
+                               $"[dim]{e.LastUpdatedAt:yyyy-MM-dd HH:mm}  {proj}  {StringHelpers.Truncate(e.Task, 50)}[/]";
+                    })
                     .AddChoices(incomplete));
+
+            return await store.LoadAsync(selected.SessionId);
         }
 
         var checkpoint = await store.LoadAsync(sessionIdHint);
@@ -862,7 +872,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         return names;
     }
 
-    private static string? ResolveWorkDir(string? flagValue, string absoluteConfigPath)
+    private static string? ResolveWorkDir(string? flagValue, string absoluteConfigPath, ILogger? logger = null)
     {
         if (!string.IsNullOrWhiteSpace(flagValue))
             return FuseraftPaths.ExpandPath(flagValue);
@@ -876,7 +886,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
                 if (!string.IsNullOrWhiteSpace(sandboxPath))
                     return FuseraftPaths.ExpandPath(sandboxPath);
             }
-            catch { /* errors surface later in full BuildAsync */ }
+            catch (Exception ex) { logger?.LogWarning(ex, "[ResolveWorkDir] {Message}", ex.Message); }
         }
 
         return null; // keep CWD

@@ -47,9 +47,6 @@ Orchestration:
 
     - Name: ImplementationComplete
       Requires:
-        - Type: FilesWritten
-          Source: .fuseraft/artifacts/brief.json
-          Field: files_to_change
         - Type: CommandSucceeded
           # Read the verify command from the Planner's brief so this works for any
           # runtime — the Planner writes the correct invocation and the contract

@@ -41,9 +41,6 @@ Orchestration:
 
     - Name: ImplementationComplete
       Requires:
-        - Type: FilesWritten
-          Source: .fuseraft/artifacts/brief.json
-          Field: files_to_change
         - Type: CommandSucceeded
           PatternField: verify_command
           Pattern: "build|compile|test|check"

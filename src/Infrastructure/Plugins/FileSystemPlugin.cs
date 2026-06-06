@@ -22,6 +22,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     private readonly FileVersionStore?  _versionStore;
     private readonly SessionReadCache?  _sessionCache;
     private readonly Action?            _onWrite;
+    private readonly Action?            _onCacheHit;
 
     // Per-turn read cache: cleared at the start of each agent turn so re-reading the same
     // file within a single turn is caught and short-circuited before dumping redundant
@@ -49,7 +50,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     // maxLines: 99999 is asking for everything and should be gated the same as omitting it.
     private const int LargeFileColdReadLines  = 500;
 
-    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null, Action? onWrite = null)
+    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null, Action? onWrite = null, Action? onCacheHit = null)
     {
         _sandboxRoot       = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _readFileSizeLimit = readFileSizeLimit > 0 ? readFileSizeLimit : 20_000;
@@ -59,6 +60,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         _versionStore      = versionStore;
         _sessionCache      = sessionCache;
         _onWrite           = onWrite;
+        _onCacheHit        = onCacheHit;
     }
 
     /// <inheritdoc cref="ITurnResettable.BeginTurn"/>
@@ -92,6 +94,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (startLine <= 1 && maxLines <= 0 && _sessionCache is not null
             && _sessionCache.TryGetHit(resolved, fileInfo, out var cacheHit))
         {
+            _onCacheHit?.Invoke();
             var ago   = FormatTimeAgo(DateTime.UtcNow - cacheHit!.LastReadUtc);
             var times = cacheHit.ReadCount == 1 ? "once" : $"{cacheHit.ReadCount} times";
             return PluginResult.Info(
@@ -107,9 +110,12 @@ public sealed class FileSystemPlugin : ITurnResettable
         // Reads with a non-default range (startLine > 1 or maxLines > 0) bypass the cache
         // so agents can page through a file in sections.
         if (startLine <= 1 && maxLines <= 0 && !_readThisTurn.Add(resolved))
+        {
+            _onCacheHit?.Invoke();
             return PluginResult.Info(
                 $"'{resolved}' already read this turn — content is in context. " +
                 $"Use grep_in_file to locate a section, then read_file with startLine/maxLines for a targeted excerpt.");
+        }
 
         // Reject binary files early by sniffing the first 8 KB for null bytes.
         using (var probe = File.OpenRead(resolved))
@@ -340,12 +346,17 @@ public sealed class FileSystemPlugin : ITurnResettable
             // Give the agent enough information to correct itself without a full re-read.
             var lineHint     = CountLines(normalContent, normalOld);
             var mismatchHint = FindFirstMismatchingLine(normalContent, normalOld);
+            var excerpt      = ExtractExcerpt(normalContent, normalOld, contextLines: 8);
+            var excerptNote  = excerpt.Length > 0
+                ? $"\nNearest content in file:\n{excerpt}\n"
+                : string.Empty;
             return PluginResult.Error(
                 $"oldText not found in '{resolved}'. " +
                 $"The text must match exactly including whitespace, indentation, and line endings. " +
                 $"{lineHint}" +
                 $"{mismatchHint}" +
-                $"Use grep_in_file to locate the exact text, then copy it verbatim as oldText.");
+                $"{excerptNote}" +
+                $"Read the file with read_file to get exact text before retrying patch_file.");
         }
 
         // Reject ambiguous matches — require the search string to be unique.
@@ -419,6 +430,41 @@ public sealed class FileSystemPlugin : ITurnResettable
                 .Replace("\\t",    "\t");
 
         return text;
+    }
+
+    // Returns a context window around the best partial match of searchText in fileContent.
+    // Finds the line in fileContent that best matches the first line of searchText
+    // (by longest common prefix), then returns contextLines lines before and after it.
+    // Returns an empty string when no useful match is found.
+    private static string ExtractExcerpt(string fileContent, string searchText, int contextLines)
+    {
+        var fileLines   = fileContent.Split('\n');
+        var firstSearch = searchText.Split('\n')[0].Trim();
+        if (string.IsNullOrEmpty(firstSearch) || fileLines.Length == 0) return string.Empty;
+
+        // Find the line with the longest common prefix to the first search line.
+        int bestLine = -1;
+        int bestScore = 0;
+        for (int i = 0; i < fileLines.Length; i++)
+        {
+            var fileLine = fileLines[i].Trim();
+            int score = 0;
+            int maxLen = Math.Min(firstSearch.Length, fileLine.Length);
+            while (score < maxLen && firstSearch[score] == fileLine[score]) score++;
+            if (score > bestScore) { bestScore = score; bestLine = i; }
+        }
+
+        if (bestLine < 0 || bestScore < 4) return string.Empty;
+
+        var from = Math.Max(0, bestLine - contextLines);
+        var to   = Math.Min(fileLines.Length - 1, bestLine + contextLines);
+        var sb   = new System.Text.StringBuilder();
+        for (int i = from; i <= to; i++)
+        {
+            var marker = i == bestLine ? ">>>" : "   ";
+            sb.AppendLine($"{marker} {i + 1,4}: {fileLines[i]}");
+        }
+        return sb.ToString().TrimEnd();
     }
 
     // When the first line of searchText can be located in fileContent but a subsequent

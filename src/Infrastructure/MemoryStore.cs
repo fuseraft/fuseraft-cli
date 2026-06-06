@@ -32,11 +32,15 @@ public sealed class MemoryStore
 {
     private const string IndexFile    = "MEMORY.md";
     private const string IndexHeader  = "# Memory Index";
-    // Relative path from cwd to the memory refs index (kept in sync with FuseraftPaths.LocalMemoryRefs).
-    private static string LocalRefsFile(string? sessionId) =>
-        sessionId is { Length: > 0 }
-            ? $"memory/sessions/{sessionId}/memory_refs.json"
-            : "memory/memory_refs.json";
+    // Absolute path to the memory refs index for a given project working directory and session.
+    // Stored in the global session directory alongside other session artifacts.
+    private static string RefsFilePath(string cwd, string? sessionId)
+    {
+        var slug = FuseraftPaths.ProjectSlug(cwd);
+        return sessionId is { Length: > 0 }
+            ? FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalMemoryRefs, sessionId, slug)
+            : Path.Combine(FuseraftPaths.GlobalRoot, "memory", $"workspace_{slug}_refs.json");
+    }
 
     private readonly string _dir;
     private readonly SemaphoreSlim _lock = new(1, 1);
@@ -243,13 +247,13 @@ public sealed class MemoryStore
     private async Task<List<MemoryEntry>> LoadByCwdAsync(string cwd, string? sessionId, CancellationToken ct)
     {
         var fuseraftDir = Path.Combine(cwd, ".fuseraft");
-        var refsPath    = Path.Combine(fuseraftDir, LocalRefsFile(sessionId));
+        var refsPath    = RefsFilePath(cwd, sessionId);
 
         if (!Directory.Exists(fuseraftDir))
             return await LoadAllAsync(ct); // not a fuseraft project — load all globals
 
         if (!File.Exists(refsPath))
-            return await LoadFromWorkspaceSessionsAsync(fuseraftDir, ct);
+            return await LoadFromWorkspaceSessionsAsync(cwd, ct);
 
         var json  = await File.ReadAllTextAsync(refsPath, ct);
         var guids = JsonSerializer.Deserialize<string[]>(json) ?? [];
@@ -265,11 +269,12 @@ public sealed class MemoryStore
         return entries;
     }
 
-    // Collects all GUIDs from every session refs file under {cwd}/.fuseraft/memory/sessions/
+    // Collects all GUIDs from every session refs file under ~/.fuseraft/sessions/{slug}/
     // so that a new REPL session in the same workspace sees memories saved by prior sessions.
-    private async Task<List<MemoryEntry>> LoadFromWorkspaceSessionsAsync(string fuseraftDir, CancellationToken ct)
+    private async Task<List<MemoryEntry>> LoadFromWorkspaceSessionsAsync(string cwd, CancellationToken ct)
     {
-        var sessionsDir = Path.Combine(fuseraftDir, "memory", "sessions");
+        var slug        = FuseraftPaths.ProjectSlug(cwd);
+        var sessionsDir = FuseraftPaths.GlobalProjectSessions(slug);
         if (!Directory.Exists(sessionsDir)) return [];
 
         var guids = new HashSet<string>();
@@ -299,8 +304,7 @@ public sealed class MemoryStore
 
     private static async Task AddLocalRefAsync(string cwd, string? sessionId, string guid, CancellationToken ct)
     {
-        var fuseraftDir = Path.Combine(cwd, ".fuseraft");
-        var refsPath    = Path.Combine(fuseraftDir, LocalRefsFile(sessionId));
+        var refsPath = RefsFilePath(cwd, sessionId);
         Directory.CreateDirectory(Path.GetDirectoryName(refsPath)!);
 
         string[] existing = [];
@@ -318,7 +322,7 @@ public sealed class MemoryStore
 
     private static async Task RemoveLocalRefAsync(string cwd, string? sessionId, string guid, CancellationToken ct)
     {
-        var refsPath = Path.Combine(cwd, ".fuseraft", LocalRefsFile(sessionId));
+        var refsPath = RefsFilePath(cwd, sessionId);
         if (!File.Exists(refsPath)) return;
 
         var json    = await File.ReadAllTextAsync(refsPath, ct);

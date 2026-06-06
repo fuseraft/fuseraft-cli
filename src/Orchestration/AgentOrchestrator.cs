@@ -325,7 +325,8 @@ public sealed class AgentOrchestrator(
                                 cancellationToken);
                             context = bAssembled.Messages;
                             if (eventEmitter is not null)
-                                await EmitContextAssemblyAsync(eventEmitter, bAssembled.Metrics, turn);
+                                await EmitContextAssemblyAsync(eventEmitter, bAssembled.Metrics, turn,
+                                    agentFactory.GetToolCount(branchAgent.Name ?? ""));
                         }
                         else
                         {
@@ -401,7 +402,7 @@ public sealed class AgentOrchestrator(
                             Content   = branchResponse.Text ?? string.Empty,
                             Role      = "assistant",
                             TurnIndex = turn++,
-                            Usage     = ExtractUsage(branchResponse),
+                            Usage     = OrchestratorHelpers.ExtractUsage(branchResponse),
                             ToolCalls = ExtractToolCalls(branchResponse.Messages, branchAgent.Name ?? "Unknown"),
                         };
 
@@ -500,7 +501,8 @@ public sealed class AgentOrchestrator(
                     cancellationToken);
                 context = assembled.Messages;
                 if (eventEmitter is not null)
-                    await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, turn);
+                    await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, turn,
+                        agentFactory.GetToolCount(agent.Name ?? ""));
             }
             else
             {
@@ -540,6 +542,13 @@ public sealed class AgentOrchestrator(
             }
 
             var contextList = context as IList<ChatMessage> ?? context.ToList();
+
+            // Sliding tool-result window: replace oldest tool results with tombstones
+            // when the estimated token cost exceeds MaxToolResultTokens. Applied to the
+            // context slice only — shared history is never modified.
+            if (config.ContextBudget is { MaxToolResultTokens: > 0 } toolBudget)
+                contextList = ToolResultWindowTrimmer.Apply(contextList, toolBudget);
+
             logger.LogDebug(
                 "[Orchestrator] Invoking '{Agent}' with {ContextCount} context messages " +
                 "(history={HistCount})",
@@ -596,7 +605,7 @@ public sealed class AgentOrchestrator(
                 Content   = response.Text ?? string.Empty,
                 Role      = "assistant",
                 TurnIndex = turn++,
-                Usage     = ExtractUsage(response),
+                Usage     = OrchestratorHelpers.ExtractUsage(response),
                 ToolCalls = ExtractToolCalls(response.Messages, agent.Name ?? "Unknown")
             };
 
@@ -729,7 +738,8 @@ public sealed class AgentOrchestrator(
                         cancellationToken);
                     vContext = vAssembled.Messages;
                     if (eventEmitter is not null)
-                        await EmitContextAssemblyAsync(eventEmitter, vAssembled.Metrics, turn);
+                        await EmitContextAssemblyAsync(eventEmitter, vAssembled.Metrics, turn,
+                            agentFactory.GetToolCount(verifierAgent.Name ?? ""));
                 }
                 else
                 {
@@ -742,9 +752,13 @@ public sealed class AgentOrchestrator(
                         : vFiltered;
                 }
 
+                var vContextList = vContext as IList<ChatMessage> ?? vContext.ToList();
+                if (config.ContextBudget is { MaxToolResultTokens: > 0 } vToolBudget)
+                    vContextList = ToolResultWindowTrimmer.Apply(vContextList, vToolBudget);
+
                 AgentResponse vResponse = governanceKernel?.CircuitBreaker is { } vcb
-                    ? await vcb.ExecuteAsync(() => verifierAgent.RunAsync(vContext, null, null, cancellationToken))
-                    : await verifierAgent.RunAsync(vContext, null, null, cancellationToken);
+                    ? await vcb.ExecuteAsync(() => verifierAgent.RunAsync(vContextList, null, null, cancellationToken))
+                    : await verifierAgent.RunAsync(vContextList, null, null, cancellationToken);
 
                 foreach (var vMsg in vResponse.Messages)
                 {
@@ -769,7 +783,7 @@ public sealed class AgentOrchestrator(
                     Content   = vResponse.Text ?? string.Empty,
                     Role      = "assistant",
                     TurnIndex = turn++,
-                    Usage     = ExtractUsage(vResponse),
+                    Usage     = OrchestratorHelpers.ExtractUsage(vResponse),
                     ToolCalls = ExtractToolCalls(vResponse.Messages, verifierAgent.Name ?? "Verifier")
                 };
 
@@ -793,36 +807,45 @@ public sealed class AgentOrchestrator(
 
     // Helpers
 
+    // Average tokens per tool schema definition — used to estimate the tool-schema overhead
+    // that is counted in the LLM's input_tokens but absent from context_chars. Fuseraft tools
+    // have detailed descriptions and multi-parameter schemas; 450 tokens/tool is a conservative
+    // mid-point calibrated against observed grok/claude session data.
+    private const int AvgToolSchemaTokens = 450;
+
     private static Task EmitContextAssemblyAsync(
         EventEmitter emitter,
         fuseraft.Core.Models.ContextAssemblyMetrics metrics,
-        int turn) =>
+        int turn,
+        int toolCount = 0) =>
         emitter.EmitAsync("context_assembly",
             agent: metrics.AgentName,
             turn:  turn,
             payload: new
             {
-                knowledge_retrieved  = metrics.KnowledgeItemsRetrieved,
-                knowledge_included   = metrics.KnowledgeItemsIncluded,
-                memory_loaded        = metrics.MemoryEntriesLoaded,
-                memory_included      = metrics.MemoryEntriesIncluded,
-                artifacts            = metrics.ArtifactsAssembled,
-                context_chars        = metrics.TotalContextChars,
-                system_prompt_chars  = metrics.SystemPromptChars,
-                assembly_ms          = (int)metrics.AssemblyDuration.TotalMilliseconds,
+                knowledge_retrieved      = metrics.KnowledgeItemsRetrieved,
+                knowledge_included       = metrics.KnowledgeItemsIncluded,
+                memory_loaded            = metrics.MemoryEntriesLoaded,
+                memory_included          = metrics.MemoryEntriesIncluded,
+                artifacts                = metrics.ArtifactsAssembled,
+                context_chars            = metrics.TotalContextChars,
+                system_prompt_chars      = metrics.SystemPromptChars,
+                assembly_ms              = (int)metrics.AssemblyDuration.TotalMilliseconds,
+                // Per-source char breakdown — shows which source dominates startup context.
+                context_chars_breakdown  = new
+                {
+                    system_prompt    = metrics.SystemPromptChars,
+                    memory           = metrics.MemoryChars,
+                    session_context  = metrics.SessionContextChars,
+                    knowledge        = metrics.KnowledgeChars,
+                    history          = metrics.HistoryChars,
+                },
+                // Tool-schema tokens are sent as the API `tools` parameter, not as messages,
+                // so they are invisible to context_chars. This estimate fills the gap so
+                // total input_tokens ≈ context_chars/4 + tool_schema_est_tokens.
+                tool_count               = toolCount,
+                tool_schema_est_tokens   = toolCount * AvgToolSchemaTokens,
             });
-
-    private static TokenUsage? ExtractUsage(AgentResponse response)
-    {
-        if (response.Usage is null) return null;
-
-        var inputTokens  = (int)(response.Usage.InputTokenCount  ?? 0L);
-        var outputTokens = (int)(response.Usage.OutputTokenCount ?? 0L);
-
-        if (inputTokens == 0 && outputTokens == 0) return null;
-
-        return new TokenUsage(inputTokens, outputTokens);
-    }
 
     /// <summary>
     /// Recursively walks the termination strategy tree and calls
@@ -866,66 +889,8 @@ public sealed class AgentOrchestrator(
                 WireDidResolver(child, resolver);
     }
 
-    /// <summary>
-    /// Scans the raw response messages for function call / result pairs and returns a
-    /// slim summary list suitable for terminal display. Fails gracefully on any parse error.
-    /// Logs tool call failures and parse errors.
-    /// </summary>
     private IReadOnlyList<ToolCallRecord>? ExtractToolCalls(IList<ChatMessage> messages, string agentName = "Unknown")
-    {
-        var calls   = new List<(string CallId, string Name, string? ArgsSummary)>();
-        var results = new Dictionary<string, bool>(StringComparer.Ordinal); // callId → succeeded
-
-        try
-        {
-            foreach (var msg in messages)
-            {
-                foreach (var content in msg.Contents)
-                {
-                    if (content is FunctionCallContent fc)
-                    {
-                        calls.Add((fc.CallId ?? fc.Name, fc.Name, ToolCallHelper.SummarizeArgs(fc.Arguments)));
-                    }
-                    else if (content is FunctionResultContent fr)
-                    {
-                        var key     = fr.CallId ?? string.Empty;
-                        var text    = fr.Result?.ToString() ?? string.Empty;
-                        var success = !text.StartsWith("[ERROR]",     StringComparison.Ordinal)
-                                   && !text.StartsWith("[DENIED]",    StringComparison.Ordinal)
-                                   && !text.StartsWith("[TIMEOUT]",   StringComparison.Ordinal)
-                                   && !text.StartsWith("[NOT FOUND]", StringComparison.Ordinal)
-                                   && !text.StartsWith("[EXIT ",      StringComparison.Ordinal);
-                        if (!string.IsNullOrEmpty(key))
-                            results[key] = success;
-
-                        if (!success)
-                        {
-                            var toolName = calls.LastOrDefault(c => c.CallId == key).Name ?? key;
-                            logger.LogWarning(
-                                "[{Agent}] Tool '{Tool}' failed: {ResultPreview}",
-                                agentName, toolName,
-                                text.Length > 120 ? text[..120].Replace('\n', ' ') : text.Replace('\n', ' '));
-                        }
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "[{Agent}] Failed to parse tool calls from agent response — tool call records will be incomplete.",
-                agentName);
-        }
-
-        if (calls.Count == 0) return null;
-
-        return calls
-            .Select(c => new ToolCallRecord(
-                c.Name,
-                c.ArgsSummary,
-                results.TryGetValue(c.CallId, out var ok) ? ok : true))
-            .ToList();
-    }
+        => OrchestratorHelpers.ExtractToolCalls(messages, logger, agentName);
 
     private static string GenerateSessionId() => Guid.NewGuid().ToString("N")[..8];
 

@@ -26,10 +26,17 @@ namespace fuseraft.Infrastructure.Plugins;
 public sealed class SessionContextPlugin
 {
     private readonly string _summaryPath;
+    private readonly int    _maxChars;
 
-    public SessionContextPlugin(string summaryPath)
+    /// <param name="maxChars">
+    /// Maximum characters to return from the summary file. Content beyond this limit is
+    /// replaced with a truncation note so the tool result stays token-bounded.
+    /// Defaults to 8,000 chars (~2,000 tokens). Set to 0 to disable the cap.
+    /// </param>
+    public SessionContextPlugin(string summaryPath, int maxChars = 8_000)
     {
         _summaryPath = summaryPath;
+        _maxChars    = maxChars;
     }
 
     [Description("Read the session context summary written by the previous agent. Call this at the start of every turn to catch up without re-reading source files.")]
@@ -44,7 +51,13 @@ public sealed class SessionContextPlugin
         if (string.IsNullOrWhiteSpace(content))
             return PluginResult.Info("Session context summary is empty.");
 
-        return $"[Session context ({Path.GetFileName(_summaryPath)})]\n\n{content.Trim()}";
+        var truncated = content.Trim();
+        if (_maxChars > 0 && truncated.Length > _maxChars)
+            truncated = truncated[.._maxChars] +
+                $"\n\n[session context truncated — {truncated.Length - _maxChars} chars omitted. " +
+                "If earlier context is needed, re-read the source files directly.]";
+
+        return $"[Session context ({Path.GetFileName(_summaryPath)})]\n\n{truncated}";
     }
 
     [Description("Write or update the session context summary. Call this before every handoff so the next agent knows what was done, what files were changed, and any known issues.")]

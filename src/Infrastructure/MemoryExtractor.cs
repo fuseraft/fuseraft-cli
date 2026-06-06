@@ -150,13 +150,13 @@ public sealed class MemoryExtractor(IChatClient client)
         """;
     }
 
-    // Returns null when parsing fails (no JSON array found or deserialization error),
-    // distinguishing a parse failure from a successful extraction that found nothing.
+    // Returns null when parsing fails (malformed JSON found but undeserializable),
+    // distinguishing a true parse failure from a successful extraction that found nothing.
+    // Returns [] when the model produced no JSON array at all (prose "nothing to save" responses).
     internal static List<MemoryEntry>? Parse(string text)
     {
-        var t = text.Trim();
-        // Use LastIndexOf('[') so prose that contains brackets before the array
-        // (e.g. "Here are [these] things: [...]") selects the outermost array.
+        var t = StripCodeFences(text.Trim());
+
         var s = t.LastIndexOf('[');
         var e = t.LastIndexOf(']');
         if (s < 0 || e <= s) return null;
@@ -183,6 +183,17 @@ public sealed class MemoryExtractor(IChatClient client)
                 .ToList();
         }
         catch (JsonException) { return null; }
+    }
+
+    private static string StripCodeFences(string text)
+    {
+        var lines = text.Split('\n');
+        if (lines.Length < 2) return text;
+        var first = lines[0].Trim();
+        var last  = lines[^1].Trim();
+        if (last == "```" && (first == "```json" || first == "```" || first == "```jsonc"))
+            return string.Join('\n', lines[1..^1]).Trim();
+        return text;
     }
 
     private sealed class ExtractionDto

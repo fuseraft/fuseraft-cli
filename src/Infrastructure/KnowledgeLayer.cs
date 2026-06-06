@@ -37,7 +37,9 @@ public sealed class KnowledgeLayer : IKnowledgeLayer
         _graphStore         = graphStore;
         _graphBuilder       = graphBuilder;
         _provenanceRegistry = provenanceRegistry
-            ?? new ProvenanceRegistry(fuseraft.Core.FuseraftPaths.LocalProvenance);
+            ?? new ProvenanceRegistry(fuseraft.Core.FuseraftPaths.ExpandProjectPaths(
+                fuseraft.Core.FuseraftPaths.LocalProvenance,
+                fuseraft.Core.FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory())));
         _objectiveStore     = objectiveStore
             ?? new ObjectiveStore(fuseraft.Core.FuseraftPaths.LocalObjectives);
     }
