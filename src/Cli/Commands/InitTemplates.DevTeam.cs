@@ -58,6 +58,9 @@ public static partial class InitTemplates
                        "cargo test -- feature_tests"
                      The Developer runs this before committing; the ImplementationComplete
                      contract requires it to succeed. Wrong: "dotnet build" (compile only).
+                     IMPORTANT: write the full literal command — never abbreviate with "...".
+                     Abbreviated commands cannot be matched against the session log and will
+                     cause ImplementationComplete to loop indefinitely.
                    acceptance_criteria — array of testable criteria the code must satisfy
               6. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO CRITIC").
