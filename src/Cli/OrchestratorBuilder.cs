@@ -1536,7 +1536,7 @@ public static class OrchestratorBuilder
         };
     }
 
-    private static OrchestrationConfig InterpolateSessionId(OrchestrationConfig config, string sessionId, string projectSlug)
+    internal static OrchestrationConfig InterpolateSessionId(OrchestrationConfig config, string sessionId, string projectSlug)
     {
         string  E(string  s) => FuseraftPaths.ExpandSessionPaths(s, sessionId, projectSlug);
         string? En(string? s) => s is null ? null : E(s);
