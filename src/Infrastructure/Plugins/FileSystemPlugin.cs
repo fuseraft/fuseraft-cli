@@ -12,11 +12,19 @@ namespace fuseraft.Infrastructure.Plugins;
 /// arguments are resolved to their absolute canonical form and rejected if they fall outside
 /// the sandbox tree. This prevents path-traversal attacks and accidental access to sensitive
 /// files such as SSH keys or environment files.
+///
+/// <paramref name="exemptedPaths"/> lists path prefixes that bypass the sandbox check.
+/// Used to allow fuseraft's own runtime state directory (<c>~/.fuseraft/</c>) even when
+/// a project sandbox is active, so agents can write session artifacts (briefs, events, etc.)
+/// without those paths being denied.
 /// </summary>
 public sealed class FileSystemPlugin : ITurnResettable
 {
     // Canonical form of the sandbox root, or null when unrestricted.
     private readonly string? _sandboxRoot;
+    // Absolute path prefixes that are always accessible even when sandboxed.
+    // Used to allow fuseraft's own runtime state dir (~/.fuseraft/) regardless of the project sandbox.
+    private readonly IReadOnlyList<string> _exemptedPrefixes;
     private readonly int     _readFileSizeLimit;
     private readonly string  _summaryDir;
     private readonly FileVersionStore?  _versionStore;
@@ -50,9 +58,12 @@ public sealed class FileSystemPlugin : ITurnResettable
     // maxLines: 99999 is asking for everything and should be gated the same as omitting it.
     private const int LargeFileColdReadLines  = 500;
 
-    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null, Action? onWrite = null, Action? onCacheHit = null)
+    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null, Action? onWrite = null, Action? onCacheHit = null, IReadOnlyList<string>? exemptedPaths = null)
     {
         _sandboxRoot       = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
+        _exemptedPrefixes  = (exemptedPaths ?? [])
+            .Select(p => FuseraftPaths.ExpandPath(p).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar)
+            .ToList();
         _readFileSizeLimit = readFileSizeLimit > 0 ? readFileSizeLimit : 20_000;
         _readBudgetPerTurn = readBudgetPerTurn > 0 ? readBudgetPerTurn : 150_000;
         var baseDir        = _sandboxRoot ?? Directory.GetCurrentDirectory();
@@ -1104,7 +1115,13 @@ public sealed class FileSystemPlugin : ITurnResettable
             : StringComparison.Ordinal;
 
         if (!resolvedCheck.StartsWith(sandboxPrefix, comparison))
+        {
+            // Allow paths explicitly exempted from the sandbox (e.g. fuseraft's own runtime state dir).
+            if (_exemptedPrefixes.Any(ep => resolvedCheck.StartsWith(ep, comparison)))
+                return null;
+
             return PluginResult.Denied($"Path '{resolved}' is outside the configured sandbox '{_sandboxRoot}'.");
+        }
 
         return null;
     }
