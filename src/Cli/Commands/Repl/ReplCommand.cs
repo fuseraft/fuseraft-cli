@@ -241,6 +241,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 modelId, cwd, pluginNames, sessionId,
                 memoryCount: memoryEntries.Count,
                 skillCount:  skillsPlugin?.Count ?? 0,
+                branch:      TryGetGitBranch(cwd),
                 eventsPath:  settings.Verbose ? eventsPath : null);
         }
 
@@ -467,6 +468,27 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             return string.IsNullOrEmpty(content)
                 ? null
                 : $"# Project instructions (from AGENTS.md)\n\n{content}";
+        }
+        catch { return null; }
+    }
+
+    private static string? TryGetGitBranch(string cwd)
+    {
+        try
+        {
+            using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName               = "git",
+                Arguments              = "rev-parse --abbrev-ref HEAD",
+                WorkingDirectory       = cwd,
+                RedirectStandardOutput = true,
+                UseShellExecute        = false,
+                CreateNoWindow         = true,
+            });
+            if (proc is null) return null;
+            var output = proc.StandardOutput.ReadToEnd().Trim();
+            proc.WaitForExit(1000);
+            return proc.ExitCode == 0 && !string.IsNullOrEmpty(output) && output != "HEAD" ? output : null;
         }
         catch { return null; }
     }
