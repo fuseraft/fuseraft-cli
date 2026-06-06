@@ -50,11 +50,13 @@ DEBUGGING.md
 
 hashnode/
 
-# fuseraft runtime artifacts — config/ and context/ remain tracked
-.fuseraft/*
-!.fuseraft/config/
-!.fuseraft/config/**
-!.fuseraft/context/
-!.fuseraft/context/**
+# .fuseraft/ — user-authored content is tracked; runtime artifacts live in ~/.fuseraft/
+# Stale local runtime dirs written before the global migration — delete once confirmed empty
+.fuseraft/red-team/
+.fuseraft/logs/
+.fuseraft/state/
+.fuseraft/sessions/
+.fuseraft/knowledge/repository/
+.fuseraft/memory/
 temp/TestMetadata/
 CHECKLIST.md

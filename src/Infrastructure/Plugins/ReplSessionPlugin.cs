@@ -30,11 +30,12 @@ public sealed class ReplSessionPlugin(
         sb.AppendLine($"Working dir:  {cwd}");
         sb.AppendLine($"Snapshot:     {snapshotPath}");
         sb.AppendLine();
-        sb.AppendLine("Log files (relative to working dir):");
-        sb.AppendLine($"  repl_events     {Path.Combine(cwd, FuseraftPaths.LocalReplEventsLog)}");
-        sb.AppendLine($"  events          {Path.Combine(cwd, FuseraftPaths.LocalEventsLog)}");
-        sb.AppendLine($"  provider_errors {Path.Combine(cwd, FuseraftPaths.LocalProviderErrors)}");
-        sb.AppendLine($"  app             {Path.Combine(cwd, FuseraftPaths.LocalAppLog)}");
+        var slug = FuseraftPaths.ProjectSlug(cwd);
+        sb.AppendLine("Log files:");
+        sb.AppendLine($"  repl_events     {FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalReplEventsLog, slug)}");
+        sb.AppendLine($"  events          {FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalEventsLog, sessionId, slug)}");
+        sb.AppendLine($"  provider_errors {FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalProviderErrors, slug)}");
+        sb.AppendLine($"  app             {FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalAppLog, slug)}");
         return sb.ToString().TrimEnd();
     }
 
@@ -66,7 +67,7 @@ public sealed class ReplSessionPlugin(
         [Description("Maximum number of events to return (most recent).")] int maxLines = 50)
     {
         var filter = string.IsNullOrWhiteSpace(targetSessionId) ? sessionId : targetSessionId.Trim();
-        var path = Path.Combine(cwd, FuseraftPaths.LocalReplEventsLog);
+        var path = FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalReplEventsLog, FuseraftPaths.ProjectSlug(cwd));
         if (!File.Exists(path))
             return PluginResult.Info($"No REPL event log at {path}. The log is created on first session activity.");
 
@@ -87,12 +88,13 @@ public sealed class ReplSessionPlugin(
         [Description("Log name: repl_events, events, provider_errors, or app.")] string logName = "repl_events",
         [Description("Maximum number of lines to return (from end of file).")] int maxLines = 100)
     {
+        var slug = FuseraftPaths.ProjectSlug(cwd);
         var path = logName.ToLowerInvariant() switch
         {
-            "repl_events"     => Path.Combine(cwd, FuseraftPaths.LocalReplEventsLog),
-            "events"          => Path.Combine(cwd, FuseraftPaths.LocalEventsLog),
-            "provider_errors" => Path.Combine(cwd, FuseraftPaths.LocalProviderErrors),
-            "app"             => Path.Combine(cwd, FuseraftPaths.LocalAppLog),
+            "repl_events"     => FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalReplEventsLog, slug),
+            "events"          => FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalEventsLog, sessionId, slug),
+            "provider_errors" => FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalProviderErrors, slug),
+            "app"             => FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalAppLog, slug),
             _ => null,
         };
 

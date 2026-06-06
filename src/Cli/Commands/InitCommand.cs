@@ -388,7 +388,7 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
 
         var lines = await File.ReadAllLinesAsync(gitignorePath, cancellationToken);
 
-        // If the old blanket entry exists, replace it with the selective block.
+        // Remove old blanket entry — entire .fuseraft/ should now be tracked.
         var blanketIndex = Array.FindIndex(lines, l => l.Trim() == ".fuseraft");
         if (blanketIndex >= 0)
         {
@@ -398,22 +398,45 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
             lines = [.. updated];
         }
 
-        // Already has the selective block — nothing to do.
-        if (lines.Any(l => l.Trim() == ".fuseraft/*")) return;
+        // Remove old allowlist block — runtime artifacts are now global, not local.
+        if (lines.Any(l => l.Trim() == ".fuseraft/*"))
+        {
+            var updated = lines
+                .Where(l =>
+                {
+                    var t = l.Trim();
+                    return t != ".fuseraft/*"
+                        && t != "!.fuseraft/.fuseraftignore"
+                        && t != "!.fuseraft/config/"  && t != "!.fuseraft/config/**"
+                        && t != "!.fuseraft/context/" && t != "!.fuseraft/context/**"
+                        && t != "!.fuseraft/knowledge/" && t != "!.fuseraft/knowledge/**"
+                        && t != ".fuseraft/knowledge/repository/";
+                })
+                .ToList();
+            // Also strip the comment line that typically precedes the block.
+            updated = updated
+                .Where(l => !l.TrimStart('#', ' ').StartsWith("fuseraft runtime artifact", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            await File.WriteAllLinesAsync(gitignorePath, updated, cancellationToken);
+            lines = [.. updated];
+        }
+
+        // Already has the new denylist block — nothing to do.
+        if (lines.Any(l => l.Contains(".fuseraft/state/"))) return;
 
         const string block = """
 
-            # fuseraft runtime artifacts — config/, context/, and .fuseraftignore remain tracked
-            .fuseraft/*
-            !.fuseraft/.fuseraftignore
-            !.fuseraft/config/
-            !.fuseraft/config/**
-            !.fuseraft/context/
-            !.fuseraft/context/**
+            # .fuseraft/ — user-authored; runtime artifacts live globally in ~/.fuseraft/
+            # Stale local runtime dirs from before the global migration — delete once confirmed empty
+            .fuseraft/state/
+            .fuseraft/logs/
+            .fuseraft/sessions/
+            .fuseraft/knowledge/repository/
+            .fuseraft/memory/
             """;
 
         await File.AppendAllTextAsync(gitignorePath, block + Environment.NewLine, cancellationToken);
-        AnsiConsole.MarkupLine("[green]✓[/] Updated [bold].gitignore[/] — [dim].fuseraft/config/[/], [dim].fuseraft/context/[/], and [dim].fuseraft/.fuseraftignore[/] will be tracked");
+        AnsiConsole.MarkupLine("[green]✓[/] Updated [bold].gitignore[/] — [dim].fuseraft/[/] user-authored content will be tracked; stale runtime dirs excluded");
     }
 
     private static string DetectDefaultModel()

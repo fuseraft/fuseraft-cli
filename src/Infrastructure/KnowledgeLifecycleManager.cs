@@ -243,11 +243,10 @@ public sealed class KnowledgeLifecycleManager
             return false;
         }
 
-        var archived = await _provenance.CompactAsync(
-            ShouldArchive,
+        var archivePath = FuseraftPaths.ExpandProjectPaths(
             FuseraftPaths.LocalProvenanceArchive,
-            apply,
-            ct);
+            FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory()));
+        var archived = await _provenance.CompactAsync(ShouldArchive, archivePath, apply, ct);
 
         return archived.Select(r => r.Id).ToList();
     }

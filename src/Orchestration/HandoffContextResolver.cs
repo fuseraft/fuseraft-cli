@@ -247,7 +247,7 @@ public sealed class ContextAssembler
         {
             // Collect recently written files from the change log.
             var touchedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var logPath = _changeLogPath ?? FuseraftPaths.LocalChanges;
+            var logPath = _changeLogPath ?? FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalChanges, FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory()));
             if (File.Exists(logPath))
             {
                 try
@@ -310,7 +310,7 @@ public sealed class ContextAssembler
 
     private async Task<string?> ResolveChangesRecentAsync(int count, int maxChars, CancellationToken ct)
     {
-        var logPath = _changeLogPath ?? FuseraftPaths.LocalChanges;
+        var logPath = _changeLogPath ?? FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalChanges, FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory()));
         if (!File.Exists(logPath)) return null;
         try
         {
