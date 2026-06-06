@@ -57,6 +57,13 @@ public sealed class SandboxEnforcementFilter
         : ["/usr/", "/bin/", "/sbin/", "/lib/", "/lib64/", "/opt/", "/nix/",
            "/run/current-system/", "/snap/"];
 
+    // fuseraft's own runtime state directory — always accessible regardless of project sandbox.
+    // Agents must be able to read/write session artifacts (briefs, events, context summaries, etc.)
+    // even when the project sandbox is locked down to the repo root.
+    private static readonly string FuseraftHomePrefix =
+        FuseraftPaths.ExpandPath("~/.fuseraft").TrimEnd(Path.DirectorySeparatorChar)
+        + Path.DirectorySeparatorChar;
+
     // Matches tokens that look like absolute paths inside a shell command string.
     private static readonly Regex AbsolutePathPattern = new(
         @"(?<![:\w])(/[^\s""'`;|&><(){}$\\]{2,}|[A-Za-z]:\\[^\s""'`;|&><(){}]+|\\\\[^\s""'`;|&><(){}]+)",
@@ -463,7 +470,8 @@ public sealed class SandboxEnforcementFilter
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
 
-        return !resolvedCheck.StartsWith(sandboxPrefix, comparison);
+        return !resolvedCheck.StartsWith(sandboxPrefix, comparison)
+            && !resolvedCheck.StartsWith(FuseraftHomePrefix, comparison);
     }
 
     private static bool IsSystemPath(string path)
