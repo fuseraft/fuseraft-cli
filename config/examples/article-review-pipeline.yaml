@@ -1,0 +1,159 @@
+## Three-agent structured-routing pipeline: Writer drafts, Editor reviews, Publisher saves.
+## The Editor's JSON verdict drives routing — no routing keywords required.
+##
+## Run:      fuseraft run --config config/examples/article-review-pipeline.yaml "Your task"
+## Validate: fuseraft validate config/examples/article-review-pipeline.yaml
+
+Orchestration:
+  Name: ArticleReviewPipeline
+  Description: >-
+    A three-agent structured-routing pipeline: Writer drafts an article as JSON,
+    Editor reviews and returns a structured verdict, Publisher finalises approved
+    content to disk. The Editor's approval or revision decision drives routing —
+    no routing keywords required.
+
+  Compaction:
+    TriggerTurnCount: 20
+    KeepRecentTurns: 6
+
+  Agents:
+    - Name: Writer
+      Description: Technical writer who drafts or revises an article based on the task and any editor feedback.
+      Instructions: |
+        You are a technical writer.
+
+        Your job is to produce a well-structured article draft based on the user's task.
+
+        IF THIS IS A REVISION (the conversation contains a previous Editor response with 'revision_needed'):
+        1. Read the Editor's 'feedback' field from their last response.
+        2. Revise your draft to address every point in that feedback.
+        3. Do NOT repeat the same content that was rejected.
+
+        When your draft is ready, respond with ONLY a single JSON object — no preamble, no explanation, no markdown fences:
+        {
+          "title": "<article title>",
+          "content": "<full article text, at least 200 words>",
+          "word_count": <integer>
+        }
+
+        RULES:
+        - Your entire response must be valid JSON. Nothing before or after the object.
+        - 'content' must be at least 200 words.
+        - Address ALL feedback points before submitting a revision.
+      Model:
+        ModelId: grok-4.3
+        Endpoint: https://api.x.ai/v1
+        ApiKeyEnvVar: XAI_API_KEY
+        MaxTokens: 4096
+        ReasoningEffort: none
+      FunctionChoice: none
+
+    - Name: Editor
+      Description: Senior editor who evaluates drafts for quality, accuracy, and completeness.
+      Instructions: |
+        You are a senior editor.
+
+        Read the Writer's most recent JSON response from the conversation. Evaluate the article on these criteria:
+
+        1. MINIMUM LENGTH: 'word_count' must be at least 200. If less, reject immediately.
+        2. TITLE: Must be descriptive and relevant to the content.
+        3. STRUCTURE: Must have at least two distinct sections or paragraphs.
+        4. CLARITY: No unexplained jargon. Key terms must be defined.
+        5. COMPLETENESS: The article must fully address the original user task.
+
+        Respond with ONLY a single JSON object — no preamble, no explanation, no markdown fences:
+
+        If the draft passes all criteria:
+        {
+          "verdict": "approved",
+          "feedback": "<brief summary of what is good>",
+          "word_count_ok": true
+        }
+
+        If the draft fails one or more criteria:
+        {
+          "verdict": "revision_needed",
+          "feedback": "<specific, actionable list of every issue that must be fixed>",
+          "word_count_ok": <true or false>
+        }
+
+        RULES:
+        - Your entire response must be valid JSON. Nothing before or after the object.
+        - Be specific in feedback — name the exact issue and what the Writer must do to fix it.
+        - Do not approve a draft shorter than 200 words under any circumstances.
+      Model:
+        ModelId: grok-4.3
+        Endpoint: https://api.x.ai/v1
+        ApiKeyEnvVar: XAI_API_KEY
+        MaxTokens: 2048
+        ReasoningEffort: none
+      FunctionChoice: none
+
+    - Name: Publisher
+      Description: Publisher who saves the approved article to disk as a Markdown file.
+      Instructions: |
+        You are a content publisher.
+
+        The article has been approved by the Editor. Your job is to save it to disk.
+
+        FOLLOW THESE STEPS IN ORDER:
+
+        1. FIND CONTENT: Locate the Writer's last JSON response in the conversation. Extract the 'title' and 'content' fields.
+
+        2. FORMAT: Produce a clean Markdown document:
+           - First line: # <title>
+           - Blank line
+           - Body: the 'content' field, with blank lines between paragraphs
+
+        3. SAVE: Use write_file to save the document to 'output/article.md'. Create the file with the full formatted content.
+
+        4. VERIFY: Use read_file to confirm 'output/article.md' was written and matches the intended content.
+
+        5. CONFIRM: Write a brief summary of what was published, then write PUBLISHED on its own line.
+
+        RULES:
+        - Never claim the file was written without verifying it with read_file.
+        - The output file must contain the approved content verbatim.
+      Model:
+        ModelId: grok-4.3
+        Endpoint: https://api.x.ai/v1
+        ApiKeyEnvVar: XAI_API_KEY
+        MaxTokens: 4096
+        ReasoningEffort: none
+      Plugins:
+        - FileSystem
+
+  Selection:
+    Type: structured
+    DefaultAgent: Writer
+    StructuredRoutes:
+      - Agent: Editor
+        Condition:
+          Field: content
+          Exists: true
+        SourceAgents:
+          - Writer
+
+      - Agent: Publisher
+        Condition:
+          Field: verdict
+          Is: approved
+        SourceAgents:
+          - Editor
+
+      - Agent: Writer
+        Condition:
+          Field: verdict
+          Is: revision_needed
+        SourceAgents:
+          - Editor
+
+  Termination:
+    Type: composite
+    MaxIterations: 12
+    Strategies:
+      - Type: regex
+        Pattern: "PUBLISHED"
+        MaxIterations: 12
+        AgentNames:
+          - Publisher
