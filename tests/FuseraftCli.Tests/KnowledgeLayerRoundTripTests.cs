@@ -341,7 +341,7 @@ public sealed class KnowledgeLayerRoundTripTests : IDisposable
             Pattern          = "Always use async for I/O operations",
             Status           = "Approved",
             Confidence       = "Verified",
-            LastReinforcedAt = DateTimeOffset.UtcNow.AddDays(-200),
+            LastReinforcedAt = DateTimeOffset.UtcNow.AddDays(-100),
         });
         await _memStore.SaveAsync(new RepositoryMemoryEntry
         {
@@ -354,6 +354,9 @@ public sealed class KnowledgeLayerRoundTripTests : IDisposable
 
         var gc     = new KnowledgeLifecycleManager(_adrStore, _memStore, _graphStore, _provenance);
         var report = await gc.RunAsync(
+            // MemoryCandidatePruningDays defaults to 180 — keep the stale entry at
+            // -100 days so it crosses the demotion window (90d) but not the pruning
+            // window (180d), ensuring we test demotion without triggering deletion.
             new LifecyclePolicy { MemoryReinforceWindowDays = 90 }, apply: true);
 
         Assert.Contains(staleId,    report.DemotedMemoryIds);
