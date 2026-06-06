@@ -12,9 +12,10 @@ namespace fuseraft.Cli.Display;
 /// </summary>
 public static class ThemeDetector
 {
-    private static bool? _isLight;
+    private static readonly Lazy<bool> _isLight =
+        new(Detect, LazyThreadSafetyMode.ExecutionAndPublication);
 
-    public static bool IsLightBackground => _isLight ??= Detect();
+    public static bool IsLightBackground => _isLight.Value;
 
     // Semantic markup colour strings — use these instead of hard-coding "yellow".
     public static string Warning => IsLightBackground ? "olive"  : "yellow";

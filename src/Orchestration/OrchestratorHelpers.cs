@@ -1,5 +1,6 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 
@@ -26,7 +27,10 @@ internal static class OrchestratorHelpers
         return new TokenUsage(inputTokens, outputTokens);
     }
 
-    internal static IReadOnlyList<ToolCallRecord>? ExtractToolCalls(IList<ChatMessage> messages)
+    internal static IReadOnlyList<ToolCallRecord>? ExtractToolCalls(
+        IList<ChatMessage> messages,
+        ILogger? logger = null,
+        string agentName = "Unknown")
     {
         var calls   = new List<(string CallId, string Name, string? ArgsSummary)>();
         var results = new Dictionary<string, bool>(StringComparer.Ordinal);
@@ -49,11 +53,25 @@ internal static class OrchestratorHelpers
                                 && !text.StartsWith("[NOT FOUND]", StringComparison.Ordinal)
                                 && !text.StartsWith("[EXIT ",      StringComparison.Ordinal);
                         if (!string.IsNullOrEmpty(key)) results[key] = ok;
+
+                        if (!ok && logger is not null)
+                        {
+                            var toolName = calls.LastOrDefault(c => c.CallId == key).Name ?? key;
+                            logger.LogWarning(
+                                "[{Agent}] Tool '{Tool}' failed: {ResultPreview}",
+                                agentName, toolName,
+                                text.Length > 120 ? text[..120].Replace('\n', ' ') : text.Replace('\n', ' '));
+                        }
                     }
                 }
             }
         }
-        catch (Exception) { /* best-effort — return null on any parse error */ }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex,
+                "[{Agent}] Failed to parse tool calls from agent response — tool call records will be incomplete.",
+                agentName);
+        }
 
         if (calls.Count == 0) return null;
 

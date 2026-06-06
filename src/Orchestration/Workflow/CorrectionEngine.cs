@@ -79,7 +79,8 @@ internal static class CorrectionEngine
         int consecutiveCount,
         string responseText,
         string foundKeyword,
-        EventEmitter? eventEmitter = null)
+        EventEmitter? eventEmitter = null,
+        int maxRetries = GraphOrchestrator.DefaultMaxRetries)
     {
         // On second+ retry, check whether the agent actually called any tools.
         if (consecutiveCount > 1 && !CurrentTurnHasToolCalls(history))
@@ -123,7 +124,7 @@ internal static class CorrectionEngine
             : string.Empty;
 
         var errorToInject = consecutiveCount > 1
-            ? $"RETRY {consecutiveCount}/{GraphOrchestrator.DefaultMaxRetries} — Previous attempt did not resolve this. Do not repeat it.\n\n" +
+            ? $"RETRY {consecutiveCount}/{maxRetries} — Previous attempt did not resolve this. Do not repeat it.\n\n" +
               errorMessage + buildDetail
             : errorMessage + buildDetail;
 

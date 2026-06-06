@@ -78,7 +78,7 @@ Orchestration/
   GraphExpansionRetriever.cs — One-hop graph traversal for KnowledgeWeight.High agents
   KnowledgeRetriever.cs      — Queries IKnowledgeLayer + RepositoryMemoryStore + RepositoryKnowledgeStore
   ObservationExtractor.cs    — Extracts entity-scoped findings from tool call results; builds compaction tool traces
-  RelevanceMemoryRanker.cs   — Ranks MemoryEntry records by keyword overlap + type priority
+  MemoryManager.cs           — Aggregates IMemoryProvider instances; PreTurnAsync builds the memory block for every agent turn
   Saga/                   — SagaOrchestrator: compensating rollback wrapper
   Strategies/             — Selection and termination strategy implementations
   Validation/             — Routing validator implementations

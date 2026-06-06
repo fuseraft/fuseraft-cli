@@ -767,7 +767,7 @@ public sealed class GraphOrchestrator(
                             throw new ValidatorStuckException(agentName, termValidator!, consecutiveFails, termErr!);
 
                         await EmitAndInjectValidationFailureAsync(
-                            agentName, "(terminal)", termValidator!, termErr!, responseText, consecutiveFails, ctx, ct);
+                            agentName, "(terminal)", termValidator!, termErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
                         continue;
                     }
                 }
@@ -831,7 +831,7 @@ public sealed class GraphOrchestrator(
                         throw new ValidatorStuckException(agentName, autoValidator!, consecutiveFails, autoErr!);
 
                     await EmitAndInjectValidationFailureAsync(
-                        agentName, "(unconditional)", autoValidator!, autoErr!, responseText, consecutiveFails, ctx, ct);
+                        agentName, "(unconditional)", autoValidator!, autoErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
                     continue;
                 }
 
@@ -852,7 +852,7 @@ public sealed class GraphOrchestrator(
                                 throw new ValidatorStuckException(agentName, ubValidator!, consecutiveFails, ubErr!);
 
                             await EmitAndInjectValidationFailureAsync(
-                                agentName, "(unconditional-back)", ubValidator!, ubErr!, responseText, consecutiveFails, ctx, ct);
+                                agentName, "(unconditional-back)", ubValidator!, ubErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
                             continue;
                         }
                     }
@@ -958,7 +958,7 @@ public sealed class GraphOrchestrator(
                         }
 
                         await EmitAndInjectValidationFailureAsync(
-                            agentName, foundKeyword, pbValidator!, pbErr!, responseText, consecutiveFails, ctx, ct);
+                            agentName, foundKeyword, pbValidator!, pbErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
                         continue;
                     }
                 }
@@ -1018,7 +1018,7 @@ public sealed class GraphOrchestrator(
                         throw new ValidatorStuckException(agentName, pgValidator!, consecutiveFails, pgErr!);
 
                     await EmitAndInjectValidationFailureAsync(
-                        agentName, foundKeyword, pgValidator!, pgErr!, responseText, consecutiveFails, ctx, ct);
+                        agentName, foundKeyword, pgValidator!, pgErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
                     continue;
                 }
 
@@ -1172,7 +1172,7 @@ public sealed class GraphOrchestrator(
                 }
 
                 await EmitAndInjectValidationFailureAsync(
-                    agentName, foundKeyword, failingValidator!, errMsg!, responseText, consecutiveFails, ctx, ct);
+                    agentName, foundKeyword, failingValidator!, errMsg!, responseText, consecutiveFails, maxRetries, ctx, ct);
                 continue;
             }
 
@@ -1461,6 +1461,7 @@ public sealed class GraphOrchestrator(
         string errMsg,
         string responseText,
         int consecutiveFails,
+        int maxRetries,
         AgentContext ctx,
         CancellationToken ct)
     {
@@ -1476,7 +1477,7 @@ public sealed class GraphOrchestrator(
                 });
 
         int histBefore = ctx.History.Count;
-        await CorrectionEngine.InjectValidationError(ctx.History, errMsg, consecutiveFails, responseText, keyword, eventEmitter);
+        await CorrectionEngine.InjectValidationError(ctx.History, errMsg, consecutiveFails, responseText, keyword, eventEmitter, maxRetries);
         await PersistCorrectionsAsync(ctx, histBefore, ct).ConfigureAwait(false);
     }
 
@@ -1715,7 +1716,7 @@ public sealed class GraphOrchestrator(
                 }
 
                 await EmitAndInjectValidationFailureAsync(
-                    agentName, foundKeyword, failingValidator!, errMsg!, responseText, consecutiveFails, ctx, ct);
+                    agentName, foundKeyword, failingValidator!, errMsg!, responseText, consecutiveFails, maxRetries, ctx, ct);
                 continue;
             }
 

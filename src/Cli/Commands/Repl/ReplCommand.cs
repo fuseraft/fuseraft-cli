@@ -560,7 +560,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 await ctx.Emitter.EmitAsync("skill_curation_complete",
                     payload: new { session = ctx.SessionId, source = "repl", outcome = "failed", failure_reason = ex.Message });
             }
-            catch (Exception emitEx) { System.Diagnostics.Debug.WriteLine($"[SkillCuration] emitter failed: {emitEx.Message}"); }
+            catch (Exception emitEx) { loggerFactory.CreateLogger<ReplCommand>().LogWarning(emitEx, "[SkillCuration] emitter failed: {Message}", emitEx.Message); }
         }
     }
 }
