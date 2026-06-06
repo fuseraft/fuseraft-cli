@@ -37,6 +37,7 @@ public static class MessageRenderer
         string sessionId,
         int memoryCount,
         int skillCount,
+        string? branch = null,
         string? eventsPath = null)
     {
         var ver = typeof(MessageRenderer).Assembly
@@ -53,11 +54,16 @@ public static class MessageRenderer
         var pluginList = string.Join(", ", pluginNames);
 
         // Labels are right-padded so values align at column 10.
+        var branchLine = branch is not null
+            ? $"[dim]Branch:[/]   {Markup.Escape(branch)}\n"
+            : string.Empty;
+
         var content = new Markup(
             $"[bold]fuseraft[/] [dim]- multi-agent orchestration framework (v{Markup.Escape(semver)})[/]\n" +
             $"\n" +
             $"[dim]Model:[/]    {Markup.Escape(modelId)}\n" +
             $"[dim]Path:[/]     {Markup.Escape(displayPath)}\n" +
+            $"{branchLine}" +
             $"[dim]Plugins:[/]  {Markup.Escape(pluginList)}\n" +
             $"[dim]Session:[/]  {Markup.Escape(sessionId)}\n" +
             $"\n" +

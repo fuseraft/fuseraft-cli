@@ -270,6 +270,8 @@ internal static class ReplTurn
         var sb                = new StringBuilder();
         var toolCallsThisTurn = new List<string>();
         var toolCallDetails   = new List<(string Name, string? Args)>();
+        var fileChanges        = new List<(char Sigil, string Path)>();
+        var fileChangeSeen     = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var toolRounds        = 0;
         var inToolBatch       = false;
         var textStarted       = false;
@@ -309,6 +311,7 @@ internal static class ReplTurn
                     if (!inToolBatch) { toolRounds++; inToolBatch = true; }
                     toolCallsThisTurn.Add(funcCall.Name);
                     toolCallDetails.Add((funcCall.Name, SummarizeToolArgs(funcCall.Arguments)));
+                    TrackFileChange(funcCall.Name, funcCall.Arguments, fileChanges, fileChangeSeen, ctx.Cwd);
 
                     if (ctx.JsonMode)
                     {
@@ -355,10 +358,9 @@ internal static class ReplTurn
                         {
                             textStarted = true;
                             await StopSpinnerAsync();
-                            // Print compact tool-call chain before the response starts.
                             if (toolCallsThisTurn.Count > 0 && !Console.IsOutputRedirected)
                                 AnsiConsole.MarkupLine(
-                                    $"  [dim]⚙  {Markup.Escape(string.Join(" → ", toolCallsThisTurn))}[/]");
+                                    $"  [dim]⚙  {Markup.Escape(BuildToolSummary(toolCallsThisTurn))}[/]");
                         }
                         else if (spinning)
                         {
@@ -465,7 +467,7 @@ internal static class ReplTurn
             if (!Console.IsOutputRedirected)
                 ClearSpinnerLine();
             AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[dim]assistant:[/]");
+            AnsiConsole.MarkupLine("[dim]A:[/]");
             AnsiConsole.Write(MarkdownRenderer.Render(responseText));
         }
         if (!ctx.JsonMode) AnsiConsole.WriteLine();
@@ -530,11 +532,18 @@ internal static class ReplTurn
         // Compact status line after each free-form response.
         if (!ctx.JsonMode && !isStepRequest && !capturePlan && responseText.Length > 0 && !Console.IsOutputRedirected)
         {
-            var toolStr = toolCallsThisTurn.Count > 0
+            var elapsed    = DateTime.UtcNow - turnStart;
+            var elapsedStr = elapsed.TotalSeconds >= 1 ? $" · {(int)elapsed.TotalSeconds}s" : string.Empty;
+            var toolStr    = toolCallsThisTurn.Count > 0
                 ? $" · {toolCallsThisTurn.Count} tool{(toolCallsThisTurn.Count == 1 ? "" : "s")}"
                 : string.Empty;
             AnsiConsole.MarkupLine(
-                $"[dim]  ── turn {ctx.TurnIndex + 1} · ~{postEst:N0} tok{toolStr}[/]");
+                $"[dim]  ── turn {ctx.TurnIndex + 1} · ~{postEst:N0} tok{toolStr}{elapsedStr}[/]");
+            foreach (var (sigil, path) in fileChanges)
+            {
+                var sigilColor = sigil == 'D' ? "red" : sigil == 'A' ? "green" : "yellow";
+                AnsiConsole.MarkupLine($"  [{sigilColor}]{sigil}[/] [dim]{Markup.Escape(path)}[/]");
+            }
         }
 
         // One-time 75 % context warning. Fires on free-form turns only (not
@@ -585,7 +594,15 @@ internal static class ReplTurn
         }
 
         if (ctx.JsonMode)
+        {
+            if (fileChanges.Count > 0)
+                ReplJsonBridge.Emit(new
+                {
+                    type    = "file_changes",
+                    changes = fileChanges.Select(f => new { sigil = f.Sigil.ToString(), path = f.Path }).ToArray(),
+                });
             ReplJsonBridge.Emit(new { type = "message_end", turnIndex = ctx.TurnIndex, toolCalls = toolCallsThisTurn.ToArray() });
+        }
 
         ctx.TurnIndex++;
         return stepPassed;
@@ -865,6 +882,91 @@ internal static class ReplTurn
 
     internal static bool TryParsePlan(string text, out PlanStep[] steps) =>
         PlanStep.TryParse(text, out steps);
+
+    private static string BuildToolSummary(List<string> toolCalls)
+    {
+        int reads = 0, searches = 0, writes = 0, shell = 0, git = 0, skills = 0, other = 0;
+        foreach (var name in toolCalls)
+        {
+            var n = name.Replace("_", "").ToLowerInvariant();
+            if (n is "readfile" or "listdirectory" or "listfiles" or "grepfile"
+                    or "getfilesummary" or "getfileinfo")
+                reads++;
+            else if (n.StartsWith("search"))
+                searches++;
+            else if (n is "writefile" or "patchfile" or "createdirectory"
+                    or "deletefile" or "deletedirectory" or "copyfile" or "movefile")
+                writes++;
+            else if (n.StartsWith("shell"))
+                shell++;
+            else if (n.StartsWith("git"))
+                git++;
+            else if (n is "loadskill")
+                skills++;
+            else
+                other++;
+        }
+        var parts = new List<string>();
+        if (reads    > 0) parts.Add($"{reads} read{(reads    == 1 ? "" : "s")}");
+        if (searches > 0) parts.Add($"{searches} search{(searches == 1 ? "" : "es")}");
+        if (writes   > 0) parts.Add($"{writes} write{(writes   == 1 ? "" : "s")}");
+        if (shell    > 0) parts.Add($"{shell} shell");
+        if (git      > 0) parts.Add($"{git} git");
+        if (skills   > 0) parts.Add($"{skills} skill{(skills   == 1 ? "" : "s")}");
+        if (other    > 0) parts.Add($"{other} other");
+        var total  = toolCalls.Count;
+        var detail = parts.Count > 1 ? $"  ({string.Join(" · ", parts)})" : string.Empty;
+        return $"{total} tool{(total == 1 ? "" : "s")}{detail}";
+    }
+
+    private static void TrackFileChange(
+        string toolName,
+        IDictionary<string, object?>? args,
+        List<(char Sigil, string Path)> fileChanges,
+        HashSet<string> seen,
+        string cwd)
+    {
+        var n = toolName.Replace("_", "").ToLowerInvariant();
+        string? rawPath;
+        char sigil;
+        if (n is "writefile" or "patchfile")
+        {
+            rawPath = GetArg(args, "path");
+            var abs = rawPath is null ? null
+                : Path.IsPathRooted(rawPath) ? rawPath : Path.Combine(cwd, rawPath);
+            sigil = abs is not null && File.Exists(abs) ? 'M' : 'A';
+        }
+        else if (n is "createdirectory")  { rawPath = GetArg(args, "path");                                 sigil = 'A'; }
+        else if (n is "deletefile" or "deletedirectory") { rawPath = GetArg(args, "path");                  sigil = 'D'; }
+        else if (n is "copyfile")         { rawPath = GetArg(args, "destination") ?? GetArg(args, "path");  sigil = 'A'; }
+        else if (n is "movefile")         { rawPath = GetArg(args, "destination");                          sigil = 'M'; }
+        else return;
+        if (string.IsNullOrWhiteSpace(rawPath)) return;
+        var display = MakeRelativePath(rawPath, cwd);
+        if (seen.Add(display))
+            fileChanges.Add((sigil, display));
+    }
+
+    private static string? GetArg(IDictionary<string, object?>? args, string key)
+    {
+        if (args is null) return null;
+        return args.TryGetValue(key, out var v) ? v?.ToString() : null;
+    }
+
+    private static string MakeRelativePath(string path, string cwd)
+    {
+        try
+        {
+            var abs = Path.IsPathRooted(path) ? path : Path.GetFullPath(Path.Combine(cwd, path));
+            if (abs.StartsWith(cwd, StringComparison.OrdinalIgnoreCase))
+            {
+                var rel = abs[cwd.Length..].TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                return string.IsNullOrEmpty(rel) ? abs : rel;
+            }
+            return abs;
+        }
+        catch { return path; }
+    }
 
     private static string? SummarizeToolArgs(IDictionary<string, object?>? args)
     {
