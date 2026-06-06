@@ -23,6 +23,10 @@ public sealed class SkillsPlugin
 
     public int Count => _skillDirs.Count;
 
+    public IEnumerable<string> Slugs => _skillDirs.Keys;
+
+    public bool HasSkill(string slug) => _skillDirs.ContainsKey(slug);
+
     public SkillsPlugin(IReadOnlyDictionary<string, string> skillDirs)
     {
         _skillDirs = skillDirs;

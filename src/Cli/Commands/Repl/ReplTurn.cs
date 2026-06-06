@@ -179,6 +179,35 @@ internal static class ReplTurn
                 continue;
             }
 
+            if (raw.StartsWith('$'))
+            {
+                var parts = raw.Split(' ', 2, StringSplitOptions.TrimEntries);
+                var slug  = parts[0][1..]; // strip '$'
+                var args  = parts.Length > 1 ? parts[1] : string.Empty;
+
+                if (ctx.SkillsPlugin is null || !ctx.SkillsPlugin.HasSkill(slug))
+                {
+                    var available = ctx.SkillsPlugin is not null
+                        ? $"Available: {string.Join(", ", ctx.SkillsPlugin.Slugs.Take(10))}"
+                        : "No skills are loaded in this session.";
+                    var errMsg = string.IsNullOrEmpty(slug)
+                        ? $"Usage: $<skill-name> [args]. {available}"
+                        : $"Skill '{slug}' not found. {available}";
+                    if (ctx.JsonMode)
+                        ReplJsonBridge.Emit(new { type = "error", text = errMsg });
+                    else
+                        AnsiConsole.MarkupLine($"[red]{Markup.Escape(errMsg)}[/]");
+                    continue;
+                }
+
+                var skillContent = await ctx.SkillsPlugin.LoadSkillAsync(slug, cancellationToken);
+                var input = string.IsNullOrEmpty(args) ? skillContent : $"{skillContent}\n\n{args}";
+
+                await ExecuteAsync(ctx, input, isStepRequest: false, capturePlan: false, activeStep: null, cancellationToken);
+                _ = SaveSnapshotAsync(ctx);
+                continue;
+            }
+
             if (raw.Equals("exit", StringComparison.OrdinalIgnoreCase) ||
                 raw.Equals("quit", StringComparison.OrdinalIgnoreCase))
                 break;

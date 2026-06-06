@@ -35,7 +35,10 @@ internal sealed class ReplLineReader
 
     private bool     _tabActive;
     private int      _tabIndex;
-    private string[] _tabMatches = [];
+    private string[] _tabMatches  = [];
+    private string[] _skillSlugs  = [];
+
+    internal void SetSkillSlugs(string[] slugs) => _skillSlugs = slugs;
 
     // ── Input history ─────────────────────────────────────────────────────────
 
@@ -236,6 +239,30 @@ internal sealed class ReplLineReader
                     case ConsoleKey.Tab:
                     {
                         var text = buffer.ToString();
+
+                        if (text.StartsWith('$') && !text.Contains(' '))
+                        {
+                            // Complete $skill-name
+                            var partial = text[1..];
+                            if (!_tabActive)
+                            {
+                                _tabMatches = _skillSlugs
+                                    .Where(s => s.StartsWith(partial, StringComparison.OrdinalIgnoreCase))
+                                    .Select(s => '$' + s)
+                                    .ToArray();
+                                _tabIndex = -1;
+                            }
+                            if (_tabMatches.Length == 0) break;
+                            _tabIndex = (_tabIndex + 1) % _tabMatches.Length;
+                            buffer.Clear();
+                            buffer.Append(_tabMatches[_tabIndex]);
+                            if (_tabMatches.Length == 1) buffer.Append(' ');
+                            cursorPos  = buffer.Length;
+                            _tabActive = true;
+                            Redraw();
+                            break;
+                        }
+
                         if (!text.StartsWith('/')) break;
 
                         var spaceIdx = text.IndexOf(' ');
