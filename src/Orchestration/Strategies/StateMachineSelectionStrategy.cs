@@ -66,6 +66,10 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
     // Used to inject escalation prompts when MaxRevisits is exceeded.
     private readonly Dictionary<string, int> _backEdgeVisits = new(StringComparer.OrdinalIgnoreCase);
 
+    // States visited in the current session (accumulated on each successful transition).
+    // Used to detect back-edge signals to already-completed states.
+    private readonly HashSet<string> _visitedStates = new(StringComparer.OrdinalIgnoreCase);
+
     // Verifier support.
     private readonly string? _verifierAgentName;
     private readonly bool _triggerVerifierOnConflict;
@@ -110,6 +114,10 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
         {
             _logger.LogDebug("[StateMachine] SetCurrentState: restoring state '{State}' after compaction", stateName);
             _currentState = stateName;
+            // If we're resuming past the initial state, the initial state was already
+            // visited — seed _visitedStates so the replan guard fires correctly.
+            if (!string.Equals(stateName, _machine.Initial, StringComparison.OrdinalIgnoreCase))
+                _visitedStates.Add(_machine.Initial);
         }
         else
         {
@@ -228,6 +236,38 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                         "[StateMachine] Signal '{Signal}' → '{To}' already consumed — skipping",
                         transition.Signal, transition.To);
                     continue;
+                }
+
+                // Block no-contract back-edge signals (e.g. "REPLAN REQUIRED") while a
+                // forward transition from this state has an active contract failure.
+                // Re-entering a prior state under these conditions wastes a full planning
+                // cycle without resolving the underlying issue — inject a correction instead.
+                if (transition.AllContracts.Count == 0
+                    && _visitedStates.Contains(transition.To)
+                    && _transitionFailure is { } blockedFailure
+                    && blockedFailure.Key.StartsWith(_currentState + "::", StringComparison.OrdinalIgnoreCase))
+                {
+                    var blockedTo = blockedFailure.Key[(_currentState.Length + 2)..];
+
+                    if (_history is not null)
+                        _history.Add(new ChatMessage(ChatRole.User,
+                            $"REPLAN BLOCKED — '{_currentState}' → '{blockedTo}' has {blockedFailure.Count} consecutive " +
+                            $"contract failure(s). Fix the contract first; routing back to '{transition.To}' is not allowed " +
+                            $"until the forward path is clear.\n\n" +
+                            blockedFailure.LastError));
+
+                    if (_eventEmitter is not null)
+                        _ = _eventEmitter.EmitAsync("replan_blocked",
+                            agent: state.Agent,
+                            payload: new { from = _currentState, to = transition.To, blocked_transition = blockedTo, consecutive = blockedFailure.Count });
+
+                    _logger.LogDebug(
+                        "[StateMachine] Blocked back-edge '{From}' → '{To}': active contract failure on '{CurrentState}' → '{BlockedTo}'",
+                        _currentState, transition.To, _currentState, blockedTo);
+
+                    return FindAgent(agents, state.Agent)
+                           ?? throw new InvalidOperationException(
+                               $"[StateMachine] Agent '{state.Agent}' not found in pool for state '{_currentState}'.");
                 }
 
                 _logger.LogDebug(
@@ -351,6 +391,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                     "[StateMachine] Transition fired: '{From}' → '{To}' (agent: {From_Agent} → {To_Agent})",
                     _currentState, targetState, state.Agent, nextState.Agent);
 
+                _visitedStates.Add(_currentState);
                 _currentState = targetState;
                 return FindAgent(agents, nextState.Agent)
                        ?? throw new InvalidOperationException(
