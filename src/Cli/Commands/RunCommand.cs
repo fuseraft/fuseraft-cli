@@ -99,7 +99,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         // Resolve the effective working directory: --work-dir > config sandbox path > CWD.
         // This must happen before BuildActiveStore so that all subsequent relative-path
         // resolutions (checkpoint path, validation paths, change log, etc.) are rooted here.
-        var workDir = ResolveWorkDir(settings.WorkDir, configPath);
+        var workDir = ResolveWorkDir(settings.WorkDir, configPath, loggerFactory.CreateLogger<RunCommand>());
         if (workDir is not null)
         {
             if (!Directory.Exists(workDir))
@@ -638,7 +638,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         if (File.Exists(configPath))
         {
             try { checkpointConfig = OrchestratorBuilder.LoadConfig(configPath).Checkpoint; }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[BuildActiveStore] {ex.Message}"); }
+            catch (Exception ex) { loggerFactory.CreateLogger<RunCommand>().LogWarning(ex, "[BuildActiveStore] {Message}", ex.Message); }
         }
 
         if (checkpointConfig?.Mode?.Equals("memory", StringComparison.OrdinalIgnoreCase) == true)
@@ -872,7 +872,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         return names;
     }
 
-    private static string? ResolveWorkDir(string? flagValue, string absoluteConfigPath)
+    private static string? ResolveWorkDir(string? flagValue, string absoluteConfigPath, ILogger? logger = null)
     {
         if (!string.IsNullOrWhiteSpace(flagValue))
             return FuseraftPaths.ExpandPath(flagValue);
@@ -886,7 +886,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
                 if (!string.IsNullOrWhiteSpace(sandboxPath))
                     return FuseraftPaths.ExpandPath(sandboxPath);
             }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[ResolveWorkDir] {ex.Message}"); }
+            catch (Exception ex) { logger?.LogWarning(ex, "[ResolveWorkDir] {Message}", ex.Message); }
         }
 
         return null; // keep CWD
