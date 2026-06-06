@@ -1013,7 +1013,7 @@ public static class OrchestratorBuilder
         memoryManager?.AttachRepositoryMemory(repoMemoryStore);
 
         var graphExpander   = new fuseraft.Orchestration.GraphExpansionRetriever(knowledgeLayer.GraphStore);
-        var knowledgeStore  = new fuseraft.Infrastructure.RepositoryKnowledgeStore(FuseraftPaths.LocalKnowledgeFindings);
+        var knowledgeStore  = new fuseraft.Infrastructure.RepositoryKnowledgeStore(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalKnowledgeFindings, projectSlug));
         var pipelineLogger  = loggerFactory.CreateLogger<fuseraft.Orchestration.ContextAssemblyPipeline>();
         var contextPipeline = new fuseraft.Orchestration.ContextAssemblyPipeline(
             knowledgeLayer:   knowledgeLayer,
@@ -1590,6 +1590,10 @@ public static class OrchestratorBuilder
 
             Events = config.Events is { } ev
                 ? ev with { Path = E(ev.Path) }
+                : null,
+
+            EvidenceStore = config.EvidenceStore is { } es
+                ? es with { Path = E(es.Path) }
                 : null,
         };
     }

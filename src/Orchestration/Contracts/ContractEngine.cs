@@ -254,11 +254,18 @@ public sealed class ContractEngine
             return (false,
                 $"Contract '{contractName}' config error: CommandSucceeded requires 'Pattern' or 'PatternField' (pointing to a non-empty string field in the brief).");
 
-        var patterns = pattern.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var commands  = await LoadSucceededCommandsAsync(ct);
+        var alternatives = pattern.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var commands     = await LoadSucceededCommandsAsync(ct);
 
-        bool found = commands.Any(cmd =>
-            patterns.Any(p => cmd.Contains(p, StringComparison.OrdinalIgnoreCase)));
+        // A pipe-separated pattern matches when ANY alternative is satisfied.
+        // An &&-chained alternative is satisfied when ALL its sub-commands appear
+        // as successful shell_run calls — each may be a separate invocation.
+        bool found = alternatives.Any(alt =>
+        {
+            var subCmds = alt.Split("&&", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return subCmds.All(sub =>
+                commands.Any(cmd => cmd.Contains(sub, StringComparison.OrdinalIgnoreCase)));
+        });
 
         if (found)
             return (true, null);
@@ -382,7 +389,7 @@ public sealed class ContractEngine
     // Reads acceptance_criteria from brief.json (best-effort; returns empty on any error).
     private async Task<List<string>> TryReadAcceptanceCriteriaAsync(CancellationToken ct)
     {
-        var briefPath = _validationConfig?.BriefPath ?? FuseraftPaths.LocalBrief;
+        var briefPath = Expand(_validationConfig?.BriefPath ?? FuseraftPaths.LocalBrief);
         if (!File.Exists(briefPath)) return [];
 
         try
