@@ -1,0 +1,140 @@
+## Two-agent research pipeline: Researcher fetches and saves findings, Writer synthesises a report.
+## State machine routing with a ResearchComplete contract ensures the Writer cannot start before
+## findings exist on disk.
+##
+## Run:      fuseraft run --config config/examples/research-team.yaml "Your task"
+## Validate: fuseraft validate config/examples/research-team.yaml
+
+Orchestration:
+  Name: ResearchTeam
+  Description: >-
+    Two-agent research pipeline: Researcher fetches data and writes structured
+    findings to disk; Writer synthesises a polished report. State machine routing
+    with a ResearchComplete contract ensures the Writer cannot start before
+    findings exist on disk.
+
+  EvidenceStore:
+    Path: .fuseraft/state/evidence.json
+
+  ChangeTracking:
+    Path: .fuseraft/state/changes.json
+
+  Contracts:
+    - Name: ResearchComplete
+      Requires:
+        - Type: FileExists
+          Path: research/raw_data.txt
+
+  FailureHandling:
+    MissingEvidence:
+      Action: Reinstruct
+      Threshold: 3
+    NoProgress:
+      Action: Abort
+      Threshold: 3
+
+  Compaction:
+    TriggerTurnCount: 20
+    KeepRecentTurns: 6
+    Mode: lossless
+
+  Agents:
+    - Name: Researcher
+      Description: Data researcher who fetches real information using HTTP and filesystem tools.
+      Instructions: |
+        You are a research specialist.
+
+        FOLLOW THESE STEPS IN ORDER:
+
+        1. FETCH: Use http_get to retrieve data from relevant public APIs or URLs. Include the exact response content.
+
+        2. EXTRACT: Use json_get to pull specific fields from JSON responses. Don't paraphrase — capture the real data.
+
+        3. SAVE: Use write_file to save your raw findings to 'research/raw_data.txt'. The file must exist on disk before you hand off.
+
+        4. VERIFY: Use read_file on 'research/raw_data.txt' to confirm it was written correctly.
+
+        5. HAND OFF: Call handoff(route_keyword: "HANDOFF TO WRITER") with a summary of what sources you consulted and what data was captured.
+
+        RULES:
+        - Never summarize or paraphrase API responses — write the actual data to the file.
+        - Never claim a file was written without verifying it with read_file.
+      Model:
+        ModelId: grok-4.3
+        Endpoint: https://api.x.ai/v1
+        ApiKeyEnvVar: XAI_API_KEY
+        MaxTokens: 8192
+        ReasoningEffort: none
+      FunctionChoice: required
+      Plugins:
+        - Http
+        - Json
+        - FileSystem
+        - Changes
+        - Handoff
+
+    - Name: Writer
+      Description: Technical writer who synthesises research into a structured report.
+      Instructions: |
+        You are a technical writer.
+
+        FOLLOW THESE STEPS IN ORDER:
+
+        1. READ: Use read_file to load 'research/raw_data.txt'. Do not proceed if the file is missing or empty —
+           report BLOCKED: no research data found.
+
+        2. ANALYSE: Identify key insights, patterns, trends, and gaps in the data.
+
+        3. WRITE REPORT: Use write_file to save a structured Markdown report to 'research/report.md'. The report
+           must have clear sections: Summary, Key Findings, and Recommendations.
+
+        4. VERIFY: Use read_file to confirm 'research/report.md' was written correctly.
+
+        5. COMPLETE: Call handoff(route_keyword: "REPORT COMPLETE") followed by a one-paragraph summary of the findings.
+      Model:
+        ModelId: grok-4.3
+        Endpoint: https://api.x.ai/v1
+        ApiKeyEnvVar: XAI_API_KEY
+        MaxTokens: 8192
+        ReasoningEffort: low
+      FunctionChoice: required
+      Plugins:
+        - FileSystem
+        - Json
+        - Handoff
+
+  Selection:
+    Type: statemachine
+    StateMachine:
+      Initial: Research
+
+      States:
+        Research:
+          Agent: Researcher
+          Transitions:
+            - To: Writing
+              Signal: "HANDOFF TO WRITER"
+              Contract: ResearchComplete
+
+        Writing:
+          Agent: Writer
+          Transitions:
+            - To: Done
+              Signal: "REPORT COMPLETE"
+
+        Done:
+          Agent: Writer
+          Terminal: true
+
+  Termination:
+    Type: composite
+    MaxIterations: 15
+    Strategies:
+      - Type: regex
+        Pattern: "REPORT COMPLETE"
+        MaxIterations: 15
+        AgentNames:
+          - Writer
+
+  Events:
+    Path: .fuseraft/events.jsonl
