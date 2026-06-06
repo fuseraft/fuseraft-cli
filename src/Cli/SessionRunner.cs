@@ -54,7 +54,8 @@ public sealed class SessionRunner(
     int maxIterations = 0,
     ContextBudgetConfig? contextBudget = null,
     ContextWindowRecorder? contextWindowRecorder = null,
-    SessionMetrics? sessionMetrics = null)
+    SessionMetrics? sessionMetrics = null,
+    bool quiet = false)
 {
     // Session-lifetime assistant-turn counter. Only ever increments — never reset after
     // compaction. Used solely for the MaxIterations hard cap.
@@ -486,74 +487,103 @@ public sealed class SessionRunner(
     {
         bool compactionNeeded = false;
 
-        await AnsiConsole.Status()
-            .Spinner(OperatingSystem.IsWindows() ? Spinner.Known.Line : Spinner.Known.Dots2)
-            .SpinnerStyle(Style.Parse("dim"))
-            .StartAsync("[dim]Starting orchestration...[/]", async ctx =>
+        if (quiet)
+        {
+            compactionNeeded = await RunStreamCoreAsync(
+                task, checkpoint, messages, turnClock, showTools,
+                statusUpdate: null, cancellationToken);
+        }
+        else
+        {
+            await AnsiConsole.Status()
+                .Spinner(OperatingSystem.IsWindows() ? Spinner.Known.Line : Spinner.Known.Dots2)
+                .SpinnerStyle(Style.Parse("dim"))
+                .StartAsync("[dim]Starting orchestration...[/]", async ctx =>
+                {
+                    compactionNeeded = await RunStreamCoreAsync(
+                        task, checkpoint, messages, turnClock, showTools,
+                        statusUpdate: s => ctx.Status(s), cancellationToken);
+                });
+        }
+
+        return compactionNeeded;
+    }
+
+    // Stream loop shared by quiet and interactive modes.
+    // statusUpdate is null in quiet mode — suppresses the spinner, turn panels, and budget warnings.
+    private async Task<bool> RunStreamCoreAsync(
+        string task,
+        SessionCheckpoint checkpoint,
+        List<AgentMessage> messages,
+        Stopwatch turnClock,
+        bool showTools,
+        Action<string>? statusUpdate,
+        CancellationToken cancellationToken)
+    {
+        bool compactionNeeded = false;
+
+        // Store handler refs so we can unsubscribe after the stream ends.
+        // Without this, every compaction cycle adds another copy of each handler,
+        // causing warnings and status updates to fire N times by turn N.
+        Action<string> onAgentStarting = name =>
+            statusUpdate?.Invoke($"[dim]{Markup.Escape(name)} thinking...[/]");
+
+        Action<string, string, string?> onToolCalling = (agent, tool, args) =>
+        {
+            var status = args is not null
+                ? $"[dim]{Markup.Escape(agent)}: {Markup.Escape(tool)}({Markup.Escape(args)})[/]"
+                : $"[dim]{Markup.Escape(agent)}: {Markup.Escape(tool)}()[/]";
+            statusUpdate?.Invoke(status);
+        };
+
+        Action<string, int, int> onTokenBudgetWarning = (agent, inputTokens, threshold) =>
+        {
+            statusUpdate?.Invoke($"[yellow]{Markup.Escape(agent)} thinking...[/]");
+            if (statusUpdate is not null)
+                AnsiConsole.MarkupLine(
+                    $"[yellow]  ⚠ {Markup.Escape(agent)} used {inputTokens:N0} input tokens this turn " +
+                    $"(warning threshold: {threshold:N0}). " +
+                    $"Reduce file reads and shell output to avoid a budget blowup.[/]");
+        };
+
+        orchestrator.AgentStarting     += onAgentStarting;
+        orchestrator.ToolCalling        += onToolCalling;
+        orchestrator.TokenBudgetWarning += onTokenBudgetWarning;
+
+        try
+        {
+            await foreach (var msg in orchestrator.StreamAsync(task, checkpoint.Messages, cancellationToken))
             {
-                // Store handler refs so we can unsubscribe after the stream ends.
-                // Without this, every compaction cycle adds another copy of each handler,
-                // causing warnings and status updates to fire N times by turn N.
-                Action<string> onAgentStarting = name =>
-                    ctx.Status($"[dim]{Markup.Escape(name)} thinking...[/]");
+                var elapsed = turnClock.Elapsed;
+                turnClock.Restart();
 
-                Action<string, string, string?> onToolCalling = (agent, tool, args) =>
+                // Orchestrator-injected correction messages (AgentName="orchestrator", Role="user")
+                // are persisted to checkpoint for resume but should not update the status spinner
+                // or appear in the rendered display — they are internal routing signals.
+                bool isOrchestratorMessage = msg.AgentName == "orchestrator";
+
+                if (!isOrchestratorMessage)
                 {
-                    var status = args is not null
-                        ? $"[dim]{Markup.Escape(agent)}: {Markup.Escape(tool)}({Markup.Escape(args)})[/]"
-                        : $"[dim]{Markup.Escape(agent)}: {Markup.Escape(tool)}()[/]";
-                    ctx.Status(status);
-                };
-
-                Action<string, int, int> onTokenBudgetWarning = (agent, inputTokens, threshold) =>
-                {
-                    ctx.Status($"[yellow]{Markup.Escape(agent)} thinking...[/]");
-                    AnsiConsole.MarkupLine(
-                        $"[yellow]  ⚠ {Markup.Escape(agent)} used {inputTokens:N0} input tokens this turn " +
-                        $"(warning threshold: {threshold:N0}). " +
-                        $"Reduce file reads and shell output to avoid a budget blowup.[/]");
-                };
-
-                orchestrator.AgentStarting      += onAgentStarting;
-                orchestrator.ToolCalling         += onToolCalling;
-                orchestrator.TokenBudgetWarning  += onTokenBudgetWarning;
-
-                try
-                {
-
-                await foreach (var msg in orchestrator.StreamAsync(task, checkpoint.Messages, cancellationToken))
-                {
-                    var elapsed = turnClock.Elapsed;
-                    turnClock.Restart();
-
-                    // Orchestrator-injected correction messages (AgentName="orchestrator", Role="user")
-                    // are persisted to checkpoint for resume but should not update the status spinner
-                    // or appear in the rendered display — they are internal routing signals.
-                    bool isOrchestratorMessage = msg.AgentName == "orchestrator";
-
-                    if (!isOrchestratorMessage)
-                    {
-                        ctx.Status($"[dim]{Markup.Escape(msg.AgentName)} thinking...[/]");
+                    statusUpdate?.Invoke($"[dim]{Markup.Escape(msg.AgentName)} thinking...[/]");
+                    if (statusUpdate is not null)
                         MessageRenderer.RenderMessage(msg, elapsed, showTools);
-                    }
-
-                    try { telemetry?.RecordTurn(msg, elapsed, modelIdByAgent.GetValueOrDefault(msg.AgentName)); } catch { }
-                    try { devUI?.BroadcastMessage(msg, elapsed); } catch { }
-                    if (await RecordMessageAsync(msg, messages, checkpoint, cancellationToken))
-                    {
-                        compactionNeeded = true;
-                        break;
-                    }
                 }
 
-                } // end try
-                finally
+                try { telemetry?.RecordTurn(msg, elapsed, modelIdByAgent.GetValueOrDefault(msg.AgentName)); } catch { }
+                try { devUI?.BroadcastMessage(msg, elapsed); } catch { }
+                if (await RecordMessageAsync(msg, messages, checkpoint, cancellationToken))
                 {
-                    orchestrator.AgentStarting     -= onAgentStarting;
-                    orchestrator.ToolCalling        -= onToolCalling;
-                    orchestrator.TokenBudgetWarning -= onTokenBudgetWarning;
+                    compactionNeeded = true;
+                    break;
                 }
-            });
+            }
+        }
+        finally
+        {
+            orchestrator.AgentStarting     -= onAgentStarting;
+            orchestrator.ToolCalling        -= onToolCalling;
+            orchestrator.TokenBudgetWarning -= onTokenBudgetWarning;
+        }
 
         return compactionNeeded;
     }
