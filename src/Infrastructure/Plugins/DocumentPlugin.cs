@@ -135,7 +135,11 @@ public sealed class DocumentPlugin(string? sandboxRoot = null)
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
 
+        var fuseraftPrefix = FuseraftPaths.ExpandPath("~/.fuseraft").TrimEnd(Path.DirectorySeparatorChar)
+                           + Path.DirectorySeparatorChar;
+
         return resolvedCheck.StartsWith(sandboxPrefix, comparison)
+            || resolvedCheck.StartsWith(fuseraftPrefix, comparison)
             ? null
             : PluginResult.Denied($"Path '{resolved}' is outside the configured sandbox '{_sandboxRoot}'.");
     }
