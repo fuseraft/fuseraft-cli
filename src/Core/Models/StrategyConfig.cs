@@ -209,9 +209,13 @@ public record KeywordRoute
     /// unless a shell command exited 0 this turn), <c>"RequireBrief"</c> (blocks
     /// HANDOFF TO DEVELOPER unless <c>brief.json</c> exists with valid content),
     /// <c>"TestReportValid"</c> (blocks HANDOFF TO REVIEWER unless <c>test-report.json</c>
-    /// is structurally sound), and <c>"RequireRelatedTestsPass"</c> (runs incremental tests
+    /// is structurally sound), <c>"RequireRelatedTestsPass"</c> (runs incremental tests
     /// scoped to changed files using <c>TestSelector.FindRelatedCommand</c> — requires
-    /// <c>TestSelector</c> to be configured at the orchestration level).
+    /// <c>TestSelector</c> to be configured at the orchestration level), and
+    /// <c>"BlockOnConsecutiveFail"</c> (blocks the forward handoff and forces escalation
+    /// via REPLAN REQUIRED when the same build or verify command has failed in every one
+    /// of the last 3 turns with no success — pair with <c>RequiredCommandPattern</c> to
+    /// scope the check to a specific build command such as <c>"dotnet publish|go build"</c>).
     /// When null or omitted (and <see cref="Validators"/> is also empty) no validation is
     /// performed for this route.
     /// </summary>

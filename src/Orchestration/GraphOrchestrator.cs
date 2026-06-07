@@ -2009,6 +2009,9 @@ public sealed class GraphOrchestrator(
                 "requirewritefile"        => new HandoffToTesterValidator(
                                                  shellFallbackPattern: shellFallbackPattern,
                                                  changeLogPath:        config.Validation?.ChangeLogPath),
+                "blockonconsecutivefail"  => new ConsecutiveShellFailValidator(
+                                                 commandPattern: requiredCommandPattern,
+                                                 changeLogPath:  config.Validation?.ChangeLogPath),
                 "requireallfileswritten"  => briefPath is not null
                                                  ? new RequireAllFilesWrittenValidator(
                                                        briefPath,
