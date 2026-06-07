@@ -31,6 +31,7 @@ fuseraft run [task] [options]
 | `--work-dir <path>` | — | Set the working directory for the session. Priority: flag > `Security.FileSystemSandboxPath` in the config > current directory. |
 | `--context-file <path>` | — | Attach a file as context. Its content is appended to the task. PDF, DOCX, PPTX, and XLSX files are extracted to plain text automatically; other files are read as UTF-8. Repeatable — specify once per file. Ignored when resuming. |
 | `--spec <path>` | — | Path to a spec file (Markdown, plain text, or JSON) that anchors all agents to an agreed specification. The spec is injected into every agent's system prompt as the authoritative source of truth and appended to the task at turn 0. Ignored when resuming. See [Spec-Driven Development](spec-driven.md). |
+| `--snapshot` | off | Capture per-turn postmortem snapshots to `~/.fuseraft/snapshots/<project>/<session>/`. Writes `turns.jsonl` (one record per agent turn: content, tool calls, token usage) and `manifest.json` (run summary: task, success/failure, elapsed). Useful for debugging and postmortem analysis. |
 | `--vscode` | off | VS Code mode. Reads the API key from the `FUSERAFT_API_KEY` environment variable (injected by the fuseraft VS Code extension) instead of the OS keychain. Automatically passed by the extension — not intended for manual use. |
 
 **Examples**
@@ -87,6 +88,10 @@ fuseraft run --context-file design.docx --context-file data-model.xlsx "Generate
 fuseraft run --spec spec.md
 fuseraft run --spec spec.md "Add authentication to the API"
 fuseraft run --spec spec.json -c dev-team.yaml
+
+# Capture postmortem snapshots for debugging or failure analysis
+fuseraft run --snapshot "Refactor the auth module"
+fuseraft run --snapshot -c my-team.yaml "Add integration tests"
 ```
 
 **Task input priority**
