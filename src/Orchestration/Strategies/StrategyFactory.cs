@@ -108,6 +108,11 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
                                 testReportPath: validationConfig?.TestReportPath,
                                 changeLogPath: validationConfig?.ChangeLogPath);
 
+                        if (string.Equals(name, "BlockOnConsecutiveFail", StringComparison.OrdinalIgnoreCase))
+                            return (IRoutingValidator)new ConsecutiveShellFailValidator(
+                                commandPattern:  r.RequiredCommandPattern,
+                                changeLogPath:   validationConfig?.ChangeLogPath);
+
                         validators.TryGetValue(name, out var v);
                         return v;
                     })
@@ -248,7 +253,10 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
             ["RequireShellPass"] = new RequireShellPassValidator(
                 changeLogPath: config?.ChangeLogPath,
                 requireCurrentTurn: isTermination,
-                provenanceRegistry: provenanceRegistry)
+                provenanceRegistry: provenanceRegistry),
+            // Threshold defaults to 3; command pattern supplied per-route via RequiredCommandPattern.
+            ["BlockOnConsecutiveFail"] = new ConsecutiveShellFailValidator(
+                changeLogPath: config?.ChangeLogPath)
         };
 
         if (config is not null)

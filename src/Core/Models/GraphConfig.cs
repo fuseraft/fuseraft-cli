@@ -185,7 +185,10 @@ public record GraphEdgeConfig
     /// Single routing validator name. Built-in validators match those recognised by
     /// <c>GraphOrchestrator</c>: <c>RequireShellPass</c>, <c>RequireWriteFile</c>,
     /// <c>RequireBrief</c>, <c>TestReportValid</c>, <c>RequireAllFilesWritten</c>,
-    /// <c>RequireReviewJudgement</c>, <c>RequireRelatedTestsPass</c>.
+    /// <c>RequireReviewJudgement</c>, <c>RequireRelatedTestsPass</c>,
+    /// <c>BlockOnConsecutiveFail</c> (blocks the forward edge and forces REPLAN REQUIRED
+    /// when the same command has failed in the last 3 turns — pair with
+    /// <c>RequiredCommandPattern</c> to target a specific build command).
     /// Ignored when <see cref="Validators"/> is non-empty.
     /// </summary>
     public string? Validator { get; init; }
