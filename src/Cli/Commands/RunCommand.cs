@@ -79,6 +79,10 @@ public sealed class RunSettings : CommandSettings
     [CommandOption("--no-replan")]
     [Description("Disable replanning: strip any state-machine transitions whose signal contains 'REPLAN' so the session cannot route back to the planning phase mid-run.")]
     public bool NoReplan { get; set; }
+
+    [CommandOption("--snapshot")]
+    [Description("Capture per-turn postmortem snapshots to ~/.fuseraft/snapshots/<project>/<session>/. Writes turns.jsonl (agent messages + tool calls) and manifest.json (run summary).")]
+    public bool Snapshot { get; set; }
 }
 
 /// <summary>
@@ -383,6 +387,18 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         using var ctxRecorder = new fuseraft.Orchestration.ContextWindowRecorder(ctxSnapshotsPath);
         ctxRecorder.SetSessionId(checkpoint.SessionId);
 
+        // Postmortem snapshot writer — only active when --snapshot is passed.
+        var snapshotDir = fuseraft.Core.FuseraftPaths.ExpandSessionPaths(
+            fuseraft.Core.FuseraftPaths.GlobalPostmortemSnapshotTemplate,
+            checkpoint.SessionId,
+            fuseraft.Core.FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory()));
+        using var snapshotWriter = settings.Snapshot
+            ? new fuseraft.Orchestration.SnapshotWriter(snapshotDir)
+            : null;
+        snapshotWriter?.SetSessionId(checkpoint.SessionId);
+        if (snapshotWriter is not null)
+            AnsiConsole.MarkupLine($"[dim]Snapshot → {Markup.Escape(snapshotDir)}[/]");
+
         // Stamp the session ID on the change tracker so check 8 in TestReportValid filters
         // to only commands recorded in this session, preventing prior-session contamination.
         if (changeTracker is not null)
@@ -451,7 +467,8 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             maxIterations: config.Termination?.ResolveMaxIterations() ?? 0,
             contextBudget: config.ContextBudget,
             contextWindowRecorder: ctxRecorder,
-            sessionMetrics: sessionMetrics);
+            sessionMetrics: sessionMetrics,
+            postmortemWriter: snapshotWriter);
 
         var result = await runner.RunAsync(task, checkpoint, settings.HumanInTheLoop, settings.ShowTools, cts.Token);
 
