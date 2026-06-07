@@ -526,6 +526,54 @@ public sealed class FileSystemPlugin : ITurnResettable
         [".py", ".js", ".ts", ".jsx", ".tsx", ".rb", ".sh", ".bash", ".zsh",
          ".lua", ".pl", ".r", ".swift", ".kt", ".scala", ".ex", ".exs", ".kiwi"];
 
+    // Source-code file extensions for which typographic-character contamination is
+    // checked before writing.  LLMs occasionally substitute Unicode lookalikes for
+    // ASCII punctuation (e.g. em-dash for hyphen-minus, curly quotes for straight
+    // quotes) when generating code, producing syntax errors that are hard to diagnose
+    // because the glyphs look identical in most editors.
+    private static readonly HashSet<string> SourceCodeExtensions =
+        [".cs", ".go", ".py", ".ts", ".tsx", ".js", ".jsx",
+         ".rs", ".java", ".cpp", ".c", ".h", ".hpp", ".cc",
+         ".kt", ".scala", ".swift", ".fs", ".rb", ".php", ".kiwi"];
+
+    // Map of typographic Unicode characters → human-readable names.
+    // These are the characters that most commonly bleed from LLM prose generation
+    // into code strings, causing compile/parse errors.
+    private static readonly Dictionary<char, string> TypographicCharNames = new()
+    {
+        ['—'] = "em-dash",
+        ['–'] = "en-dash",
+        ['“'] = "left double quotation mark",
+        ['”'] = "right double quotation mark",
+        ['‘'] = "left single quotation mark",
+        ['’'] = "right single quotation mark",
+        ['…'] = "ellipsis",
+        [' '] = "non-breaking space",
+        ['·'] = "middle dot",
+    };
+
+    private readonly record struct TypographicHit(char Char, string Name, int Line, string Excerpt);
+
+    // Scans `content` for typographic characters and returns up to `maxHits` findings
+    // with the line number and a short excerpt.  Returns an empty list when clean.
+    private static List<TypographicHit> FindTypographicChars(string content, int maxHits = 10)
+    {
+        var hits = new List<TypographicHit>();
+        var lines = content.Split('\n');
+        for (int i = 0; i < lines.Length && hits.Count < maxHits; i++)
+        {
+            var line = lines[i];
+            foreach (var (ch, name) in TypographicCharNames)
+            {
+                if (!line.Contains(ch)) continue;
+                var excerpt = line.Length > 80 ? line[..80] + "…" : line;
+                hits.Add(new TypographicHit(ch, name, i + 1, excerpt.Trim()));
+                if (hits.Count >= maxHits) break;
+            }
+        }
+        return hits;
+    }
+
     [Description("Get file version, size, and last-modified. Cheaper than read_file. Returns VERSION_NOT_TRACKED when the file exists but was not written through write_file.")]
     public async Task<string> StatFileAsync(
         [Description("File path.")] string path)
@@ -700,6 +748,31 @@ public sealed class FileSystemPlugin : ITurnResettable
                 .Replace("\\n", "\n")
                 .Replace("\\t", "\t");
             normalised = true;
+        }
+
+        // Typographic character guard: source files that contain em-dashes, curly quotes,
+        // non-breaking spaces, or other Unicode lookalikes will fail to compile or parse.
+        // These characters appear when an LLM bleeds prose-generation typography into code.
+        // Block the write and report each offending character so the agent can correct the
+        // content before it reaches disk — preventing the delete/rewrite correction loop
+        // caused by files that are syntactically broken from the moment they are written.
+        if (SourceCodeExtensions.Contains(ext) && !raw)
+        {
+            var hits = FindTypographicChars(content);
+            if (hits.Count > 0)
+                return PluginResult.Error(
+                    $"WRITE BLOCKED — typographic characters found in source file '{resolved}'.\n" +
+                    $"These are Unicode lookalikes for ASCII punctuation that cause compile/parse errors:\n\n" +
+                    string.Join("\n", hits.Select(h =>
+                        $"  line {h.Line}: U+{(int)h.Char:X4} {h.Name}\n    {h.Excerpt}")) +
+                    $"\n\nReplace each with the correct ASCII character:\n" +
+                    "  — (em-dash)         → - (hyphen-minus)\n" +
+                    "  – (en-dash)         → - (hyphen-minus)\n" +
+                    "  “” (curly dquotes) → \" (straight double quote)\n" +
+                    "  ‘’ (curly squotes) → ' (apostrophe)\n" +
+                    "  … (ellipsis)        → ... (three full stops)\n" +
+                    "    (non-breaking sp) →   (regular space)\n" +
+                    "\nCorrect the content and call write_file again.");
         }
 
         write:
