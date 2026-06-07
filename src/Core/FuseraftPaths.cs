@@ -117,6 +117,14 @@ public static class FuseraftPaths
         "~/.fuseraft/logs/sessions/{project_slug}/{session_id}/ctx_snapshots.jsonl";
 
     /// <summary>
+    /// Template for the per-session postmortem snapshot directory written when --snapshot is passed.
+    /// Contains turns.jsonl (per-turn records) and manifest.json (run summary).
+    /// Call <see cref="ExpandSessionPaths"/> to resolve both tokens.
+    /// </summary>
+    public const string GlobalPostmortemSnapshotTemplate =
+        "~/.fuseraft/snapshots/{project_slug}/{session_id}";
+
+    /// <summary>
     /// Converts an absolute project path to a filesystem-safe slug used as the
     /// project subdirectory under <c>~/.fuseraft/logs/sessions/</c>.
     /// Example: <c>/home/scs/github/fuseraft/brewer</c> → <c>home-scs-github-fuseraft-brewer</c>

@@ -55,7 +55,8 @@ public sealed class SessionRunner(
     ContextBudgetConfig? contextBudget = null,
     ContextWindowRecorder? contextWindowRecorder = null,
     SessionMetrics? sessionMetrics = null,
-    bool quiet = false)
+    bool quiet = false,
+    SnapshotWriter? postmortemWriter = null)
 {
     // Session-lifetime assistant-turn counter. Only ever increments — never reset after
     // compaction. Used solely for the MaxIterations hard cap.
@@ -382,6 +383,9 @@ public sealed class SessionRunner(
 
         if (sessionMetrics is not null)
             try { await sessionMetrics.PrintSummaryAsync(eventEmitter, checkpoint.SessionId); } catch { }
+
+        if (postmortemWriter is not null)
+            try { await postmortemWriter.WriteManifestAsync(succeeded, errorMessage, task, sessionClock.Elapsed); } catch { }
 
         return new SessionResult(succeeded, errorMessage, messages, sessionClock.Elapsed);
     }
@@ -732,6 +736,8 @@ public sealed class SessionRunner(
             sessionMetrics?.RecordTurn(msg);
         }
         checkpoint.LastUpdatedAt = DateTime.UtcNow;
+        if (postmortemWriter is not null)
+            try { await postmortemWriter.RecordTurnAsync(msg); } catch { }
         if (orchestrator is MagenticOrchestrator mo) checkpoint.MagenticState = mo.CurrentState;
         if (orchestrator is GraphOrchestrator go) checkpoint.StateHistory = [..go.StateHistory];
         try
