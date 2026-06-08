@@ -48,6 +48,25 @@ public sealed record ContextAssemblyMetrics
     /// <summary>Sum of characters across filtered shared-history messages included in context.</summary>
     public int HistoryChars { get; init; }
 
+    /// <summary>Total number of messages in the filtered history passed to the agent.</summary>
+    public int HistoryMessageCount { get; init; }
+
+    /// <summary>User-role message count within the filtered history.</summary>
+    public int HistoryUserCount { get; init; }
+
+    /// <summary>Assistant-role message count within the filtered history.</summary>
+    public int HistoryAssistantCount { get; init; }
+
+    /// <summary>Tool-role message count within the filtered history.</summary>
+    public int HistoryToolCount { get; init; }
+
+    /// <summary>
+    /// Whether any message in the filtered history is a compaction summary.
+    /// Useful for detecting whether cross-turn history is being replayed verbatim
+    /// or has already been compressed by a compaction pass.
+    /// </summary>
+    public bool HistoryHasCompactionSummary { get; init; }
+
     /// <summary>Wall-clock time spent inside <c>AssembleAsync</c>.</summary>
     public TimeSpan AssemblyDuration { get; init; }
 

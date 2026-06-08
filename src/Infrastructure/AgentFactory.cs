@@ -218,7 +218,8 @@ public sealed class AgentFactory(
         var effectiveClient = BuildMiddlewareChain(
             chatClient, config, chatOptions,
             maxContextChars, maxInTurnChars, maxInTurnToolPairs,
-            toolSchemaChars, maxPayloadBytes, hasHandoff);
+            toolSchemaChars, maxPayloadBytes, hasHandoff,
+            emitter: eventEmitter);
 
         // Pre-configure FunctionInvokingChatClient and wrap the skills context provider.
         var agentChatClient = BuildEventEmitMiddleware(effectiveClient, config, skillsProvider);
@@ -384,10 +385,15 @@ public sealed class AgentFactory(
         int maxInTurnToolPairs,
         int toolSchemaChars,
         long maxPayloadBytes,
-        bool hasHandoff)
+        bool hasHandoff,
+        EventEmitter? emitter = null)
     {
         // Always wrap: the adaptive context-trim retry fires on any provider rejection
         // classified as ContextExceeded, regardless of whether explicit limits are set.
+        // Monotonic counter shared across all inner calls for this agent instance.
+        // Lets us correlate inner_call_context events with http_reasoning events in the log.
+        int innerCallSeq = 0;
+
         return chatClient.AsBuilder()
             .Use(
                 getResponseFunc: async (messages, options, inner, ct) =>
@@ -424,6 +430,21 @@ public sealed class AgentFactory(
 
                     var merged  = chatOptions is not null ? MergeOptions(messages, options, chatOptions) : options;
                     var baseMsg = messages as IReadOnlyList<ChatMessage> ?? messages.ToList();
+
+                    // Probe 3: emit a per-inner-call context snapshot after all trimming.
+                    // Captures the exact content-type breakdown the provider will receive,
+                    // making it possible to identify which content type drives token growth.
+                    // Set the ambient call-seq so RawReasoningCaptureHandler can echo it into
+                    // http_reasoning — enabling per-call correlation of estimated vs actual tokens.
+                    // Sub-agent HTTP calls naturally see null here (they run in FunctionInvokingChatClient's
+                    // execution context, captured before this middleware ran, so the value never flows to them).
+                    var callSeq = Interlocked.Increment(ref innerCallSeq);
+                    InnerCallId.Current.Value = callSeq;
+                    if (emitter is not null)
+                        _ = emitter.EmitAsync("inner_call_context",
+                            agent: config.Name, turn: null,
+                            payload: BuildInnerCallContextPayload(
+                                baseMsg, toolSchemaChars, callSeq));
 
                     // Adaptive retry: on ContextExceeded the context is progressively
                     // trimmed (tool results truncated → dropped) and the call retried.
@@ -1436,6 +1457,75 @@ public sealed class AgentFactory(
         }
 
         return DropAllToolContent(list);
+    }
+
+    /// <summary>
+    /// Builds the payload for an <c>inner_call_context</c> event — a per-inner-API-call
+    /// snapshot of the message list after all trimming. Emitted before every
+    /// <c>inner.GetResponseAsync</c> call so growth across rounds is directly observable.
+    /// </summary>
+    private static object BuildInnerCallContextPayload(
+        IReadOnlyList<ChatMessage> messages, int toolSchemaChars, int seq)
+    {
+        int userMsgs = 0, assistantMsgs = 0, toolMsgs = 0;
+        int textChars = 0, reasoningTextChars = 0, reasoningProtectedDataChars = 0;
+        int fnCallArgChars = 0, fnResultChars = 0;
+        int protectedDataBlobs = 0;
+
+        foreach (var msg in messages)
+        {
+            if      (msg.Role == ChatRole.User)      userMsgs++;
+            else if (msg.Role == ChatRole.Assistant) assistantMsgs++;
+            else if (msg.Role == ChatRole.Tool)      toolMsgs++;
+
+            foreach (var content in msg.Contents)
+            {
+                switch (content)
+                {
+                    case TextContent tc:
+                        textChars += tc.Text?.Length ?? 0;
+                        break;
+                    case TextReasoningContent trc:
+                        reasoningTextChars += trc.Text?.Length ?? 0;
+                        var pdLen = trc.ProtectedData?.Length ?? 0;
+                        reasoningProtectedDataChars += pdLen;
+                        if (pdLen > 0) protectedDataBlobs++;
+                        break;
+                    case FunctionCallContent fc:
+                        fnCallArgChars += fc.Arguments?.Values.Sum(v =>
+                            v is System.Text.Json.JsonElement je
+                                ? je.GetRawText().Length
+                                : v?.ToString()?.Length ?? 0) ?? 0;
+                        break;
+                    case FunctionResultContent fr:
+                        fnResultChars += fr.Result is string s ? s.Length : fr.Result?.ToString()?.Length ?? 0;
+                        break;
+                }
+            }
+        }
+
+        int contentTotal = textChars + reasoningTextChars + reasoningProtectedDataChars
+                         + fnCallArgChars + fnResultChars;
+        int grandTotal   = contentTotal + toolSchemaChars;
+
+        return new
+        {
+            seq,
+            msg_counts = new { user = userMsgs, assistant = assistantMsgs, tool = toolMsgs },
+            content_chars = new
+            {
+                text                       = textChars,
+                reasoning_text             = reasoningTextChars,
+                reasoning_protected_data   = reasoningProtectedDataChars,
+                fn_call_args               = fnCallArgChars,
+                fn_results                 = fnResultChars,
+                content_total              = contentTotal,
+                tool_schema_est            = toolSchemaChars,
+                grand_total                = grandTotal,
+            },
+            protected_data_blobs = protectedDataBlobs,
+            est_tokens           = grandTotal / 4,
+        };
     }
 
     private static int EstimateContentChars(AIContent content) => content switch
