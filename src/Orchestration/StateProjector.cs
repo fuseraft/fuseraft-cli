@@ -60,6 +60,35 @@ public sealed class StateProjector : IEventSink
     internal void SetSessionId(string id) => _sessionId = id;
 
     /// <summary>
+    /// Called once at session start. If the on-disk state belongs to a different session,
+    /// overwrites it with a clean state so prior-run build status, failed attempts, and
+    /// file-change records never bleed into a brand-new session.
+    /// </summary>
+    public async Task InitializeAsync(CancellationToken ct = default)
+    {
+        await _fileLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (!File.Exists(_statePath)) return;
+
+            var raw   = await File.ReadAllTextAsync(_statePath, ct);
+            var state = JsonSerializer.Deserialize<ExecutionState>(raw, JsonOpts);
+
+            if (state is null
+                || string.IsNullOrEmpty(state.SessionId)
+                || state.SessionId == _sessionId)
+                return;
+
+            await WriteCoreAsync(new ExecutionState { SessionId = _sessionId }, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "StateProjector: failed to initialize '{Path}'.", _statePath);
+        }
+        finally { _fileLock.Release(); }
+    }
+
+    /// <summary>
     /// Called by ChangeTracker after each turn's invocations are flushed.
     /// Drains the typed event queue and processes invocation records, then writes
     /// execution-state.json.
@@ -263,9 +292,16 @@ public sealed class StateProjector : IEventSink
         if (!File.Exists(_statePath))
             return new ExecutionState { SessionId = _sessionId };
 
-        var raw = await File.ReadAllTextAsync(_statePath, ct);
-        return JsonSerializer.Deserialize<ExecutionState>(raw, JsonOpts)
-            ?? new ExecutionState { SessionId = _sessionId };
+        var raw   = await File.ReadAllTextAsync(_statePath, ct);
+        var state = JsonSerializer.Deserialize<ExecutionState>(raw, JsonOpts)
+                 ?? new ExecutionState { SessionId = _sessionId };
+
+        // Different session on disk → start fresh so prior-run build status, failed
+        // attempts, and file-change records never bleed into a brand-new session.
+        if (!string.IsNullOrEmpty(state.SessionId) && state.SessionId != _sessionId)
+            return new ExecutionState { SessionId = _sessionId };
+
+        return state;
     }
 
     // Caller must hold _fileLock.
