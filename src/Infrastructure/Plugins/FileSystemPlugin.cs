@@ -396,6 +396,11 @@ public sealed class FileSystemPlugin : ITurnResettable
         var idx = normalContent.IndexOf(normalOld, StringComparison.Ordinal);
         if (idx < 0)
         {
+            // Release the write-once lock so write_file can serve as a recovery path.
+            // Keeping the lock when oldText is not found leaves the agent with no valid
+            // exit: patch_file cannot match, write_file is blocked, and the turn deadlocks.
+            _patchedThisTurn.Remove(resolved);
+
             // Give the agent enough information to correct itself without a full re-read.
             var lineHint     = CountLines(normalContent, normalOld);
             var mismatchHint = FindFirstMismatchingLine(normalContent, normalOld);

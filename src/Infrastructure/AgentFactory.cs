@@ -1138,6 +1138,14 @@ public sealed class AgentFactory(
         var result = new List<ChatMessage>(list);
         const string Placeholder = "[result omitted — sliding window]";
         int cutoff = toolIndices.Count - maxPairs;
+
+        // Track assistant messages whose paired tool results are being evicted so their
+        // ProtectedData (accumulated extended-thinking blobs) can be stripped in tandem.
+        // Keeping ProtectedData on evicted rounds causes O(N×thinking) token accumulation
+        // since EstimateContentChars now accounts for it and the budget trimmer will fire —
+        // but proactively dropping it here keeps the sliding window truly O(maxPairs).
+        var assistantIndicesToStrip = new HashSet<int>();
+
         for (int k = 0; k < cutoff; k++)
         {
             int idx = toolIndices[k];
@@ -1148,7 +1156,34 @@ public sealed class AgentFactory(
                 .ToList<AIContent>();
             result[idx] = new ChatMessage(old.Role,
                 trimmed.Count > 0 ? trimmed : [new TextContent(Placeholder)]);
+
+            // Find the assistant message that issued these tool calls (immediately preceding).
+            for (int j = idx - 1; j >= 0; j--)
+            {
+                if (result[j].Role == ChatRole.Assistant)
+                {
+                    assistantIndicesToStrip.Add(j);
+                    break;
+                }
+            }
         }
+
+        // Strip ProtectedData from assistant messages whose tool pairs are being evicted.
+        // The reasoning for those rounds is stale and is no longer needed by the provider.
+        foreach (int aIdx in assistantIndicesToStrip)
+        {
+            var msg = result[aIdx];
+            if (!msg.Contents.OfType<TextReasoningContent>().Any(trc => trc.ProtectedData is not null))
+                continue;
+
+            var stripped = msg.Contents
+                .Select(c => c is TextReasoningContent trc && trc.ProtectedData is not null
+                    ? (AIContent)new TextReasoningContent(trc.Text) { ProtectedData = null }
+                    : c)
+                .ToList();
+            result[aIdx] = new ChatMessage(msg.Role, stripped) { AuthorName = msg.AuthorName };
+        }
+
         return result;
     }
 
@@ -1410,6 +1445,10 @@ public sealed class AgentFactory(
         FunctionCallContent c   => (c.Name?.Length ?? 0) + (c.Arguments?.Values.Sum(v =>
                                       v is System.Text.Json.JsonElement je ? je.GetRawText().Length
                                       : v?.ToString()?.Length ?? 0) ?? 0),
+        // ProtectedData is the opaque blob encoding the full thinking token sequence.
+        // It must be included here or budget/trim checks are completely blind to thinking cost,
+        // allowing it to accumulate unchecked across tool-call rounds.
+        TextReasoningContent trc => (trc.Text?.Length ?? 0) + (trc.ProtectedData?.Length ?? 0),
         _                       => 0,
     };
 
