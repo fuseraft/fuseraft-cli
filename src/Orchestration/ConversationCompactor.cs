@@ -30,7 +30,8 @@ public sealed class ConversationCompactor(
     EvidenceStore? evidenceStore = null,
     fuseraft.Infrastructure.ObjectiveManager? objectiveManager = null,
     fuseraft.Infrastructure.KnowledgeSnapshotEnricher? knowledgeEnricher = null,
-    string? readCachePath = null)
+    string? readCachePath = null,
+    string? executionStatePath = null)
 {
     // Tracks savings ratios from the last AntiThrashWindow compactions so we can detect
     // conversations that are thrashing (repeatedly compacting but saving very little).
@@ -38,6 +39,9 @@ public sealed class ConversationCompactor(
     private string _sessionId = string.Empty;
 
     public void SetSessionId(string sessionId) => _sessionId = sessionId;
+
+    /// <summary>Exposes the compaction configuration for callers that need to inspect it.</summary>
+    public CompactionConfig Config => config;
 
     private string? ExpandedNote =>
         resumptionNote is null ? null
@@ -173,6 +177,12 @@ public sealed class ConversationCompactor(
                                     CombineBlocks(CombineBlocks(symbolBlock, objectiveBlock), reasoningBlock),
                                     explorationBlock);
 
+        // Phase 3: load ExecutionState once here so both LLM and hybrid paths can use it
+        // for content filtering and prompt addendum without re-reading the file.
+        var executionState    = await TryLoadExecutionStateAsync(cancellationToken);
+        var filteredCompact   = FilterForCompaction(toCompact, executionState);
+        var executionStateNote = executionState is not null ? ExecutionStateCompactionNote : null;
+
         // Intent mode: reconstruct from the intent log — fully deterministic, no LLM call.
         // When the intent log is unavailable, record a visible fallback notice so agents
         // resuming after compaction know the summary was degraded.
@@ -180,21 +190,7 @@ public sealed class ConversationCompactor(
         if (mode == "intent")
         {
             if (intentLog is not null)
-            {
-                var intents = await intentLog.GetIntentsForRangeAsync(
-                    toCompact[0].TurnIndex, toCompact[^1].TurnIndex, cancellationToken);
-                var intentSummary = BuildIntentDerivedSummary(
-                    toCompact[0].TurnIndex, toCompact[^1].TurnIndex, intents, prefixBlock);
-                intentSummary = intentSummary with
-                {
-                    Usage     = AccumulateCompactedUsage(toCompact, null),
-                    ToolCalls = AccumulateCompactedToolCalls(toCompact),
-                };
-                logger.LogInformation(
-                    "Intent compaction: {Compacted} turns replaced by intent log reconstruction ({IntentCount} intents).",
-                    toCompact.Count, intents.Count);
-                return (intentSummary, toRetain);
-            }
+                return await CompactFromIntentAsync(toCompact, toRetain, prefixBlock, cancellationToken);
 
             logger.LogWarning(
                 "Compaction mode is 'intent' but no intent log is available — falling back to lossless/llm. " +
@@ -208,74 +204,11 @@ public sealed class ConversationCompactor(
 
         // Lossless: skip LLM call entirely; rebuild from durable state.
         if ((mode == "lossless" || mode == "intent") && snapshotter is not null)
-        {
-            var snapshot = await snapshotter.SnapshotAsync(cancellationToken);
-            if (knowledgeEnricher is not null)
-                snapshot = await knowledgeEnricher.EnrichAsync(snapshot, cancellationToken);
-            var reconstructed = ContextRebuilder.BuildContextMessage(snapshot, toCompact[^1].TurnIndex);
-            if (!string.IsNullOrEmpty(prefixBlock))
-                reconstructed = reconstructed with
-                {
-                    Content = prefixBlock + "\n\n---\n\n" + reconstructed.Content
-                };
-            if (ExpandedNote is not null)
-                reconstructed = reconstructed with { Content = reconstructed.Content + "\n\n---\n" + ExpandedNote };
-            reconstructed = reconstructed with
-            {
-                Usage     = AccumulateCompactedUsage(toCompact, null),
-                ToolCalls = AccumulateCompactedToolCalls(toCompact),
-            };
-            logger.LogInformation(
-                "Lossless compaction: {Compacted} turns replaced by evidence reconstruction.",
-                toCompact.Count);
-            return (PrependFallbackNotice(reconstructed, intentFallbackNotice), toRetain);
-        }
+            return await CompactLosslessAsync(toCompact, toRetain, snapshotter, prefixBlock, intentFallbackNotice, cancellationToken);
 
         // Hybrid: prepend reconstruction before the LLM summary.
         if (mode == "hybrid" && snapshotter is not null)
-        {
-            var snapshot = await snapshotter.SnapshotAsync(cancellationToken);
-            if (knowledgeEnricher is not null)
-                snapshot = await knowledgeEnricher.EnrichAsync(snapshot, cancellationToken);
-            var reconstructed = ContextRebuilder.BuildContextMessage(snapshot, toCompact[^1].TurnIndex);
-
-            try
-            {
-                var histText       = BuildHistoryText(toCompact, config.MaxCharsPerHistoryMessage);
-                var clText         = ReadChangeLog();
-                var hybridTrace    = ObservationExtractor.BuildToolTraceBlock(toCompact);
-                var (summText, summUsage) = await GenerateSummaryAsync(
-                    task, histText, clText, hybridTrace, toCompact.Count, cancellationToken);
-
-                var hybridContent =
-                    reconstructed.Content + "\n\n---\n\n" +
-                    FormatSummaryContent(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, summText, prefixBlock);
-
-                var hybridSummary = new AgentMessage
-                {
-                    AgentName           = "System",
-                    Content             = hybridContent,
-                    Role                = "user",
-                    TurnIndex           = toCompact[^1].TurnIndex,
-                    IsCompactionSummary = true,
-                    Usage               = AccumulateCompactedUsage(toCompact, summUsage),
-                    ToolCalls           = AccumulateCompactedToolCalls(toCompact),
-                };
-
-                logger.LogInformation(
-                    "Hybrid compaction complete. Turns 0–{Last} replaced by evidence reconstruction + LLM summary.",
-                    toCompact[^1].TurnIndex);
-                return (hybridSummary, toRetain);
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                // LLM summary failed; return the lossless reconstruction alone so the session survives.
-                logger.LogError(ex,
-                    "Hybrid compaction: LLM summary call failed — returning lossless reconstruction only.");
-                return (reconstructed with { Usage = AccumulateCompactedUsage(toCompact, null) }, toRetain);
-            }
-        }
+            return await CompactHybridAsync(task, toCompact, toRetain, snapshotter, prefixBlock, filteredCompact, executionStateNote, cancellationToken);
 
         // LLM mode (default) — existing behaviour.
         if (mode is "lossless" or "intent")
@@ -283,14 +216,131 @@ public sealed class ConversationCompactor(
                 "Compaction mode is '{Mode}' but no snapshotter or intent log is available — falling back to LLM mode.",
                 mode);
 
-        var historyText   = BuildHistoryText(toCompact, config.MaxCharsPerHistoryMessage);
+        return await CompactWithLlmAsync(task, toCompact, toRetain, prefixBlock, filteredCompact, executionStateNote, intentFallbackNotice, cancellationToken);
+    }
+
+    // Intent-log-derived summary path: fully deterministic, no LLM call.
+    private async Task<(AgentMessage Summary, IReadOnlyList<AgentMessage> Retained)> CompactFromIntentAsync(
+        List<AgentMessage> toCompact,
+        List<AgentMessage> toRetain,
+        string prefixBlock,
+        CancellationToken cancellationToken)
+    {
+        var intents = await intentLog!.GetIntentsForRangeAsync(
+            toCompact[0].TurnIndex, toCompact[^1].TurnIndex, cancellationToken);
+        var intentSummary = BuildIntentDerivedSummary(
+            toCompact[0].TurnIndex, toCompact[^1].TurnIndex, intents, prefixBlock);
+        intentSummary = intentSummary with
+        {
+            Usage     = AccumulateCompactedUsage(toCompact, null),
+            ToolCalls = AccumulateCompactedToolCalls(toCompact),
+        };
+        logger.LogInformation(
+            "Intent compaction: {Compacted} turns replaced by intent log reconstruction ({IntentCount} intents).",
+            toCompact.Count, intents.Count);
+        return (intentSummary, toRetain);
+    }
+
+    // Evidence snapshot reconstruction path: skips LLM call entirely; rebuilds from durable state.
+    private async Task<(AgentMessage Summary, IReadOnlyList<AgentMessage> Retained)> CompactLosslessAsync(
+        List<AgentMessage> toCompact,
+        List<AgentMessage> toRetain,
+        IContextSnapshotter snapshotter,
+        string prefixBlock,
+        string? intentFallbackNotice,
+        CancellationToken cancellationToken)
+    {
+        var snapshot      = await EnrichWithKnowledgeAsync(await snapshotter.SnapshotAsync(cancellationToken), cancellationToken);
+        var reconstructed = ContextRebuilder.BuildContextMessage(snapshot, toCompact[^1].TurnIndex);
+        if (!string.IsNullOrEmpty(prefixBlock))
+            reconstructed = reconstructed with
+            {
+                Content = prefixBlock + "\n\n---\n\n" + reconstructed.Content
+            };
+        if (ExpandedNote is not null)
+            reconstructed = reconstructed with { Content = reconstructed.Content + "\n\n---\n" + ExpandedNote };
+        reconstructed = reconstructed with
+        {
+            Usage     = AccumulateCompactedUsage(toCompact, null),
+            ToolCalls = AccumulateCompactedToolCalls(toCompact),
+        };
+        logger.LogInformation(
+            "Lossless compaction: {Compacted} turns replaced by evidence reconstruction.",
+            toCompact.Count);
+        return (PrependFallbackNotice(reconstructed, intentFallbackNotice), toRetain);
+    }
+
+    // Hybrid reconstruction + LLM path: prepends evidence reconstruction before the LLM summary.
+    private async Task<(AgentMessage Summary, IReadOnlyList<AgentMessage> Retained)> CompactHybridAsync(
+        string task,
+        List<AgentMessage> toCompact,
+        List<AgentMessage> toRetain,
+        IContextSnapshotter snapshotter,
+        string prefixBlock,
+        IReadOnlyList<AgentMessage> filteredCompact,
+        string? executionStateNote,
+        CancellationToken cancellationToken)
+    {
+        var snapshot      = await EnrichWithKnowledgeAsync(await snapshotter.SnapshotAsync(cancellationToken), cancellationToken);
+        var reconstructed = ContextRebuilder.BuildContextMessage(snapshot, toCompact[^1].TurnIndex);
+
+        try
+        {
+            var histText       = BuildHistoryText(filteredCompact, config.MaxCharsPerHistoryMessage);
+            var clText         = ReadChangeLog();
+            var hybridTrace    = ObservationExtractor.BuildToolTraceBlock(toCompact);
+            var (summText, summUsage) = await GenerateSummaryAsync(
+                task, histText, clText, hybridTrace, toCompact.Count, cancellationToken, executionStateNote);
+
+            var hybridContent =
+                reconstructed.Content + "\n\n---\n\n" +
+                FormatSummaryContent(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, summText, prefixBlock);
+
+            var hybridSummary = new AgentMessage
+            {
+                AgentName           = "System",
+                Content             = hybridContent,
+                Role                = "user",
+                TurnIndex           = toCompact[^1].TurnIndex,
+                IsCompactionSummary = true,
+                Usage               = AccumulateCompactedUsage(toCompact, summUsage),
+                ToolCalls           = AccumulateCompactedToolCalls(toCompact),
+            };
+
+            logger.LogInformation(
+                "Hybrid compaction complete. Turns 0–{Last} replaced by evidence reconstruction + LLM summary.",
+                toCompact[^1].TurnIndex);
+            return (hybridSummary, toRetain);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            // LLM summary failed; return the lossless reconstruction alone so the session survives.
+            logger.LogError(ex,
+                "Hybrid compaction: LLM summary call failed — returning lossless reconstruction only.");
+            return (reconstructed with { Usage = AccumulateCompactedUsage(toCompact, null) }, toRetain);
+        }
+    }
+
+    // Pure LLM compaction path (default).
+    private async Task<(AgentMessage Summary, IReadOnlyList<AgentMessage> Retained)> CompactWithLlmAsync(
+        string task,
+        List<AgentMessage> toCompact,
+        List<AgentMessage> toRetain,
+        string prefixBlock,
+        IReadOnlyList<AgentMessage> filteredCompact,
+        string? executionStateNote,
+        string? intentFallbackNotice,
+        CancellationToken cancellationToken)
+    {
+        var historyText   = BuildHistoryText(filteredCompact, config.MaxCharsPerHistoryMessage);
         var changeLogText = ReadChangeLog();
         var toolTrace     = ObservationExtractor.BuildToolTraceBlock(toCompact);
 
         try
         {
             var (summaryText, summaryUsage) = await GenerateSummaryAsync(
-                task, historyText, changeLogText, toolTrace, toCompact.Count, cancellationToken);
+                task, historyText, changeLogText, toolTrace, toCompact.Count, cancellationToken, executionStateNote);
 
             var summary = new AgentMessage
             {
@@ -319,6 +369,16 @@ public sealed class ConversationCompactor(
                 with { ToolCalls = AccumulateCompactedToolCalls(toCompact) };
             return (PrependFallbackNotice(fallback, intentFallbackNotice), toRetain);
         }
+    }
+
+    // Knowledge snapshot enrichment: applies knowledgeEnricher to a snapshot when available.
+    private async Task<ContextSnapshot> EnrichWithKnowledgeAsync(
+        ContextSnapshot snapshot,
+        CancellationToken cancellationToken)
+    {
+        if (knowledgeEnricher is not null)
+            snapshot = await knowledgeEnricher.EnrichAsync(snapshot, cancellationToken);
+        return snapshot;
     }
 
     // Internals
@@ -444,7 +504,8 @@ public sealed class ConversationCompactor(
         string? changeLogText,
         string? toolTraceText,
         int turnCount,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? executionStateNote = null)
     {
         var changeLogBlock = changeLogText is not null
             ? $"""
@@ -464,13 +525,17 @@ public sealed class ConversationCompactor(
             ? $"\n\n{toolTraceText}\n\n"
             : string.Empty;
 
+        var executionStateBlock = executionStateNote is not null
+            ? $"\n\n{executionStateNote}\n\n"
+            : string.Empty;
+
         var template = !string.IsNullOrWhiteSpace(config.SummaryTemplate)
             ? config.SummaryTemplate
             : SummaryPrompt;
         var prompt = template
             .Replace("{{$task}}",        task)
             .Replace("{{$turn_count}}",  turnCount.ToString())
-            .Replace("{{$change_log}}", changeLogBlock + toolTraceBlock)
+            .Replace("{{$change_log}}", changeLogBlock + toolTraceBlock + executionStateBlock)
             .Replace("{{$history}}",     historyText);
 
         ChatResponse result;
@@ -941,6 +1006,99 @@ public sealed class ConversationCompactor(
         sb.Append("Do not re-read these files from scratch. " +
                   "Jump directly to specific regions, or proceed to implementation.");
         return sb.ToString().TrimEnd();
+    }
+
+    // ---------------------------------------------------------------------------
+    // Phase 3 — Execution-state-aware compaction filter
+    // ---------------------------------------------------------------------------
+
+    private const string ExecutionStateCompactionNote =
+        "EXECUTION STATE NOTE: The current ExecutionState (injected separately into every " +
+        "agent turn) already records: build pass/fail status and compiler errors, failed " +
+        "attempt history, and open tasks. Do NOT summarize this information. Focus the " +
+        "summary on: decisions made and their rationale, architectural constraints " +
+        "discovered, agent coordination and handoffs, and information NOT captured in ExecutionState.";
+
+    private async Task<ExecutionState?> TryLoadExecutionStateAsync(CancellationToken ct)
+    {
+        if (executionStatePath is null || !File.Exists(executionStatePath)) return null;
+        try
+        {
+            var json = await File.ReadAllTextAsync(executionStatePath, ct);
+            return JsonSerializer.Deserialize<ExecutionState>(json, ChangeLogJsonOpts);
+        }
+        catch { return null; }
+    }
+
+    // Returns a copy of the message list with verbose content replaced by short markers
+    // for entries whose information is already captured in ExecutionState. Only Content
+    // is modified — ToolCalls is preserved so the tool-trace block remains accurate.
+    private static IReadOnlyList<AgentMessage> FilterForCompaction(
+        IReadOnlyList<AgentMessage> messages,
+        ExecutionState? state)
+    {
+        if (state is null) return messages;
+
+        var capturedPaths = state.SignificantChanges
+            .Select(c => c.Path)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var result = new List<AgentMessage>(messages.Count);
+        foreach (var msg in messages)
+            result.Add(ApplyCompactionMessageFilter(msg, capturedPaths));
+        return result;
+    }
+
+    private static AgentMessage ApplyCompactionMessageFilter(
+        AgentMessage msg, HashSet<string> capturedPaths)
+    {
+        if (msg.ToolCalls is not { Count: > 0 }) return msg;
+
+        // Build commands: shell_run with a build/publish/test command → already in ExecutionState.Build.
+        if (msg.ToolCalls.Any(tc => IsShellRunCall(tc.Name) && IsBuildCommand(tc.ArgsSummary)))
+            return msg with { Content = "[shell_run output captured in ExecutionState]" };
+
+        // File operations: all write/patch/delete calls where every touched path is already
+        // logged in ExecutionState.SignificantChanges → content adds no new information.
+        var fileOps = msg.ToolCalls.Where(tc => IsFileOpCall(tc.Name)).ToList();
+        if (fileOps.Count > 0 && fileOps.All(tc => IsPathCaptured(tc.ArgsSummary, capturedPaths)))
+            return msg with { Content = "[file operations logged in ExecutionState]" };
+
+        return msg;
+    }
+
+    private static bool IsShellRunCall(string name) =>
+        name.Replace("_", "").Equals("shellrun", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsBuildCommand(string? argsSummary)
+    {
+        if (argsSummary is null) return false;
+        var lower = argsSummary.ToLowerInvariant();
+        return lower.Contains("build")   || lower.Contains("publish") ||
+               lower.Contains("compile") || lower.Contains("cargo")   ||
+               lower.Contains("pytest")  || lower.Contains("cmake")   ||
+               lower.Contains("npm run") || lower.Contains("go test");
+    }
+
+    private static bool IsFileOpCall(string name)
+    {
+        var n = name.Replace("_", "").ToLowerInvariant();
+        return n is "writefile" or "patchfile" or "deletefile";
+    }
+
+    // ArgsSummary for write_file/patch_file is "path=<value>" (up to 60 chars, may be truncated).
+    // Checks whether the path referenced by the summary appears in the captured-paths set.
+    private static bool IsPathCaptured(string? argsSummary, HashSet<string> capturedPaths)
+    {
+        if (argsSummary is null) return false;
+        const string key = "path=";
+        var idx = argsSummary.IndexOf(key, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return false;
+        var partial = argsSummary[(idx + key.Length)..].TrimEnd('.', ' ');
+        if (partial.Length == 0) return false;
+        return capturedPaths.Any(p =>
+            p.EndsWith(partial, StringComparison.OrdinalIgnoreCase) ||
+            p.Contains(partial, StringComparison.OrdinalIgnoreCase));
     }
 
     private const string SummaryPrompt = """

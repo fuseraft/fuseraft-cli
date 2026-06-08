@@ -5,12 +5,12 @@ namespace fuseraft.Cli.Commands;
 public static partial class InitTemplates
 {
     /// <summary>
-    /// Generates the <c>graph</c> template: Planner → Developer → Tester → Reviewer expressed as a
-    /// declarative directed graph. Back-edges (<c>BUGS FOUND</c>, <c>REVISION REQUIRED</c>,
-    /// <c>REPLAN REQUIRED</c>) return control to earlier nodes without restarting the full pipeline.
-    /// <c>APPROVED</c> routes to a lightweight terminal <c>Approved</c> node that ends the session.
+    /// Generates the <c>pipeline</c> template (replaces <c>graph</c>): Planner → Developer → Tester
+    /// → Reviewer expressed as a declarative directed graph. Back-edges return control to earlier nodes
+    /// without restarting the full pipeline. Developer and Tester have investigation tooling for
+    /// structured failure tracking. Use <c>swe</c> for production work with evidence contracts.
     /// </summary>
-    private static GeneratedConfig Graph(string model, string? endpoint)
+    private static GeneratedConfig Pipeline(string model, string? endpoint)
     {
         var planner = $"""
             Name: Planner
@@ -53,7 +53,15 @@ public static partial class InitTemplates
               2. Read {FuseraftPaths.LocalBrief} — implement every file in files_to_change.
                  Use patch_file for targeted edits to existing files; use write_file only for
                  new files. All paths are relative to the sandbox root.
+                 The Execution State and Investigation Log in your context show what has already
+                 failed this session. Do not repeat an approach listed under "Rejected Paths".
               3. Run a build command with shell_run to confirm it compiles.
+                 If it fails, record the failed approach before trying another:
+                 a. Call create_hypothesis(description) naming the specific approach.
+                 b. If it fails: call reject_hypothesis(id, reason, evidence) with the exact
+                    error. Read the source of the failure before writing new code.
+                 c. If it passes: call confirm_hypothesis(id, evidence).
+                 You MUST NOT call handoff with any open hypotheses.
               4. Commit with git_add and git_commit.
               5. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO TESTER").
@@ -65,6 +73,7 @@ public static partial class InitTemplates
               - Shell
               - Git
               - Changes
+              - Investigation
               - SessionContext
               - Handoff
             FunctionChoice: required
@@ -89,6 +98,8 @@ public static partial class InitTemplates
                      FAIL: name, status, exit_code, command, output (relevant stderr/stdout from the failure — required)
               A PASS result with an empty or missing command field is treated as fabricated and will block handoff.
               Always write the report before routing, even when tests fail.
+              If a test failure reveals a clear root cause (wrong return value, missing
+              dependency, incorrect wiring), call identify_root_cause(cause) before routing.
               5. {ContextWriteStep}
               If all tests pass, call handoff(route_keyword: "HANDOFF TO REVIEWER").
               If any tests fail, call handoff(route_keyword: "BUGS FOUND").
@@ -98,6 +109,7 @@ public static partial class InitTemplates
               - FileSystem
               - Shell
               - Changes
+              - Investigation
               - SessionContext
               - Handoff
             FunctionChoice: required
@@ -150,11 +162,11 @@ public static partial class InitTemplates
 
         var mainConfig = $"""
             Orchestration:
-              Name: Graph Pipeline
+              Name: Pipeline
               Description: >-
-                Planner → Developer → Tester → Reviewer expressed as a declarative directed graph.
-                Back-edges (BUGS FOUND, REVISION REQUIRED, REPLAN REQUIRED) return to earlier nodes
-                without restarting the full pipeline. APPROVED routes to a terminal confirmation node.
+                Planner → Developer → Tester → Reviewer as a directed graph. Developer and Tester
+                have investigation tooling for structured failure tracking. Back-edges return to earlier
+                nodes without restarting. For evidence contracts and full safeguards, use the swe template.
 
               Security:
                 FileSystemSandboxPath: .   # set to your project root (e.g. ~/projects/myapp)
@@ -287,11 +299,11 @@ public static partial class InitTemplates
             """;
 
         return new GeneratedConfig(mainConfig, [
-            ("agents/planner.yaml",   planner),
-            ("agents/developer.yaml", developer),
-            ("agents/tester.yaml",    tester),
-            ("agents/reviewer.yaml",  reviewer),
-            ("agents/approved.yaml",  approved),
+            ("agents/planner.yaml",    planner),
+            ("agents/developer.yaml",  developer),
+            ("agents/tester.yaml",     tester),
+            ("agents/reviewer.yaml",   reviewer),
+            ("agents/approved.yaml",   approved),
         ]);
     }
 }

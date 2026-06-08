@@ -623,6 +623,36 @@ The stub is actionable: it tells the agent what happened, which tool produced th
 
 ---
 
+## Session read cache (cross-turn file deduplication)
+
+Every `fuseraft run` session maintains a per-session read cache keyed by resolved file path, validated by mtime + file size, and persisted to `read_cache.json` in the session directory. Its purpose is to prevent agents from re-injecting full file content into the conversation on every turn.
+
+**How it works:**
+
+When an agent calls `read_file` without `startLine`/`maxLines`:
+
+1. The cache checks whether the file has changed since it was last read or written this session.
+2. If unchanged, the tool returns a hint message instead of the full content:
+   - **Write-primed entry** (`ReadCount = 0`): the file was written via `write_file` this session and not yet read. The hint says the content is in history via the `write_file` call.
+   - **Read-primed entry** (`ReadCount ≥ 1`): the file was previously read this session. The hint says the content is in history from that earlier read, and reports how many times and how long ago.
+3. Both hints include the caveat "(unless compacted away)" so agents know to force a re-read with `startLine`/`maxLines` if the turn is post-compaction.
+
+**Write priming (`write_file`):**
+
+When `write_file` succeeds, the session cache is primed with `ReadCount: 0` rather than invalidated. This prevents the next cross-turn read of an unchanged written file from re-injecting its full content into context — the agent already has the content from the write call itself.
+
+Within the same turn, the cache hint is suppressed so the agent can immediately read back and verify what it just wrote. The suppression is cleared at the next `BeginTurn()`.
+
+**`patch_file` is not write-primed:** `patch_file` gives the agent a delta, not full content, so the patched file's cache entry is invalidated rather than primed. A subsequent cross-turn `read_file` will read the actual content.
+
+**Bypassing the cache:** pass `startLine` and/or `maxLines` to any `read_file` call to bypass the session cache and force a targeted re-read. This is the correct recovery path after compaction removes earlier file content from context.
+
+**Storage:** the cache is persisted to `read_cache.json` in the session directory and survives compaction. Cache entries record `mtime`, `size`, `reads` (read count), and `last` (last read or write timestamp).
+
+No configuration is required — the session read cache is always active when `fuseraft run` is used.
+
+---
+
 ## Adaptive context-trim retry
 
 When a provider call fails due to a context or payload size error — HTTP 413, a Bedrock
@@ -714,6 +744,7 @@ Here is the full sequence from session start through a long-running session:
    ├─ Session context injection → context_summary.md prepended when present
    ├─ Knowledge artifact appended as [Pipeline Knowledge] user message
    └─ Assembled context → sent to LLM
+      ├─ Session read cache — read_file returns hint instead of full content if file unchanged since last read/write this session
       ├─ Tool-result artifact offloading — results > 40k chars stored to disk; stub replaces inline content
       ├─ MaxInTurnToolPairs — sliding window: keep only last N tool pairs per inner call
       ├─ MaxInTurnContextTokens — budget-reactive: trim oldest pairs when over budget

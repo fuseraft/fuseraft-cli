@@ -81,6 +81,25 @@ public sealed class SessionReadCache
         TryPersist();
     }
 
+    /// <summary>
+    /// Primes the cache after a successful write without counting it as a read. Later-turn
+    /// cold reads of an unchanged file get a "was written this session" hint instead of
+    /// re-injecting the full content into the model's context window.
+    /// <see cref="SessionCacheEntry.ReadCount"/> is left at zero so callers can
+    /// distinguish a write-primed entry from a read-primed one and surface the right hint.
+    /// </summary>
+    public void RecordWrite(string resolvedPath, FileInfo fileInfo)
+    {
+        _entries[resolvedPath] = new SessionCacheEntry
+        {
+            LastModifiedUtc = fileInfo.LastWriteTimeUtc,
+            SizeBytes       = fileInfo.Length,
+            ReadCount       = 0,
+            LastReadUtc     = DateTime.UtcNow,
+        };
+        TryPersist();
+    }
+
     /// <summary>Removes <paramref name="resolvedPath"/> from the cache.</summary>
     public void Invalidate(string resolvedPath)
     {
