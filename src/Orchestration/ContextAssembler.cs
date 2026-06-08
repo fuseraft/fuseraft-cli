@@ -29,6 +29,8 @@ public sealed class ContextAssembler
     private readonly string? _sandboxRoot;
     private readonly string? _changeLogPath;
     private readonly string? _briefPath;
+    private readonly string? _executionStatePath;
+    private readonly string? _investigationLogPath;
     private readonly RepositoryGraphStore? _graphStore;
     private readonly AdrRegistry? _adrRegistry;
     private readonly fuseraft.Infrastructure.ObjectiveManager? _objectiveManager;
@@ -48,21 +50,25 @@ public sealed class ContextAssembler
     };
 
     public ContextAssembler(
-        string? sandboxRoot   = null,
-        string? changeLogPath = null,
-        string? briefPath     = null,
+        string? sandboxRoot           = null,
+        string? changeLogPath         = null,
+        string? briefPath             = null,
         RepositoryGraphStore? graphStore       = null,
         AdrRegistry?          adrRegistry      = null,
         fuseraft.Infrastructure.ObjectiveManager? objectiveManager = null,
-        ContextBroker?        contextBroker    = null)
+        ContextBroker?        contextBroker    = null,
+        string? executionStatePath    = null,
+        string? investigationLogPath  = null)
     {
-        _sandboxRoot      = sandboxRoot;
-        _changeLogPath    = changeLogPath;
-        _briefPath        = briefPath;
-        _graphStore       = graphStore;
-        _adrRegistry      = adrRegistry;
-        _objectiveManager = objectiveManager;
-        _contextBroker    = contextBroker;
+        _sandboxRoot          = sandboxRoot;
+        _changeLogPath        = changeLogPath;
+        _briefPath            = briefPath;
+        _executionStatePath   = executionStatePath;
+        _investigationLogPath = investigationLogPath;
+        _graphStore           = graphStore;
+        _adrRegistry          = adrRegistry;
+        _objectiveManager     = objectiveManager;
+        _contextBroker        = contextBroker;
     }
 
     public void SetSessionId(string sessionId) => _sessionId = sessionId;
@@ -216,8 +222,126 @@ public sealed class ContextAssembler
             "adr_graph"         => await ResolveAdrGraphAsync(maxChars, ct),
             "active_objectives" => await ResolveActiveObjectivesAsync(maxChars, ct),
             "broker"            => await ResolveBrokerAsync(param ?? string.Empty, maxChars, ct),
+            "execution_state"   => await ResolveExecutionStateAsync(maxChars, ct),
+            "investigation_log" => await ResolveInvestigationLogAsync(maxChars, ct),
             _                   => null,
         };
+    }
+
+    private async Task<string?> ResolveExecutionStateAsync(int maxChars, CancellationToken ct)
+    {
+        if (_executionStatePath is null || !File.Exists(_executionStatePath)) return null;
+        try
+        {
+            var json  = await File.ReadAllTextAsync(_executionStatePath, ct);
+            var state = JsonSerializer.Deserialize<fuseraft.Core.Models.ExecutionState>(json, JsonOpts);
+            if (state is null) return null;
+            return Truncate(FormatExecutionState(state), maxChars);
+        }
+        catch { return null; }
+    }
+
+    private static string FormatExecutionState(fuseraft.Core.Models.ExecutionState state)
+    {
+        var sb = new StringBuilder();
+
+        if (!string.IsNullOrEmpty(state.Build.Command))
+        {
+            var status = state.Build.Succeeded
+                ? "PASSED"
+                : $"FAILED (exit {state.Build.ExitCode})";
+            sb.AppendLine($"**Build:** {status} — `{state.Build.Command}`");
+
+            if (!state.Build.Succeeded && state.ActiveFailures.Count > 0)
+            {
+                sb.AppendLine("**Errors:**");
+                foreach (var f in state.ActiveFailures.Take(10))
+                {
+                    var loc  = f.Line > 0 ? $"{f.File}:{f.Line}" : f.File;
+                    var code = string.IsNullOrEmpty(f.Code) ? string.Empty : $"{f.Code} ";
+                    sb.AppendLine($"- {code}{loc} — {f.Message}");
+                }
+            }
+        }
+        else
+        {
+            sb.AppendLine("**Build:** no build recorded yet");
+        }
+
+        if (state.FailedAttempts.Count > 0)
+        {
+            var recent = state.FailedAttempts.TakeLast(3).ToList();
+            sb.AppendLine($"**Failed Attempts (last {recent.Count}):**");
+            for (int i = 0; i < recent.Count; i++)
+            {
+                var a       = recent[i];
+                var summary = a.ErrorSummary is not null ? $" → {a.ErrorSummary}" : string.Empty;
+                sb.AppendLine($"{i + 1}. {a.Description}{summary}");
+            }
+        }
+
+        if (state.OpenTasks.Count > 0)
+        {
+            sb.AppendLine("**Open Tasks:**");
+            foreach (var t in state.OpenTasks)
+                sb.AppendLine($"- [ ] {t.Description}");
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private async Task<string?> ResolveInvestigationLogAsync(int maxChars, CancellationToken ct)
+    {
+        if (_investigationLogPath is null || !File.Exists(_investigationLogPath)) return null;
+        try
+        {
+            var json = await File.ReadAllTextAsync(_investigationLogPath, ct);
+            var log  = JsonSerializer.Deserialize<fuseraft.Core.Models.InvestigationLog>(json, JsonOpts);
+            if (log is null) return null;
+            return Truncate(FormatInvestigationLog(log), maxChars);
+        }
+        catch { return null; }
+    }
+
+    private static string FormatInvestigationLog(fuseraft.Core.Models.InvestigationLog log)
+    {
+        var sb = new StringBuilder();
+
+        var open = log.Hypotheses.Where(h => h.Status == "open").ToList();
+        if (open.Count > 0)
+        {
+            sb.AppendLine("**Open Hypotheses:**");
+            foreach (var h in open)
+                sb.AppendLine($"- [{h.Id}] {h.Hypothesis}");
+        }
+
+        var rejected = log.Hypotheses.Where(h => h.Status == "rejected").ToList();
+        if (rejected.Count > 0)
+        {
+            sb.AppendLine("**Rejected Paths (do not revisit):**");
+            foreach (var h in rejected)
+            {
+                var reason = h.RejectReason is not null ? $" — REJECTED: {h.RejectReason}" : " — REJECTED";
+                sb.AppendLine($"- [{h.Id}] {h.Hypothesis}{reason}");
+            }
+        }
+
+        if (log.ConfirmedRootCauses.Count > 0)
+        {
+            sb.AppendLine("**Confirmed Root Causes:**");
+            foreach (var cause in log.ConfirmedRootCauses)
+                sb.AppendLine($"- {cause}");
+        }
+
+        if (log.Investigations.Count > 0)
+        {
+            var recent = log.Investigations.TakeLast(3).ToList();
+            sb.AppendLine($"**Recent Investigations (last {recent.Count}):**");
+            foreach (var inv in recent)
+                sb.AppendLine($"- {inv.Summary} → {inv.Conclusion}");
+        }
+
+        return sb.ToString().TrimEnd();
     }
 
     private async Task<string?> ResolveBrokerAsync(string query, int maxChars, CancellationToken ct)
@@ -465,14 +589,16 @@ public sealed class ContextAssembler
         var (type, param) = ParseSource(source);
         return type switch
         {
-            "session_context" => "Session Context",
-            "changes_recent"  => "Recent Changes",
-            "brief_field"     => $"Task: {param}",
-            "file"            => param is not null ? Path.GetFileName(param) : "File",
-            "adr_graph"         => "Governing ADRs",
-            "active_objectives" => "Active Objectives",
-            "broker"            => string.IsNullOrEmpty(param) ? "Adaptive Context" : $"Adaptive Context: {param}",
-            _                   => source,
+            "session_context"  => "Session Context",
+            "changes_recent"   => "Recent Changes",
+            "brief_field"      => $"Task: {param}",
+            "file"             => param is not null ? Path.GetFileName(param) : "File",
+            "adr_graph"        => "Governing ADRs",
+            "active_objectives"=> "Active Objectives",
+            "broker"           => string.IsNullOrEmpty(param) ? "Adaptive Context" : $"Adaptive Context: {param}",
+            "execution_state"  => "Execution State",
+            "investigation_log"=> "Investigation Log",
+            _                  => source,
         };
     }
 

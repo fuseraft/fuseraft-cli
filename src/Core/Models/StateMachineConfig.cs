@@ -115,6 +115,15 @@ public record ContextSource
     ///   <item><c>own_history:N</c> — the agent's own last N turns from the shared history
     ///     (text-only, no tool frames). Only meaningful in <c>AgentConfig.Context</c>;
     ///     ignored in <c>TransitionConfig.HandoffContext</c>.</item>
+    ///   <item><c>execution_state</c> — the current build status, active compiler failures,
+    ///     recent failed attempts, and open tasks. Durable across compaction; projected from
+    ///     tool events by <c>StateProjector</c>. Automatically prepended for state-machine
+    ///     agents unless <c>AgentConfig.SkipExecutionState</c> is <c>true</c>.</item>
+    ///   <item><c>investigation_log</c> — recorded hypotheses, rejected investigation paths,
+    ///     completed investigations, and confirmed root causes. Written by agents via
+    ///     <c>InvestigationPlugin</c> tools. Durable across compaction; agents use the
+    ///     rejected-paths list to avoid re-running dead-end investigations. Automatically
+    ///     prepended for state-machine agents alongside <c>execution_state</c>.</item>
     /// </list>
     /// </summary>
     public string Source { get; init; } = string.Empty;

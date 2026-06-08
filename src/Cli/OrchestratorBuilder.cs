@@ -447,13 +447,28 @@ public static class OrchestratorBuilder
         // Change tracking: hook a filter into every agent kernel that records tool results.
         // Pass eventEmitter, evidenceStore, and intentLog so tracked tool calls emit flat
         // entries, typed graph nodes, and pre-execution intent records.
-        ChangeTracker? changeTracker = null;
-        IntentLog? intentLog = null;
+        StateProjector? stateProjector   = null;
+        ChangeTracker? changeTracker     = null;
+        IntentLog? intentLog             = null;
+        string? executionStatePath       = null;
+        string? investigationLogPath     = null;
         if (config.ChangeTracking is { } ctConfig)
         {
-            intentLog     = new IntentLog(ctConfig.ResolveIntentLogPath(), loggerFactory.CreateLogger<IntentLog>());
-            changeTracker = new ChangeTracker(ctConfig.Path, eventEmitter, evidenceStore, intentLog, loggerFactory.CreateLogger<ChangeTracker>(), knowledgeLayer.GraphBuilder);
-            pluginRegistry.Register("Changes", () => new ChangesPlugin(ctConfig.Path));
+            intentLog = new IntentLog(ctConfig.ResolveIntentLogPath(), loggerFactory.CreateLogger<IntentLog>());
+
+            var stateDir = Path.GetDirectoryName(Path.GetFullPath(ctConfig.Path))
+                        ?? FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalState, projectSlug);
+            executionStatePath   = Path.Combine(stateDir, "execution-state.json");
+            investigationLogPath = Path.Combine(stateDir, "investigation-log.json");
+
+            stateProjector = new StateProjector(
+                executionStatePath,
+                sessionId ?? string.Empty,
+                loggerFactory.CreateLogger<StateProjector>());
+
+            changeTracker = new ChangeTracker(ctConfig.Path, eventEmitter, evidenceStore, intentLog, loggerFactory.CreateLogger<ChangeTracker>(), knowledgeLayer.GraphBuilder, stateProjector);
+            pluginRegistry.Register("Changes",      () => new ChangesPlugin(ctConfig.Path));
+            pluginRegistry.Register("Investigation", () => new InvestigationPlugin(investigationLogPath, sessionId ?? string.Empty, stateProjector));
         }
 
         // File version store: tracks monotonic write counters per file so agents can detect
@@ -490,7 +505,7 @@ public static class OrchestratorBuilder
         // so write_file, stat_file, and read_file participate in version-aware conflict
         // detection and cross-turn read deduplication. Thread the cache-hit callback so
         // SessionMetrics can count duplicate reads across the session.
-        pluginRegistry.Configure(config.Security ?? new SecurityConfig(), profiles, shellApprover, fileVersionStore, sessionReadCache, onCacheHit: sessionMetrics.RecordCacheHit);
+        pluginRegistry.Configure(config.Security ?? new SecurityConfig(), profiles, shellApprover, fileVersionStore, sessionReadCache, onCacheHit: sessionMetrics.RecordCacheHit, eventSink: stateProjector);
 
         // Session context plugin: shared handoff notes that agents write before routing
         // and read on re-entry. Stored in the global session directory.
@@ -778,7 +793,8 @@ public static class OrchestratorBuilder
                 chatClientFactory.Create(summaryModel), compactionConfig,
                 loggerFactory.CreateLogger<ConversationCompactor>(),
                 resumptionNote, changeLogPath, intentLog, config.Events?.Path, evidenceStore,
-                objectiveManager, snapshotEnricher, readCachePath);
+                objectiveManager, snapshotEnricher, readCachePath,
+                executionStatePath: executionStatePath);
 
             if ((compactionConfig.Mode ?? string.Empty).Equals("intent", StringComparison.OrdinalIgnoreCase)
                 && intentLog is null)
@@ -862,13 +878,15 @@ public static class OrchestratorBuilder
         // Sources the graph store and ADR registry from the shared knowledge layer so
         // adr_graph traversal sees the same state as the plugins and change tracker.
         var contextAssembler = new ContextAssembler(
-            sandboxRoot:       resolvedSandbox,
-            changeLogPath:     config.Validation?.ChangeLogPath,
-            briefPath:         config.Validation?.BriefPath,
-            graphStore:        knowledgeLayer.GraphStore,
-            adrRegistry:       knowledgeLayer.AdrRegistry,
-            objectiveManager:  objectiveManager,
-            contextBroker:     contextBroker);
+            sandboxRoot:           resolvedSandbox,
+            changeLogPath:         config.Validation?.ChangeLogPath,
+            briefPath:             config.Validation?.BriefPath,
+            graphStore:            knowledgeLayer.GraphStore,
+            adrRegistry:           knowledgeLayer.AdrRegistry,
+            objectiveManager:      objectiveManager,
+            contextBroker:         contextBroker,
+            executionStatePath:    executionStatePath,
+            investigationLogPath:  investigationLogPath);
         if (!string.IsNullOrEmpty(sessionId))
             contextAssembler.SetSessionId(sessionId);
 
@@ -900,6 +918,62 @@ public static class OrchestratorBuilder
                         $"State machine state '{stateName}' references agent '{state.Agent}' " +
                         $"which is not defined in 'Orchestration.Agents'.");
             }
+        }
+
+        // For state-machine configs with an active StateProjector, prepend execution_state
+        // and investigation_log as the first context sources for every agent that does not
+        // already declare them. This ensures build failures, compiler errors, failed attempts,
+        // and rejected investigation paths survive compaction and are visible to every agent
+        // on every turn, regardless of token pressure.
+        if (config.Selection.Type.Equals("statemachine", StringComparison.OrdinalIgnoreCase)
+            && executionStatePath is not null)
+        {
+            static string SourceType(string s)
+            {
+                var i = s.IndexOf(':');
+                return i < 0 ? s.Trim().ToLowerInvariant() : s[..i].Trim().ToLowerInvariant();
+            }
+
+            var execStateSrc = new ContextSource { Source = "execution_state" };
+            var invLogSrc    = investigationLogPath is not null
+                ? new ContextSource { Source = "investigation_log" }
+                : (ContextSource?)null;
+
+            config = config with
+            {
+                Agents = config.Agents.Select(a =>
+                {
+                    if (a.SkipExecutionState) return a;
+
+                    // Auto-add Investigation plugin so agents can write to the investigation log.
+                    // Agents that already declare it, or that have no plugin list, are unchanged.
+                    var plugins = a.Plugins.Count > 0 && invLogSrc is not null
+                        && !a.Plugins.Any(p => p.Equals("Investigation", StringComparison.OrdinalIgnoreCase))
+                        ? [.. a.Plugins, "Investigation"]
+                        : a.Plugins;
+
+                    if (a.Context is { Count: > 0 } existing)
+                    {
+                        var needsExecState = !existing.Any(s => SourceType(s.Source) == "execution_state");
+                        var needsInvLog    = invLogSrc is not null && !existing.Any(s => SourceType(s.Source) == "investigation_log");
+
+                        if (!needsExecState && !needsInvLog && ReferenceEquals(plugins, a.Plugins)) return a;
+
+                        var toPrepend = new List<ContextSource>();
+                        if (needsExecState) toPrepend.Add(execStateSrc);
+                        if (needsInvLog)    toPrepend.Add(invLogSrc!);
+                        return a with { Context = [.. toPrepend, .. existing], Plugins = plugins };
+                    }
+
+                    // No context spec → inject a default that substitutes for shared-history replay:
+                    // execution state + investigation log (ground truth) + own recent turns + handoff notes.
+                    var defaultSources = new List<ContextSource> { execStateSrc };
+                    if (invLogSrc is not null) defaultSources.Add(invLogSrc);
+                    defaultSources.Add(new ContextSource { Source = "own_history:10" });
+                    defaultSources.Add(new ContextSource { Source = "session_context" });
+                    return a with { Context = defaultSources, Plugins = plugins };
+                }).ToList()
+            };
         }
 
         // Validate graph config at startup when the graph strategy is selected.
@@ -1417,6 +1491,8 @@ public static class OrchestratorBuilder
             SubAgentModel          = inline.SubAgentModel                               ?? baseConfig.SubAgentModel,
             SubAgentPlugins        = inline.SubAgentPlugins                             ?? baseConfig.SubAgentPlugins,
             RemoteAgent            = inline.RemoteAgent                                 ?? baseConfig.RemoteAgent,
+            SkipExecutionState     = inline.SkipExecutionState || baseConfig.SkipExecutionState,
+            Context                = inline.Context is { Count: > 0 }                  ? inline.Context                : baseConfig.Context,
         };
 
     private static string BuildTestSelectorBlock(TestSelectorConfig ts)
