@@ -1,3 +1,4 @@
+using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Plugins;
 
 namespace FuseraftCli.Tests;
@@ -520,6 +521,34 @@ public sealed class FileSystemPluginTests : IDisposable
         var result = await _plugin.ReadFileAsync(TempPath("cache2.txt"));
         Assert.DoesNotContain("[INFO]", result);
         Assert.Contains("some content", result);
+    }
+
+    [Fact]
+    public async Task WriteFile_PrimesSessionCacheForCrossTurnRead()
+    {
+        var cache  = new SessionReadCache();
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, sessionCache: cache);
+
+        await plugin.WriteFileAsync(TempPath("session_primed.txt"), "hello from write");
+        ((ITurnResettable)plugin).BeginTurn(); // simulate next agent turn
+
+        var result = await plugin.ReadFileAsync(TempPath("session_primed.txt"));
+        Assert.StartsWith("[INFO]", result);
+        Assert.Contains("written this session", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task WriteFile_AllowsWithinTurnReadAfterWrite()
+    {
+        var cache  = new SessionReadCache();
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, sessionCache: cache);
+
+        await plugin.WriteFileAsync(TempPath("same_turn_verify.txt"), "content here");
+
+        // Within-turn read must return actual content, not a session-cache-hit hint.
+        var result = await plugin.ReadFileAsync(TempPath("same_turn_verify.txt"));
+        Assert.DoesNotContain("[INFO]", result);
+        Assert.Contains("content here", result);
     }
 
     [Fact]

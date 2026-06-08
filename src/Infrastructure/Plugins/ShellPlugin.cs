@@ -166,6 +166,33 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         return output;
     }
 
+    [Description("Run a shell command; returns 'OK' on success or full output+exit code on failure. Use instead of shell_run when successful output is not needed.")]
+    public async Task<string> RunQuietAsync(
+        [Description("Shell command to execute.")] string command,
+        [Description("Working directory.")] string? workingDirectory = null,
+        [Description("Timeout in seconds.")] int timeoutSeconds = 60)
+    {
+        command = System.Net.WebUtility.HtmlDecode(command);
+
+        var sudoDenial = CheckForSudo(command);
+        if (sudoDenial is not null) return sudoDenial;
+
+        var policyDenial = CheckShellPolicy(command);
+        if (policyDenial is not null) return policyDenial;
+
+        if (_approveCommand is not null && !await _approveCommand(command))
+            return PluginResult.Denied("Shell command blocked by user.");
+
+        var denial = ValidateWorkingDirectory(workingDirectory, out var resolvedDir);
+        if (denial is not null) return denial;
+
+        var result = await ProcessHelper.RunAsync(
+            Shell, [ShellFlag, command],
+            resolvedDir, timeoutSeconds);
+
+        return result.Succeeded ? "OK" : result.ToPluginOutput();
+    }
+
     private static async Task<string?> TryCaptureCommitHashAsync(string? workingDir)
     {
         try

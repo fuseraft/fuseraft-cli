@@ -42,6 +42,11 @@ public sealed class FileSystemPlugin : ITurnResettable
     // current disk state, so it would silently clobber the patch that was just applied.
     private readonly HashSet<string> _patchedThisTurn = new(StringComparer.OrdinalIgnoreCase);
 
+    // Paths written via write_file this turn. Used in CheckSessionCache to suppress the
+    // session-level cache hit for the first within-turn read after a write, so agents can
+    // still read back and verify what they just wrote. Cleared by BeginTurn().
+    private readonly HashSet<string> _writtenThisTurn = new(StringComparer.OrdinalIgnoreCase);
+
     // Per-turn cumulative read budget (chars). Prevents individual tool calls from
     // individually respecting the per-call size limit while still collectively flooding
     // the in-turn context with hundreds of thousands of chars of file content — the
@@ -79,6 +84,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     {
         _readThisTurn.Clear();
         _patchedThisTurn.Clear();
+        _writtenThisTurn.Clear();
         _readBudgetUsed = 0;
     }
 
@@ -147,16 +153,29 @@ public sealed class FileSystemPlugin : ITurnResettable
     private string? CheckSessionCache(string resolved, FileInfo fileInfo, int startLine, int maxLines)
     {
         if (startLine <= 1 && maxLines <= 0 && _sessionCache is not null
+            && !_writtenThisTurn.Contains(resolved)
             && _sessionCache.TryGetHit(resolved, fileInfo, out var cacheHit))
         {
             _onCacheHit?.Invoke();
-            var ago   = FormatTimeAgo(DateTime.UtcNow - cacheHit!.LastReadUtc);
-            var times = cacheHit.ReadCount == 1 ? "once" : $"{cacheHit.ReadCount} times";
-            return PluginResult.Info(
-                $"'{resolved}' has not changed since it was last read this session " +
-                $"({times}, {ago} ago). Content from that read is in your conversation " +
-                $"history (unless compacted away). Use grep_in_file to locate a specific " +
-                $"section, or pass startLine/maxLines to force a targeted re-read.");
+            string hint;
+            if (cacheHit!.ReadCount == 0)
+            {
+                var ago = FormatTimeAgo(DateTime.UtcNow - cacheHit.LastReadUtc);
+                hint = $"'{resolved}' was written this session ({ago} ago) and has not changed " +
+                       $"since. The content is in your conversation history via the write_file call " +
+                       $"(unless compacted away). Use grep_file to search within it, or pass " +
+                       $"startLine/maxLines to force a targeted re-read.";
+            }
+            else
+            {
+                var ago   = FormatTimeAgo(DateTime.UtcNow - cacheHit.LastReadUtc);
+                var times = cacheHit.ReadCount == 1 ? "once" : $"{cacheHit.ReadCount} times";
+                hint = $"'{resolved}' has not changed since it was last read this session " +
+                       $"({times}, {ago} ago). Content from that read is in your conversation " +
+                       $"history (unless compacted away). Use grep_in_file to locate a specific " +
+                       $"section, or pass startLine/maxLines to force a targeted re-read.";
+            }
+            return PluginResult.Info(hint);
         }
 
         if (startLine <= 1 && maxLines <= 0 && !_readThisTurn.Add(resolved))
@@ -887,10 +906,14 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         await File.WriteAllTextAsync(resolved, content);
 
-        // Invalidate both caches — content has changed so a subsequent read_file call should
-        // return the new content, not a cache-hit message.
+        // Allow a within-turn verification read by removing from the per-turn set.
+        // Prime the session cache (ReadCount:0) so later-turn reads get a "was written"
+        // hint instead of re-injecting the full content into context.
+        // _writtenThisTurn suppresses the session-cache check for the first within-turn
+        // read so agents can still verify the content they just wrote.
         _readThisTurn.Remove(resolved);
-        _sessionCache?.Invalidate(resolved);
+        _writtenThisTurn.Add(resolved);
+        _sessionCache?.RecordWrite(resolved, new FileInfo(resolved));
 
         // Bump the version store so stat_file and future baseVersion checks stay accurate.
         int? newVersion = null;
