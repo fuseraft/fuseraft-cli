@@ -645,7 +645,7 @@ public sealed class ChangeTracker
 
             _ = _eventEmitter.EmitAsync("tool_call",
                 agent:   agentName,
-                payload: new { tool = name, arg, ok = succeeded, output = shellOutput, error = toolError });
+                payload: new { tool = name, arg, ok = succeeded, result_chars = resultText.Length, output = shellOutput, error = toolError });
         }
 
         // Intercept search_symbol results to populate SymbolDefinition evidence nodes.
