@@ -5,30 +5,33 @@ namespace fuseraft.Cli.Commands;
 public static partial class InitTemplates
 {
     /// <summary>
-    /// Generates the <c>devops</c> template: Planner → Developer → Operator state-machine pipeline
-    /// for infrastructure and deployment tasks. The Operator executes the deployment and runs smoke
-    /// tests; a <c>DEPLOYMENT_FAILED</c> back-edge returns to Developer for remediation.
+    /// Generates the <c>devops</c> template: OpsPlanner → Executor → Verifier state-machine pipeline
+    /// for infrastructure and deployment tasks. The ops plan includes <c>rollback_command</c> and
+    /// <c>rollback_steps</c>; the Verifier can trigger a rollback cycle if health checks fail.
     /// </summary>
     private static GeneratedConfig DevOps(string model, string? endpoint)
     {
         var planner = $"""
-            Name: Planner
-            Description: Designs the deployment or infrastructure plan.
+            Name: OpsPlanner
+            Description: Designs the operations plan including rollback strategy.
             Instructions: |
               You are a DevOps architect. Your job is to:
               1. {ContextReadStep}
-              2. Understand the infrastructure or deployment task.
-              3. Use sub_agent_explore to survey relevant config files and scripts. For any direct
-                 file reads: {LargeFileProtocol}
-              4. Check if {FuseraftPaths.LocalBrief} already exists. If it does, read it — if it
-                 still covers the current task, call handoff(route_keyword: "PLANNING_COMPLETE")
-                 immediately without rewriting it.
-              5. Write a step-by-step execution plan to {FuseraftPaths.LocalBrief} with fields:
-                   goal — what the deployment achieves
-                   steps — ordered list of execution steps
-                   rollback — steps to undo if something goes wrong
+              2. Understand the infrastructure or deployment task in full.
+              3. Use sub_agent_explore to survey relevant config files, scripts, and manifests.
+                 For any direct file reads: {LargeFileProtocol}
+              4. Check if {FuseraftPaths.LocalOpsPlan} already exists. If it does, read it — if it
+                 still covers the current task, call handoff(route_keyword: "PLAN READY") immediately.
+              5. Write an ops plan to {FuseraftPaths.LocalOpsPlan} (YAML) with these fields:
+                   goal           — what the operation achieves (one sentence)
+                   steps          — ordered list of exact shell commands to execute
+                   verify_command — the exact command to confirm success (health check, smoke test)
+                   rollback_command — the single command to run if verify fails (e.g. "helm rollback")
+                   rollback_steps — ordered list of exact shell commands for manual rollback
+                                    (used when rollback_command is insufficient)
+                   notes          — any warnings, known dependencies, or timing constraints
               6. {ContextWriteStep}
-              When the plan is ready, call handoff(route_keyword: "PLANNING_COMPLETE").
+              When the plan is ready, call handoff(route_keyword: "PLAN READY").
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
@@ -40,76 +43,89 @@ public static partial class InitTemplates
             {AgentFileOptions}
             """;
 
-        var developer = $"""
-            Name: Developer
-            Description: Implements scripts, manifests, and config files.
+        var executor = $"""
+            Name: Executor
+            Description: Runs the ops plan steps or rollback steps and records every exit code.
             Instructions: |
-              You are a DevOps engineer. Your job is to:
+              You are a site reliability engineer executing an operations plan. Your job is to:
               1. {ContextReadStep}
-              2. Read the plan from {FuseraftPaths.LocalBrief} and implement all required
-                 scripts, manifests, or config files. Use patch_file for edits to existing
-                 files; use write_file only for new files.
-              3. Run static analysis or validation with shell_run (e.g. lint, validate, check).
-              4. Commit with git_add and git_commit when ready.
-              5. {ContextWriteStep}
-              When done, call handoff(route_keyword: "DEVELOPMENT_COMPLETE").
-              If the plan is unclear, call handoff(route_keyword: "REPLAN_REQUIRED").
+              2. Read {FuseraftPaths.LocalOpsPlan}. Check whether this is a forward execution
+                 or a rollback (the handoff context will say "ROLLBACK REQUIRED" if rolling back).
+
+                 FORWARD EXECUTION:
+                 - Run each command in the plan's steps array in order using shell_run.
+                 - Record the exit code and relevant output for each step.
+                 - If any step exits non-zero, stop immediately and call
+                   handoff(route_keyword: "EXECUTION FAILED") with the exact error output.
+                 - If all steps succeed, call handoff(route_keyword: "EXECUTION COMPLETE").
+
+                 ROLLBACK EXECUTION:
+                 - Run rollback_command first. If that exits 0, call
+                   handoff(route_keyword: "EXECUTION COMPLETE").
+                 - If rollback_command fails or is absent, run each command in rollback_steps.
+                 - Report outcome: call handoff(route_keyword: "EXECUTION COMPLETE") if rollback
+                   succeeded, or handoff(route_keyword: "EXECUTION FAILED") if it did not.
+              3. {ContextWriteStep}
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
-              - FileSystem
               - Shell
+              - FileSystem
               - Git
               - Changes
               - SessionContext
               - Handoff
             FunctionChoice: required
             MaxInTurnToolPairs: 12
-            {DeveloperContextWindow}
             {AgentFileOptions}
             """;
 
-        var operator_ = $"""
-            Name: Operator
-            Description: Executes the deployment and verifies success.
+        var verifier = $"""
+            Name: Verifier
+            Description: Runs health checks from the ops plan; triggers rollback if checks fail.
             Instructions: |
-              You are a site reliability engineer. Your job is to:
-              1. Execute the deployment steps from {FuseraftPaths.LocalBrief} using shell_run.
-              2. Run smoke tests to verify the deployment succeeded.
-              3. Report the outcome clearly with exact command output.
-              If successful, call handoff(route_keyword: "DEPLOYMENT_COMPLETE").
-              If failed, call handoff(route_keyword: "DEPLOYMENT_FAILED") and describe what went wrong.
+              You are a site reliability engineer verifying an operation. Your job is to:
+              1. {ContextReadStep}
+              2. Read {FuseraftPaths.LocalOpsPlan} and run verify_command with shell_run.
+              3. Evaluate the output:
+                 - If verify_command exits 0 and the output indicates healthy state:
+                   call handoff(route_keyword: "OPS VERIFIED").
+                 - If verify_command exits non-zero or output indicates failure:
+                   Report the exact command, exit code, and relevant output.
+                   call handoff(route_keyword: "ROLLBACK REQUIRED") so the Executor
+                   can run the rollback steps.
+              4. {ContextWriteStep}
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
               - Shell
-              - Git
+              - FileSystem
               - Changes
+              - SessionContext
               - Handoff
             FunctionChoice: required
-            MaxInTurnToolPairs: 12
             {AgentFileOptions}
             """;
 
         var mainConfig = $"""
             Orchestration:
-              Name: DevOps Team
+              Name: DevOps Pipeline
               Description: >-
-                Planner → Developer → Operator pipeline for infrastructure and deployment tasks.
+                OpsPlanner → Executor → Verifier with rollback handling. The ops plan includes
+                verify_command and rollback_command; if health checks fail the Executor runs the
+                rollback steps and the Verifier confirms a known-good state.
 
               EvidenceStore:
                 Path: {FuseraftPaths.LocalEvidence}
 
               Contracts:
-                - Name: PlanExists
+                - Name: PlanReady
                   Requires:
                     - Type: FileExists
-                      Path: {FuseraftPaths.LocalBrief}
+                      Path: {FuseraftPaths.LocalOpsPlan}
 
-                - Name: ArtifactsReady
-                  Requires:
-                    - Type: CommandSucceeded
-                      Pattern: "lint|validate|check|test"
+              ChangeTracking:
+                Path: {FuseraftPaths.LocalChanges}
 
               FailureHandling:
                 MissingEvidence:
@@ -120,11 +136,11 @@ public static partial class InitTemplates
                   Threshold: 3
 
               # Each agent lives in its own YAML file in agents/ — edit, version, or reuse
-              # them independently across configs. Inline fields override the file at load time.
+              # them independently across configs.
               Agents:
-                - AgentFile: agents/planner.yaml
-                - AgentFile: agents/developer.yaml
-                - AgentFile: agents/operator.yaml
+                - AgentFile: agents/ops-planner.yaml
+                - AgentFile: agents/executor.yaml
+                - AgentFile: agents/verifier.yaml
 
               Selection:
                 Type: statemachine
@@ -133,48 +149,50 @@ public static partial class InitTemplates
 
                   States:
                     Planning:
-                      Agent: Planner
+                      Agent: OpsPlanner
                       Transitions:
-                        - To: Development
-                          Signal: "PLANNING_COMPLETE"
-                          Contract: PlanExists
+                        - To: Execution
+                          Signal: "PLAN READY"
+                          Contract: PlanReady
 
-                    Development:
-                      Agent: Developer
+                    Execution:
+                      Agent: Executor
                       Transitions:
-                        - To: Operations
-                          Signal: "DEVELOPMENT_COMPLETE"
-                          Contract: ArtifactsReady
+                        - To: Verification
+                          Signal: "EXECUTION COMPLETE"
                         - To: Planning
-                          Signal: "REPLAN_REQUIRED"
+                          Signal: "EXECUTION FAILED"
 
-                    Operations:
-                      Agent: Operator
+                    Verification:
+                      Agent: Verifier
                       Transitions:
                         - To: Done
-                          Signal: "DEPLOYMENT_COMPLETE"
-                        - To: Development
-                          Signal: "DEPLOYMENT_FAILED"
+                          Signal: "OPS VERIFIED"
+                        - To: Execution
+                          Signal: "ROLLBACK REQUIRED"
 
                     Done:
-                      Agent: Operator
+                      Agent: Verifier
                       Terminal: true
 
               Termination:
                 Type: composite
                 Strategies:
                   - Type: regex
-                    Pattern: DEPLOYMENT_COMPLETE
-                    AgentNames: [Operator]
+                    Pattern: "OPS VERIFIED"
+                    AgentNames: [Verifier]
                   - Type: maxiterations
                     MaxIterations: 20
+
+              Events:
+                Path: {FuseraftPaths.LocalEventsLog}
             {OptionalSections(model, endpoint)}
             """;
 
         return new GeneratedConfig(mainConfig, [
-            ("agents/planner.yaml",   planner),
-            ("agents/developer.yaml", developer),
-            ("agents/operator.yaml",  operator_),
+            ("agents/ops-planner.yaml", planner),
+            ("agents/executor.yaml",    executor),
+            ("agents/verifier.yaml",    verifier),
         ]);
     }
 }

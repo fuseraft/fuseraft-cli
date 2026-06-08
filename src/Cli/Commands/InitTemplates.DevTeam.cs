@@ -5,13 +5,14 @@ namespace fuseraft.Cli.Commands;
 public static partial class InitTemplates
 {
     /// <summary>
-    /// Generates the default <c>devteam</c> template:
+    /// Generates the <c>swe</c> template (replaces <c>devteam</c>):
     /// Planner → PlannerCritic → Developer → Tester → Reviewer
-    /// state-machine pipeline with evidence contracts, failure handling, lossless compaction,
-    /// and a periodic Verifier agent that audits the evidence graph for inconsistencies.
+    /// state-machine pipeline with evidence contracts, hypothesis tracking, failure handling,
+    /// lossless compaction with adaptive ContextBudget, and a periodic Verifier agent.
+    /// Durable execution state and investigation log are injected to all agents by default.
     /// This is the most fully-featured template and serves as the reference implementation.
     /// </summary>
-    private static GeneratedConfig DevTeam(string model, string? endpoint)
+    private static GeneratedConfig Swe(string model, string? endpoint)
     {
         var planner = $"""
             Name: Planner
@@ -26,6 +27,11 @@ public static partial class InitTemplates
                  commands, test failures, or "REPLAN REQUIRED" in the session context.
                  IF a failure signal is present:
                    - Read the test report and recent changes to understand the specific failure.
+                   - Check the Investigation Log in your context: rejected hypotheses show what
+                     the Developer already tried. Confirmed root causes show what is definitively
+                     known. Do not propose an approach that is already rejected.
+                   - If you now know definitively why the previous approach failed, call
+                     identify_root_cause(cause) before writing the revised brief.
                    - Update {FuseraftPaths.LocalBrief}: revise implementation_hints to target
                      the root cause, add a failure_analysis field describing what went wrong
                      and why the previous approach failed.
@@ -40,7 +46,11 @@ public static partial class InitTemplates
                   Address every blocking issue explicitly in the revised brief.
                   Do NOT re-handoff with blocking issues unresolved — the same brief will
                   be rejected again. For each fix, note what you changed in implementation_hints.
-              5. Write a brief to {FuseraftPaths.LocalBrief} with fields:
+              5. If you have a theory about the root cause or the best implementation approach
+                 (especially on a replanning cycle), record it with create_hypothesis(hypothesis)
+                 so the Developer can confirm or reject it explicitly rather than abandoning it
+                 silently. Check the Investigation Log for any approach already ruled out.
+                 Write a brief to {FuseraftPaths.LocalBrief} with fields:
                    goal — one-sentence description of what to build
                    files_to_change — array of paths RELATIVE TO THE SANDBOX ROOT
                      Correct:  src/module/file.py
@@ -73,6 +83,7 @@ public static partial class InitTemplates
               - SubAgent
               - Decision
               - Objective
+              - Investigation
               - Handoff
             FunctionChoice: required
             {AgentFileOptions}
@@ -140,20 +151,45 @@ public static partial class InitTemplates
             Instructions: |
               You are a senior software engineer. Your job is to:
               1. {ContextReadStep}
-              2. Read {FuseraftPaths.LocalBrief}. If the handoff context includes a test report
-                 or failure summary, read it before writing any code — understand what specifically
-                 failed. Root-cause first, patch second. Read the source of the failing call
-                 before patching; a patch without understanding the failure will fail again.
+              2. Read {FuseraftPaths.LocalBrief}. Then read the Execution State section in your
+                 context — it contains:
+                   ActiveFailures   — build/compiler errors with file, line, and error code.
+                                      These are the specific errors you must fix.
+                   FailedAttempts   — approaches that were tried and failed this session.
+                                      Do not repeat any approach listed here.
+                   SignificantChanges — files already written or patched this session.
+                                        Check this before writing: the file may already exist.
+                 Also read the Investigation Log section: rejected hypotheses are ruled-out paths,
+                 confirmed root causes are ground truth. Do not re-attempt anything that appears
+                 under rejected hypotheses.
+                 If the handoff context includes a test report or failure summary, read it before
+                 writing any code. Root-cause first, patch second — read the source of the failing
+                 call before patching; a patch without understanding the failure will fail again.
               3. Implement every file in files_to_change.
-                 Use patch_file for targeted edits to existing files; use write_file only for
-                 new files. All paths are relative to the sandbox root — never double-nest the
-                 project directory name.
-              4. Run verify_command from the brief with shell_run. First call changes_read_latest
-                 and scan the shell command log — if verify_command already appears with exit
-                 code 0 this session, you do not need to re-run it. Otherwise run it now.
-                 This is the authoritative correctness check. Do NOT commit until it passes.
-                 If it fails, diagnose the runtime error (read the relevant source files to
-                 understand the failure), fix, and re-run. Do not commit known-broken code.
+                 FILE WRITE RULES — follow exactly:
+                   a. For existing files: always use patch_file. Never use write_file on a file
+                      that already exists — it may be non-empty and write_file will fail silently.
+                   b. For new files: use write_file.
+                   c. After writing or patching a file, verify it landed: call stat_file on the
+                      path (or list_directory on its parent) and confirm the file is present and
+                      non-zero in size. If write_file fails (file already exists), switch to
+                      patch_file immediately — do not retry write_file on the same path.
+                 All paths are relative to the sandbox root — never double-nest the project dir.
+              4. HYPOTHESIS PROTOCOL — required for every verify_command attempt:
+                 a. BEFORE running verify_command, call create_hypothesis(hypothesis) naming
+                    the specific approach you are about to try (e.g. "patch AddCommand.cs to
+                    add missing namespace import"). Record the hypothesis ID.
+                 b. Run verify_command from the brief with shell_run. Check changes_read_latest
+                    first — if verify_command already succeeded (exit code 0) this session,
+                    skip re-running it and proceed to commit.
+                 c. If verify_command FAILS: call reject_hypothesis(id, reason, evidence) with
+                    the exact exit code and relevant error lines from the output. Do NOT attempt
+                    a new fix without first closing the current hypothesis. Read the failing
+                    source before retrying — understand the new error before writing new code.
+                 d. If verify_command PASSES: call confirm_hypothesis(id, evidence) to close it.
+                 You MUST NOT call handoff with any open (unclosed) hypotheses. Every
+                 create_hypothesis call must be paired with either reject_hypothesis or
+                 confirm_hypothesis before routing.
               5. Commit with git_add and git_commit.
               6. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO TESTER").
@@ -165,6 +201,7 @@ public static partial class InitTemplates
               - Shell
               - Git
               - Changes
+              - Investigation
               - SessionContext
               - Handoff
             FunctionChoice: required
@@ -189,6 +226,9 @@ public static partial class InitTemplates
                      FAIL: name, status, exit_code, command, output (relevant stderr/stdout from the failure — required)
               A PASS result with an empty or missing command field is treated as fabricated and will block handoff.
               Always write the report before routing, even when tests fail.
+              If a test failure reveals a clear root cause (wrong return value, missing
+              dependency, incorrect wiring), call identify_root_cause(cause) before routing
+              so the Developer does not need to re-diagnose it.
               5. {ContextWriteStep}
               If all pass, call handoff(route_keyword: "HANDOFF TO REVIEWER").
               If any fail, call handoff(route_keyword: "BUGS FOUND").
@@ -198,6 +238,7 @@ public static partial class InitTemplates
               - FileSystem
               - Shell
               - Changes
+              - Investigation
               - SessionContext
               - Handoff
             FunctionChoice: required
@@ -247,34 +288,68 @@ public static partial class InitTemplates
 
         var verifier = $"""
             Name: Verifier
-            Description: Audits the evidence graph for inconsistencies between claims and recorded actions.
+            Description: Audits the evidence graph, execution state, and investigation log for inconsistencies.
             Instructions: |
               You are an evidence auditor. Detect inconsistencies between what agents
-              claim and what is recorded in the change log.
+              claim and what is recorded in the change log, execution state, and investigation log.
 
-              1. Call changes_read_latest to see what was actually done this session.
-              2. Compare recorded file writes, shell commands, and exit codes against
-                 any claims made in recent conversation messages.
-              3. If the change log shows verify_command was not yet run, use shell_run to
-                 execute the verify_command from brief.json and record the result.
-              4. If consistent: "Evidence verified — no inconsistencies found."
-              5. If inconsistent: "INCONSISTENCY DETECTED: <what was claimed vs what the evidence shows>"
+              FOLLOW THESE STEPS IN ORDER:
+
+              1. Call changes_read_latest to see what file writes, shell commands, and exit codes
+                 were recorded this session.
+
+              2. Read {FuseraftPaths.LocalExecutionState} with read_file. Check:
+                 - ActiveFailures: any build/compiler errors currently present.
+                 - FailedAttempts: approaches that were recorded as failed.
+                 - SignificantChanges: files written or patched this session.
+
+              3. Read {FuseraftPaths.LocalInvestigationLog} with read_file. Check:
+                 - ConfirmedRootCauses: known ground-truth causes.
+                 - Hypotheses with status "open": any unclosed hypothesis is a protocol violation
+                   (the Developer must close every hypothesis before handoff).
+                 - Hypotheses with status "rejected": approaches that must not be retried.
+
+              4. Cross-check for these specific inconsistency patterns:
+                 a. REPEATED FAILURE: The same error code or error message appears in
+                    ActiveFailures AND in a previous FailedAttempt — meaning a fix was
+                    attempted but the same error recurred. The Developer has not made progress.
+                 b. UNDOCUMENTED FAILURES: FailedAttempts is empty but the change log shows
+                    multiple failed shell commands — the Developer is failing silently without
+                    using the investigation tools.
+                 c. KNOWN ROOT CAUSE UNADDRESSED: ConfirmedRootCauses is non-empty but
+                    ActiveFailures still contains the same error category — the root cause
+                    was identified but the fix was not applied or did not work.
+                 d. OPEN HYPOTHESES: Any hypothesis with status "open" — the Developer
+                    routed without closing it.
+                 e. CLAIMED SUCCESS WITHOUT EVIDENCE: An agent claimed "verify_command passed"
+                    or "ImplementationComplete" but the change log does not show a successful
+                    shell_run of that command.
+
+              5. If the change log shows verify_command was not yet run, use shell_run to
+                 execute the verify_command from {FuseraftPaths.LocalBrief} and record the result.
+
+              6. Report outcome:
+                 - If consistent: "Evidence verified — no inconsistencies found."
+                 - If inconsistent: "INCONSISTENCY DETECTED: <pattern letter> — <what was claimed
+                   vs what the evidence shows, with specific error codes or file names>"
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
+              - FileSystem
               - Changes
               - Shell
             FunctionChoice: required
+            SkipExecutionState: true
             {VerifierContextWindow}
             {AgentFileOptions}
             """;
 
         var mainConfig = $"""
             Orchestration:
-              Name: Software Development Team
+              Name: Software Engineering Team
               Description: >-
                 Planner → PlannerCritic → Developer → Tester → Reviewer with state machine routing,
-                evidence contracts, failure handling, and self-verification.
+                evidence contracts, hypothesis tracking, adaptive ContextBudget, and self-verification.
 
               Security:
                 FileSystemSandboxPath: .   # set to your project root (e.g. ~/projects/myapp)
@@ -475,12 +550,12 @@ public static partial class InitTemplates
             """;
 
         return new GeneratedConfig(mainConfig, [
-            ("agents/planner.yaml",        planner),
-            ("agents/planner-critic.yaml", plannerCritic),
-            ("agents/developer.yaml",      developer),
-            ("agents/tester.yaml",         tester),
-            ("agents/reviewer.yaml",       reviewer),
-            ("agents/verifier.yaml",       verifier),
+            ("agents/planner.yaml",         planner),
+            ("agents/planner-critic.yaml",  plannerCritic),
+            ("agents/developer.yaml",       developer),
+            ("agents/tester.yaml",          tester),
+            ("agents/reviewer.yaml",        reviewer),
+            ("agents/verifier.yaml",        verifier),
         ]);
     }
 }
