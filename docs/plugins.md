@@ -299,7 +299,7 @@ Each entry shows the agent name, turn index, timestamp, files written/deleted, c
 
 ## Session
 
-Gives REPL agents first-class access to their own session metadata, saved-session history, and diagnostic log files. Always available in the REPL when tools are enabled; not applicable to `fuseraft run` orchestrations.
+Gives REPL agents first-class access to their own session metadata, saved-session history, diagnostic log files, and context management. Always available in the REPL when tools are enabled; not applicable to `fuseraft run` orchestrations.
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
@@ -307,6 +307,8 @@ Gives REPL agents first-class access to their own session metadata, saved-sessio
 | `repl_session_list` | — | List all saved REPL sessions newest-first. The active session is marked with `◄ current`. |
 | `repl_session_read_event_log` | `targetSessionId` (optional), `maxLines` (default 50) | Read entries from `repl_events.jsonl` filtered to a session. Defaults to the current session. |
 | `repl_session_read_log` | `logName` (default `"repl_events"`), `maxLines` (default 100) | Read the tail of a named diagnostic log. Valid names: `repl_events`, `events`, `provider_errors`, `app`. |
+| `compact_context` | `focus` (optional) | Compact the conversation history into a concise handoff summary and replace it immediately. Pass an optional one-line focus hint (e.g. `"fix build error in SharePointClient.cs"`) to steer the summary. Call this when context is near the 80k token ceiling or the agent is repeatedly hitting budget errors. |
+| `get_context_status` | — | Return the current context budget: `estimated_tokens`, `budget`, `pct_used`, `tokens_remaining`, and `turn`. Call before a multi-file investigation or whenever you want to check how much headroom remains. |
 
 **Session context in system prompt:** The current session ID, start time, snapshot path, and event log path are injected into the system prompt automatically — the agent always knows its session without needing to call a tool first.
 
@@ -324,6 +326,12 @@ repl_session_read_event_log(maxLines=20)
 
 # Check for provider errors
 repl_session_read_log(logName="provider_errors")
+
+# Check how full the context window is before a large investigation
+get_context_status()
+
+# Free up context when nearing the 80k ceiling
+compact_context(focus="finish fixing the auth middleware")
 ```
 
 ---
