@@ -42,6 +42,33 @@ Add `Changes` to the Tester and Reviewer agent plugin lists so they can inspect 
 
 ---
 
+## Execution state
+
+When `ChangeTracking` is configured, fuseraft maintains a second derived artifact alongside `changes.json`: `execution-state.json` in the same state directory. It is written after every agent turn and injected into every agent's context as the `execution_state` source.
+
+**What agents see:**
+
+| Field | Content |
+|-------|---------|
+| `ActiveFailures` | Compiler/linker errors extracted from the most recent failed build — file, line, error code, and message. Cleared on the next successful build. |
+| `FailedAttempts` | Ring buffer (last 10) of attempts that were recorded as failed this session — description, error summary, and timestamp. |
+| `SignificantChanges` | Ring buffer (last 50) of file writes, patches, copies, and deletes this session — path, operation, and timestamp. |
+| `Build` | Most recent build result — succeeded flag, exit code, command, and errors. |
+
+**Session scoping:**
+
+The execution state file lives at the project level (next to `changes.json`) and persists on disk between runs. On session start, fuseraft compares the on-disk `SessionId` to the current session's ID. If they differ, the file is reset to a clean state before the first agent turn runs — so a new run never inherits `ActiveFailures`, `FailedAttempts`, `SignificantChanges`, or a stale `Build.Succeeded` from a prior run.
+
+Within a session, state accumulates across all turns and survives compaction. A REPLAN loop in the same session picks up where it left off — `FailedAttempts` from earlier Developer turns are still visible to the Planner when deciding how to revise the brief.
+
+**When it matters:**
+
+- The Developer reads `ActiveFailures` to know exactly which compiler errors to fix rather than re-running a build to rediscover them.
+- The Planner reads `FailedAttempts` on a REPLAN to avoid proposing an approach the Developer already tried.
+- The Verifier cross-checks `FailedAttempts` against the change log to detect silent failures (errors that recur without being recorded).
+
+---
+
 ## Validators
 
 Validators are deterministic pre-flight checks that run before a keyword route fires. They inspect disk artifacts, tool-call records in the conversation history, or both. If a check fails, the route is blocked, an error message is injected, and the source agent is re-invoked.
