@@ -76,15 +76,36 @@ public sealed class StateProjector : IEventSink
         if (invocations.Count == 0 && typedEvents.Count == 0)
             return;
 
-        var state = await ReadCurrentAsync(ct);
+        await _fileLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            ExecutionState state;
+            try
+            {
+                state = await ReadCoreAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "StateProjector: failed to read '{Path}' — state reset.", _statePath);
+                state = new ExecutionState { SessionId = _sessionId };
+            }
 
-        foreach (var evt in typedEvents)
-            state = ApplyEvent(state, evt);
+            foreach (var evt in typedEvents)
+                state = ApplyEvent(state, evt);
 
-        foreach (var inv in invocations)
-            state = ApplyInvocation(state, inv);
+            foreach (var inv in invocations)
+                state = ApplyInvocation(state, inv);
 
-        await WriteAsync(state with { LastUpdated = DateTimeOffset.UtcNow, SessionId = _sessionId }, ct);
+            try
+            {
+                await WriteCoreAsync(state with { LastUpdated = DateTimeOffset.UtcNow, SessionId = _sessionId }, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "StateProjector: failed to write '{Path}'.", _statePath);
+            }
+        }
+        finally { _fileLock.Release(); }
     }
 
     private static ExecutionState ApplyEvent(ExecutionState state, ExecutionEvent evt) =>
@@ -106,7 +127,7 @@ public sealed class StateProjector : IEventSink
             ExitCode       = evt.ExitCode,
             Command        = evt.Command,
             Errors         = evt.Errors,
-            LastGoodCommit = evt.Succeeded ? null : state.Build.LastGoodCommit,
+            LastGoodCommit = evt.Succeeded ? evt.CommitHash : state.Build.LastGoodCommit,
             Timestamp      = evt.Timestamp,
         };
 
@@ -236,39 +257,22 @@ public sealed class StateProjector : IEventSink
             pattern.Replace("_", ""),
             StringComparison.OrdinalIgnoreCase);
 
-    private async Task<ExecutionState> ReadCurrentAsync(CancellationToken ct)
+    // Caller must hold _fileLock.
+    private async Task<ExecutionState> ReadCoreAsync(CancellationToken ct)
     {
-        await _fileLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            if (!File.Exists(_statePath))
-                return new ExecutionState { SessionId = _sessionId };
-
-            var raw = await File.ReadAllTextAsync(_statePath, ct);
-            return JsonSerializer.Deserialize<ExecutionState>(raw, JsonOpts)
-                ?? new ExecutionState { SessionId = _sessionId };
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "StateProjector: failed to read '{Path}' — state reset.", _statePath);
+        if (!File.Exists(_statePath))
             return new ExecutionState { SessionId = _sessionId };
-        }
-        finally { _fileLock.Release(); }
+
+        var raw = await File.ReadAllTextAsync(_statePath, ct);
+        return JsonSerializer.Deserialize<ExecutionState>(raw, JsonOpts)
+            ?? new ExecutionState { SessionId = _sessionId };
     }
 
-    private async Task WriteAsync(ExecutionState state, CancellationToken ct)
+    // Caller must hold _fileLock.
+    private async Task WriteCoreAsync(ExecutionState state, CancellationToken ct)
     {
-        await _fileLock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            var dir = Path.GetDirectoryName(Path.GetFullPath(_statePath));
-            if (dir is not null) Directory.CreateDirectory(dir);
-            await File.WriteAllTextAsync(_statePath, JsonSerializer.Serialize(state, JsonOpts), ct);
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "StateProjector: failed to write '{Path}'.", _statePath);
-        }
-        finally { _fileLock.Release(); }
+        var dir = Path.GetDirectoryName(Path.GetFullPath(_statePath));
+        if (dir is not null) Directory.CreateDirectory(dir);
+        await File.WriteAllTextAsync(_statePath, JsonSerializer.Serialize(state, JsonOpts), ct);
     }
 }

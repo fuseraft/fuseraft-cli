@@ -152,16 +152,28 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
 
         if (_eventSink is not null && IsBuildCommand(command))
         {
-            var rawOutput = result.Stdout + "\n" + result.Stderr;
+            var rawOutput  = result.Stdout + "\n" + result.Stderr;
+            var commitHash = result.Succeeded ? await TryCaptureCommitHashAsync(resolvedDir) : null;
             _eventSink.Emit(new BuildResultEvent(
-                Succeeded: result.Succeeded,
-                ExitCode:  result.ExitCode,
-                Command:   command,
-                Errors:    ParseCompilerErrors(rawOutput))
+                Succeeded:  result.Succeeded,
+                ExitCode:   result.ExitCode,
+                Command:    command,
+                CommitHash: commitHash,
+                Errors:     ParseCompilerErrors(rawOutput))
             { Timestamp = DateTimeOffset.UtcNow });
         }
 
         return output;
+    }
+
+    private static async Task<string?> TryCaptureCommitHashAsync(string? workingDir)
+    {
+        try
+        {
+            var r = await ProcessHelper.RunAsync("git", ["rev-parse", "HEAD"], workingDir, 5);
+            return r.Succeeded ? r.Stdout.Trim() : null;
+        }
+        catch { return null; }
     }
 
     private static readonly string[] BuildCommandPrefixes =
