@@ -103,15 +103,37 @@ REPL agents can inspect their own session and diagnostic logs using the built-in
 | `repl_session_list` | All saved sessions newest-first — the active session is marked `◄ current` |
 | `repl_session_read_event_log` | Entries from `repl_events.jsonl` filtered to a session (current by default) |
 | `repl_session_read_log` | Tail of any diagnostic log: `repl_events`, `events`, `provider_errors`, or `app` |
+| `get_context_status` | `estimated_tokens`, `budget`, `pct_used`, `tokens_remaining`, and current `turn` index |
+| `compact_context` | Compact history into a summary; optional `focus` hint steers the summary |
 
 **Log files written per working directory:**
 
 | Log name | Path | Contents |
 |----------|------|----------|
-| `repl_events` | `.fuseraft/logs/repl_events.jsonl` | REPL lifecycle events (session start/end, each turn) tagged with session ID |
+| `repl_events` | `.fuseraft/logs/repl_events.jsonl` | REPL lifecycle events tagged with session ID and turn index |
 | `events` | `~/.fuseraft/logs/sessions/{project_slug}/{session_id}/events.jsonl` | Orchestration events from `fuseraft run` sessions |
 | `provider_errors` | `.fuseraft/logs/provider_errors.jsonl` | Provider API errors and retry attempts |
 | `app` | `.fuseraft/logs/app.log` | Application diagnostic log |
+
+**REPL event types** emitted to `repl_events.jsonl`:
+
+| Event type | When emitted |
+|------------|-------------|
+| `session_start` | Session begins |
+| `session_end` | Session exits cleanly |
+| `user_input` | Each user message submitted |
+| `turn_start` | Model starts processing a turn |
+| `turn_end` | Model finishes a turn — payload: `elapsed_ms`, `estimated_tokens`, `tool_rounds`, `tool_count`, `is_step`, `is_correction` |
+| `assistant_response` | Final assistant message for the turn |
+| `tool_call` | Each individual tool invocation |
+| `compaction` | Context compacted (via `/compact` or `compact_context` tool) — payload: `before_tokens`, `after_tokens`, `source`, `focus` |
+| `cancelled` | Turn cancelled by Ctrl+C |
+| `context_warning` | Context exceeds 75% of the 80k token budget — payload: `estimated_tokens`, `budget`, `pct` |
+| `correction_injected` | Harness injects a write-tool correction after a mutation claim without a backing tool call — payload: `reason` |
+| `plan_captured` | `/plan` stores a new step plan — payload: `step_count` |
+| `step_complete` | `/execute` step passes postconditions — payload: `step`, `total`, `skipped`, `steps_left`, `hit_iteration_cap` |
+| `step_halted` | `/execute` step fails postconditions — payload: `step`, `total`, `expected_tool`, `expected_creates`, `tool_calls`, `hit_iteration_cap` |
+| `command` | Slash command issued |
 
 All REPL events are tagged with the session ID (`session` field in the JSONL), so the agent can distinguish events from different sessions in the same log file.
 

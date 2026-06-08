@@ -902,7 +902,42 @@ internal static class ReplCommands
 
         if (!ctx.JsonMode) AnsiConsole.Markup("[dim]compacting…[/]");
 
-        var focus = string.IsNullOrWhiteSpace(arg) ? string.Empty : $"\n\nFocus for the next session: {arg}";
+        var (success, errorReason, _, _) = await CompactHistoryAsync(ctx, arg, cancellationToken);
+
+        if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 30)}\r");
+
+        if (!success)
+        {
+            if (errorReason == "cancelled")
+                AnsiConsole.MarkupLine("[dim](cancelled)[/]");
+            else if (errorReason == "empty")
+                AnsiConsole.MarkupLine("[yellow]Compaction returned empty output — history unchanged.[/]");
+            else
+                AnsiConsole.MarkupLine($"[red]✗ Compaction failed:[/] {Markup.Escape(errorReason ?? "unknown error")}");
+            return CommandResult.Continue;
+        }
+
+        // /compact resets the displayed turn counter so status lines restart from 1.
+        ctx.TurnIndex = 0;
+
+        if (ctx.JsonMode)
+            ReplJsonBridge.Emit(new { type = "compacted" });
+        else
+            AnsiConsole.MarkupLine("[dim]Session compacted — history replaced with handoff summary.[/]");
+        await ctx.Emitter.EmitAsync("command", payload: new { command = "/compact", arg });
+        return CommandResult.Continue;
+    }
+
+    /// <summary>
+    /// Core compaction logic shared by the /compact command and the compact_context tool.
+    /// Generates a handoff summary via LLM, replaces ctx.History, and resets per-turn
+    /// metrics. Returns (success, errorReason, tokensBefore, tokensAfter).
+    /// </summary>
+    internal static async Task<(bool Success, string? ErrorReason, int BeforeEst, int AfterEst)>
+        CompactHistoryAsync(ReplSessionContext ctx, string? focus, CancellationToken cancellationToken)
+    {
+        var beforeEst = ctx.EstimateTokens();
+        var focusNote = string.IsNullOrWhiteSpace(focus) ? string.Empty : $"\n\nFocus for the next session: {focus}";
         var compactionPrompt =
             "Write a concise handoff document summarising this conversation so a fresh session can continue the work. " +
             "Include: what was being worked on, key decisions and findings, current state, and what comes next. " +
@@ -913,12 +948,9 @@ internal static class ReplCommands
             "calling read_file / shell_run / grep_file etc.), do NOT include them as established facts. " +
             "Instead write: [UNVERIFIED ASSUMPTION: <one-line description>]. " +
             "Facts confirmed by actual tool output are verified and should be stated normally." +
-            focus;
+            focusNote;
 
-        var messages = new List<ChatMessage>(ctx.History)
-        {
-            new ChatMessage(ChatRole.User, compactionPrompt)
-        };
+        var messages = new List<ChatMessage>(ctx.History) { new ChatMessage(ChatRole.User, compactionPrompt) };
 
         string summary;
         try
@@ -927,41 +959,31 @@ internal static class ReplCommands
             using var _  = mc as IDisposable;
             var response = await mc.GetResponseAsync(messages, cancellationToken: cancellationToken);
             summary      = response.Text ?? string.Empty;
-            if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 30)}\r");
+        }
+        catch (OperationCanceledException) { return (false, "cancelled", 0, 0); }
+        catch (Exception ex)               { return (false, ex.Message,   0, 0); }
 
-            if (string.IsNullOrWhiteSpace(summary))
-            {
-                AnsiConsole.MarkupLine("[yellow]Compaction returned empty output — history unchanged.[/]");
-                return CommandResult.Continue;
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 30)}\r");
-            AnsiConsole.MarkupLine("[dim](cancelled)[/]");
-            return CommandResult.Continue;
-        }
-        catch (Exception ex)
-        {
-            if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 30)}\r");
-            AnsiConsole.MarkupLine($"[red]✗ Compaction failed:[/] {Markup.Escape(ex.Message)}");
-            return CommandResult.Continue;
-        }
+        if (string.IsNullOrWhiteSpace(summary)) return (false, "empty", 0, 0);
 
         var sys = ctx.History.FirstOrDefault(m => m.Role == ChatRole.System);
         ctx.History.Clear();
         if (sys is not null) ctx.History.Add(sys);
         ctx.History.Add(new ChatMessage(ChatRole.User, $"[Compacted context from previous session]\n\n{summary}"));
 
-        ctx.TurnIndex             = 0;
         ctx.PrevTurnTokenEstimate = 0;
         ctx.TurnTokenDeltas.Clear();
         ctx.ContextWarningShown   = false;
         ctx.ResetPlanState();
 
-        AnsiConsole.MarkupLine("[dim]Session compacted — history replaced with handoff summary.[/]");
-        await ctx.Emitter.EmitAsync("command", payload: new { command = "/compact", arg });
-        return CommandResult.Continue;
+        var afterEst = ctx.EstimateTokens();
+        await ctx.Emitter.EmitAsync("compaction", payload: new
+        {
+            source        = "manual",
+            before_tokens = beforeEst,
+            after_tokens  = afterEst,
+            focus,
+        });
+        return (true, null, beforeEst, afterEst);
     }
 
     private static async Task<CommandResult> CmdExploreAsync(

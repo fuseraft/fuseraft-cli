@@ -316,6 +316,7 @@ Unless `--no-tools` is passed, the REPL gives the model access to:
 | Search | `search_files`, `search_content`, `search_symbol` |
 | Git | `git_status`, `git_diff`, `git_log`, `git_commit`, and more |
 | Http | `http_get`, `http_post` |
+| Session | `repl_session_current`, `repl_session_list`, `repl_session_read_event_log`, `repl_session_read_log`, `compact_context`, `get_context_status` |
 | Skills | `load_skill`, `run_skill_script` (only when skills are installed — see [Skills](skills.md)) |
 
 When the model invokes tools, the spinner label updates live to show the accumulating chain:
@@ -754,7 +755,27 @@ Use `/context` before compacting to see how full the window is. `/compact` is ad
 
 **Event log**
 
-Every session appends structured JSONL events to `.fuseraft/repl_events.jsonl` in the current working directory (created automatically). Events include `session_start`, `user_input`, `tool_call`, `assistant_response`, `command`, and `session_end`, each stamped with a UTC timestamp and session ID. Use `/events` to view a summary of the current session without leaving the REPL.
+Every session appends structured JSONL events to `.fuseraft/repl_events.jsonl` in the current working directory (created automatically). Each record is tagged with a UTC timestamp, session ID, and turn index. The full set of event types:
+
+| Event type | When emitted |
+|------------|-------------|
+| `session_start` | Session begins |
+| `session_end` | Session exits cleanly |
+| `user_input` | Each user message submitted |
+| `turn_start` | Model starts processing a turn |
+| `turn_end` | Model finishes a turn — includes `elapsed_ms`, `estimated_tokens`, `tool_rounds`, `tool_count` |
+| `assistant_response` | Final assistant message for a turn |
+| `tool_call` | Each individual tool invocation |
+| `compaction` | `/compact` or `compact_context` fires — includes `before_tokens`, `after_tokens`, `source`, `focus` |
+| `cancelled` | Turn cancelled by Ctrl+C |
+| `context_warning` | Context window exceeds 75% of the 80k token budget — includes `estimated_tokens`, `budget`, `pct` |
+| `correction_injected` | Harness injects a write-tool correction after a mutation claim with no tool call |
+| `plan_captured` | `/plan` stores a new plan — includes `step_count` |
+| `step_complete` | `/execute` step passes postconditions — includes `step`, `total`, `steps_left` |
+| `step_halted` | `/execute` step fails postconditions — includes `step`, `total`, `expected_tool`, `tool_calls` |
+| `command` | Slash command issued |
+
+Use `/events` to view a summary of the current session without leaving the REPL.
 
 **Examples**
 

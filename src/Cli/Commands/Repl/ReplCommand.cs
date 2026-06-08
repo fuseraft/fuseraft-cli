@@ -192,9 +192,12 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         var sessionId  = snapshot?.SessionId ?? GenerateSessionId();
         var startedAt  = snapshot?.StartedAt  ?? DateTime.UtcNow;
 
+        ReplSessionPlugin? replSessionPlugin = null;
         if (!settings.NoTools)
-            toolsByCategory["Session"] = PluginRegistry.GetFunctionsFromObject(
-                new ReplSessionPlugin(sessionId, startedAt, modelId, cwd)).ToList();
+        {
+            replSessionPlugin = new ReplSessionPlugin(sessionId, startedAt, modelId, cwd);
+            toolsByCategory["Session"] = PluginRegistry.GetFunctionsFromObject(replSessionPlugin).ToList();
+        }
 
         // Wrap every tool category with the artifact offload filter so oversized results are
         // stored to disk instead of accumulating verbatim in the conversation history.
@@ -256,6 +259,22 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         };
         if (skillsPlugin is not null)
             ctx.LineReader.SetSkillSlugs([.. skillsPlugin.Slugs]);
+
+        // Wire the compact_context and get_context_status tools now that ctx is available.
+        replSessionPlugin?.SetCompactDelegate(async (focus, ct) =>
+        {
+            var (success, errorReason, before, after) =
+                await ReplCommands.CompactHistoryAsync(ctx, focus, ct);
+            if (!success)
+                return errorReason == "cancelled"
+                    ? "Compaction cancelled."
+                    : $"ERROR: Compaction failed: {errorReason}";
+            return $"Context compacted. Token estimate: {before:N0} → {after:N0} " +
+                   $"(freed ~{before - after:N0} tokens). " +
+                   $"The compact summary is now the active context. Continue the current task from here.";
+        });
+        replSessionPlugin?.SetStatusDelegate(
+            () => (ctx.EstimateTokens(), ReplTurn.ContextTokenBudget, ctx.TurnIndex));
 
         if (snapshot is not null)
         {

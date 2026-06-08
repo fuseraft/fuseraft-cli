@@ -16,6 +16,50 @@ public sealed class ReplSessionPlugin(
     string modelId,
     string cwd)
 {
+    // Wired by ReplCommand after context construction so the agent can trigger compaction
+    // and query live context state without a circular construction dependency.
+    private Func<string?, CancellationToken, Task<string>>?        _compactDelegate;
+    private Func<(int EstimatedTokens, int Budget, int TurnIndex)>? _statusDelegate;
+
+    internal void SetCompactDelegate(Func<string?, CancellationToken, Task<string>> compact)
+        => _compactDelegate = compact;
+
+    internal void SetStatusDelegate(Func<(int EstimatedTokens, int Budget, int TurnIndex)> status)
+        => _statusDelegate = status;
+
+    [Description(
+        "Compact the conversation history into a concise handoff summary to free context budget. " +
+        "Call this when accumulated previous turns or tool reads are consuming most of the context window — " +
+        "the agent keeps seeing budget-exceeded errors or context is near the 80k token ceiling. " +
+        "The compaction takes effect immediately: the next turn starts with the compact summary instead of the full history. " +
+        "Safe to call at any point in the session.")]
+    public Task<string> CompactContextAsync(
+        [Description("Optional one-line focus for the summary (e.g. 'fix build error in SharePointClient.cs'). " +
+                     "Helps the summary emphasise the most relevant prior context.")] string? focus = null,
+        CancellationToken cancellationToken = default) =>
+        _compactDelegate is not null
+            ? _compactDelegate(focus, cancellationToken)
+            : Task.FromResult(PluginResult.Error("Compaction is not available in this session."));
+
+    [Description(
+        "Returns the current context budget: estimated token count, budget ceiling, percentage used, remaining tokens, and turn index. " +
+        "Call this before starting a multi-file investigation, or any time you want to know how much headroom " +
+        "remains before deciding whether to call compact_context.")]
+    public string GetContextStatus()
+    {
+        if (_statusDelegate is null)
+            return PluginResult.Error("Context status is not available in this session.");
+
+        var (estimated, budget, turn) = _statusDelegate();
+        var pct       = (double)estimated / budget;
+        var remaining = budget - estimated;
+        return $"estimated_tokens: {estimated:N0}\n" +
+               $"budget:           {budget:N0}\n" +
+               $"pct_used:         {pct:P1}\n" +
+               $"tokens_remaining: {remaining:N0}\n" +
+               $"turn:             {turn}";
+    }
+
     [Description("Get metadata for the current REPL session: ID, model, start time, working dir, snapshot path, and log file locations.")]
     public string Current()
     {
