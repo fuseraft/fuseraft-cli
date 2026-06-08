@@ -79,7 +79,7 @@ public sealed class ContextAssembler
     /// declare an explicit <c>Context</c> spec.
     /// </summary>
     public Task<string?> ReadSessionContextAsync(CancellationToken ct = default)
-        => ResolveSessionContextAsync(ct);
+        => ResolveSessionContextAsync(DefaultMaxCharsPerSource, ct);
 
     // ── Handoff injection (state machine transitions) ────────────────────────
 
@@ -213,7 +213,7 @@ public sealed class ContextAssembler
         var (type, param) = ParseSource(src.Source);
         return type switch
         {
-            "session_context"   => await ResolveSessionContextAsync(ct),
+            "session_context"   => await ResolveSessionContextAsync(maxChars, ct),
             "changes_recent"    => await ResolveChangesRecentAsync(
                                        int.TryParse(param, out var n) ? Math.Max(1, n) : 3,
                                        maxChars, ct),
@@ -420,14 +420,14 @@ public sealed class ContextAssembler
         catch { return null; }
     }
 
-    private async Task<string?> ResolveSessionContextAsync(CancellationToken ct)
+    private async Task<string?> ResolveSessionContextAsync(int maxChars, CancellationToken ct)
     {
         var path = FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalSessionContext, _sessionId);
         if (!File.Exists(path)) return null;
         try
         {
             var text = await File.ReadAllTextAsync(path, ct);
-            return string.IsNullOrWhiteSpace(text) ? null : text;
+            return string.IsNullOrWhiteSpace(text) ? null : Truncate(text, maxChars);
         }
         catch { return null; }
     }
