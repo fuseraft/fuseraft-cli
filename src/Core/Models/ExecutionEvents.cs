@@ -12,7 +12,8 @@ public sealed record BuildResultEvent(
     bool Succeeded,
     int ExitCode,
     string Command,
-    List<string> Errors) : ExecutionEvent;
+    List<string> Errors,
+    string? CommitHash = null) : ExecutionEvent;
 
 public sealed record AttemptFailedEvent(
     string Description,

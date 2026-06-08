@@ -407,6 +407,12 @@ public sealed class AgentFactory(
             {
                 functions = PluginRegistry.GetFunctionsFromObject(plugin);
             }
+            else if (pluginName.Equals("Investigation", StringComparison.OrdinalIgnoreCase))
+            {
+                // Investigation is registered only when ChangeTracking is configured.
+                // Skip gracefully rather than crashing at startup.
+                continue;
+            }
             else
             {
                 throw new InvalidOperationException(
@@ -568,10 +574,19 @@ public sealed class AgentFactory(
                 if (param.ParameterType == typeof(CancellationToken))
                     continue;
 
-                // A parameter is required if it's not optional and not nullable
+                // A parameter is required if it's not optional and not nullable.
+                // Use NullabilityInfoContext for reference types so string is not treated as
+                // nullable — string.IsClass is always true, which would always skip required
+                // string parameters.
                 bool isOptional = param.IsOptional || param.HasDefaultValue;
-                bool isNullable = param.ParameterType.IsClass || 
-                                  Nullable.GetUnderlyingType(param.ParameterType) != null;
+                bool isNullable;
+                if (param.ParameterType.IsValueType)
+                    isNullable = Nullable.GetUnderlyingType(param.ParameterType) != null;
+                else
+                {
+                    var nullCtx = new System.Reflection.NullabilityInfoContext();
+                    isNullable = nullCtx.Create(param).WriteState != System.Reflection.NullabilityState.NotNull;
+                }
 
                 if (!isOptional && !isNullable && !arguments.ContainsKey(param.Name!))
                 {
@@ -1126,7 +1141,7 @@ public sealed class AgentFactory(
                             fr.Result is string s && s.Length > perResultMax)
                         {
                             rebuilt.Add(new FunctionResultContent(
-                                fr.CallId!, s[..perResultMax] + TruncSuffix));
+                                fr.CallId ?? string.Empty, s[..perResultMax] + TruncSuffix));
                             changed = true;
                         }
                         else
