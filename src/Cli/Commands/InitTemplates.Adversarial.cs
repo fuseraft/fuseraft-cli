@@ -5,96 +5,114 @@ namespace fuseraft.Cli.Commands;
 public static partial class InitTemplates
 {
     /// <summary>
-    /// Generates the <c>adversarial</c> template: a GAN-style pipeline where generator agents
-    /// produce artifacts and critic agents review them in isolated context windows.
-    /// Each stage runs up to <c>Rounds</c> generate → critique → revise cycles before the
-    /// approved artifact is promoted to the next stage.
+    /// Generates the <c>debate</c> template: a decision-focused adversarial pipeline.
+    /// A Proposer argues a position across up to 3 rounds against a Challenger; a Moderator
+    /// then synthesises a structured final verdict. Use for architecture decisions, design
+    /// reviews, technology evaluations, and approach choices.
     /// </summary>
-    private static string Adversarial(string model, string? endpoint) => $"""
+    private static string Debate(string model, string? endpoint) => $"""
         Orchestration:
-          Name: Adversarial Pipeline
+          Name: Debate Pipeline
           Description: >
-            GAN-style multi-agent pipeline. Generator agents produce artifacts; critic agents
-            review them with fresh, isolated context windows (no shared history). Each stage
-            runs up to Rounds generate → critique → revise cycles before the artifact is promoted.
+            Decision-focused adversarial pipeline. The Proposer argues a position with evidence;
+            the Challenger critiques it for up to 3 rounds. The Moderator synthesises a final
+            verdict with recommendation, rationale, and dissenting points.
 
           Agents:
-            - Name: Planner
-              Description: Produces a step-by-step implementation plan from the task description.
+            - Name: Proposer
+              Description: Makes the case for a specific decision or approach with evidence.
               Instructions: |
-                You are a Planner. Given a task, produce a clear, concrete, step-by-step
-                implementation plan. Be specific about what needs to be done, in what order,
-                and what the expected output of each step is. Avoid vague instructions.
+                You are a Proposer. Your role depends on the stage.
+
+                STAGE 1 — DELIBERATION (rounds with the Challenger):
+                Round 1: Write a structured position paper arguing for a specific decision or
+                approach. Include:
+                  - Clear recommendation (one sentence)
+                  - Rationale with supporting evidence (data, precedents, constraints)
+                  - Anticipated objections and pre-emptive responses
+                Save the paper to {FuseraftPaths.LocalDebatePosition}.
+
+                Subsequent rounds: Revise the position paper in response to the Challenger's
+                critique. Address EACH objection explicitly — do not ignore any. Update
+                {FuseraftPaths.LocalDebatePosition} with the revised paper.
+
+                STAGE 2 — SYNTHESIS (with the Moderator):
+                Write a debate summary to {FuseraftPaths.LocalDebateSummary} capturing:
+                  - What was argued in Stage 1
+                  - What objections were raised and how they were addressed
+                  - What remains contested
+                  - Your final position
+              Model:
+                ModelId: {model}{Ep(endpoint, "        ")}
+              Plugins:
+                - FileSystem
+                - Search
+                - Scratchpad
+
+            - Name: Challenger
+              Description: Adversarially critiques the Proposer's position with counter-evidence.
+              Instructions: |
+                You are a Challenger. Your job is to stress-test the Proposer's position — not
+                to find reasons it will succeed, but reasons it will FAIL.
+
+                Read {FuseraftPaths.LocalDebatePosition} carefully.
+
+                For each weakness you find, provide:
+                  - The specific claim being challenged
+                  - Counter-evidence or a counter-argument (not just a preference)
+                  - What would need to be true for the weakness to be addressed
+
+                Do not raise objections you cannot support with evidence or reasoning.
+                Do not repeat objections the Proposer has already addressed adequately.
+
+                If the position is genuinely sound and well-argued, respond with exactly:
+                APPROVED
               Model:
                 ModelId: {model}{Ep(endpoint, "        ")}
               Plugins:
                 - FileSystem
                 - Scratchpad
 
-            - Name: PlanReviewer
-              Description: Independently reviews a plan for logical flaws, gaps, and ambiguities.
+            - Name: Moderator
+              Description: Synthesises the full debate record into a structured final verdict.
               Instructions: |
-                You are a PlanReviewer. You will receive a plan to review. Assess it critically:
-                - Are the steps logically ordered with no missing dependencies?
-                - Is each step concrete and actionable?
-                - Are there any ambiguities, contradictions, or dead-ends?
-                - Does the plan actually accomplish the stated goal?
+                You are a Moderator. You have observed the full debate. Your job is to write
+                an impartial, structured verdict.
 
-                If the plan is sound and complete, respond with exactly:
+                Read:
+                  - {FuseraftPaths.LocalDebatePosition} (the Proposer's final position)
+                  - {FuseraftPaths.LocalDebateSummary} (the Proposer's debate summary)
+
+                Write a verdict to {FuseraftPaths.LocalDebateVerdict} with these fields:
+                  recommendation  — what to do (one sentence)
+                  rationale       — the strongest reasons for the recommendation (2–4 bullets)
+                  dissenting_points — objections from the Challenger that were NOT fully resolved
+                  confidence      — "high", "medium", or "low" with a one-sentence justification
+
+                Be fair. If the Challenger raised valid unresolved objections, say so.
+                Do not rubber-stamp the Proposer's position.
+
+                After writing the verdict, respond with exactly:
                 APPROVED
-
-                Otherwise, list specific, actionable improvements. Be precise — point to the
-                exact steps that need to change and explain why.
-              Model:
-                ModelId: {model}{Ep(endpoint, "        ")}
-
-            - Name: Developer
-              Description: Implements code based on an approved plan.
-              Instructions: |
-                You are a Developer. You will receive an approved plan and must implement it.
-                Write clean, working code. Use your tools to create files and run tests.
-                Report what you built and confirm it works.
               Model:
                 ModelId: {model}{Ep(endpoint, "        ")}
               Plugins:
                 - FileSystem
-                - Shell
-                - Git
                 - Scratchpad
-
-            - Name: CodeReviewer
-              Description: Independently reviews implemented code for correctness and quality.
-              Instructions: |
-                You are a CodeReviewer. You will receive implemented code to review.
-                Assess it critically with no assumptions about the author's intent:
-                - Does the implementation match the plan?
-                - Are there bugs, edge cases, or missing error handling?
-                - Is the code readable and maintainable?
-                - Do the tests cover the important paths?
-
-                If the implementation is correct and complete, respond with exactly:
-                APPROVED
-
-                Otherwise, list specific, actionable defects. Reference exact file paths and
-                line numbers where possible. Be precise — describe what is wrong and why.
-              Model:
-                ModelId: {model}{Ep(endpoint, "        ")}
-              Plugins:
-                - FileSystem
 
           Selection:
             Type: adversarial
             Adversarial:
-              Rounds: 3          # critique rounds per stage (generator gets Rounds-1 revision opportunities)
+              Rounds: 3
               PassKeyword: "APPROVED"
               Stages:
-                - Generator: Planner
-                  Critic: PlanReviewer
-                  Label: Planning
+                - Generator: Proposer
+                  Critic: Challenger
+                  Label: Deliberation
 
-                - Generator: Developer
-                  Critic: CodeReviewer
-                  Label: Implementation
+                - Generator: Proposer
+                  Critic: Moderator
+                  Label: Synthesis
 
           Termination:
             Type: maxiterations
@@ -103,10 +121,6 @@ public static partial class InitTemplates
           Compaction:
             TriggerTurnCount: 40
             KeepRecentTurns: 10
-
-          Checkpoint:
-            Mode: json
-            Path: {FuseraftPaths.LocalCheckpoints}
 
           Events:
             Path: {FuseraftPaths.LocalEventsLog}

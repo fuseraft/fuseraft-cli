@@ -42,6 +42,11 @@ public sealed class FileSystemPlugin : ITurnResettable
     // current disk state, so it would silently clobber the patch that was just applied.
     private readonly HashSet<string> _patchedThisTurn = new(StringComparer.OrdinalIgnoreCase);
 
+    // Paths written via write_file this turn. Used in CheckSessionCache to suppress the
+    // session-level cache hit for the first within-turn read after a write, so agents can
+    // still read back and verify what they just wrote. Cleared by BeginTurn().
+    private readonly HashSet<string> _writtenThisTurn = new(StringComparer.OrdinalIgnoreCase);
+
     // Per-turn cumulative read budget (chars). Prevents individual tool calls from
     // individually respecting the per-call size limit while still collectively flooding
     // the in-turn context with hundreds of thousands of chars of file content — the
@@ -79,6 +84,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     {
         _readThisTurn.Clear();
         _patchedThisTurn.Clear();
+        _writtenThisTurn.Clear();
         _readBudgetUsed = 0;
     }
 
@@ -97,36 +103,8 @@ public sealed class FileSystemPlugin : ITurnResettable
         // Compute FileInfo once — used by the session cache check and the cold-read gate.
         var fileInfo = new FileInfo(resolved);
 
-        // Session-level read cache: if the file is in the cache and unchanged on disk
-        // (matching mtime + size), return a hint instead of re-dumping the full content.
-        // Only fires on cold reads (no startLine/maxLines override), same condition as the
-        // per-turn cache below. After compaction the content may no longer be in context,
-        // so agents can pass startLine/maxLines to force a targeted re-read.
-        if (startLine <= 1 && maxLines <= 0 && _sessionCache is not null
-            && _sessionCache.TryGetHit(resolved, fileInfo, out var cacheHit))
-        {
-            _onCacheHit?.Invoke();
-            var ago   = FormatTimeAgo(DateTime.UtcNow - cacheHit!.LastReadUtc);
-            var times = cacheHit.ReadCount == 1 ? "once" : $"{cacheHit.ReadCount} times";
-            return PluginResult.Info(
-                $"'{resolved}' has not changed since it was last read this session " +
-                $"({times}, {ago} ago). Content from that read is in your conversation " +
-                $"history (unless compacted away). Use grep_in_file to locate a specific " +
-                $"section, or pass startLine/maxLines to force a targeted re-read.");
-        }
-
-        // Turn-level read cache — identical file reads within one agent turn return a short
-        // reminder instead of re-dumping the full content into context. The cache is cleared
-        // by ITurnResettable.BeginTurn() at the start of each agent turn.
-        // Reads with a non-default range (startLine > 1 or maxLines > 0) bypass the cache
-        // so agents can page through a file in sections.
-        if (startLine <= 1 && maxLines <= 0 && !_readThisTurn.Add(resolved))
-        {
-            _onCacheHit?.Invoke();
-            return PluginResult.Info(
-                $"'{resolved}' already read this turn — content is in context. " +
-                $"Use grep_in_file to locate a section, then read_file with startLine/maxLines for a targeted excerpt.");
-        }
+        var cacheResult = CheckSessionCache(resolved, fileInfo, startLine, maxLines);
+        if (cacheResult is not null) return cacheResult;
 
         // Reject binary files early by sniffing the first 8 KB for null bytes.
         using (var probe = File.OpenRead(resolved))
@@ -140,10 +118,84 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         var effectiveStart = Math.Max(1, startLine);
 
-        // Cold-read gate: fires when no meaningful maxLines cap is set ("give me everything"),
-        // regardless of startLine — a large file requested from line 2 with no cap is just as
-        // expensive as one from line 1. Byte pre-check avoids allocating a full string array
-        // for a file we're about to redirect.
+        var largeFileResult = await GateLargeFileAsync(resolved, fileInfo, effectiveStart, maxLines);
+        if (largeFileResult is not null) return largeFileResult;
+
+        var allLines   = await File.ReadAllLinesAsync(resolved);
+        var totalLines = allLines.Length;
+
+        if (effectiveStart > totalLines)
+            return PluginResult.Error(
+                $"startLine {effectiveStart} exceeds file length ({totalLines} lines): {resolved}");
+
+        // Slice to the requested range (convert to 0-based index).
+        var slice = allLines.AsSpan(effectiveStart - 1);
+        if (maxLines > 0 && slice.Length > maxLines)
+            slice = slice[..maxLines];
+
+        var budgetResult = ReadWithBudget(resolved, fileInfo, slice, effectiveStart, totalLines, startLine, maxLines, out var content);
+        if (budgetResult is not null) return budgetResult;
+
+        return content!;
+    }
+
+    // Session-level read cache: if the file is in the cache and unchanged on disk
+    // (matching mtime + size), return a hint instead of re-dumping the full content.
+    // Only fires on cold reads (no startLine/maxLines override), same condition as the
+    // per-turn cache below. After compaction the content may no longer be in context,
+    // so agents can pass startLine/maxLines to force a targeted re-read.
+    // Also handles the turn-level read cache — identical file reads within one agent turn
+    // return a short reminder instead of re-dumping the full content into context. The cache
+    // is cleared by ITurnResettable.BeginTurn() at the start of each agent turn.
+    // Reads with a non-default range (startLine > 1 or maxLines > 0) bypass the cache
+    // so agents can page through a file in sections.
+    // Returns a result string when a cache hit is detected, or null to continue reading.
+    private string? CheckSessionCache(string resolved, FileInfo fileInfo, int startLine, int maxLines)
+    {
+        if (startLine <= 1 && maxLines <= 0 && _sessionCache is not null
+            && !_writtenThisTurn.Contains(resolved)
+            && _sessionCache.TryGetHit(resolved, fileInfo, out var cacheHit))
+        {
+            _onCacheHit?.Invoke();
+            string hint;
+            if (cacheHit!.ReadCount == 0)
+            {
+                var ago = FormatTimeAgo(DateTime.UtcNow - cacheHit.LastReadUtc);
+                hint = $"'{resolved}' was written this session ({ago} ago) and has not changed " +
+                       $"since. The content is in your conversation history via the write_file call " +
+                       $"(unless compacted away). Use grep_file to search within it, or pass " +
+                       $"startLine/maxLines to force a targeted re-read.";
+            }
+            else
+            {
+                var ago   = FormatTimeAgo(DateTime.UtcNow - cacheHit.LastReadUtc);
+                var times = cacheHit.ReadCount == 1 ? "once" : $"{cacheHit.ReadCount} times";
+                hint = $"'{resolved}' has not changed since it was last read this session " +
+                       $"({times}, {ago} ago). Content from that read is in your conversation " +
+                       $"history (unless compacted away). Use grep_in_file to locate a specific " +
+                       $"section, or pass startLine/maxLines to force a targeted re-read.";
+            }
+            return PluginResult.Info(hint);
+        }
+
+        if (startLine <= 1 && maxLines <= 0 && !_readThisTurn.Add(resolved))
+        {
+            _onCacheHit?.Invoke();
+            return PluginResult.Info(
+                $"'{resolved}' already read this turn — content is in context. " +
+                $"Use grep_in_file to locate a section, then read_file with startLine/maxLines for a targeted excerpt.");
+        }
+
+        return null;
+    }
+
+    // Cold-read gate: fires when no meaningful maxLines cap is set ("give me everything"),
+    // regardless of startLine — a large file requested from line 2 with no cap is just as
+    // expensive as one from line 1. Byte pre-check avoids allocating a full string array
+    // for a file we're about to redirect.
+    // Returns a result string when the large-file gate fires (preview or budget error), or null to continue.
+    private async Task<string?> GateLargeFileAsync(string resolved, FileInfo fileInfo, int effectiveStart, int maxLines)
+    {
         bool isColdRead = maxLines <= 0 || maxLines > LargeFileColdReadLines;
         if (isColdRead && fileInfo.Length > LargeFileByteThreshold)
         {
@@ -161,18 +213,16 @@ public sealed class FileSystemPlugin : ITurnResettable
             return preview;
         }
 
-        var allLines   = await File.ReadAllLinesAsync(resolved);
-        var totalLines = allLines.Length;
+        return null;
+    }
 
-        if (effectiveStart > totalLines)
-            return PluginResult.Error(
-                $"startLine {effectiveStart} exceeds file length ({totalLines} lines): {resolved}");
-
-        // Slice to the requested range (convert to 0-based index).
-        var slice = allLines.AsSpan(effectiveStart - 1);
-        if (maxLines > 0 && slice.Length > maxLines)
-            slice = slice[..maxLines];
-
+    // Applies the character cap across the selected lines, checks the per-turn read budget,
+    // appends a navigation hint when the output is a partial view, and records the read in
+    // the session cache for full cold reads.
+    // Returns an error string when the budget is exhausted, or null on success (content is set via out parameter).
+    private string? ReadWithBudget(string resolved, FileInfo fileInfo, ReadOnlySpan<string> slice,
+        int effectiveStart, int totalLines, int startLine, int maxLines, out string? content)
+    {
         // Apply character cap across the selected lines.
         var sb = new System.Text.StringBuilder();
         int totalChars = 0;
@@ -190,20 +240,39 @@ public sealed class FileSystemPlugin : ITurnResettable
         }
 
         var endLine = effectiveStart + linesIncluded - 1;
-        var content = sb.ToString();
+        var built   = sb.ToString();
 
         // Per-turn read budget: reject this read if adding its content would exceed the
         // cumulative char limit for this turn. Large numbers of file reads is the primary
         // driver of 400k+ input-token turns — once the budget is hit, the agent must
         // proceed with what it already has in context rather than reading more files.
-        if (_readBudgetUsed + content.Length > _readBudgetPerTurn)
+        if (_readBudgetUsed + built.Length > _readBudgetPerTurn)
+        {
+            content = null;
             return PluginResult.Error(
                 $"Read budget exhausted ({_readBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars). " +
                 $"Proceed with context already available — use patch_file or shell_run. Budget resets next turn.");
+        }
 
-        _readBudgetUsed += content.Length;
+        _readBudgetUsed += built.Length;
 
-        // Append a navigation hint when the output is a partial view of the file.
+        built = AnnotateTypographicWarnings(built, effectiveStart, endLine, totalLines, startLine, maxLines, charTruncated);
+
+        // Record successful full cold reads in the session cache so subsequent attempts
+        // on the same unchanged file are short-circuited with a "content unchanged" hint.
+        // Partial reads (startLine > 1 or maxLines > 0) are not cached — agents requesting
+        // specific ranges are actively paging and should continue to receive content.
+        if (startLine <= 1 && maxLines <= 0)
+            _sessionCache?.RecordRead(resolved, fileInfo);
+
+        content = built;
+        return null;
+    }
+
+    // Appends a navigation hint when the output is a partial view of the file.
+    private static string AnnotateTypographicWarnings(string content, int effectiveStart, int endLine,
+        int totalLines, int startLine, int maxLines, bool charTruncated)
+    {
         bool lineTruncated = (maxLines > 0 && totalLines - effectiveStart + 1 > maxLines) || charTruncated;
         if (effectiveStart > 1 || lineTruncated)
         {
@@ -216,14 +285,6 @@ public sealed class FileSystemPlugin : ITurnResettable
                     : $"\n\n[Showing lines {effectiveStart}–{endLine} of {totalLines}.]";
             content += hint;
         }
-
-        // Record successful full cold reads in the session cache so subsequent attempts
-        // on the same unchanged file are short-circuited with a "content unchanged" hint.
-        // Partial reads (startLine > 1 or maxLines > 0) are not cached — agents requesting
-        // specific ranges are actively paging and should continue to receive content.
-        if (startLine <= 1 && maxLines <= 0)
-            _sessionCache?.RecordRead(resolved, fileInfo);
-
         return content;
     }
 
@@ -354,6 +415,11 @@ public sealed class FileSystemPlugin : ITurnResettable
         var idx = normalContent.IndexOf(normalOld, StringComparison.Ordinal);
         if (idx < 0)
         {
+            // Release the write-once lock so write_file can serve as a recovery path.
+            // Keeping the lock when oldText is not found leaves the agent with no valid
+            // exit: patch_file cannot match, write_file is blocked, and the turn deadlocks.
+            _patchedThisTurn.Remove(resolved);
+
             // Give the agent enough information to correct itself without a full re-read.
             var lineHint     = CountLines(normalContent, normalOld);
             var mismatchHint = FindFirstMismatchingLine(normalContent, normalOld);
@@ -612,6 +678,30 @@ public sealed class FileSystemPlugin : ITurnResettable
             return PluginResult.Error(
                 "The 'content' parameter is required but was not provided. Pass the file text as 'content' separately.");
 
+        var pathDenial = ValidateWritePath(path, out var resolved);
+        if (pathDenial is not null) return pathDenial;
+
+        var versionDenial = await CheckVersionConflictAsync(resolved!, baseVersion);
+        if (versionDenial is not null) return versionDenial;
+
+        var truncationDenial = await EnsureFileExistsAsync(resolved!, content);
+        if (truncationDenial is not null) return truncationDenial;
+
+        var ext = Path.GetExtension(resolved!).ToLowerInvariant();
+
+        var diffDenial = ComputeAndReportDiff(resolved!, content, ext, raw, out content, out bool normalised);
+        if (diffDenial is not null) return diffDenial;
+
+        return await CommitWriteAsync(resolved!, content, normalised);
+    }
+
+    // Validates the path argument: checks for embedded newlines, resolves through the sandbox,
+    // and blocks writes to paths that were already patch_file'd this turn.
+    // Returns a denial string on failure, or null on success (resolved is set via out parameter).
+    private string? ValidateWritePath(string path, out string? resolved)
+    {
+        resolved = null;
+
         // Guard against models that accidentally embed file content in the path argument
         // (e.g. passing "my/file.go\npackage main\n..." as the path). A valid path never
         // contains newline characters; anything after the first newline is almost certainly
@@ -622,8 +712,9 @@ public sealed class FileSystemPlugin : ITurnResettable
                 "file path. Did you accidentally include file content in the path? " +
                 "Pass the file path as 'path' and the file text as 'content' separately.");
 
-        var denial = ResolveSafe(path, out var resolved);
+        var denial = ResolveSafe(path, out var r);
         if (denial is not null) return denial;
+        resolved = r;
 
         // Block write_file on a path that was already patch_file'd this turn. The agent's
         // full-file content is derived from its pre-patch mental model and would silently
@@ -634,8 +725,14 @@ public sealed class FileSystemPlugin : ITurnResettable
                 $"Calling write_file now would overwrite that patch with stale content. " +
                 $"Use patch_file again for any additional edits.");
 
-        // Version conflict check: when baseVersion > 0, reject the write if the current
-        // stored version differs so agents cannot silently overwrite concurrent changes.
+        return null;
+    }
+
+    // Version conflict check: when baseVersion > 0, reject the write if the current
+    // stored version differs so agents cannot silently overwrite concurrent changes.
+    // Returns an error string on conflict, or null when the check passes.
+    private async Task<string?> CheckVersionConflictAsync(string resolved, int baseVersion)
+    {
         if (baseVersion > 0 && _versionStore is not null)
         {
             var currentVersion = await _versionStore.GetVersionAsync(resolved);
@@ -645,16 +742,21 @@ public sealed class FileSystemPlugin : ITurnResettable
                     $"but baseVersion={baseVersion} was supplied. " +
                     $"Call stat_file to read the current version, then reissue the write with the correct baseVersion.");
         }
+        return null;
+    }
 
-        // Guard against model output truncation on large existing files.
-        // When a model tries to write a file that is substantially larger on disk than the
-        // content it is providing, the content is almost certainly truncated — the model ran
-        // out of output tokens before finishing the file. Writing truncated content silently
-        // would corrupt the file. Instead, return an error so the agent knows to use a
-        // targeted edit tool (sed -i, or shell_run with a patch) rather than a full rewrite.
-        //
-        // Threshold: if the existing file is > 50 lines AND the new content has fewer than
-        // 60 % of the existing line count, reject the write.
+    // Guard against model output truncation on large existing files.
+    // When a model tries to write a file that is substantially larger on disk than the
+    // content it is providing, the content is almost certainly truncated — the model ran
+    // out of output tokens before finishing the file. Writing truncated content silently
+    // would corrupt the file. Instead, return an error so the agent knows to use a
+    // targeted edit tool (sed -i, or shell_run with a patch) rather than a full rewrite.
+    //
+    // Threshold: if the existing file is > 50 lines AND the new content has fewer than
+    // 60 % of the existing line count, reject the write.
+    // Returns an error string when the truncation guard fires, or null to proceed.
+    private static async Task<string?> EnsureFileExistsAsync(string resolved, string content)
+    {
         if (File.Exists(resolved))
         {
             int existingLines = 0;
@@ -673,119 +775,145 @@ public sealed class FileSystemPlugin : ITurnResettable
                     $"  • Alternatively: shell_run with sed -i to insert/replace specific lines.\n" +
                     $"This approach is safer and avoids the token-limit truncation problem.");
         }
+        return null;
+    }
 
-        var ext = Path.GetExtension(resolved).ToLowerInvariant();
-        bool normalised = false;
+    // Encoding detection + line ending normalization: applies quote normalization, JSON
+    // artifact stripping, escape-sequence expansion, and the typographic character guard.
+    // Quote normalisation runs unconditionally for known extensions — it corrects a
+    // JSON serialisation artifact (model double-escaping " as \") and must not be
+    // skipped even when raw=true, which only controls escape-sequence expansion.
+    // Returns an error string when typographic characters block the write, or null on success
+    // (normalizedContent and normalised are set via out parameters).
+    private static string? ComputeAndReportDiff(string resolved, string content, string ext, bool raw,
+        out string normalizedContent, out bool normalised)
+    {
+        normalised = false;
 
-        // Quote normalisation runs unconditionally for known extensions — it corrects a
-        // JSON serialisation artifact (model double-escaping " as \") and must not be
-        // skipped even when raw=true, which only controls escape-sequence expansion.
         if (QuoteNormalizeExtensions.Contains(ext) && content.Contains("\\\""))
         {
             content    = content.Replace("\\\"", "\"");
             normalised = true;
         }
 
-        if (raw) goto write;
-
-        // For .json files, normalise common LLM wrapping artifacts before writing.
-        if (ext == ".json")
+        if (!raw)
         {
-            // Guard against blank/whitespace-only content — the model probably forgot
-            // to include the content argument.  Returning an error here is cheaper than
-            // a successful write that immediately fails downstream JSON validation.
-            if (string.IsNullOrWhiteSpace(content))
-                return PluginResult.Error(
-                    "The 'content' argument is empty. Did you forget to include the JSON content? " +
-                    "Pass the full JSON object as the 'content' parameter.");
-
-            var trimmed = content.TrimStart();
-
-            // Strip markdown code fences (```json ... ``` or ``` ... ```).
-            // A valid JSON file should never start with ``` — strip the fence and trailing
-            // ``` so the file contains only the raw JSON object/array.
-            if (trimmed.StartsWith("```"))
+            // For .json files, normalise common LLM wrapping artifacts before writing.
+            if (ext == ".json")
             {
-                // Skip the opening fence line (```json, ```, etc.)
-                var firstNewline = trimmed.IndexOf('\n');
-                if (firstNewline >= 0)
-                    trimmed = trimmed[(firstNewline + 1)..];
-                // Strip the closing ```
-                var lastFence = trimmed.LastIndexOf("```");
-                if (lastFence >= 0)
-                    trimmed = trimmed[..lastFence];
-                content   = trimmed.Trim();
+                // Guard against blank/whitespace-only content — the model probably forgot
+                // to include the content argument.  Returning an error here is cheaper than
+                // a successful write that immediately fails downstream JSON validation.
+                if (string.IsNullOrWhiteSpace(content))
+                {
+                    normalizedContent = content;
+                    return PluginResult.Error(
+                        "The 'content' argument is empty. Did you forget to include the JSON content? " +
+                        "Pass the full JSON object as the 'content' parameter.");
+                }
+
+                var trimmed = content.TrimStart();
+
+                // Strip markdown code fences (```json ... ``` or ``` ... ```).
+                // A valid JSON file should never start with ``` — strip the fence and trailing
+                // ``` so the file contains only the raw JSON object/array.
+                if (trimmed.StartsWith("```"))
+                {
+                    // Skip the opening fence line (```json, ```, etc.)
+                    var firstNewline = trimmed.IndexOf('\n');
+                    if (firstNewline >= 0)
+                        trimmed = trimmed[(firstNewline + 1)..];
+                    // Strip the closing ```
+                    var lastFence = trimmed.LastIndexOf("```");
+                    if (lastFence >= 0)
+                        trimmed = trimmed[..lastFence];
+                    content   = trimmed.Trim();
+                    normalised = true;
+                }
+                // Strip XML <parameter name="content">…</parameter> wrappers.
+                // Some models emit tool-call XML artifacts as literal content, e.g.:
+                //   <parameter name="content">{"goal": ...}</parameter>
+                // Extract just the inner text so the file contains valid JSON.
+                else if (trimmed.StartsWith("<parameter", StringComparison.OrdinalIgnoreCase))
+                {
+                    var closeTag = trimmed.IndexOf('>');
+                    if (closeTag >= 0)
+                    {
+                        var inner = trimmed[(closeTag + 1)..];
+                        var endTag = inner.LastIndexOf("</parameter>", StringComparison.OrdinalIgnoreCase);
+                        if (endTag >= 0) inner = inner[..endTag];
+                        content   = inner.Trim();
+                        normalised = true;
+                    }
+                }
+            }
+
+            // Detect double-escaped newlines: when a model constructs the tool-call JSON
+            // argument by hand, it sometimes writes \\n instead of a real newline, so after
+            // JSON deserialization the content string contains literal \n (backslash-n) rather
+            // than actual newline characters. The tell-tale sign is a file with zero real
+            // newlines but multiple literal \n sequences — replace them so the written file has
+            // proper line endings instead of collapsing to a single line of escape sequences.
+            if (!content.Contains('\n') && !content.Contains('\r') && content.Contains("\\n"))
+            {
+                content = content
+                    .Replace("\\r\\n", "\r\n")
+                    .Replace("\\n", "\n")
+                    .Replace("\\t", "\t");
                 normalised = true;
             }
-            // Strip XML <parameter name="content">…</parameter> wrappers.
-            // Some models emit tool-call XML artifacts as literal content, e.g.:
-            //   <parameter name="content">{"goal": ...}</parameter>
-            // Extract just the inner text so the file contains valid JSON.
-            else if (trimmed.StartsWith("<parameter", StringComparison.OrdinalIgnoreCase))
+
+            // Typographic character guard: source files that contain em-dashes, curly quotes,
+            // non-breaking spaces, or other Unicode lookalikes will fail to compile or parse.
+            // These characters appear when an LLM bleeds prose-generation typography into code.
+            // Block the write and report each offending character so the agent can correct the
+            // content before it reaches disk — preventing the delete/rewrite correction loop
+            // caused by files that are syntactically broken from the moment they are written.
+            if (SourceCodeExtensions.Contains(ext))
             {
-                var closeTag = trimmed.IndexOf('>');
-                if (closeTag >= 0)
+                var hits = FindTypographicChars(content);
+                if (hits.Count > 0)
                 {
-                    var inner = trimmed[(closeTag + 1)..];
-                    var endTag = inner.LastIndexOf("</parameter>", StringComparison.OrdinalIgnoreCase);
-                    if (endTag >= 0) inner = inner[..endTag];
-                    content   = inner.Trim();
-                    normalised = true;
+                    normalizedContent = content;
+                    return PluginResult.Error(
+                        $"WRITE BLOCKED — typographic characters found in source file '{resolved}'.\n" +
+                        $"These are Unicode lookalikes for ASCII punctuation that cause compile/parse errors:\n\n" +
+                        string.Join("\n", hits.Select(h =>
+                            $"  line {h.Line}: U+{(int)h.Char:X4} {h.Name}\n    {h.Excerpt}")) +
+                        $"\n\nReplace each with the correct ASCII character:\n" +
+                        "  — (em-dash)         → - (hyphen-minus)\n" +
+                        "  – (en-dash)         → - (hyphen-minus)\n" +
+                        "  “” (curly dquotes) → \" (straight double quote)\n" +
+                        "  ‘’ (curly squotes) → ' (apostrophe)\n" +
+                        "  … (ellipsis)        → ... (three full stops)\n" +
+                        "    (non-breaking sp) →   (regular space)\n" +
+                        "\nCorrect the content and call write_file again.");
                 }
             }
         }
 
-        // Detect double-escaped newlines: when a model constructs the tool-call JSON
-        // argument by hand, it sometimes writes \\n instead of a real newline, so after
-        // JSON deserialization the content string contains literal \n (backslash-n) rather
-        // than actual newline characters. The tell-tale sign is a file with zero real
-        // newlines but multiple literal \n sequences — replace them so the written file has
-        // proper line endings instead of collapsing to a single line of escape sequences.
-        if (!content.Contains('\n') && !content.Contains('\r') && content.Contains("\\n"))
-        {
-            content = content
-                .Replace("\\r\\n", "\r\n")
-                .Replace("\\n", "\n")
-                .Replace("\\t", "\t");
-            normalised = true;
-        }
+        normalizedContent = content;
+        return null;
+    }
 
-        // Typographic character guard: source files that contain em-dashes, curly quotes,
-        // non-breaking spaces, or other Unicode lookalikes will fail to compile or parse.
-        // These characters appear when an LLM bleeds prose-generation typography into code.
-        // Block the write and report each offending character so the agent can correct the
-        // content before it reaches disk — preventing the delete/rewrite correction loop
-        // caused by files that are syntactically broken from the moment they are written.
-        if (SourceCodeExtensions.Contains(ext) && !raw)
-        {
-            var hits = FindTypographicChars(content);
-            if (hits.Count > 0)
-                return PluginResult.Error(
-                    $"WRITE BLOCKED — typographic characters found in source file '{resolved}'.\n" +
-                    $"These are Unicode lookalikes for ASCII punctuation that cause compile/parse errors:\n\n" +
-                    string.Join("\n", hits.Select(h =>
-                        $"  line {h.Line}: U+{(int)h.Char:X4} {h.Name}\n    {h.Excerpt}")) +
-                    $"\n\nReplace each with the correct ASCII character:\n" +
-                    "  — (em-dash)         → - (hyphen-minus)\n" +
-                    "  – (en-dash)         → - (hyphen-minus)\n" +
-                    "  “” (curly dquotes) → \" (straight double quote)\n" +
-                    "  ‘’ (curly squotes) → ' (apostrophe)\n" +
-                    "  … (ellipsis)        → ... (three full stops)\n" +
-                    "    (non-breaking sp) →   (regular space)\n" +
-                    "\nCorrect the content and call write_file again.");
-        }
-
-        write:
+    // Writes content to disk, invalidates caches, bumps the version store, and returns the
+    // success result string.
+    private async Task<string> CommitWriteAsync(string resolved, string content, bool normalised)
+    {
         var dir = Path.GetDirectoryName(resolved);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
 
         await File.WriteAllTextAsync(resolved, content);
 
-        // Invalidate both caches — content has changed so a subsequent read_file call should
-        // return the new content, not a cache-hit message.
+        // Allow a within-turn verification read by removing from the per-turn set.
+        // Prime the session cache (ReadCount:0) so later-turn reads get a "was written"
+        // hint instead of re-injecting the full content into context.
+        // _writtenThisTurn suppresses the session-cache check for the first within-turn
+        // read so agents can still verify the content they just wrote.
         _readThisTurn.Remove(resolved);
-        _sessionCache?.Invalidate(resolved);
+        _writtenThisTurn.Add(resolved);
+        _sessionCache?.RecordWrite(resolved, new FileInfo(resolved));
 
         // Bump the version store so stat_file and future baseVersion checks stay accurate.
         int? newVersion = null;

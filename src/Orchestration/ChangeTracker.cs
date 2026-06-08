@@ -39,6 +39,7 @@ public sealed class ChangeTracker
     private readonly IntentLog? _intentLog;
     private readonly RepositoryGraphBuilder? _graphBuilder;
     private readonly ILogger<ChangeTracker>? _logger;
+    private readonly StateProjector? _stateProjector;
     private readonly ConcurrentQueue<InvocationRecord> _pending = new();
     private readonly SemaphoreSlim _fileLock = new(1, 1);
     private string? _sessionId;
@@ -80,7 +81,7 @@ public sealed class ChangeTracker
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    public ChangeTracker(string logPath, EventEmitter? eventEmitter = null, EvidenceStore? evidenceStore = null, IntentLog? intentLog = null, ILogger<ChangeTracker>? logger = null, RepositoryGraphBuilder? graphBuilder = null)
+    public ChangeTracker(string logPath, EventEmitter? eventEmitter = null, EvidenceStore? evidenceStore = null, IntentLog? intentLog = null, ILogger<ChangeTracker>? logger = null, RepositoryGraphBuilder? graphBuilder = null, StateProjector? stateProjector = null)
     {
         _logPath        = logPath;
         _eventEmitter   = eventEmitter;
@@ -88,6 +89,7 @@ public sealed class ChangeTracker
         _intentLog      = intentLog;
         _graphBuilder   = graphBuilder;
         _logger         = logger;
+        _stateProjector = stateProjector;
     }
 
     /// <summary>
@@ -104,6 +106,7 @@ public sealed class ChangeTracker
         if (_evidenceStore is not null)
             await _evidenceStore.SetSessionIdAsync(sessionId, cancellationToken);
         _intentLog?.SetSessionId(sessionId);
+        _stateProjector?.SetSessionId(sessionId);
 
         await _fileLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -187,89 +190,100 @@ public sealed class ChangeTracker
                 await EmitCallerEvidenceNodesAsync(agentName, turnIndex, callerRecords, cancellationToken);
         }
 
-        if (records.Count == 0) return;
-
-        var entry = new ChangeEntry
-        {
-            Agent     = agentName,
-            TurnIndex = turnIndex,
-            Timestamp = DateTime.UtcNow,
-            SessionId = _sessionId,
-
-            FilesWritten = [.. records
-                .Where(r => (FunctionNameMatches(r.Name, "write_file") || FunctionNameMatches(r.Name, "patch_file")) && r.Succeeded)
-                .Select(r => OrchestratorHelpers.GetArg(r.Args, "path"))
-                .Concat(records
-                    .Where(r => FunctionNameMatches(r.Name, "copy_file") && r.Succeeded)
-                    .Select(r => OrchestratorHelpers.GetArg(r.Args, "destination")))
-                .Concat(records
-                    .Where(r => FunctionNameMatches(r.Name, "move_file") && r.Succeeded)
-                    .Select(r => OrchestratorHelpers.GetArg(r.Args, "destination")))
-                .OfType<string>()],
-
-            FilesDeleted = [.. records
-                .Where(r => FunctionNameMatches(r.Name, "delete_file") && r.Succeeded)
-                .Select(r => OrchestratorHelpers.GetArg(r.Args, "path"))
-                .Concat(records
-                    .Where(r => FunctionNameMatches(r.Name, "delete_directory") && r.Succeeded)
-                    .Select(r => OrchestratorHelpers.GetArg(r.Args, "path")))
-                .Concat(records
-                    .Where(r => FunctionNameMatches(r.Name, "move_file") && r.Succeeded)
-                    .Select(r => OrchestratorHelpers.GetArg(r.Args, "source")))
-                .OfType<string>()],
-
-            CommandsRun = [.. records
-                .Where(r => FunctionNameMatches(r.Name, "shell_run"))
-                .Select(r => new CommandRecord
-                {
-                    Command   = OrchestratorHelpers.GetArg(r.Args, "command") ?? OrchestratorHelpers.GetArg(r.Args, "script") ?? "(script)",
-                    Succeeded = r.Succeeded,
-                    Output    = r.Output
-                })],
-
-            GitCommits = [.. records
-                .Where(r => FunctionNameMatches(r.Name, "git_commit") && r.Succeeded)
-                .Select(r => OrchestratorHelpers.GetArg(r.Args, "message"))
-                .OfType<string>()]
-        };
-
-        if (!entry.FilesWritten.Any() && !entry.FilesDeleted.Any() &&
-            !entry.CommandsRun.Any()  && !entry.GitCommits.Any())
-            return;
-
-        // Emit typed evidence nodes for the evidence graph (alongside flat changes.json).
-        if (_evidenceStore is not null)
-            await EmitEvidenceNodesAsync(agentName, turnIndex, records, cancellationToken);
-
-        await _fileLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var dir = Path.GetDirectoryName(Path.GetFullPath(_logPath));
-            if (dir is not null) Directory.CreateDirectory(dir);
+            if (records.Count == 0) return;
 
-            ChangeLog log;
-            if (File.Exists(_logPath))
+            var entry = new ChangeEntry
             {
-                try
+                Agent     = agentName,
+                TurnIndex = turnIndex,
+                Timestamp = DateTime.UtcNow,
+                SessionId = _sessionId,
+
+                FilesWritten = [.. records
+                    .Where(r => (FunctionNameMatches(r.Name, "write_file") || FunctionNameMatches(r.Name, "patch_file")) && r.Succeeded)
+                    .Select(r => OrchestratorHelpers.GetArg(r.Args, "path"))
+                    .Concat(records
+                        .Where(r => FunctionNameMatches(r.Name, "copy_file") && r.Succeeded)
+                        .Select(r => OrchestratorHelpers.GetArg(r.Args, "destination")))
+                    .Concat(records
+                        .Where(r => FunctionNameMatches(r.Name, "move_file") && r.Succeeded)
+                        .Select(r => OrchestratorHelpers.GetArg(r.Args, "destination")))
+                    .OfType<string>()],
+
+                FilesDeleted = [.. records
+                    .Where(r => FunctionNameMatches(r.Name, "delete_file") && r.Succeeded)
+                    .Select(r => OrchestratorHelpers.GetArg(r.Args, "path"))
+                    .Concat(records
+                        .Where(r => FunctionNameMatches(r.Name, "delete_directory") && r.Succeeded)
+                        .Select(r => OrchestratorHelpers.GetArg(r.Args, "path")))
+                    .Concat(records
+                        .Where(r => FunctionNameMatches(r.Name, "move_file") && r.Succeeded)
+                        .Select(r => OrchestratorHelpers.GetArg(r.Args, "source")))
+                    .OfType<string>()],
+
+                CommandsRun = [.. records
+                    .Where(r => FunctionNameMatches(r.Name, "shell_run"))
+                    .Select(r => new CommandRecord
+                    {
+                        Command   = OrchestratorHelpers.GetArg(r.Args, "command") ?? OrchestratorHelpers.GetArg(r.Args, "script") ?? "(script)",
+                        Succeeded = r.Succeeded,
+                        Output    = r.Output
+                    })],
+
+                GitCommits = [.. records
+                    .Where(r => FunctionNameMatches(r.Name, "git_commit") && r.Succeeded)
+                    .Select(r => OrchestratorHelpers.GetArg(r.Args, "message"))
+                    .OfType<string>()]
+            };
+
+            if (!entry.FilesWritten.Any() && !entry.FilesDeleted.Any() &&
+                !entry.CommandsRun.Any()  && !entry.GitCommits.Any())
+                return;
+
+            // Emit typed evidence nodes for the evidence graph (alongside flat changes.json).
+            if (_evidenceStore is not null)
+                await EmitEvidenceNodesAsync(agentName, turnIndex, records, cancellationToken);
+
+            await _fileLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var dir = Path.GetDirectoryName(Path.GetFullPath(_logPath));
+                if (dir is not null) Directory.CreateDirectory(dir);
+
+                ChangeLog log;
+                if (File.Exists(_logPath))
                 {
-                    var raw = await File.ReadAllTextAsync(_logPath, cancellationToken);
-                    log = JsonSerializer.Deserialize<ChangeLog>(raw, JsonOpts) ?? new ChangeLog();
+                    try
+                    {
+                        var raw = await File.ReadAllTextAsync(_logPath, cancellationToken);
+                        log = JsonSerializer.Deserialize<ChangeLog>(raw, JsonOpts) ?? new ChangeLog();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.LogWarning(ex, "ChangeTracker: failed to load '{Path}' during flush — change log reset.", _logPath);
+                        log = new ChangeLog();
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    _logger?.LogWarning(ex, "ChangeTracker: failed to load '{Path}' during flush — change log reset.", _logPath);
                     log = new ChangeLog();
                 }
-            }
-            else
-            {
-                log = new ChangeLog();
-            }
 
-            log.Entries.Add(entry);
-            await File.WriteAllTextAsync(_logPath, JsonSerializer.Serialize(log, JsonOpts), cancellationToken);
+                log.Entries.Add(entry);
+                await File.WriteAllTextAsync(_logPath, JsonSerializer.Serialize(log, JsonOpts), cancellationToken);
+            }
+            finally { _fileLock.Release(); }
         }
-        finally { _fileLock.Release(); }
+        finally
+        {
+            if (_stateProjector is not null)
+            {
+                try   { await _stateProjector.ProjectAsync(records, agentName, turnIndex, cancellationToken); }
+                catch (Exception ex) { _logger?.LogWarning(ex, "StateProjector.ProjectAsync failed (turn {Turn}).", turnIndex); }
+            }
+        }
     }
 
     // Builds typed EvidenceNode objects from the raw invocation records and persists
@@ -631,7 +645,7 @@ public sealed class ChangeTracker
 
             _ = _eventEmitter.EmitAsync("tool_call",
                 agent:   agentName,
-                payload: new { tool = name, arg, ok = succeeded, output = shellOutput, error = toolError });
+                payload: new { tool = name, arg, ok = succeeded, result_chars = resultText.Length, output = shellOutput, error = toolError });
         }
 
         // Intercept search_symbol results to populate SymbolDefinition evidence nodes.

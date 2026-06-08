@@ -59,7 +59,22 @@ public static class FuseraftPaths
     // ── Project-local (.fuseraft/ relative to CWD) — user-authored, all tracked by git ──
 
     // artifacts/ — non-session-scoped outputs (local, agent-generated per run)
-    public const string LocalTestReport = ".fuseraft/artifacts/test-report.json";
+    public const string LocalTestReport     = ".fuseraft/artifacts/test-report.json";
+    public const string LocalAuditFindings  = ".fuseraft/artifacts/audit-findings.json";
+    public const string LocalRemediationPlan = ".fuseraft/artifacts/remediation-plan.json";
+    public const string LocalOpsPlan        = ".fuseraft/artifacts/ops-plan.yaml";
+
+    // data/ — data engineering outputs (local, agent-generated per run)
+    public const string LocalDataRoot            = ".fuseraft/data";
+    public const string LocalDataManifest        = ".fuseraft/data/manifest.json";
+    public const string LocalDataAnalysisResults = ".fuseraft/data/analysis-results.json";
+
+    // docs/ (supplemental) — structured review artifacts
+    public const string LocalResearchFindings = ".fuseraft/docs/research-findings.md";
+    public const string LocalResearchReview   = ".fuseraft/docs/research-review.json";
+    public const string LocalDebatePosition   = ".fuseraft/docs/position.md";
+    public const string LocalDebateSummary    = ".fuseraft/docs/debate-summary.md";
+    public const string LocalDebateVerdict    = ".fuseraft/docs/verdict.md";
 
     // ── Global project-scoped runtime paths (~/.fuseraft/) — keyed by {project_slug} ──
     // These are templates; expand with ExpandProjectPaths(path, slug) or
@@ -81,6 +96,8 @@ public static class FuseraftPaths
     public const string LocalKnowledgeFindings    = "~/.fuseraft/state/{project_slug}/knowledge_findings.json";
     public const string LocalProvenanceArchive    = "~/.fuseraft/state/{project_slug}/provenance.archive.json";
     public const string LocalRepositoryGraph      = "~/.fuseraft/state/{project_slug}/repository.graph";
+    public const string LocalExecutionState       = "~/.fuseraft/state/{project_slug}/execution-state.json";
+    public const string LocalInvestigationLog     = "~/.fuseraft/state/{project_slug}/investigation-log.json";
 
     // sessions/ — all session-scoped runtime data, keyed by {project_slug}/{session_id}
     public const string LocalSessions             = "~/.fuseraft/sessions/{project_slug}";

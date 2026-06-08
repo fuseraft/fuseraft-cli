@@ -101,6 +101,15 @@ public record AgentConfig
     public List<ContextSource>? Context { get; init; }
 
     /// <summary>
+    /// When <c>true</c>, suppresses the automatic <c>execution_state</c> prepend that
+    /// <c>OrchestratorBuilder</c> injects for all state-machine agents. Set this when an
+    /// agent intentionally omits execution state from its context (e.g. a Planner whose
+    /// instructions are anchored to the brief and does not need live build status).
+    /// Defaults to <c>false</c>.
+    /// </summary>
+    public bool SkipExecutionState { get; init; } = false;
+
+    /// <summary>
     /// Per-plugin capability allowlist. When a plugin name appears here, only the tools
     /// whose capability tag is in the declared list are registered for this agent. Plugins
     /// listed in <see cref="Plugins"/> that have no entry here receive all of their tools

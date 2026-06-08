@@ -909,12 +909,67 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
 
         return new ContextSnapshot
         {
-            CurrentStateName = _currentState,
-            ContractResults  = results,
-            RecentEvidence   = recent,
-            SessionId        = _sessionId == "unknown" ? null : _sessionId,
-            Timestamp        = DateTimeOffset.UtcNow,
+            CurrentStateName  = _currentState,
+            ContractResults   = results,
+            RecentEvidence    = recent,
+            SessionId         = _sessionId == "unknown" ? null : _sessionId,
+            Timestamp         = DateTimeOffset.UtcNow,
+            TransitionFailure = _transitionFailure,
+            NoSignalFailure   = _noSignalFailure,
+            VisitedStates     = _visitedStates,
+            BackEdgeVisits    = _backEdgeVisits,
+            RecoveryActivated = _recoveryActivated,
         };
+    }
+
+    /// <summary>
+    /// Returns a JSON-serialisable checkpoint of the failure-tracking counters. Called by
+    /// <see cref="fuseraft.Cli.SessionRunner"/> immediately before compaction so the counters
+    /// survive across <c>StreamAsync</c> restarts.
+    /// </summary>
+    public StateMachineCheckpointState TakeCheckpointState() => new()
+    {
+        TransitionFailureKey   = _transitionFailure?.Key,
+        TransitionFailureCount = _transitionFailure?.Count ?? 0,
+        TransitionFailureError = _transitionFailure?.LastError,
+        NoSignalFailureState   = _noSignalFailure?.State,
+        NoSignalFailureCount   = _noSignalFailure?.Count ?? 0,
+        VisitedStates          = [.. _visitedStates],
+        BackEdgeVisits         = new Dictionary<string, int>(_backEdgeVisits, StringComparer.OrdinalIgnoreCase),
+        RecoveryActivated      = [.. _recoveryActivated],
+    };
+
+    /// <summary>
+    /// Restores the failure-tracking counters from a persisted checkpoint. Called after
+    /// <see cref="SetCurrentState"/> during compaction resume so all five counters survive
+    /// the <c>StreamAsync</c> restart rather than resetting to their zero-state defaults.
+    /// No-op when <paramref name="snap"/> is null.
+    /// </summary>
+    public void RestoreFromSnapshot(StateMachineCheckpointState? snap)
+    {
+        if (snap is null) return;
+
+        _transitionFailure = snap.TransitionFailureKey is { Length: > 0 }
+            ? (snap.TransitionFailureKey, snap.TransitionFailureCount, snap.TransitionFailureError ?? string.Empty)
+            : null;
+
+        _noSignalFailure = snap.NoSignalFailureState is { Length: > 0 }
+            ? (snap.NoSignalFailureState, snap.NoSignalFailureCount)
+            : null;
+
+        _visitedStates.Clear();
+        foreach (var s in snap.VisitedStates) _visitedStates.Add(s);
+
+        _backEdgeVisits.Clear();
+        foreach (var (k, v) in snap.BackEdgeVisits) _backEdgeVisits[k] = v;
+
+        _recoveryActivated.Clear();
+        foreach (var s in snap.RecoveryActivated) _recoveryActivated.Add(s);
+
+        _logger.LogDebug("[StateMachine] RestoreFromSnapshot: failure state restored from checkpoint (transition={Key}/{Count}, noSignal={NSState}/{NSCount}, visited={Visited}, backEdges={BackEdges}, recovered={Recovered})",
+            _transitionFailure?.Key ?? "none", _transitionFailure?.Count ?? 0,
+            _noSignalFailure?.State ?? "none", _noSignalFailure?.Count ?? 0,
+            _visitedStates.Count, _backEdgeVisits.Count, _recoveryActivated.Count);
     }
 
     private static AIAgent? FindAgent(IReadOnlyList<AIAgent> agents, string name) =>

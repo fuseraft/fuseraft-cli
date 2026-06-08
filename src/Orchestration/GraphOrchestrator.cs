@@ -683,72 +683,15 @@ public sealed class GraphOrchestrator(
                 throw new ValidatorStuckException(agentName, "total-turns", totalTurns,
                     $"Node '{nodeId}' ({agentName}) exceeded {maxTotalTurns} total turns without completing.");
 
-            // Assemble context through the unified pipeline (or legacy filter when pipeline is absent).
-            IEnumerable<ChatMessage> context;
-            if (contextPipeline is not null)
-            {
-                var assembled = await contextPipeline.AssembleAsync(
-                    new fuseraft.Core.Models.AgentExecutionRequest
-                    {
-                        AgentName     = agentName,
-                        Task          = _task,
-                        SharedHistory = ctx.History,
-                        AgentConfig   = agentCfg,
-                        SessionId     = _sessionId,
-                    }, ct);
-                context = assembled.Messages;
-                await EmitContextCapWarningAsync(agentName, agentCfg, assembled.Messages, ctx);
-                if (eventEmitter is not null)
-                    await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, ctx.TurnIndex);
-            }
-            else
-            {
-                var filtered = ContextWindowFilter.Apply(ctx.History, agentCfg.ContextWindow);
-                await EmitContextCapWarningAsync(agentName, agentCfg, filtered, ctx);
-                context = !string.IsNullOrWhiteSpace(instructions)
-                    ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
-                    : filtered;
-            }
-
-            if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("turn_start", agent: agentName, turn: ctx.TurnIndex);
-
-            AgentResponse response;
-            try
-            {
-                response = governanceKernel?.CircuitBreaker is { } cb
-                    ? await cb.ExecuteAsync(() => agent.RunAsync(context, null, null, ct)).ConfigureAwait(false)
-                    : await agent.RunAsync(context, null, null, ct).ConfigureAwait(false);
-            }
-            catch (TimeoutException tex)
-            {
-                consecutiveFails++;
-
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("turn_timeout",
-                        agent:   agentName,
-                        payload: new { message = tex.Message, consecutive = consecutiveFails });
-
-                if (consecutiveFails >= maxRetries)
-                    throw new ValidatorStuckException(agentName, "streaming-timeout",
-                        consecutiveFails, tex.Message);
-
-                ctx.History.Add(new ChatMessage(ChatRole.User,
-                    "TIMEOUT: Response timed out. Resume from where you left off — prior tool results are in context. " +
-                    "Do not re-research. Call write_file or shell_run now, or emit the handoff keyword if all work is complete.\n\n" +
-                    $"Valid keywords: {CorrectionEngine.BuildValidKeywordList(routeTable)}"));
-                continue;
-            }
-
-            logger.LogDebug(
-                "[{Agent}] Node '{NodeId}' turn {Turn} — response: {Preview}",
-                agentName, nodeId, totalTurns,
-                StringHelpers.Truncate((response.Text ?? "").Replace('\n', ' '), 200));
-
-            var agentMsg = await RecordAndEmitAsync(response, agentName, ctx, ct);
+            var (response, agentMsg, updatedFails, shouldContinue) =
+                await RunSingleNodeTurnAsync(
+                    nodeId, agentName, agent, routeTable, agentCfg, instructions,
+                    ctx, consecutiveFails, maxRetries, totalTurns, ct);
+            consecutiveFails = updatedFails;
+            if (shouldContinue) continue;
 
             // responseText is used by both the terminal validator path and keyword detection.
-            var responseText = response.Text ?? string.Empty;
+            var responseText = response!.Text ?? string.Empty;
 
             // Terminal node: validate then end the session.
             if (isTerminal)
@@ -775,13 +718,12 @@ public sealed class GraphOrchestrator(
                 consecutiveFails = 0;
                 ctx.LastKeyword  = TerminalSentinel;
 
-                ctx.CurrentState = StateHandoff.Advance(ctx.CurrentState, agentName);
-                lock (_stateHistoryLock) _stateHistory.Add(ctx.CurrentState);
+                RecordNodeState(ctx, agentName);
 
                 if (eventEmitter is not null)
                     await eventEmitter.EmitAsync("state_advanced",
                         agent: agentName,
-                        turn:  agentMsg.TurnIndex,
+                        turn:  agentMsg!.TurnIndex,
                         payload: new { version = ctx.CurrentState.Version, terminal = true });
 
                 await wfCtx.YieldOutputAsync(ctx, ct).ConfigureAwait(false);
@@ -811,11 +753,10 @@ public sealed class GraphOrchestrator(
                         if (eventEmitter is not null)
                             await eventEmitter.EmitAsync("agent_routed",
                                 agent:   agentName,
-                                turn:    agentMsg.TurnIndex,
+                                turn:    agentMsg!.TurnIndex,
                                 payload: new { keyword = "(unconditional)", to = autoFwdRoute.NextExecutorName });
 
-                        ctx.CurrentState = StateHandoff.Advance(ctx.CurrentState, autoFwdRoute.NextExecutorName);
-                        lock (_stateHistoryLock) _stateHistory.Add(ctx.CurrentState);
+                        RecordNodeState(ctx, autoFwdRoute.NextExecutorName);
 
                         ctx.History.Add(new ChatMessage(ChatRole.User,
                             $"[fuseraft: {agentName} → {autoFwdRoute.NextExecutorName}]"));
@@ -861,13 +802,12 @@ public sealed class GraphOrchestrator(
                     // Use a synthetic keyword so the outer phase loop can look up the destination.
                     ctx.LastKeyword  = $"__UNCOND_BACK:{nodeId.ToLowerInvariant()}";
 
-                    ctx.CurrentState = StateHandoff.Advance(ctx.CurrentState, autoBackDest ?? agentName);
-                    lock (_stateHistoryLock) _stateHistory.Add(ctx.CurrentState);
+                    RecordNodeState(ctx, autoBackDest ?? agentName);
 
                     if (eventEmitter is not null)
                         await eventEmitter.EmitAsync("state_advanced",
                             agent: agentName,
-                            turn:  agentMsg.TurnIndex,
+                            turn:  agentMsg!.TurnIndex,
                             payload: new { version = ctx.CurrentState.Version, phase_break = "(unconditional)", next = autoBackDest ?? "(terminal)" });
 
                     await wfCtx.YieldOutputAsync(ctx, ct).ConfigureAwait(false);
@@ -884,7 +824,7 @@ public sealed class GraphOrchestrator(
 
             // Keyword detection
 
-            var handoffArgKeyword = KeywordDetector.ExtractHandoffToolCallKeyword(response.Messages, routeTable);
+            var handoffArgKeyword = KeywordDetector.ExtractHandoffToolCallKeyword(response!.Messages, routeTable);
             var allKeywords       = handoffArgKeyword is not null
                 ? (IReadOnlyList<string>)[handoffArgKeyword]
                 : KeywordDetector.DetectKeywords(responseText, routeTable);
@@ -897,7 +837,7 @@ public sealed class GraphOrchestrator(
                 if (eventEmitter is not null)
                     await eventEmitter.EmitAsync("multi_keyword",
                         agent:   agentName,
-                        turn:    agentMsg.TurnIndex,
+                        turn:    agentMsg!.TurnIndex,
                         payload: new { keywords = allKeywords, consecutive = consecutiveFails });
 
                 if (consecutiveFails >= maxRetries)
@@ -918,87 +858,20 @@ public sealed class GraphOrchestrator(
             if (foundKeyword is not null && eventEmitter is not null)
                 await eventEmitter.EmitAsync("keyword_detected",
                     agent:   agentName,
-                    turn:    agentMsg.TurnIndex,
+                    turn:    agentMsg!.TurnIndex,
                     payload: new { keyword = foundKeyword });
 
             // Back-edge keyword (phase-break): validate then yield to restart outer loop.
 
             if (foundKeyword is not null && routeTable.PhaseBreakKeywords.Contains(foundKeyword))
             {
-                // Run per-keyword validators declared on this back-edge (GAP-2).
-                if (routeTable.PhaseBreakValidators.TryGetValue(foundKeyword, out var pbValidators)
-                    && pbValidators.Count > 0)
-                {
-                    var (pbOk, pbErr, pbValidator) = await RunValidatorsAsync(
-                        pbValidators, ctx.History, ct).ConfigureAwait(false);
-
-                    if (!pbOk)
-                    {
-                        consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-                        RecordGovernanceViolation(agentName, pbValidator!, consecutiveFails, maxRetries);
-
-                        if (consecutiveFails >= maxRetries)
-                            throw new ValidatorStuckException(agentName, pbValidator!, consecutiveFails, pbErr!);
-
-                        // Recovery agent for back-edge validator failures.
-                        var backEdgeKey = $"{nodeId}::{foundKeyword}::back";
-                        if (consecutiveFails >= 2
-                            && routeTable.PhaseBreakRecoveryAgents.TryGetValue(foundKeyword, out var backRecoveryName)
-                            && !_recoveryActivated.ContainsKey(backEdgeKey)
-                            && agents.TryGetValue(backRecoveryName, out var backRecoveryAgt))
-                        {
-                            _recoveryActivated.TryAdd(backEdgeKey, true);
-                            await InvokeRecoveryAgentAsync(
-                                backRecoveryName, backRecoveryAgt,
-                                agentInstructions, agentConfigs,
-                                $"'{pbValidator}' failed {consecutiveFails}× on back-edge '{foundKeyword}'",
-                                pbErr!, foundKeyword, ctx, ct);
-                            consecutiveFails = 0;
-                            continue;
-                        }
-
-                        await EmitAndInjectValidationFailureAsync(
-                            agentName, foundKeyword, pbValidator!, pbErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
-                        continue;
-                    }
-                }
-
-                // Human approval gate for back-edges.
-                if (routeTable.PhaseBreakRequireHumanApproval.Contains(foundKeyword)
-                    && _humanApprovalService is not null)
-                {
-                    var backTarget = _backEdgeDestinations.TryGetValue(foundKeyword, out var pbd0)
-                        ? pbd0 ?? "(terminal)"
-                        : "(terminal)";
-                    var approved = await _humanApprovalService.PromptRouteApprovalAsync(
-                        foundKeyword, agentName, backTarget);
-                    if (!approved)
-                    {
-                        ctx.History.Add(new ChatMessage(ChatRole.User,
-                            $"Phase-break to '{backTarget}' was blocked by the operator. " +
-                            $"Continue your work or await further instructions."));
-                        consecutiveFails = 0;
-                        int histBeforePbBlocked = ctx.History.Count - 1;
-                        await PersistCorrectionsAsync(ctx, histBeforePbBlocked, ct).ConfigureAwait(false);
-                        continue;
-                    }
-                }
-
-                consecutiveFails = 0;
-                ctx.LastKeyword  = foundKeyword;
-
-                var backEdgeDest = _backEdgeDestinations.TryGetValue(foundKeyword, out var pbd) ? pbd : null;
-                ctx.CurrentState = StateHandoff.Advance(ctx.CurrentState, backEdgeDest ?? agentName);
-                lock (_stateHistoryLock) _stateHistory.Add(ctx.CurrentState);
-
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("state_advanced",
-                        agent: agentName,
-                        turn:  agentMsg.TurnIndex,
-                        payload: new { version = ctx.CurrentState.Version, phase_break = foundKeyword, next = backEdgeDest ?? "(terminal)" });
-
-                await wfCtx.YieldOutputAsync(ctx, ct).ConfigureAwait(false);
-                return;
+                var (backHandled, backShouldReturn, backFails) =
+                    await HandleBackEdgeAsync(
+                        nodeId, agentName, foundKeyword, routeTable, agentMsg!, responseText,
+                        consecutiveFails, maxRetries, ctx, wfCtx, agents, agentInstructions, agentConfigs, ct);
+                consecutiveFails = backFails;
+                if (backShouldReturn) return;
+                if (backHandled) continue;
             }
 
             // Parallel fan-out keyword
@@ -1024,17 +897,13 @@ public sealed class GraphOrchestrator(
 
                 if (parallelGroup.RequireHumanApproval && _humanApprovalService is not null)
                 {
-                    var approved = await _humanApprovalService.PromptRouteApprovalAsync(
-                        foundKeyword, agentName, parallelGroup.MergeTargetName);
-                    if (!approved)
-                    {
-                        ctx.History.Add(new ChatMessage(ChatRole.User,
-                            $"Parallel dispatch to [{string.Join(", ", parallelGroup.NodeIds)}] was blocked by the operator. " +
-                            $"Continue your work or await further instructions."));
-                        consecutiveFails = 0;
-                        await PersistCorrectionsAsync(ctx, ctx.History.Count - 1, ct).ConfigureAwait(false);
-                        continue;
-                    }
+                    var (pgApproved, pgApprovedFails) = await ApplyHumanApprovalGateAsync(
+                        foundKeyword, agentName, parallelGroup.MergeTargetName,
+                        $"Parallel dispatch to [{string.Join(", ", parallelGroup.NodeIds)}] was blocked by the operator. " +
+                        $"Continue your work or await further instructions.",
+                        consecutiveFails, ctx, ct);
+                    consecutiveFails = pgApprovedFails;
+                    if (!pgApproved) continue;
                 }
 
                 if (eventEmitter is not null)
@@ -1071,8 +940,7 @@ public sealed class GraphOrchestrator(
                 consecutiveFails = 0;
                 ctx.LastKeyword  = foundKeyword;
 
-                ctx.CurrentState = StateHandoff.Advance(ctx.CurrentState, parallelGroup.MergeTargetName);
-                lock (_stateHistoryLock) _stateHistory.Add(ctx.CurrentState);
+                RecordNodeState(ctx, parallelGroup.MergeTargetName);
 
                 if (eventEmitter is not null)
                 {
@@ -1082,7 +950,7 @@ public sealed class GraphOrchestrator(
 
                     await eventEmitter.EmitAsync("state_advanced",
                         agent: agentName,
-                        turn:  agentMsg.TurnIndex,
+                        turn:  agentMsg!.TurnIndex,
                         payload: new { version = ctx.CurrentState.Version, parallel_merge = true, to = parallelGroup.MergeTargetName });
                 }
 
@@ -1097,83 +965,13 @@ public sealed class GraphOrchestrator(
 
             if (foundKeyword is not null && routeTable.Routes.TryGetValue(foundKeyword, out var route))
             {
-                var (ok, errMsg, failingValidator) = await RunValidatorsAsync(
-                    route.Validators, ctx.History, ct).ConfigureAwait(false);
-
-                if (ok)
-                {
-                    if (route.Validators.Count > 0)
-                        governanceKernel?.SloEngine.Get("policy-compliance")?.Record(1.0);
-
-                    // Human approval gate: prompt before the route fires.
-                    if (route.RequireHumanApproval && _humanApprovalService is not null)
-                    {
-                        var approved = await _humanApprovalService.PromptRouteApprovalAsync(
-                            foundKeyword, agentName, route.NextExecutorName);
-                        if (!approved)
-                        {
-                            ctx.History.Add(new ChatMessage(ChatRole.User,
-                                $"Route to {route.NextExecutorName} was blocked by the operator. " +
-                                $"Continue your work or await further instructions."));
-                            consecutiveFails = 0;
-                            int histBeforeBlocked = ctx.History.Count - 1;
-                            await PersistCorrectionsAsync(ctx, histBeforeBlocked, ct).ConfigureAwait(false);
-                            continue;
-                        }
-                    }
-
-                    consecutiveFails = 0;
-                    ctx.LastKeyword  = foundKeyword;
-
-                    if (eventEmitter is not null)
-                        await eventEmitter.EmitAsync("agent_routed",
-                            agent:   agentName,
-                            turn:    agentMsg.TurnIndex,
-                            payload: new { keyword = foundKeyword, to = route.NextExecutorName });
-
-                    ctx.CurrentState = StateHandoff.Advance(ctx.CurrentState, route.NextExecutorName);
-                    lock (_stateHistoryLock) _stateHistory.Add(ctx.CurrentState);
-                    if (eventEmitter is not null)
-                        await eventEmitter.EmitAsync("state_advanced",
-                            agent: agentName,
-                            turn:  agentMsg.TurnIndex,
-                            payload: new { version = ctx.CurrentState.Version, to = route.NextExecutorName });
-
-                    ctx.History.Add(new ChatMessage(ChatRole.User,
-                        $"[fuseraft: {agentName} → {route.NextExecutorName}]"));
-
-                    await wfCtx.SendMessageAsync(ctx, route.NextExecutorId, ct).ConfigureAwait(false);
-                    return;
-                }
-
-                // Validator failed — clamp to maxRetries-1 so a single keyword find is not
-                // penalised as heavily as a missing keyword before injecting correction.
-                consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-                RecordGovernanceViolation(agentName, failingValidator!, consecutiveFails, maxRetries);
-
-                if (consecutiveFails >= maxRetries)
-                    throw new ValidatorStuckException(agentName, failingValidator!, consecutiveFails, errMsg!);
-
-                // Recovery agent: activate on >= 2 consecutive failures, at most once per edge.
-                var fwdEdgeKey = $"{nodeId}::{foundKeyword}";
-                if (consecutiveFails >= 2
-                    && route.RecoveryAgent is not null
-                    && !_recoveryActivated.ContainsKey(fwdEdgeKey)
-                    && agents.TryGetValue(route.RecoveryAgent, out var fwdRecoveryAgt))
-                {
-                    _recoveryActivated.TryAdd(fwdEdgeKey, true);
-                    await InvokeRecoveryAgentAsync(
-                        route.RecoveryAgent, fwdRecoveryAgt,
-                        agentInstructions, agentConfigs,
-                        $"'{failingValidator}' failed {consecutiveFails}× on edge '{foundKeyword}'",
-                        errMsg!, foundKeyword, ctx, ct);
-                    consecutiveFails = 0;
-                    continue;
-                }
-
-                await EmitAndInjectValidationFailureAsync(
-                    agentName, foundKeyword, failingValidator!, errMsg!, responseText, consecutiveFails, maxRetries, ctx, ct);
-                continue;
+                var (fwdHandled, fwdShouldReturn, fwdFails) =
+                    await EvaluateRouteAsync(
+                        nodeId, agentName, foundKeyword, route, agentMsg!, responseText,
+                        consecutiveFails, maxRetries, ctx, wfCtx, agents, agentInstructions, agentConfigs, ct);
+                consecutiveFails = fwdFails;
+                if (fwdShouldReturn) return;
+                if (fwdHandled) continue;
             }
 
             // No keyword matched.
@@ -1183,13 +981,13 @@ public sealed class GraphOrchestrator(
             if (eventEmitter is not null)
                 await eventEmitter.EmitAsync("no_keyword",
                     agent:   agentName,
-                    turn:    agentMsg.TurnIndex,
+                    turn:    agentMsg!.TurnIndex,
                     payload: new { consecutive = consecutiveFails });
 
             int histBefore2 = ctx.History.Count;
             await CorrectionEngine.InjectNoKeywordCorrection(
                 ctx.History, responseText, agentName, consecutiveFails, routeTable, eventEmitter,
-                agentMsg.ToolCalls);
+                agentMsg!.ToolCalls);
             await PersistCorrectionsAsync(ctx, histBefore2, ct).ConfigureAwait(false);
 
             if (consecutiveFails >= maxRetries)
@@ -1197,6 +995,357 @@ public sealed class GraphOrchestrator(
                     $"Node '{nodeId}' ({agentName}) emitted no routing keyword " +
                     $"for {consecutiveFails} consecutive turns.");
         }
+    }
+
+    /// <summary>
+    /// Single agent turn and stream collection. Assembles context via
+    /// <see cref="HandleContextOverflowAsync"/>, emits <c>turn_start</c>, runs the agent,
+    /// handles timeout by injecting a correction and signalling retry, then records and
+    /// emits the response via <see cref="RecordAndEmitAsync"/>.
+    /// </summary>
+    /// <returns>
+    /// A tuple of (<see cref="AgentResponse"/>, <see cref="AgentMessage"/>,
+    /// updated consecutive-fail count, shouldContinue). When <c>shouldContinue</c> is
+    /// <c>true</c> a timeout was handled and the caller must retry the turn loop.
+    /// </returns>
+    private async Task<(AgentResponse? Response, AgentMessage? AgentMsg, int ConsecutiveFails, bool ShouldContinue)>
+        RunSingleNodeTurnAsync(
+            string nodeId,
+            string agentName,
+            AIAgent agent,
+            AgentRouteTable routeTable,
+            AgentConfig agentCfg,
+            string instructions,
+            AgentContext ctx,
+            int consecutiveFails,
+            int maxRetries,
+            int totalTurns,
+            CancellationToken ct)
+    {
+        // Assemble context through the unified pipeline (or legacy filter when pipeline is absent).
+        var context = await HandleContextOverflowAsync(agentName, agentCfg, instructions, ctx, ct)
+            .ConfigureAwait(false);
+
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync("turn_start", agent: agentName, turn: ctx.TurnIndex);
+
+        AgentResponse response;
+        try
+        {
+            response = governanceKernel?.CircuitBreaker is { } cb
+                ? await cb.ExecuteAsync(() => agent.RunAsync(context, null, null, ct)).ConfigureAwait(false)
+                : await agent.RunAsync(context, null, null, ct).ConfigureAwait(false);
+        }
+        catch (TimeoutException tex)
+        {
+            consecutiveFails++;
+
+            if (eventEmitter is not null)
+                await eventEmitter.EmitAsync("turn_timeout",
+                    agent:   agentName,
+                    payload: new { message = tex.Message, consecutive = consecutiveFails });
+
+            if (consecutiveFails >= maxRetries)
+                throw new ValidatorStuckException(agentName, "streaming-timeout",
+                    consecutiveFails, tex.Message);
+
+            ctx.History.Add(new ChatMessage(ChatRole.User,
+                "TIMEOUT: Response timed out. Resume from where you left off — prior tool results are in context. " +
+                "Do not re-research. Call write_file or shell_run now, or emit the handoff keyword if all work is complete.\n\n" +
+                $"Valid keywords: {CorrectionEngine.BuildValidKeywordList(routeTable)}"));
+            return (null, null, consecutiveFails, true);
+        }
+
+        logger.LogDebug(
+            "[{Agent}] Node '{NodeId}' turn {Turn} — response: {Preview}",
+            agentName, nodeId, totalTurns,
+            StringHelpers.Truncate((response.Text ?? "").Replace('\n', ' '), 200));
+
+        var agentMsg = await RecordAndEmitAsync(response, agentName, ctx, ct);
+        return (response, agentMsg, consecutiveFails, false);
+    }
+
+    /// <summary>
+    /// Context cap warning and compaction trigger. Assembles the per-turn message list via
+    /// the unified context pipeline (when configured) or the legacy
+    /// <see cref="ContextWindowFilter"/>, emits a <c>context_cap_warning</c> event when
+    /// the filtered count approaches the configured cap fraction, and returns the assembled
+    /// context ready for the agent call.
+    /// </summary>
+    private async Task<IEnumerable<ChatMessage>> HandleContextOverflowAsync(
+        string agentName,
+        AgentConfig agentCfg,
+        string instructions,
+        AgentContext ctx,
+        CancellationToken ct)
+    {
+        // Assemble context through the unified pipeline (or legacy filter when pipeline is absent).
+        IEnumerable<ChatMessage> context;
+        if (contextPipeline is not null)
+        {
+            var assembled = await contextPipeline.AssembleAsync(
+                new fuseraft.Core.Models.AgentExecutionRequest
+                {
+                    AgentName     = agentName,
+                    Task          = _task,
+                    SharedHistory = ctx.History,
+                    AgentConfig   = agentCfg,
+                    SessionId     = _sessionId,
+                }, ct);
+            context = assembled.Messages;
+            await EmitContextCapWarningAsync(agentName, agentCfg, assembled.Messages, ctx);
+            if (eventEmitter is not null)
+                await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, ctx.TurnIndex);
+        }
+        else
+        {
+            var filtered = ContextWindowFilter.Apply(ctx.History, agentCfg.ContextWindow);
+            await EmitContextCapWarningAsync(agentName, agentCfg, filtered, ctx);
+            context = !string.IsNullOrWhiteSpace(instructions)
+                ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
+                : filtered;
+        }
+        return context;
+    }
+
+    /// <summary>
+    /// Back-edge detection and recovery agent logic. Runs per-keyword validators,
+    /// activates the recovery agent on repeated failures, enforces the human-approval
+    /// gate, then yields output to restart the outer phase loop.
+    /// </summary>
+    /// <returns>
+    /// A tuple of (handled, shouldReturn, consecutiveFails).
+    /// <c>handled=true, shouldReturn=true</c> means the back-edge fired and the caller
+    /// must <c>return</c>. <c>handled=true, shouldReturn=false</c> means validation
+    /// failed and the caller must <c>continue</c>. <c>handled=false</c> is never
+    /// returned; all back-edge paths resolve to one of the two above.
+    /// </returns>
+    private async Task<(bool Handled, bool ShouldReturn, int ConsecutiveFails)> HandleBackEdgeAsync(
+        string nodeId,
+        string agentName,
+        string foundKeyword,
+        AgentRouteTable routeTable,
+        AgentMessage agentMsg,
+        string responseText,
+        int consecutiveFails,
+        int maxRetries,
+        AgentContext ctx,
+        IWorkflowContext wfCtx,
+        Dictionary<string, AIAgent> agents,
+        Dictionary<string, string> agentInstructions,
+        Dictionary<string, AgentConfig> agentConfigs,
+        CancellationToken ct)
+    {
+        // Run per-keyword validators declared on this back-edge (GAP-2).
+        if (routeTable.PhaseBreakValidators.TryGetValue(foundKeyword, out var pbValidators)
+            && pbValidators.Count > 0)
+        {
+            var (pbOk, pbErr, pbValidator) = await RunValidatorsAsync(
+                pbValidators, ctx.History, ct).ConfigureAwait(false);
+
+            if (!pbOk)
+            {
+                consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
+                RecordGovernanceViolation(agentName, pbValidator!, consecutiveFails, maxRetries);
+
+                if (consecutiveFails >= maxRetries)
+                    throw new ValidatorStuckException(agentName, pbValidator!, consecutiveFails, pbErr!);
+
+                // Recovery agent for back-edge validator failures.
+                var backEdgeKey = $"{nodeId}::{foundKeyword}::back";
+                if (consecutiveFails >= 2
+                    && routeTable.PhaseBreakRecoveryAgents.TryGetValue(foundKeyword, out var backRecoveryName)
+                    && !_recoveryActivated.ContainsKey(backEdgeKey)
+                    && agents.TryGetValue(backRecoveryName, out var backRecoveryAgt))
+                {
+                    _recoveryActivated.TryAdd(backEdgeKey, true);
+                    await InvokeRecoveryAgentAsync(
+                        backRecoveryName, backRecoveryAgt,
+                        agentInstructions, agentConfigs,
+                        $"'{pbValidator}' failed {consecutiveFails}× on back-edge '{foundKeyword}'",
+                        pbErr!, foundKeyword, ctx, ct);
+                    consecutiveFails = 0;
+                    return (true, false, consecutiveFails);
+                }
+
+                await EmitAndInjectValidationFailureAsync(
+                    agentName, foundKeyword, pbValidator!, pbErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
+                return (true, false, consecutiveFails);
+            }
+        }
+
+        // Human approval gate for back-edges.
+        if (routeTable.PhaseBreakRequireHumanApproval.Contains(foundKeyword)
+            && _humanApprovalService is not null)
+        {
+            var backTarget = _backEdgeDestinations.TryGetValue(foundKeyword, out var pbd0)
+                ? pbd0 ?? "(terminal)"
+                : "(terminal)";
+            var (approved, approvedFails) = await ApplyHumanApprovalGateAsync(
+                foundKeyword, agentName, backTarget,
+                $"Phase-break to '{backTarget}' was blocked by the operator. " +
+                $"Continue your work or await further instructions.",
+                consecutiveFails, ctx, ct);
+            consecutiveFails = approvedFails;
+            if (!approved) return (true, false, consecutiveFails);
+        }
+
+        consecutiveFails = 0;
+        ctx.LastKeyword  = foundKeyword;
+
+        var backEdgeDest = _backEdgeDestinations.TryGetValue(foundKeyword, out var pbd) ? pbd : null;
+        RecordNodeState(ctx, backEdgeDest ?? agentName);
+
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync("state_advanced",
+                agent: agentName,
+                turn:  agentMsg.TurnIndex,
+                payload: new { version = ctx.CurrentState.Version, phase_break = foundKeyword, next = backEdgeDest ?? "(terminal)" });
+
+        await wfCtx.YieldOutputAsync(ctx, ct).ConfigureAwait(false);
+        return (true, true, consecutiveFails);
+    }
+
+    /// <summary>
+    /// HITL approval prompt and approval branching. When the human-approval service
+    /// rejects the route, injects a blocked-route message into history, persists it to
+    /// the message sink, and resets <paramref name="consecutiveFails"/> to zero.
+    /// </summary>
+    /// <returns>
+    /// A tuple of (approved, updated consecutiveFails). When <c>approved</c> is
+    /// <c>false</c> the caller must <c>continue</c> the turn loop.
+    /// </returns>
+    private async Task<(bool Approved, int ConsecutiveFails)> ApplyHumanApprovalGateAsync(
+        string keyword,
+        string agentName,
+        string targetName,
+        string blockedMessage,
+        int consecutiveFails,
+        AgentContext ctx,
+        CancellationToken ct)
+    {
+        var approved = await _humanApprovalService!.PromptRouteApprovalAsync(
+            keyword, agentName, targetName);
+        if (!approved)
+        {
+            ctx.History.Add(new ChatMessage(ChatRole.User, blockedMessage));
+            consecutiveFails = 0;
+            int histBeforeBlocked = ctx.History.Count - 1;
+            await PersistCorrectionsAsync(ctx, histBeforeBlocked, ct).ConfigureAwait(false);
+        }
+        return (approved, consecutiveFails);
+    }
+
+    /// <summary>
+    /// Route table lookup and validator execution for forward-edge keywords. Runs the
+    /// route's validators, enforces the human-approval gate on success, records state,
+    /// and dispatches via <c>SendMessageAsync</c>. On validation failure activates the
+    /// recovery agent when eligible, then injects a correction and signals retry.
+    /// </summary>
+    /// <returns>
+    /// A tuple of (handled, shouldReturn, consecutiveFails).
+    /// <c>handled=true, shouldReturn=true</c> means the route fired and the caller
+    /// must <c>return</c>. <c>handled=true, shouldReturn=false</c> means validation
+    /// failed and the caller must <c>continue</c>.
+    /// </returns>
+    private async Task<(bool Handled, bool ShouldReturn, int ConsecutiveFails)> EvaluateRouteAsync(
+        string nodeId,
+        string agentName,
+        string foundKeyword,
+        RouteInfo route,
+        AgentMessage agentMsg,
+        string responseText,
+        int consecutiveFails,
+        int maxRetries,
+        AgentContext ctx,
+        IWorkflowContext wfCtx,
+        Dictionary<string, AIAgent> agents,
+        Dictionary<string, string> agentInstructions,
+        Dictionary<string, AgentConfig> agentConfigs,
+        CancellationToken ct)
+    {
+        var (ok, errMsg, failingValidator) = await RunValidatorsAsync(
+            route.Validators, ctx.History, ct).ConfigureAwait(false);
+
+        if (ok)
+        {
+            if (route.Validators.Count > 0)
+                governanceKernel?.SloEngine.Get("policy-compliance")?.Record(1.0);
+
+            // Human approval gate: prompt before the route fires.
+            if (route.RequireHumanApproval && _humanApprovalService is not null)
+            {
+                var (approved, approvedFails) = await ApplyHumanApprovalGateAsync(
+                    foundKeyword, agentName, route.NextExecutorName,
+                    $"Route to {route.NextExecutorName} was blocked by the operator. " +
+                    $"Continue your work or await further instructions.",
+                    consecutiveFails, ctx, ct);
+                consecutiveFails = approvedFails;
+                if (!approved) return (true, false, consecutiveFails);
+            }
+
+            consecutiveFails = 0;
+            ctx.LastKeyword  = foundKeyword;
+
+            if (eventEmitter is not null)
+                await eventEmitter.EmitAsync("agent_routed",
+                    agent:   agentName,
+                    turn:    agentMsg.TurnIndex,
+                    payload: new { keyword = foundKeyword, to = route.NextExecutorName });
+
+            RecordNodeState(ctx, route.NextExecutorName);
+            if (eventEmitter is not null)
+                await eventEmitter.EmitAsync("state_advanced",
+                    agent: agentName,
+                    turn:  agentMsg.TurnIndex,
+                    payload: new { version = ctx.CurrentState.Version, to = route.NextExecutorName });
+
+            ctx.History.Add(new ChatMessage(ChatRole.User,
+                $"[fuseraft: {agentName} → {route.NextExecutorName}]"));
+
+            await wfCtx.SendMessageAsync(ctx, route.NextExecutorId, ct).ConfigureAwait(false);
+            return (true, true, consecutiveFails);
+        }
+
+        // Validator failed — clamp to maxRetries-1 so a single keyword find is not
+        // penalised as heavily as a missing keyword before injecting correction.
+        consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
+        RecordGovernanceViolation(agentName, failingValidator!, consecutiveFails, maxRetries);
+
+        if (consecutiveFails >= maxRetries)
+            throw new ValidatorStuckException(agentName, failingValidator!, consecutiveFails, errMsg!);
+
+        // Recovery agent: activate on >= 2 consecutive failures, at most once per edge.
+        var fwdEdgeKey = $"{nodeId}::{foundKeyword}";
+        if (consecutiveFails >= 2
+            && route.RecoveryAgent is not null
+            && !_recoveryActivated.ContainsKey(fwdEdgeKey)
+            && agents.TryGetValue(route.RecoveryAgent, out var fwdRecoveryAgt))
+        {
+            _recoveryActivated.TryAdd(fwdEdgeKey, true);
+            await InvokeRecoveryAgentAsync(
+                route.RecoveryAgent, fwdRecoveryAgt,
+                agentInstructions, agentConfigs,
+                $"'{failingValidator}' failed {consecutiveFails}× on edge '{foundKeyword}'",
+                errMsg!, foundKeyword, ctx, ct);
+            consecutiveFails = 0;
+            return (true, false, consecutiveFails);
+        }
+
+        await EmitAndInjectValidationFailureAsync(
+            agentName, foundKeyword, failingValidator!, errMsg!, responseText, consecutiveFails, maxRetries, ctx, ct);
+        return (true, false, consecutiveFails);
+    }
+
+    /// <summary>
+    /// State history append and checkpoint write. Advances the current agent state via
+    /// <see cref="StateHandoff.Advance"/> and appends the new snapshot to
+    /// <see cref="_stateHistory"/> under the state-history lock.
+    /// </summary>
+    private void RecordNodeState(AgentContext ctx, string nextNodeName)
+    {
+        ctx.CurrentState = StateHandoff.Advance(ctx.CurrentState, nextNodeName);
+        lock (_stateHistoryLock) _stateHistory.Add(ctx.CurrentState);
     }
 
     // -------------------------------------------------------------------------
@@ -1817,6 +1966,24 @@ public sealed class GraphOrchestrator(
         GraphConfig graphCfg,
         Dictionary<string, GraphNodeConfig> nodeById)
     {
+        var tables = BuildRouteTableForNode(graphCfg, nodeById);
+        AssignParallelGroups(tables);
+        WireBackEdges(graphCfg, nodeById, tables);
+        return tables;
+    }
+
+    /// <summary>
+    /// Per-node route table construction. Iterates all graph edges and populates each
+    /// source node's <see cref="AgentRouteTable"/> with forward routes, back-edge
+    /// phase-break entries, parallel fan-out keywords, terminal validators, and
+    /// foreign-keyword sets. Also registers back-edge destinations in
+    /// <see cref="_backEdgeDestinations"/> and parallel group membership in
+    /// <see cref="_parallelGroups"/>.
+    /// </summary>
+    private Dictionary<string, AgentRouteTable> BuildRouteTableForNode(
+        GraphConfig graphCfg,
+        Dictionary<string, GraphNodeConfig> nodeById)
+    {
         var tables = new Dictionary<string, AgentRouteTable>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var edge in graphCfg.Edges)
@@ -1915,27 +2082,21 @@ public sealed class GraphOrchestrator(
                 if (!table.Routes.ContainsKey(kw) && !table.PhaseBreakKeywords.Contains(kw))
                     table.ForeignSendForwardKeywords.Add(kw);
 
-        // Resolve merge targets for parallel groups from the parallel nodes' own route tables.
-        // The merge target is the first forward-route destination found in any of the group's nodes.
-        foreach (var (groupKey, pg) in _parallelGroups)
-        {
-            foreach (var pNodeId in pg.NodeIds)
-            {
-                if (!tables.TryGetValue(pNodeId, out var pTable)) continue;
-                var firstFwdRoute = pTable.Routes.Values.FirstOrDefault();
-                if (firstFwdRoute is null) continue;
-                pg.MergeTargetId   = firstFwdRoute.NextExecutorId;
-                pg.MergeTargetName = firstFwdRoute.NextExecutorName;
-                break;
-            }
+        return tables;
+    }
 
-            if (string.IsNullOrEmpty(pg.MergeTargetId))
-                logger.LogWarning(
-                    "[GraphOrchestrator] Parallel group '{Key}' has no merge target — " +
-                    "each parallel node must have at least one forward edge to the merge-target node.",
-                    groupKey);
-        }
-
+    /// <summary>
+    /// Back-edge destination resolution. Populates unconditional routing maps
+    /// (<see cref="_unconditionalForwardRoutes"/>, <see cref="_unconditionalBackEdges"/>,
+    /// <see cref="_unconditionalBackEdgeValidators"/>) and registers synthetic back-edge
+    /// keywords in <see cref="_backEdgeDestinations"/> for nodes whose ALL outgoing edges
+    /// carry no keyword.
+    /// </summary>
+    private void WireBackEdges(
+        GraphConfig graphCfg,
+        Dictionary<string, GraphNodeConfig> nodeById,
+        Dictionary<string, AgentRouteTable> tables)
+    {
         // Populate unconditional routing for nodes whose ALL outgoing edges carry no keyword.
         // A node qualifies when it has exactly one no-keyword edge and zero keyword-based edges.
         foreach (var node in graphCfg.Nodes)
@@ -1981,8 +2142,35 @@ public sealed class GraphOrchestrator(
                     uncValidators);
             }
         }
+    }
 
-        return tables;
+    /// <summary>
+    /// Parallel group membership assignment. Resolves the merge target for each parallel
+    /// fan-out group by scanning the group's nodes' own forward routes, then logs a warning
+    /// for any group whose merge target could not be determined.
+    /// </summary>
+    private void AssignParallelGroups(Dictionary<string, AgentRouteTable> tables)
+    {
+        // Resolve merge targets for parallel groups from the parallel nodes' own route tables.
+        // The merge target is the first forward-route destination found in any of the group's nodes.
+        foreach (var (groupKey, pg) in _parallelGroups)
+        {
+            foreach (var pNodeId in pg.NodeIds)
+            {
+                if (!tables.TryGetValue(pNodeId, out var pTable)) continue;
+                var firstFwdRoute = pTable.Routes.Values.FirstOrDefault();
+                if (firstFwdRoute is null) continue;
+                pg.MergeTargetId   = firstFwdRoute.NextExecutorId;
+                pg.MergeTargetName = firstFwdRoute.NextExecutorName;
+                break;
+            }
+
+            if (string.IsNullOrEmpty(pg.MergeTargetId))
+                logger.LogWarning(
+                    "[GraphOrchestrator] Parallel group '{Key}' has no merge target — " +
+                    "each parallel node must have at least one forward edge to the merge-target node.",
+                    groupKey);
+        }
     }
 
     private IReadOnlyList<IRoutingValidator> BuildValidatorsFromNames(
