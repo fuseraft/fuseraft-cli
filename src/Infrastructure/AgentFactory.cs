@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text;
 using A2A;
 using AgentGovernance;
 using AgentGovernance.Audit;
@@ -89,7 +90,7 @@ public sealed class AgentFactory(
     /// the tool wrapper so callers see each tool call in real time rather than in bulk
     /// after all tools in a batch have finished executing.
     /// </param>
-    public AIAgent Create(AgentConfig config, Action<string, string, string?>? onToolCalling = null)
+    public AIAgent Create(AgentConfig config, ContextBudgetConfig? sessionBudget = null, Action<string, string, string?>? onToolCalling = null)
     {
         if (string.IsNullOrWhiteSpace(config.Name))
             throw new ArgumentException("Agent Name must not be empty.", nameof(config));
@@ -148,11 +149,12 @@ public sealed class AgentFactory(
         // This ensures memory reflects the current session and is ranked by relevance.
         var instructions = config.Instructions;
 
-        // Build the per-agent tool list. Wrap each tool with a notifying proxy when a
-        // ToolCalling callback is registered so notifications fire at invocation time
-        // (real-time) rather than after the whole batch finishes executing.
-        var tools = BuildTools(config, resolvedModel, config.Name, onToolCalling);
-        _toolCounts[config.Name] = tools.Count;
+        // Build the per-agent tool list, apply offload caching, then wrap each tool with a
+        // notifying proxy when a ToolCalling callback is registered so notifications fire
+        // at invocation time (real-time) rather than after the whole batch finishes executing.
+        var tools = ConvertPluginTools(config, resolvedModel);
+        tools     = BuildCachingMiddleware(tools, toolArtifactStore);
+        tools     = WrapWithNotifications(tools, config.Name, onToolCalling);
 
         // Build ChatOptions (temperature, max tokens, tool mode).
         // The tool list is passed so that MergeOptions can always fall back to the
@@ -173,13 +175,22 @@ public sealed class AgentFactory(
         // FunctionInvokingChatClient loop resends all prior tool results. When set, the
         // oldest tool-result messages are replaced with compact placeholders before each
         // inner LLM call so the context stays roughly constant across iterations.
-        // When neither MaxInTurnContextTokens nor MaxContextTokens is configured, fall
-        // back to a 500 k-char (≈ 125 k-token) floor so unconfigured agents are still
-        // protected against within-turn accumulation.
-        const int DefaultMaxInTurnChars = 500_000;
+        //
+        // Priority order:
+        //   1. Per-agent MaxInTurnContextTokens — explicit agent-level override.
+        //   2. Session MaxSingleTurnInputTokens / 3 — allocates 1/3 of the per-turn
+        //      budget to within-turn tool results, leaving headroom for the system
+        //      prompt, tool schemas (~10–20 k tokens), and cross-turn history.
+        //   3. Model MaxContextTokens — fall back to the model's context window.
+        //   4. DefaultMaxInTurnChars — conservative floor for unconfigured agents.
+        //      Halved from the previous 500 k to reduce the risk of single-turn
+        //      explosions when neither the session nor the model has explicit limits.
+        const int DefaultMaxInTurnChars = 200_000;
         var maxInTurnChars = config.MaxInTurnContextTokens > 0
             ? config.MaxInTurnContextTokens * 4
-            : (maxContextChars > 0 ? maxContextChars : DefaultMaxInTurnChars);
+            : sessionBudget?.MaxSingleTurnInputTokens > 0
+                ? sessionBudget.MaxSingleTurnInputTokens / 3 * 4
+                : (maxContextChars > 0 ? maxContextChars : DefaultMaxInTurnChars);
 
         // Deterministic sliding-window cap: always keep only the last N tool call/result
         // pairs in full, replacing older ones with placeholders unconditionally.
@@ -204,98 +215,14 @@ public sealed class AgentFactory(
 
         // Always wrap: the adaptive context-trim retry fires on any provider rejection
         // classified as ContextExceeded, regardless of whether explicit limits are set.
-        var effectiveClient = chatClient.AsBuilder()
-            .Use(
-                getResponseFunc: async (messages, options, inner, ct) =>
-                {
-                    // Strip verbose reasoning text from ALL intermediate tool-calling assistant
-                    // messages before the window filter — reasoning from prior calls in the
-                    // same turn is never needed again and is the primary cause of the O(N²)
-                    // token growth seen with grok-build and other reasoning-heavy models.
-                    messages = TruncateIntermediateAssistantReasoning(messages);
+        var effectiveClient = BuildMiddlewareChain(
+            chatClient, config, chatOptions,
+            maxContextChars, maxInTurnChars, maxInTurnToolPairs,
+            toolSchemaChars, maxPayloadBytes, hasHandoff,
+            emitter: eventEmitter);
 
-                    if (maxInTurnToolPairs > 0)
-                        messages = KeepLastToolPairs(messages, maxInTurnToolPairs);
-
-                    if (maxInTurnChars > 0)
-                        messages = TrimInTurnContext(messages, maxInTurnChars);
-
-                    // Stop the FunctionInvokingChatClient loop immediately after handoff —
-                    // no follow-up LLM call is made, so the agent cannot call more tools.
-                    if (hasHandoff && HandoffWasInvoked(messages))
-                        return new ChatResponse(new ChatMessage(ChatRole.Assistant, string.Empty));
-
-                    var merged  = chatOptions is not null ? MergeOptions(messages, options, chatOptions) : options;
-                    var baseMsg = messages as IReadOnlyList<ChatMessage> ?? messages.ToList();
-
-                    // Adaptive retry: on ContextExceeded the context is progressively
-                    // trimmed (tool results truncated → dropped) and the call retried.
-                    // Pre-flight budget/payload checks run on each attempt so they act as
-                    // early-exit guards rather than hard failures.
-                    for (int attempt = 0; ; attempt++)
-                    {
-                        var ctx = attempt == 0
-                            ? (IEnumerable<ChatMessage>)baseMsg
-                            : AdaptiveTrimMessages(baseMsg, attempt);
-                        try
-                        {
-                            if (maxContextChars > 0)
-                                EnforceContextBudget(config.Name, ctx, maxContextChars, toolSchemaChars);
-                            if (maxPayloadBytes > 0)
-                                EnforcePayloadLimit(config.Name, ctx, toolSchemaChars, maxPayloadBytes);
-                            return await inner.GetResponseAsync(ctx, merged, ct);
-                        }
-                        catch (Exception ex) when (attempt < AdaptiveContextTrimMaxRetries
-                                                   && IsContextLimitException(ex))
-                        {
-                            _logger.LogWarning(
-                                "[context-trim] {Agent} stage {Stage}/{Max}: {Error} — reducing tool results and retrying",
-                                config.Name, attempt + 1, AdaptiveContextTrimMaxRetries,
-                                ex.Message[..Math.Min(ex.Message.Length, 120)].Replace('\n', ' '));
-                        }
-                    }
-                },
-                getStreamingResponseFunc: (messages, options, inner, ct) =>
-                {
-                    messages = TruncateIntermediateAssistantReasoning(messages);
-
-                    if (maxInTurnToolPairs > 0)
-                        messages = KeepLastToolPairs(messages, maxInTurnToolPairs);
-
-                    if (maxInTurnChars > 0)
-                        messages = TrimInTurnContext(messages, maxInTurnChars);
-                    if (hasHandoff && HandoffWasInvoked(messages))
-                        return EmptyStreamingResponse();
-
-                    var merged = chatOptions is not null ? MergeOptions(messages, options, chatOptions) : options;
-
-                    // Cannot retry mid-stream — pre-trim proactively when limits are known.
-                    // Without configured limits we have no target, so trimming is skipped and
-                    // a provider rejection surfaces as a normal error for the user to see.
-                    if (maxContextChars > 0 || maxPayloadBytes > 0)
-                        messages = ProactivelyTrimIfNeeded(
-                            config.Name, messages, maxContextChars, maxPayloadBytes, toolSchemaChars, _logger);
-
-                    return inner.GetStreamingResponseAsync(messages, merged, ct);
-                })
-            .Build();
-
-        // Pre-configure FunctionInvokingChatClient so ChatClientAgent reuses our instance
-        // (it only adds its own when none is present in the pipeline). This lets us set
-        // MaximumIterationsPerRequest per agent instead of accepting the framework default (40).
-        // We always set this so the limit is explicit and visible, even when using the default.
-        var maxIterations = config.MaxToolCallsPerTurn > 0 ? config.MaxToolCallsPerTurn : 40;
-        var functionInvokingClient = effectiveClient
-            .AsBuilder()
-            .UseFunctionInvocation(configure: c => c.MaximumIterationsPerRequest = maxIterations)
-            .Build();
-
-        // Skills context provider wraps outside the function-invoker so that skill tools
-        // (load_skill, run_skill_script, etc.) are visible to the function-invoker when
-        // the model requests them. AIContextProvider must be the outermost layer.
-        IChatClient agentChatClient = skillsProvider is not null
-            ? functionInvokingClient.AsBuilder().UseAIContextProviders(skillsProvider).Build()
-            : functionInvokingClient;
+        // Pre-configure FunctionInvokingChatClient and wrap the skills context provider.
+        var agentChatClient = BuildEventEmitMiddleware(effectiveClient, config, skillsProvider);
 
         // Construct the base ChatClientAgent with tools and chat options.
         ChatClientAgent baseAgent = new(
@@ -308,35 +235,19 @@ public sealed class AgentFactory(
         // Wrap with middleware: ChangeTracker first (outermost), then Sandbox enforcement.
         // Ordering: ChangeTracker wraps first so it always observes the final result —
         // including [DENIED] responses from the sandbox — making every tool attempt auditable.
-        AIAgent agent = baseAgent;
-
-        if (changeTracker is not null)
-            agent = changeTracker.WrapAgent(agent, config.Name);
-
-        if (!string.IsNullOrEmpty(securityConfig?.FileSystemSandboxPath))
-        {
-            var ring = governanceKernel?.Rings?.ComputeRing(config.TrustScore) ?? ExecutionRing.Ring2;
-            agent = new SandboxEnforcementFilter(
-                    securityConfig.FileSystemSandboxPath,
-                    governanceKernel?.InjectionDetector,
-                    ring,
-                    securityConfig.ChangeEnvelope,
-                    securityConfig.FileSystemPermissions)
-                .WrapAgent(agent);
-        }
-
         // Set the name on the final wrapped agent so the orchestrator can identify it.
         // MAF's middleware builder preserves the name, but we verify here.
-        return agent;
+        return BuildGovernanceMiddleware(baseAgent, config);
     }
 
     // Helpers
 
-    private List<AIFunction> BuildTools(
-        AgentConfig config,
-        ModelConfig resolvedModel,
-        string agentName,
-        Action<string, string, string?>? onToolCalling)
+    /// <summary>
+    /// Resolves every plugin declared in <paramref name="config"/> into a flat list of
+    /// <see cref="AIFunction"/> objects, applying per-plugin capability filters and
+    /// registering any <see cref="ITurnResettable"/> instances for turn-start reset.
+    /// </summary>
+    private List<AIFunction> ConvertPluginTools(AgentConfig config, ModelConfig resolvedModel)
     {
         var tools = new List<AIFunction>();
 
@@ -390,6 +301,12 @@ public sealed class AgentFactory(
             {
                 functions = PluginRegistry.GetFunctionsFromObject(plugin);
             }
+            else if (pluginName.Equals("Investigation", StringComparison.OrdinalIgnoreCase))
+            {
+                // Investigation is registered only when ChangeTracking is configured.
+                // Skip gracefully rather than crashing at startup.
+                continue;
+            }
             else
             {
                 throw new InvalidOperationException(
@@ -413,11 +330,37 @@ public sealed class AgentFactory(
                 lock (_resettablesLock) _turnResettables.Add(tr);
         }
 
-        // Wrap every tool with an offload filter so oversized results are stored to disk
-        // before they enter the conversation history. Applied before the notification proxy
-        // so the stub is what the provider receives, not the raw large content.
-        if (toolArtifactStore is not null)
-            tools = tools.Select(f => (AIFunction)new ToolResultOffloadFilter(f, toolArtifactStore)).ToList();
+        return tools;
+    }
+
+    /// <summary>
+    /// Wraps every tool with a <see cref="ToolResultOffloadFilter"/> so oversized results
+    /// are stored to disk before they enter the conversation history. Applied before the
+    /// notification proxy so the stub is what the provider receives, not the raw large content.
+    /// Returns <paramref name="tools"/> unchanged when <paramref name="store"/> is null.
+    /// </summary>
+    private static List<AIFunction> BuildCachingMiddleware(
+        List<AIFunction> tools,
+        ToolResultArtifactStore? store)
+    {
+        if (store is not null)
+            tools = tools.Select(f => (AIFunction)new ToolResultOffloadFilter(f, store)).ToList();
+
+        return tools;
+    }
+
+    /// <summary>
+    /// Wraps every tool with a <see cref="NotifyingAIFunction"/> proxy so
+    /// <paramref name="onToolCalling"/> fires the moment a tool begins execution, not after
+    /// the whole batch finishes. Also records the final tool count for telemetry.
+    /// Returns <paramref name="tools"/> unchanged when <paramref name="onToolCalling"/> is null.
+    /// </summary>
+    private List<AIFunction> WrapWithNotifications(
+        List<AIFunction> tools,
+        string agentName,
+        Action<string, string, string?>? onToolCalling)
+    {
+        _toolCounts[agentName] = tools.Count;
 
         // Wrap every tool with a notifying proxy so onToolCalling fires the moment the
         // tool begins execution, not after the whole batch finishes.
@@ -425,6 +368,199 @@ public sealed class AgentFactory(
             return tools.Select(f => (AIFunction)new NotifyingAIFunction(f, agentName, onToolCalling)).ToList();
 
         return tools;
+    }
+
+    /// <summary>
+    /// Composes the context-trim and adaptive-retry middleware layer around
+    /// <paramref name="chatClient"/>. Handles in-turn deduplication, window trimming,
+    /// handoff detection, pre-flight budget/payload enforcement, and ContextExceeded retries
+    /// for both non-streaming and streaming paths.
+    /// </summary>
+    private IChatClient BuildMiddlewareChain(
+        IChatClient chatClient,
+        AgentConfig config,
+        ChatOptions? chatOptions,
+        int maxContextChars,
+        int maxInTurnChars,
+        int maxInTurnToolPairs,
+        int toolSchemaChars,
+        long maxPayloadBytes,
+        bool hasHandoff,
+        EventEmitter? emitter = null)
+    {
+        // Always wrap: the adaptive context-trim retry fires on any provider rejection
+        // classified as ContextExceeded, regardless of whether explicit limits are set.
+        // Monotonic counter shared across all inner calls for this agent instance.
+        // Lets us correlate inner_call_context events with http_reasoning events in the log.
+        int innerCallSeq = 0;
+
+        return chatClient.AsBuilder()
+            .Use(
+                getResponseFunc: async (messages, options, inner, ct) =>
+                {
+                    // Drop write_file/patch_file pairs superseded by a later write_file to
+                    // the same path — the earlier write is never observable and is pure noise.
+                    messages = DropSupersededWritePairs(messages);
+
+                    // Drop observational calls (read_file, grep_file, list_*, stat_file, etc.)
+                    // that are superseded by a later identical call — only the freshest result matters.
+                    messages = DropSupersededObservationalPairs(messages);
+
+                    // Compress shell_run results that are superseded by a later run of the same
+                    // command to a single-line outcome. Keeps the call visible (showing the
+                    // attempt sequence) while eliminating the verbose output from earlier runs.
+                    messages = CompressSupersededShellPairs(messages);
+
+                    // Strip verbose reasoning text from ALL intermediate tool-calling assistant
+                    // messages before the window filter — reasoning from prior calls in the
+                    // same turn is never needed again and is the primary cause of the O(N²)
+                    // token growth seen with grok-build and other reasoning-heavy models.
+                    messages = TruncateIntermediateAssistantReasoning(messages);
+
+                    if (maxInTurnToolPairs > 0)
+                        messages = KeepLastToolPairs(messages, maxInTurnToolPairs);
+
+                    if (maxInTurnChars > 0)
+                        messages = TrimInTurnContext(messages, maxInTurnChars);
+
+                    // Stop the FunctionInvokingChatClient loop immediately after handoff —
+                    // no follow-up LLM call is made, so the agent cannot call more tools.
+                    if (hasHandoff && HandoffWasInvoked(messages))
+                        return new ChatResponse(new ChatMessage(ChatRole.Assistant, string.Empty));
+
+                    var merged  = chatOptions is not null ? MergeOptions(messages, options, chatOptions) : options;
+                    var baseMsg = messages as IReadOnlyList<ChatMessage> ?? messages.ToList();
+
+                    // Probe 3: emit a per-inner-call context snapshot after all trimming.
+                    // Captures the exact content-type breakdown the provider will receive,
+                    // making it possible to identify which content type drives token growth.
+                    // Set the ambient call-seq so RawReasoningCaptureHandler can echo it into
+                    // http_reasoning — enabling per-call correlation of estimated vs actual tokens.
+                    // Sub-agent HTTP calls naturally see null here (they run in FunctionInvokingChatClient's
+                    // execution context, captured before this middleware ran, so the value never flows to them).
+                    var callSeq = Interlocked.Increment(ref innerCallSeq);
+                    InnerCallId.Current.Value = callSeq;
+                    if (emitter is not null)
+                        _ = emitter.EmitAsync("inner_call_context",
+                            agent: config.Name, turn: null,
+                            payload: BuildInnerCallContextPayload(
+                                baseMsg, toolSchemaChars, callSeq));
+
+                    // Adaptive retry: on ContextExceeded the context is progressively
+                    // trimmed (tool results truncated → dropped) and the call retried.
+                    // Pre-flight budget/payload checks run on each attempt so they act as
+                    // early-exit guards rather than hard failures.
+                    for (int attempt = 0; ; attempt++)
+                    {
+                        var ctx = attempt == 0
+                            ? (IEnumerable<ChatMessage>)baseMsg
+                            : AdaptiveTrimMessages(baseMsg, attempt);
+                        try
+                        {
+                            if (maxContextChars > 0)
+                                EnforceContextBudget(config.Name, ctx, maxContextChars, toolSchemaChars);
+                            if (maxPayloadBytes > 0)
+                                EnforcePayloadLimit(config.Name, ctx, toolSchemaChars, maxPayloadBytes);
+                            return await inner.GetResponseAsync(ctx, merged, ct);
+                        }
+                        catch (Exception ex) when (attempt < AdaptiveContextTrimMaxRetries
+                                                   && IsContextLimitException(ex))
+                        {
+                            _logger.LogWarning(
+                                "[context-trim] {Agent} stage {Stage}/{Max}: {Error} — reducing tool results and retrying",
+                                config.Name, attempt + 1, AdaptiveContextTrimMaxRetries,
+                                ex.Message[..Math.Min(ex.Message.Length, 120)].Replace('\n', ' '));
+                        }
+                    }
+                },
+                getStreamingResponseFunc: (messages, options, inner, ct) =>
+                {
+                    messages = DropSupersededWritePairs(messages);
+                    messages = DropSupersededObservationalPairs(messages);
+                    messages = CompressSupersededShellPairs(messages);
+                    messages = TruncateIntermediateAssistantReasoning(messages);
+
+                    if (maxInTurnToolPairs > 0)
+                        messages = KeepLastToolPairs(messages, maxInTurnToolPairs);
+
+                    if (maxInTurnChars > 0)
+                        messages = TrimInTurnContext(messages, maxInTurnChars);
+                    if (hasHandoff && HandoffWasInvoked(messages))
+                        return EmptyStreamingResponse();
+
+                    var merged = chatOptions is not null ? MergeOptions(messages, options, chatOptions) : options;
+
+                    // Cannot retry mid-stream — pre-trim proactively when limits are known.
+                    // Without configured limits we have no target, so trimming is skipped and
+                    // a provider rejection surfaces as a normal error for the user to see.
+                    if (maxContextChars > 0 || maxPayloadBytes > 0)
+                        messages = ProactivelyTrimIfNeeded(
+                            config.Name, messages, maxContextChars, maxPayloadBytes, toolSchemaChars, _logger);
+
+                    return inner.GetStreamingResponseAsync(messages, merged, ct);
+                })
+            .Build();
+    }
+
+    /// <summary>
+    /// Wraps <paramref name="effectiveClient"/> with a <see cref="FunctionInvokingChatClient"/>
+    /// (capped at <see cref="AgentConfig.MaxToolCallsPerTurn"/> iterations) and, when a
+    /// <see cref="AgentSkillsProvider"/> is present, an outer AIContextProvider layer so
+    /// skill tools are visible to the function-invoker.
+    /// </summary>
+    private static IChatClient BuildEventEmitMiddleware(
+        IChatClient effectiveClient,
+        AgentConfig config,
+        AgentSkillsProvider? skillsProvider)
+    {
+        // Pre-configure FunctionInvokingChatClient so ChatClientAgent reuses our instance
+        // (it only adds its own when none is present in the pipeline). This lets us set
+        // MaximumIterationsPerRequest per agent instead of accepting the framework default (40).
+        // We always set this so the limit is explicit and visible, even when using the default.
+        var maxIterations = config.MaxToolCallsPerTurn > 0 ? config.MaxToolCallsPerTurn : 40;
+        var functionInvokingClient = effectiveClient
+            .AsBuilder()
+            .UseFunctionInvocation(configure: c => c.MaximumIterationsPerRequest = maxIterations)
+            .Build();
+
+        // Skills context provider wraps outside the function-invoker so that skill tools
+        // (load_skill, run_skill_script, etc.) are visible to the function-invoker when
+        // the model requests them. AIContextProvider must be the outermost layer.
+        IChatClient agentChatClient = skillsProvider is not null
+            ? functionInvokingClient.AsBuilder().UseAIContextProviders(skillsProvider).Build()
+            : functionInvokingClient;
+
+        return agentChatClient;
+    }
+
+    /// <summary>
+    /// Applies the governance middleware ring: wraps <paramref name="baseAgent"/> with
+    /// <see cref="ChangeTracker"/> (outermost, for full auditability) and then with
+    /// <see cref="SandboxEnforcementFilter"/> when a filesystem sandbox is configured.
+    /// </summary>
+    private AIAgent BuildGovernanceMiddleware(AIAgent baseAgent, AgentConfig config)
+    {
+        // Wrap with middleware: ChangeTracker first (outermost), then Sandbox enforcement.
+        // Ordering: ChangeTracker wraps first so it always observes the final result —
+        // including [DENIED] responses from the sandbox — making every tool attempt auditable.
+        AIAgent agent = baseAgent;
+
+        if (changeTracker is not null)
+            agent = changeTracker.WrapAgent(agent, config.Name);
+
+        if (!string.IsNullOrEmpty(securityConfig?.FileSystemSandboxPath))
+        {
+            var ring = governanceKernel?.Rings?.ComputeRing(config.TrustScore) ?? ExecutionRing.Ring2;
+            agent = new SandboxEnforcementFilter(
+                    securityConfig.FileSystemSandboxPath,
+                    governanceKernel?.InjectionDetector,
+                    ring,
+                    securityConfig.ChangeEnvelope,
+                    securityConfig.FileSystemPermissions)
+                .WrapAgent(agent);
+        }
+
+        return agent;
     }
 
     // Assembles the tool list for a sub-agent spawned by SubAgentPlugin.
@@ -551,10 +687,19 @@ public sealed class AgentFactory(
                 if (param.ParameterType == typeof(CancellationToken))
                     continue;
 
-                // A parameter is required if it's not optional and not nullable
+                // A parameter is required if it's not optional and not nullable.
+                // Use NullabilityInfoContext for reference types so string is not treated as
+                // nullable — string.IsClass is always true, which would always skip required
+                // string parameters.
                 bool isOptional = param.IsOptional || param.HasDefaultValue;
-                bool isNullable = param.ParameterType.IsClass || 
-                                  Nullable.GetUnderlyingType(param.ParameterType) != null;
+                bool isNullable;
+                if (param.ParameterType.IsValueType)
+                    isNullable = Nullable.GetUnderlyingType(param.ParameterType) != null;
+                else
+                {
+                    var nullCtx = new System.Reflection.NullabilityInfoContext();
+                    isNullable = nullCtx.Create(param).WriteState != System.Reflection.NullabilityState.NotNull;
+                }
 
                 if (!isOptional && !isNullable && !arguments.ContainsKey(param.Name!))
                 {
@@ -715,6 +860,289 @@ public sealed class AgentFactory(
         _ => value
     };
 
+    /// <summary>
+    /// For <c>shell_run</c> calls with identical <c>command</c> + <c>workingDirectory</c>
+    /// arguments, compresses the tool result of earlier calls to a single-line outcome
+    /// ("succeeded" / "failed [exit N]"). The command call itself is left intact so the
+    /// sequence of attempts remains visible in context. The latest call keeps its full output.
+    /// </summary>
+    private static IEnumerable<ChatMessage> CompressSupersededShellPairs(
+        IEnumerable<ChatMessage> messages)
+    {
+        var list = messages as IList<ChatMessage> ?? messages.ToList();
+
+        // Pass 1: map each shell_run callId to its key; track the last callId per key.
+        var keyById   = new Dictionary<string, string>(StringComparer.Ordinal);
+        var lastByKey = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var msg in list)
+        {
+            if (msg.Role != ChatRole.Assistant) continue;
+            foreach (var fc in msg.Contents.OfType<FunctionCallContent>())
+            {
+                if (fc.Name is not "shell_run" || fc.CallId is null) continue;
+                object? cmdObj = null, dirObj = null;
+                fc.Arguments?.TryGetValue("command",          out cmdObj);
+                fc.Arguments?.TryGetValue("workingDirectory", out dirObj);
+                var key = (cmdObj?.ToString()?.Trim() ?? string.Empty)
+                        + "\0"
+                        + (dirObj?.ToString() ?? string.Empty);
+                keyById[fc.CallId]  = key;
+                lastByKey[key]      = fc.CallId;
+            }
+        }
+
+        if (keyById.Count == 0) return list;
+
+        var toCompress = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (callId, key) in keyById)
+            if (lastByKey[key] != callId)
+                toCompress.Add(callId);
+
+        if (toCompress.Count == 0) return list;
+
+        // Snapshot the result text for each superseded call so we can extract its outcome.
+        var resultById = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var msg in list)
+        {
+            if (msg.Role != ChatRole.Tool) continue;
+            foreach (var fr in msg.Contents.OfType<FunctionResultContent>())
+                if (fr.CallId is not null && toCompress.Contains(fr.CallId))
+                    resultById[fr.CallId] = fr.Result?.ToString() ?? string.Empty;
+        }
+
+        // Replace only the tool result for superseded calls; leave the FunctionCallContent intact.
+        var result = new List<ChatMessage>(list.Count);
+        foreach (var msg in list)
+        {
+            if (msg.Role == ChatRole.Tool &&
+                msg.Contents.OfType<FunctionResultContent>()
+                    .Any(fr => fr.CallId is not null && toCompress.Contains(fr.CallId)))
+            {
+                var rebuilt = msg.Contents.Select(c =>
+                {
+                    if (c is FunctionResultContent fr && fr.CallId is not null && toCompress.Contains(fr.CallId))
+                    {
+                        resultById.TryGetValue(fr.CallId, out var text);
+                        return (AIContent)new FunctionResultContent(fr.CallId, ShellOutcomeSummary(text ?? string.Empty));
+                    }
+                    return c;
+                }).ToList<AIContent>();
+                result.Add(new ChatMessage(msg.Role, rebuilt));
+            }
+            else
+            {
+                result.Add(msg);
+            }
+        }
+        return result;
+    }
+
+    // Failures always begin with "[EXIT N]"; everything else is a success.
+    private static string ShellOutcomeSummary(string resultText)
+    {
+        if (!resultText.StartsWith("[EXIT ", StringComparison.Ordinal)) return "succeeded";
+        var end = resultText.IndexOf(']');
+        return end > 0 ? $"failed {resultText[..(end + 1)]}" : "failed";
+    }
+
+    // Tools whose results are purely observational: the latest call with the same arguments
+    // is the only one that matters — earlier results reflect stale state.
+    private static readonly HashSet<string> ObservationalTools = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "read_file", "grep_file", "list_files", "list_directory",
+        "get_file_summary", "stat_file", "session_context_read",
+        "changes_read_latest", "git_status", "git_diff",
+    };
+
+    /// <summary>
+    /// Replaces observational tool-call/result pairs that are superseded by a later call
+    /// with identical arguments. Only the freshest result for each (tool, args) combination
+    /// is preserved; earlier identical calls are stubbed out.
+    /// </summary>
+    private static IEnumerable<ChatMessage> DropSupersededObservationalPairs(
+        IEnumerable<ChatMessage> messages)
+    {
+        var list = messages as IList<ChatMessage> ?? messages.ToList();
+
+        // Pass 1: map each callId to its key; track the last callId seen for each key.
+        var keyById     = new Dictionary<string, string>(StringComparer.Ordinal); // callId → key
+        var lastByKey   = new Dictionary<string, string>(StringComparer.Ordinal); // key → last callId
+
+        foreach (var msg in list)
+        {
+            if (msg.Role != ChatRole.Assistant) continue;
+            foreach (var fc in msg.Contents.OfType<FunctionCallContent>())
+            {
+                if (fc.CallId is null || fc.Name is null) continue;
+                if (!ObservationalTools.Contains(fc.Name)) continue;
+                var key = BuildObservationalKey(fc);
+                keyById[fc.CallId]  = key;
+                lastByKey[key]      = fc.CallId;
+            }
+        }
+
+        if (keyById.Count == 0) return list;
+
+        var superseded = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (callId, key) in keyById)
+            if (lastByKey[key] != callId)
+                superseded.Add(callId);
+
+        if (superseded.Count == 0) return list;
+
+        const string FcNote   = "[superseded — repeated call with same arguments]";
+        const string ToolNote = "[omitted — superseded by later identical call]";
+
+        var result = new List<ChatMessage>(list.Count);
+        foreach (var msg in list)
+        {
+            if (msg.Role == ChatRole.Assistant)
+            {
+                if (!msg.Contents.OfType<FunctionCallContent>()
+                        .Any(fc => fc.CallId is not null && superseded.Contains(fc.CallId)))
+                {
+                    result.Add(msg);
+                    continue;
+                }
+                var rebuilt = msg.Contents.Select(c =>
+                {
+                    if (c is FunctionCallContent fc && fc.CallId is not null && superseded.Contains(fc.CallId))
+                        return (AIContent)new FunctionCallContent(fc.CallId, fc.Name ?? string.Empty,
+                            new AIFunctionArguments(new Dictionary<string, object?> { ["_note"] = FcNote }));
+                    return c;
+                }).ToList<AIContent>();
+                result.Add(new ChatMessage(msg.Role, rebuilt) { AuthorName = msg.AuthorName });
+            }
+            else if (msg.Role == ChatRole.Tool)
+            {
+                if (!msg.Contents.OfType<FunctionResultContent>()
+                        .Any(fr => fr.CallId is not null && superseded.Contains(fr.CallId)))
+                {
+                    result.Add(msg);
+                    continue;
+                }
+                var rebuilt = msg.Contents.Select(c =>
+                {
+                    if (c is FunctionResultContent fr && fr.CallId is not null && superseded.Contains(fr.CallId))
+                        return (AIContent)new FunctionResultContent(fr.CallId, ToolNote);
+                    return c;
+                }).ToList<AIContent>();
+                result.Add(new ChatMessage(msg.Role, rebuilt));
+            }
+            else
+            {
+                result.Add(msg);
+            }
+        }
+        return result;
+    }
+
+    // Builds a deduplication key from a tool call: tool name + sorted argument entries.
+    // Sorting by key makes matching argument-order-independent.
+    private static string BuildObservationalKey(FunctionCallContent fc)
+    {
+        if (fc.Arguments is not { Count: > 0 })
+            return fc.Name ?? string.Empty;
+
+        var sb = new StringBuilder(fc.Name);
+        foreach (var kv in fc.Arguments.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+        {
+            sb.Append(':');
+            sb.Append(kv.Key);
+            sb.Append('=');
+            sb.Append(kv.Value?.ToString() ?? string.Empty);
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Replaces <c>write_file</c> and <c>patch_file</c> tool-call/result pairs that are
+    /// superseded by a later <c>write_file</c> to the same path with compact placeholders.
+    /// A call is superseded when a subsequent <c>write_file</c> overwrites the same path
+    /// entirely, making the earlier write irrelevant to context.
+    /// </summary>
+    private static IEnumerable<ChatMessage> DropSupersededWritePairs(
+        IEnumerable<ChatMessage> messages)
+    {
+        var list = messages as IList<ChatMessage> ?? messages.ToList();
+
+        // Pass 1: collect write_file/patch_file calls in order; track last write_file per path.
+        var writeCalls = new List<(string CallId, string Path, string ToolName)>();
+        var lastWriteIdByPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var msg in list)
+        {
+            if (msg.Role != ChatRole.Assistant) continue;
+            foreach (var fc in msg.Contents.OfType<FunctionCallContent>())
+            {
+                if (fc.Name is not ("write_file" or "patch_file") || fc.CallId is null) continue;
+                object? pathObj = null;
+                fc.Arguments?.TryGetValue("path", out pathObj);
+                var path = pathObj?.ToString();
+                if (string.IsNullOrEmpty(path)) continue;
+                writeCalls.Add((fc.CallId, path!, fc.Name!));
+                if (fc.Name == "write_file")
+                    lastWriteIdByPath[path!] = fc.CallId;
+            }
+        }
+
+        if (writeCalls.Count == 0) return list;
+
+        // A call is superseded if a later write_file targets the same path.
+        var superseded = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (callId, path, _) in writeCalls)
+            if (lastWriteIdByPath.TryGetValue(path, out var lastId) && callId != lastId)
+                superseded.Add(callId);
+
+        if (superseded.Count == 0) return list;
+
+        const string FcNote      = "[superseded — later write_file for same path]";
+        const string ToolNote    = "[omitted — superseded by later write_file]";
+
+        var result = new List<ChatMessage>(list.Count);
+        foreach (var msg in list)
+        {
+            if (msg.Role == ChatRole.Assistant)
+            {
+                if (!msg.Contents.OfType<FunctionCallContent>()
+                        .Any(fc => fc.CallId is not null && superseded.Contains(fc.CallId)))
+                {
+                    result.Add(msg);
+                    continue;
+                }
+                var rebuilt = msg.Contents.Select(c =>
+                {
+                    if (c is FunctionCallContent fc && fc.CallId is not null && superseded.Contains(fc.CallId))
+                        return (AIContent)new FunctionCallContent(fc.CallId, fc.Name ?? string.Empty,
+                            new AIFunctionArguments(new Dictionary<string, object?> { ["_note"] = FcNote }));
+                    return c;
+                }).ToList<AIContent>();
+                result.Add(new ChatMessage(msg.Role, rebuilt) { AuthorName = msg.AuthorName });
+            }
+            else if (msg.Role == ChatRole.Tool)
+            {
+                if (!msg.Contents.OfType<FunctionResultContent>()
+                        .Any(fr => fr.CallId is not null && superseded.Contains(fr.CallId)))
+                {
+                    result.Add(msg);
+                    continue;
+                }
+                var rebuilt = msg.Contents.Select(c =>
+                {
+                    if (c is FunctionResultContent fr && fr.CallId is not null && superseded.Contains(fr.CallId))
+                        return (AIContent)new FunctionResultContent(fr.CallId, ToolNote);
+                    return c;
+                }).ToList<AIContent>();
+                result.Add(new ChatMessage(msg.Role, rebuilt));
+            }
+            else
+            {
+                result.Add(msg);
+            }
+        }
+        return result;
+    }
+
     private static IEnumerable<ChatMessage> KeepLastToolPairs(
         IEnumerable<ChatMessage> messages,
         int maxPairs)
@@ -731,6 +1159,14 @@ public sealed class AgentFactory(
         var result = new List<ChatMessage>(list);
         const string Placeholder = "[result omitted — sliding window]";
         int cutoff = toolIndices.Count - maxPairs;
+
+        // Track assistant messages whose paired tool results are being evicted so their
+        // ProtectedData (accumulated extended-thinking blobs) can be stripped in tandem.
+        // Keeping ProtectedData on evicted rounds causes O(N×thinking) token accumulation
+        // since EstimateContentChars now accounts for it and the budget trimmer will fire —
+        // but proactively dropping it here keeps the sliding window truly O(maxPairs).
+        var assistantIndicesToStrip = new HashSet<int>();
+
         for (int k = 0; k < cutoff; k++)
         {
             int idx = toolIndices[k];
@@ -741,7 +1177,34 @@ public sealed class AgentFactory(
                 .ToList<AIContent>();
             result[idx] = new ChatMessage(old.Role,
                 trimmed.Count > 0 ? trimmed : [new TextContent(Placeholder)]);
+
+            // Find the assistant message that issued these tool calls (immediately preceding).
+            for (int j = idx - 1; j >= 0; j--)
+            {
+                if (result[j].Role == ChatRole.Assistant)
+                {
+                    assistantIndicesToStrip.Add(j);
+                    break;
+                }
+            }
         }
+
+        // Strip ProtectedData from assistant messages whose tool pairs are being evicted.
+        // The reasoning for those rounds is stale and is no longer needed by the provider.
+        foreach (int aIdx in assistantIndicesToStrip)
+        {
+            var msg = result[aIdx];
+            if (!msg.Contents.OfType<TextReasoningContent>().Any(trc => trc.ProtectedData is not null))
+                continue;
+
+            var stripped = msg.Contents
+                .Select(c => c is TextReasoningContent trc && trc.ProtectedData is not null
+                    ? (AIContent)new TextReasoningContent(trc.Text) { ProtectedData = null }
+                    : c)
+                .ToList();
+            result[aIdx] = new ChatMessage(msg.Role, stripped) { AuthorName = msg.AuthorName };
+        }
+
         return result;
     }
 
@@ -826,7 +1289,7 @@ public sealed class AgentFactory(
                             fr.Result is string s && s.Length > perResultMax)
                         {
                             rebuilt.Add(new FunctionResultContent(
-                                fr.CallId!, s[..perResultMax] + TruncSuffix));
+                                fr.CallId ?? string.Empty, s[..perResultMax] + TruncSuffix));
                             changed = true;
                         }
                         else
@@ -996,6 +1459,75 @@ public sealed class AgentFactory(
         return DropAllToolContent(list);
     }
 
+    /// <summary>
+    /// Builds the payload for an <c>inner_call_context</c> event — a per-inner-API-call
+    /// snapshot of the message list after all trimming. Emitted before every
+    /// <c>inner.GetResponseAsync</c> call so growth across rounds is directly observable.
+    /// </summary>
+    private static object BuildInnerCallContextPayload(
+        IReadOnlyList<ChatMessage> messages, int toolSchemaChars, int seq)
+    {
+        int userMsgs = 0, assistantMsgs = 0, toolMsgs = 0;
+        int textChars = 0, reasoningTextChars = 0, reasoningProtectedDataChars = 0;
+        int fnCallArgChars = 0, fnResultChars = 0;
+        int protectedDataBlobs = 0;
+
+        foreach (var msg in messages)
+        {
+            if      (msg.Role == ChatRole.User)      userMsgs++;
+            else if (msg.Role == ChatRole.Assistant) assistantMsgs++;
+            else if (msg.Role == ChatRole.Tool)      toolMsgs++;
+
+            foreach (var content in msg.Contents)
+            {
+                switch (content)
+                {
+                    case TextContent tc:
+                        textChars += tc.Text?.Length ?? 0;
+                        break;
+                    case TextReasoningContent trc:
+                        reasoningTextChars += trc.Text?.Length ?? 0;
+                        var pdLen = trc.ProtectedData?.Length ?? 0;
+                        reasoningProtectedDataChars += pdLen;
+                        if (pdLen > 0) protectedDataBlobs++;
+                        break;
+                    case FunctionCallContent fc:
+                        fnCallArgChars += fc.Arguments?.Values.Sum(v =>
+                            v is System.Text.Json.JsonElement je
+                                ? je.GetRawText().Length
+                                : v?.ToString()?.Length ?? 0) ?? 0;
+                        break;
+                    case FunctionResultContent fr:
+                        fnResultChars += fr.Result is string s ? s.Length : fr.Result?.ToString()?.Length ?? 0;
+                        break;
+                }
+            }
+        }
+
+        int contentTotal = textChars + reasoningTextChars + reasoningProtectedDataChars
+                         + fnCallArgChars + fnResultChars;
+        int grandTotal   = contentTotal + toolSchemaChars;
+
+        return new
+        {
+            seq,
+            msg_counts = new { user = userMsgs, assistant = assistantMsgs, tool = toolMsgs },
+            content_chars = new
+            {
+                text                       = textChars,
+                reasoning_text             = reasoningTextChars,
+                reasoning_protected_data   = reasoningProtectedDataChars,
+                fn_call_args               = fnCallArgChars,
+                fn_results                 = fnResultChars,
+                content_total              = contentTotal,
+                tool_schema_est            = toolSchemaChars,
+                grand_total                = grandTotal,
+            },
+            protected_data_blobs = protectedDataBlobs,
+            est_tokens           = grandTotal / 4,
+        };
+    }
+
     private static int EstimateContentChars(AIContent content) => content switch
     {
         TextContent t           => t.Text?.Length ?? 0,
@@ -1003,6 +1535,10 @@ public sealed class AgentFactory(
         FunctionCallContent c   => (c.Name?.Length ?? 0) + (c.Arguments?.Values.Sum(v =>
                                       v is System.Text.Json.JsonElement je ? je.GetRawText().Length
                                       : v?.ToString()?.Length ?? 0) ?? 0),
+        // ProtectedData is the opaque blob encoding the full thinking token sequence.
+        // It must be included here or budget/trim checks are completely blind to thinking cost,
+        // allowing it to accumulate unchecked across tool-call rounds.
+        TextReasoningContent trc => (trc.Text?.Length ?? 0) + (trc.ProtectedData?.Length ?? 0),
         _                       => 0,
     };
 

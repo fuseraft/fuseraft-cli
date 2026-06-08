@@ -195,183 +195,40 @@ public sealed class MagenticOrchestrator(
 
         if (isResume)
         {
-            sharedHistory.Add(new ChatMessage(ChatRole.User, task));
-
-            // Resolve the current plan from persisted history if not already set by resume state.
-            // Done before the foreach so we can inject the planning prompt in the right order.
-            if (currentPlan is null)
+            await foreach (var msg in RehydrateResumeStateAsync(
+                task, priorHistory!, sharedHistory, managerHistory,
+                awaitingPlanReview, roundIndex, stallCount, resetCount,
+                currentPlan, currentPlanSteps, turn, cumulativeTokens,
+                cancellationToken).ConfigureAwait(false))
             {
-                currentPlan = priorHistory!
-                    .LastOrDefault(m => m.AgentName is ManagerPlanTag or ManagerReplanTag)
-                    ?.Content;
-            }
-
-            // Re-anchor manager history with the original fact-gathering prompt so the manager
-            // model receives properly alternating User→Assistant turns.
-            // The planning prompt and any replan bridging prompts are injected inline (below)
-            // immediately before their corresponding assistant messages, preserving the correct
-            // turn order: U:FactGather → A:Facts → U:Plan → A:Plan → (U:Replan → A:Replan)*.
-            managerHistory.Add(new ChatMessage(ChatRole.User, BuildFactGatherPrompt(task, config.Agents)));
-
-            bool planPromptInjected = false;
-
-            // Reconstruct both histories from the persisted message stream.
-            foreach (var prior in priorHistory!)
-            {
-                var role = prior.Role == "user" ? ChatRole.User : ChatRole.Assistant;
-
-                if ((prior.AgentName ?? string.Empty).StartsWith("[MagenticManager:", StringComparison.Ordinal))
-                {
-                    // Inject user-side prompts immediately before the matching assistant response
-                    // so that manager history maintains a valid User→Assistant alternation.
-                    if (!planPromptInjected &&
-                        prior.AgentName is ManagerPlanTag or ManagerReplanTag)
-                    {
-                        // First plan (or replan when no separate plan was ever emitted):
-                        // inject the original planning prompt.
-                        //
-                        // Guard: if the last managerHistory entry is already a User message it
-                        // means the Internal/facts response was compacted away — adding another
-                        // User message would create two consecutive User turns which many
-                        // providers reject. Inject a synthetic Assistant response first.
-                        if (managerHistory.Count > 0 && managerHistory[^1].Role == ChatRole.User)
-                        {
-                            managerHistory.Add(new ChatMessage(ChatRole.Assistant,
-                                "(Fact-gathering response not available in this compacted history window.)")
-                            { AuthorName = ManagerInternalTag });
-                        }
-                        managerHistory.Add(new ChatMessage(ChatRole.User, BuildPlanningPrompt(config.Agents)));
-                        planPromptInjected = true;
-                    }
-                    else if (planPromptInjected && prior.AgentName == ManagerReplanTag)
-                    {
-                        // Subsequent replans: the live replan prompt is not persisted in the
-                        // checkpoint stream, so inject a synthetic bridging user turn.
-                        managerHistory.Add(new ChatMessage(ChatRole.User,
-                            "The team stalled. Please revise the plan based on recent progress."));
-                    }
-
-                    // Manager messages belong in manager history so it can re-orient.
-                    var mgrMsg = new ChatMessage(role, ContextWindowFilter.TruncateReplayContent(prior));
-                    if (role == ChatRole.Assistant) mgrMsg.AuthorName = prior.AgentName;
-                    managerHistory.Add(mgrMsg);
-                }
-                else
-                {
-                    var sharedMsg = new ChatMessage(role, ContextWindowFilter.TruncateReplayContent(prior));
-                    if (role == ChatRole.Assistant && prior.AgentName is not null)
-                        sharedMsg.AuthorName = prior.AgentName;
-                    sharedHistory.Add(sharedMsg);
-                }
-            }
-
-            // Compaction may have dropped the original manager plan exchange. Detect this by
-            // checking whether planPromptInjected is still false after the loop — meaning no
-            // [MagenticManager:Plan] or [MagenticManager:Replan] message survived in the
-            // retained history. Without correction, managerHistory contains only the bare
-            // fact-gather User prompt. The first ledger call would then append another User
-            // prompt, producing two consecutive User messages — which many providers reject.
-            // Inject synthetic exchanges to restore valid User→Assistant alternation.
-            if (!planPromptInjected)
-            {
-                managerHistory.Add(new ChatMessage(ChatRole.Assistant,
-                    "(Prior context was compacted — original fact-gather response not available in this window.)")
-                { AuthorName = ManagerInternalTag });
-
-                if (currentPlan is not null)
-                {
-                    // Inject planning prompt + the recovered plan so the manager has context
-                    // of its own prior plan before the first ledger evaluation prompt arrives.
-                    managerHistory.Add(new ChatMessage(ChatRole.User, BuildPlanningPrompt(config.Agents)));
-                    managerHistory.Add(new ChatMessage(ChatRole.Assistant, currentPlan) { AuthorName = ManagerPlanTag });
-                }
-            }
-
-            // If the checkpoint says we were awaiting plan review, re-emit the plan prompt.
-            if (awaitingPlanReview && currentPlan is not null && approvalService is not null)
-            {
-                if (currentPlanSteps is null)
-                    PlanStep.TryParse(currentPlan, out currentPlanSteps);
-
-                var feedback = await approvalService.PromptPlanReviewAsync(currentPlan);
-                while (feedback is not null)
-                {
-                    managerHistory.Add(new ChatMessage(ChatRole.User,
-                        $"[Plan revision requested]: {feedback}"));
-                    var (revisedPlan, revCost) = await InvokeManagerAsync(managerHistory, cancellationToken);
-                    currentPlan = revisedPlan;
-                    PlanStep.TryParse(currentPlan, out currentPlanSteps);
-                    managerHistory.Add(new ChatMessage(ChatRole.Assistant, currentPlan) { AuthorName = ManagerPlanTag });
-                    cumulativeTokens += revCost?.TotalTokens ?? 0;
-
-                    UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: true);
-                    yield return MakeMessage(ManagerPlanTag, currentPlan, turn++, revCost);
-
-                    feedback = await approvalService.PromptPlanReviewAsync(currentPlan);
-                }
-                UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
+                currentPlan      = msg.State.CurrentPlan;
+                currentPlanSteps = msg.State.CurrentPlanSteps;
+                turn             = msg.State.Turn;
+                cumulativeTokens = msg.State.CumulativeTokens;
+                if (msg.Message is { } m) yield return m;
             }
         }
         else
         {
-            // Phase 0: Fact Gathering
-
-            sharedHistory.Add(new ChatMessage(ChatRole.User, task));
-
-            var factPrompt = BuildFactGatherPrompt(task, config.Agents);
-            managerHistory.Add(new ChatMessage(ChatRole.User, factPrompt));
-
-            logger.LogDebug("[MagenticOrchestrator] Gathering facts...");
-            var (facts, factCost) = await InvokeManagerAsync(managerHistory, cancellationToken);
-            managerHistory.Add(new ChatMessage(ChatRole.Assistant, facts) { AuthorName = ManagerInternalTag });
-            cumulativeTokens += factCost?.TotalTokens ?? 0;
-
-            // Yield facts as an internal message so they appear in the session transcript.
-            yield return MakeMessage(ManagerInternalTag, facts, turn++, factCost);
-
-            // Phase 1: Planning
-
-            managerHistory.Add(new ChatMessage(ChatRole.User, BuildPlanningPrompt(config.Agents)));
-
-            logger.LogDebug("[MagenticOrchestrator] Generating initial plan...");
-            var (initialPlan, planCost) = await InvokeManagerAsync(managerHistory, cancellationToken);
-            currentPlan = initialPlan;
-            PlanStep.TryParse(currentPlan, out currentPlanSteps);
-            managerHistory.Add(new ChatMessage(ChatRole.Assistant, currentPlan) { AuthorName = ManagerPlanTag });
-            cumulativeTokens += planCost?.TotalTokens ?? 0;
-
-            if (_magConfig.EnablePlanReview && approvalService is not null)
+            await foreach (var msg in GatherFactsAsync(
+                task, sharedHistory, managerHistory, turn, cumulativeTokens,
+                cancellationToken).ConfigureAwait(false))
             {
-                UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: true);
-                yield return MakeMessage(ManagerPlanTag, currentPlan, turn++, planCost);
-
-                var feedback = await approvalService.PromptPlanReviewAsync(currentPlan);
-                while (feedback is not null)
-                {
-                    managerHistory.Add(new ChatMessage(ChatRole.User,
-                        $"[Plan revision requested]: {feedback}"));
-                    var (revisedPlan, revCost) = await InvokeManagerAsync(managerHistory, cancellationToken);
-                    currentPlan = revisedPlan;
-                    PlanStep.TryParse(currentPlan, out currentPlanSteps);
-                    managerHistory.Add(new ChatMessage(ChatRole.Assistant, currentPlan) { AuthorName = ManagerPlanTag });
-                    cumulativeTokens += revCost?.TotalTokens ?? 0;
-
-                    UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: true);
-                    yield return MakeMessage(ManagerPlanTag, currentPlan, turn++, revCost);
-
-                    feedback = await approvalService.PromptPlanReviewAsync(currentPlan);
-                }
-
-                UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
-            }
-            else
-            {
-                yield return MakeMessage(ManagerPlanTag, currentPlan, turn++, planCost);
-                UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
+                turn             = msg.State.Turn;
+                cumulativeTokens = msg.State.CumulativeTokens;
+                if (msg.Message is { } m) yield return m;
             }
 
-            if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("magentic_plan", agent: ManagerPlanTag, payload: new { plan = currentPlan });
+            await foreach (var msg in GeneratePlanAsync(
+                managerHistory, roundIndex, stallCount, resetCount,
+                turn, cumulativeTokens, cancellationToken).ConfigureAwait(false))
+            {
+                currentPlan      = msg.State.CurrentPlan;
+                currentPlanSteps = msg.State.CurrentPlanSteps;
+                turn             = msg.State.Turn;
+                cumulativeTokens = msg.State.CumulativeTokens;
+                if (msg.Message is { } m) yield return m;
+            }
         }
 
         // Phase 2: Inner Loop
@@ -383,257 +240,81 @@ public sealed class MagenticOrchestrator(
 
         while (roundIndex < _magConfig.MaxRoundCount && !cancellationToken.IsCancellationRequested)
         {
-            var ledgerPrompt = BuildLedgerPrompt(sharedHistory, currentPlan, currentPlanSteps, completedStepIds, participantNames);
+            var speakerResult = await SelectNextSpeakerAsync(
+                sharedHistory, managerHistory, currentPlan, currentPlanSteps,
+                completedStepIds, participantNames, agents, agentsByName,
+                roundIndex, stallCount, resetCount, cumulativeTokens,
+                cancellationToken);
 
-            // Evaluate progress — use a windowed snapshot of manager history to prevent long
-            // sessions with many replan cycles from overflowing the manager model's context.
-            // Keeps the first ManagerHistoryBootstrapMessages (fact-gather + plan) plus the most recent tail.
-            IEnumerable<ChatMessage> ledgerBase = managerHistory.Count <= ManagerHistoryWindow
-                ? managerHistory
-                : managerHistory.Take(ManagerHistoryBootstrapMessages).Concat(managerHistory.TakeLast(ManagerHistoryWindow - ManagerHistoryBootstrapMessages));
+            stallCount       = speakerResult.StallCount;
+            resetCount       = speakerResult.ResetCount;
+            cumulativeTokens = speakerResult.CumulativeTokens;
+            if (speakerResult.StepsCompleted is { Length: > 0 })
+                foreach (var id in speakerResult.StepsCompleted) completedStepIds.Add(id);
 
-            var ledgerContext = new List<ChatMessage>(ledgerBase)
+            if (speakerResult.Outcome == SpeakerOutcome.Satisfied)
             {
-                new(ChatRole.User, ledgerPrompt)
-            };
-
-            logger.LogDebug("[MagenticOrchestrator] Evaluating progress (round {Round})...", roundIndex);
-            var (ledgerText, ledgerCost) = await InvokeManagerAsync(ledgerContext, cancellationToken);
-            cumulativeTokens += ledgerCost?.TotalTokens ?? 0;
-            var ledger = ParseLedger(ledgerText);
-
-            if (ledger is null)
-            {
-                logger.LogWarning("[MagenticOrchestrator] Failed to parse progress ledger on round {Round}; counting as stall.", roundIndex);
-                stallCount++;
-            }
-            else if (ledger.IsRequestSatisfied)
-            {
-                // Merge any newly-completed steps reported by the manager before exiting.
-                if (ledger.StepsCompleted is { Length: > 0 })
-                    foreach (var id in ledger.StepsCompleted) completedStepIds.Add(id);
-
-                // Task complete — synthesize and yield the final answer.
-                string finalContent;
-                TokenUsage? finalCost = null;
-
-                // Guard against models that output the string "null" instead of JSON null —
-                // the prompt instructs JSON null but some models comply only partially.
-                if (!string.IsNullOrWhiteSpace(ledger.FinalAnswer) &&
-                    !string.Equals(ledger.FinalAnswer, "null", StringComparison.OrdinalIgnoreCase))
+                await foreach (var msg in EmitFinalAnswerAsync(
+                    managerHistory, sharedHistory, speakerResult.Ledger!,
+                    currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount,
+                    turn, cumulativeTokens, cancellationToken).ConfigureAwait(false))
                 {
-                    finalContent = ledger.FinalAnswer;
+                    turn             = msg.State.Turn;
+                    cumulativeTokens = msg.State.CumulativeTokens;
+                    if (msg.Message is { } m) yield return m;
                 }
-                else
-                {
-                    (finalContent, finalCost) = await SynthesizeFinalAnswerAsync(managerHistory, sharedHistory, cancellationToken);
-                    cumulativeTokens += finalCost?.TotalTokens ?? 0;
-                }
-
-                UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
-                yield return MakeMessage(ManagerFinalTag, finalContent, turn++, finalCost);
-
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("magentic_complete", agent: ManagerFinalTag,
-                        payload: new { rounds = roundIndex });
                 emittedFinal = true;
                 break;
             }
-            else
-            {
-                // Track completed steps reported by the manager so the checklist stays current.
-                if (ledger.StepsCompleted is { Length: > 0 })
-                    foreach (var id in ledger.StepsCompleted) completedStepIds.Add(id);
 
-                if (!ledger.IsProgressBeingMade || ledger.IsInLoop)
-                    stallCount++;
-                else
-                    stallCount = 0;
+            if (speakerResult.Outcome == SpeakerOutcome.TerminalStall)
+            {
+                UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
+                yield return MakeMessage(ManagerFinalTag,
+                    $"The session could not make further progress after {resetCount - 1} replanning cycles. " +
+                    "Please review the conversation history and consider restarting with a more specific task.",
+                    turn++, null);
+                emittedFinal = true;
+                break;
             }
 
-            // Stall handling
-
-            if (stallCount >= _magConfig.MaxStallCount)
+            if (speakerResult.Outcome == SpeakerOutcome.Replan)
             {
-                resetCount++;
-
-                if (resetCount > _magConfig.MaxResetCount)
+                await foreach (var msg in ReplanAsync(
+                    sharedHistory, managerHistory, currentPlan, currentPlanSteps,
+                    completedStepIds, roundIndex, stallCount, resetCount,
+                    turn, cumulativeTokens, cancellationToken).ConfigureAwait(false))
                 {
-                    logger.LogWarning("[MagenticOrchestrator] Max resets ({Max}) reached — terminating.", _magConfig.MaxResetCount);
-                    UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
-                    yield return MakeMessage(ManagerFinalTag,
-                        $"The session could not make further progress after {resetCount - 1} replanning cycles. " +
-                        "Please review the conversation history and consider restarting with a more specific task.",
-                        turn++, null);
-                    emittedFinal = true;
-                    break;
+                    currentPlan      = msg.State.CurrentPlan;
+                    currentPlanSteps = msg.State.CurrentPlanSteps;
+                    roundIndex       = msg.State.RoundIndex;
+                    stallCount       = msg.State.StallCount;
+                    turn             = msg.State.Turn;
+                    cumulativeTokens = msg.State.CumulativeTokens;
+                    if (msg.Message is { } m) yield return m;
                 }
-
-                logger.LogInformation("[MagenticOrchestrator] Stall detected — replanning (cycle {Cycle}).", resetCount);
-                stallCount = 0;
-                roundIndex = 0;
                 completedStepIds.Clear();
-
-                var replanPrompt = BuildReplanPrompt(sharedHistory, currentPlan, currentPlanSteps, completedStepIds);
-
-                // Apply the same history window as ledger evaluation so a high MaxResetCount
-                // cannot push the replan call past the manager model's context limit.
-                IEnumerable<ChatMessage> replanBase = managerHistory.Count <= ManagerHistoryWindow
-                    ? managerHistory
-                    : managerHistory.Take(ManagerHistoryBootstrapMessages).Concat(managerHistory.TakeLast(ManagerHistoryWindow - ManagerHistoryBootstrapMessages));
-                var replanContext = new List<ChatMessage>(replanBase) { new(ChatRole.User, replanPrompt) };
-
-                var (newPlan, replanCost) = await InvokeManagerAsync(replanContext, cancellationToken);
-                currentPlan = newPlan;
-                PlanStep.TryParse(currentPlan, out currentPlanSteps);
-                // Record the full exchange in managerHistory for future reference.
-                managerHistory.Add(new ChatMessage(ChatRole.User, replanPrompt));
-                managerHistory.Add(new ChatMessage(ChatRole.Assistant, currentPlan) { AuthorName = ManagerReplanTag });
-                cumulativeTokens += replanCost?.TotalTokens ?? 0;
-
-                UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
-                yield return MakeMessage(ManagerReplanTag, currentPlan, turn++, replanCost);
-
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("magentic_replan", agent: ManagerReplanTag,
-                        payload: new { cycle = resetCount, plan = currentPlan });
-
                 continue;
             }
 
             // Select next participant and invoke
 
-            AIAgent? nextAgent = null;
-            if (ledger?.NextSpeaker is { } speakerName && !agentsByName.TryGetValue(speakerName, out nextAgent))
-                logger.LogWarning("[MagenticOrchestrator] Manager named unknown agent '{Speaker}'; defaulting to '{Default}'.",
-                    speakerName, agents[0].Name);
-            nextAgent ??= agents[0];
-
-            AgentStarting?.Invoke(nextAgent.Name ?? "Unknown");
-            agentFactory.OnAgentTurnStarting();
-            changeTracker?.BeginTurn(nextAgent.Name ?? "Unknown", turn);
-
-            var instruction = ledger is null
-                ? "The orchestrator could not evaluate progress. Please summarize your work so far and describe your next steps."
-                : ledger.InstructionOrQuestion ?? "Please continue working on the task.";
-
-            // Participant context: pipeline-assembled context (memory + knowledge + filtered history)
-            // with the manager's targeted instruction appended as the final user message.
-            var agentCfg = agentConfigs.GetValueOrDefault(nextAgent.Name ?? "");
-            IEnumerable<ChatMessage> participantContext;
-            if (contextPipeline is not null)
+            await foreach (var msg in SynthesizeToolCallsAsync(
+                task, speakerResult.NextAgent!, speakerResult.Instruction!,
+                sharedHistory, agentInstructions, agentConfigs,
+                currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount,
+                turn, cumulativeTokens, cancellationToken).ConfigureAwait(false))
             {
-                var assembled = await contextPipeline.AssembleAsync(
-                    new fuseraft.Core.Models.AgentExecutionRequest
-                    {
-                        AgentName     = nextAgent.Name ?? string.Empty,
-                        Task          = task,
-                        SharedHistory = sharedHistory,
-                        AgentConfig   = agentCfg,
-                        SessionId     = _sessionId,
-                    }, cancellationToken);
-                // Append the manager's targeted instruction after the assembled context.
-                var msgs = assembled.Messages.ToList();
-                msgs.Add(new ChatMessage(ChatRole.User, instruction));
-                participantContext = msgs;
-                if (eventEmitter is not null)
-                    await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, turn);
+                currentPlan      = msg.State.CurrentPlan;
+                currentPlanSteps = msg.State.CurrentPlanSteps;
+                roundIndex       = msg.State.RoundIndex;
+                turn             = msg.State.Turn;
+                cumulativeTokens = msg.State.CumulativeTokens;
+                if (msg.Message is { } m) yield return m;
             }
-            else
-            {
-                bool hasInstructions = agentInstructions.TryGetValue(nextAgent.Name ?? "", out var sysInstructions);
-                var filteredHistory  = ContextWindowFilter.Apply(sharedHistory, agentCfg?.ContextWindow);
-                participantContext = hasInstructions
-                    ? [new ChatMessage(ChatRole.System, sysInstructions), .. filteredHistory, new ChatMessage(ChatRole.User, instruction)]
-                    : [.. filteredHistory, new ChatMessage(ChatRole.User, instruction)];
-            }
-
-            logger.LogDebug("[MagenticOrchestrator] Invoking '{Agent}' (round {Round}): {Instruction}",
-                nextAgent.Name, roundIndex, StringHelpers.Truncate(instruction, 120));
-
-            AgentResponse response = governanceKernel?.CircuitBreaker is { } cb
-                ? await cb.ExecuteAsync(() => nextAgent.RunAsync(participantContext, null, null, cancellationToken))
-                : await nextAgent.RunAsync(participantContext, null, null, cancellationToken);
-
-            // Append participant response to shared history.
-            foreach (var msg in response.Messages)
-            {
-                if (msg.Role == ChatRole.Assistant && string.IsNullOrEmpty(msg.AuthorName))
-                    msg.AuthorName = nextAgent.Name;
-                sharedHistory.Add(msg);
-            }
-
-            var agentMsg = new AgentMessage
-            {
-                AgentName = nextAgent.Name ?? "Unknown",
-                Content   = response.Text ?? string.Empty,
-                Role      = "assistant",
-                TurnIndex = turn++,
-                Usage     = OrchestratorHelpers.ExtractUsage(response),
-                ToolCalls = OrchestratorHelpers.ExtractToolCalls(response.Messages)
-            };
-
-            cumulativeTokens += agentMsg.Usage?.TotalTokens ?? 0;
-            roundIndex++;
-
-            var warnThreshold = config.WarnTurnTokens;
-            if (warnThreshold > 0 && agentMsg.Usage?.InputTokens is { } inputToks && inputToks > warnThreshold)
-                TokenBudgetWarning?.Invoke(agentMsg.AgentName, inputToks, warnThreshold);
-
-            // Yield and snapshot state before checking the budget so the participant's response
-            // is always visible in the transcript even if it was the turn that pushed over the
-            // limit — the work was done and the tokens were already consumed regardless.
-            UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
-            yield return agentMsg;
 
             if (config.MaxTotalTokens is { } limit && cumulativeTokens > limit)
                 throw new BudgetExceededException(cumulativeTokens, limit);
-
-            if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("turn_end",
-                    agent: agentMsg.AgentName,
-                    turn:  agentMsg.TurnIndex,
-                    payload: new
-                    {
-                        input_tokens  = agentMsg.Usage?.InputTokens,
-                        output_tokens = agentMsg.Usage?.OutputTokens,
-                    });
-
-            if (changeTracker is not null)
-            {
-                try { await changeTracker.FlushTurnAsync(agentMsg.AgentName, agentMsg.TurnIndex, CancellationToken.None); }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex,
-                        "ChangeTracker flush failed for turn {Turn} ({Agent}).", agentMsg.TurnIndex, agentMsg.AgentName);
-                }
-            }
-
-            // Persist entity-scoped findings from tool calls for future session retrieval.
-            if (repositoryKnowledgeStore is not null && !string.IsNullOrEmpty(_sessionId))
-            {
-                try
-                {
-                    var observations = ObservationExtractor.Extract(
-                        (IReadOnlyList<ChatMessage>)response.Messages,
-                        agentMsg.AgentName, agentMsg.TurnIndex);
-                    foreach (var obs in observations)
-                    {
-                        if (string.IsNullOrWhiteSpace(obs.Entity)) continue;
-                        await repositoryKnowledgeStore.AddAsync(new fuseraft.Core.Models.RepositoryKnowledgeFinding
-                        {
-                            Entity     = obs.Entity!,
-                            Finding    = obs.Finding,
-                            Source     = _sessionId,
-                            Confidence = obs.Confidence,
-                            AgentName  = obs.AgentName,
-                            Kind       = obs.Source is "write_file" or "patch_file" or "delete_file"
-                                         ? "change" : "observation",
-                        }, CancellationToken.None);
-                    }
-                }
-                catch { /* best-effort */ }
-            }
         }
 
         // Emit a terminal message when the loop exhausted MaxRoundCount without self-terminating
@@ -648,6 +329,623 @@ public sealed class MagenticOrchestrator(
                 "with a more specific task or a higher MaxRoundCount.",
                 turn, null);
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Extracted private methods
+    // -------------------------------------------------------------------------
+
+    // Carrier used by all async-enumerable helpers below: a yielded AgentMessage
+    // (null when the iteration step only mutates state without emitting a message)
+    // plus the updated scalar fields that the caller needs to write back.
+    private sealed record StreamStep(AgentMessage? Message, StreamState State);
+
+    private sealed record StreamState(
+        string?     CurrentPlan,
+        PlanStep[]? CurrentPlanSteps,
+        int         Turn,
+        int         CumulativeTokens,
+        int         RoundIndex  = 0,
+        int         StallCount  = 0);
+
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Resume checkpoint rehydration into history.
+    /// Reconstructs <paramref name="sharedHistory"/> and <paramref name="managerHistory"/>
+    /// from <paramref name="priorHistory"/> and, when the checkpoint was awaiting plan review,
+    /// drives the approval loop and yields revised-plan messages.
+    /// </summary>
+    private async IAsyncEnumerable<StreamStep> RehydrateResumeStateAsync(
+        string task,
+        IReadOnlyList<AgentMessage> priorHistory,
+        List<ChatMessage> sharedHistory,
+        List<ChatMessage> managerHistory,
+        bool awaitingPlanReview,
+        int roundIndex,
+        int stallCount,
+        int resetCount,
+        string? currentPlan,
+        PlanStep[]? currentPlanSteps,
+        int turn,
+        int cumulativeTokens,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        sharedHistory.Add(new ChatMessage(ChatRole.User, task));
+
+        // Resolve the current plan from persisted history if not already set by resume state.
+        // Done before the foreach so we can inject the planning prompt in the right order.
+        if (currentPlan is null)
+        {
+            currentPlan = priorHistory
+                .LastOrDefault(m => m.AgentName is ManagerPlanTag or ManagerReplanTag)
+                ?.Content;
+        }
+
+        // Re-anchor manager history with the original fact-gathering prompt so the manager
+        // model receives properly alternating User→Assistant turns.
+        // The planning prompt and any replan bridging prompts are injected inline (below)
+        // immediately before their corresponding assistant messages, preserving the correct
+        // turn order: U:FactGather → A:Facts → U:Plan → A:Plan → (U:Replan → A:Replan)*.
+        managerHistory.Add(new ChatMessage(ChatRole.User, BuildFactGatherPrompt(task, config.Agents)));
+
+        bool planPromptInjected = false;
+
+        // Reconstruct both histories from the persisted message stream.
+        foreach (var prior in priorHistory)
+        {
+            var role = prior.Role == "user" ? ChatRole.User : ChatRole.Assistant;
+
+            if ((prior.AgentName ?? string.Empty).StartsWith("[MagenticManager:", StringComparison.Ordinal))
+            {
+                // Inject user-side prompts immediately before the matching assistant response
+                // so that manager history maintains a valid User→Assistant alternation.
+                if (!planPromptInjected &&
+                    prior.AgentName is ManagerPlanTag or ManagerReplanTag)
+                {
+                    // First plan (or replan when no separate plan was ever emitted):
+                    // inject the original planning prompt.
+                    //
+                    // Guard: if the last managerHistory entry is already a User message it
+                    // means the Internal/facts response was compacted away — adding another
+                    // User message would create two consecutive User turns which many
+                    // providers reject. Inject a synthetic Assistant response first.
+                    if (managerHistory.Count > 0 && managerHistory[^1].Role == ChatRole.User)
+                    {
+                        managerHistory.Add(new ChatMessage(ChatRole.Assistant,
+                            "(Fact-gathering response not available in this compacted history window.)")
+                        { AuthorName = ManagerInternalTag });
+                    }
+                    managerHistory.Add(new ChatMessage(ChatRole.User, BuildPlanningPrompt(config.Agents)));
+                    planPromptInjected = true;
+                }
+                else if (planPromptInjected && prior.AgentName == ManagerReplanTag)
+                {
+                    // Subsequent replans: the live replan prompt is not persisted in the
+                    // checkpoint stream, so inject a synthetic bridging user turn.
+                    managerHistory.Add(new ChatMessage(ChatRole.User,
+                        "The team stalled. Please revise the plan based on recent progress."));
+                }
+
+                // Manager messages belong in manager history so it can re-orient.
+                var mgrMsg = new ChatMessage(role, ContextWindowFilter.TruncateReplayContent(prior));
+                if (role == ChatRole.Assistant) mgrMsg.AuthorName = prior.AgentName;
+                managerHistory.Add(mgrMsg);
+            }
+            else
+            {
+                var sharedMsg = new ChatMessage(role, ContextWindowFilter.TruncateReplayContent(prior));
+                if (role == ChatRole.Assistant && prior.AgentName is not null)
+                    sharedMsg.AuthorName = prior.AgentName;
+                sharedHistory.Add(sharedMsg);
+            }
+        }
+
+        // Compaction may have dropped the original manager plan exchange. Detect this by
+        // checking whether planPromptInjected is still false after the loop — meaning no
+        // [MagenticManager:Plan] or [MagenticManager:Replan] message survived in the
+        // retained history. Without correction, managerHistory contains only the bare
+        // fact-gather User prompt. The first ledger call would then append another User
+        // prompt, producing two consecutive User messages — which many providers reject.
+        // Inject synthetic exchanges to restore valid User→Assistant alternation.
+        if (!planPromptInjected)
+        {
+            managerHistory.Add(new ChatMessage(ChatRole.Assistant,
+                "(Prior context was compacted — original fact-gather response not available in this window.)")
+            { AuthorName = ManagerInternalTag });
+
+            if (currentPlan is not null)
+            {
+                // Inject planning prompt + the recovered plan so the manager has context
+                // of its own prior plan before the first ledger evaluation prompt arrives.
+                managerHistory.Add(new ChatMessage(ChatRole.User, BuildPlanningPrompt(config.Agents)));
+                managerHistory.Add(new ChatMessage(ChatRole.Assistant, currentPlan) { AuthorName = ManagerPlanTag });
+            }
+        }
+
+        // If the checkpoint says we were awaiting plan review, re-emit the plan prompt.
+        if (awaitingPlanReview && currentPlan is not null && approvalService is not null)
+        {
+            if (currentPlanSteps is null)
+                PlanStep.TryParse(currentPlan, out currentPlanSteps);
+
+            var feedback = await approvalService.PromptPlanReviewAsync(currentPlan);
+            while (feedback is not null)
+            {
+                managerHistory.Add(new ChatMessage(ChatRole.User,
+                    $"[Plan revision requested]: {feedback}"));
+                var (revisedPlan, revCost) = await InvokeManagerAsync(managerHistory, cancellationToken);
+                currentPlan = revisedPlan;
+                PlanStep.TryParse(currentPlan, out currentPlanSteps);
+                managerHistory.Add(new ChatMessage(ChatRole.Assistant, currentPlan) { AuthorName = ManagerPlanTag });
+                cumulativeTokens += revCost?.TotalTokens ?? 0;
+
+                UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: true);
+                yield return new StreamStep(
+                    MakeMessage(ManagerPlanTag, currentPlan, turn++, revCost),
+                    new StreamState(currentPlan, currentPlanSteps, turn, cumulativeTokens));
+
+                feedback = await approvalService.PromptPlanReviewAsync(currentPlan);
+            }
+            UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
+        }
+
+        // Final state propagation (no message to yield).
+        yield return new StreamStep(null, new StreamState(currentPlan, currentPlanSteps, turn, cumulativeTokens));
+    }
+
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Emit to each agent, collect results into shared history.
+    /// Performs Phase 0 (fact gathering): builds the fact-gather prompt, invokes the manager,
+    /// and yields the internal facts message.
+    /// </summary>
+    private async IAsyncEnumerable<StreamStep> GatherFactsAsync(
+        string task,
+        List<ChatMessage> sharedHistory,
+        List<ChatMessage> managerHistory,
+        int turn,
+        int cumulativeTokens,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        // Phase 0: Fact Gathering
+
+        sharedHistory.Add(new ChatMessage(ChatRole.User, task));
+
+        var factPrompt = BuildFactGatherPrompt(task, config.Agents);
+        managerHistory.Add(new ChatMessage(ChatRole.User, factPrompt));
+
+        logger.LogDebug("[MagenticOrchestrator] Gathering facts...");
+        var (facts, factCost) = await InvokeManagerAsync(managerHistory, cancellationToken);
+        managerHistory.Add(new ChatMessage(ChatRole.Assistant, facts) { AuthorName = ManagerInternalTag });
+        cumulativeTokens += factCost?.TotalTokens ?? 0;
+
+        // Yield facts as an internal message so they appear in the session transcript.
+        yield return new StreamStep(
+            MakeMessage(ManagerInternalTag, facts, turn++, factCost),
+            new StreamState(null, null, turn, cumulativeTokens));
+    }
+
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Initial plan generation via manager.
+    /// Performs Phase 1 (planning): invokes the manager with the planning prompt,
+    /// runs the plan-review approval loop when enabled, and yields plan messages.
+    /// </summary>
+    private async IAsyncEnumerable<StreamStep> GeneratePlanAsync(
+        List<ChatMessage> managerHistory,
+        int roundIndex,
+        int stallCount,
+        int resetCount,
+        int turn,
+        int cumulativeTokens,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        // Phase 1: Planning
+
+        managerHistory.Add(new ChatMessage(ChatRole.User, BuildPlanningPrompt(config.Agents)));
+
+        logger.LogDebug("[MagenticOrchestrator] Generating initial plan...");
+        var (initialPlan, planCost) = await InvokeManagerAsync(managerHistory, cancellationToken);
+        var currentPlan      = initialPlan;
+        PlanStep[]? currentPlanSteps;
+        PlanStep.TryParse(currentPlan, out currentPlanSteps);
+        managerHistory.Add(new ChatMessage(ChatRole.Assistant, currentPlan) { AuthorName = ManagerPlanTag });
+        cumulativeTokens += planCost?.TotalTokens ?? 0;
+
+        if (_magConfig.EnablePlanReview && approvalService is not null)
+        {
+            UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: true);
+            yield return new StreamStep(
+                MakeMessage(ManagerPlanTag, currentPlan, turn++, planCost),
+                new StreamState(currentPlan, currentPlanSteps, turn, cumulativeTokens));
+
+            var feedback = await approvalService.PromptPlanReviewAsync(currentPlan);
+            while (feedback is not null)
+            {
+                managerHistory.Add(new ChatMessage(ChatRole.User,
+                    $"[Plan revision requested]: {feedback}"));
+                var (revisedPlan, revCost) = await InvokeManagerAsync(managerHistory, cancellationToken);
+                currentPlan = revisedPlan;
+                PlanStep.TryParse(currentPlan, out currentPlanSteps);
+                managerHistory.Add(new ChatMessage(ChatRole.Assistant, currentPlan) { AuthorName = ManagerPlanTag });
+                cumulativeTokens += revCost?.TotalTokens ?? 0;
+
+                UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: true);
+                yield return new StreamStep(
+                    MakeMessage(ManagerPlanTag, currentPlan, turn++, revCost),
+                    new StreamState(currentPlan, currentPlanSteps, turn, cumulativeTokens));
+
+                feedback = await approvalService.PromptPlanReviewAsync(currentPlan);
+            }
+
+            UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
+        }
+        else
+        {
+            yield return new StreamStep(
+                MakeMessage(ManagerPlanTag, currentPlan, turn++, planCost),
+                new StreamState(currentPlan, currentPlanSteps, turn, cumulativeTokens));
+            UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
+        }
+
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync("magentic_plan", agent: ManagerPlanTag, payload: new { plan = currentPlan });
+    }
+
+    // -------------------------------------------------------------------------
+
+    private enum SpeakerOutcome { Proceed, Satisfied, TerminalStall, Replan }
+
+    private sealed record SelectSpeakerResult(
+        SpeakerOutcome             Outcome,
+        MagenticProgressLedger?    Ledger,
+        AIAgent?                   NextAgent,
+        string?                    Instruction,
+        int[]?                     StepsCompleted,
+        int                        StallCount,
+        int                        ResetCount,
+        int                        CumulativeTokens);
+
+    /// <summary>
+    /// LLM-based speaker selection with stall detection.
+    /// Evaluates the progress ledger, updates stall/reset counters, and returns a
+    /// <see cref="SelectSpeakerResult"/> that tells the caller which branch to take next.
+    /// </summary>
+    private async Task<SelectSpeakerResult> SelectNextSpeakerAsync(
+        List<ChatMessage> sharedHistory,
+        List<ChatMessage> managerHistory,
+        string? currentPlan,
+        PlanStep[]? currentPlanSteps,
+        HashSet<int> completedStepIds,
+        string participantNames,
+        List<AIAgent> agents,
+        Dictionary<string, AIAgent> agentsByName,
+        int roundIndex,
+        int stallCount,
+        int resetCount,
+        int cumulativeTokens,
+        CancellationToken cancellationToken)
+    {
+        var ledgerPrompt = BuildLedgerPrompt(sharedHistory, currentPlan, currentPlanSteps, completedStepIds, participantNames);
+
+        // Evaluate progress — use a windowed snapshot of manager history to prevent long
+        // sessions with many replan cycles from overflowing the manager model's context.
+        // Keeps the first ManagerHistoryBootstrapMessages (fact-gather + plan) plus the most recent tail.
+        IEnumerable<ChatMessage> ledgerBase = managerHistory.Count <= ManagerHistoryWindow
+            ? managerHistory
+            : managerHistory.Take(ManagerHistoryBootstrapMessages).Concat(managerHistory.TakeLast(ManagerHistoryWindow - ManagerHistoryBootstrapMessages));
+
+        var ledgerContext = new List<ChatMessage>(ledgerBase)
+        {
+            new(ChatRole.User, ledgerPrompt)
+        };
+
+        logger.LogDebug("[MagenticOrchestrator] Evaluating progress (round {Round})...", roundIndex);
+        var (ledgerText, ledgerCost) = await InvokeManagerAsync(ledgerContext, cancellationToken);
+        cumulativeTokens += ledgerCost?.TotalTokens ?? 0;
+        var ledger = ParseLedger(ledgerText);
+
+        int[]? stepsCompleted = null;
+
+        if (ledger is null)
+        {
+            logger.LogWarning("[MagenticOrchestrator] Failed to parse progress ledger on round {Round}; counting as stall.", roundIndex);
+            stallCount++;
+        }
+        else if (ledger.IsRequestSatisfied)
+        {
+            // Merge any newly-completed steps reported by the manager before exiting.
+            if (ledger.StepsCompleted is { Length: > 0 })
+                stepsCompleted = ledger.StepsCompleted;
+
+            return new SelectSpeakerResult(SpeakerOutcome.Satisfied, ledger, null, null, stepsCompleted, stallCount, resetCount, cumulativeTokens);
+        }
+        else
+        {
+            // Track completed steps reported by the manager so the checklist stays current.
+            if (ledger.StepsCompleted is { Length: > 0 })
+                stepsCompleted = ledger.StepsCompleted;
+
+            if (!ledger.IsProgressBeingMade || ledger.IsInLoop)
+                stallCount++;
+            else
+                stallCount = 0;
+        }
+
+        // Stall handling
+
+        if (stallCount >= _magConfig.MaxStallCount)
+        {
+            resetCount++;
+
+            if (resetCount > _magConfig.MaxResetCount)
+            {
+                logger.LogWarning("[MagenticOrchestrator] Max resets ({Max}) reached — terminating.", _magConfig.MaxResetCount);
+                return new SelectSpeakerResult(SpeakerOutcome.TerminalStall, ledger, null, null, stepsCompleted, stallCount, resetCount, cumulativeTokens);
+            }
+
+            logger.LogInformation("[MagenticOrchestrator] Stall detected — replanning (cycle {Cycle}).", resetCount);
+            return new SelectSpeakerResult(SpeakerOutcome.Replan, ledger, null, null, stepsCompleted, stallCount, resetCount, cumulativeTokens);
+        }
+
+        // Resolve the next participant agent.
+        AIAgent? nextAgent = null;
+        if (ledger?.NextSpeaker is { } speakerName && !agentsByName.TryGetValue(speakerName, out nextAgent))
+            logger.LogWarning("[MagenticOrchestrator] Manager named unknown agent '{Speaker}'; defaulting to '{Default}'.",
+                speakerName, agents[0].Name);
+        nextAgent ??= agents[0];
+
+        var instruction = ledger is null
+            ? "The orchestrator could not evaluate progress. Please summarize your work so far and describe your next steps."
+            : ledger.InstructionOrQuestion ?? "Please continue working on the task.";
+
+        return new SelectSpeakerResult(SpeakerOutcome.Proceed, ledger, nextAgent, instruction, stepsCompleted, stallCount, resetCount, cumulativeTokens);
+    }
+
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Replan branch — ledger check + manager invoke.
+    /// Resets round/stall counters, builds the replan prompt, invokes the manager,
+    /// records the exchange in manager history, and yields the replan message.
+    /// </summary>
+    private async IAsyncEnumerable<StreamStep> ReplanAsync(
+        List<ChatMessage> sharedHistory,
+        List<ChatMessage> managerHistory,
+        string? currentPlan,
+        PlanStep[]? currentPlanSteps,
+        HashSet<int> completedStepIds,
+        int roundIndex,
+        int stallCount,
+        int resetCount,
+        int turn,
+        int cumulativeTokens,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        stallCount = 0;
+        roundIndex = 0;
+
+        var replanPrompt = BuildReplanPrompt(sharedHistory, currentPlan, currentPlanSteps, completedStepIds);
+
+        // Apply the same history window as ledger evaluation so a high MaxResetCount
+        // cannot push the replan call past the manager model's context limit.
+        IEnumerable<ChatMessage> replanBase = managerHistory.Count <= ManagerHistoryWindow
+            ? managerHistory
+            : managerHistory.Take(ManagerHistoryBootstrapMessages).Concat(managerHistory.TakeLast(ManagerHistoryWindow - ManagerHistoryBootstrapMessages));
+        var replanContext = new List<ChatMessage>(replanBase) { new(ChatRole.User, replanPrompt) };
+
+        var (newPlan, replanCost) = await InvokeManagerAsync(replanContext, cancellationToken);
+        currentPlan = newPlan;
+        PlanStep.TryParse(currentPlan, out currentPlanSteps);
+        // Record the full exchange in managerHistory for future reference.
+        managerHistory.Add(new ChatMessage(ChatRole.User, replanPrompt));
+        managerHistory.Add(new ChatMessage(ChatRole.Assistant, currentPlan) { AuthorName = ManagerReplanTag });
+        cumulativeTokens += replanCost?.TotalTokens ?? 0;
+
+        UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
+        yield return new StreamStep(
+            MakeMessage(ManagerReplanTag, currentPlan, turn++, replanCost),
+            new StreamState(currentPlan, currentPlanSteps, turn, cumulativeTokens, roundIndex, stallCount));
+
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync("magentic_replan", agent: ManagerReplanTag,
+                payload: new { cycle = resetCount, plan = currentPlan });
+    }
+
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Synthesize tool call messages for ledger replay.
+    /// Assembles participant context, invokes the next agent, appends responses to shared
+    /// history, and yields the agent message with post-turn side-effects (events, change-tracker,
+    /// knowledge-store persistence).
+    /// </summary>
+    private async IAsyncEnumerable<StreamStep> SynthesizeToolCallsAsync(
+        string task,
+        AIAgent nextAgent,
+        string instruction,
+        List<ChatMessage> sharedHistory,
+        Dictionary<string, string> agentInstructions,
+        Dictionary<string, AgentConfig> agentConfigs,
+        string? currentPlan,
+        PlanStep[]? currentPlanSteps,
+        int roundIndex,
+        int stallCount,
+        int resetCount,
+        int turn,
+        int cumulativeTokens,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        AgentStarting?.Invoke(nextAgent.Name ?? "Unknown");
+        agentFactory.OnAgentTurnStarting();
+        changeTracker?.BeginTurn(nextAgent.Name ?? "Unknown", turn);
+
+        // Participant context: pipeline-assembled context (memory + knowledge + filtered history)
+        // with the manager's targeted instruction appended as the final user message.
+        var agentCfg = agentConfigs.GetValueOrDefault(nextAgent.Name ?? "");
+        IEnumerable<ChatMessage> participantContext;
+        if (contextPipeline is not null)
+        {
+            var assembled = await contextPipeline.AssembleAsync(
+                new fuseraft.Core.Models.AgentExecutionRequest
+                {
+                    AgentName     = nextAgent.Name ?? string.Empty,
+                    Task          = task,
+                    SharedHistory = sharedHistory,
+                    AgentConfig   = agentCfg,
+                    SessionId     = _sessionId,
+                }, cancellationToken);
+            // Append the manager's targeted instruction after the assembled context.
+            var msgs = assembled.Messages.ToList();
+            msgs.Add(new ChatMessage(ChatRole.User, instruction));
+            participantContext = msgs;
+            if (eventEmitter is not null)
+                await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, turn);
+        }
+        else
+        {
+            bool hasInstructions = agentInstructions.TryGetValue(nextAgent.Name ?? "", out var sysInstructions);
+            var filteredHistory  = ContextWindowFilter.Apply(sharedHistory, agentCfg?.ContextWindow);
+            participantContext = hasInstructions
+                ? [new ChatMessage(ChatRole.System, sysInstructions), .. filteredHistory, new ChatMessage(ChatRole.User, instruction)]
+                : [.. filteredHistory, new ChatMessage(ChatRole.User, instruction)];
+        }
+
+        logger.LogDebug("[MagenticOrchestrator] Invoking '{Agent}' (round {Round}): {Instruction}",
+            nextAgent.Name, roundIndex, StringHelpers.Truncate(instruction, 120));
+
+        AgentResponse response = governanceKernel?.CircuitBreaker is { } cb
+            ? await cb.ExecuteAsync(() => nextAgent.RunAsync(participantContext, null, null, cancellationToken))
+            : await nextAgent.RunAsync(participantContext, null, null, cancellationToken);
+
+        // Append participant response to shared history.
+        foreach (var msg in response.Messages)
+        {
+            if (msg.Role == ChatRole.Assistant && string.IsNullOrEmpty(msg.AuthorName))
+                msg.AuthorName = nextAgent.Name;
+            sharedHistory.Add(msg);
+        }
+
+        var agentMsg = new AgentMessage
+        {
+            AgentName = nextAgent.Name ?? "Unknown",
+            Content   = response.Text ?? string.Empty,
+            Role      = "assistant",
+            TurnIndex = turn++,
+            Usage     = OrchestratorHelpers.ExtractUsage(response),
+            ToolCalls = OrchestratorHelpers.ExtractToolCalls(response.Messages)
+        };
+
+        cumulativeTokens += agentMsg.Usage?.TotalTokens ?? 0;
+        roundIndex++;
+
+        var warnThreshold = config.WarnTurnTokens;
+        if (warnThreshold > 0 && agentMsg.Usage?.InputTokens is { } inputToks && inputToks > warnThreshold)
+            TokenBudgetWarning?.Invoke(agentMsg.AgentName, inputToks, warnThreshold);
+
+        // Yield and snapshot state before checking the budget so the participant's response
+        // is always visible in the transcript even if it was the turn that pushed over the
+        // limit — the work was done and the tokens were already consumed regardless.
+        UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
+        yield return new StreamStep(
+            agentMsg,
+            new StreamState(currentPlan, currentPlanSteps, turn, cumulativeTokens, roundIndex));
+
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync("turn_end",
+                agent: agentMsg.AgentName,
+                turn:  agentMsg.TurnIndex,
+                payload: new
+                {
+                    input_tokens  = agentMsg.Usage?.InputTokens,
+                    output_tokens = agentMsg.Usage?.OutputTokens,
+                });
+
+        if (changeTracker is not null)
+        {
+            try { await changeTracker.FlushTurnAsync(agentMsg.AgentName, agentMsg.TurnIndex, CancellationToken.None); }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex,
+                    "ChangeTracker flush failed for turn {Turn} ({Agent}).", agentMsg.TurnIndex, agentMsg.AgentName);
+            }
+        }
+
+        // Persist entity-scoped findings from tool calls for future session retrieval.
+        if (repositoryKnowledgeStore is not null && !string.IsNullOrEmpty(_sessionId))
+        {
+            try
+            {
+                var observations = ObservationExtractor.Extract(
+                    (IReadOnlyList<ChatMessage>)response.Messages,
+                    agentMsg.AgentName, agentMsg.TurnIndex);
+                foreach (var obs in observations)
+                {
+                    if (string.IsNullOrWhiteSpace(obs.Entity)) continue;
+                    await repositoryKnowledgeStore.AddAsync(new fuseraft.Core.Models.RepositoryKnowledgeFinding
+                    {
+                        Entity     = obs.Entity!,
+                        Finding    = obs.Finding,
+                        Source     = _sessionId,
+                        Confidence = obs.Confidence,
+                        AgentName  = obs.AgentName,
+                        Kind       = obs.Source is "write_file" or "patch_file" or "delete_file"
+                                     ? "change" : "observation",
+                    }, CancellationToken.None);
+                }
+            }
+            catch { /* best-effort */ }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Final answer generation + state snapshot.
+    /// Merges completed steps from the ledger, synthesizes a final answer (from the ledger
+    /// or via a dedicated manager call), yields the final message, and emits the completion event.
+    /// </summary>
+    private async IAsyncEnumerable<StreamStep> EmitFinalAnswerAsync(
+        List<ChatMessage> managerHistory,
+        List<ChatMessage> sharedHistory,
+        MagenticProgressLedger ledger,
+        string? currentPlan,
+        PlanStep[]? currentPlanSteps,
+        int roundIndex,
+        int stallCount,
+        int resetCount,
+        int turn,
+        int cumulativeTokens,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        // Task complete — synthesize and yield the final answer.
+        string finalContent;
+        TokenUsage? finalCost = null;
+
+        // Guard against models that output the string "null" instead of JSON null —
+        // the prompt instructs JSON null but some models comply only partially.
+        if (!string.IsNullOrWhiteSpace(ledger.FinalAnswer) &&
+            !string.Equals(ledger.FinalAnswer, "null", StringComparison.OrdinalIgnoreCase))
+        {
+            finalContent = ledger.FinalAnswer;
+        }
+        else
+        {
+            (finalContent, finalCost) = await SynthesizeFinalAnswerAsync(managerHistory, sharedHistory, cancellationToken);
+            cumulativeTokens += finalCost?.TotalTokens ?? 0;
+        }
+
+        UpdateState(currentPlan, currentPlanSteps, roundIndex, stallCount, resetCount, awaitingReview: false);
+        yield return new StreamStep(
+            MakeMessage(ManagerFinalTag, finalContent, turn++, finalCost),
+            new StreamState(currentPlan, currentPlanSteps, turn, cumulativeTokens));
+
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync("magentic_complete", agent: ManagerFinalTag,
+                payload: new { rounds = roundIndex });
     }
 
     private static Task EmitContextAssemblyAsync(

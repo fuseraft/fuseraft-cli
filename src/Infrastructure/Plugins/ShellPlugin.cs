@@ -1,6 +1,8 @@
 using System.ComponentModel;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using fuseraft.Core;
+using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 
 namespace fuseraft.Infrastructure.Plugins;
@@ -33,6 +35,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     private readonly string? _sandboxRoot;
     private readonly Func<string, Task<bool>>? _approveCommand;
     private readonly ShellPolicy? _shellPolicy;
+    private readonly IEventSink? _eventSink;
     private readonly object _tempDirLock = new();
     private string? _sessionTempDir;
 
@@ -87,11 +90,12 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         }
     }
 
-    public ShellPlugin(string? sandboxRoot = null, Func<string, Task<bool>>? approveCommand = null, ShellPolicy? shellPolicy = null)
+    public ShellPlugin(string? sandboxRoot = null, Func<string, Task<bool>>? approveCommand = null, ShellPolicy? shellPolicy = null, IEventSink? eventSink = null)
     {
         _sandboxRoot    = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _approveCommand = approveCommand;
         _shellPolicy    = shellPolicy;
+        _eventSink      = eventSink;
     }
 
     public void Dispose()
@@ -145,7 +149,114 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
 
         var output = result.ToPluginOutput();
         _runThisTurn[cacheKey] = output;
+
+        if (_eventSink is not null && IsBuildCommand(command))
+        {
+            var rawOutput  = result.Stdout + "\n" + result.Stderr;
+            var commitHash = result.Succeeded ? await TryCaptureCommitHashAsync(resolvedDir) : null;
+            _eventSink.Emit(new BuildResultEvent(
+                Succeeded:  result.Succeeded,
+                ExitCode:   result.ExitCode,
+                Command:    command,
+                CommitHash: commitHash,
+                Errors:     ParseCompilerErrors(rawOutput))
+            { Timestamp = DateTimeOffset.UtcNow });
+        }
+
         return output;
+    }
+
+    [Description("Run a shell command; returns 'OK' on success or full output+exit code on failure. Use instead of shell_run when successful output is not needed.")]
+    public async Task<string> RunQuietAsync(
+        [Description("Shell command to execute.")] string command,
+        [Description("Working directory.")] string? workingDirectory = null,
+        [Description("Timeout in seconds.")] int timeoutSeconds = 60)
+    {
+        command = System.Net.WebUtility.HtmlDecode(command);
+
+        var sudoDenial = CheckForSudo(command);
+        if (sudoDenial is not null) return sudoDenial;
+
+        var policyDenial = CheckShellPolicy(command);
+        if (policyDenial is not null) return policyDenial;
+
+        if (_approveCommand is not null && !await _approveCommand(command))
+            return PluginResult.Denied("Shell command blocked by user.");
+
+        var denial = ValidateWorkingDirectory(workingDirectory, out var resolvedDir);
+        if (denial is not null) return denial;
+
+        var result = await ProcessHelper.RunAsync(
+            Shell, [ShellFlag, command],
+            resolvedDir, timeoutSeconds);
+
+        return result.Succeeded ? "OK" : result.ToPluginOutput();
+    }
+
+    private static async Task<string?> TryCaptureCommitHashAsync(string? workingDir)
+    {
+        try
+        {
+            var r = await ProcessHelper.RunAsync("git", ["rev-parse", "HEAD"], workingDir, 5);
+            return r.Succeeded ? r.Stdout.Trim() : null;
+        }
+        catch { return null; }
+    }
+
+    private static readonly string[] BuildCommandPrefixes =
+    [
+        "dotnet build", "dotnet publish", "dotnet test",
+        "cargo build",  "cargo test",     "cargo check",
+        "go build",     "go test",        "go vet",
+        "npm run build", "npm run test",  "npm test",
+        "yarn build",   "yarn test",
+        "python -m pytest", "pytest",
+        "gradle build", "gradle test",
+        "mvn package",  "mvn test",       "mvn compile",
+        "cmake --build", "tsc",           "ng build",
+    ];
+
+    private static bool IsBuildCommand(string command)
+    {
+        var trimmed = command.Trim();
+        foreach (var prefix in BuildCommandPrefixes)
+        {
+            if (trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        // bare "make" with or without args
+        if (trimmed.Equals("make", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("make ", StringComparison.OrdinalIgnoreCase))
+            return true;
+        return false;
+    }
+
+    private static readonly Regex GoErrorLine =
+        new(@"^\./[^:]+:\d+:\d+: (?!warning:)", RegexOptions.Compiled);
+
+    private static List<string> ParseCompilerErrors(string output)
+    {
+        const int MaxErrors = 20;
+        var errors = new List<string>();
+        foreach (var line in output.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (string.IsNullOrEmpty(trimmed)) continue;
+
+            bool isDotNet  = trimmed.Contains("): error CS", StringComparison.OrdinalIgnoreCase)
+                          || trimmed.Contains("): error FS", StringComparison.OrdinalIgnoreCase);
+            bool isRust    = trimmed.StartsWith("error[", StringComparison.Ordinal);
+            bool isGo      = GoErrorLine.IsMatch(trimmed);
+            bool isGeneric = trimmed.StartsWith("error:", StringComparison.OrdinalIgnoreCase)
+                          || trimmed.Contains(": error:", StringComparison.OrdinalIgnoreCase);
+
+            if (isDotNet || isRust || isGo || isGeneric)
+            {
+                errors.Add(trimmed);
+                if (errors.Count >= MaxErrors) break;
+            }
+        }
+        return errors;
     }
 
     [Description("Write a script to a temp file and execute it.")]

@@ -10,6 +10,7 @@ using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Plugins;
 using fuseraft.Core.Models;
 using fuseraft.Orchestration;
+using fuseraft.Orchestration.Strategies;
 using MagenticOrchestrator = fuseraft.Orchestration.MagenticOrchestrator;
 
 namespace fuseraft.Cli;
@@ -78,6 +79,14 @@ public sealed class SessionRunner(
     // may be large enough to start the next turn already over the per-turn limit.
     private bool _justCompacted;
 
+    // Carrier for the outcome of each exception handler. Avoids out-parameters on async methods.
+    private readonly record struct HandlerOutcome(
+        bool ShouldBreak,
+        bool ShouldContinue,
+        bool CompactionNeeded,
+        bool Succeeded,
+        string? ErrorMessage);
+
     public async Task<SessionResult> RunAsync(
         string task,
         SessionCheckpoint checkpoint,
@@ -105,10 +114,15 @@ public sealed class SessionRunner(
             // agent from spending expensive tokens on a turn that would immediately trigger
             // post-turn compaction anyway. Skipped for the first turn after a compaction
             // (_justCompacted) so we don't thrash when the retained tail itself is large.
+            //
+            // Estimate uses chars / 3 rather than / 4: code-heavy content (tool results,
+            // file reads) averages ~3 chars per token, and the estimate omits tool-schema
+            // overhead (~10–20 k tokens for agents with many tools). The conservative
+            // divisor compensates for both without needing per-agent schema introspection.
             if (!_justCompacted
                 && compactor is not null
                 && contextBudget?.MaxSingleTurnInputTokens > 0
-                && checkpoint.Messages.Sum(m => (m.Content?.Length ?? 0) / 4) > contextBudget.MaxSingleTurnInputTokens)
+                && checkpoint.Messages.Sum(m => (m.Content?.Length ?? 0) / 3) > contextBudget.MaxSingleTurnInputTokens)
             {
                 AnsiConsole.MarkupLine(
                     $"[yellow]  ⚡ Pre-turn context estimate exceeds MaxSingleTurnInputTokens " +
@@ -128,70 +142,26 @@ public sealed class SessionRunner(
             }
             catch (ValidatorStuckException stuck)
             {
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("hitl_escalation",
-                        agent: stuck.AgentName,
-                        payload: new { validator = stuck.ValidatorName, consecutive_failures = stuck.ConsecutiveFailures, last_error = stuck.LastValidatorError });
-
-                AnsiConsole.MarkupLine(
-                    $"\n[yellow]⚠ HITL intervention required.[/]\n" +
-                    $"  Agent:    [bold]{Markup.Escape(stuck.AgentName)}[/]\n" +
-                    $"  Blocked:  [bold]{Markup.Escape(stuck.ValidatorName)}[/] " +
-                    $"({stuck.ConsecutiveFailures} consecutive failures)\n" +
-                    $"  Last error:\n[dim]{Markup.Escape(stuck.LastValidatorError)}[/]\n");
-
-                var redirect = await approvalService.PromptRedirectAsync(stuck.AgentName);
-
-                if (redirect == null)
-                {
-                    succeeded    = false;
-                    errorMessage = $"Aborted: agent '{stuck.AgentName}' stuck on validator '{stuck.ValidatorName}'.";
-                    AnsiConsole.MarkupLine(
-                        $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] paused — resume with:[/] " +
-                        $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
-                    break;
-                }
-
-                await InjectAndSaveHumanMessageAsync(redirect, messages, checkpoint, cancellationToken);
-                continue;
+                var outcome = await HandleValidatorStuckAsync(stuck, checkpoint, messages, cancellationToken);
+                succeeded    = outcome.Succeeded;
+                errorMessage = outcome.ErrorMessage;
+                if (outcome.ShouldBreak)    break;
+                if (outcome.ShouldContinue) continue;
             }
             catch (CircuitBreakerOpenException cb)
             {
-                const int MaxAutoRetrySeconds = 300;
-                if (!cancellationToken.IsCancellationRequested && cb.RetryAfter.TotalSeconds <= MaxAutoRetrySeconds)
-                {
-                    if (eventEmitter is not null)
-                        await eventEmitter.EmitAsync("circuit_breaker_open",
-                            payload: new { retry_after_seconds = cb.RetryAfter.TotalSeconds });
-                    var wait = cb.RetryAfter + TimeSpan.FromSeconds(2);
-                    AnsiConsole.MarkupLine(
-                        $"\n[yellow]⚠ Circuit breaker open[/] — waiting {wait.TotalSeconds:F0}s for it to reset...[/]");
-                    await Task.Delay(wait, cancellationToken);
-                    AnsiConsole.MarkupLine("[dim]Retrying...[/]");
-                    continue;
-                }
-
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("session_error",
-                        payload: new { reason = "circuit_breaker_open", retry_after_seconds = cb.RetryAfter.TotalSeconds });
-                succeeded    = false;
-                errorMessage = $"Circuit breaker open — LLM calls failing. Retry after {cb.RetryAfter.TotalSeconds:F0}s.";
-                AnsiConsole.MarkupLine(
-                    $"\n[red]✗ Circuit breaker open:[/] Too many consecutive LLM failures. " +
-                    $"[dim]Retry after {cb.RetryAfter.TotalSeconds:F0}s.[/]\n");
-                break;
+                var outcome = await HandleCircuitBreakerOpenAsync(cb, cancellationToken);
+                succeeded    = outcome.Succeeded;
+                errorMessage = outcome.ErrorMessage;
+                if (outcome.ShouldBreak)    break;
+                if (outcome.ShouldContinue) continue;
             }
             catch (BudgetExceededException budget)
             {
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("session_error",
-                        payload: new { reason = "token_budget_exceeded", actual_tokens = budget.ActualTokens, limit_tokens = budget.LimitTokens });
-                succeeded    = false;
-                errorMessage = budget.Message;
-                AnsiConsole.MarkupLine(
-                    $"\n[red]✗ Error:[/] Session used [bold]{budget.ActualTokens:N0}[/] tokens, " +
-                    $"exceeding the configured budget of [bold]{budget.LimitTokens:N0}[/].\n");
-                break;
+                var outcome = await HandleBudgetExceededAsync(budget);
+                succeeded    = outcome.Succeeded;
+                errorMessage = outcome.ErrorMessage;
+                if (outcome.ShouldBreak) break;
             }
             catch (TimeoutException tex)
             {
@@ -228,79 +198,40 @@ public sealed class SessionRunner(
             }
             catch (Exception ex) when (Is429(ex))
             {
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("session_error",
-                        payload: new { reason = "rate_limited_429", message = ex.Message });
-                succeeded    = false;
-                errorMessage = ex.Message;
-                AnsiConsole.MarkupLine(
-                    $"\n[red]✗ API rate limit / quota exceeded (HTTP 429)[/]\n" +
-                    $"  [dim]{Markup.Escape(TrimTo(ex.Message, 300))}[/]\n" +
-                    $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] saved — resume once credits are restored:[/] " +
-                    $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
-                break;
+                var outcome = await HandleRateLimitAsync(ex, checkpoint);
+                succeeded    = outcome.Succeeded;
+                errorMessage = outcome.ErrorMessage;
+                if (outcome.ShouldBreak) break;
             }
             catch (Exception ex) when (ProviderErrorClassifier.Classify(ex) == FailoverReason.ContextExceeded && compactor is not null)
             {
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("context_exceeded_recovery",
-                        payload: new { message = TrimTo(ex.Message, 200) });
-                AnsiConsole.MarkupLine(
-                    $"\n[yellow]⚠ Context window exceeded — fallover chain exhausted.[/] Compacting history and retrying...\n" +
-                    $"  [dim]{Markup.Escape(TrimTo(ex.Message, 200))}[/]\n");
-                _pendingCompactionReason = CompactionReason.ContextExceeded;
-                compactionNeeded = true;
+                var outcome = await HandleContextExceededAsync(ex, checkpoint, withCompactor: true);
+                compactionNeeded = outcome.CompactionNeeded;
+                succeeded    = outcome.Succeeded;
+                errorMessage = outcome.ErrorMessage;
+                if (outcome.ShouldBreak) break;
             }
             catch (Exception ex) when (ProviderErrorClassifier.Classify(ex) == FailoverReason.ContextExceeded)
             {
-                // Compactor is not configured — nothing we can do but surface a clear message.
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("session_error",
-                        payload: new { reason = "context_exceeded_no_compactor", message = TrimTo(ex.Message, 200) });
-                succeeded    = false;
-                errorMessage = "Context window exceeded with no compaction configured.";
-                AnsiConsole.MarkupLine(
-                    $"\n[red]✗ Context window exceeded[/] — no compactor configured.\n" +
-                    $"  Add [dim]compaction: window[/] (or [dim]llm[/]) to your config to enable auto-compaction.\n" +
-                    $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] saved — resume after adding compaction config:[/] " +
-                    $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
-                break;
+                var outcome = await HandleContextExceededAsync(ex, checkpoint, withCompactor: false);
+                succeeded    = outcome.Succeeded;
+                errorMessage = outcome.ErrorMessage;
+                if (outcome.ShouldBreak) break;
             }
             catch (Exception ex) when (Is400(ex) && ProviderErrorClassifier.Classify(ex) == FailoverReason.None)
             {
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("hitl_escalation",
-                        payload: new { reason = "provider_400", message = TrimTo(ex.Message, 200) });
-                AnsiConsole.MarkupLine(
-                    $"\n[yellow]⚠ Provider returned HTTP 400 (bad request).[/]\n" +
-                    $"  [dim]{Markup.Escape(TrimTo(ex.Message, 300))}[/]\n");
-                var redirect = await approvalService.PromptRedirectAsync("(provider-400)");
-                if (redirect == null)
-                {
-                    succeeded    = false;
-                    errorMessage = $"Aborted: provider 400 — {TrimTo(ex.Message, 200)}";
-                    AnsiConsole.MarkupLine(
-                        $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] paused — resume with:[/] " +
-                        $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
-                    break;
-                }
-                await InjectAndSaveHumanMessageAsync(redirect, messages, checkpoint, cancellationToken);
-                continue;
+                var outcome = await HandleHttpBadRequestAsync(ex, checkpoint, messages, cancellationToken);
+                succeeded    = outcome.Succeeded;
+                errorMessage = outcome.ErrorMessage;
+                if (outcome.ShouldBreak)    break;
+                if (outcome.ShouldContinue) continue;
             }
             catch (Exception ex)
             {
-                succeeded    = false;
-                errorMessage = ex.Message;
-                string? dumpPath = null;
-                try { dumpPath = CrashDumper.Write(ex, []); } catch { }
-                AnsiConsole.MarkupLine(
-                    $"\n[red]✗ Unexpected error:[/] {Markup.Escape(TrimTo(ex.Message, 300))}");
-                if (dumpPath is not null)
-                    AnsiConsole.MarkupLine($"  [dim]Crash dump: {Markup.Escape(dumpPath)}[/]");
-                AnsiConsole.MarkupLine(
-                    $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] saved — resume with:[/] " +
-                    $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
-                break;
+                var outcome = await HandleSessionFaultAsync(ex, checkpoint);
+                succeeded    = outcome.Succeeded;
+                errorMessage = outcome.ErrorMessage;
+                if (outcome.ShouldBreak) break;
             }
 
             if (cancellationToken.IsCancellationRequested) break;
@@ -319,53 +250,16 @@ public sealed class SessionRunner(
 
             if (compactionNeeded)
             {
-                try
-                {
-                    checkpoint = await ApplyCompactionAsync(task, checkpoint, compactor!, cancellationToken);
-
-                    PostCompactionReset(checkpoint);
-                    if (contextWindowRecorder is not null)
-                        await contextWindowRecorder.RecordCompactionAsync(_totalAssistantTurnCount);
-                }
-                catch (OperationCanceledException)
+                var (updatedCheckpoint, shouldBreak, shouldContinue, compactionError) =
+                    await TryTriggerCompactionAsync(task, checkpoint, cancellationToken);
+                checkpoint = updatedCheckpoint;
+                if (shouldBreak)
                 {
                     succeeded    = false;
-                    errorMessage = "Cancelled.";
-                    AnsiConsole.MarkupLine(
-                        $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] paused — resume with:[/] " +
-                        $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
+                    errorMessage = compactionError;
                     break;
                 }
-                catch (Exception ex)
-                {
-                    // Compaction itself failed. Treat as a session error rather than letting
-                    // the exception escape RunAsync to the caller uncaught.
-                    succeeded    = false;
-                    errorMessage = $"Compaction failed: {ex.Message}";
-                    string? dumpPath = null;
-                    try { dumpPath = CrashDumper.Write(ex, []); } catch { }
-                    AnsiConsole.MarkupLine(
-                        $"\n[red]✗ Compaction error:[/] {Markup.Escape(TrimTo(ex.Message, 300))}");
-                    if (dumpPath is not null)
-                        AnsiConsole.MarkupLine($"  [dim]Crash dump: {Markup.Escape(dumpPath)}[/]");
-                    AnsiConsole.MarkupLine(
-                        $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] saved — resume with:[/] " +
-                        $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
-                    break;
-                }
-
-                if (checkpoint.ResumeExecutorId is not null)
-                    orchestrator.SetResumeExecutorId(checkpoint.ResumeExecutorId);
-                if (checkpoint.CurrentStateName is not null)
-                    orchestrator.SetResumeStateName(checkpoint.CurrentStateName);
-
-                // Restore Magentic loop-counter state so the next StreamAsync call resumes at
-                // the correct round/stall/reset counts rather than restarting from zero.
-                if (orchestrator is MagenticOrchestrator magentic && checkpoint.MagenticState is { } magState)
-                    magentic.SetResumeState(magState);
-
-                AnsiConsole.MarkupLine("[dim]History compacted — continuing session.[/]");
-                continue;
+                if (shouldContinue) continue;
             }
 
             // Non-null, non-quit injection: the HITL user typed a redirect message.
@@ -381,11 +275,7 @@ public sealed class SessionRunner(
 
         sessionClock.Stop();
 
-        if (sessionMetrics is not null)
-            try { await sessionMetrics.PrintSummaryAsync(eventEmitter, checkpoint.SessionId); } catch { }
-
-        if (postmortemWriter is not null)
-            try { await postmortemWriter.WriteManifestAsync(succeeded, errorMessage, task, sessionClock.Elapsed); } catch { }
+        await FinalizeSessionAsync(succeeded, errorMessage, task, sessionClock.Elapsed, checkpoint);
 
         return new SessionResult(succeeded, errorMessage, messages, sessionClock.Elapsed);
     }
@@ -399,6 +289,242 @@ public sealed class SessionRunner(
             return $"fuseraft run --config {rel} --resume {sessionId}";
         }
         return $"fuseraft run --resume {sessionId}";
+    }
+
+    // ── Exception handlers ────────────────────────────────────────────────────
+
+    private async Task<HandlerOutcome> HandleValidatorStuckAsync(
+        ValidatorStuckException stuck,
+        SessionCheckpoint checkpoint,
+        List<AgentMessage> messages,
+        CancellationToken cancellationToken)
+    {
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync("hitl_escalation",
+                agent: stuck.AgentName,
+                payload: new { validator = stuck.ValidatorName, consecutive_failures = stuck.ConsecutiveFailures, last_error = stuck.LastValidatorError });
+
+        AnsiConsole.MarkupLine(
+            $"\n[yellow]⚠ HITL intervention required.[/]\n" +
+            $"  Agent:    [bold]{Markup.Escape(stuck.AgentName)}[/]\n" +
+            $"  Blocked:  [bold]{Markup.Escape(stuck.ValidatorName)}[/] " +
+            $"({stuck.ConsecutiveFailures} consecutive failures)\n" +
+            $"  Last error:\n[dim]{Markup.Escape(stuck.LastValidatorError)}[/]\n");
+
+        var redirect = await approvalService.PromptRedirectAsync(stuck.AgentName);
+
+        if (redirect == null)
+        {
+            AnsiConsole.MarkupLine(
+                $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] paused — resume with:[/] " +
+                $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
+            return new HandlerOutcome(ShouldBreak: true, ShouldContinue: false, CompactionNeeded: false,
+                Succeeded: false, ErrorMessage: $"Aborted: agent '{stuck.AgentName}' stuck on validator '{stuck.ValidatorName}'.");
+        }
+
+        await InjectAndSaveHumanMessageAsync(redirect, messages, checkpoint, cancellationToken);
+        return new HandlerOutcome(ShouldBreak: false, ShouldContinue: true, CompactionNeeded: false,
+            Succeeded: true, ErrorMessage: null);
+    }
+
+    private async Task<HandlerOutcome> HandleCircuitBreakerOpenAsync(
+        CircuitBreakerOpenException cb,
+        CancellationToken cancellationToken)
+    {
+        const int MaxAutoRetrySeconds = 300;
+        if (!cancellationToken.IsCancellationRequested && cb.RetryAfter.TotalSeconds <= MaxAutoRetrySeconds)
+        {
+            if (eventEmitter is not null)
+                await eventEmitter.EmitAsync("circuit_breaker_open",
+                    payload: new { retry_after_seconds = cb.RetryAfter.TotalSeconds });
+            var wait = cb.RetryAfter + TimeSpan.FromSeconds(2);
+            AnsiConsole.MarkupLine(
+                $"\n[yellow]⚠ Circuit breaker open[/] — waiting {wait.TotalSeconds:F0}s for it to reset...[/]");
+            await Task.Delay(wait, cancellationToken);
+            AnsiConsole.MarkupLine("[dim]Retrying...[/]");
+            return new HandlerOutcome(ShouldBreak: false, ShouldContinue: true, CompactionNeeded: false,
+                Succeeded: true, ErrorMessage: null);
+        }
+
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync("session_error",
+                payload: new { reason = "circuit_breaker_open", retry_after_seconds = cb.RetryAfter.TotalSeconds });
+        AnsiConsole.MarkupLine(
+            $"\n[red]✗ Circuit breaker open:[/] Too many consecutive LLM failures. " +
+            $"[dim]Retry after {cb.RetryAfter.TotalSeconds:F0}s.[/]\n");
+        return new HandlerOutcome(ShouldBreak: true, ShouldContinue: false, CompactionNeeded: false,
+            Succeeded: false, ErrorMessage: $"Circuit breaker open — LLM calls failing. Retry after {cb.RetryAfter.TotalSeconds:F0}s.");
+    }
+
+    private async Task<HandlerOutcome> HandleBudgetExceededAsync(BudgetExceededException budget)
+    {
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync("session_error",
+                payload: new { reason = "token_budget_exceeded", actual_tokens = budget.ActualTokens, limit_tokens = budget.LimitTokens });
+        AnsiConsole.MarkupLine(
+            $"\n[red]✗ Error:[/] Session used [bold]{budget.ActualTokens:N0}[/] tokens, " +
+            $"exceeding the configured budget of [bold]{budget.LimitTokens:N0}[/].\n");
+        return new HandlerOutcome(ShouldBreak: true, ShouldContinue: false, CompactionNeeded: false,
+            Succeeded: false, ErrorMessage: budget.Message);
+    }
+
+    private async Task<HandlerOutcome> HandleRateLimitAsync(Exception ex, SessionCheckpoint checkpoint)
+    {
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync("session_error",
+                payload: new { reason = "rate_limited_429", message = ex.Message });
+        AnsiConsole.MarkupLine(
+            $"\n[red]✗ API rate limit / quota exceeded (HTTP 429)[/]\n" +
+            $"  [dim]{Markup.Escape(TrimTo(ex.Message, 300))}[/]\n" +
+            $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] saved — resume once credits are restored:[/] " +
+            $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
+        return new HandlerOutcome(ShouldBreak: true, ShouldContinue: false, CompactionNeeded: false,
+            Succeeded: false, ErrorMessage: ex.Message);
+    }
+
+    private async Task<HandlerOutcome> HandleContextExceededAsync(
+        Exception ex,
+        SessionCheckpoint checkpoint,
+        bool withCompactor)
+    {
+        if (withCompactor)
+        {
+            if (eventEmitter is not null)
+                await eventEmitter.EmitAsync("context_exceeded_recovery",
+                    payload: new { message = TrimTo(ex.Message, 200) });
+            AnsiConsole.MarkupLine(
+                $"\n[yellow]⚠ Context window exceeded — fallover chain exhausted.[/] Compacting history and retrying...\n" +
+                $"  [dim]{Markup.Escape(TrimTo(ex.Message, 200))}[/]\n");
+            _pendingCompactionReason = CompactionReason.ContextExceeded;
+            return new HandlerOutcome(ShouldBreak: false, ShouldContinue: false, CompactionNeeded: true,
+                Succeeded: true, ErrorMessage: null);
+        }
+
+        // Compactor is not configured — nothing we can do but surface a clear message.
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync("session_error",
+                payload: new { reason = "context_exceeded_no_compactor", message = TrimTo(ex.Message, 200) });
+        AnsiConsole.MarkupLine(
+            $"\n[red]✗ Context window exceeded[/] — no compactor configured.\n" +
+            $"  Add [dim]compaction: window[/] (or [dim]llm[/]) to your config to enable auto-compaction.\n" +
+            $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] saved — resume after adding compaction config:[/] " +
+            $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
+        return new HandlerOutcome(ShouldBreak: true, ShouldContinue: false, CompactionNeeded: false,
+            Succeeded: false, ErrorMessage: "Context window exceeded with no compaction configured.");
+    }
+
+    private async Task<HandlerOutcome> HandleHttpBadRequestAsync(
+        Exception ex,
+        SessionCheckpoint checkpoint,
+        List<AgentMessage> messages,
+        CancellationToken cancellationToken)
+    {
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync("hitl_escalation",
+                payload: new { reason = "provider_400", message = TrimTo(ex.Message, 200) });
+        AnsiConsole.MarkupLine(
+            $"\n[yellow]⚠ Provider returned HTTP 400 (bad request).[/]\n" +
+            $"  [dim]{Markup.Escape(TrimTo(ex.Message, 300))}[/]\n");
+        var redirect = await approvalService.PromptRedirectAsync("(provider-400)");
+        if (redirect == null)
+        {
+            AnsiConsole.MarkupLine(
+                $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] paused — resume with:[/] " +
+                $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
+            return new HandlerOutcome(ShouldBreak: true, ShouldContinue: false, CompactionNeeded: false,
+                Succeeded: false, ErrorMessage: $"Aborted: provider 400 — {TrimTo(ex.Message, 200)}");
+        }
+        await InjectAndSaveHumanMessageAsync(redirect, messages, checkpoint, cancellationToken);
+        return new HandlerOutcome(ShouldBreak: false, ShouldContinue: true, CompactionNeeded: false,
+            Succeeded: true, ErrorMessage: null);
+    }
+
+    private Task<HandlerOutcome> HandleSessionFaultAsync(Exception ex, SessionCheckpoint checkpoint)
+    {
+        string? dumpPath = null;
+        try { dumpPath = CrashDumper.Write(ex, []); } catch { }
+        AnsiConsole.MarkupLine(
+            $"\n[red]✗ Unexpected error:[/] {Markup.Escape(TrimTo(ex.Message, 300))}");
+        if (dumpPath is not null)
+            AnsiConsole.MarkupLine($"  [dim]Crash dump: {Markup.Escape(dumpPath)}[/]");
+        AnsiConsole.MarkupLine(
+            $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] saved — resume with:[/] " +
+            $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
+        return Task.FromResult(new HandlerOutcome(ShouldBreak: true, ShouldContinue: false, CompactionNeeded: false,
+            Succeeded: false, ErrorMessage: ex.Message));
+    }
+
+    // ── Compaction trigger ────────────────────────────────────────────────────
+
+    private async Task<(SessionCheckpoint Checkpoint, bool ShouldBreak, bool ShouldContinue, string? ErrorMessage)> TryTriggerCompactionAsync(
+        string task,
+        SessionCheckpoint checkpoint,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            checkpoint = await ApplyCompactionAsync(task, checkpoint, compactor!, cancellationToken);
+
+            PostCompactionReset(checkpoint);
+            if (contextWindowRecorder is not null)
+                await contextWindowRecorder.RecordCompactionAsync(_totalAssistantTurnCount);
+        }
+        catch (OperationCanceledException)
+        {
+            AnsiConsole.MarkupLine(
+                $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] paused — resume with:[/] " +
+                $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
+            return (checkpoint, ShouldBreak: true, ShouldContinue: false, ErrorMessage: "Cancelled.");
+        }
+        catch (Exception ex)
+        {
+            // Compaction itself failed. Treat as a session error rather than letting
+            // the exception escape RunAsync to the caller uncaught.
+            string? dumpPath = null;
+            try { dumpPath = CrashDumper.Write(ex, []); } catch { }
+            AnsiConsole.MarkupLine(
+                $"\n[red]✗ Compaction error:[/] {Markup.Escape(TrimTo(ex.Message, 300))}");
+            if (dumpPath is not null)
+                AnsiConsole.MarkupLine($"  [dim]Crash dump: {Markup.Escape(dumpPath)}[/]");
+            AnsiConsole.MarkupLine(
+                $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] saved — resume with:[/] " +
+                $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
+            return (checkpoint, ShouldBreak: true, ShouldContinue: false, ErrorMessage: $"Compaction failed: {ex.Message}");
+        }
+
+        if (checkpoint.ResumeExecutorId is not null)
+            orchestrator.SetResumeExecutorId(checkpoint.ResumeExecutorId);
+        if (checkpoint.CurrentStateName is not null)
+            orchestrator.SetResumeStateName(checkpoint.CurrentStateName);
+
+        // Restore failure-tracking counters for the state machine so MaxConsecutiveContractFailures
+        // and the REPLAN BLOCKED guard survive across compaction cycles.
+        if (orchestrator is AgentOrchestrator ao && checkpoint.StateMachineState is { } smState)
+            ao.SetResumeSnapshot(smState);
+
+        // Restore Magentic loop-counter state so the next StreamAsync call resumes at
+        // the correct round/stall/reset counts rather than restarting from zero.
+        if (orchestrator is MagenticOrchestrator magentic && checkpoint.MagenticState is { } magState)
+            magentic.SetResumeState(magState);
+
+        AnsiConsole.MarkupLine("[dim]History compacted — continuing session.[/]");
+        return (checkpoint, ShouldBreak: false, ShouldContinue: true, ErrorMessage: null);
+    }
+
+    // ── Session finalization ──────────────────────────────────────────────────
+
+    private async Task FinalizeSessionAsync(
+        bool succeeded,
+        string? errorMessage,
+        string task,
+        TimeSpan elapsed,
+        SessionCheckpoint checkpoint)
+    {
+        if (sessionMetrics is not null)
+            try { await sessionMetrics.PrintSummaryAsync(eventEmitter, checkpoint.SessionId); } catch { }
+
+        if (postmortemWriter is not null)
+            try { await postmortemWriter.WriteManifestAsync(succeeded, errorMessage, task, elapsed); } catch { }
     }
 
     // Iteration helpers
@@ -417,7 +543,7 @@ public sealed class SessionRunner(
 
         Action<string, string, string?> onToolCalling = (_, tool, args) =>
         {
-            var line = args is not null ? $"  \u276f {tool}({args})" : $"  \u276f {tool}()";
+            var line = args is not null ? $"  ❯ {tool}({args})" : $"  ❯ {tool}()";
             AnsiConsole.MarkupLine($"[dim]{Markup.Escape(line)}[/]");
         };
 
@@ -626,6 +752,8 @@ public sealed class SessionRunner(
 
         // Capture the state machine's current state so post-compaction StreamAsync calls
         // restore to e.g. "Testing" rather than resetting to the initial "Planning" state.
+        // Also capture failure-tracking counters so MaxConsecutiveContractFailures and the
+        // REPLAN BLOCKED guard survive across compaction cycles.
         if (snapshotter is not null)
         {
             try
@@ -636,6 +764,12 @@ public sealed class SessionRunner(
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex) { Debug.WriteLine($"[SessionRunner] state snapshot failed: {ex.Message}"); }
+        }
+
+        if (snapshotter is StateMachineSelectionStrategy smStrategy)
+        {
+            try { checkpoint.StateMachineState = smStrategy.TakeCheckpointState(); }
+            catch (Exception ex) { Debug.WriteLine($"[SessionRunner] failure-state capture failed: {ex.Message}"); }
         }
 
         // Diagnostic (Phase 5): log both the last-message agent and the state machine's
@@ -653,6 +787,11 @@ public sealed class SessionRunner(
 
         int turnsBefore = checkpoint.Messages.Count;
 
+        // Snapshot original messages before any trimming — needed for signal pinning.
+        var originalMessages = compactor.Config.PinLastRoutingSignal
+            ? (IReadOnlyList<AgentMessage>)checkpoint.Messages.ToList()
+            : null;
+
         if (compactor.IsWindowMode)
         {
             var trimmed = compactor.TrimToWindow(checkpoint.Messages);
@@ -660,6 +799,10 @@ public sealed class SessionRunner(
 
             checkpoint.Messages.Clear();
             checkpoint.Messages.AddRange(trimmed);
+
+            if (originalMessages is not null)
+                TryPinLastRoutingSignal(checkpoint.Messages, originalMessages);
+
             checkpoint.LastUpdatedAt = DateTime.UtcNow;
 
             sessionMetrics?.RecordCompaction(_pendingCompactionReason);
@@ -692,6 +835,10 @@ public sealed class SessionRunner(
         checkpoint.Messages.Clear();
         checkpoint.Messages.Add(summary);
         checkpoint.Messages.AddRange(retained);
+
+        if (originalMessages is not null)
+            TryPinLastRoutingSignal(checkpoint.Messages, originalMessages);
+
         checkpoint.LastUpdatedAt = DateTime.UtcNow;
 
         sessionMetrics?.RecordCompaction(_pendingCompactionReason);
@@ -707,6 +854,64 @@ public sealed class SessionRunner(
 
         await sessionStore.SaveAsync(checkpoint, cancellationToken);
         return checkpoint;
+    }
+
+    // Re-injects the last handoff signal at the head of the retained window if it was
+    // dropped by compaction. Prevents keyword_not_found re-invocations on the first turn
+    // after compaction when the signal fell outside the retained tail.
+    // The synthetic AgentMessage uses Role="user" so it is replayed as a ChatMessage that
+    // IsSignalOnOwnLine can match — it does NOT start with "[fuseraft:" so TransitionAlreadyFired
+    // treats it as unprocessed.
+    private static void TryPinLastRoutingSignal(
+        List<AgentMessage> retained,
+        IReadOnlyList<AgentMessage> original)
+    {
+        // Find the last handoff in the pre-compaction history.
+        AgentMessage? lastHandoff = null;
+        for (int i = original.Count - 1; i >= 0; i--)
+        {
+            var m = original[i];
+            if (m.Role == "assistant" &&
+                m.ToolCalls?.Any(tc => string.Equals(tc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase)) == true)
+            {
+                lastHandoff = m;
+                break;
+            }
+        }
+        if (lastHandoff is null) return;
+
+        // Extract route_keyword from ArgsSummary: "route_keyword=SOME KEYWORD"
+        var handoffCall = lastHandoff.ToolCalls!.First(tc =>
+            string.Equals(tc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase));
+        var argsSummary = handoffCall.ArgsSummary;
+        if (argsSummary is null) return;
+
+        var prefix = $"{HandoffPlugin.ArgumentName}=";
+        var routeKeyword = argsSummary.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            ? argsSummary[prefix.Length..].Trim()
+            : null;
+        if (string.IsNullOrEmpty(routeKeyword)) return;
+
+        // Skip if the signal already survived into the retained window.
+        bool alreadyPresent = retained.Any(m =>
+            m.Role == "assistant" &&
+            m.ToolCalls?.Any(tc =>
+                string.Equals(tc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase) &&
+                tc.ArgsSummary?.EndsWith(routeKeyword, StringComparison.OrdinalIgnoreCase) == true) == true);
+        if (alreadyPresent) return;
+
+        // Inject a synthetic user message with the signal on its own line.
+        // Placed after the compaction summary (index 1) so it appears as early context.
+        var synthetic = new AgentMessage
+        {
+            AgentName = lastHandoff.AgentName,
+            Content   = $"[Resume: pre-compaction routing signal from {lastHandoff.AgentName}]\n{routeKeyword}",
+            Role      = "user",
+            TurnIndex = lastHandoff.TurnIndex,
+        };
+
+        int insertAt = retained.Count > 0 && retained[0].IsCompactionSummary ? 1 : 0;
+        retained.Insert(insertAt, synthetic);
     }
 
     // Resets all per-compaction-cycle state in one place. Every counter or flag that

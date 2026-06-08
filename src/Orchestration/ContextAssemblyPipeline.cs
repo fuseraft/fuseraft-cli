@@ -115,20 +115,23 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
 
         // ── Stage 5: History / Context Assembly ──────────────────────────────
         IReadOnlyList<ChatMessage> baseMessages;
+        IReadOnlyList<ChatMessage> historyMessages = [];  // used for breakdown stats below
         int sessionContextChars = 0;
         int historyChars        = 0;
 
         if (agentCfg?.Context is { Count: > 0 } contextSources && _contextAssembler is not null)
         {
-            baseMessages = await _contextAssembler.AssembleForAgentAsync(
+            baseMessages    = await _contextAssembler.AssembleForAgentAsync(
                 agentName, task, contextSources,
                 history as IList<ChatMessage> ?? new List<ChatMessage>(history), ct);
-            historyChars = baseMessages.Sum(m => m.Text?.Length ?? 0);
+            historyChars    = baseMessages.Sum(m => m.Text?.Length ?? 0);
+            historyMessages = baseMessages;
         }
         else
         {
             var filtered   = ContextWindowFilter.Apply(history, agentCfg?.ContextWindow);
             historyChars   = filtered.Sum(m => m.Text?.Length ?? 0);
+            historyMessages = filtered;
             var sessionCtx = _contextAssembler is not null
                 ? await _contextAssembler.ReadSessionContextAsync(ct)
                 : null;
@@ -137,6 +140,26 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
                 sessionContextChars = sessionCtx.Length;
 
             baseMessages = BuildDefaultMessages(filtered, sessionCtx);
+        }
+
+        // ── History breakdown (role + compaction) ────────────────────────────
+        int  historyMsgCount       = historyMessages.Count;
+        int  historyUserCount      = 0;
+        int  historyAssistantCount = 0;
+        int  historyToolCount      = 0;
+        bool historyHasCompaction  = false;
+        foreach (var m in historyMessages)
+        {
+            if      (m.Role == ChatRole.User)      historyUserCount++;
+            else if (m.Role == ChatRole.Assistant) historyAssistantCount++;
+            else if (m.Role == ChatRole.Tool)      historyToolCount++;
+            // Compaction summaries are user-role messages injected by ContextRebuilder.
+            // The IsCompactionSummary flag lives only on AgentMessage and is lost when
+            // replayed into the shared ChatMessage history — detect by the content prefix.
+            if (!historyHasCompaction
+                && m.Role == ChatRole.User
+                && m.Text?.StartsWith("RESUMPTION NOTE:", StringComparison.Ordinal) == true)
+                historyHasCompaction = true;
         }
 
         // ── Stage 6: Artifact Injection ──────────────────────────────────────
@@ -164,19 +187,24 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
         var budget  = TokenBudget.Unlimited;
         var metrics = new ContextAssemblyMetrics
         {
-            AgentName               = agentName,
-            KnowledgeItemsRetrieved = knRetrieved,
-            KnowledgeItemsIncluded  = knowledgeItems.Count,
-            MemoryEntriesLoaded     = memLoaded,
-            MemoryEntriesIncluded   = memIncluded,
-            ArtifactsAssembled      = artifacts.Count,
-            TotalContextChars       = finalMessages.Sum(m => m.Text?.Length ?? 0),
-            SystemPromptChars       = systemPrompt.Length,
-            MemoryChars             = memoryBlock?.Length ?? 0,
-            SessionContextChars     = sessionContextChars,
-            KnowledgeChars          = knowledgeChars,
-            HistoryChars            = historyChars,
-            AssemblyDuration        = sw.Elapsed,
+            AgentName                  = agentName,
+            KnowledgeItemsRetrieved    = knRetrieved,
+            KnowledgeItemsIncluded     = knowledgeItems.Count,
+            MemoryEntriesLoaded        = memLoaded,
+            MemoryEntriesIncluded      = memIncluded,
+            ArtifactsAssembled         = artifacts.Count,
+            TotalContextChars          = finalMessages.Sum(m => m.Text?.Length ?? 0),
+            SystemPromptChars          = systemPrompt.Length,
+            MemoryChars                = memoryBlock?.Length ?? 0,
+            SessionContextChars        = sessionContextChars,
+            KnowledgeChars             = knowledgeChars,
+            HistoryChars               = historyChars,
+            HistoryMessageCount        = historyMsgCount,
+            HistoryUserCount           = historyUserCount,
+            HistoryAssistantCount      = historyAssistantCount,
+            HistoryToolCount           = historyToolCount,
+            HistoryHasCompactionSummary = historyHasCompaction,
+            AssemblyDuration           = sw.Elapsed,
         };
 
         _logger?.LogDebug(

@@ -246,8 +246,8 @@ app.Configure(cfg =>
         .WithDescription("Generate a ready-to-run orchestration config from an interactive wizard.")
         .WithExample(["init"])
         .WithExample(["init", ".fuseraft/config/my-team.json"])
-        .WithExample(["init", "--template", "dev-team", "--model", "claude-sonnet-4-5"])
-        .WithExample(["init", "--template", "minimal", "--no-interactive"]);
+        .WithExample(["init", "--template", "swe", "--model", "claude-sonnet-4-6"])
+        .WithExample(["init", "--template", "solo", "--no-interactive"]);
 
     cfg.AddCommand<ReplCommand>("repl")
         .WithDescription("Start an interactive REPL chat session with a single model (no config needed).")

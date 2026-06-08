@@ -86,6 +86,13 @@ public record SessionCheckpoint
     /// that use orchestrators other than <c>GraphOrchestrator</c>.
     /// </summary>
     public IReadOnlyList<AgentState>? StateHistory { get; set; }
+
+    /// <summary>
+    /// Failure-tracking counters for the state machine, captured at compaction time and
+    /// restored on the next <c>StreamAsync</c> call. Null for non-state-machine sessions
+    /// or sessions where no compaction has occurred.
+    /// </summary>
+    public StateMachineCheckpointState? StateMachineState { get; set; }
 }
 
 /// <summary>
@@ -118,4 +125,37 @@ public record MagenticCheckpointState
     /// The orchestrator re-emits the plan review prompt on resume.
     /// </summary>
     public bool AwaitingPlanReview { get; init; }
+}
+
+/// <summary>
+/// Serialisable snapshot of the <c>StateMachineSelectionStrategy</c> failure-tracking
+/// counters captured at compaction time. Restored at the start of the next
+/// <c>StreamAsync</c> call so <see cref="SessionCheckpoint.StateMachineState"/> and
+/// <see cref="FailureHandlingConfig.MaxConsecutiveContractFailures"/> survive compaction.
+/// </summary>
+public record StateMachineCheckpointState
+{
+    /// <summary>Key of the active transition failure ("State::TransitionTo"). Null when no failure is active.</summary>
+    public string? TransitionFailureKey { get; init; }
+
+    /// <summary>Consecutive failure count for the active transition. Meaningful only when <see cref="TransitionFailureKey"/> is non-null.</summary>
+    public int TransitionFailureCount { get; init; }
+
+    /// <summary>Last validator error message for the active transition failure. May be empty.</summary>
+    public string? TransitionFailureError { get; init; }
+
+    /// <summary>State name of the active no-signal failure. Null when no no-signal failure is active.</summary>
+    public string? NoSignalFailureState { get; init; }
+
+    /// <summary>Consecutive turns without a routing signal. Meaningful only when <see cref="NoSignalFailureState"/> is non-null.</summary>
+    public int NoSignalFailureCount { get; init; }
+
+    /// <summary>States entered at least once during the session.</summary>
+    public List<string> VisitedStates { get; init; } = [];
+
+    /// <summary>Per-back-edge revisit counts. Key format: "FromState::ToState".</summary>
+    public Dictionary<string, int> BackEdgeVisits { get; init; } = [];
+
+    /// <summary>Transition keys for which one-shot recovery logic already fired.</summary>
+    public List<string> RecoveryActivated { get; init; } = [];
 }

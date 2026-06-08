@@ -5,13 +5,14 @@ namespace fuseraft.Cli.Commands;
 public static partial class InitTemplates
 {
     /// <summary>
-    /// Generates the default <c>devteam</c> template:
+    /// Generates the <c>swe</c> template (replaces <c>devteam</c>):
     /// Planner → PlannerCritic → Developer → Tester → Reviewer
-    /// state-machine pipeline with evidence contracts, failure handling, lossless compaction,
-    /// and a periodic Verifier agent that audits the evidence graph for inconsistencies.
+    /// state-machine pipeline with evidence contracts, hypothesis tracking, failure handling,
+    /// lossless compaction with adaptive ContextBudget, and a periodic Verifier agent.
+    /// Durable execution state and investigation log are injected to all agents by default.
     /// This is the most fully-featured template and serves as the reference implementation.
     /// </summary>
-    private static GeneratedConfig DevTeam(string model, string? endpoint)
+    private static GeneratedConfig Swe(string model, string? endpoint)
     {
         var planner = $"""
             Name: Planner
@@ -30,6 +31,9 @@ public static partial class InitTemplates
                      the root cause, add a failure_analysis field describing what went wrong
                      and why the previous approach failed.
                    - Do NOT re-handoff with the same brief — the Developer already tried it.
+                   - Append to (or create) the known_pitfalls array in the brief: each entry
+                     names an approach already tried and why it failed. The Developer reads
+                     this before starting and MUST NOT repeat any listed approach.
                  IF no failure signal and {FuseraftPaths.LocalBrief} already exists and still
                  covers the current task: call handoff(route_keyword: "HANDOFF TO CRITIC")
                  immediately without rewriting it.
@@ -62,6 +66,22 @@ public static partial class InitTemplates
                      Abbreviated commands cannot be matched against the session log and will
                      cause ImplementationComplete to loop indefinitely.
                    acceptance_criteria — array of testable criteria the code must satisfy
+              5b. SELF-CRITIQUE — run these checks against the brief you just wrote (or
+                  the existing brief if you skipped step 5). Fix before continuing.
+                  a. files_to_change completeness: use sub_agent_explore to confirm no
+                     clearly in-scope file is missing (call sites, tests, config). Add any
+                     missing files.
+                  b. acceptance_criteria testability: every criterion must produce a binary
+                     PASS/FAIL from an automated test. Rewrite any description criterion.
+                  c. verify_command concreteness: must run actual feature logic, not just
+                     compile. Flags that assume pre-built state (--no-build, --no-restore)
+                     are only valid when the build step precedes them in the same command
+                     chain (&&). Rewrite any command that uses such flags standalone.
+                  d. implementation_hints specificity: every hint must name file + symbol/
+                     method + why it matters. Remove or expand file-only hints.
+                  e. execution_checklist: write an execution_checklist array of discrete,
+                     ordered, verifiable steps ("create fwc/Counter.cs", "add glob exclusion
+                     to main.csproj"). The Developer works through this list in order.
               6. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO CRITIC").
             Model:
@@ -140,20 +160,45 @@ public static partial class InitTemplates
             Instructions: |
               You are a senior software engineer. Your job is to:
               1. {ContextReadStep}
-              2. Read {FuseraftPaths.LocalBrief}. If the handoff context includes a test report
-                 or failure summary, read it before writing any code — understand what specifically
-                 failed. Root-cause first, patch second. Read the source of the failing call
-                 before patching; a patch without understanding the failure will fail again.
+              2. Read {FuseraftPaths.LocalBrief}. Check for these fields:
+                   known_pitfalls — approaches already tried and known to fail. You MUST NOT
+                                    repeat any listed approach, even partially.
+                   execution_checklist — ordered steps. Work through them in order.
+                 Then read the Execution State section in your context — it contains:
+                   ActiveFailures   — build/compiler errors with file, line, and error code.
+                                      These are the specific errors you must fix.
+                   SignificantChanges — files already written or patched this session.
+                                        Check this before writing: the file may already exist.
+                 If the handoff context includes a test report or failure summary, read it before
+                 writing any code. Root-cause first, patch second — read the source of the failing
+                 call before patching; a patch without understanding the failure will fail again.
+                 BUILD ERROR TRIAGE — follow before touching any source file:
+                   a. Every compiler/linker error identifies a build unit — read that attribution
+                      first (e.g. [project.csproj] suffix, CMake target, Cargo package, Make rule).
+                      That tells you WHICH config file to fix, not just which source file.
+                   b. If a source file's errors are attributed to build unit A but logically belong
+                      to unit B, fix A's include/exclude rules — not B's source.
+                   c. A "duplicate symbol" error almost always means one file is compiled by two
+                      build units. Fix the glob/include patterns — do not touch the source.
+                   d. Before each shell command, state in one sentence why it will produce a
+                      different result than the previous run. A repeated command without a reason
+                      is not a hypothesis — it is a loop.
               3. Implement every file in files_to_change.
-                 Use patch_file for targeted edits to existing files; use write_file only for
-                 new files. All paths are relative to the sandbox root — never double-nest the
-                 project directory name.
-              4. Run verify_command from the brief with shell_run. First call changes_read_latest
-                 and scan the shell command log — if verify_command already appears with exit
-                 code 0 this session, you do not need to re-run it. Otherwise run it now.
-                 This is the authoritative correctness check. Do NOT commit until it passes.
-                 If it fails, diagnose the runtime error (read the relevant source files to
-                 understand the failure), fix, and re-run. Do not commit known-broken code.
+                 FILE WRITE RULES — follow exactly:
+                   a. For existing files: always use patch_file. Never use write_file on a file
+                      that already exists — it may be non-empty and write_file will fail silently.
+                   b. For new files: use write_file.
+                   c. After writing or patching a file, verify it landed: call stat_file on the
+                      path (or list_directory on its parent) and confirm the file is present and
+                      non-zero in size. If write_file fails (file already exists), switch to
+                      patch_file immediately — do not retry write_file on the same path.
+                 All paths are relative to the sandbox root — never double-nest the project dir.
+              4. Run verify_command from the brief with shell_run. Check changes_read_latest
+                 first — if verify_command already succeeded (exit code 0) this session,
+                 skip re-running it and proceed to commit.
+                 If verify_command FAILS: read the failing source before retrying — understand
+                 the new error before writing new code. Do NOT re-run the same command again
+                 without first making a change.
               5. Commit with git_add and git_commit.
               6. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO TESTER").
@@ -247,34 +292,57 @@ public static partial class InitTemplates
 
         var verifier = $"""
             Name: Verifier
-            Description: Audits the evidence graph for inconsistencies between claims and recorded actions.
+            Description: Audits execution state and change log for evidence inconsistencies.
             Instructions: |
               You are an evidence auditor. Detect inconsistencies between what agents
-              claim and what is recorded in the change log.
+              claim and what is recorded in the change log and execution state.
 
-              1. Call changes_read_latest to see what was actually done this session.
-              2. Compare recorded file writes, shell commands, and exit codes against
-                 any claims made in recent conversation messages.
-              3. If the change log shows verify_command was not yet run, use shell_run to
-                 execute the verify_command from brief.json and record the result.
-              4. If consistent: "Evidence verified — no inconsistencies found."
-              5. If inconsistent: "INCONSISTENCY DETECTED: <what was claimed vs what the evidence shows>"
+              FOLLOW THESE STEPS IN ORDER:
+
+              1. Call changes_read_latest to see what file writes, shell commands, and exit codes
+                 were recorded this session.
+
+              2. Read {FuseraftPaths.LocalExecutionState} with read_file. Check:
+                 - ActiveFailures: any build/compiler errors currently present.
+                 - SignificantChanges: files written or patched this session.
+
+              3. Cross-check for these specific inconsistency patterns:
+                 a. REPEATED FAILURE: The same error code or error message appears in
+                    ActiveFailures AND in earlier failed shell commands in the change log —
+                    a fix was attempted but the same error recurred. The Developer has not
+                    made progress.
+                 b. NO PROGRESS: The change log shows 3 or more consecutive failed shell
+                    commands with no file writes between them — the Developer is re-running
+                    failing commands without making any changes.
+                 c. CLAIMED SUCCESS WITHOUT EVIDENCE: An agent claimed "verify_command passed"
+                    or "ImplementationComplete" but the change log does not show a successful
+                    shell_run of the verify_command from the brief.
+
+              4. If the change log shows verify_command was not yet run, use shell_run to
+                 execute the verify_command from {FuseraftPaths.LocalBrief} and record the result.
+
+              5. Report outcome:
+                 - If consistent: "Evidence verified — no inconsistencies found."
+                 - If inconsistent: "INCONSISTENCY DETECTED: <pattern letter> — <what was claimed
+                   vs what the evidence shows, with specific error codes or file names>"
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
+              - FileSystem
               - Changes
               - Shell
             FunctionChoice: required
+            SkipExecutionState: true
             {VerifierContextWindow}
             {AgentFileOptions}
             """;
 
         var mainConfig = $"""
             Orchestration:
-              Name: Software Development Team
+              Name: Software Engineering Team
               Description: >-
                 Planner → PlannerCritic → Developer → Tester → Reviewer with state machine routing,
-                evidence contracts, failure handling, and self-verification.
+                evidence contracts, hypothesis tracking, adaptive ContextBudget, and self-verification.
 
               Security:
                 FileSystemSandboxPath: .   # set to your project root (e.g. ~/projects/myapp)
@@ -334,14 +402,15 @@ public static partial class InitTemplates
 
               Verifier:
                 AgentName: Verifier
-                EveryNTurns: 5
+                EveryNTurns: 4
                 TriggerOnSuspiciousTransition: true
                 FindingsKeyword: INCONSISTENCY
 
               Compaction:
                 TriggerTurnCount: 30
-                KeepRecentTurns: 8
+                KeepRecentTurns: 12
                 Mode: lossless
+                PinLastRoutingSignal: true
 
               # WarnTurnTokens: warn when a single turn's input exceeds this value.
               # Keep this below ContextBudget.CutoverAt so the warning fires before
@@ -353,10 +422,13 @@ public static partial class InitTemplates
               # after each compaction cycle so the session can run indefinitely.
               # MaxSingleTurnInputTokens guards against single-turn explosions that exhaust
               # the cumulative budget in one shot — compaction fires before the next turn.
+              # MaxToolResultTokens caps individual tool result size before it enters the
+              # context slice — prevents a single large build log from filling the budget.
               ContextBudget:
                 WarnAt: 60000
                 CutoverAt: 100000
                 MaxSingleTurnInputTokens: 200000
+                MaxToolResultTokens: 8000
 
               Events:
                 Path: {FuseraftPaths.LocalEventsLog}
@@ -402,12 +474,14 @@ public static partial class InitTemplates
                         - To: Testing
                           Signal: "HANDOFF TO TESTER"
                           Contract: ImplementationComplete
+                          RecoveryAgent: PlannerCritic
                           HandoffContext:
                             - Source: session_context
                             - Source: changes_recent
                             - Source: brief_field:test_targets
                         - To: Planning
                           Signal: "REPLAN REQUIRED"
+                          MaxRevisits: 2
                           HandoffContext:
                             - Source: session_context
                             - Source: changes_recent
@@ -475,12 +549,12 @@ public static partial class InitTemplates
             """;
 
         return new GeneratedConfig(mainConfig, [
-            ("agents/planner.yaml",        planner),
-            ("agents/planner-critic.yaml", plannerCritic),
-            ("agents/developer.yaml",      developer),
-            ("agents/tester.yaml",         tester),
-            ("agents/reviewer.yaml",       reviewer),
-            ("agents/verifier.yaml",       verifier),
+            ("agents/planner.yaml",         planner),
+            ("agents/planner-critic.yaml",  plannerCritic),
+            ("agents/developer.yaml",       developer),
+            ("agents/tester.yaml",          tester),
+            ("agents/reviewer.yaml",        reviewer),
+            ("agents/verifier.yaml",        verifier),
         ]);
     }
 }

@@ -1,0 +1,227 @@
+using System.ComponentModel;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using fuseraft.Core.Interfaces;
+using fuseraft.Core.Models;
+
+namespace fuseraft.Infrastructure.Plugins;
+
+/// <summary>
+/// Durable investigation memory: records hypotheses, rejected paths, and confirmed root causes
+/// so future agents never re-run the same dead-end investigation.
+///
+/// <para>
+/// All writes go to <c>.fuseraft/state/investigation-log.json</c>. The log survives compaction
+/// and is injected into every agent's context via the <c>investigation_log</c> context source.
+/// </para>
+/// </summary>
+public sealed class InvestigationPlugin
+{
+    private readonly string _logPath;
+    private readonly string _sessionId;
+    private readonly IEventSink? _eventSink;
+    private readonly SemaphoreSlim _lock = new(1, 1);
+
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        WriteIndented              = true,
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition     = JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    public InvestigationPlugin(string logPath, string sessionId, IEventSink? eventSink = null)
+    {
+        _logPath   = logPath;
+        _sessionId = sessionId;
+        _eventSink = eventSink;
+    }
+
+    [Description("Record a new hypothesis for investigation.")]
+    public async Task<string> CreateHypothesisAsync(
+        [Description("The hypothesis to investigate.")]
+        string hypothesis)
+    {
+        if (string.IsNullOrWhiteSpace(hypothesis))
+            return "[ERROR] Hypothesis text must not be empty.";
+
+        await _lock.WaitAsync();
+        try
+        {
+            var log = await LoadCoreAsync();
+            var id  = $"H-{(log.Hypotheses.Count + 1):D3}";
+            var updated = log with
+            {
+                Hypotheses = [.. log.Hypotheses, new HypothesisRecord
+                {
+                    Id         = id,
+                    Hypothesis = hypothesis.Trim(),
+                    Status     = "open",
+                    CreatedAt  = DateTimeOffset.UtcNow,
+                }],
+            };
+            await SaveCoreAsync(updated);
+            return $"Recorded hypothesis [{id}]: {hypothesis.Trim()}";
+        }
+        finally { _lock.Release(); }
+    }
+
+    [Description("Mark a hypothesis as rejected with the reason and supporting evidence.")]
+    public async Task<string> RejectHypothesisAsync(
+        [Description("Hypothesis ID (e.g. H-001).")]
+        string id,
+        [Description("Why this hypothesis was rejected.")]
+        string reason,
+        [Description("Evidence that disproves the hypothesis (one piece per line).")]
+        string? evidence = null)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+            return "[ERROR] Hypothesis ID must not be empty.";
+
+        string? hypothesisText = null;
+        await _lock.WaitAsync();
+        try
+        {
+            var log = await LoadCoreAsync();
+            var idx = log.Hypotheses.FindIndex(h =>
+                string.Equals(h.Id, id.Trim(), StringComparison.OrdinalIgnoreCase));
+
+            if (idx < 0)
+                return $"[NOT FOUND] No hypothesis with ID '{id}'.";
+
+            hypothesisText = log.Hypotheses[idx].Hypothesis;
+            var evidenceList = ParseEvidence(evidence);
+            var updated = log.Hypotheses[idx] with
+            {
+                Status       = "rejected",
+                RejectReason = reason.Trim(),
+                Evidence     = evidenceList,
+            };
+
+            var newHypotheses = new List<HypothesisRecord>(log.Hypotheses) { [idx] = updated };
+            await SaveCoreAsync(log with { Hypotheses = newHypotheses });
+        }
+        finally { _lock.Release(); }
+
+        if (hypothesisText is not null)
+            _eventSink?.Emit(new AttemptFailedEvent(
+                Description:  hypothesisText,
+                ErrorSummary: reason.Trim())
+            { Timestamp = DateTimeOffset.UtcNow });
+
+        return $"Marked [{id}] as rejected: {reason.Trim()}";
+    }
+
+    [Description("Mark a hypothesis as confirmed with supporting evidence.")]
+    public async Task<string> ConfirmHypothesisAsync(
+        [Description("Hypothesis ID (e.g. H-001).")]
+        string id,
+        [Description("Evidence that confirms the hypothesis (one piece per line).")]
+        string? evidence = null)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+            return "[ERROR] Hypothesis ID must not be empty.";
+
+        await _lock.WaitAsync();
+        try
+        {
+            var log = await LoadCoreAsync();
+            var idx = log.Hypotheses.FindIndex(h =>
+                string.Equals(h.Id, id.Trim(), StringComparison.OrdinalIgnoreCase));
+
+            if (idx < 0)
+                return $"[NOT FOUND] No hypothesis with ID '{id}'.";
+
+            var evidenceList = ParseEvidence(evidence);
+            var updated = log.Hypotheses[idx] with
+            {
+                Status   = "confirmed",
+                Evidence = evidenceList,
+            };
+
+            var newHypotheses = new List<HypothesisRecord>(log.Hypotheses) { [idx] = updated };
+            await SaveCoreAsync(log with { Hypotheses = newHypotheses });
+            return $"Marked [{id}] as confirmed.";
+        }
+        finally { _lock.Release(); }
+    }
+
+    [Description("Log a completed investigation with its summary and conclusion.")]
+    public async Task<string> RecordInvestigationAsync(
+        [Description("What was investigated.")]
+        string summary,
+        [Description("What was found or concluded.")]
+        string conclusion)
+    {
+        if (string.IsNullOrWhiteSpace(summary))
+            return "[ERROR] Summary must not be empty.";
+
+        await _lock.WaitAsync();
+        try
+        {
+            var log = await LoadCoreAsync();
+            var entry = new InvestigationRecord
+            {
+                Summary    = summary.Trim(),
+                Conclusion = conclusion.Trim(),
+                Timestamp  = DateTimeOffset.UtcNow,
+            };
+            await SaveCoreAsync(log with { Investigations = [.. log.Investigations, entry] });
+            return $"Recorded investigation: {summary.Trim()}";
+        }
+        finally { _lock.Release(); }
+    }
+
+    [Description("Append a confirmed root cause to the investigation log.")]
+    public async Task<string> IdentifyRootCauseAsync(
+        [Description("The confirmed root cause.")]
+        string cause)
+    {
+        if (string.IsNullOrWhiteSpace(cause))
+            return "[ERROR] Root cause must not be empty.";
+
+        await _lock.WaitAsync();
+        try
+        {
+            var log = await LoadCoreAsync();
+            if (log.ConfirmedRootCauses.Any(c =>
+                    string.Equals(c, cause.Trim(), StringComparison.OrdinalIgnoreCase)))
+                return $"Root cause already recorded: {cause.Trim()}";
+
+            await SaveCoreAsync(log with { ConfirmedRootCauses = [.. log.ConfirmedRootCauses, cause.Trim()] });
+            return $"Identified root cause: {cause.Trim()}";
+        }
+        finally { _lock.Release(); }
+    }
+
+    // ── I/O ─────────────────────────────────────────────────────────────────────
+
+    // Caller must hold _lock.
+    private async Task<InvestigationLog> LoadCoreAsync()
+    {
+        try
+        {
+            if (!File.Exists(_logPath)) return new InvestigationLog { SessionId = _sessionId };
+            var json = await File.ReadAllTextAsync(_logPath);
+            return JsonSerializer.Deserialize<InvestigationLog>(json, JsonOpts)
+                ?? new InvestigationLog { SessionId = _sessionId };
+        }
+        catch { return new InvestigationLog { SessionId = _sessionId }; }
+    }
+
+    // Caller must hold _lock.
+    private async Task SaveCoreAsync(InvestigationLog log)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_logPath)!);
+        var json = JsonSerializer.Serialize(log with { SessionId = _sessionId }, JsonOpts);
+        await File.WriteAllTextAsync(_logPath, json);
+    }
+
+    private static List<string> ParseEvidence(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return [];
+        return raw.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                  .Where(s => s.Length > 0)
+                  .ToList();
+    }
+}

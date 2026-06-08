@@ -119,6 +119,88 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                 issues.Add(("error", $"SystemPromptPath file not found: {promptPath}"));
         }
 
+        ValidateAgents(config, settings, issues);
+
+        // Selection strategy
+        var selType = config.Selection.Type.ToLowerInvariant();
+        if (selType is not ("sequential" or "roundrobin" or "llm" or "keyword" or "structured" or "magentic" or "statemachine" or "graph" or "adversarial"))
+            issues.Add(("error", $"Unknown selection type: '{config.Selection.Type}'."));
+
+        if (selType == "llm" && config.Selection.Model is null)
+            issues.Add(("error", "LLM selection requires Selection.Model to be set."));
+
+        if (selType == "keyword" && (config.Selection.Routes is null || config.Selection.Routes.Count == 0))
+            issues.Add(("error", "Keyword selection requires at least one entry in Routes."));
+
+        if (selType == "structured")
+            ValidateStructuredRoutes(config, issues);
+
+        if (selType == "magentic")
+            ValidateMagenticSelection(config, issues);
+
+        if (selType == "graph")
+            ValidateGraph(config, issues);
+
+        if (selType == "statemachine")
+            ValidateStateMachine(config, issues);
+
+        if (selType == "adversarial")
+            ValidateAdversarialSelection(config, issues);
+
+        if (selType == "keyword" && config.Selection.Routes is { Count: > 1 })
+        {
+            // Detect routes that share the same keyword and SourceAgents but have different
+            // validators. Because selection uses first-match-wins, the second route's validator
+            // is permanently unreachable — this is almost always a misconfiguration. The intent
+            // is usually AND semantics (both validators must pass), which requires a single route
+            // with a Validators[] array instead of two separate routes.
+            //
+            // Exception: routes that carry a Condition are disambiguated at runtime by the JSON
+            // value of the condition field — they are intentionally parallel branches of the same
+            // keyword and must not be flagged as unreachable.
+            var routeSignatures = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int ri = 0; ri < config.Selection.Routes.Count; ri++)
+            {
+                var r = config.Selection.Routes[ri];
+                var sourceKey = r.SourceAgents is { Count: > 0 }
+                    ? string.Join(",", r.SourceAgents.OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
+                    : "*";
+
+                // Include the condition in the signature so condition-differentiated routes
+                // on the same keyword do not trigger the unreachable-route warning.
+                var condKey = r.Condition is { } c
+                    ? $"|cond:{c.Field}:{c.Is}{c.IsNot}{c.Contains}{c.Exists}"
+                    : string.Empty;
+
+                var sig = $"{r.Keyword}::{sourceKey}{condKey}";
+
+                if (routeSignatures.TryGetValue(sig, out var firstIndex))
+                    issues.Add(("warning",
+                        $"Routes[{firstIndex}] and Routes[{ri}] share keyword '{r.Keyword}' " +
+                        $"and SourceAgents '{sourceKey}'. The second route's validator is " +
+                        $"unreachable (first-match wins). To require both validators, merge them " +
+                        $"into a single route using a \"Validators\": [] array."));
+                else
+                    routeSignatures[sig] = ri;
+            }
+        }
+
+        // Termination strategy — only validate when the section was explicitly configured.
+        if (config.Termination is not null)
+            ValidateTermination(config.Termination, config.Agents, issues);
+
+        ValidateCompactionConfig(config, issues);
+
+        ValidateMemoryLayer(config, issues);
+
+        return await ReportResultsAsync(config, settings, issues);
+    }
+
+    private void ValidateAgents(
+        OrchestrationConfig config,
+        ValidateConfigSettings settings,
+        List<(string Level, string Message)> issues)
+    {
         if (config.Agents.Count == 0)
         {
             issues.Add(("error", "No agents defined."));
@@ -189,75 +271,12 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                 }
             }
         }
+    }
 
-        // Selection strategy
-        var selType = config.Selection.Type.ToLowerInvariant();
-        if (selType is not ("sequential" or "roundrobin" or "llm" or "keyword" or "structured" or "magentic" or "statemachine" or "graph" or "adversarial"))
-            issues.Add(("error", $"Unknown selection type: '{config.Selection.Type}'."));
-
-        if (selType == "llm" && config.Selection.Model is null)
-            issues.Add(("error", "LLM selection requires Selection.Model to be set."));
-
-        if (selType == "keyword" && (config.Selection.Routes is null || config.Selection.Routes.Count == 0))
-            issues.Add(("error", "Keyword selection requires at least one entry in Routes."));
-
-        if (selType == "structured")
-            ValidateStructuredRoutes(config, issues);
-
-        if (selType == "magentic")
-            ValidateMagenticSelection(config, issues);
-
-        if (selType == "graph")
-            ValidateGraph(config, issues);
-
-        if (selType == "statemachine")
-            ValidateStateMachine(config, issues);
-
-        if (selType == "adversarial")
-            ValidateAdversarialSelection(config, issues);
-
-        if (selType == "keyword" && config.Selection.Routes is { Count: > 1 })
-        {
-            // Detect routes that share the same keyword and SourceAgents but have different
-            // validators. Because selection uses first-match-wins, the second route's validator
-            // is permanently unreachable — this is almost always a misconfiguration. The intent
-            // is usually AND semantics (both validators must pass), which requires a single route
-            // with a Validators[] array instead of two separate routes.
-            //
-            // Exception: routes that carry a Condition are disambiguated at runtime by the JSON
-            // value of the condition field — they are intentionally parallel branches of the same
-            // keyword and must not be flagged as unreachable.
-            var routeSignatures = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            for (int ri = 0; ri < config.Selection.Routes.Count; ri++)
-            {
-                var r = config.Selection.Routes[ri];
-                var sourceKey = r.SourceAgents is { Count: > 0 }
-                    ? string.Join(",", r.SourceAgents.OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
-                    : "*";
-
-                // Include the condition in the signature so condition-differentiated routes
-                // on the same keyword do not trigger the unreachable-route warning.
-                var condKey = r.Condition is { } c
-                    ? $"|cond:{c.Field}:{c.Is}{c.IsNot}{c.Contains}{c.Exists}"
-                    : string.Empty;
-
-                var sig = $"{r.Keyword}::{sourceKey}{condKey}";
-
-                if (routeSignatures.TryGetValue(sig, out var firstIndex))
-                    issues.Add(("warning",
-                        $"Routes[{firstIndex}] and Routes[{ri}] share keyword '{r.Keyword}' " +
-                        $"and SourceAgents '{sourceKey}'. The second route's validator is " +
-                        $"unreachable (first-match wins). To require both validators, merge them " +
-                        $"into a single route using a \"Validators\": [] array."));
-                else
-                    routeSignatures[sig] = ri;
-            }
-        }
-
-        // Termination strategy — only validate when the section was explicitly configured.
-        if (config.Termination is not null)
-            ValidateTermination(config.Termination, config.Agents, issues);
-
+    private static void ValidateCompactionConfig(
+        OrchestrationConfig config,
+        List<(string Level, string Message)> issues)
+    {
         // Context budget — mirror the guards in OrchestratorBuilder.BuildAsync so they
         // surface here rather than only at session startup.
         if (config.ContextBudget is { } cb)
@@ -278,19 +297,38 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                     "The per-turn warning fires in the same turn as compaction — lower WarnTurnTokens " +
                     "below CutoverAt to get an advance signal."));
         }
+    }
 
+    private static void ValidateMemoryLayer(
+        OrchestrationConfig config,
+        List<(string Level, string Message)> issues)
+    {
         // Telemetry
         if (config.Telemetry is { OtlpEndpoint: { } endpoint })
         {
             if (!Uri.TryCreate(endpoint, UriKind.Absolute, out _))
                 issues.Add(("error", $"Telemetry.OtlpEndpoint is not a valid URI: '{endpoint}'."));
         }
+    }
 
+    private static async Task ValidateMcpConnectivityAsync(
+        OrchestrationConfig config,
+        ValidateConfigSettings settings,
+        List<(string Level, string Message)> issues)
+    {
+        if (settings.CheckConnectivity)
+            await CheckConnectivityAsync(config, issues);
+    }
+
+    private static async Task<int> ReportResultsAsync(
+        OrchestrationConfig config,
+        ValidateConfigSettings settings,
+        List<(string Level, string Message)> issues)
+    {
         // Report static issues, then optionally run live connectivity checks.
         PrintIssues(issues);
 
-        if (settings.CheckConnectivity)
-            await CheckConnectivityAsync(config, issues);
+        await ValidateMcpConnectivityAsync(config, settings, issues);
 
         var errorCount = issues.Count(x => x.Level == "error");
         var warnCount  = issues.Count(x => x.Level == "warning");

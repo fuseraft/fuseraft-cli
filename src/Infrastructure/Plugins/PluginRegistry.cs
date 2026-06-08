@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using fuseraft.Core;
+using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 
@@ -141,7 +142,8 @@ public sealed class PluginRegistry : IDisposable
         Func<string, Task<bool>>? shellCommandApprover = null,
         FileVersionStore? fileVersionStore = null,
         SessionReadCache? sessionReadCache = null,
-        Action? onCacheHit = null)
+        Action? onCacheHit = null,
+        IEventSink? eventSink = null)
     {
         var sandboxRoot       = security.FileSystemSandboxPath;
         var allowedHosts      = security.HttpAllowedHosts is { Count: > 0 } h ? (IReadOnlyList<string>)h : null;
@@ -149,7 +151,7 @@ public sealed class PluginRegistry : IDisposable
 
         // Create ShellPlugin once so FileSystemPlugin can reference its cache invalidator.
         // Both are registered as singletons — the factory lambda returns the same instance.
-        var shellInstance = new ShellPlugin(sandboxRoot, shellCommandApprover, security.ShellPolicy);
+        var shellInstance = new ShellPlugin(sandboxRoot, shellCommandApprover, security.ShellPolicy, eventSink);
         Register("Shell",      () => shellInstance);
         Register("FileSystem", () => new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore, sessionCache: sessionReadCache, onWrite: shellInstance.InvalidateRunCache, onCacheHit: onCacheHit, exemptedPaths: ["~/.fuseraft/"]));
         Register("Http",       () => new HttpPlugin(_sharedHttpClient, allowedHosts, apiProfiles, allowPrivateHosts, _loggerFactory?.CreateLogger<HttpPlugin>()));

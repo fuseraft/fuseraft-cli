@@ -158,8 +158,19 @@ public sealed class AgentOrchestrator(
     // Consumed once and cleared so subsequent phase restarts infer state from signals normally.
     private volatile string? _resumeStateName;
 
+    // Full failure-tracking snapshot to restore alongside the state name. Populated by
+    // SessionRunner.ApplyCompactionAsync when a StateMachineSelectionStrategy is active.
+    private volatile StateMachineCheckpointState? _resumeSnapshot;
+
     /// <inheritdoc/>
     public void SetResumeStateName(string? stateName) => _resumeStateName = stateName;
+
+    /// <summary>
+    /// Stores the failure-tracking counters to restore on the next <c>StreamAsync</c> call.
+    /// Called by <see cref="fuseraft.Cli.SessionRunner"/> after compaction so counters such as
+    /// <c>_transitionFailure</c> and <c>_visitedStates</c> survive across restarts.
+    /// </summary>
+    public void SetResumeSnapshot(StateMachineCheckpointState? snap) => _resumeSnapshot = snap;
 
 
     /// <summary>
@@ -184,7 +195,7 @@ public sealed class AgentOrchestrator(
 
         // Build fresh agents and strategies per session to avoid state bleed.
         var agents = config.Agents
-            .Select(a => agentFactory.Create(a, onToolCalling: (agent, tool, args) => ToolCalling?.Invoke(agent, tool, args)))
+            .Select(a => agentFactory.Create(a, config.ContextBudget, onToolCalling: (agent, tool, args) => ToolCalling?.Invoke(agent, tool, args)))
             .ToList();
         if (!string.IsNullOrEmpty(_sessionId))
             strategyFactory.SetSessionId(_sessionId);
@@ -240,6 +251,12 @@ public sealed class AgentOrchestrator(
             _resumeStateName = null; // consume before applying — prevents re-application if SetCurrentState throws
             if (!string.IsNullOrWhiteSpace(stateName))
                 smss.SetCurrentState(stateName);
+
+            // Restore failure-tracking counters so MaxConsecutiveContractFailures and
+            // the REPLAN BLOCKED guard survive across compaction cycles.
+            var snap = _resumeSnapshot;
+            _resumeSnapshot = null; // consume once, same discipline as _resumeStateName
+            smss.RestoreFromSnapshot(snap);
         }
         WireHistory(termination, history);
         if (!string.IsNullOrEmpty(_sessionId))
@@ -839,6 +856,14 @@ public sealed class AgentOrchestrator(
                     session_context  = metrics.SessionContextChars,
                     knowledge        = metrics.KnowledgeChars,
                     history          = metrics.HistoryChars,
+                    history_breakdown = new
+                    {
+                        msgs                   = metrics.HistoryMessageCount,
+                        user                   = metrics.HistoryUserCount,
+                        assistant              = metrics.HistoryAssistantCount,
+                        tool                   = metrics.HistoryToolCount,
+                        has_compaction_summary = metrics.HistoryHasCompactionSummary,
+                    },
                 },
                 // Tool-schema tokens are sent as the API `tools` parameter, not as messages,
                 // so they are invisible to context_chars. This estimate fills the gap so

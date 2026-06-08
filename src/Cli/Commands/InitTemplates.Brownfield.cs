@@ -6,9 +6,12 @@ public static partial class InitTemplates
 {
     /// <summary>
     /// Generates the <c>brownfield</c> template: Archaeologist → Planner → Developer → Reviewer
-    /// state-machine pipeline for making targeted changes to an existing codebase.
-    /// The Archaeologist writes a convention profile and discovery brief before any code changes;
-    /// both artifacts are injected into every subsequent agent's context.
+    /// expressed as a directed graph. The Archaeologist writes a convention profile and discovery
+    /// brief (one-time recon); all subsequent agents read these artifacts rather than re-exploring
+    /// the codebase. Graph selection gives the Reviewer two distinct back-edge targets:
+    /// <c>REVISION REQUIRED</c> → Developer (targeted fix) and <c>REPLAN REQUIRED</c> → Planner
+    /// (approach rethink). Supersedes both the old state-machine <c>brownfield</c> and the
+    /// <c>brownfield-graph</c> templates.
     /// </summary>
     private static GeneratedConfig Brownfield(string model, string? endpoint)
     {
@@ -24,8 +27,7 @@ public static partial class InitTemplates
                  without re-running recon.
               2. For any file you need to examine: {LargeFileProtocolArchaeologist}
               3. Use list_files and sub_agent_explore to map the directory structure — do NOT
-                 read every file; prefer sub_agent_explore for structural questions — it returns
-                 a prose summary, not raw file contents.
+                 read every file; prefer sub_agent_explore for structural questions.
               4. Identify: primary language and framework, naming conventions (snake_case vs camelCase),
                  import style, test framework, build system, and key architectural patterns.
               5. Write the convention profile to {FuseraftPaths.LocalConventions} with fields:
@@ -37,6 +39,9 @@ public static partial class InitTemplates
                    in_scope_files — array of file paths likely relevant to the task
                    dependencies — key external dependencies to be aware of
                    risks — array of fragility signals (e.g. no tests, circular deps, god objects)
+              8. For each significant architectural risk or pattern you uncover, call
+                 record_investigation(summary, conclusion) — these findings survive compaction
+                 and will be visible to every subsequent agent without re-reading the codebase.
 
               When both files are written, call handoff(route_keyword: "RECON COMPLETE").
             Model:
@@ -45,6 +50,7 @@ public static partial class InitTemplates
               - FileSystem
               - Search
               - SubAgent
+              - Investigation
               - Handoff
             FunctionChoice: required
             {AgentFileOptions}
@@ -56,17 +62,35 @@ public static partial class InitTemplates
             Instructions: |
               You are a software architect working on an existing codebase. Your job is to:
               1. {ContextReadStep}
-              2. Check if {FuseraftPaths.LocalBrief} already exists. If it does, read it — if it
-                 still covers the current task, call handoff(route_keyword: "HANDOFF TO DEVELOPER")
+              2. Check for a REPLAN signal: read changes_read_latest and look for failed
+                 commands or "REPLAN REQUIRED" in the session context.
+                 IF a failure signal is present:
+                   - Read any available test output or reviewer notes in the handoff context.
+                   - Check the Investigation Log in your context: rejected hypotheses show what
+                     the Developer already tried. Do not propose an approach that is already
+                     rejected. If you now know definitively why it failed, call
+                     identify_root_cause(cause) before writing the revised brief.
+                   - Update {FuseraftPaths.LocalBrief}: revise implementation_hints to target
+                     the root cause, add a failure_analysis field describing what went wrong.
+                   - Do NOT re-handoff with the same brief — the Developer already tried it.
+                 IF no failure signal and {FuseraftPaths.LocalBrief} already exists and still
+                 covers the current task: call handoff(route_keyword: "HANDOFF TO DEVELOPER")
                  immediately without rewriting it.
               3. Read {FuseraftPaths.LocalBrownfieldBrief} to understand the codebase shape and risks.
-              4. Read {FuseraftPaths.LocalConventions} to understand the project's conventions — follow them exactly.
-              5. Use sub_agent_explore for any additional targeted questions. For direct file
-                 reads: {LargeFileProtocol}
+              4. Read {FuseraftPaths.LocalConventions} — follow the project's conventions exactly.
+              5. Use sub_agent_explore for additional targeted questions. For direct file reads:
+                 {LargeFileProtocol}
               6. Write a scoped brief to {FuseraftPaths.LocalBrief} with fields:
                    goal — one-sentence description of the change
                    findings — summary of relevant existing code to modify
-                   files_to_change — only the files that genuinely need to change (paths relative to sandbox root)
+                   files_to_change — only the files that genuinely need to change
+                                     (paths relative to the sandbox root)
+                   implementation_hints — concrete symbol-level anchors from your exploration.
+                     Each entry: file + symbol/method + approximate line + reason.
+                     Without these, the Developer re-explores everything from scratch on every
+                     compaction boundary. A symbol name and line hint is worth hundreds of tokens.
+                   verify_command — the exact shell command to verify runtime correctness.
+                     Must exercise the actual code path, not just compile. Full literal command.
                    acceptance_criteria — observable code properties the change must satisfy
                    convention_notes — specific conventions to follow from the profile
               7. {ContextWriteStep}
@@ -89,15 +113,29 @@ public static partial class InitTemplates
             Instructions: |
               You are a developer working carefully inside an existing codebase. Your job is to:
               1. {ContextReadStep}
-              2. Read {FuseraftPaths.LocalBrief} — implement ONLY the files listed in files_to_change.
-              3. Read {FuseraftPaths.LocalConventions} — follow the project's naming, import, and style conventions exactly.
-              4. Before modifying an existing file: {LargeFileProtocolDeveloper} Never overwrite blindly.
-              5. Use patch_file for surgical edits to existing files; use write_file only for new files.
-              6. Run the build command from the convention profile to confirm nothing is broken.
-              7. Commit with git_add and git_commit.
-              8. {ContextWriteStep}
+              2. Read {FuseraftPaths.LocalBrief}. If the handoff context includes reviewer notes
+                 or a failure summary, read it before writing any code — root-cause first,
+                 patch second. Read the source of any failing call before patching it.
+                 The Execution State and Investigation Log in your context show what has already
+                 failed this session. Do not repeat an approach listed under "Rejected Paths".
+              3. Read {FuseraftPaths.LocalConventions} — follow the project's naming, import,
+                 and style conventions exactly.
+              4. Before modifying an existing file: {LargeFileProtocolDeveloper}
+                 Never overwrite blindly.
+              5. Use patch_file for surgical edits to existing files; use write_file only for
+                 new files. All paths relative to the sandbox root.
+              6. Run the build command from the convention profile to confirm compilation.
+              7. Run verify_command from the brief to confirm runtime correctness.
+                 HYPOTHESIS PROTOCOL — required for every verify_command attempt:
+                 a. Call create_hypothesis(description) naming the specific approach.
+                 b. If it fails: call reject_hypothesis(id, reason, evidence) with the exact
+                    error. Read the failing source before retrying.
+                 c. If it passes: call confirm_hypothesis(id, evidence).
+                 You MUST NOT call handoff with any open hypotheses.
+              8. Commit with git_add and git_commit.
+              9. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO REVIEWER").
-              If the brief is unclear, call handoff(route_keyword: "REPLAN REQUIRED").
+              If the brief is fundamentally unclear, call handoff(route_keyword: "REPLAN REQUIRED").
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
@@ -105,6 +143,7 @@ public static partial class InitTemplates
               - Shell
               - Git
               - Changes
+              - Investigation
               - SessionContext
               - Handoff
             FunctionChoice: required
@@ -115,23 +154,28 @@ public static partial class InitTemplates
 
         var reviewer = $"""
             Name: Reviewer
-            Description: Code-review-only inspection against the brief and conventions.
+            Description: Verifies the change via code inspection and runtime execution; routes to Developer, Planner, or final approval.
             Instructions: |
               You are a principal engineer reviewing a change to an existing codebase. Your job is to:
               1. {ContextReadStep}
               2. For each file listed in {FuseraftPaths.LocalBrief} under files_to_change:
                  {LargeFileProtocolReviewer}
-              3. Verify every acceptance criterion is satisfied by code inspection.
+              3. Inspect the code against every acceptance criterion.
               4. Check that the change follows conventions from {FuseraftPaths.LocalConventions}.
               5. Confirm no files outside files_to_change were modified (use changes_read_latest).
-              Do NOT run shell commands — this is a code-inspection-only review.
-              If the change is correct, call handoff(route_keyword: "APPROVED").
-              If revision is needed, call handoff(route_keyword: "REVISION REQUIRED") and explain what to fix.
-              If the plan needs rethinking, call handoff(route_keyword: "REPLAN REQUIRED").
+              6. Run the build command from the convention profile to confirm the project compiles.
+              7. Run the verify_command from the brief to confirm runtime correctness.
+              Emit a JSON review block covering every acceptance criterion with verdict (PASS/FAIL)
+              and evidence before your routing keyword.
+              If all criteria pass, call handoff(route_keyword: "APPROVED").
+              If targeted fixes are needed, call handoff(route_keyword: "REVISION REQUIRED") and
+              describe each fix: file, line, current code, exact replacement.
+              If the approach is wrong, call handoff(route_keyword: "REPLAN REQUIRED").
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
               - FileSystem
+              - Shell
               - Changes
               - SessionContext
               - Handoff
@@ -141,19 +185,29 @@ public static partial class InitTemplates
             {AgentFileOptions}
             """;
 
+        var approved = $"""
+            Name: Approved
+            Description: Terminal confirmation node — emits a one-line completion summary.
+            Instructions: |
+              All acceptance criteria have already been verified and approved.
+              Write exactly one sentence confirming the task is complete. Nothing else.
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            FunctionChoice: none
+            {AgentFileOptions}
+            """;
+
         var mainConfig = $"""
             Orchestration:
-              Name: Brownfield Codebase Pipeline
+              Name: Brownfield Pipeline
               Description: >-
-                Archaeologist recons the existing codebase and writes a discovery brief;
-                Planner designs the targeted change; Developer implements with a scoped change
-                envelope; Reviewer inspects by code review. Conventions detected during recon
-                are automatically injected into every agent's system prompt.
+                Archaeologist → Planner → Developer → Reviewer as a directed graph. One-time recon
+                writes a convention profile and discovery brief; all subsequent agents read these
+                rather than re-exploring the codebase. Reviewer has two back-edge targets:
+                REVISION REQUIRED → Developer, REPLAN REQUIRED → Planner.
 
               Security:
                 FileSystemSandboxPath: .   # set to your project root (e.g. ~/projects/myapp)
-                # ChangeEnvelope is seeded automatically from the discovery brief when
-                # Brownfield.SeedEnvelopeFromBrief is true — no need to list files manually.
 
               Brownfield:
                 EntryPoints:
@@ -162,9 +216,6 @@ public static partial class InitTemplates
                 DiscoveryBriefPath: {FuseraftPaths.LocalBrownfieldBrief}
                 ConventionProfilePath: {FuseraftPaths.LocalConventions}
 
-              EvidenceStore:
-                Path: {FuseraftPaths.LocalEvidence}
-
               ChangeTracking:
                 Path: {FuseraftPaths.LocalChanges}
 
@@ -172,90 +223,73 @@ public static partial class InitTemplates
                 BriefPath: {FuseraftPaths.LocalBrief}
                 ChangeLogPath: {FuseraftPaths.LocalChanges}
 
-              Contracts:
-                - Name: ReconComplete
-                  Requires:
-                    - Type: FileExists
-                      Path: {FuseraftPaths.LocalBrownfieldBrief}
-                    - Type: FileExists
-                      Path: {FuseraftPaths.LocalConventions}
-
-                - Name: BriefExists
-                  Requires:
-                    - Type: FileExists
-                      Path: {FuseraftPaths.LocalBrief}
-
-                - Name: ImplementationComplete
-                  Requires:
-                    - Type: CommandSucceeded
-                      Pattern: "build|compile|test|check"
-
-              FailureHandling:
-                MissingEvidence:
-                  Action: Reinstruct
-                  Threshold: 3
-                NoProgress:
-                  Action: Abort
-                  Threshold: 3
-
               Events:
                 Path: {FuseraftPaths.LocalEventsLog}
 
-              WarnTurnTokens: 300000
+              WarnTurnTokens: 60000
 
               # Each agent lives in its own YAML file in agents/ — edit, version, or reuse
-              # them independently across configs. Inline fields override the file at load time.
+              # them independently across configs.
               Agents:
                 - AgentFile: agents/archaeologist.yaml
                 - AgentFile: agents/planner.yaml
                 - AgentFile: agents/developer.yaml
                 - AgentFile: agents/reviewer.yaml
+                - AgentFile: agents/approved.yaml
 
               Selection:
-                Type: statemachine
-                StateMachine:
-                  Initial: Recon
+                Type: graph
+                Graph:
+                  EntryNode: recon
+                  MaxRetries: 4
 
-                  States:
-                    Recon:
+                  Nodes:
+                    - Id: recon
                       Agent: Archaeologist
-                      Transitions:
-                        - To: Planning
-                          Signal: "RECON COMPLETE"
-                          Contract: ReconComplete
-
-                    Planning:
+                    - Id: planner
                       Agent: Planner
-                      Transitions:
-                        - To: Implementation
-                          Signal: "HANDOFF TO DEVELOPER"
-                          Contract: BriefExists
-
-                    Implementation:
+                    - Id: developer
                       Agent: Developer
-                      Transitions:
-                        - To: Review
-                          Signal: "HANDOFF TO REVIEWER"
-                          Contract: ImplementationComplete
-                          HandoffContext:
-                            - Source: session_context
-                            - Source: changes_recent
-                        - To: Planning
-                          Signal: "REPLAN REQUIRED"
-
-                    Review:
+                    - Id: reviewer
                       Agent: Reviewer
-                      Transitions:
-                        - To: Done
-                          Signal: APPROVED
-                        - To: Implementation
-                          Signal: "REVISION REQUIRED"
-                        - To: Planning
-                          Signal: "REPLAN REQUIRED"
-
-                    Done:
-                      Agent: Reviewer
+                    - Id: approved
+                      Agent: Approved
                       Terminal: true
+
+                  Edges:
+                    # Forward edges
+                    - From: recon
+                      To: planner
+                      Keyword: "RECON COMPLETE"
+                      Validators: [RequireWriteFile]       # blocks until discovery files are written
+
+                    - From: planner
+                      To: developer
+                      Keyword: "HANDOFF TO DEVELOPER"
+                      Validators: [RequireBrief]           # blocks until brief.json is valid
+
+                    - From: developer
+                      To: reviewer
+                      Keyword: "HANDOFF TO REVIEWER"
+                      Validators: [RequireWriteFile]       # blocks until at least one file is written
+
+                    - From: reviewer
+                      To: approved
+                      Keyword: "APPROVED"
+                      Validators: [RequireReviewJudgement]
+
+                    # Back-edges
+                    - From: reviewer
+                      To: developer
+                      Keyword: "REVISION REQUIRED"         # targeted fix — bypass recon and planning
+
+                    - From: reviewer
+                      To: planner
+                      Keyword: "REPLAN REQUIRED"           # approach rethink — skip recon
+
+                    - From: developer
+                      To: planner
+                      Keyword: "REPLAN REQUIRED"           # developer can also escalate
 
               Termination:
                 Type: composite
@@ -269,7 +303,30 @@ public static partial class InitTemplates
               Compaction:
                 TriggerTurnCount: 30
                 KeepRecentTurns: 8
-                Mode: lossless
+                Mode: intent
+
+              ContextBudget:
+                WarnAt: 60000
+                CutoverAt: 100000
+                MaxSingleTurnInputTokens: 200000
+
+              # ---------------------------------------------------------------------------
+              # OPTIONAL EXTRAS — uncomment as needed
+              # ---------------------------------------------------------------------------
+
+              # EvidenceStore:
+              #   Path: {FuseraftPaths.LocalEvidence}
+
+              # Checkpoint:
+              #   Mode: json
+              #   Path: {FuseraftPaths.LocalCheckpoints}
+
+              # Models:
+              #   fast:
+              #     ModelId: {model}
+              #   reasoning:
+              #     ModelId: {model}
+              #     ReasoningEffort: low
             """;
 
         return new GeneratedConfig(mainConfig, [
@@ -277,6 +334,7 @@ public static partial class InitTemplates
             ("agents/planner.yaml",       planner),
             ("agents/developer.yaml",     developer),
             ("agents/reviewer.yaml",      reviewer),
+            ("agents/approved.yaml",      approved),
         ]);
     }
 }
