@@ -10,6 +10,7 @@ using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Plugins;
 using fuseraft.Core.Models;
 using fuseraft.Orchestration;
+using fuseraft.Orchestration.Strategies;
 using MagenticOrchestrator = fuseraft.Orchestration.MagenticOrchestrator;
 
 namespace fuseraft.Cli;
@@ -113,10 +114,15 @@ public sealed class SessionRunner(
             // agent from spending expensive tokens on a turn that would immediately trigger
             // post-turn compaction anyway. Skipped for the first turn after a compaction
             // (_justCompacted) so we don't thrash when the retained tail itself is large.
+            //
+            // Estimate uses chars / 3 rather than / 4: code-heavy content (tool results,
+            // file reads) averages ~3 chars per token, and the estimate omits tool-schema
+            // overhead (~10–20 k tokens for agents with many tools). The conservative
+            // divisor compensates for both without needing per-agent schema introspection.
             if (!_justCompacted
                 && compactor is not null
                 && contextBudget?.MaxSingleTurnInputTokens > 0
-                && checkpoint.Messages.Sum(m => (m.Content?.Length ?? 0) / 4) > contextBudget.MaxSingleTurnInputTokens)
+                && checkpoint.Messages.Sum(m => (m.Content?.Length ?? 0) / 3) > contextBudget.MaxSingleTurnInputTokens)
             {
                 AnsiConsole.MarkupLine(
                     $"[yellow]  ⚡ Pre-turn context estimate exceeds MaxSingleTurnInputTokens " +
@@ -491,6 +497,11 @@ public sealed class SessionRunner(
         if (checkpoint.CurrentStateName is not null)
             orchestrator.SetResumeStateName(checkpoint.CurrentStateName);
 
+        // Restore failure-tracking counters for the state machine so MaxConsecutiveContractFailures
+        // and the REPLAN BLOCKED guard survive across compaction cycles.
+        if (orchestrator is AgentOrchestrator ao && checkpoint.StateMachineState is { } smState)
+            ao.SetResumeSnapshot(smState);
+
         // Restore Magentic loop-counter state so the next StreamAsync call resumes at
         // the correct round/stall/reset counts rather than restarting from zero.
         if (orchestrator is MagenticOrchestrator magentic && checkpoint.MagenticState is { } magState)
@@ -741,6 +752,8 @@ public sealed class SessionRunner(
 
         // Capture the state machine's current state so post-compaction StreamAsync calls
         // restore to e.g. "Testing" rather than resetting to the initial "Planning" state.
+        // Also capture failure-tracking counters so MaxConsecutiveContractFailures and the
+        // REPLAN BLOCKED guard survive across compaction cycles.
         if (snapshotter is not null)
         {
             try
@@ -751,6 +764,12 @@ public sealed class SessionRunner(
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex) { Debug.WriteLine($"[SessionRunner] state snapshot failed: {ex.Message}"); }
+        }
+
+        if (snapshotter is StateMachineSelectionStrategy smStrategy)
+        {
+            try { checkpoint.StateMachineState = smStrategy.TakeCheckpointState(); }
+            catch (Exception ex) { Debug.WriteLine($"[SessionRunner] failure-state capture failed: {ex.Message}"); }
         }
 
         // Diagnostic (Phase 5): log both the last-message agent and the state machine's
@@ -768,6 +787,11 @@ public sealed class SessionRunner(
 
         int turnsBefore = checkpoint.Messages.Count;
 
+        // Snapshot original messages before any trimming — needed for signal pinning.
+        var originalMessages = compactor.Config.PinLastRoutingSignal
+            ? (IReadOnlyList<AgentMessage>)checkpoint.Messages.ToList()
+            : null;
+
         if (compactor.IsWindowMode)
         {
             var trimmed = compactor.TrimToWindow(checkpoint.Messages);
@@ -775,6 +799,10 @@ public sealed class SessionRunner(
 
             checkpoint.Messages.Clear();
             checkpoint.Messages.AddRange(trimmed);
+
+            if (originalMessages is not null)
+                TryPinLastRoutingSignal(checkpoint.Messages, originalMessages);
+
             checkpoint.LastUpdatedAt = DateTime.UtcNow;
 
             sessionMetrics?.RecordCompaction(_pendingCompactionReason);
@@ -807,6 +835,10 @@ public sealed class SessionRunner(
         checkpoint.Messages.Clear();
         checkpoint.Messages.Add(summary);
         checkpoint.Messages.AddRange(retained);
+
+        if (originalMessages is not null)
+            TryPinLastRoutingSignal(checkpoint.Messages, originalMessages);
+
         checkpoint.LastUpdatedAt = DateTime.UtcNow;
 
         sessionMetrics?.RecordCompaction(_pendingCompactionReason);
@@ -822,6 +854,64 @@ public sealed class SessionRunner(
 
         await sessionStore.SaveAsync(checkpoint, cancellationToken);
         return checkpoint;
+    }
+
+    // Re-injects the last handoff signal at the head of the retained window if it was
+    // dropped by compaction. Prevents keyword_not_found re-invocations on the first turn
+    // after compaction when the signal fell outside the retained tail.
+    // The synthetic AgentMessage uses Role="user" so it is replayed as a ChatMessage that
+    // IsSignalOnOwnLine can match — it does NOT start with "[fuseraft:" so TransitionAlreadyFired
+    // treats it as unprocessed.
+    private static void TryPinLastRoutingSignal(
+        List<AgentMessage> retained,
+        IReadOnlyList<AgentMessage> original)
+    {
+        // Find the last handoff in the pre-compaction history.
+        AgentMessage? lastHandoff = null;
+        for (int i = original.Count - 1; i >= 0; i--)
+        {
+            var m = original[i];
+            if (m.Role == "assistant" &&
+                m.ToolCalls?.Any(tc => string.Equals(tc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase)) == true)
+            {
+                lastHandoff = m;
+                break;
+            }
+        }
+        if (lastHandoff is null) return;
+
+        // Extract route_keyword from ArgsSummary: "route_keyword=SOME KEYWORD"
+        var handoffCall = lastHandoff.ToolCalls!.First(tc =>
+            string.Equals(tc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase));
+        var argsSummary = handoffCall.ArgsSummary;
+        if (argsSummary is null) return;
+
+        var prefix = $"{HandoffPlugin.ArgumentName}=";
+        var routeKeyword = argsSummary.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            ? argsSummary[prefix.Length..].Trim()
+            : null;
+        if (string.IsNullOrEmpty(routeKeyword)) return;
+
+        // Skip if the signal already survived into the retained window.
+        bool alreadyPresent = retained.Any(m =>
+            m.Role == "assistant" &&
+            m.ToolCalls?.Any(tc =>
+                string.Equals(tc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase) &&
+                tc.ArgsSummary?.EndsWith(routeKeyword, StringComparison.OrdinalIgnoreCase) == true) == true);
+        if (alreadyPresent) return;
+
+        // Inject a synthetic user message with the signal on its own line.
+        // Placed after the compaction summary (index 1) so it appears as early context.
+        var synthetic = new AgentMessage
+        {
+            AgentName = lastHandoff.AgentName,
+            Content   = $"[Resume: pre-compaction routing signal from {lastHandoff.AgentName}]\n{routeKeyword}",
+            Role      = "user",
+            TurnIndex = lastHandoff.TurnIndex,
+        };
+
+        int insertAt = retained.Count > 0 && retained[0].IsCompactionSummary ? 1 : 0;
+        retained.Insert(insertAt, synthetic);
     }
 
     // Resets all per-compaction-cycle state in one place. Every counter or flag that
