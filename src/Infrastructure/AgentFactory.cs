@@ -90,7 +90,7 @@ public sealed class AgentFactory(
     /// the tool wrapper so callers see each tool call in real time rather than in bulk
     /// after all tools in a batch have finished executing.
     /// </param>
-    public AIAgent Create(AgentConfig config, Action<string, string, string?>? onToolCalling = null)
+    public AIAgent Create(AgentConfig config, ContextBudgetConfig? sessionBudget = null, Action<string, string, string?>? onToolCalling = null)
     {
         if (string.IsNullOrWhiteSpace(config.Name))
             throw new ArgumentException("Agent Name must not be empty.", nameof(config));
@@ -175,13 +175,22 @@ public sealed class AgentFactory(
         // FunctionInvokingChatClient loop resends all prior tool results. When set, the
         // oldest tool-result messages are replaced with compact placeholders before each
         // inner LLM call so the context stays roughly constant across iterations.
-        // When neither MaxInTurnContextTokens nor MaxContextTokens is configured, fall
-        // back to a 500 k-char (≈ 125 k-token) floor so unconfigured agents are still
-        // protected against within-turn accumulation.
-        const int DefaultMaxInTurnChars = 500_000;
+        //
+        // Priority order:
+        //   1. Per-agent MaxInTurnContextTokens — explicit agent-level override.
+        //   2. Session MaxSingleTurnInputTokens / 3 — allocates 1/3 of the per-turn
+        //      budget to within-turn tool results, leaving headroom for the system
+        //      prompt, tool schemas (~10–20 k tokens), and cross-turn history.
+        //   3. Model MaxContextTokens — fall back to the model's context window.
+        //   4. DefaultMaxInTurnChars — conservative floor for unconfigured agents.
+        //      Halved from the previous 500 k to reduce the risk of single-turn
+        //      explosions when neither the session nor the model has explicit limits.
+        const int DefaultMaxInTurnChars = 200_000;
         var maxInTurnChars = config.MaxInTurnContextTokens > 0
             ? config.MaxInTurnContextTokens * 4
-            : (maxContextChars > 0 ? maxContextChars : DefaultMaxInTurnChars);
+            : sessionBudget?.MaxSingleTurnInputTokens > 0
+                ? sessionBudget.MaxSingleTurnInputTokens / 3 * 4
+                : (maxContextChars > 0 ? maxContextChars : DefaultMaxInTurnChars);
 
         // Deterministic sliding-window cap: always keep only the last N tool call/result
         // pairs in full, replacing older ones with placeholders unconditionally.

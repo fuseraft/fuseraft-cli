@@ -36,6 +36,9 @@ public static partial class InitTemplates
                      the root cause, add a failure_analysis field describing what went wrong
                      and why the previous approach failed.
                    - Do NOT re-handoff with the same brief — the Developer already tried it.
+                   - Append to (or create) the known_pitfalls array in the brief: each entry
+                     names an approach already tried and why it failed. The Developer reads
+                     this before starting and MUST NOT repeat any listed approach.
                  IF no failure signal and {FuseraftPaths.LocalBrief} already exists and still
                  covers the current task: call handoff(route_keyword: "HANDOFF TO CRITIC")
                  immediately without rewriting it.
@@ -72,6 +75,22 @@ public static partial class InitTemplates
                      Abbreviated commands cannot be matched against the session log and will
                      cause ImplementationComplete to loop indefinitely.
                    acceptance_criteria — array of testable criteria the code must satisfy
+              5b. SELF-CRITIQUE — run these checks against the brief you just wrote (or
+                  the existing brief if you skipped step 5). Fix before continuing.
+                  a. files_to_change completeness: use sub_agent_explore to confirm no
+                     clearly in-scope file is missing (call sites, tests, config). Add any
+                     missing files.
+                  b. acceptance_criteria testability: every criterion must produce a binary
+                     PASS/FAIL from an automated test. Rewrite any description criterion.
+                  c. verify_command concreteness: must run actual feature logic, not just
+                     compile. Flags that assume pre-built state (--no-build, --no-restore)
+                     are only valid when the build step precedes them in the same command
+                     chain (&&). Rewrite any command that uses such flags standalone.
+                  d. implementation_hints specificity: every hint must name file + symbol/
+                     method + why it matters. Remove or expand file-only hints.
+                  e. execution_checklist: write an execution_checklist array of discrete,
+                     ordered, verifiable steps ("create fwc/Counter.cs", "add glob exclusion
+                     to main.csproj"). The Developer works through this list in order.
               6. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO CRITIC").
             Model:
@@ -151,8 +170,11 @@ public static partial class InitTemplates
             Instructions: |
               You are a senior software engineer. Your job is to:
               1. {ContextReadStep}
-              2. Read {FuseraftPaths.LocalBrief}. Then read the Execution State section in your
-                 context — it contains:
+              2. Read {FuseraftPaths.LocalBrief}. Check for these fields:
+                   known_pitfalls — approaches already tried and known to fail. You MUST NOT
+                                    repeat any listed approach, even partially.
+                   execution_checklist — ordered steps. Work through them in order.
+                 Then read the Execution State section in your context — it contains:
                    ActiveFailures   — build/compiler errors with file, line, and error code.
                                       These are the specific errors you must fix.
                    FailedAttempts   — approaches that were tried and failed this session.
@@ -165,6 +187,17 @@ public static partial class InitTemplates
                  If the handoff context includes a test report or failure summary, read it before
                  writing any code. Root-cause first, patch second — read the source of the failing
                  call before patching; a patch without understanding the failure will fail again.
+                 BUILD ERROR TRIAGE — follow before touching any source file:
+                   a. Every compiler/linker error identifies a build unit — read that attribution
+                      first (e.g. [project.csproj] suffix, CMake target, Cargo package, Make rule).
+                      That tells you WHICH config file to fix, not just which source file.
+                   b. If a source file's errors are attributed to build unit A but logically belong
+                      to unit B, fix A's include/exclude rules — not B's source.
+                   c. A "duplicate symbol" error almost always means one file is compiled by two
+                      build units. Fix the glob/include patterns — do not touch the source.
+                   d. Before each shell command, state in one sentence why it will produce a
+                      different result than the previous run. A repeated command without a reason
+                      is not a hypothesis — it is a loop.
               3. Implement every file in files_to_change.
                  FILE WRITE RULES — follow exactly:
                    a. For existing files: always use patch_file. Never use write_file on a file
@@ -412,14 +445,15 @@ public static partial class InitTemplates
 
               Verifier:
                 AgentName: Verifier
-                EveryNTurns: 5
+                EveryNTurns: 4
                 TriggerOnSuspiciousTransition: true
                 FindingsKeyword: INCONSISTENCY
 
               Compaction:
                 TriggerTurnCount: 30
-                KeepRecentTurns: 8
+                KeepRecentTurns: 12
                 Mode: lossless
+                PinLastRoutingSignal: true
 
               # WarnTurnTokens: warn when a single turn's input exceeds this value.
               # Keep this below ContextBudget.CutoverAt so the warning fires before
@@ -431,10 +465,13 @@ public static partial class InitTemplates
               # after each compaction cycle so the session can run indefinitely.
               # MaxSingleTurnInputTokens guards against single-turn explosions that exhaust
               # the cumulative budget in one shot — compaction fires before the next turn.
+              # MaxToolResultTokens caps individual tool result size before it enters the
+              # context slice — prevents a single large build log from filling the budget.
               ContextBudget:
                 WarnAt: 60000
                 CutoverAt: 100000
                 MaxSingleTurnInputTokens: 200000
+                MaxToolResultTokens: 8000
 
               Events:
                 Path: {FuseraftPaths.LocalEventsLog}
@@ -480,12 +517,14 @@ public static partial class InitTemplates
                         - To: Testing
                           Signal: "HANDOFF TO TESTER"
                           Contract: ImplementationComplete
+                          RecoveryAgent: PlannerCritic
                           HandoffContext:
                             - Source: session_context
                             - Source: changes_recent
                             - Source: brief_field:test_targets
                         - To: Planning
                           Signal: "REPLAN REQUIRED"
+                          MaxRevisits: 2
                           HandoffContext:
                             - Source: session_context
                             - Source: changes_recent

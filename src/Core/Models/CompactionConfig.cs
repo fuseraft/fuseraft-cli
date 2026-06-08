@@ -96,6 +96,15 @@ public record CompactionConfig
     public bool IncludeExploration { get; init; } = true;
 
     /// <summary>
+    /// When <c>true</c>, the last <c>handoff(route_keyword=...)</c> signal emitted before
+    /// compaction is re-injected at the head of the retained window if it was dropped by
+    /// trimming. Prevents <c>keyword_not_found</c> re-invocations on the first turn after
+    /// compaction when the signal fell outside the retained tail.
+    /// Default: <c>false</c>.
+    /// </summary>
+    public bool PinLastRoutingSignal { get; init; } = false;
+
+    /// <summary>
     /// Optional custom prompt template for LLM-mode compaction. When set, replaces the
     /// built-in structured summary prompt entirely. Use the same placeholders as the default:
     /// <c>{{$task}}</c>, <c>{{$turn_count}}</c>, <c>{{$change_log}}</c>, <c>{{$history}}</c>.
