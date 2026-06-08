@@ -75,4 +75,34 @@ public sealed record ContextSnapshot
     /// before acting on it.
     /// </summary>
     public IReadOnlyList<string> ExpiredProvenanceWarnings { get; init; } = [];
+
+    // ── State machine failure-tracking fields ────────────────────────────────
+
+    /// <summary>
+    /// Active transition failure counter: key = "State::TransitionTo", count = consecutive
+    /// failures, error = last validator message. Null when no failure is active.
+    /// Populated by <see cref="fuseraft.Orchestration.Strategies.StateMachineSelectionStrategy.SnapshotAsync"/>.
+    /// </summary>
+    public (string Key, int Count, string LastError)? TransitionFailure { get; init; }
+
+    /// <summary>
+    /// Active no-signal counter: state = current state name, count = consecutive turns
+    /// without a routing signal. Null when no failure is active.
+    /// </summary>
+    public (string State, int Count)? NoSignalFailure { get; init; }
+
+    /// <summary>
+    /// States entered at least once during the session. Used to detect back-edge signals.
+    /// </summary>
+    public IReadOnlySet<string> VisitedStates { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Per-back-edge revisit counts. Key format: "FromState::ToState".
+    /// </summary>
+    public IReadOnlyDictionary<string, int> BackEdgeVisits { get; init; } = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Transition keys ("State::TransitionTo") for which one-shot recovery logic already fired.
+    /// </summary>
+    public IReadOnlySet<string> RecoveryActivated { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 }

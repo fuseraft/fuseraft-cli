@@ -40,6 +40,9 @@ public sealed class ConversationCompactor(
 
     public void SetSessionId(string sessionId) => _sessionId = sessionId;
 
+    /// <summary>Exposes the compaction configuration for callers that need to inspect it.</summary>
+    public CompactionConfig Config => config;
+
     private string? ExpandedNote =>
         resumptionNote is null ? null
         : _sessionId is { Length: > 0 }
