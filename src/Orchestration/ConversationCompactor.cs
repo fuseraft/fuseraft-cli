@@ -1045,7 +1045,6 @@ public sealed class ConversationCompactor(
         if (partial.Length == 0) return false;
         return capturedPaths.Any(p =>
             p.EndsWith(partial, StringComparison.OrdinalIgnoreCase) ||
-            partial.Contains(Path.GetFileName(p), StringComparison.OrdinalIgnoreCase) ||
             p.Contains(partial, StringComparison.OrdinalIgnoreCase));
     }
 
