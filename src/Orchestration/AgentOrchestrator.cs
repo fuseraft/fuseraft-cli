@@ -856,6 +856,14 @@ public sealed class AgentOrchestrator(
                     session_context  = metrics.SessionContextChars,
                     knowledge        = metrics.KnowledgeChars,
                     history          = metrics.HistoryChars,
+                    history_breakdown = new
+                    {
+                        msgs                   = metrics.HistoryMessageCount,
+                        user                   = metrics.HistoryUserCount,
+                        assistant              = metrics.HistoryAssistantCount,
+                        tool                   = metrics.HistoryToolCount,
+                        has_compaction_summary = metrics.HistoryHasCompactionSummary,
+                    },
                 },
                 // Tool-schema tokens are sent as the API `tools` parameter, not as messages,
                 // so they are invisible to context_chars. This estimate fills the gap so

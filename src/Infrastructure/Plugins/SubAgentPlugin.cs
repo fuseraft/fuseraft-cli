@@ -268,6 +268,8 @@ public sealed class SubAgentPlugin(
         try
         {
             string result;
+            long? inputTok  = null;
+            long? outputTok = null;
             if (onChunk is not null)
             {
                 var sb = new StringBuilder();
@@ -285,6 +287,8 @@ public sealed class SubAgentPlugin(
             else
             {
                 var response = await loopClient.GetResponseAsync(messages, options, cts.Token);
+                inputTok  = response.Usage?.InputTokenCount;
+                outputTok = response.Usage?.OutputTokenCount;
                 result = string.IsNullOrWhiteSpace(response.Text)
                     ? "Sub-agent produced no text output."
                     : response.Text;
@@ -293,7 +297,8 @@ public sealed class SubAgentPlugin(
             if (eventEmitter is not null)
                 await eventEmitter.EmitAsync("sub_agent_end",
                     agent:   parentAgentName,
-                    payload: new { outcome, summary_chars = result.Length, mode });
+                    payload: new { outcome, summary_chars = result.Length, mode,
+                                   input_tokens = inputTok, output_tokens = outputTok });
 
             return result;
         }
