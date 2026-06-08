@@ -187,9 +187,10 @@ public static partial class InitTemplates
                     a new fix without first closing the current hypothesis. Read the failing
                     source before retrying — understand the new error before writing new code.
                  d. If verify_command PASSES: call confirm_hypothesis(id, evidence) to close it.
-                 You MUST NOT call handoff with any open (unclosed) hypotheses. Every
-                 create_hypothesis call must be paired with either reject_hypothesis or
-                 confirm_hypothesis before routing.
+                 You MUST NOT call handoff(route_keyword: "HANDOFF TO TESTER") with any open
+                 (unclosed) hypotheses — close every hypothesis before claiming implementation
+                 complete. For other routing signals (e.g., "REPLAN REQUIRED"), open hypotheses
+                 are allowed when the build is still failing.
               5. Commit with git_add and git_commit.
               6. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO TESTER").
@@ -319,8 +320,10 @@ public static partial class InitTemplates
                  c. KNOWN ROOT CAUSE UNADDRESSED: ConfirmedRootCauses is non-empty but
                     ActiveFailures still contains the same error category — the root cause
                     was identified but the fix was not applied or did not work.
-                 d. OPEN HYPOTHESES: Any hypothesis with status "open" — the Developer
-                    routed without closing it.
+                 d. OPEN HYPOTHESES: Any hypothesis with status "open" when ActiveFailures
+                    is empty — the Developer claimed success but left a hypothesis unclosed.
+                    Do NOT flag open hypotheses when ActiveFailures is non-empty; the
+                    Developer is still actively debugging and open hypotheses are expected.
                  e. CLAIMED SUCCESS WITHOUT EVIDENCE: An agent claimed "verify_command passed"
                     or "ImplementationComplete" but the change log does not show a successful
                     shell_run of that command.
