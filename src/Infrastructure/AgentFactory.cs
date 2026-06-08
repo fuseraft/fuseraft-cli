@@ -149,11 +149,12 @@ public sealed class AgentFactory(
         // This ensures memory reflects the current session and is ranked by relevance.
         var instructions = config.Instructions;
 
-        // Build the per-agent tool list. Wrap each tool with a notifying proxy when a
-        // ToolCalling callback is registered so notifications fire at invocation time
-        // (real-time) rather than after the whole batch finishes executing.
-        var tools = BuildTools(config, resolvedModel, config.Name, onToolCalling);
-        _toolCounts[config.Name] = tools.Count;
+        // Build the per-agent tool list, apply offload caching, then wrap each tool with a
+        // notifying proxy when a ToolCalling callback is registered so notifications fire
+        // at invocation time (real-time) rather than after the whole batch finishes executing.
+        var tools = ConvertPluginTools(config, resolvedModel);
+        tools     = BuildCachingMiddleware(tools, toolArtifactStore);
+        tools     = WrapWithNotifications(tools, config.Name, onToolCalling);
 
         // Build ChatOptions (temperature, max tokens, tool mode).
         // The tool list is passed so that MergeOptions can always fall back to the
@@ -205,7 +206,180 @@ public sealed class AgentFactory(
 
         // Always wrap: the adaptive context-trim retry fires on any provider rejection
         // classified as ContextExceeded, regardless of whether explicit limits are set.
-        var effectiveClient = chatClient.AsBuilder()
+        var effectiveClient = BuildMiddlewareChain(
+            chatClient, config, chatOptions,
+            maxContextChars, maxInTurnChars, maxInTurnToolPairs,
+            toolSchemaChars, maxPayloadBytes, hasHandoff);
+
+        // Pre-configure FunctionInvokingChatClient and wrap the skills context provider.
+        var agentChatClient = BuildEventEmitMiddleware(effectiveClient, config, skillsProvider);
+
+        // Construct the base ChatClientAgent with tools and chat options.
+        ChatClientAgent baseAgent = new(
+            chatClient: agentChatClient,
+            instructions: instructions,
+            name: config.Name,
+            description: config.Description,
+            tools: tools.Count > 0 ? tools.Cast<AITool>().ToList() : null);
+
+        // Wrap with middleware: ChangeTracker first (outermost), then Sandbox enforcement.
+        // Ordering: ChangeTracker wraps first so it always observes the final result —
+        // including [DENIED] responses from the sandbox — making every tool attempt auditable.
+        // Set the name on the final wrapped agent so the orchestrator can identify it.
+        // MAF's middleware builder preserves the name, but we verify here.
+        return BuildGovernanceMiddleware(baseAgent, config);
+    }
+
+    // Helpers
+
+    /// <summary>
+    /// Resolves every plugin declared in <paramref name="config"/> into a flat list of
+    /// <see cref="AIFunction"/> objects, applying per-plugin capability filters and
+    /// registering any <see cref="ITurnResettable"/> instances for turn-start reset.
+    /// </summary>
+    private List<AIFunction> ConvertPluginTools(AgentConfig config, ModelConfig resolvedModel)
+    {
+        var tools = new List<AIFunction>();
+
+        foreach (var pluginName in config.Plugins)
+        {
+            IEnumerable<AIFunction> functions;
+
+            // "Skills" is handled by AgentSkillsProvider (UseAIContextProviders), which
+            // injects load_skill / run_skill_script as tools on the chat client pipeline.
+            // The Plugins entry is a declaration of intent; no registry lookup is needed.
+            if (pluginName.Equals("Skills", StringComparison.OrdinalIgnoreCase))
+                continue;
+            // "Scratchpad" is per-agent — each agent gets its own file.
+            else if (pluginName.Equals("Scratchpad", StringComparison.OrdinalIgnoreCase))
+            {
+                var basePath = scratchpadConfig?.BasePath ?? FuseraftPaths.GlobalScratchpad;
+                functions = PluginRegistry.GetFunctionsFromObject(new ScratchpadPlugin(config.Name, basePath));
+            }
+            // "SubAgent" is per-agent — each agent gets its own lightweight IChatClient
+            // (optionally on a different, cheaper model) and a configurable tool set so
+            // the sub-agent respects the same sandbox constraints.
+            else if (pluginName.Equals("SubAgent", StringComparison.OrdinalIgnoreCase))
+            {
+                // Allow the sub-agent to run on a different model (e.g. Haiku for cost control).
+                var subModel  = string.IsNullOrWhiteSpace(config.SubAgentModel)
+                    ? resolvedModel
+                    : chatClientFactory.Resolve(new ModelConfig { ModelId = config.SubAgentModel });
+                var subClient = chatClientFactory.Create(subModel);
+
+                var explorerTools = BuildSubAgentTools(config, pluginRegistry, securityConfig);
+
+                functions = PluginRegistry.GetFunctionsFromObject(
+                    new SubAgentPlugin(subClient, explorerTools,
+                        eventEmitter:    eventEmitter,
+                        parentAgentName: config.Name,
+                        maxToolCalls:    config.SubAgentMaxToolCalls));
+            }
+            // "Chatroom" is per-agent (own sender name) but all agents share the same file.
+            else if (pluginName.Equals("Chatroom", StringComparison.OrdinalIgnoreCase))
+            {
+                var chatPath = FuseraftPaths.ExpandSessionId(
+                    chatroomConfig?.Path ?? FuseraftPaths.LocalChatroom,
+                    _sessionId ?? "startup");
+                functions = PluginRegistry.GetFunctionsFromObject(new ChatroomPlugin(config.Name, chatPath));
+            }
+            else if (pluginRegistry.TryGetAIFunctions(pluginName, out var aiFunctions))
+            {
+                functions = aiFunctions;
+            }
+            else if (pluginRegistry.TryGet(pluginName, out var plugin))
+            {
+                functions = PluginRegistry.GetFunctionsFromObject(plugin);
+            }
+            else if (pluginName.Equals("Investigation", StringComparison.OrdinalIgnoreCase))
+            {
+                // Investigation is registered only when ChangeTracking is configured.
+                // Skip gracefully rather than crashing at startup.
+                continue;
+            }
+            else
+            {
+                throw new InvalidOperationException(
+                    $"Agent '{config.Name}' references unknown plugin '{pluginName}'. " +
+                    $"Registered plugins: {string.Join(", ", pluginRegistry.RegisteredPlugins)}");
+            }
+
+            // Apply per-plugin capability filter when the agent declares constraints.
+            // Tools absent from the capability map (e.g. MCP tools) pass through unfiltered.
+            if (config.Capabilities.TryGetValue(pluginName, out var caps) && caps.Count > 0)
+                functions = functions.Where(f => PluginCapabilityMap.IsAllowed(f.Name, caps));
+
+            tools.AddRange(functions);
+        }
+
+        // Collect any newly-seen ITurnResettable plugin instances so OnAgentTurnStarting
+        // can reset their per-turn state before each agent's turn begins.
+        foreach (var pluginName in config.Plugins)
+        {
+            if (pluginRegistry.TryGet(pluginName, out var obj) && obj is ITurnResettable tr)
+                lock (_resettablesLock) _turnResettables.Add(tr);
+        }
+
+        return tools;
+    }
+
+    /// <summary>
+    /// Wraps every tool with a <see cref="ToolResultOffloadFilter"/> so oversized results
+    /// are stored to disk before they enter the conversation history. Applied before the
+    /// notification proxy so the stub is what the provider receives, not the raw large content.
+    /// Returns <paramref name="tools"/> unchanged when <paramref name="store"/> is null.
+    /// </summary>
+    private static List<AIFunction> BuildCachingMiddleware(
+        List<AIFunction> tools,
+        ToolResultArtifactStore? store)
+    {
+        if (store is not null)
+            tools = tools.Select(f => (AIFunction)new ToolResultOffloadFilter(f, store)).ToList();
+
+        return tools;
+    }
+
+    /// <summary>
+    /// Wraps every tool with a <see cref="NotifyingAIFunction"/> proxy so
+    /// <paramref name="onToolCalling"/> fires the moment a tool begins execution, not after
+    /// the whole batch finishes. Also records the final tool count for telemetry.
+    /// Returns <paramref name="tools"/> unchanged when <paramref name="onToolCalling"/> is null.
+    /// </summary>
+    private List<AIFunction> WrapWithNotifications(
+        List<AIFunction> tools,
+        string agentName,
+        Action<string, string, string?>? onToolCalling)
+    {
+        _toolCounts[agentName] = tools.Count;
+
+        // Wrap every tool with a notifying proxy so onToolCalling fires the moment the
+        // tool begins execution, not after the whole batch finishes.
+        if (onToolCalling is not null)
+            return tools.Select(f => (AIFunction)new NotifyingAIFunction(f, agentName, onToolCalling)).ToList();
+
+        return tools;
+    }
+
+    /// <summary>
+    /// Composes the context-trim and adaptive-retry middleware layer around
+    /// <paramref name="chatClient"/>. Handles in-turn deduplication, window trimming,
+    /// handoff detection, pre-flight budget/payload enforcement, and ContextExceeded retries
+    /// for both non-streaming and streaming paths.
+    /// </summary>
+    private IChatClient BuildMiddlewareChain(
+        IChatClient chatClient,
+        AgentConfig config,
+        ChatOptions? chatOptions,
+        int maxContextChars,
+        int maxInTurnChars,
+        int maxInTurnToolPairs,
+        int toolSchemaChars,
+        long maxPayloadBytes,
+        bool hasHandoff)
+    {
+        // Always wrap: the adaptive context-trim retry fires on any provider rejection
+        // classified as ContextExceeded, regardless of whether explicit limits are set.
+        return chatClient.AsBuilder()
             .Use(
                 getResponseFunc: async (messages, options, inner, ct) =>
                 {
@@ -296,7 +470,19 @@ public sealed class AgentFactory(
                     return inner.GetStreamingResponseAsync(messages, merged, ct);
                 })
             .Build();
+    }
 
+    /// <summary>
+    /// Wraps <paramref name="effectiveClient"/> with a <see cref="FunctionInvokingChatClient"/>
+    /// (capped at <see cref="AgentConfig.MaxToolCallsPerTurn"/> iterations) and, when a
+    /// <see cref="AgentSkillsProvider"/> is present, an outer AIContextProvider layer so
+    /// skill tools are visible to the function-invoker.
+    /// </summary>
+    private static IChatClient BuildEventEmitMiddleware(
+        IChatClient effectiveClient,
+        AgentConfig config,
+        AgentSkillsProvider? skillsProvider)
+    {
         // Pre-configure FunctionInvokingChatClient so ChatClientAgent reuses our instance
         // (it only adds its own when none is present in the pipeline). This lets us set
         // MaximumIterationsPerRequest per agent instead of accepting the framework default (40).
@@ -314,14 +500,16 @@ public sealed class AgentFactory(
             ? functionInvokingClient.AsBuilder().UseAIContextProviders(skillsProvider).Build()
             : functionInvokingClient;
 
-        // Construct the base ChatClientAgent with tools and chat options.
-        ChatClientAgent baseAgent = new(
-            chatClient: agentChatClient,
-            instructions: instructions,
-            name: config.Name,
-            description: config.Description,
-            tools: tools.Count > 0 ? tools.Cast<AITool>().ToList() : null);
+        return agentChatClient;
+    }
 
+    /// <summary>
+    /// Applies the governance middleware ring: wraps <paramref name="baseAgent"/> with
+    /// <see cref="ChangeTracker"/> (outermost, for full auditability) and then with
+    /// <see cref="SandboxEnforcementFilter"/> when a filesystem sandbox is configured.
+    /// </summary>
+    private AIAgent BuildGovernanceMiddleware(AIAgent baseAgent, AgentConfig config)
+    {
         // Wrap with middleware: ChangeTracker first (outermost), then Sandbox enforcement.
         // Ordering: ChangeTracker wraps first so it always observes the final result —
         // including [DENIED] responses from the sandbox — making every tool attempt auditable.
@@ -342,112 +530,7 @@ public sealed class AgentFactory(
                 .WrapAgent(agent);
         }
 
-        // Set the name on the final wrapped agent so the orchestrator can identify it.
-        // MAF's middleware builder preserves the name, but we verify here.
         return agent;
-    }
-
-    // Helpers
-
-    private List<AIFunction> BuildTools(
-        AgentConfig config,
-        ModelConfig resolvedModel,
-        string agentName,
-        Action<string, string, string?>? onToolCalling)
-    {
-        var tools = new List<AIFunction>();
-
-        foreach (var pluginName in config.Plugins)
-        {
-            IEnumerable<AIFunction> functions;
-
-            // "Skills" is handled by AgentSkillsProvider (UseAIContextProviders), which
-            // injects load_skill / run_skill_script as tools on the chat client pipeline.
-            // The Plugins entry is a declaration of intent; no registry lookup is needed.
-            if (pluginName.Equals("Skills", StringComparison.OrdinalIgnoreCase))
-                continue;
-            // "Scratchpad" is per-agent — each agent gets its own file.
-            else if (pluginName.Equals("Scratchpad", StringComparison.OrdinalIgnoreCase))
-            {
-                var basePath = scratchpadConfig?.BasePath ?? FuseraftPaths.GlobalScratchpad;
-                functions = PluginRegistry.GetFunctionsFromObject(new ScratchpadPlugin(config.Name, basePath));
-            }
-            // "SubAgent" is per-agent — each agent gets its own lightweight IChatClient
-            // (optionally on a different, cheaper model) and a configurable tool set so
-            // the sub-agent respects the same sandbox constraints.
-            else if (pluginName.Equals("SubAgent", StringComparison.OrdinalIgnoreCase))
-            {
-                // Allow the sub-agent to run on a different model (e.g. Haiku for cost control).
-                var subModel  = string.IsNullOrWhiteSpace(config.SubAgentModel)
-                    ? resolvedModel
-                    : chatClientFactory.Resolve(new ModelConfig { ModelId = config.SubAgentModel });
-                var subClient = chatClientFactory.Create(subModel);
-
-                var explorerTools = BuildSubAgentTools(config, pluginRegistry, securityConfig);
-
-                functions = PluginRegistry.GetFunctionsFromObject(
-                    new SubAgentPlugin(subClient, explorerTools,
-                        eventEmitter:    eventEmitter,
-                        parentAgentName: config.Name,
-                        maxToolCalls:    config.SubAgentMaxToolCalls));
-            }
-            // "Chatroom" is per-agent (own sender name) but all agents share the same file.
-            else if (pluginName.Equals("Chatroom", StringComparison.OrdinalIgnoreCase))
-            {
-                var chatPath = FuseraftPaths.ExpandSessionId(
-                    chatroomConfig?.Path ?? FuseraftPaths.LocalChatroom,
-                    _sessionId ?? "startup");
-                functions = PluginRegistry.GetFunctionsFromObject(new ChatroomPlugin(config.Name, chatPath));
-            }
-            else if (pluginRegistry.TryGetAIFunctions(pluginName, out var aiFunctions))
-            {
-                functions = aiFunctions;
-            }
-            else if (pluginRegistry.TryGet(pluginName, out var plugin))
-            {
-                functions = PluginRegistry.GetFunctionsFromObject(plugin);
-            }
-            else if (pluginName.Equals("Investigation", StringComparison.OrdinalIgnoreCase))
-            {
-                // Investigation is registered only when ChangeTracking is configured.
-                // Skip gracefully rather than crashing at startup.
-                continue;
-            }
-            else
-            {
-                throw new InvalidOperationException(
-                    $"Agent '{config.Name}' references unknown plugin '{pluginName}'. " +
-                    $"Registered plugins: {string.Join(", ", pluginRegistry.RegisteredPlugins)}");
-            }
-
-            // Apply per-plugin capability filter when the agent declares constraints.
-            // Tools absent from the capability map (e.g. MCP tools) pass through unfiltered.
-            if (config.Capabilities.TryGetValue(pluginName, out var caps) && caps.Count > 0)
-                functions = functions.Where(f => PluginCapabilityMap.IsAllowed(f.Name, caps));
-
-            tools.AddRange(functions);
-        }
-
-        // Collect any newly-seen ITurnResettable plugin instances so OnAgentTurnStarting
-        // can reset their per-turn state before each agent's turn begins.
-        foreach (var pluginName in config.Plugins)
-        {
-            if (pluginRegistry.TryGet(pluginName, out var obj) && obj is ITurnResettable tr)
-                lock (_resettablesLock) _turnResettables.Add(tr);
-        }
-
-        // Wrap every tool with an offload filter so oversized results are stored to disk
-        // before they enter the conversation history. Applied before the notification proxy
-        // so the stub is what the provider receives, not the raw large content.
-        if (toolArtifactStore is not null)
-            tools = tools.Select(f => (AIFunction)new ToolResultOffloadFilter(f, toolArtifactStore)).ToList();
-
-        // Wrap every tool with a notifying proxy so onToolCalling fires the moment the
-        // tool begins execution, not after the whole batch finishes.
-        if (onToolCalling is not null)
-            return tools.Select(f => (AIFunction)new NotifyingAIFunction(f, agentName, onToolCalling)).ToList();
-
-        return tools;
     }
 
     // Assembles the tool list for a sub-agent spawned by SubAgentPlugin.
