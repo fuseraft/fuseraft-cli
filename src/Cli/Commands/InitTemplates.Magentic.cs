@@ -7,8 +7,8 @@ public static partial class InitTemplates
     /// <summary>
     /// Generates the <c>magentic</c> template: an AI-managed team where a manager LLM dynamically
     /// selects participants each round, plans the work, and replans when progress stalls.
-    /// Termination is controlled by <c>MaxRoundCount</c>, <c>MaxStallCount</c>, and
-    /// <c>MaxResetCount</c>; the <c>Termination</c> section is ignored for this selection type.
+    /// Five specialised worker agents cover research, planning, development, testing, and critique.
+    /// <c>EnablePlanReview: true</c> lets the user approve the manager's plan before execution begins.
     /// </summary>
     private static string Magentic(string model, string? endpoint) => $"""
         Orchestration:
@@ -16,10 +16,10 @@ public static partial class InitTemplates
           Description: >
             AI-managed team orchestrated by Magentic. A manager LLM plans the work,
             dynamically selects participants each round, and replans if progress stalls.
+            The manager benefits from a reasoning-capable model; workers default to '{model}'.
 
-          # Named model aliases — agents reference these by alias name so you only need to
-          # change the model ID in one place.  The manager benefits from a reasoning-capable
-          # model (e.g. o3, claude-opus-4-6, gemini-2.5-pro); both default to '{model}' here.
+          # Named model aliases — agents reference these by alias so you only change IDs once.
+          # Set 'manager' to a reasoning-capable model (claude-opus-4-8, o3, gemini-2.5-pro).
           Models:
             manager:
               ModelId: {model}{Ep(endpoint, "      ")}
@@ -28,15 +28,30 @@ public static partial class InitTemplates
 
           Agents:
             - Name: Researcher
-              Description: Gathers information, searches, and produces sourced summaries.
+              Description: Gathers information, searches the web and filesystem, and produces sourced summaries.
               Instructions: |
                 You are a Researcher. Find information, analyse it, and produce well-sourced
                 summaries. Use your tools to search and read content. Be thorough but concise.
+                Cite your sources and flag uncertainty explicitly.
               Model:
                 ModelId: worker
               Plugins:
                 - FileSystem
                 - Search
+                - Http
+                - Scratchpad
+
+            - Name: Planner
+              Description: Designs the approach, writes structured briefs, and breaks work into tasks.
+              Instructions: |
+                You are a Planner. Design a concrete, step-by-step approach for the work at hand.
+                Identify what needs to be done, in what order, and by whom. Be specific — vague
+                instructions waste cycles. Write plans and briefs to the filesystem.
+              Model:
+                ModelId: worker
+              Plugins:
+                - FileSystem
+                - SubAgent
                 - Scratchpad
 
             - Name: Developer
@@ -53,33 +68,53 @@ public static partial class InitTemplates
                 - Git
                 - Scratchpad
 
+            - Name: Tester
+              Description: Writes and runs tests; reports pass/fail with evidence.
+              Instructions: |
+                You are a Tester. Write tests that verify the feature works as intended.
+                Run them with shell_run and report each result with the exact command and output.
+                Never report a test as passing without evidence.
+              Model:
+                ModelId: worker
+              Plugins:
+                - FileSystem
+                - Shell
+                - Scratchpad
+
+            - Name: Critic
+              Description: Reviews artifacts for quality, correctness, and completeness.
+              Instructions: |
+                You are a Critic. Review whatever artifact you are given — code, plan, brief,
+                or research — for correctness, completeness, and quality. Be specific: name the
+                file and line, quote the problematic passage, and explain why it is wrong.
+                If the artifact is sound, say so explicitly with supporting evidence.
+              Model:
+                ModelId: worker
+              Plugins:
+                - FileSystem
+                - Scratchpad
+
           Selection:
             Type: magentic
             Magentic:
-              # The manager drives the planning and progress-evaluation loop.
-              # A reasoning-capable model is strongly recommended for this role.
               Model:
                 ModelId: manager
-              MaxRoundCount: 20      # hard cap on coordination rounds
+              MaxRoundCount: 25      # hard cap on coordination rounds
               MaxStallCount: 3       # consecutive stalled rounds before replanning
               MaxResetCount: 2       # max replan cycles before terminating
-              EnablePlanReview: false  # set to true to approve the plan before execution begins
+              EnablePlanReview: true # user approves the manager's plan before execution begins
 
-          # NOTE: The Termination section is IGNORED for Selection.Type 'magentic'.
-          # Session end is controlled entirely by MaxRoundCount, MaxStallCount, and
-          # MaxResetCount in the Magentic block above.  This section is present only
-          # to satisfy the config schema and may be removed.
+          # NOTE: Termination is controlled entirely by MaxRoundCount, MaxStallCount, and
+          # MaxResetCount above. This section exists only to satisfy the config schema.
           Termination:
             Type: maxiterations
-            MaxIterations: 50
+            MaxIterations: 80
 
           Compaction:
-            TriggerTurnCount: 50
-            KeepRecentTurns: 10
+            TriggerTurnCount: 40
+            KeepRecentTurns: 12
 
-          # ContextBudget: per-agent cumulative input-token thresholds. Warns before
-          # context rot sets in, then triggers compaction automatically. Counters reset
-          # after each compaction cycle so the session can run indefinitely.
+          # ContextBudget: per-agent cumulative input-token thresholds.
           # ContextBudget:
           #   WarnAt: 80000
           #   CutoverAt: 120000
