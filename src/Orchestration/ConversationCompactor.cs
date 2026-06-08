@@ -30,7 +30,8 @@ public sealed class ConversationCompactor(
     EvidenceStore? evidenceStore = null,
     fuseraft.Infrastructure.ObjectiveManager? objectiveManager = null,
     fuseraft.Infrastructure.KnowledgeSnapshotEnricher? knowledgeEnricher = null,
-    string? readCachePath = null)
+    string? readCachePath = null,
+    string? executionStatePath = null)
 {
     // Tracks savings ratios from the last AntiThrashWindow compactions so we can detect
     // conversations that are thrashing (repeatedly compacting but saving very little).
@@ -173,6 +174,12 @@ public sealed class ConversationCompactor(
                                     CombineBlocks(CombineBlocks(symbolBlock, objectiveBlock), reasoningBlock),
                                     explorationBlock);
 
+        // Phase 3: load ExecutionState once here so both LLM and hybrid paths can use it
+        // for content filtering and prompt addendum without re-reading the file.
+        var executionState    = await TryLoadExecutionStateAsync(cancellationToken);
+        var filteredCompact   = FilterForCompaction(toCompact, executionState);
+        var executionStateNote = executionState is not null ? ExecutionStateCompactionNote : null;
+
         // Intent mode: reconstruct from the intent log — fully deterministic, no LLM call.
         // When the intent log is unavailable, record a visible fallback notice so agents
         // resuming after compaction know the summary was degraded.
@@ -241,11 +248,11 @@ public sealed class ConversationCompactor(
 
             try
             {
-                var histText       = BuildHistoryText(toCompact, config.MaxCharsPerHistoryMessage);
+                var histText       = BuildHistoryText(filteredCompact, config.MaxCharsPerHistoryMessage);
                 var clText         = ReadChangeLog();
                 var hybridTrace    = ObservationExtractor.BuildToolTraceBlock(toCompact);
                 var (summText, summUsage) = await GenerateSummaryAsync(
-                    task, histText, clText, hybridTrace, toCompact.Count, cancellationToken);
+                    task, histText, clText, hybridTrace, toCompact.Count, cancellationToken, executionStateNote);
 
                 var hybridContent =
                     reconstructed.Content + "\n\n---\n\n" +
@@ -283,14 +290,14 @@ public sealed class ConversationCompactor(
                 "Compaction mode is '{Mode}' but no snapshotter or intent log is available — falling back to LLM mode.",
                 mode);
 
-        var historyText   = BuildHistoryText(toCompact, config.MaxCharsPerHistoryMessage);
+        var historyText   = BuildHistoryText(filteredCompact, config.MaxCharsPerHistoryMessage);
         var changeLogText = ReadChangeLog();
         var toolTrace     = ObservationExtractor.BuildToolTraceBlock(toCompact);
 
         try
         {
             var (summaryText, summaryUsage) = await GenerateSummaryAsync(
-                task, historyText, changeLogText, toolTrace, toCompact.Count, cancellationToken);
+                task, historyText, changeLogText, toolTrace, toCompact.Count, cancellationToken, executionStateNote);
 
             var summary = new AgentMessage
             {
@@ -444,7 +451,8 @@ public sealed class ConversationCompactor(
         string? changeLogText,
         string? toolTraceText,
         int turnCount,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? executionStateNote = null)
     {
         var changeLogBlock = changeLogText is not null
             ? $"""
@@ -464,13 +472,17 @@ public sealed class ConversationCompactor(
             ? $"\n\n{toolTraceText}\n\n"
             : string.Empty;
 
+        var executionStateBlock = executionStateNote is not null
+            ? $"\n\n{executionStateNote}\n\n"
+            : string.Empty;
+
         var template = !string.IsNullOrWhiteSpace(config.SummaryTemplate)
             ? config.SummaryTemplate
             : SummaryPrompt;
         var prompt = template
             .Replace("{{$task}}",        task)
             .Replace("{{$turn_count}}",  turnCount.ToString())
-            .Replace("{{$change_log}}", changeLogBlock + toolTraceBlock)
+            .Replace("{{$change_log}}", changeLogBlock + toolTraceBlock + executionStateBlock)
             .Replace("{{$history}}",     historyText);
 
         ChatResponse result;
@@ -941,6 +953,100 @@ public sealed class ConversationCompactor(
         sb.Append("Do not re-read these files from scratch. " +
                   "Jump directly to specific regions, or proceed to implementation.");
         return sb.ToString().TrimEnd();
+    }
+
+    // ---------------------------------------------------------------------------
+    // Phase 3 — Execution-state-aware compaction filter
+    // ---------------------------------------------------------------------------
+
+    private const string ExecutionStateCompactionNote =
+        "EXECUTION STATE NOTE: The current ExecutionState (injected separately into every " +
+        "agent turn) already records: build pass/fail status and compiler errors, failed " +
+        "attempt history, and open tasks. Do NOT summarize this information. Focus the " +
+        "summary on: decisions made and their rationale, architectural constraints " +
+        "discovered, agent coordination and handoffs, and information NOT captured in ExecutionState.";
+
+    private async Task<ExecutionState?> TryLoadExecutionStateAsync(CancellationToken ct)
+    {
+        if (executionStatePath is null || !File.Exists(executionStatePath)) return null;
+        try
+        {
+            var json = await File.ReadAllTextAsync(executionStatePath, ct);
+            return JsonSerializer.Deserialize<ExecutionState>(json, ChangeLogJsonOpts);
+        }
+        catch { return null; }
+    }
+
+    // Returns a copy of the message list with verbose content replaced by short markers
+    // for entries whose information is already captured in ExecutionState. Only Content
+    // is modified — ToolCalls is preserved so the tool-trace block remains accurate.
+    private static IReadOnlyList<AgentMessage> FilterForCompaction(
+        IReadOnlyList<AgentMessage> messages,
+        ExecutionState? state)
+    {
+        if (state is null) return messages;
+
+        var capturedPaths = state.SignificantChanges
+            .Select(c => c.Path)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var result = new List<AgentMessage>(messages.Count);
+        foreach (var msg in messages)
+            result.Add(ApplyCompactionMessageFilter(msg, capturedPaths));
+        return result;
+    }
+
+    private static AgentMessage ApplyCompactionMessageFilter(
+        AgentMessage msg, HashSet<string> capturedPaths)
+    {
+        if (msg.ToolCalls is not { Count: > 0 }) return msg;
+
+        // Build commands: shell_run with a build/publish/test command → already in ExecutionState.Build.
+        if (msg.ToolCalls.Any(tc => IsShellRunCall(tc.Name) && IsBuildCommand(tc.ArgsSummary)))
+            return msg with { Content = "[shell_run output captured in ExecutionState]" };
+
+        // File operations: all write/patch/delete calls where every touched path is already
+        // logged in ExecutionState.SignificantChanges → content adds no new information.
+        var fileOps = msg.ToolCalls.Where(tc => IsFileOpCall(tc.Name)).ToList();
+        if (fileOps.Count > 0 && fileOps.All(tc => IsPathCaptured(tc.ArgsSummary, capturedPaths)))
+            return msg with { Content = "[file operations logged in ExecutionState]" };
+
+        return msg;
+    }
+
+    private static bool IsShellRunCall(string name) =>
+        name.Replace("_", "").Equals("shellrun", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsBuildCommand(string? argsSummary)
+    {
+        if (argsSummary is null) return false;
+        var lower = argsSummary.ToLowerInvariant();
+        return lower.Contains("build")   || lower.Contains("publish") ||
+               lower.Contains("compile") || lower.Contains("cargo")   ||
+               lower.Contains("pytest")  || lower.Contains("cmake")   ||
+               lower.Contains("npm run") || lower.Contains("go test");
+    }
+
+    private static bool IsFileOpCall(string name)
+    {
+        var n = name.Replace("_", "").ToLowerInvariant();
+        return n is "writefile" or "patchfile" or "deletefile";
+    }
+
+    // ArgsSummary for write_file/patch_file is "path=<value>" (up to 60 chars, may be truncated).
+    // Checks whether the path referenced by the summary appears in the captured-paths set.
+    private static bool IsPathCaptured(string? argsSummary, HashSet<string> capturedPaths)
+    {
+        if (argsSummary is null) return false;
+        const string key = "path=";
+        var idx = argsSummary.IndexOf(key, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return false;
+        var partial = argsSummary[(idx + key.Length)..].TrimEnd('.', ' ');
+        if (partial.Length == 0) return false;
+        return capturedPaths.Any(p =>
+            p.EndsWith(partial, StringComparison.OrdinalIgnoreCase) ||
+            partial.Contains(Path.GetFileName(p), StringComparison.OrdinalIgnoreCase) ||
+            p.Contains(partial, StringComparison.OrdinalIgnoreCase));
     }
 
     private const string SummaryPrompt = """
