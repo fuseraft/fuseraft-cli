@@ -102,7 +102,6 @@ public static partial class InitTemplates
               - SubAgent
               - Decision
               - Objective
-              - Investigation
               - Handoff
             FunctionChoice: required
             {AgentFileOptions}
@@ -235,7 +234,6 @@ public static partial class InitTemplates
               - Shell
               - Git
               - Changes
-              - Investigation
               - SessionContext
               - Handoff
             FunctionChoice: required
@@ -272,7 +270,6 @@ public static partial class InitTemplates
               - FileSystem
               - Shell
               - Changes
-              - Investigation
               - SessionContext
               - Handoff
             FunctionChoice: required
