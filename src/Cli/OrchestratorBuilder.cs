@@ -565,6 +565,8 @@ public static class OrchestratorBuilder
                 sessionId ?? string.Empty,
                 loggerFactory.CreateLogger<StateProjector>());
 
+            await stateProjector.InitializeAsync();
+
             changeTracker = new ChangeTracker(ctConfig.Path, eventEmitter, evidenceStore, intentLog, loggerFactory.CreateLogger<ChangeTracker>(), knowledgeLayer.GraphBuilder, stateProjector);
             pluginRegistry.Register("Changes",      () => new ChangesPlugin(ctConfig.Path));
             pluginRegistry.Register("Investigation", () => new InvestigationPlugin(investigationLogPath, sessionId ?? string.Empty, stateProjector));
