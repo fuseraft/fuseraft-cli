@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text;
 using A2A;
 using AgentGovernance;
 using AgentGovernance.Audit;
@@ -208,6 +209,19 @@ public sealed class AgentFactory(
             .Use(
                 getResponseFunc: async (messages, options, inner, ct) =>
                 {
+                    // Drop write_file/patch_file pairs superseded by a later write_file to
+                    // the same path — the earlier write is never observable and is pure noise.
+                    messages = DropSupersededWritePairs(messages);
+
+                    // Drop observational calls (read_file, grep_file, list_*, stat_file, etc.)
+                    // that are superseded by a later identical call — only the freshest result matters.
+                    messages = DropSupersededObservationalPairs(messages);
+
+                    // Compress shell_run results that are superseded by a later run of the same
+                    // command to a single-line outcome. Keeps the call visible (showing the
+                    // attempt sequence) while eliminating the verbose output from earlier runs.
+                    messages = CompressSupersededShellPairs(messages);
+
                     // Strip verbose reasoning text from ALL intermediate tool-calling assistant
                     // messages before the window filter — reasoning from prior calls in the
                     // same turn is never needed again and is the primary cause of the O(N²)
@@ -257,6 +271,9 @@ public sealed class AgentFactory(
                 },
                 getStreamingResponseFunc: (messages, options, inner, ct) =>
                 {
+                    messages = DropSupersededWritePairs(messages);
+                    messages = DropSupersededObservationalPairs(messages);
+                    messages = CompressSupersededShellPairs(messages);
                     messages = TruncateIntermediateAssistantReasoning(messages);
 
                     if (maxInTurnToolPairs > 0)
@@ -714,6 +731,289 @@ public sealed class AgentFactory(
             => $"[{je.GetString()?.Length ?? 0:N0} chars — omitted from intermediate context]",
         _ => value
     };
+
+    /// <summary>
+    /// For <c>shell_run</c> calls with identical <c>command</c> + <c>workingDirectory</c>
+    /// arguments, compresses the tool result of earlier calls to a single-line outcome
+    /// ("succeeded" / "failed [exit N]"). The command call itself is left intact so the
+    /// sequence of attempts remains visible in context. The latest call keeps its full output.
+    /// </summary>
+    private static IEnumerable<ChatMessage> CompressSupersededShellPairs(
+        IEnumerable<ChatMessage> messages)
+    {
+        var list = messages as IList<ChatMessage> ?? messages.ToList();
+
+        // Pass 1: map each shell_run callId to its key; track the last callId per key.
+        var keyById   = new Dictionary<string, string>(StringComparer.Ordinal);
+        var lastByKey = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var msg in list)
+        {
+            if (msg.Role != ChatRole.Assistant) continue;
+            foreach (var fc in msg.Contents.OfType<FunctionCallContent>())
+            {
+                if (fc.Name is not "shell_run" || fc.CallId is null) continue;
+                object? cmdObj = null, dirObj = null;
+                fc.Arguments?.TryGetValue("command",          out cmdObj);
+                fc.Arguments?.TryGetValue("workingDirectory", out dirObj);
+                var key = (cmdObj?.ToString()?.Trim() ?? string.Empty)
+                        + "\0"
+                        + (dirObj?.ToString() ?? string.Empty);
+                keyById[fc.CallId]  = key;
+                lastByKey[key]      = fc.CallId;
+            }
+        }
+
+        if (keyById.Count == 0) return list;
+
+        var toCompress = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (callId, key) in keyById)
+            if (lastByKey[key] != callId)
+                toCompress.Add(callId);
+
+        if (toCompress.Count == 0) return list;
+
+        // Snapshot the result text for each superseded call so we can extract its outcome.
+        var resultById = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var msg in list)
+        {
+            if (msg.Role != ChatRole.Tool) continue;
+            foreach (var fr in msg.Contents.OfType<FunctionResultContent>())
+                if (fr.CallId is not null && toCompress.Contains(fr.CallId))
+                    resultById[fr.CallId] = fr.Result?.ToString() ?? string.Empty;
+        }
+
+        // Replace only the tool result for superseded calls; leave the FunctionCallContent intact.
+        var result = new List<ChatMessage>(list.Count);
+        foreach (var msg in list)
+        {
+            if (msg.Role == ChatRole.Tool &&
+                msg.Contents.OfType<FunctionResultContent>()
+                    .Any(fr => fr.CallId is not null && toCompress.Contains(fr.CallId)))
+            {
+                var rebuilt = msg.Contents.Select(c =>
+                {
+                    if (c is FunctionResultContent fr && fr.CallId is not null && toCompress.Contains(fr.CallId))
+                    {
+                        resultById.TryGetValue(fr.CallId, out var text);
+                        return (AIContent)new FunctionResultContent(fr.CallId, ShellOutcomeSummary(text ?? string.Empty));
+                    }
+                    return c;
+                }).ToList<AIContent>();
+                result.Add(new ChatMessage(msg.Role, rebuilt));
+            }
+            else
+            {
+                result.Add(msg);
+            }
+        }
+        return result;
+    }
+
+    // Failures always begin with "[EXIT N]"; everything else is a success.
+    private static string ShellOutcomeSummary(string resultText)
+    {
+        if (!resultText.StartsWith("[EXIT ", StringComparison.Ordinal)) return "succeeded";
+        var end = resultText.IndexOf(']');
+        return end > 0 ? $"failed {resultText[..(end + 1)]}" : "failed";
+    }
+
+    // Tools whose results are purely observational: the latest call with the same arguments
+    // is the only one that matters — earlier results reflect stale state.
+    private static readonly HashSet<string> ObservationalTools = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "read_file", "grep_file", "list_files", "list_directory",
+        "get_file_summary", "stat_file", "session_context_read",
+        "changes_read_latest", "git_status", "git_diff",
+    };
+
+    /// <summary>
+    /// Replaces observational tool-call/result pairs that are superseded by a later call
+    /// with identical arguments. Only the freshest result for each (tool, args) combination
+    /// is preserved; earlier identical calls are stubbed out.
+    /// </summary>
+    private static IEnumerable<ChatMessage> DropSupersededObservationalPairs(
+        IEnumerable<ChatMessage> messages)
+    {
+        var list = messages as IList<ChatMessage> ?? messages.ToList();
+
+        // Pass 1: map each callId to its key; track the last callId seen for each key.
+        var keyById     = new Dictionary<string, string>(StringComparer.Ordinal); // callId → key
+        var lastByKey   = new Dictionary<string, string>(StringComparer.Ordinal); // key → last callId
+
+        foreach (var msg in list)
+        {
+            if (msg.Role != ChatRole.Assistant) continue;
+            foreach (var fc in msg.Contents.OfType<FunctionCallContent>())
+            {
+                if (fc.CallId is null || fc.Name is null) continue;
+                if (!ObservationalTools.Contains(fc.Name)) continue;
+                var key = BuildObservationalKey(fc);
+                keyById[fc.CallId]  = key;
+                lastByKey[key]      = fc.CallId;
+            }
+        }
+
+        if (keyById.Count == 0) return list;
+
+        var superseded = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (callId, key) in keyById)
+            if (lastByKey[key] != callId)
+                superseded.Add(callId);
+
+        if (superseded.Count == 0) return list;
+
+        const string FcNote   = "[superseded — repeated call with same arguments]";
+        const string ToolNote = "[omitted — superseded by later identical call]";
+
+        var result = new List<ChatMessage>(list.Count);
+        foreach (var msg in list)
+        {
+            if (msg.Role == ChatRole.Assistant)
+            {
+                if (!msg.Contents.OfType<FunctionCallContent>()
+                        .Any(fc => fc.CallId is not null && superseded.Contains(fc.CallId)))
+                {
+                    result.Add(msg);
+                    continue;
+                }
+                var rebuilt = msg.Contents.Select(c =>
+                {
+                    if (c is FunctionCallContent fc && fc.CallId is not null && superseded.Contains(fc.CallId))
+                        return (AIContent)new FunctionCallContent(fc.CallId, fc.Name ?? string.Empty,
+                            new AIFunctionArguments(new Dictionary<string, object?> { ["_note"] = FcNote }));
+                    return c;
+                }).ToList<AIContent>();
+                result.Add(new ChatMessage(msg.Role, rebuilt) { AuthorName = msg.AuthorName });
+            }
+            else if (msg.Role == ChatRole.Tool)
+            {
+                if (!msg.Contents.OfType<FunctionResultContent>()
+                        .Any(fr => fr.CallId is not null && superseded.Contains(fr.CallId)))
+                {
+                    result.Add(msg);
+                    continue;
+                }
+                var rebuilt = msg.Contents.Select(c =>
+                {
+                    if (c is FunctionResultContent fr && fr.CallId is not null && superseded.Contains(fr.CallId))
+                        return (AIContent)new FunctionResultContent(fr.CallId, ToolNote);
+                    return c;
+                }).ToList<AIContent>();
+                result.Add(new ChatMessage(msg.Role, rebuilt));
+            }
+            else
+            {
+                result.Add(msg);
+            }
+        }
+        return result;
+    }
+
+    // Builds a deduplication key from a tool call: tool name + sorted argument entries.
+    // Sorting by key makes matching argument-order-independent.
+    private static string BuildObservationalKey(FunctionCallContent fc)
+    {
+        if (fc.Arguments is not { Count: > 0 })
+            return fc.Name ?? string.Empty;
+
+        var sb = new StringBuilder(fc.Name);
+        foreach (var kv in fc.Arguments.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+        {
+            sb.Append(':');
+            sb.Append(kv.Key);
+            sb.Append('=');
+            sb.Append(kv.Value?.ToString() ?? string.Empty);
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Replaces <c>write_file</c> and <c>patch_file</c> tool-call/result pairs that are
+    /// superseded by a later <c>write_file</c> to the same path with compact placeholders.
+    /// A call is superseded when a subsequent <c>write_file</c> overwrites the same path
+    /// entirely, making the earlier write irrelevant to context.
+    /// </summary>
+    private static IEnumerable<ChatMessage> DropSupersededWritePairs(
+        IEnumerable<ChatMessage> messages)
+    {
+        var list = messages as IList<ChatMessage> ?? messages.ToList();
+
+        // Pass 1: collect write_file/patch_file calls in order; track last write_file per path.
+        var writeCalls = new List<(string CallId, string Path, string ToolName)>();
+        var lastWriteIdByPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var msg in list)
+        {
+            if (msg.Role != ChatRole.Assistant) continue;
+            foreach (var fc in msg.Contents.OfType<FunctionCallContent>())
+            {
+                if (fc.Name is not ("write_file" or "patch_file") || fc.CallId is null) continue;
+                object? pathObj = null;
+                fc.Arguments?.TryGetValue("path", out pathObj);
+                var path = pathObj?.ToString();
+                if (string.IsNullOrEmpty(path)) continue;
+                writeCalls.Add((fc.CallId, path!, fc.Name!));
+                if (fc.Name == "write_file")
+                    lastWriteIdByPath[path!] = fc.CallId;
+            }
+        }
+
+        if (writeCalls.Count == 0) return list;
+
+        // A call is superseded if a later write_file targets the same path.
+        var superseded = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (callId, path, _) in writeCalls)
+            if (lastWriteIdByPath.TryGetValue(path, out var lastId) && callId != lastId)
+                superseded.Add(callId);
+
+        if (superseded.Count == 0) return list;
+
+        const string FcNote      = "[superseded — later write_file for same path]";
+        const string ToolNote    = "[omitted — superseded by later write_file]";
+
+        var result = new List<ChatMessage>(list.Count);
+        foreach (var msg in list)
+        {
+            if (msg.Role == ChatRole.Assistant)
+            {
+                if (!msg.Contents.OfType<FunctionCallContent>()
+                        .Any(fc => fc.CallId is not null && superseded.Contains(fc.CallId)))
+                {
+                    result.Add(msg);
+                    continue;
+                }
+                var rebuilt = msg.Contents.Select(c =>
+                {
+                    if (c is FunctionCallContent fc && fc.CallId is not null && superseded.Contains(fc.CallId))
+                        return (AIContent)new FunctionCallContent(fc.CallId, fc.Name ?? string.Empty,
+                            new AIFunctionArguments(new Dictionary<string, object?> { ["_note"] = FcNote }));
+                    return c;
+                }).ToList<AIContent>();
+                result.Add(new ChatMessage(msg.Role, rebuilt) { AuthorName = msg.AuthorName });
+            }
+            else if (msg.Role == ChatRole.Tool)
+            {
+                if (!msg.Contents.OfType<FunctionResultContent>()
+                        .Any(fr => fr.CallId is not null && superseded.Contains(fr.CallId)))
+                {
+                    result.Add(msg);
+                    continue;
+                }
+                var rebuilt = msg.Contents.Select(c =>
+                {
+                    if (c is FunctionResultContent fr && fr.CallId is not null && superseded.Contains(fr.CallId))
+                        return (AIContent)new FunctionResultContent(fr.CallId, ToolNote);
+                    return c;
+                }).ToList<AIContent>();
+                result.Add(new ChatMessage(msg.Role, rebuilt));
+            }
+            else
+            {
+                result.Add(msg);
+            }
+        }
+        return result;
+    }
 
     private static IEnumerable<ChatMessage> KeepLastToolPairs(
         IEnumerable<ChatMessage> messages,
