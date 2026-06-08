@@ -12,7 +12,7 @@ public sealed class InitSettings : CommandSettings
     public string? OutputPath { get; set; }
 
     [CommandOption("-t|--template")]
-    [Description("Team template: dev-team, research, devops, content, minimal, magentic, brownfield, designer, graph, brownfield-graph.")]
+    [Description("Team template: solo, pipeline, swe, brownfield, research, data, devops, debate, audit, magentic.")]
     public string? Template { get; set; }
 
     [CommandOption("-m|--model")]
@@ -38,26 +38,26 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
 
     private static readonly TemplateInfo[] Templates =
     [
-        new("dev-team",  "Software Development Team",
-            "Planner → Developer → Tester → Reviewer with state machine routing, evidence contracts, and self-verification"),
-        new("research",  "Research Team",
-            "Researcher → Writer with state machine routing and evidence-gated handoff"),
-        new("devops",    "DevOps Team",
-            "Planner → Developer → Operator with state machine routing and shell tooling"),
-        new("content",   "Content Pipeline",
-            "Writer → Editor with state machine routing and draft verification"),
-        new("minimal",       "Minimal — Single Agent",
-            "One general-purpose agent for simple tasks"),
-        new("magentic",      "Magentic Team",
-            "AI-managed team: a manager LLM plans and coordinates participants dynamically"),
-        new("brownfield",    "Brownfield Codebase Pipeline",
-            "Archaeologist recons the codebase → Planner → Developer (change-envelope enforced) → Reviewer"),
-        new("designer",      "Orchestration Designer",
-            "A single agent that helps you design, write, and validate fuseraft orchestration configs"),
-        new("graph",            "Graph Pipeline",
-            "Planner → Developer → Tester → Reviewer as a declarative directed graph with keyword-routed forward and back-edges"),
-        new("brownfield-graph", "Brownfield Graph Pipeline",
-            "Archaeologist → Planner → Developer → Reviewer as a directed graph; Reviewer routes to Developer OR Planner on failure — showcasing multi-target back-edges"),
+        new("solo",       "Solo Agent",
+            "Single capable agent with investigation tooling and lossless compaction — the right starting point for simple tasks"),
+        new("pipeline",   "Pipeline",
+            "Planner → Developer → Tester → Reviewer as a directed graph with investigation tooling — no evidence contracts; use swe for production work"),
+        new("swe",        "Software Engineering Team",
+            "Planner → PlannerCritic → Developer → Tester → Reviewer — full safeguards: evidence contracts, hypothesis tracking, periodic Verifier, lossless compaction"),
+        new("brownfield", "Brownfield Pipeline",
+            "Archaeologist recons the codebase once → Planner → Developer → Reviewer as a graph; multi-target back-edges (REVISION REQUIRED → Developer, REPLAN REQUIRED → Planner)"),
+        new("research",   "Research Team",
+            "Researcher gathers cited findings → Critic adversarially reviews for gaps → Writer synthesises the final document"),
+        new("data",       "Data Pipeline",
+            "DataEngineer fetches and structures data → Analyst computes findings → Reporter synthesises a final document"),
+        new("devops",     "DevOps Pipeline",
+            "OpsPlanner writes an ops plan with rollback_command → Executor runs steps → Verifier health-checks; can trigger rollback"),
+        new("debate",     "Debate Pipeline",
+            "Proposer argues a position → Challenger critiques adversarially → Moderator synthesises a structured final verdict"),
+        new("audit",      "Audit Pipeline",
+            "Auditor scans for security / quality / compliance issues → Prioritizer triages by severity → Developer fixes → Verifier confirms"),
+        new("magentic",   "Magentic Team",
+            "AI-managed team: a manager LLM plans and coordinates 5 specialist workers dynamically; user approves the plan before execution"),
     ];
 
     private static readonly (string EnvVar, string Model)[] ProviderDefaults =
@@ -146,7 +146,7 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
         {
             if (settings.NoInteractive)
             {
-                key = "dev-team";
+                key = "swe";
             }
             else
             {

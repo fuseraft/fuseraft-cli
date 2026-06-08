@@ -20,10 +20,10 @@ fuseraft
 fuseraft init
 
 # Or start from a built-in template
-fuseraft init --template dev-team --model claude-sonnet-4-6
-fuseraft init --template graph          # directed-graph pipeline with parallel fan-out
-fuseraft init --template adversarial    # GAN-style generate → critique → revise pipeline
-fuseraft init --template designer       # AI-assisted config designer
+fuseraft init --template solo           # single capable agent — the simplest starting point
+fuseraft init --template pipeline       # Planner → Developer → Tester → Reviewer (graph)
+fuseraft init --template swe            # full SWE pipeline with evidence contracts + Verifier
+fuseraft init --template debate         # adversarial deliberation for decisions and design reviews
 
 # Run a session
 fuseraft run -c .fuseraft/config/orchestration.yaml "Build a REST API in Go with JWT authentication"

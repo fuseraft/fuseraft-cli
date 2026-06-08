@@ -97,7 +97,7 @@ You'll be prompted to pick a team template, confirm a model (auto-detected from 
 For non-interactive or CI use:
 
 ```bash
-./bin/fuseraft init --template minimal --no-interactive
+./bin/fuseraft init --template solo --no-interactive
 ./bin/fuseraft run -c .fuseraft/config/orchestration.yaml "Your task here"
 ```
 

@@ -87,7 +87,7 @@ fuseraft run --context-file design.docx --context-file data-model.xlsx "Generate
 # Spec-driven development — spec anchors every agent and drives the Planner brief
 fuseraft run --spec spec.md
 fuseraft run --spec spec.md "Add authentication to the API"
-fuseraft run --spec spec.json -c dev-team.yaml
+fuseraft run --spec spec.json -c swe.yaml
 
 # Capture postmortem snapshots for debugging or failure analysis
 fuseraft run --snapshot "Refactor the auth module"
@@ -1028,16 +1028,16 @@ fuseraft init [output] [options]
 
 | Template | Description |
 |----------|-------------|
-| `dev-team` | Five-agent pipeline: Planner → Developer → Tester → Reviewer with keyword routing, plus a periodic Verifier that audits the evidence graph for inconsistencies |
-| `research` | Two-agent pipeline: Researcher gathers information, Writer produces the final report |
-| `devops` | Three-agent pipeline for infrastructure and deployment tasks |
-| `content` | Two-agent pipeline: Writer drafts, Editor refines and approves |
-| `minimal` | Single general-purpose agent for simple tasks |
-| `brownfield` | Four-agent pipeline: Archaeologist recons the codebase, Planner designs the change, Developer implements with change-envelope enforcement, Reviewer inspects by code review |
-| `magentic` | Magentic-managed team: a manager LLM plans and coordinates Researcher + Developer agents dynamically |
-| `designer` | Single-agent orchestration that designs, writes, and validates fuseraft configs interactively — describe your use case in plain language and get a ready-to-run YAML config back |
-| `graph` | Planner → Developer → Tester → Reviewer as a declarative directed graph; forward edges advance the phase, back-edges (REVISION REQUIRED, BUGS FOUND, REPLAN REQUIRED) restart from the target node |
-| `brownfield-graph` | Brownfield codebase pipeline as a directed graph; Archaeologist → Planner → Developer → Reviewer/approved; the Reviewer has two distinct back-edges — REVISION REQUIRED routes to Developer and REPLAN REQUIRED routes to Planner |
+| `solo` | Single capable agent with investigation tooling and lossless compaction — the right starting point for simple tasks |
+| `pipeline` | Planner → Developer → Tester → Reviewer as a directed graph; investigation tooling on Developer and Tester; no evidence contracts — use `swe` for production work |
+| `swe` | Full SWE pipeline: Planner → PlannerCritic → Developer → Tester → Reviewer with evidence contracts, hypothesis tracking, periodic Verifier, adaptive ContextBudget, and lossless compaction |
+| `brownfield` | Archaeology-first pipeline as a directed graph: Archaeologist recons the codebase once, then Planner → Developer → Reviewer; Reviewer routes to Developer (REVISION REQUIRED) or Planner (REPLAN REQUIRED) |
+| `research` | Researcher gathers cited findings → Critic adversarially reviews for gaps and unsupported claims → Writer synthesises the final document |
+| `data` | DataEngineer fetches and structures raw data → Analyst computes findings → Reporter synthesises a final document; contracts prevent fabricated analysis |
+| `devops` | OpsPlanner writes an ops plan with `rollback_command` → Executor runs steps → Verifier health-checks; Verifier can trigger a rollback cycle if checks fail |
+| `debate` | Decision-focused adversarial pipeline: Proposer argues a position → Challenger critiques adversarially → Moderator synthesises a structured final verdict |
+| `audit` | Auditor scans for security / quality / compliance issues → Prioritizer triages by severity → Developer fixes with hypothesis tracking → Verifier confirms |
+| `magentic` | AI-managed team: a manager LLM plans and coordinates five specialist workers (Researcher, Planner, Developer, Tester, Critic) dynamically; user approves the plan before execution |
 
 **Model auto-detection**
 
@@ -1063,32 +1063,42 @@ fuseraft init
 # Write to a custom path
 fuseraft init .fuseraft/config/my-team.yaml
 
-# Non-interactive with explicit template and model
-fuseraft init --template dev-team --model claude-sonnet-4-6
-fuseraft init --template minimal --no-interactive
+# Single agent — simplest starting point
+fuseraft init --template solo
+fuseraft init --template solo --no-interactive
+
+# Standard dev pipeline (graph) — no evidence contracts
+fuseraft init --template pipeline --model claude-sonnet-4-6
+
+# Full SWE pipeline — evidence contracts, hypothesis tracking, periodic Verifier
+fuseraft init --template swe --model claude-sonnet-4-6
+fuseraft init .fuseraft/config/swe.yaml --template swe --model claude-sonnet-4-6
 
 # Brownfield codebase — Archaeologist recons first, then plan → implement → review
 fuseraft init --template brownfield
 fuseraft init --template brownfield --model claude-sonnet-4-6 --endpoint https://api.anthropic.com
 
-# Generate a Magentic team config
+# Research pipeline — Researcher → Critic → Writer
+fuseraft init --template research --model claude-sonnet-4-6
+
+# Data analysis pipeline — DataEngineer → Analyst → Reporter
+fuseraft init --template data
+
+# Infrastructure and deployment with rollback
+fuseraft init --template devops
+
+# Adversarial deliberation for decisions and design reviews
+fuseraft init --template debate
+
+# Security / quality / compliance audit
+fuseraft init --template audit --model claude-sonnet-4-6
+
+# AI-managed Magentic team
 fuseraft init --template magentic
 fuseraft init .fuseraft/config/magentic-team.yaml --template magentic --model gpt-4o
 
-# Generate an Orchestration Designer — describe your use case, get a validated config back
-fuseraft init --template designer
-fuseraft init .fuseraft/config/designer.yaml --template designer --model claude-sonnet-4-6
-
-# Graph pipeline — explicit directed-graph topology with forward edges and back-edges
-fuseraft init --template graph
-fuseraft init .fuseraft/config/graph-team.yaml --template graph --model claude-sonnet-4-6
-
-# Brownfield graph — Archaeologist → Planner → Developer → Reviewer/approved with multi-target back-edges
-fuseraft init --template brownfield-graph
-fuseraft init .fuseraft/config/brownfield-graph.yaml --template brownfield-graph --model claude-sonnet-4-6
-
 # CI / scripted usage
-fuseraft init .fuseraft/config/ci-team.yaml --template dev-team --model gpt-4o --no-interactive
+fuseraft init .fuseraft/config/ci-team.yaml --template swe --model gpt-4o --no-interactive
 ```
 
 After generating, `init` prints the next steps:

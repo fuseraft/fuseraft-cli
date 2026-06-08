@@ -132,7 +132,7 @@ fuseraft run --spec spec.md --hitl
 fuseraft run --spec spec.md --context-file openapi.yaml --context-file schema.sql
 
 # Spec + custom config for a specialised agent team
-fuseraft run --spec spec.md -c configs/dev-team.yaml
+fuseraft run --spec spec.md -c configs/swe.yaml
 
 # Spec + task override (use when the spec covers multiple features and you want one now)
 fuseraft run --spec spec.md "Implement only the /health endpoint for now"

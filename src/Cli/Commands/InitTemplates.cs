@@ -24,17 +24,17 @@ public static partial class InitTemplates
     public static GeneratedConfig Build(string template, string model, string? endpoint) =>
         template switch
         {
+            "solo"       => GeneratedConfig.Inline(Solo(model, endpoint)),
             "research"   => Research(model, endpoint),
-            "devops"     => DevOps(model, endpoint),
-            "content"    => Content(model, endpoint),
-            "minimal"    => GeneratedConfig.Inline(Minimal(model, endpoint)),
-            "magentic"   => GeneratedConfig.Inline(Magentic(model, endpoint)),
-            "designer"   => GeneratedConfig.Inline(Designer(model, endpoint)),
+            "pipeline"   => Pipeline(model, endpoint),
+            "swe"        => Swe(model, endpoint),
             "brownfield" => Brownfield(model, endpoint),
-            "graph"            => Graph(model, endpoint),
-            "brownfield-graph" => BrownfieldGraph(model, endpoint),
-            "adversarial"      => GeneratedConfig.Inline(Adversarial(model, endpoint)),
-            _                  => DevTeam(model, endpoint),
+            "magentic"   => GeneratedConfig.Inline(Magentic(model, endpoint)),
+            "debate"     => GeneratedConfig.Inline(Debate(model, endpoint)),
+            "audit"      => Audit(model, endpoint),
+            "data"       => Data(model, endpoint),
+            "devops"     => DevOps(model, endpoint),
+            _            => Swe(model, endpoint),
         };
 
     /// <summary>Returns a newline-prefixed <c>Endpoint:</c> line for inline agent blocks, or empty when <paramref name="endpoint"/> is unset.</summary>
