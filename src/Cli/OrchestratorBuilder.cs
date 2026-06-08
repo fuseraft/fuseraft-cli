@@ -970,24 +970,17 @@ public static class OrchestratorBuilder
                 {
                     if (a.SkipExecutionState) return a;
 
-                    // Auto-add Investigation plugin so agents can write to the investigation log.
-                    // Agents that already declare it, or that have no plugin list, are unchanged.
-                    var plugins = a.Plugins.Count > 0 && invLogSrc is not null
-                        && !a.Plugins.Any(p => p.Equals("Investigation", StringComparison.OrdinalIgnoreCase))
-                        ? [.. a.Plugins, "Investigation"]
-                        : a.Plugins;
-
                     if (a.Context is { Count: > 0 } existing)
                     {
                         var needsExecState = !existing.Any(s => SourceType(s.Source) == "execution_state");
                         var needsInvLog    = invLogSrc is not null && !existing.Any(s => SourceType(s.Source) == "investigation_log");
 
-                        if (!needsExecState && !needsInvLog && ReferenceEquals(plugins, a.Plugins)) return a;
+                        if (!needsExecState && !needsInvLog) return a;
 
                         var toPrepend = new List<ContextSource>();
                         if (needsExecState) toPrepend.Add(execStateSrc);
                         if (needsInvLog)    toPrepend.Add(invLogSrc!);
-                        return a with { Context = [.. toPrepend, .. existing], Plugins = plugins };
+                        return a with { Context = [.. toPrepend, .. existing] };
                     }
 
                     // No context spec → inject a default that substitutes for shared-history replay:
@@ -996,7 +989,7 @@ public static class OrchestratorBuilder
                     if (invLogSrc is not null) defaultSources.Add(invLogSrc);
                     defaultSources.Add(new ContextSource { Source = "own_history:10" });
                     defaultSources.Add(new ContextSource { Source = "session_context" });
-                    return a with { Context = defaultSources, Plugins = plugins };
+                    return a with { Context = defaultSources };
                 }).ToList()
             };
         }
