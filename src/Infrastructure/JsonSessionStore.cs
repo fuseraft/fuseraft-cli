@@ -16,6 +16,7 @@ namespace fuseraft.Infrastructure;
 public sealed class JsonSessionStore(ILogger<JsonSessionStore> logger, string? sessionDir = null) : ISessionStore
 {
     private readonly string SessionDir = sessionDir ?? FuseraftPaths.GlobalSessions;
+    private readonly SemaphoreSlim _indexLock = new(1, 1);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -66,9 +67,17 @@ public sealed class JsonSessionStore(ILogger<JsonSessionStore> logger, string? s
         var indexPath = IndexPath();
         if (File.Exists(indexPath))
         {
-            var entries = await ReadIndexAsync(indexPath, cancellationToken);
-            if (entries.Remove(sessionId))
-                await WriteIndexAsync(indexPath, entries, cancellationToken);
+            await _indexLock.WaitAsync(cancellationToken);
+            try
+            {
+                var entries = await ReadIndexAsync(indexPath, cancellationToken);
+                if (entries.Remove(sessionId))
+                    await WriteIndexAsync(indexPath, entries, cancellationToken);
+            }
+            finally
+            {
+                _indexLock.Release();
+            }
         }
     }
 
@@ -128,9 +137,17 @@ public sealed class JsonSessionStore(ILogger<JsonSessionStore> logger, string? s
     private async Task UpdateIndexAsync(SessionCheckpoint checkpoint, CancellationToken ct)
     {
         var indexPath = IndexPath();
-        var entries   = await ReadIndexAsync(indexPath, ct);
-        entries[checkpoint.SessionId] = ToIndexEntry(checkpoint);
-        await WriteIndexAsync(indexPath, entries, ct);
+        await _indexLock.WaitAsync(ct);
+        try
+        {
+            var entries = await ReadIndexAsync(indexPath, ct);
+            entries[checkpoint.SessionId] = ToIndexEntry(checkpoint);
+            await WriteIndexAsync(indexPath, entries, ct);
+        }
+        finally
+        {
+            _indexLock.Release();
+        }
     }
 
     private static async Task<Dictionary<string, SessionIndexEntry>> ReadIndexAsync(string path, CancellationToken ct)
