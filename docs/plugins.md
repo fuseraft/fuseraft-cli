@@ -49,6 +49,7 @@ Execute shell commands and scripts.
 | Function | Parameters | Description |
 |----------|-----------|-------------|
 | `shell_run` | `command`, `workingDirectory` (optional), `timeoutSeconds` (default 60) | Run a shell command. Supports pipes, redirects, and chained commands. Captures stdout, stderr, and exit code. |
+| `shell_run_quiet` | `command`, `workingDirectory` (optional), `timeoutSeconds` (default 60) | Run a shell command; returns `OK` on exit 0 or full output + exit code on failure. Use instead of `shell_run` when successful output is not needed (e.g. scaffolding, `dotnet restore`, environment setup). |
 | `shell_run_script` | `script`, `workingDirectory` (optional), `timeoutSeconds` (default 120) | Write a multi-line script to a temp file and execute it. Useful for complex multi-command workflows. |
 | `shell_get_env` | `name` | Return an environment variable value (empty string if not set). |
 | `shell_set_env` | `name`, `value` | Set an environment variable for the current session. Inherited by all subsequent `shell_run` calls. Pass an empty string to clear a variable. |
@@ -64,7 +65,7 @@ The shell used is `/bin/bash` on Unix and `cmd` on Windows. The shell binary is 
 
 **`sudo` protection:** `sudo` is always blocked. Any command or script containing `sudo` (including after pipes, `&&`, `;`, or newlines) is rejected before execution. The denial message instructs the agent to use non-privileged alternatives (`pip install --user`, `pipx`, virtualenvs) or, if elevated access is truly required, to tell the user what to run so they can do it themselves.
 
-**Shell command approval in `--hitl` mode:** When `fuseraft run --hitl` is active, every `shell_run` and `shell_run_script` call pauses and shows the command for approval before executing. See [CLI Reference — Shell command approval](cli-reference.md#human-in-the-loop-controls).
+**Shell command approval in `--hitl` mode:** When `fuseraft run --hitl` is active, every `shell_run`, `shell_run_quiet`, and `shell_run_script` call pauses and shows the command for approval before executing. See [CLI Reference — Shell command approval](cli-reference.md#human-in-the-loop-controls).
 
 **Security note:** When `FileSystemSandboxPath` is set, the `workingDirectory` argument is hard-denied if it falls outside the sandbox. The `command` and `script` arguments are scanned for absolute paths escaping the sandbox; system binary prefixes (`/usr/`, `/bin/`, `/opt/`, `/nix/`, etc.) are exempted. Shell scanning is heuristic — for strict containment use `CodeExecution` (Docker) instead.
 
