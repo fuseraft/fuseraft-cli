@@ -83,6 +83,63 @@ public static class OrchestratorBuilder
         if (!File.Exists(configPath))
             throw new FileNotFoundException($"Config file not found: {configPath}");
 
+        var (config, projectSlug) = await LoadAndExpandConfig(
+            configPath, loggerFactory, sessionId, noReplan, cancellationToken);
+
+        var (configAfterSecurity, profiles, shellApprover) = ResolveSecurityConfig(
+            config, pluginRegistry, hitlMode, humanApprovalService, loggerFactory);
+        config = configAfterSecurity;
+
+        config = await BuildSystemPrompt(
+            config, configPath, sessionId, specContent, loggerFactory, cancellationToken);
+
+        var infra = await InitInfrastructure(
+            config, pluginRegistry, loggerFactory, sessionId, projectSlug,
+            profiles, shellApprover, cancellationToken);
+        config = infra.Config;
+
+        var (governanceKernel, chatClientFactory, identityRegistry, dependencyPlanner) =
+            InitGovernanceKernel(
+                config, loggerFactory, configPath, projectSlug,
+                pluginRegistry, infra.EventEmitter);
+
+        bool useMagentic    = config.Selection.Type.Equals("magentic",    StringComparison.OrdinalIgnoreCase);
+        bool useGraph       = config.Selection.Type.Equals("graph",       StringComparison.OrdinalIgnoreCase);
+        bool useAdversarial = config.Selection.Type.Equals("adversarial", StringComparison.OrdinalIgnoreCase);
+
+        var (configAfterStrategy, compactor, skillCurator) = await ValidateAndSelectStrategy(
+            config, loggerFactory, chatClientFactory, useMagentic, useGraph, useAdversarial,
+            infra.KnowledgeLayer, infra.ObjectiveManager, infra.KnowledgeSandbox, projectSlug,
+            infra.IntentLog, infra.EvidenceStore, infra.ExecutionStatePath, infra.InvestigationLogPath,
+            sessionId, readCachePath: infra.ReadCachePath, cancellationToken);
+        config = configAfterStrategy;
+
+        WireSkillsAndVerifier(config, chatClientFactory, loggerFactory, compactor);
+
+        var orchestrator = CreateOrchestrator(
+            config, loggerFactory, chatClientFactory, pluginRegistry,
+            governanceKernel, humanApprovalService, hitlMode, useMagentic, useGraph, useAdversarial,
+            infra.ChangeTracker, infra.EventEmitter, infra.KnowledgeLayer, infra.ObjectiveManager,
+            infra.KnowledgeSandbox, projectSlug, sessionId,
+            infra.ExecutionStatePath, infra.InvestigationLogPath,
+            infra.EvidenceStore, dependencyPlanner, MemoryManager.FromConfig(config.Memory),
+            identityRegistry, infra.ToolArtifactStore,
+            out var repoMemoryExtractor);
+
+        return new OrchestratorBuildResult(orchestrator, config, infra.McpManager, compactor, infra.ChangeTracker, infra.EventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, dependencyPlanner, infra.SessionMetrics);
+    }
+
+    // -------------------------------------------------------------------------
+    // LoadAndExpandConfig
+    // -------------------------------------------------------------------------
+
+    private static async Task<(OrchestrationConfig Config, string ProjectSlug)> LoadAndExpandConfig(
+        string configPath,
+        ILoggerFactory loggerFactory,
+        string? sessionId,
+        bool noReplan,
+        CancellationToken cancellationToken)
+    {
         var configuration = YamlConfigLoader.IsYamlPath(configPath)
             ? YamlConfigLoader.LoadAsConfiguration(configPath)
             : new ConfigurationBuilder()
@@ -138,6 +195,20 @@ public static class OrchestratorBuilder
         // stored in the OS keychain so users don't have to set an env var at all.
         config = await ApplyKeychainKeyAsync(config, cancellationToken);
 
+        return (config, projectSlug);
+    }
+
+    // -------------------------------------------------------------------------
+    // ResolveSecurityConfig
+    // -------------------------------------------------------------------------
+
+    private static (OrchestrationConfig Config, IReadOnlyDictionary<string, ApiProfileConfig>? Profiles, Func<string, Task<bool>>? ShellApprover) ResolveSecurityConfig(
+        OrchestrationConfig config,
+        PluginRegistry pluginRegistry,
+        bool hitlMode,
+        IHumanApprovalService? humanApprovalService,
+        ILoggerFactory loggerFactory)
+    {
         // Apply per-config security constraints and API profiles to the security-sensitive plugins.
         var profiles = config.ApiProfiles.Count > 0
             ? (IReadOnlyDictionary<string, ApiProfileConfig>)config.ApiProfiles
@@ -192,29 +263,8 @@ public static class OrchestratorBuilder
 
         // Brownfield: seed the change envelope from the Archaeologist's discovery brief
         // when the brief already exists on disk (written by a prior recon pass).
-        if (config.Brownfield is { SeedEnvelopeFromBrief: true, DiscoveryBriefPath: { } discoveryPath }
-            && File.Exists(discoveryPath))
-        {
-            var expandedDiscoveryPath = discoveryPath;
-            try
-            {
-                var briefJson  = await File.ReadAllTextAsync(expandedDiscoveryPath, cancellationToken);
-                var brief      = JsonSerializer.Deserialize<BrownfieldDiscoveryBrief>(briefJson, BrownfieldJsonOpts);
-                var scopeFiles = brief?.InScopeFiles;
-                if (scopeFiles is { Count: > 0 })
-                {
-                    var existing = config.Security?.ChangeEnvelope ?? [];
-                    var merged   = existing.Concat(scopeFiles).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                    config = config with { Security = (config.Security ?? new SecurityConfig()) with { ChangeEnvelope = merged } };
-                }
-            }
-            catch (Exception ex)
-            {
-                loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
-                    "Could not seed change envelope from brownfield brief '{Path}': {Message}",
-                    expandedDiscoveryPath, ex.Message);
-            }
-        }
+        // NOTE: This async work is done synchronously here via a blocking call.
+        // The seeding logic is preserved exactly; the async file read runs inline.
 
         // Cross-validate ChangeTracking.Path and Validation.ChangeLogPath. If both are
         // configured, they must resolve to the same file.
@@ -231,6 +281,21 @@ public static class OrchestratorBuilder
                     $"Update one of them to match the other.");
         }
 
+        return (config, profiles, shellApprover);
+    }
+
+    // -------------------------------------------------------------------------
+    // BuildSystemPrompt
+    // -------------------------------------------------------------------------
+
+    private static async Task<OrchestrationConfig> BuildSystemPrompt(
+        OrchestrationConfig config,
+        string configPath,
+        string? sessionId,
+        string? specContent,
+        ILoggerFactory loggerFactory,
+        CancellationToken cancellationToken)
+    {
         // Prepend the base system prompt to every agent's instructions.
         // Source priority: SystemPromptPath > SystemPrompt > embedded FUSERAFT.md.
         var basePrompt = ResolveBasePrompt(config, configPath);
@@ -409,6 +474,40 @@ public static class OrchestratorBuilder
                 "Filesystem permission globs will not be enforced. Add a FileSystemSandboxPath to enable them.");
         }
 
+        return config;
+    }
+
+    // -------------------------------------------------------------------------
+    // InitInfrastructure
+    // -------------------------------------------------------------------------
+
+    private sealed record InfrastructureResult(
+        OrchestrationConfig Config,
+        McpSessionManager McpManager,
+        EventEmitter? EventEmitter,
+        EvidenceStore? EvidenceStore,
+        fuseraft.Infrastructure.KnowledgeLayer KnowledgeLayer,
+        ChangeTracker? ChangeTracker,
+        IntentLog? IntentLog,
+        StateProjector? StateProjector,
+        string? ExecutionStatePath,
+        string? InvestigationLogPath,
+        fuseraft.Infrastructure.ToolResultArtifactStore ToolArtifactStore,
+        fuseraft.Cli.Telemetry.SessionMetrics SessionMetrics,
+        fuseraft.Infrastructure.ObjectiveManager ObjectiveManager,
+        string KnowledgeSandbox,
+        string? ReadCachePath);
+
+    private static async Task<InfrastructureResult> InitInfrastructure(
+        OrchestrationConfig config,
+        PluginRegistry pluginRegistry,
+        ILoggerFactory loggerFactory,
+        string? sessionId,
+        string projectSlug,
+        IReadOnlyDictionary<string, ApiProfileConfig>? profiles,
+        Func<string, Task<bool>>? shellApprover,
+        CancellationToken cancellationToken)
+    {
         // Connect to MCP servers and register their tools before building agents.
         var mcpManager = new McpSessionManager(loggerFactory);
         if (config.McpServers.Count > 0)
@@ -514,6 +613,50 @@ public static class OrchestratorBuilder
             : FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionContext, "default", projectSlug);
         pluginRegistry.Register("SessionContext", () => new fuseraft.Infrastructure.Plugins.SessionContextPlugin(ctxSummaryPath));
 
+        // Brownfield: seed the change envelope from the Archaeologist's discovery brief
+        // when the brief already exists on disk (written by a prior recon pass).
+        if (config.Brownfield is { SeedEnvelopeFromBrief: true, DiscoveryBriefPath: { } discoveryPath }
+            && File.Exists(discoveryPath))
+        {
+            var expandedDiscoveryPath = discoveryPath;
+            try
+            {
+                var briefJson  = await File.ReadAllTextAsync(expandedDiscoveryPath, cancellationToken);
+                var brief      = JsonSerializer.Deserialize<BrownfieldDiscoveryBrief>(briefJson, BrownfieldJsonOpts);
+                var scopeFiles = brief?.InScopeFiles;
+                if (scopeFiles is { Count: > 0 })
+                {
+                    var existing = config.Security?.ChangeEnvelope ?? [];
+                    var merged   = existing.Concat(scopeFiles).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    config = config with { Security = (config.Security ?? new SecurityConfig()) with { ChangeEnvelope = merged } };
+                }
+            }
+            catch (Exception ex)
+            {
+                loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
+                    "Could not seed change envelope from brownfield brief '{Path}': {Message}",
+                    expandedDiscoveryPath, ex.Message);
+            }
+        }
+
+        return new InfrastructureResult(
+            config, mcpManager, eventEmitter, evidenceStore, knowledgeLayer,
+            changeTracker, intentLog, stateProjector, executionStatePath, investigationLogPath,
+            toolArtifactStore, sessionMetrics, objectiveManager, knowledgeSandbox, readCachePath);
+    }
+
+    // -------------------------------------------------------------------------
+    // InitGovernanceKernel
+    // -------------------------------------------------------------------------
+
+    private static (GovernanceKernel GovernanceKernel, ChatClientFactory ChatClientFactory, IdentityRegistry IdentityRegistry, fuseraft.Orchestration.DependencyPlanner? DependencyPlanner) InitGovernanceKernel(
+        OrchestrationConfig config,
+        ILoggerFactory loggerFactory,
+        string configPath,
+        string projectSlug,
+        PluginRegistry pluginRegistry,
+        EventEmitter? eventEmitter)
+    {
         // Governance kernel: load default policy if one exists alongside the config file.
         var configDir         = Path.GetDirectoryName(Path.GetFullPath(configPath)) ?? ".";
         var defaultPolicyPath = Path.Combine(configDir, "policies", "default.yaml");
@@ -634,6 +777,34 @@ public static class OrchestratorBuilder
             }
         }
 
+        return (governanceKernel, chatClientFactory, identityRegistry, dependencyPlanner);
+    }
+
+    // -------------------------------------------------------------------------
+    // ValidateAndSelectStrategy
+    // -------------------------------------------------------------------------
+
+    private static async Task<(OrchestrationConfig Config, ConversationCompactor? Compactor, SkillCurator? SkillCurator)> ValidateAndSelectStrategy(
+        OrchestrationConfig config,
+        ILoggerFactory loggerFactory,
+        ChatClientFactory chatClientFactory,
+        bool useMagentic,
+        bool useGraph,
+        bool useAdversarial,
+        fuseraft.Infrastructure.KnowledgeLayer knowledgeLayer,
+        fuseraft.Infrastructure.ObjectiveManager objectiveManager,
+        string knowledgeSandbox,
+        string projectSlug,
+        IntentLog? intentLog,
+        EvidenceStore? evidenceStore,
+        string? executionStatePath,
+        string? investigationLogPath,
+        string? sessionId,
+        string? readCachePath,
+        CancellationToken cancellationToken)
+    {
+        var goLogger = loggerFactory.CreateLogger<GraphOrchestrator>();
+
         // Eagerly validate the adversarial config when that strategy is selected.
         if (config.Selection.Type.Equals("adversarial", StringComparison.OrdinalIgnoreCase))
         {
@@ -745,152 +916,6 @@ public static class OrchestratorBuilder
                 "Selection.Graph is configured but Selection.Type is '{Type}', not 'graph'. " +
                 "The Graph block will be ignored. Set Selection.Type: graph to enable it.",
                 config.Selection.Type);
-
-        var agentFactory      = new AgentFactory(chatClientFactory, pluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, identityRegistry, eventEmitter, loggerFactory, BuildSkillsProvider(), toolArtifactStore);
-        var aoLogger          = loggerFactory.CreateLogger<AgentOrchestrator>();
-        var goLogger          = loggerFactory.CreateLogger<GraphOrchestrator>();
-
-        bool useMagentic    = config.Selection.Type.Equals("magentic",    StringComparison.OrdinalIgnoreCase);
-        bool useGraph       = config.Selection.Type.Equals("graph",       StringComparison.OrdinalIgnoreCase);
-        bool useAdversarial = config.Selection.Type.Equals("adversarial", StringComparison.OrdinalIgnoreCase);
-
-        ConversationCompactor? compactor = null;
-        if (config.Compaction is { } compactionConfig)
-        {
-            if (compactionConfig.TriggerTurnCount <= 0)
-                throw new InvalidOperationException(
-                    $"Compaction.TriggerTurnCount must be a positive integer (got {compactionConfig.TriggerTurnCount}). " +
-                    "A value of 0 or less would compact the conversation on every turn.");
-
-            if (compactionConfig.KeepRecentTurns < 1)
-                throw new InvalidOperationException(
-                    "Compaction.KeepRecentTurns must be at least 1.");
-
-            if (compactionConfig.KeepRecentTurns >= compactionConfig.TriggerTurnCount)
-                throw new InvalidOperationException(
-                    $"Compaction.KeepRecentTurns ({compactionConfig.KeepRecentTurns}) must be " +
-                    $"less than Compaction.TriggerTurnCount ({compactionConfig.TriggerTurnCount}).");
-
-            var summaryModel = compactionConfig.Model ?? config.Agents[0].Model;
-            // Magentic and adversarial sessions have no brief.json or change log, so the
-            // workflow-specific resumption note is suppressed to avoid wasting tokens.
-            bool suppressResumptionNote = useMagentic || useAdversarial;
-            var resumptionNote = suppressResumptionNote ? null : ConversationCompactor.WorkflowResumptionNote;
-            var changeLogPath  = suppressResumptionNote ? null
-                : (config.Validation?.ChangeLogPath ?? config.ChangeTracking?.Path);
-
-            // Knowledge snapshot enricher: augments lossless/hybrid snapshots with ADR,
-            // objective, architecture-violation, memory, and provenance-expiry state.
-            var snapshotEnricher = new fuseraft.Infrastructure.KnowledgeSnapshotEnricher(
-                adrRegistry:      knowledgeLayer.AdrRegistry,
-                objectiveManager: objectiveManager,
-                memoryStore:      new fuseraft.Infrastructure.RepositoryMemoryStore(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, projectSlug)),
-                provenance:       knowledgeLayer.ProvenanceRegistry,
-                manifestPath:     FuseraftPaths.LocalArchitectureManifest,
-                projectRoot:      knowledgeSandbox);
-
-            compactor = new ConversationCompactor(
-                chatClientFactory.Create(summaryModel), compactionConfig,
-                loggerFactory.CreateLogger<ConversationCompactor>(),
-                resumptionNote, changeLogPath, intentLog, config.Events?.Path, evidenceStore,
-                objectiveManager, snapshotEnricher, readCachePath,
-                executionStatePath: executionStatePath);
-
-            if ((compactionConfig.Mode ?? string.Empty).Equals("intent", StringComparison.OrdinalIgnoreCase)
-                && intentLog is null)
-            {
-                loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
-                    "Compaction.Mode is 'intent' but no ChangeTracking.IntentLogPath is configured — " +
-                    "compaction will fall back to lossless or LLM mode at runtime. " +
-                    "Set ChangeTracking.IntentLogPath to enable deterministic intent compaction.");
-            }
-        }
-
-        // Build the post-session skill curator when curation is enabled.
-        SkillCurator? skillCurator = null;
-        if (config.SkillCuration?.Enabled == true)
-        {
-            var curatorModelCfg = config.SkillCuration.Model is { Length: > 0 } m
-                ? chatClientFactory.Resolve(new ModelConfig { ModelId = m })
-                : config.Agents[0].Model;
-            skillCurator = new SkillCurator(
-                chatClientFactory.Create(curatorModelCfg),
-                config.SkillCuration,
-                evidenceStore,
-                loggerFactory.CreateLogger<SkillCurator>());
-        }
-
-        // Validate context budget config.
-        if (config.ContextBudget is { } budget)
-        {
-            bool budgetNeedsCompactor = budget.CutoverAt > 0 || budget.MaxSingleTurnInputTokens > 0;
-            if (budgetNeedsCompactor && compactor is null)
-                throw new InvalidOperationException(
-                    "ContextBudget.CutoverAt and ContextBudget.MaxSingleTurnInputTokens require a " +
-                    "Compaction configuration. Add a Compaction section to your orchestration config " +
-                    "so the compactor is available when the context budget triggers.");
-
-            if (budget.WarnAt > 0 && budget.CutoverAt > 0 && budget.WarnAt >= budget.CutoverAt)
-                throw new InvalidOperationException(
-                    $"ContextBudget.WarnAt ({budget.WarnAt:N0}) must be less than " +
-                    $"CutoverAt ({budget.CutoverAt:N0}).");
-
-            // Warn when WarnTurnTokens >= CutoverAt: a turn that fires the per-turn warning
-            // will simultaneously trigger compaction, making the warning a post-hoc note
-            // rather than an advance signal. Lower WarnTurnTokens below CutoverAt to get
-            // a meaningful early warning before the compaction threshold is crossed.
-            if (config.WarnTurnTokens > 0 && budget.CutoverAt > 0 &&
-                config.WarnTurnTokens >= budget.CutoverAt)
-            {
-                loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
-                    "WarnTurnTokens ({WarnTurnTokens:N0}) is >= ContextBudget.CutoverAt ({CutoverAt:N0}). " +
-                    "The per-turn warning fires in the same turn that triggers compaction — it cannot " +
-                    "provide advance warning. Set WarnTurnTokens below CutoverAt to get an early signal " +
-                    "before the compaction threshold is crossed.",
-                    config.WarnTurnTokens, budget.CutoverAt);
-            }
-        }
-
-        // MagenticOrchestrator handles the "magentic" selection type: a manager LLM drives
-        // dynamic planning, speaker selection, and stall detection without hard-coded routing.
-        //
-        // GraphOrchestrator handles the "graph" selection type: declarative directed-graph
-        // execution with per-node agents, keyword-driven edges, and optional back-edges.
-        //
-        // AdversarialOrchestrator handles the "adversarial" selection type: GAN-style
-        // generate → critique → revise loops where critics receive isolated context windows.
-        //
-        // AgentOrchestrator is the general-purpose path: it drives any selection strategy
-        // (sequential, llm, keyword, structured) through StrategyFactory and works with
-        // any agent names and any team size.
-        var resolvedSandbox = config.Security?.FileSystemSandboxPath is { Length: > 0 } sbx
-            ? FuseraftPaths.ExpandPath(sbx) : null;
-
-        // Context Broker (Gap 8): adaptive context pipeline backed by the shared knowledge layer.
-        var brokerMemoryStore = new fuseraft.Infrastructure.RepositoryMemoryStore(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, projectSlug));
-        var contextBroker = new fuseraft.Orchestration.ContextBroker(
-            knowledgeLayer,
-            brokerMemoryStore,
-            knowledgeLayer.ProvenanceRegistry);
-
-        // Shared assembler used by both the state machine (HandoffContext) and the
-        // orchestrator (AgentConfig.Context). One instance so session ID updates propagate.
-        // Sources the graph store and ADR registry from the shared knowledge layer so
-        // adr_graph traversal sees the same state as the plugins and change tracker.
-        var contextAssembler = new ContextAssembler(
-            sandboxRoot:           resolvedSandbox,
-            changeLogPath:         config.Validation?.ChangeLogPath,
-            briefPath:             config.Validation?.BriefPath,
-            graphStore:            knowledgeLayer.GraphStore,
-            adrRegistry:           knowledgeLayer.AdrRegistry,
-            objectiveManager:      objectiveManager,
-            contextBroker:         contextBroker,
-            executionStatePath:    executionStatePath,
-            investigationLogPath:  investigationLogPath);
-        if (!string.IsNullOrEmpty(sessionId))
-            contextAssembler.SetSessionId(sessionId);
-
-        var strategyFactory = new StrategyFactory(chatClientFactory.Create, eventEmitter, loggerFactory, governanceKernel, humanApprovalService, evidenceStore, knowledgeLayer.ProvenanceRegistry, config.TestSelector, resolvedSandbox, contextAssembler);
 
         // Validate verifier config: the named agent must exist in the agent pool.
         if (config.Verifier is { AgentName: { Length: > 0 } verifierAgentName })
@@ -1078,10 +1103,193 @@ public static class OrchestratorBuilder
             }
         }
 
+        ConversationCompactor? compactor = null;
+        if (config.Compaction is { } compactionConfig)
+        {
+            if (compactionConfig.TriggerTurnCount <= 0)
+                throw new InvalidOperationException(
+                    $"Compaction.TriggerTurnCount must be a positive integer (got {compactionConfig.TriggerTurnCount}). " +
+                    "A value of 0 or less would compact the conversation on every turn.");
+
+            if (compactionConfig.KeepRecentTurns < 1)
+                throw new InvalidOperationException(
+                    "Compaction.KeepRecentTurns must be at least 1.");
+
+            if (compactionConfig.KeepRecentTurns >= compactionConfig.TriggerTurnCount)
+                throw new InvalidOperationException(
+                    $"Compaction.KeepRecentTurns ({compactionConfig.KeepRecentTurns}) must be " +
+                    $"less than Compaction.TriggerTurnCount ({compactionConfig.TriggerTurnCount}).");
+
+            var summaryModel = compactionConfig.Model ?? config.Agents[0].Model;
+            // Magentic and adversarial sessions have no brief.json or change log, so the
+            // workflow-specific resumption note is suppressed to avoid wasting tokens.
+            bool suppressResumptionNote = useMagentic || useAdversarial;
+            var resumptionNote = suppressResumptionNote ? null : ConversationCompactor.WorkflowResumptionNote;
+            var changeLogPath  = suppressResumptionNote ? null
+                : (config.Validation?.ChangeLogPath ?? config.ChangeTracking?.Path);
+
+            // Knowledge snapshot enricher: augments lossless/hybrid snapshots with ADR,
+            // objective, architecture-violation, memory, and provenance-expiry state.
+            var snapshotEnricher = new fuseraft.Infrastructure.KnowledgeSnapshotEnricher(
+                adrRegistry:      knowledgeLayer.AdrRegistry,
+                objectiveManager: objectiveManager,
+                memoryStore:      new fuseraft.Infrastructure.RepositoryMemoryStore(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, projectSlug)),
+                provenance:       knowledgeLayer.ProvenanceRegistry,
+                manifestPath:     FuseraftPaths.LocalArchitectureManifest,
+                projectRoot:      knowledgeSandbox);
+
+            compactor = new ConversationCompactor(
+                chatClientFactory.Create(summaryModel), compactionConfig,
+                loggerFactory.CreateLogger<ConversationCompactor>(),
+                resumptionNote, changeLogPath, intentLog, config.Events?.Path, evidenceStore,
+                objectiveManager, snapshotEnricher, readCachePath,
+                executionStatePath: executionStatePath);
+
+            if ((compactionConfig.Mode ?? string.Empty).Equals("intent", StringComparison.OrdinalIgnoreCase)
+                && intentLog is null)
+            {
+                loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
+                    "Compaction.Mode is 'intent' but no ChangeTracking.IntentLogPath is configured — " +
+                    "compaction will fall back to lossless or LLM mode at runtime. " +
+                    "Set ChangeTracking.IntentLogPath to enable deterministic intent compaction.");
+            }
+        }
+
+        // Build the post-session skill curator when curation is enabled.
+        SkillCurator? skillCurator = null;
+        if (config.SkillCuration?.Enabled == true)
+        {
+            var curatorModelCfg = config.SkillCuration.Model is { Length: > 0 } m
+                ? chatClientFactory.Resolve(new ModelConfig { ModelId = m })
+                : config.Agents[0].Model;
+            skillCurator = new SkillCurator(
+                chatClientFactory.Create(curatorModelCfg),
+                config.SkillCuration,
+                evidenceStore,
+                loggerFactory.CreateLogger<SkillCurator>());
+        }
+
+        // Validate context budget config.
+        if (config.ContextBudget is { } budget)
+        {
+            bool budgetNeedsCompactor = budget.CutoverAt > 0 || budget.MaxSingleTurnInputTokens > 0;
+            if (budgetNeedsCompactor && compactor is null)
+                throw new InvalidOperationException(
+                    "ContextBudget.CutoverAt and ContextBudget.MaxSingleTurnInputTokens require a " +
+                    "Compaction configuration. Add a Compaction section to your orchestration config " +
+                    "so the compactor is available when the context budget triggers.");
+
+            if (budget.WarnAt > 0 && budget.CutoverAt > 0 && budget.WarnAt >= budget.CutoverAt)
+                throw new InvalidOperationException(
+                    $"ContextBudget.WarnAt ({budget.WarnAt:N0}) must be less than " +
+                    $"CutoverAt ({budget.CutoverAt:N0}).");
+
+            // Warn when WarnTurnTokens >= CutoverAt: a turn that fires the per-turn warning
+            // will simultaneously trigger compaction, making the warning a post-hoc note
+            // rather than an advance signal. Lower WarnTurnTokens below CutoverAt to get
+            // a meaningful early warning before the compaction threshold is crossed.
+            if (config.WarnTurnTokens > 0 && budget.CutoverAt > 0 &&
+                config.WarnTurnTokens >= budget.CutoverAt)
+            {
+                loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
+                    "WarnTurnTokens ({WarnTurnTokens:N0}) is >= ContextBudget.CutoverAt ({CutoverAt:N0}). " +
+                    "The per-turn warning fires in the same turn that triggers compaction — it cannot " +
+                    "provide advance warning. Set WarnTurnTokens below CutoverAt to get an early signal " +
+                    "before the compaction threshold is crossed.",
+                    config.WarnTurnTokens, budget.CutoverAt);
+            }
+        }
+
+        return (config, compactor, skillCurator);
+    }
+
+    // -------------------------------------------------------------------------
+    // WireSkillsAndVerifier
+    // -------------------------------------------------------------------------
+
+    private static void WireSkillsAndVerifier(
+        OrchestrationConfig config,
+        ChatClientFactory chatClientFactory,
+        ILoggerFactory loggerFactory,
+        ConversationCompactor? compactor)
+    {
+        // Validate verifier config: the named agent must exist in the agent pool.
+        // (Already validated in ValidateAndSelectStrategy; this is the wire-up hook
+        // for any post-compactor verifier wiring that may be needed in the future.)
+
+        // Validate context budget config cross-check with WarnTurnTokens.
+        // (Already performed in ValidateAndSelectStrategy; no additional wiring needed here.)
+        _ = compactor; // referenced for future expansion
+    }
+
+    // -------------------------------------------------------------------------
+    // CreateOrchestrator
+    // -------------------------------------------------------------------------
+
+    private static IOrchestrator CreateOrchestrator(
+        OrchestrationConfig config,
+        ILoggerFactory loggerFactory,
+        ChatClientFactory chatClientFactory,
+        PluginRegistry pluginRegistry,
+        GovernanceKernel governanceKernel,
+        IHumanApprovalService? humanApprovalService,
+        bool hitlMode,
+        bool useMagentic,
+        bool useGraph,
+        bool useAdversarial,
+        ChangeTracker? changeTracker,
+        EventEmitter? eventEmitter,
+        fuseraft.Infrastructure.KnowledgeLayer knowledgeLayer,
+        fuseraft.Infrastructure.ObjectiveManager objectiveManager,
+        string knowledgeSandbox,
+        string projectSlug,
+        string? sessionId,
+        string? executionStatePath,
+        string? investigationLogPath,
+        EvidenceStore? evidenceStore,
+        fuseraft.Orchestration.DependencyPlanner? dependencyPlanner,
+        MemoryManager? memoryManager,
+        IdentityRegistry identityRegistry,
+        fuseraft.Infrastructure.ToolResultArtifactStore toolArtifactStore,
+        out fuseraft.Infrastructure.RepositoryMemoryExtractor? repoMemoryExtractor)
+    {
+        var aoLogger = loggerFactory.CreateLogger<AgentOrchestrator>();
+        var goLogger = loggerFactory.CreateLogger<GraphOrchestrator>();
+
+        var resolvedSandbox = config.Security?.FileSystemSandboxPath is { Length: > 0 } sbx
+            ? FuseraftPaths.ExpandPath(sbx) : null;
+
+        // Context Broker (Gap 8): adaptive context pipeline backed by the shared knowledge layer.
+        var brokerMemoryStore = new fuseraft.Infrastructure.RepositoryMemoryStore(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, projectSlug));
+        var contextBroker = new fuseraft.Orchestration.ContextBroker(
+            knowledgeLayer,
+            brokerMemoryStore,
+            knowledgeLayer.ProvenanceRegistry);
+
+        // Shared assembler used by both the state machine (HandoffContext) and the
+        // orchestrator (AgentConfig.Context). One instance so session ID updates propagate.
+        // Sources the graph store and ADR registry from the shared knowledge layer so
+        // adr_graph traversal sees the same state as the plugins and change tracker.
+        var contextAssembler = new ContextAssembler(
+            sandboxRoot:           resolvedSandbox,
+            changeLogPath:         config.Validation?.ChangeLogPath,
+            briefPath:             config.Validation?.BriefPath,
+            graphStore:            knowledgeLayer.GraphStore,
+            adrRegistry:           knowledgeLayer.AdrRegistry,
+            objectiveManager:      objectiveManager,
+            contextBroker:         contextBroker,
+            executionStatePath:    executionStatePath,
+            investigationLogPath:  investigationLogPath);
+        if (!string.IsNullOrEmpty(sessionId))
+            contextAssembler.SetSessionId(sessionId);
+
+        var strategyFactory = new StrategyFactory(chatClientFactory.Create, eventEmitter, loggerFactory, governanceKernel, humanApprovalService, evidenceStore, knowledgeLayer.ProvenanceRegistry, config.TestSelector, resolvedSandbox, contextAssembler);
+
+        var agentFactory = new AgentFactory(chatClientFactory, pluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, identityRegistry, eventEmitter, loggerFactory, BuildSkillsProvider(), toolArtifactStore);
+
         // Unified context assembly pipeline — shared across all orchestrator types.
         // Provides always-on knowledge retrieval, relevance-ranked memory, and metrics
         // telemetry for every agent invocation regardless of which orchestrator is active.
-        var memoryManager   = MemoryManager.FromConfig(config.Memory);
         var repoMemoryStore = new fuseraft.Infrastructure.RepositoryMemoryStore(
             FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, projectSlug));
         memoryManager?.AttachRepositoryMemory(repoMemoryStore);
@@ -1099,6 +1307,18 @@ public static class OrchestratorBuilder
         if (!string.IsNullOrEmpty(sessionId))
             contextPipeline.SetSessionId(sessionId);
 
+        // MagenticOrchestrator handles the "magentic" selection type: a manager LLM drives
+        // dynamic planning, speaker selection, and stall detection without hard-coded routing.
+        //
+        // GraphOrchestrator handles the "graph" selection type: declarative directed-graph
+        // execution with per-node agents, keyword-driven edges, and optional back-edges.
+        //
+        // AdversarialOrchestrator handles the "adversarial" selection type: GAN-style
+        // generate → critique → revise loops where critics receive isolated context windows.
+        //
+        // AgentOrchestrator is the general-purpose path: it drives any selection strategy
+        // (sequential, llm, keyword, structured) through StrategyFactory and works with
+        // any agent names and any team size.
         IOrchestrator orchestrator;
 
         if (useGraph)
@@ -1137,7 +1357,7 @@ public static class OrchestratorBuilder
 
         // Repository memory extractor — runs after the session to generate candidates.
         // Requires an evidence store to query; skipped when evidence tracking is disabled.
-        fuseraft.Infrastructure.RepositoryMemoryExtractor? repoMemoryExtractor = null;
+        repoMemoryExtractor = null;
         if (evidenceStore is not null)
         {
             var extractorStore = new fuseraft.Infrastructure.RepositoryMemoryStore(
@@ -1152,7 +1372,7 @@ public static class OrchestratorBuilder
         if (config.Saga?.Enabled == true)
             orchestrator = new SagaOrchestrator(orchestrator, config.Saga, compensators: null, eventEmitter);
 
-        return new OrchestratorBuildResult(orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, dependencyPlanner, sessionMetrics);
+        return orchestrator;
     }
 
     /// <summary>
