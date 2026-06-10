@@ -79,7 +79,7 @@ REPL snapshots are stored at `~/.fuseraft/repl-sessions/repl-<id>.json` with own
 
 | Field | Description |
 |-------|-------------|
-| `SessionId` | 12-character hex identifier shown in the REPL header |
+| `SessionId` | 8-character hex identifier shown in the REPL header |
 | `ModelId` | Model used for the session |
 | `Cwd` | Working directory when the session was started |
 | `StartedAt` | UTC timestamp when the session was first created |
