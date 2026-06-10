@@ -660,10 +660,16 @@ public sealed class SessionRunner(
 
         Action<string, string, string?> onToolCalling = (agent, tool, args) =>
         {
-            var status = args is not null
-                ? $"[dim]{Markup.Escape(agent)}: {Markup.Escape(tool)}({Markup.Escape(args)})[/]"
-                : $"[dim]{Markup.Escape(agent)}: {Markup.Escape(tool)}()[/]";
-            statusUpdate?.Invoke(status);
+            var raw = args is not null
+                ? $"{agent}: {tool}({args})"
+                : $"{agent}: {tool}()";
+
+            // 2 chars for spinner prefix ("⠋ "); truncate with ellipsis if it would wrap
+            var available = AnsiConsole.Console.Profile.Width - 2;
+            if (available > 0 && raw.Length > available)
+                raw = raw[..(available - 1)] + "…";
+
+            statusUpdate?.Invoke($"[dim]{Markup.Escape(raw)}[/]");
         };
 
         Action<string, int, int> onTokenBudgetWarning = (agent, inputTokens, threshold) =>
@@ -902,7 +908,10 @@ public sealed class SessionRunner(
         if (alreadyPresent) return;
 
         // Inject a synthetic user message with the signal on its own line.
-        // Placed after the compaction summary (index 1) so it appears as early context.
+        // Appended at the end so TransitionAlreadyFired finds no [fuseraft:] markers
+        // after it — inserting at the front would place it before retained transition
+        // markers like "[fuseraft: PlannerCritic → Developer]", which would cause
+        // TransitionAlreadyFired to incorrectly suppress the signal.
         var synthetic = new AgentMessage
         {
             AgentName = lastHandoff.AgentName,
@@ -911,8 +920,7 @@ public sealed class SessionRunner(
             TurnIndex = lastHandoff.TurnIndex,
         };
 
-        int insertAt = retained.Count > 0 && retained[0].IsCompactionSummary ? 1 : 0;
-        retained.Insert(insertAt, synthetic);
+        retained.Add(synthetic);
     }
 
     // Resets all per-compaction-cycle state in one place. Every counter or flag that

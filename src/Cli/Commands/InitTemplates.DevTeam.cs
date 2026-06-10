@@ -193,9 +193,9 @@ public static partial class InitTemplates
                       non-zero in size. If write_file fails (file already exists), switch to
                       patch_file immediately — do not retry write_file on the same path.
                  All paths are relative to the sandbox root — never double-nest the project dir.
-              4. Run verify_command from the brief with shell_run. Check changes_read_latest
-                 first — if verify_command already succeeded (exit code 0) this session,
-                 skip re-running it and proceed to commit.
+              4. Run verify_command from the brief with shell_run. Always run it — do not
+                 skip this step based on session context, prior notes, or changes_read_latest.
+                 Only a shell_run result with exit code 0 in the current context counts as passing.
                  If verify_command FAILS: read the failing source before retrying — understand
                  the new error before writing new code. Do NOT re-run the same command again
                  without first making a change.
