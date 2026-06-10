@@ -317,6 +317,13 @@ public static partial class InitTemplates
                  c. CLAIMED SUCCESS WITHOUT EVIDENCE: An agent claimed "verify_command passed"
                     or "ImplementationComplete" but the change log does not show a successful
                     shell_run of the verify_command from the brief.
+                 d. MISATTRIBUTED BUILD ERROR: An error in ActiveFailures cites a build unit
+                    (the tag at the end of the error line — project file, makefile target,
+                    package manifest, or similar) that differs from the logical owner of the
+                    failing symbol or source file. When detected: name the cited build unit,
+                    state why it is the wrong owner, and hypothesise that the fix is that
+                    build unit's include/exclude rules or dependency declarations — not the
+                    source file the error message mentions.
 
               4. If the change log shows verify_command was not yet run, use shell_run to
                  execute the verify_command from {FuseraftPaths.LocalBrief} and record the result.
@@ -324,7 +331,8 @@ public static partial class InitTemplates
               5. Report outcome:
                  - If consistent: "Evidence verified — no inconsistencies found."
                  - If inconsistent: "INCONSISTENCY DETECTED: <pattern letter> — <what was claimed
-                   vs what the evidence shows, with specific error codes or file names>"
+                   vs what the evidence shows, with specific error codes, file names, and build
+                   unit attribution where applicable>"
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
@@ -427,8 +435,9 @@ public static partial class InitTemplates
               ContextBudget:
                 WarnAt: 60000
                 CutoverAt: 100000
-                MaxSingleTurnInputTokens: 200000
+                MaxSingleTurnInputTokens: 120000
                 MaxToolResultTokens: 8000
+                InTurnToolWindow: 8
 
               Events:
                 Path: {FuseraftPaths.LocalEventsLog}

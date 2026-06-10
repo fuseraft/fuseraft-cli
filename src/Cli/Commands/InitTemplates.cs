@@ -68,10 +68,10 @@ public static partial class InitTemplates
     // Standard ContextWindow blocks used by developer and tester agents to strip tool
     // frames from cross-turn history and cap how far back each turn looks.
     private const string DeveloperContextWindow = """
-        MaxInTurnContextTokens: 50000
+        MaxInTurnContextTokens: 30000
         ContextWindow:
           TextOnly: true
-          MaxTurnAge: 8
+          MaxTurnAge: 5
         """;
     private const string TesterContextWindow = """
         ContextWindow:
