@@ -422,6 +422,7 @@ internal static class ReplTurn
 
             // Reset per-attempt accumulators before reissuing the request.
             sb.Clear(); toolCallsThisTurn.Clear(); toolCallDetails.Clear();
+            fileChanges.Clear(); fileChangeSeen.Clear();
             toolRounds = 0; inToolBatch = false; textStarted = false;
 
             // Restart spinner for the fresh attempt.
@@ -813,10 +814,14 @@ internal static class ReplTurn
                 total -= Estimate(history[start]);
                 history.RemoveAt(start);
             }
-            if (start < history.Count && history[start].Role == ChatRole.Assistant)
+            else if (start < history.Count && history[start].Role == ChatRole.Assistant)
             {
                 total -= Estimate(history[start]);
                 history.RemoveAt(start);
+            }
+            else
+            {
+                start++; // unexpected role — advance to avoid an infinite loop
             }
         }
         return true;
@@ -873,11 +878,15 @@ internal static class ReplTurn
         if (!FirstPersonMutationRegex.IsMatch(text)) return false;
         // Require a file-like reference so purely conversational "I fixed the explanation" doesn't fire.
         var lower = text.ToLowerInvariant();
-        return lower.Contains('/') ||
-               lower.Contains(".md") || lower.Contains(".cs") || lower.Contains(".py") ||
-               lower.Contains(".js") || lower.Contains(".ts") || lower.Contains(".json") ||
+        return lower.Contains('/') || lower.Contains('\\') ||
+               lower.Contains(".md") || lower.Contains(".cs")   || lower.Contains(".py")  ||
+               lower.Contains(".js") || lower.Contains(".ts")   || lower.Contains(".json") ||
                lower.Contains(".xml") || lower.Contains(".yaml") || lower.Contains(".txt") ||
-               lower.Contains(".drawio") || lower.Contains(".sh") || lower.Contains(".toml");
+               lower.Contains(".drawio") || lower.Contains(".sh") || lower.Contains(".toml") ||
+               lower.Contains(".go")  || lower.Contains(".java") || lower.Contains(".rb")  ||
+               lower.Contains(".rs")  || lower.Contains(".cpp")  || lower.Contains(".c")   ||
+               lower.Contains(".h")   || lower.Contains(".html") || lower.Contains(".css") ||
+               lower.Contains(".vue") || lower.Contains(".kt")   || lower.Contains(".swift");
     }
 
     internal static async Task<bool> VerifyStepAsync(
@@ -906,12 +915,11 @@ internal static class ReplTurn
     {
         try
         {
-            var (shell, args) = OperatingSystem.IsWindows()
-                ? ("cmd.exe",   $"/c {command}")
-                : ("/bin/bash", $"-c {command}");
-
-            var result = await fuseraft.Infrastructure.Plugins.ProcessHelper.RunAsync(
-                shell, args, workingDirectory: cwd, timeoutSeconds: 10, cancellationToken: cancellationToken);
+            var result = await (OperatingSystem.IsWindows()
+                ? fuseraft.Infrastructure.Plugins.ProcessHelper.RunAsync(
+                    "cmd.exe",   ["/c", command], workingDirectory: cwd, timeoutSeconds: 10, cancellationToken: cancellationToken)
+                : fuseraft.Infrastructure.Plugins.ProcessHelper.RunAsync(
+                    "/bin/bash", ["-c", command], workingDirectory: cwd, timeoutSeconds: 10, cancellationToken: cancellationToken));
             return result.Succeeded;
         }
         catch { return false; }

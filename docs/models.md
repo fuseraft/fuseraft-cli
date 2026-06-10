@@ -106,7 +106,7 @@ For any model not matching the table, specify `Provider`, `Endpoint`, and `ApiKe
 
 ```json
 {
-  "modelId": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+  "modelId": "anthropic.claude-sonnet-4-6-20250929-v1:0",
   "endpoint": "http://localhost:3000/api/openai/v1",
   "apiKeyEnvVar": "OPENWEBUI_API_KEY"
 }

@@ -179,7 +179,7 @@ For each agent, read `Instructions` and flag:
 
 #### H. Model aliases
 
-1. Every `Model.ModelId` in agents must either be a direct provider model ID (e.g. `gpt-4o`, `claude-sonnet-4-5`) or an alias defined in `Models`.
+1. Every `Model.ModelId` in agents must either be a direct provider model ID (e.g. `gpt-4o`, `claude-sonnet-4-6`) or an alias defined in `Models`.
 2. Every alias in `Models` must have a `ModelId` field.
 3. If `Compaction.Model` is set, apply the same check.
 4. Flag any model that likely requires an API key env var not mentioned in the config or a local `README`.

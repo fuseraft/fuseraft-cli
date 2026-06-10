@@ -48,7 +48,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 {
     private static readonly (string EnvVar, string ModelId)[] AutoDetectOrder =
     [
-        ("ANTHROPIC_API_KEY",  "claude-sonnet-4-5"),
+        ("ANTHROPIC_API_KEY",  "claude-sonnet-4-6"),
         ("OPENAI_API_KEY",     "gpt-4o-mini"),
         ("XAI_API_KEY",        "grok-4.3"),
         ("GOOGLE_AI_API_KEY",  "gemini-2.0-flash"),
