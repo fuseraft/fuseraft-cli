@@ -183,10 +183,15 @@ public static class MessageRenderer
         }
         else if (!hasContent && toolCount > 0)
         {
-            // Agent produced no summary text but did make tool calls. Show a dim count so
-            // the panel is never completely blank — the user can re-run with --tools
-            // to see the full tool list.
-            body = new Markup($"[dim]({toolCount} tool call{(toolCount == 1 ? "" : "s")} — run with --tools to see details)[/]");
+            // No summary text — emit a compact single line instead of a full panel.
+            var callWord  = toolCount == 1 ? "call" : "calls";
+            var elapsedFmt = elapsed.TotalSeconds > 0.5 ? $"  {elapsed.TotalSeconds:0.0}s" : string.Empty;
+            var usageFmt   = message.Usage is { } u2 ? $"  in:{u2.InputTokens:N0} out:{u2.OutputTokens:N0}" : string.Empty;
+            AnsiConsole.MarkupLine(
+                $"  [bold {color.ToMarkup()}]{Markup.Escape(message.AgentName)}[/]" +
+                $"  [dim]turn {message.TurnIndex + 1}{Markup.Escape(elapsedFmt)}{Markup.Escape(usageFmt)}" +
+                $"  {toolCount} tool {callWord}[/]");
+            return;
         }
         else
         {
