@@ -135,6 +135,14 @@ public sealed class SessionRunner(
                     compactionNeeded = await RunSpinnerIterationAsync(
                         task, checkpoint, messages, turnClock, showTools, cancellationToken);
             }
+            catch (AgentBlockedException blocked)
+            {
+                var outcome = await HandleAgentBlockedAsync(blocked, checkpoint, messages, cancellationToken);
+                succeeded    = outcome.Succeeded;
+                errorMessage = outcome.ErrorMessage;
+                if (outcome.ShouldBreak)    break;
+                if (outcome.ShouldContinue) continue;
+            }
             catch (ValidatorStuckException stuck)
             {
                 var outcome = await HandleValidatorStuckAsync(stuck, checkpoint, messages, cancellationToken);
@@ -297,6 +305,33 @@ public sealed class SessionRunner(
     /// if the user declines to intervene, or <see cref="HandlerOutcome.ShouldContinue"/> after
     /// injecting the redirect.
     /// </summary>
+    private async Task<HandlerOutcome> HandleAgentBlockedAsync(
+        AgentBlockedException blocked,
+        SessionCheckpoint checkpoint,
+        List<AgentMessage> messages,
+        CancellationToken cancellationToken)
+    {
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync("agent_blocked",
+                agent: blocked.AgentName,
+                payload: new { message = blocked.BlockerMessage });
+
+        var redirect = await approvalService.PromptBlockerResolutionAsync(blocked.AgentName, blocked.BlockerMessage);
+
+        if (redirect == null)
+        {
+            AnsiConsole.MarkupLine(
+                $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] paused — resume with:[/] " +
+                $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
+            return new HandlerOutcome(ShouldBreak: true, ShouldContinue: false, CompactionNeeded: false,
+                Succeeded: false, ErrorMessage: $"Blocked: agent '{blocked.AgentName}' declared an unrecoverable blocker.");
+        }
+
+        await InjectAndSaveHumanMessageAsync(redirect, messages, checkpoint, cancellationToken);
+        return new HandlerOutcome(ShouldBreak: false, ShouldContinue: true, CompactionNeeded: false,
+            Succeeded: true, ErrorMessage: null);
+    }
+
     private async Task<HandlerOutcome> HandleValidatorStuckAsync(
         ValidatorStuckException stuck,
         SessionCheckpoint checkpoint,
@@ -308,14 +343,8 @@ public sealed class SessionRunner(
                 agent: stuck.AgentName,
                 payload: new { validator = stuck.ValidatorName, consecutive_failures = stuck.ConsecutiveFailures, last_error = stuck.LastValidatorError });
 
-        AnsiConsole.MarkupLine(
-            $"\n[yellow]⚠ HITL intervention required.[/]\n" +
-            $"  Agent:    [bold]{Markup.Escape(stuck.AgentName)}[/]\n" +
-            $"  Blocked:  [bold]{Markup.Escape(stuck.ValidatorName)}[/] " +
-            $"({stuck.ConsecutiveFailures} consecutive failures)\n" +
-            $"  Last error:\n[dim]{Markup.Escape(stuck.LastValidatorError)}[/]\n");
-
-        var redirect = await approvalService.PromptRedirectAsync(stuck.AgentName);
+        var redirect = await approvalService.PromptValidatorStuckAsync(
+            stuck.AgentName, stuck.ValidatorName, stuck.ConsecutiveFailures, stuck.LastValidatorError);
 
         if (redirect == null)
         {
