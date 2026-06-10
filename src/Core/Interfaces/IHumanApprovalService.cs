@@ -19,6 +19,19 @@ public interface IHumanApprovalService
     Task<string?> PromptRedirectAsync(string agentName);
 
     /// <summary>
+    /// Prompts the user when a validator has blocked an agent for too many consecutive turns,
+    /// displaying the validator name, failure count, and last error. Returns a redirect message
+    /// to inject, or null to pause the session.
+    /// </summary>
+    Task<string?> PromptValidatorStuckAsync(string agentName, string validatorName, int consecutiveFailures, string lastError);
+
+    /// <summary>
+    /// Prompts the user when an agent emits BLOCKED, displaying the blocker reason and
+    /// asking for a resolution message to inject. Returns the message, or null to pause.
+    /// </summary>
+    Task<string?> PromptBlockerResolutionAsync(string agentName, string blockerMessage);
+
+    /// <summary>
     /// Prompts for explicit approval before a route fires.
     /// Returns true if approved; false blocks the route and re-invokes the source agent.
     /// </summary>

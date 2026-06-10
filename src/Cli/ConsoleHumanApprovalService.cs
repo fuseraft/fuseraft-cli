@@ -33,7 +33,44 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
     {
         AnsiConsole.Markup(
             $"[bold]Redirect {Markup.Escape(agentName)}[/] " +
-            $"[dim](Enter to abort session):[/]  ");
+            $"[dim](Enter to pause session):[/]  ");
+        var input = Console.ReadLine()?.Trim() ?? string.Empty;
+        return Task.FromResult<string?>(string.IsNullOrEmpty(input) ? null : input);
+    }
+
+    public Task<string?> PromptValidatorStuckAsync(string agentName, string validatorName, int consecutiveFailures, string lastError)
+    {
+        const int MaxErrorChars = 800;
+        var error = lastError.Length > MaxErrorChars
+            ? lastError[..MaxErrorChars] + "\n…(truncated)"
+            : lastError;
+
+        AnsiConsole.MarkupLine($"\n[bold {ThemeDetector.Warning}]⏸ HITL intervention required.[/]");
+        AnsiConsole.MarkupLine("[dim]─────────────────────────────────────────[/]");
+        AnsiConsole.MarkupLine($"  Agent:     [bold]{Markup.Escape(agentName)}[/]");
+        AnsiConsole.MarkupLine($"  Validator: [bold]{Markup.Escape(validatorName)}[/] ({consecutiveFailures} consecutive failures)\n");
+        AnsiConsole.MarkupLine(Markup.Escape(error));
+        AnsiConsole.MarkupLine("[dim]─────────────────────────────────────────[/]");
+        AnsiConsole.Markup("[dim]Type a message to redirect the agent  ·  press Enter to pause:[/]  ");
+
+        var input = Console.ReadLine()?.Trim() ?? string.Empty;
+        return Task.FromResult<string?>(string.IsNullOrEmpty(input) ? null : input);
+    }
+
+    public Task<string?> PromptBlockerResolutionAsync(string agentName, string blockerMessage)
+    {
+        const int MaxReasonChars = 800;
+        var reason = blockerMessage.Length > MaxReasonChars
+            ? blockerMessage[..MaxReasonChars] + "\n…(truncated)"
+            : blockerMessage;
+
+        AnsiConsole.MarkupLine($"\n[bold {ThemeDetector.Warning}]⏸ Agent blocked — intervention required.[/]");
+        AnsiConsole.MarkupLine("[dim]─────────────────────────────────────────[/]");
+        AnsiConsole.MarkupLine($"  Agent: [bold]{Markup.Escape(agentName)}[/]\n");
+        AnsiConsole.MarkupLine(Markup.Escape(reason));
+        AnsiConsole.MarkupLine("[dim]─────────────────────────────────────────[/]");
+        AnsiConsole.Markup("[dim]Type a message to unblock the agent  ·  press Enter to pause:[/]  ");
+
         var input = Console.ReadLine()?.Trim() ?? string.Empty;
         return Task.FromResult<string?>(string.IsNullOrEmpty(input) ? null : input);
     }
