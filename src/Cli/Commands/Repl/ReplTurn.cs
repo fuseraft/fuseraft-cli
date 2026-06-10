@@ -805,16 +805,12 @@ internal static class ReplTurn
         int start = history.Count > 0 && history[0].Role == ChatRole.System ? 1 : 0;
         while (total > ContextTokenBudget && start + 1 < history.Count)
         {
-            // Remove one user message then the immediately following assistant message.
-            // Consecutive user turns (e.g. injected step summaries) are removed one per
-            // iteration; the assistant check below safely no-ops when history[start] is
-            // still another user message after the removal.
-            if (history[start].Role == ChatRole.User)
-            {
-                total -= Estimate(history[start]);
-                history.RemoveAt(start);
-            }
-            else if (start < history.Count && history[start].Role == ChatRole.Assistant)
+            // Remove one message per iteration across all roles that form a turn:
+            // user prompt, interleaved assistant tool-call stubs, tool results
+            // (ChatRole.Tool), and the final assistant reply are all evicted together
+            // as the loop advances through the turn sequence.
+            var role = history[start].Role;
+            if (role == ChatRole.User || role == ChatRole.Assistant || role == ChatRole.Tool)
             {
                 total -= Estimate(history[start]);
                 history.RemoveAt(start);

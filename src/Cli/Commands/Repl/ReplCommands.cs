@@ -174,12 +174,12 @@ internal static class ReplCommands
             return CommandResult.Continue;
         }
 
-        AnsiConsole.MarkupLine("[dim]Paste your content below. Type[/] [bold]EOF[/] [dim]on its own line when done.[/]");
+        AnsiConsole.MarkupLine("[dim]Paste your content below. Type[/] [bold].done[/] [dim]on its own line (or press Ctrl+D) when done.[/]");
         var lines = new List<string>();
         while (true)
         {
             var line = Console.ReadLine();
-            if (line is null || line == "EOF") break;
+            if (line is null || line == ".done") break;
             lines.Add(line);
         }
         if (lines.Count == 0)
@@ -1261,7 +1261,7 @@ internal static class ReplCommands
         var turns  = new List<(string User, string? Asst)>();
         for (var i = 0; i < nonSys.Count; i++)
         {
-            if (nonSys[i].Role != ChatRole.User) continue;
+            if (nonSys[i].Role != ChatRole.User || IsStepSummary(nonSys[i])) continue;
             var userText = nonSys[i].Text ?? string.Empty;
             string? asstText = null;
             if (i + 1 < nonSys.Count && nonSys[i + 1].Role == ChatRole.Assistant)
@@ -1344,7 +1344,7 @@ internal static class ReplCommands
         // Use the count of User messages in history as the authoritative turn count —
         // TurnIndex can drift from the live history after TrimHistory or /execute steps.
         var nonSys     = ctx.History.Where(m => m.Role != ChatRole.System).ToList();
-        var totalTurns = nonSys.Count(m => m.Role == ChatRole.User);
+        var totalTurns = nonSys.Count(m => m.Role == ChatRole.User && !IsStepSummary(m));
 
         if (totalTurns == 0)
         {
@@ -1389,7 +1389,7 @@ internal static class ReplCommands
         var seen = 0;
         for (var i = 0; i < nonSys.Count; i++)
         {
-            if (nonSys[i].Role == ChatRole.User)
+            if (nonSys[i].Role == ChatRole.User && !IsStepSummary(nonSys[i]))
             {
                 if (seen >= targetTurn) break;
                 kept.Add(nonSys[i]);
@@ -1397,7 +1397,7 @@ internal static class ReplCommands
             }
             else
             {
-                kept.Add(nonSys[i]); // assistant message — belongs to the preceding user turn
+                kept.Add(nonSys[i]); // assistant, tool, or step-summary — belongs to the preceding turn
             }
         }
 
@@ -2284,6 +2284,12 @@ internal static class ReplCommands
             $"    [dim]{Markup.Escape(paddedLabel)}[/] [bold]{tokens,7:N0}[/] [dim]tok  {pct,5:F1}%  {bar}[/]{suffix}");
     }
 
+    private static bool IsStepSummary(ChatMessage m) =>
+        m.Role == ChatRole.User &&
+        m.Text is { } t &&
+        t.StartsWith("[Step ", StringComparison.Ordinal) &&
+        t.Contains(" complete]", StringComparison.Ordinal);
+
     /// <summary>
     /// Returns <paramref name="steps"/> in dependency order using Kahn's algorithm.
     /// Steps with no <c>DependsOn</c> or with already-satisfied dependencies are emitted
@@ -2295,9 +2301,16 @@ internal static class ReplCommands
         if (steps.All(s => s.DependsOn is not { Length: > 0 }))
             return steps;
 
-        var byId       = steps.ToDictionary(s => s.Step);
-        var inDegree   = steps.ToDictionary(s => s.Step, _ => 0);
-        var dependents = steps.ToDictionary(s => s.Step, _ => new List<int>());
+        // Build index tolerating duplicate step numbers — last writer wins.
+        var byId       = new Dictionary<int, PlanStep>();
+        var inDegree   = new Dictionary<int, int>();
+        var dependents = new Dictionary<int, List<int>>();
+        foreach (var s in steps)
+        {
+            byId[s.Step]       = s;
+            inDegree[s.Step]   = 0;
+            dependents[s.Step] = new List<int>();
+        }
 
         foreach (var step in steps.Where(s => s.DependsOn is { Length: > 0 }))
         {
