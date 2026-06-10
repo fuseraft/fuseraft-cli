@@ -189,7 +189,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             }
         }
 
-        var sessionId  = snapshot?.SessionId ?? GenerateSessionId();
+        var sessionId  = snapshot?.SessionId ?? StringHelpers.NewSessionId();
         var startedAt  = snapshot?.StartedAt  ?? DateTime.UtcNow;
 
         ReplSessionPlugin? replSessionPlugin = null;
@@ -417,13 +417,6 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             return proc.ExitCode == 0 && !string.IsNullOrEmpty(output) && output != "HEAD" ? output : null;
         }
         catch { return null; }
-    }
-
-    private static string GenerateSessionId()
-    {
-        var bytes = new byte[6];
-        System.Security.Cryptography.RandomNumberGenerator.Fill(bytes);
-        return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
     /// <summary>
