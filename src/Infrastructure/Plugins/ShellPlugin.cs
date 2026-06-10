@@ -39,19 +39,31 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     private readonly object _tempDirLock = new();
     private string? _sessionTempDir;
 
-    // Per-turn command dedup cache: maps (command + workingDir) → previous output so
-    // running the exact same command twice in one agent turn returns the cached result
-    // instead of re-executing it. Cleared by BeginTurn() at the start of each turn.
-    private readonly Dictionary<string, string> _runThisTurn = new(StringComparer.Ordinal);
+    // Per-turn command dedup: tracks only the most recently run command.
+    // If the exact same command is called again with no other shell command in between,
+    // the cached result is returned so the agent can act on the failure rather than
+    // re-running an identical command in a tight loop.
+    // Any other intervening shell_run clears the entry, so file changes made via shell
+    // (cat >, tee, heredocs, etc.) are always reflected on the next verify run.
+    private string? _lastRunKey;
+    private string? _lastRunOutput;
 
-    void ITurnResettable.BeginTurn() => _runThisTurn.Clear();
+    void ITurnResettable.BeginTurn()
+    {
+        _lastRunKey    = null;
+        _lastRunOutput = null;
+    }
 
     /// <summary>
     /// Clears the per-turn command cache so that the next shell_run call executes
     /// fresh even within the same turn. Called by FileSystemPlugin after a successful
     /// write_file or patch_file so verify commands pick up changes immediately.
     /// </summary>
-    internal void InvalidateRunCache() => _runThisTurn.Clear();
+    internal void InvalidateRunCache()
+    {
+        _lastRunKey    = null;
+        _lastRunOutput = null;
+    }
 
     // Background job registry
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, BackgroundJob> _jobs = new();
@@ -135,20 +147,23 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         var denial = ValidateWorkingDirectory(workingDirectory, out var resolvedDir);
         if (denial is not null) return denial;
 
-        // Per-turn command dedup: if the exact same command has already run in this turn,
-        // return the cached output. Re-running an identical command in the same turn almost
-        // always means the agent is looping — returning the previous result breaks the loop
-        // and keeps the previous output in context where the agent can act on it.
+        // Per-turn command dedup: if the exact same command was the last command run this
+        // turn, return the cached output. Re-running an identical command back-to-back
+        // almost always means the agent is looping — returning the cached result breaks
+        // the loop and keeps the failure in context where the agent can act on it.
+        // Any other intervening shell_run clears the cached entry so that file changes
+        // made via shell (cat >, tee, heredocs, etc.) are reflected on the next verify run.
         var cacheKey = command.Trim() + "\0" + (resolvedDir ?? "(default)");
-        if (_runThisTurn.TryGetValue(cacheKey, out var cachedOutput))
-            return $"[Command already ran this turn — cached output follows]\n\n{cachedOutput}";
+        if (_lastRunKey == cacheKey)
+            return $"[Command already ran this turn — cached output follows]\n\n{_lastRunOutput}";
 
         var result = await ProcessHelper.RunAsync(
             Shell, [ShellFlag, command],
             resolvedDir, timeoutSeconds);
 
         var output = result.ToPluginOutput();
-        _runThisTurn[cacheKey] = output;
+        _lastRunKey    = cacheKey;
+        _lastRunOutput = output;
 
         if (_eventSink is not null && IsBuildCommand(command))
         {
