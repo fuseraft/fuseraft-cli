@@ -78,10 +78,15 @@ var logConfig = new LoggerConfiguration()
     .MinimumLevel.Is(verbose ? LogEventLevel.Debug : LogEventLevel.Information)
     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
     .MinimumLevel.Override("System", LogEventLevel.Warning)
-    .Enrich.FromLogContext()
-    .WriteTo.Console(
-        formatter: maskedFormatter,
-        standardErrorFromLevel: vsCodeArg ? LogEventLevel.Verbose : null);
+    .Enrich.FromLogContext();
+
+// In VSCode mode all output must go to stderr so stdout stays a clean JSON stream.
+// Otherwise route through AnsiConsole so Serilog lines coordinate with live displays
+// (spinner, Status) and never land on the wrong terminal row.
+if (vsCodeArg)
+    logConfig = logConfig.WriteTo.Console(formatter: maskedFormatter, standardErrorFromLevel: LogEventLevel.Verbose);
+else
+    logConfig = logConfig.WriteTo.Sink(new AnsiConsoleSink(maskedFormatter));
 
 // Always write Warning+ to .fuseraft/logs/app.log so store-corruption and other
 // runtime warnings survive past the terminal session.
