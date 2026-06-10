@@ -65,7 +65,7 @@ public static class DocumentTextExtractor
             throw new InvalidOperationException($"Sheet '{sheetName}' has no part ID.");
 
         var wsPart = (WorksheetPart)workbookPart.GetPartById(sheet.Id.Value);
-        var data = wsPart.Worksheet.GetFirstChild<SheetData>();
+        var data = wsPart.Worksheet?.GetFirstChild<SheetData>();
         if (data is null) return (string.Empty, 0);
 
         var sb = new StringBuilder();
@@ -143,7 +143,7 @@ public static class DocumentTextExtractor
         {
             slideNum++;
             sb.AppendLine($"=== Slide {slideNum} ===");
-            foreach (var text in slidePart.Slide.Descendants<DocumentFormat.OpenXml.Drawing.Text>())
+            foreach (var text in slidePart.Slide?.Descendants<DocumentFormat.OpenXml.Drawing.Text>() ?? [])
             {
                 if (!string.IsNullOrWhiteSpace(text.Text))
                     sb.AppendLine(text.Text);
@@ -172,7 +172,7 @@ public static class DocumentTextExtractor
             sb.AppendLine($"=== Sheet: {sheet.Name} ===");
             if (sheet.Id?.Value is null) continue;
             var wsPart = (WorksheetPart)workbookPart.GetPartById(sheet.Id.Value);
-            var data   = wsPart.Worksheet.GetFirstChild<SheetData>();
+            var data   = wsPart.Worksheet?.GetFirstChild<SheetData>();
             if (data is null) continue;
 
             foreach (var row in data.Elements<Row>())
