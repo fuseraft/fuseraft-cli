@@ -1913,7 +1913,8 @@ public static class OrchestratorBuilder
     private static async Task<object?> RunSkillScriptAsync(
         AgentFileSkill skill,
         AgentFileSkillScript script,
-        AIFunctionArguments arguments,
+        JsonElement? arguments,
+        IServiceProvider? serviceProvider,
         CancellationToken cancellationToken)
     {
         var ext = Path.GetExtension(script.FullPath).ToLowerInvariant();
@@ -1936,8 +1937,15 @@ public static class OrchestratorBuilder
             UseShellExecute        = false,
         };
         psi.ArgumentList.Add(script.FullPath);
-        foreach (var val in arguments.Values.Select(v => v?.ToString() ?? "").Where(s => s.Length > 0))
-            psi.ArgumentList.Add(val);
+        if (arguments.HasValue && arguments.Value.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var prop in arguments.Value.EnumerateObject())
+            {
+                var val = prop.Value.ToString();
+                if (!string.IsNullOrEmpty(val))
+                    psi.ArgumentList.Add(val);
+            }
+        }
 
         using var proc = Process.Start(psi)
             ?? throw new InvalidOperationException($"Failed to start {program}");
