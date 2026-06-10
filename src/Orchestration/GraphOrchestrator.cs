@@ -974,6 +974,10 @@ public sealed class GraphOrchestrator(
                 if (fwdHandled) continue;
             }
 
+            // BLOCKED: agent declared an unrecoverable blocker — halt immediately, no retry.
+            if (foundKeyword is null && KeywordDetector.IsBlocked(responseText))
+                throw new AgentBlockedException(agentName, responseText);
+
             // No keyword matched.
 
             consecutiveFails++;

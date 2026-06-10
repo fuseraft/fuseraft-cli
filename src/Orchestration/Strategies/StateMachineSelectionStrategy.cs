@@ -399,6 +399,13 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
             }
         }
 
+        // BLOCKED: agent declared an unrecoverable blocker — halt immediately, no correction loop.
+        var lastAssistantText = history
+            .LastOrDefault(m => m.Role == ChatRole.Assistant)
+            ?.Text;
+        if (lastAssistantText is not null && IsSignalOnOwnLine(lastAssistantText, "BLOCKED"))
+            throw new AgentBlockedException(state.Agent, lastAssistantText);
+
         // No signal matched — re-invoke the current state's agent with corrective nudge if needed.
         _logger.LogDebug(
             "[StateMachine] No transition signal matched in state '{State}' — re-invoking agent '{Agent}'",

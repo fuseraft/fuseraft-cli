@@ -606,6 +606,12 @@ public sealed class KeywordSelectionStrategy : IAgentSelector
         // causes out-of-order execution and can corrupt shared state (e.g. the default agent
         // writing over files it has no business touching).
         var lastAgent = FindLastSpeakingAgent(history, agents);
+
+        // BLOCKED: agent declared an unrecoverable blocker — halt immediately, no correction loop.
+        var lastAgentText = GetLastAgentText(history);
+        if (lastAgentText is not null && IsKeywordOnOwnLine(lastAgentText, "BLOCKED"))
+            throw new AgentBlockedException(lastAgent?.Name ?? _defaultAgentName, lastAgentText);
+
         if (lastAgent is not null &&
             !string.Equals(lastAgent.Name, _defaultAgentName, StringComparison.OrdinalIgnoreCase))
         {

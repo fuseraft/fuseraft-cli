@@ -62,6 +62,11 @@ internal static class KeywordDetector
         return found;
     }
 
+    // Returns true when the response contains a BLOCKED keyword on its own line,
+    // indicating the agent has declared an unrecoverable blocker.
+    internal static bool IsBlocked(string responseText) =>
+        IsKeywordOnOwnLineStrict(responseText, "BLOCKED");
+
     // Matches when the keyword appears ALONE on its own line after stripping markdown
     // formatting characters (* and _). This is the only matching mode used for both
     // detection and foreign-keyword classification — relaxed "starts-with" matching was
