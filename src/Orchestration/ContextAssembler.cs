@@ -43,6 +43,10 @@ public sealed class ContextAssembler
     // contains more text, but still bounded so 4 verbose turns don't silently cost 80k chars.
     private const int DefaultMaxCharsOwnHistory  = 8_000;
 
+    private const int TaskReminderMinContextChars = 2_000;
+    private const int TaskReminderMinTaskLength   = 50;
+    private const int TaskReminderPreviewChars    = 200;
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -202,15 +206,11 @@ public sealed class ContextAssembler
         var pendingCorrections = ExtractPendingCorrections(agentName, sharedHistory);
         result.AddRange(pendingCorrections);
 
-        // 5. Task reminder — sandwich the objective at both ends of a non-trivial context.
-        // The task is already at position 0 (primacy effect); repeating a brief version at the
-        // very end exploits the recency effect so the agent's goal stays visible after a long
-        // assembled context block. Only injected when there is enough content between the two
-        // endpoints to make the reminder worthwhile.
+        // 5. Repeat task at recency end — exploits primacy+recency sandwich for long contexts.
         int charsAfterTask = result.Skip(1).Sum(m => m.Text?.Length ?? 0);
-        if (task.Length > 50 && charsAfterTask > 2_000)
+        if (task.Length > TaskReminderMinTaskLength && charsAfterTask > TaskReminderMinContextChars)
         {
-            var preview = task.Length > 200 ? task[..200] + "…" : task;
+            var preview = task.Length > TaskReminderPreviewChars ? task[..TaskReminderPreviewChars] + "…" : task;
             result.Add(new ChatMessage(ChatRole.User, $"[Task Reminder]\n\n{preview}"));
         }
 
