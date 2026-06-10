@@ -15,18 +15,6 @@ using MagenticOrchestrator = fuseraft.Orchestration.MagenticOrchestrator;
 
 namespace fuseraft.Cli;
 
-// Compaction trigger classification — informs the session_summary event and the
-// compaction event reason field so post-session analysis can identify the primary
-// cause of each compaction cycle.
-file static class CompactionReason
-{
-    public const string SingleTurnLimit = "single_turn_limit";
-    public const string CumulativeBudget = "cumulative_budget";
-    public const string ShouldCompact = "window_size";
-    public const string AgentRequested = "agent_requested";
-    public const string ContextExceeded = "context_exceeded";
-}
-
 /// <summary>
 /// The outcome of a completed session run.
 /// </summary>
@@ -62,22 +50,19 @@ public sealed class SessionRunner(
     // Session-lifetime assistant-turn counter. Only ever increments — never reset after
     // compaction. Used solely for the MaxIterations hard cap.
     private int _totalAssistantTurnCount;
-    private readonly Dictionary<string, int> _perAgentCumulativeInputTokens = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _warnedAgents = new(StringComparer.OrdinalIgnoreCase);
 
-    // Reason for the pending compaction cycle — set just before compactionNeeded=true,
-    // cleared after the compaction event is emitted. Informs session_summary and the
-    // compaction event reason field so post-hoc analysis can identify the cause.
-    private string _pendingCompactionReason = CompactionReason.ShouldCompact;
-
-    // Set to true after each compaction cycle. Suppresses CutoverAt (cumulative) enforcement
-    // for exactly one turn so a post-compaction turn can run without immediately triggering
-    // another compaction — the history is already at minimum after compaction and re-compacting
-    // before the agent makes any progress would thrash indefinitely.
-    // MaxSingleTurnInputTokens is NOT suppressed: a single-turn explosion should always trigger
-    // compaction regardless of whether we just compacted, since the compaction summary itself
-    // may be large enough to start the next turn already over the per-turn limit.
-    private bool _justCompacted;
+    private readonly ContextBudgetManager _budgetManager = new(contextBudget, contextWindowRecorder, eventEmitter);
+    private readonly CompactionCoordinator _coordinator  = new(
+        orchestrator, compactor, sessionStore, eventEmitter, sessionMetrics, contextWindowRecorder,
+        sessionId =>
+        {
+            if (!string.IsNullOrEmpty(configPath))
+            {
+                var rel = Path.GetRelativePath(Directory.GetCurrentDirectory(), configPath);
+                return $"fuseraft run --config {rel} --resume {sessionId}";
+            }
+            return $"fuseraft run --resume {sessionId}";
+        });
 
     // Carrier for the outcome of each exception handler. Avoids out-parameters on async methods.
     private readonly record struct HandlerOutcome(
@@ -119,14 +104,11 @@ public sealed class SessionRunner(
             // file reads) averages ~3 chars per token, and the estimate omits tool-schema
             // overhead (~10–20 k tokens for agents with many tools). The conservative
             // divisor compensates for both without needing per-agent schema introspection.
-            if (!_justCompacted
-                && compactor is not null
-                && contextBudget?.MaxSingleTurnInputTokens > 0
-                && checkpoint.Messages.Sum(m => (m.Content?.Length ?? 0) / 3) > contextBudget.MaxSingleTurnInputTokens)
+            if (_coordinator.NeedsPreTurnCompaction(checkpoint, contextBudget))
             {
                 AnsiConsole.MarkupLine(
                     $"[yellow]  ⚡ Pre-turn context estimate exceeds MaxSingleTurnInputTokens " +
-                    $"({contextBudget.MaxSingleTurnInputTokens:N0}). Compacting before next turn...[/]");
+                    $"({contextBudget!.MaxSingleTurnInputTokens:N0}). Compacting before next turn...[/]");
                 compactionNeeded = true;
             }
 
@@ -251,7 +233,7 @@ public sealed class SessionRunner(
             if (compactionNeeded)
             {
                 var (updatedCheckpoint, shouldBreak, shouldContinue, compactionError) =
-                    await TryTriggerCompactionAsync(task, checkpoint, cancellationToken);
+                    await _coordinator.TryTriggerCompactionAsync(task, checkpoint, _totalAssistantTurnCount, _budgetManager, cancellationToken);
                 checkpoint = updatedCheckpoint;
                 if (shouldBreak)
                 {
@@ -395,12 +377,11 @@ public sealed class SessionRunner(
             AnsiConsole.MarkupLine(
                 $"\n[yellow]⚠ Context window exceeded — fallover chain exhausted.[/] Compacting history and retrying...\n" +
                 $"  [dim]{Markup.Escape(TrimTo(ex.Message, 200))}[/]\n");
-            _pendingCompactionReason = CompactionReason.ContextExceeded;
+            _coordinator.SetPendingReason(CompactionReason.ContextExceeded);
             return new HandlerOutcome(ShouldBreak: false, ShouldContinue: false, CompactionNeeded: true,
                 Succeeded: true, ErrorMessage: null);
         }
 
-        // Compactor is not configured — nothing we can do but surface a clear message.
         if (eventEmitter is not null)
             await eventEmitter.EmitAsync("session_error",
                 payload: new { reason = "context_exceeded_no_compactor", message = TrimTo(ex.Message, 200) });
@@ -454,63 +435,6 @@ public sealed class SessionRunner(
             Succeeded: false, ErrorMessage: ex.Message));
     }
 
-    // ── Compaction trigger ────────────────────────────────────────────────────
-
-    private async Task<(SessionCheckpoint Checkpoint, bool ShouldBreak, bool ShouldContinue, string? ErrorMessage)> TryTriggerCompactionAsync(
-        string task,
-        SessionCheckpoint checkpoint,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            checkpoint = await ApplyCompactionAsync(task, checkpoint, compactor!, cancellationToken);
-
-            PostCompactionReset(checkpoint);
-            if (contextWindowRecorder is not null)
-                await contextWindowRecorder.RecordCompactionAsync(_totalAssistantTurnCount);
-        }
-        catch (OperationCanceledException)
-        {
-            AnsiConsole.MarkupLine(
-                $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] paused — resume with:[/] " +
-                $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
-            return (checkpoint, ShouldBreak: true, ShouldContinue: false, ErrorMessage: "Cancelled.");
-        }
-        catch (Exception ex)
-        {
-            // Compaction itself failed. Treat as a session error rather than letting
-            // the exception escape RunAsync to the caller uncaught.
-            string? dumpPath = null;
-            try { dumpPath = CrashDumper.Write(ex, []); } catch { }
-            AnsiConsole.MarkupLine(
-                $"\n[red]✗ Compaction error:[/] {Markup.Escape(TrimTo(ex.Message, 300))}");
-            if (dumpPath is not null)
-                AnsiConsole.MarkupLine($"  [dim]Crash dump: {Markup.Escape(dumpPath)}[/]");
-            AnsiConsole.MarkupLine(
-                $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] saved — resume with:[/] " +
-                $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
-            return (checkpoint, ShouldBreak: true, ShouldContinue: false, ErrorMessage: $"Compaction failed: {ex.Message}");
-        }
-
-        if (checkpoint.ResumeExecutorId is not null)
-            orchestrator.SetResumeExecutorId(checkpoint.ResumeExecutorId);
-        if (checkpoint.CurrentStateName is not null)
-            orchestrator.SetResumeStateName(checkpoint.CurrentStateName);
-
-        // Restore failure-tracking counters for the state machine so MaxConsecutiveContractFailures
-        // and the REPLAN BLOCKED guard survive across compaction cycles.
-        if (orchestrator is AgentOrchestrator ao && checkpoint.StateMachineState is { } smState)
-            ao.SetResumeSnapshot(smState);
-
-        // Restore Magentic loop-counter state so the next StreamAsync call resumes at
-        // the correct round/stall/reset counts rather than restarting from zero.
-        if (orchestrator is MagenticOrchestrator magentic && checkpoint.MagenticState is { } magState)
-            magentic.SetResumeState(magState);
-
-        AnsiConsole.MarkupLine("[dim]History compacted — continuing session.[/]");
-        return (checkpoint, ShouldBreak: false, ShouldContinue: true, ErrorMessage: null);
-    }
-
     // ── Session finalization ──────────────────────────────────────────────────
 
     private async Task FinalizeSessionAsync(
@@ -539,7 +463,7 @@ public sealed class SessionRunner(
     {
         string? injection        = null;
         bool    compactionNeeded = false;
-        bool    lastWasEnter     = false;   // tracks whether the last user action was Enter (vs redirect/break)
+        bool    lastWasEnter     = false;
 
         Action<string, string, string?> onToolCalling = (_, tool, args) =>
         {
@@ -580,20 +504,14 @@ public sealed class SessionRunner(
             if (injection == null)
             {
                 lastWasEnter = true;
-                continue;       // Enter — keep streaming
+                continue;
             }
             lastWasEnter = false;
-            break;              // redirect or quit — exit foreach
+            break;
         }
 
-        // streamCompleted is true only when the stream drained naturally after the user pressed
-        // Enter on the last message — not when the user redirected, compaction fired, or an
-        // exception propagated out of the loop.
         bool streamCompleted = lastWasEnter && !compactionNeeded;
 
-        // When the stream ended because the termination condition (or max iterations) fired,
-        // show a clear "session complete" prompt instead of silently exiting.  The user may
-        // want to send a follow-up message and keep the session alive.
         if (streamCompleted && !cancellationToken.IsCancellationRequested)
             injection = await approvalService.PromptPostSessionAsync();
 
@@ -664,7 +582,6 @@ public sealed class SessionRunner(
                 ? $"{agent}: {tool}({args})"
                 : $"{agent}: {tool}()";
 
-            // 2 chars for spinner prefix ("⠋ "); truncate with ellipsis if it would wrap
             var available = AnsiConsole.Console.Profile.Width - 2;
             if (available > 0 && raw.Length > available)
                 raw = raw[..(available - 1)] + "…";
@@ -674,7 +591,6 @@ public sealed class SessionRunner(
 
         Action<string, int, int> onTokenBudgetWarning = (agent, inputTokens, threshold) =>
         {
-            // statusUpdate?.Invoke($"[yellow]{Markup.Escape(agent)} thinking...[/]");
             if (statusUpdate is not null)
             {
                 AnsiConsole.WriteLine();
@@ -686,7 +602,7 @@ public sealed class SessionRunner(
             }
         };
 
-        orchestrator.AgentStarting     += onAgentStarting;
+        orchestrator.AgentStarting      += onAgentStarting;
         orchestrator.ToolCalling        += onToolCalling;
         orchestrator.TokenBudgetWarning += onTokenBudgetWarning;
 
@@ -720,219 +636,12 @@ public sealed class SessionRunner(
         }
         finally
         {
-            orchestrator.AgentStarting     -= onAgentStarting;
+            orchestrator.AgentStarting      -= onAgentStarting;
             orchestrator.ToolCalling        -= onToolCalling;
             orchestrator.TokenBudgetWarning -= onTokenBudgetWarning;
         }
 
         return compactionNeeded;
-    }
-
-    private async Task<SessionCheckpoint> ApplyCompactionAsync(
-        string task,
-        SessionCheckpoint checkpoint,
-        ConversationCompactor compactor,
-        CancellationToken cancellationToken)
-    {
-        // Capture which executor is active before throwing away the full history so the
-        // next StreamAsync starts from the correct agent (not the default Planner).
-        // Skip for Magentic: SetResumeExecutorId is a no-op there, and the last assistant
-        // message in a Magentic session is often a manager tag like "[MagenticManager:Final]"
-        // which would write a misleading executor ID into the checkpoint.
-        // Capture which executor is active before discarding full history so the next
-        // StreamAsync starts from the correct agent. Skip for Magentic.
-        string? lastAssistantAgent = null;
-        if (orchestrator is not MagenticOrchestrator)
-        {
-            lastAssistantAgent = checkpoint.Messages
-                .LastOrDefault(m => m.Role == "assistant" && !string.IsNullOrWhiteSpace(m.AgentName))
-                ?.AgentName
-                ?.ToLowerInvariant();
-
-            checkpoint.ResumeExecutorId = lastAssistantAgent;
-        }
-
-        string modifiedFilesNote = BuildModifiedFilesNote(checkpoint.Messages);
-
-        // Capture the current snapshotter from the orchestrator (non-null only for state machine sessions).
-        var snapshotter = (orchestrator as AgentOrchestrator)?.CurrentSnapshotter;
-
-        // Capture the state machine's current state so post-compaction StreamAsync calls
-        // restore to e.g. "Testing" rather than resetting to the initial "Planning" state.
-        // Also capture failure-tracking counters so MaxConsecutiveContractFailures and the
-        // REPLAN BLOCKED guard survive across compaction cycles.
-        if (snapshotter is not null)
-        {
-            try
-            {
-                var snap = await snapshotter.SnapshotAsync(cancellationToken);
-                if (!string.IsNullOrWhiteSpace(snap.CurrentStateName))
-                    checkpoint.CurrentStateName = snap.CurrentStateName;
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex) { Debug.WriteLine($"[SessionRunner] state snapshot failed: {ex.Message}"); }
-        }
-
-        if (snapshotter is StateMachineSelectionStrategy smStrategy)
-        {
-            try { checkpoint.StateMachineState = smStrategy.TakeCheckpointState(); }
-            catch (Exception ex) { Debug.WriteLine($"[SessionRunner] failure-state capture failed: {ex.Message}"); }
-        }
-
-        // Diagnostic (Phase 5): log both the last-message agent and the state machine's
-        // current state so post-hoc analysis can confirm whether the wrong agent is resumed
-        // after a handoff-then-compaction sequence.
-        if (orchestrator is not MagenticOrchestrator && eventEmitter is not null)
-            _ = eventEmitter.EmitAsync("compaction_resume_candidate",
-                payload: new
-                {
-                    last_assistant_agent = lastAssistantAgent,
-                    current_state_name   = checkpoint.CurrentStateName,
-                    reason               = _pendingCompactionReason,
-                    total_messages       = checkpoint.Messages.Count,
-                });
-
-        int turnsBefore = checkpoint.Messages.Count;
-
-        // Snapshot original messages before any trimming — needed for signal pinning.
-        var originalMessages = compactor.Config.PinLastRoutingSignal
-            ? (IReadOnlyList<AgentMessage>)checkpoint.Messages.ToList()
-            : null;
-
-        if (compactor.IsWindowMode)
-        {
-            var trimmed = compactor.TrimToWindow(checkpoint.Messages);
-            int dropped = turnsBefore - trimmed.Count;
-
-            checkpoint.Messages.Clear();
-            checkpoint.Messages.AddRange(trimmed);
-
-            if (originalMessages is not null)
-                TryPinLastRoutingSignal(checkpoint.Messages, originalMessages);
-
-            checkpoint.LastUpdatedAt = DateTime.UtcNow;
-
-            sessionMetrics?.RecordCompaction(_pendingCompactionReason);
-            if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("compaction",
-                    payload: new
-                    {
-                        mode            = "window",
-                        reason          = _pendingCompactionReason,
-                        turns_dropped   = dropped,
-                        turns_retained  = trimmed.Count,
-                        resume_from     = checkpoint.ResumeExecutorId ?? "planner"
-                    });
-
-            await sessionStore.SaveAsync(checkpoint, cancellationToken);
-            return checkpoint;
-        }
-
-        if (checkpoint.Messages.Count < 2)
-        {
-            AnsiConsole.MarkupLine("[yellow]  Compaction skipped: fewer than 2 messages in history — nothing to compact.[/]");
-            return checkpoint;
-        }
-
-        var (summary, retained) = await compactor.CompactAsync(task, checkpoint.Messages, cancellationToken, snapshotter);
-
-        if (modifiedFilesNote.Length > 0)
-            summary = summary with { Content = summary.Content + modifiedFilesNote };
-
-        checkpoint.Messages.Clear();
-        checkpoint.Messages.Add(summary);
-        checkpoint.Messages.AddRange(retained);
-
-        if (originalMessages is not null)
-            TryPinLastRoutingSignal(checkpoint.Messages, originalMessages);
-
-        checkpoint.LastUpdatedAt = DateTime.UtcNow;
-
-        sessionMetrics?.RecordCompaction(_pendingCompactionReason);
-        if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("compaction",
-                payload: new
-                {
-                    turns_compacted = turnsBefore - retained.Count,
-                    turns_retained  = retained.Count,
-                    reason          = _pendingCompactionReason,
-                    resume_from     = checkpoint.ResumeExecutorId ?? "planner"
-                });
-
-        await sessionStore.SaveAsync(checkpoint, cancellationToken);
-        return checkpoint;
-    }
-
-    // Re-injects the last handoff signal at the head of the retained window if it was
-    // dropped by compaction. Prevents keyword_not_found re-invocations on the first turn
-    // after compaction when the signal fell outside the retained tail.
-    // The synthetic AgentMessage uses Role="user" so it is replayed as a ChatMessage that
-    // IsSignalOnOwnLine can match — it does NOT start with "[fuseraft:" so TransitionAlreadyFired
-    // treats it as unprocessed.
-    private static void TryPinLastRoutingSignal(
-        List<AgentMessage> retained,
-        IReadOnlyList<AgentMessage> original)
-    {
-        // Find the last handoff in the pre-compaction history.
-        AgentMessage? lastHandoff = null;
-        for (int i = original.Count - 1; i >= 0; i--)
-        {
-            var m = original[i];
-            if (m.Role == "assistant" &&
-                m.ToolCalls?.Any(tc => string.Equals(tc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase)) == true)
-            {
-                lastHandoff = m;
-                break;
-            }
-        }
-        if (lastHandoff is null) return;
-
-        // Extract route_keyword from ArgsSummary: "route_keyword=SOME KEYWORD"
-        var handoffCall = lastHandoff.ToolCalls!.First(tc =>
-            string.Equals(tc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase));
-        var argsSummary = handoffCall.ArgsSummary;
-        if (argsSummary is null) return;
-
-        var prefix = $"{HandoffPlugin.ArgumentName}=";
-        var routeKeyword = argsSummary.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-            ? argsSummary[prefix.Length..].Trim()
-            : null;
-        if (string.IsNullOrEmpty(routeKeyword)) return;
-
-        // Skip if the signal already survived into the retained window.
-        bool alreadyPresent = retained.Any(m =>
-            m.Role == "assistant" &&
-            m.ToolCalls?.Any(tc =>
-                string.Equals(tc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase) &&
-                tc.ArgsSummary?.EndsWith(routeKeyword, StringComparison.OrdinalIgnoreCase) == true) == true);
-        if (alreadyPresent) return;
-
-        // Inject a synthetic user message with the signal on its own line.
-        // Appended at the end so TransitionAlreadyFired finds no [fuseraft:] markers
-        // after it — inserting at the front would place it before retained transition
-        // markers like "[fuseraft: PlannerCritic → Developer]", which would cause
-        // TransitionAlreadyFired to incorrectly suppress the signal.
-        var synthetic = new AgentMessage
-        {
-            AgentName = lastHandoff.AgentName,
-            Content   = $"[Resume: pre-compaction routing signal from {lastHandoff.AgentName}]\n{routeKeyword}",
-            Role      = "user",
-            TurnIndex = lastHandoff.TurnIndex,
-        };
-
-        retained.Add(synthetic);
-    }
-
-    // Resets all per-compaction-cycle state in one place. Every counter or flag that
-    // must restart after a compaction belongs here — adding it anywhere else means the
-    // next person to introduce a new counter will miss this site.
-    // Note: _totalAssistantTurnCount is session-lifetime (MaxIterations cap) and intentionally
-    // does not appear here.
-    private void PostCompactionReset(SessionCheckpoint _)
-    {
-        _perAgentCumulativeInputTokens.Clear();
-        _warnedAgents.Clear();
-        _justCompacted = true;
     }
 
     private async Task<bool> RecordMessageAsync(
@@ -961,107 +670,13 @@ public sealed class SessionRunner(
         catch (OperationCanceledException) { throw; }
         catch (Exception saveEx)
         {
-            // Checkpoint save failed (e.g. disk full, permissions). Non-fatal: session continues
-            // in memory. The next successful save will catch up.
             if (statusActive) AnsiConsole.WriteLine();
             AnsiConsole.MarkupLine(
                 $"[yellow]  ⚠ Checkpoint save failed: {Markup.Escape(TrimTo(saveEx.Message, 200))}[/]");
         }
 
-        // Accumulate per-agent cumulative input tokens unconditionally — needed for
-        // budget enforcement and context window recording regardless of grace state.
-        var agentName  = msg.AgentName ?? "Unknown";
-        int inputToks  = 0;
-        int cumulative = 0;
-        if (msg.Usage?.InputTokens is > 0 and var rawInputToks)
-        {
-            inputToks = rawInputToks;
-            _perAgentCumulativeInputTokens[agentName] =
-                _perAgentCumulativeInputTokens.GetValueOrDefault(agentName) + inputToks;
-            cumulative = _perAgentCumulativeInputTokens[agentName];
-
-            if (contextWindowRecorder is not null)
-                await contextWindowRecorder.RecordAsync(
-                    agentName:             agentName,
-                    turn:                  msg.TurnIndex,
-                    turnInputTokens:       inputToks,
-                    turnOutputTokens:      msg.Usage.OutputTokens,
-                    cumulativeInputTokens: cumulative,
-                    warnAt:                contextBudget?.WarnAt,
-                    cutoverAt:             contextBudget?.CutoverAt);
-
-            if (contextBudget?.WarnAt > 0 && cumulative >= contextBudget.WarnAt
-                && _warnedAgents.Add(agentName))
-            {
-                if (statusActive) AnsiConsole.WriteLine();
-                AnsiConsole.MarkupLine(
-                    $"[yellow]  ⚠ {Markup.Escape(agentName)} has accumulated {cumulative:N0} cumulative " +
-                    $"input tokens (warn_at: {contextBudget.WarnAt:N0}). " +
-                    $"Context rot risk — compaction will trigger at {contextBudget.CutoverAt:N0} tokens.[/]");
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("context_budget_warn",
-                        agent: agentName,
-                        payload: new { cumulative_input_tokens = cumulative, warn_at = contextBudget.WarnAt, cutover_at = contextBudget.CutoverAt });
-            }
-        }
-
-        // Post-compaction grace: skip cumulative-budget compaction triggers for exactly one turn
-        // to avoid thrashing. Token accumulation above still runs so budget recording stays accurate.
-        // MaxSingleTurnInputTokens is checked first and is NOT suppressed — a single-turn explosion
-        // must always trigger compaction even on the turn immediately after compaction.
-        if (contextBudget is not null && inputToks > 0 &&
-            contextBudget.MaxSingleTurnInputTokens > 0 && inputToks > contextBudget.MaxSingleTurnInputTokens)
-        {
-            _justCompacted = false;
-            _pendingCompactionReason = CompactionReason.SingleTurnLimit;
-            if (statusActive) AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine(
-                $"[yellow]  ⚡ {Markup.Escape(agentName)} single-turn input ({inputToks:N0}) exceeded " +
-                $"MaxSingleTurnInputTokens ({contextBudget.MaxSingleTurnInputTokens:N0}). " +
-                $"Compacting before next turn...[/]");
-            if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("context_budget_cutover",
-                    agent: agentName,
-                    payload: new { input_tokens = inputToks, cutover_at = contextBudget.MaxSingleTurnInputTokens, reason = CompactionReason.SingleTurnLimit });
-            return true;
-        }
-
-        if (_justCompacted)
-        {
-            _justCompacted = false;
-            return false;
-        }
-
-        if (compactor?.ShouldCompact(checkpoint.Messages) == true)
-        {
-            _pendingCompactionReason = CompactionReason.ShouldCompact;
-            return true;
-        }
-
-        if (compactor is not null &&
-            msg.ToolCalls?.Any(tc => tc.Name == CompactionPlugin.FunctionName) == true)
-        {
-            _pendingCompactionReason = CompactionReason.AgentRequested;
-            return true;
-        }
-
-        if (contextBudget is not null && inputToks > 0)
-        {
-            if (contextBudget.CutoverAt > 0 && cumulative >= contextBudget.CutoverAt)
-            {
-                _pendingCompactionReason = CompactionReason.CumulativeBudget;
-                AnsiConsole.MarkupLine(
-                    $"[yellow]  ⚡ {Markup.Escape(agentName)} reached context budget cutover " +
-                    $"({cumulative:N0} ≥ {contextBudget.CutoverAt:N0} input tokens). Compacting history...[/]");
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("context_budget_cutover",
-                        agent: agentName,
-                        payload: new { cumulative_input_tokens = cumulative, cutover_at = contextBudget.CutoverAt });
-                return true;
-            }
-        }
-
-        return false;
+        var budgetResult = await _budgetManager.EvaluateAsync(msg, statusActive);
+        return await _coordinator.EvaluateCompactionTriggerAsync(checkpoint, msg, budgetResult, statusActive);
     }
 
     private async Task InjectAndSaveHumanMessageAsync(
@@ -1075,37 +690,6 @@ public sealed class SessionRunner(
         messages.Add(msg);
         MessageRenderer.RenderHumanMessage(msg);
         await sessionStore.SaveAsync(checkpoint, ct);
-    }
-
-    private static string BuildModifiedFilesNote(List<AgentMessage> messages)
-    {
-        var files = new List<string>();
-        foreach (var msg in messages)
-        {
-            if (msg.ToolCalls is null) continue;
-            foreach (var tc in msg.ToolCalls)
-            {
-                if (!tc.Succeeded) continue;
-                if (tc.Name == "write_file" &&
-                    tc.ArgsSummary is { } pa &&
-                    pa.StartsWith("path=", StringComparison.Ordinal))
-                {
-                    files.Add(pa["path=".Length..]);
-                }
-                else if (tc.Name is "shell_run" or "shell_run_script" &&
-                         tc.ArgsSummary is { } ca &&
-                         ca.StartsWith("command=", StringComparison.Ordinal) &&
-                         ca.Contains("sed -i", StringComparison.Ordinal))
-                {
-                    files.Add($"(sed edit) {ca["command=".Length..]}");
-                }
-            }
-        }
-        return files.Count > 0
-            ? "\n\nFILES MODIFIED IN THIS SESSION (before compaction):\n" +
-              string.Join("\n", files.Distinct().Select(f => $"  - {f}")) +
-              "\n\nThese changes are already on disk. Use shell_run('git diff') or shell_run('git status') to verify current state."
-            : string.Empty;
     }
 
     private static AgentMessage HumanMessage(string content, int turnIndex) => new()
@@ -1144,7 +728,6 @@ public sealed class SessionRunner(
                 msg.Contains("spending limit", StringComparison.OrdinalIgnoreCase) ||
                 msg.Contains("used all available credits", StringComparison.OrdinalIgnoreCase))
                 return true;
-            // Check type name without taking a hard dependency on System.ClientModel.
             if (e.GetType().Name == "ClientResultException")
             {
                 var status = e.GetType().GetProperty("Status")?.GetValue(e);
