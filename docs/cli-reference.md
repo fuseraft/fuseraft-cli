@@ -286,7 +286,7 @@ The session ID is shown on every startup so you can note it down for later resum
 
 If `~/.fuseraft/config` is missing or incomplete, `fuseraft repl` runs an interactive setup wizard before starting the session. It prompts for a model ID, provider URL, and API key. Settings are saved after the first successful reply — the config file stores model and endpoint only; the API key goes into the OS keychain. Use `/provider setup` to reconfigure at any time.
 
-**Custom and enterprise providers** — the wizard accepts any OpenAI-compatible endpoint. Supply the full base URL (e.g. `https://chat.mycompany.com/openai/`) and any model ID recognised by that endpoint, including non-standard formats such as AWS Bedrock deployment IDs (`anthropic.claude-sonnet-4-5-20250929-v1:0`). When both a custom endpoint and an API key are provided, auto-detection is skipped entirely and the endpoint is treated as OpenAI-compatible.
+**Custom and enterprise providers** — the wizard accepts any OpenAI-compatible endpoint. Supply the full base URL (e.g. `https://chat.mycompany.com/openai/`) and any model ID recognised by that endpoint, including non-standard formats such as AWS Bedrock deployment IDs (`anthropic.claude-sonnet-4-6-20250929-v1:0`). When both a custom endpoint and an API key are provided, auto-detection is skipped entirely and the endpoint is treated as OpenAI-compatible.
 
 See [Getting Started — Set your API key](getting-started.md#set-your-api-key) and [Security — API key storage](security.md#api-key-storage) for more detail.
 
@@ -298,7 +298,7 @@ See [Getting Started — Set your API key](getting-started.md#set-your-api-key) 
 
 | Environment variable | Default model |
 |---------------------|---------------|
-| `ANTHROPIC_API_KEY` | `claude-sonnet-4-5` |
+| `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` |
 | `OPENAI_API_KEY` | `gpt-4o-mini` |
 | `XAI_API_KEY` | `grok-4.3` |
 | `GOOGLE_AI_API_KEY` | `gemini-2.0-flash` |
