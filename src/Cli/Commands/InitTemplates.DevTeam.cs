@@ -325,8 +325,13 @@ public static partial class InitTemplates
                     build unit's include/exclude rules or dependency declarations — not the
                     source file the error message mentions.
 
-              4. If the change log shows verify_command was not yet run, use shell_run to
-                 execute the verify_command from {FuseraftPaths.LocalBrief} and record the result.
+              4. Only if SignificantChanges shows that at least one file from brief.json
+                 `files_to_change` has been written (i.e., implementation has started): if
+                 the change log shows verify_command has not yet run successfully, use
+                 shell_run to execute the verify_command from {FuseraftPaths.LocalBrief} and
+                 record the result. If no files_to_change have been written yet, skip this
+                 step — the Developer has not started and a pre-implementation failure is
+                 not an inconsistency.
 
               5. Report outcome:
                  - If consistent: "Evidence verified — no inconsistencies found."
