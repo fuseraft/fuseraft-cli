@@ -64,6 +64,11 @@ public static class ContextRebuilder
                     case "commandrun":
                         var exitStr = node.ExitCode.HasValue ? $" \u2192 exit {node.ExitCode}" : string.Empty;
                         sb.AppendLine($"{node.Command}{exitStr} (turn {node.Turn}, agent {node.Agent})");
+                        if (node.ExitCode is not (null or 0) && !string.IsNullOrWhiteSpace(node.Output))
+                        {
+                            var snippet = node.Output.Length > 400 ? node.Output[..400] + "\u2026" : node.Output;
+                            sb.AppendLine($"      Output: {snippet.Replace('\n', ' ').Trim()}");
+                        }
                         break;
                     case "gitcommit":
                         sb.AppendLine($"{node.CommitMessage} (turn {node.Turn}, agent {node.Agent})");

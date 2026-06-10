@@ -416,7 +416,7 @@ public static partial class InitTemplates
 
               Compaction:
                 TriggerTurnCount: 30
-                KeepRecentTurns: 12
+                KeepRecentTurns: 8
                 Mode: lossless
                 PinLastRoutingSignal: true
 
@@ -435,9 +435,9 @@ public static partial class InitTemplates
               ContextBudget:
                 WarnAt: 60000
                 CutoverAt: 100000
-                MaxSingleTurnInputTokens: 120000
-                MaxToolResultTokens: 8000
-                InTurnToolWindow: 8
+                MaxSingleTurnInputTokens: 200000
+                MaxToolResultTokens: 6000
+                InTurnToolWindow: 5
 
               Events:
                 Path: {FuseraftPaths.LocalEventsLog}
