@@ -260,10 +260,12 @@ public sealed class AgentFactory(
             // The Plugins entry is a declaration of intent; no registry lookup is needed.
             if (pluginName.Equals("Skills", StringComparison.OrdinalIgnoreCase))
                 continue;
-            // "Scratchpad" is per-agent — each agent gets its own file.
+            // "Scratchpad" is per-agent — each agent gets its own file under the session directory.
             else if (pluginName.Equals("Scratchpad", StringComparison.OrdinalIgnoreCase))
             {
-                var basePath = scratchpadConfig?.BasePath ?? FuseraftPaths.GlobalScratchpad;
+                var basePath = _sessionId is { Length: > 0 }
+                    ? FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalSessionScratchpad, _sessionId)
+                    : (scratchpadConfig?.BasePath ?? FuseraftPaths.GlobalScratchpad);
                 functions = PluginRegistry.GetFunctionsFromObject(new ScratchpadPlugin(config.Name, basePath));
             }
             // "SubAgent" is per-agent — each agent gets its own lightweight IChatClient
@@ -365,7 +367,9 @@ public sealed class AgentFactory(
         // Wrap every tool with a notifying proxy so onToolCalling fires the moment the
         // tool begins execution, not after the whole batch finishes.
         if (onToolCalling is not null)
-            return tools.Select(f => (AIFunction)new NotifyingAIFunction(f, agentName, onToolCalling)).ToList();
+            return tools.Select(f => (AIFunction)new fuseraft.Infrastructure.Plugins.NotifyingAIFunction(
+                f, agentName,
+                (agent, name, args) => { onToolCalling(agent, name, args); return Task.CompletedTask; })).ToList();
 
         return tools;
     }
@@ -629,93 +633,6 @@ public sealed class AgentFactory(
         }
 
         return tools;
-    }
-
-    /// <summary>
-    /// Transparent proxy that fires <paramref name="onToolCalling"/> the moment a tool
-    /// begins executing, forwarding all schema and metadata from the inner function.
-    /// Deterministically validates that all required parameters are present before invocation.
-    /// Using <see cref="DelegatingAIFunction"/> means the model sees the exact same
-    /// parameter schema as the original tool.
-    /// </summary>
-    private sealed class NotifyingAIFunction : DelegatingAIFunction
-    {
-        private readonly string _agentName;
-        private readonly Action<string, string, string?> _onToolCalling;
-
-        public NotifyingAIFunction(AIFunction inner, string agentName, Action<string, string, string?> onToolCalling)
-            : base(inner)
-        {
-            _agentName     = agentName;
-            _onToolCalling = onToolCalling;
-        }
-
-        protected override async ValueTask<object?> InvokeCoreAsync(
-            AIFunctionArguments arguments,
-            CancellationToken cancellationToken)
-        {
-            _onToolCalling(_agentName, Name, ToolCallHelper.SummarizeArgs(arguments));
-            
-            // Deterministically validate required parameters BEFORE invocation.
-            // This prevents the ArgumentException from being thrown deep in the invocation stack
-            // and returns a structured error message that the LLM can see and correct.
-            var validationError = ValidateRequiredParameters(arguments);
-            if (validationError is not null)
-                return validationError;
-            
-            return await InnerFunction.InvokeAsync(arguments, cancellationToken);
-        }
-
-        /// <summary>
-        /// Validates that all required parameters (non-nullable, non-optional) are present
-        /// in the arguments dictionary. Returns a structured error message if any are missing.
-        /// </summary>
-        private string? ValidateRequiredParameters(AIFunctionArguments arguments)
-        {
-            // Access the underlying C# method to get accurate parameter metadata
-            var method = InnerFunction.GetType()
-                .GetProperty("UnderlyingMethod", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                ?.GetValue(InnerFunction) as System.Reflection.MethodInfo;
-
-            if (method is null)
-                return null; // Can't validate without method metadata
-
-            var missing = new List<string>();
-            foreach (var param in method.GetParameters())
-            {
-                // Skip CancellationToken
-                if (param.ParameterType == typeof(CancellationToken))
-                    continue;
-
-                // A parameter is required if it's not optional and not nullable.
-                // Use NullabilityInfoContext for reference types so string is not treated as
-                // nullable — string.IsClass is always true, which would always skip required
-                // string parameters.
-                bool isOptional = param.IsOptional || param.HasDefaultValue;
-                bool isNullable;
-                if (param.ParameterType.IsValueType)
-                    isNullable = Nullable.GetUnderlyingType(param.ParameterType) != null;
-                else
-                {
-                    var nullCtx = new System.Reflection.NullabilityInfoContext();
-                    isNullable = nullCtx.Create(param).WriteState != System.Reflection.NullabilityState.NotNull;
-                }
-
-                if (!isOptional && !isNullable && !arguments.ContainsKey(param.Name!))
-                {
-                    missing.Add(param.Name!);
-                }
-            }
-
-            if (missing.Count == 0)
-                return null;
-
-            // Build a structured error message that tells the LLM exactly what's wrong.
-            var paramList = string.Join(", ", missing.Select(p => $"'{p}'"));
-            var plural = missing.Count > 1 ? "parameters" : "parameter";
-            return $"[ERROR] Tool call failed: required {plural} {paramList} not provided.\n\n" +
-                   $"To fix: Call {Name} again with all required parameters included.";
-        }
     }
 
     /// <summary>

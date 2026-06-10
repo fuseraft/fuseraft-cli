@@ -47,7 +47,7 @@ public sealed class SnapshotWriter : IDisposable
             Agent:                msg.AgentName,
             Role:                 msg.Role,
             Content:              msg.Content,
-            ToolCalls:            msg.ToolCalls?.Select(tc => new ToolCallEntry(tc.Name, tc.ArgsSummary, tc.Succeeded)).ToArray(),
+            ToolCalls:            msg.ToolCalls?.Select(tc => new ToolCallEntry(tc.Name, tc.ArgsSummary, tc.Succeeded, msg.Usage?.InputTokens, msg.Usage?.OutputTokens)).ToArray(),
             InputTokens:          msg.Usage?.InputTokens,
             OutputTokens:         msg.Usage?.OutputTokens,
             IsCompactionSummary:  msg.IsCompactionSummary ? true : null);
@@ -105,7 +105,7 @@ public sealed class SnapshotWriter : IDisposable
         int?     OutputTokens,
         bool?    IsCompactionSummary);
 
-    private sealed record ToolCallEntry(string Name, string? ArgsSummary, bool Succeeded);
+    private sealed record ToolCallEntry(string Name, string? ArgsSummary, bool Succeeded, int? InputTokens, int? OutputTokens);
 
     private sealed record ManifestRecord(
         string  Ts,
