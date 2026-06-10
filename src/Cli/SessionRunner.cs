@@ -72,6 +72,19 @@ public sealed class SessionRunner(
         bool Succeeded,
         string? ErrorMessage);
 
+    /// <summary>
+    /// Executes the main agent streaming loop until the session completes, is cancelled,
+    /// hits the iteration cap, or encounters an unrecoverable error.
+    /// </summary>
+    /// <param name="task">The initial task prompt submitted to the orchestrator.</param>
+    /// <param name="checkpoint">Mutable session checkpoint that is updated and persisted each turn.</param>
+    /// <param name="hitlMode">When <see langword="true"/>, pauses after each assistant turn for human approval.</param>
+    /// <param name="showTools">When <see langword="true"/>, renders tool-call details in the terminal output.</param>
+    /// <param name="cancellationToken">Token used to abort the session loop on user interrupt.</param>
+    /// <returns>
+    /// A <see cref="SessionResult"/> containing success/failure state, an optional error message,
+    /// the accumulated message list, and total wall-clock elapsed time.
+    /// </returns>
     public async Task<SessionResult> RunAsync(
         string task,
         SessionCheckpoint checkpoint,
@@ -262,7 +275,10 @@ public sealed class SessionRunner(
         return new SessionResult(succeeded, errorMessage, messages, sessionClock.Elapsed);
     }
 
-    // Returns the resume command string, including --config when a config path is known.
+    /// <summary>
+    /// Returns the CLI command a user can run to resume the given session,
+    /// including <c>--config</c> when a config path is available.
+    /// </summary>
     private string ResumeHint(string sessionId)
     {
         if (!string.IsNullOrEmpty(configPath))
@@ -275,6 +291,12 @@ public sealed class SessionRunner(
 
     // ── Exception handlers ────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Handles a <see cref="ValidatorStuckException"/> by surfacing HITL escalation details
+    /// and prompting the user for a redirect message. Returns <see cref="HandlerOutcome.ShouldBreak"/>
+    /// if the user declines to intervene, or <see cref="HandlerOutcome.ShouldContinue"/> after
+    /// injecting the redirect.
+    /// </summary>
     private async Task<HandlerOutcome> HandleValidatorStuckAsync(
         ValidatorStuckException stuck,
         SessionCheckpoint checkpoint,
@@ -309,6 +331,10 @@ public sealed class SessionRunner(
             Succeeded: true, ErrorMessage: null);
     }
 
+    /// <summary>
+    /// Handles a <see cref="CircuitBreakerOpenException"/>. Waits and retries automatically
+    /// when the required delay is within <c>MaxAutoRetrySeconds</c>; otherwise terminates the session.
+    /// </summary>
     private async Task<HandlerOutcome> HandleCircuitBreakerOpenAsync(
         CircuitBreakerOpenException cb,
         CancellationToken cancellationToken)
@@ -338,6 +364,10 @@ public sealed class SessionRunner(
             Succeeded: false, ErrorMessage: $"Circuit breaker open — LLM calls failing. Retry after {cb.RetryAfter.TotalSeconds:F0}s.");
     }
 
+    /// <summary>
+    /// Handles a <see cref="BudgetExceededException"/> by emitting a telemetry event,
+    /// printing the overage details, and signalling the loop to break.
+    /// </summary>
     private async Task<HandlerOutcome> HandleBudgetExceededAsync(BudgetExceededException budget)
     {
         if (eventEmitter is not null)
@@ -350,6 +380,10 @@ public sealed class SessionRunner(
             Succeeded: false, ErrorMessage: budget.Message);
     }
 
+    /// <summary>
+    /// Handles an HTTP 429 rate-limit or quota exception by saving the session and
+    /// printing a resume hint so the user can retry once credits are restored.
+    /// </summary>
     private async Task<HandlerOutcome> HandleRateLimitAsync(Exception ex, SessionCheckpoint checkpoint)
     {
         if (eventEmitter is not null)
@@ -364,6 +398,15 @@ public sealed class SessionRunner(
             Succeeded: false, ErrorMessage: ex.Message);
     }
 
+    /// <summary>
+    /// Handles a context-window-exceeded error. When a compactor is available,
+    /// schedules compaction and continues; otherwise terminates the session with
+    /// guidance to add a compaction strategy to the config.
+    /// </summary>
+    /// <param name="withCompactor">
+    /// <see langword="true"/> when a <see cref="ConversationCompactor"/> is configured;
+    /// <see langword="false"/> when none is available.
+    /// </param>
     private async Task<HandlerOutcome> HandleContextExceededAsync(
         Exception ex,
         SessionCheckpoint checkpoint,
@@ -394,6 +437,10 @@ public sealed class SessionRunner(
             Succeeded: false, ErrorMessage: "Context window exceeded with no compaction configured.");
     }
 
+    /// <summary>
+    /// Handles an HTTP 400 bad-request error by prompting the user for a redirect.
+    /// Injects the redirect and continues when provided; otherwise pauses the session.
+    /// </summary>
     private async Task<HandlerOutcome> HandleHttpBadRequestAsync(
         Exception ex,
         SessionCheckpoint checkpoint,
@@ -420,6 +467,10 @@ public sealed class SessionRunner(
             Succeeded: true, ErrorMessage: null);
     }
 
+    /// <summary>
+    /// Handles any unexpected exception by writing a crash dump, printing the error,
+    /// and signalling the loop to break with a failed outcome.
+    /// </summary>
     private Task<HandlerOutcome> HandleSessionFaultAsync(Exception ex, SessionCheckpoint checkpoint)
     {
         string? dumpPath = null;
@@ -437,6 +488,10 @@ public sealed class SessionRunner(
 
     // ── Session finalization ──────────────────────────────────────────────────
 
+    /// <summary>
+    /// Performs end-of-session housekeeping: prints the metrics summary and writes
+    /// the postmortem snapshot manifest when those components are configured.
+    /// </summary>
     private async Task FinalizeSessionAsync(
         bool succeeded,
         string? errorMessage,
@@ -453,6 +508,15 @@ public sealed class SessionRunner(
 
     // Iteration helpers
 
+    /// <summary>
+    /// Runs one HITL iteration: streams the orchestrator, renders each message, and pauses
+    /// after each turn to collect a human approval or redirect. After the stream ends, prompts
+    /// for a post-session directive.
+    /// </summary>
+    /// <returns>
+    /// A tuple of the human injection string (or <see langword="null"/> on plain Enter) and
+    /// a flag indicating whether compaction was triggered during the turn.
+    /// </returns>
     private async Task<(string? Injection, bool CompactionNeeded)> RunHitlIterationAsync(
         string task,
         SessionCheckpoint checkpoint,
@@ -525,6 +589,11 @@ public sealed class SessionRunner(
         return (injection, compactionNeeded);
     }
 
+    /// <summary>
+    /// Runs one non-interactive iteration, wrapping <see cref="RunStreamCoreAsync"/> in an
+    /// Ansi spinner when not in quiet mode. Returns <see langword="true"/> when compaction
+    /// was triggered during the turn.
+    /// </summary>
     private async Task<bool> RunSpinnerIterationAsync(
         string task,
         SessionCheckpoint checkpoint,
@@ -557,8 +626,17 @@ public sealed class SessionRunner(
         return compactionNeeded;
     }
 
-    // Stream loop shared by quiet and interactive modes.
-    // statusUpdate is null in quiet mode — suppresses the spinner, turn panels, and budget warnings.
+    /// <summary>
+    /// Core stream loop shared by quiet and interactive (spinner) modes. Subscribes to orchestrator
+    /// events, iterates <see cref="IOrchestrator.StreamAsync"/>, renders messages, and records each
+    /// turn. Event subscriptions are always cleaned up in the <c>finally</c> block to prevent
+    /// duplicate firings across compaction cycles.
+    /// </summary>
+    /// <param name="statusUpdate">
+    /// Callback that pushes a status string to the spinner; <see langword="null"/> in quiet mode,
+    /// which also suppresses turn panels and budget warnings.
+    /// </param>
+    /// <returns><see langword="true"/> when compaction was triggered during this stream pass.</returns>
     private async Task<bool> RunStreamCoreAsync(
         string task,
         SessionCheckpoint checkpoint,
@@ -644,6 +722,16 @@ public sealed class SessionRunner(
         return compactionNeeded;
     }
 
+    /// <summary>
+    /// Appends <paramref name="msg"/> to the in-memory list and checkpoint, increments the
+    /// assistant-turn counter, persists the checkpoint, and delegates to the budget manager
+    /// and compaction coordinator to determine whether compaction should be triggered.
+    /// </summary>
+    /// <param name="statusActive">
+    /// <see langword="true"/> when the Ansi spinner is running; used to insert a blank line
+    /// before warning output so it does not corrupt the spinner display.
+    /// </param>
+    /// <returns><see langword="true"/> when a compaction trigger has been raised.</returns>
     private async Task<bool> RecordMessageAsync(
         AgentMessage msg,
         List<AgentMessage> messages,
@@ -679,6 +767,10 @@ public sealed class SessionRunner(
         return await _coordinator.EvaluateCompactionTriggerAsync(checkpoint, msg, budgetResult, statusActive);
     }
 
+    /// <summary>
+    /// Creates a human-role <see cref="AgentMessage"/> for <paramref name="content"/>, appends it
+    /// to both the in-memory list and the checkpoint, renders it, and persists the checkpoint.
+    /// </summary>
     private async Task InjectAndSaveHumanMessageAsync(
         string content,
         List<AgentMessage> messages,
@@ -692,6 +784,9 @@ public sealed class SessionRunner(
         await sessionStore.SaveAsync(checkpoint, ct);
     }
 
+    /// <summary>
+    /// Builds a minimal human-role <see cref="AgentMessage"/> for the given content and turn index.
+    /// </summary>
     private static AgentMessage HumanMessage(string content, int turnIndex) => new()
     {
         AgentName = "Human",
@@ -700,7 +795,11 @@ public sealed class SessionRunner(
         TurnIndex = turnIndex,
     };
 
-    // Returns true when the exception (or any inner exception) is an HTTP 400.
+    /// <summary>
+    /// Returns <see langword="true"/> when <paramref name="ex"/> or any inner exception represents
+    /// an HTTP 400 bad-request response, checking both <c>ClientResultException.Status</c> and
+    /// <see cref="System.Net.Http.HttpRequestException.StatusCode"/>.
+    /// </summary>
     private static bool Is400(Exception ex)
     {
         for (var e = ex; e is not null; e = e.InnerException)
@@ -717,7 +816,11 @@ public sealed class SessionRunner(
         return false;
     }
 
-    // Returns true when the exception (or any inner exception) is an HTTP 429.
+    /// <summary>
+    /// Returns <see langword="true"/> when <paramref name="ex"/> or any inner exception represents
+    /// an HTTP 429 / quota-exceeded response, matching on status code, "Too Many Requests",
+    /// "spending limit", and "used all available credits" message patterns.
+    /// </summary>
     private static bool Is429(Exception ex)
     {
         for (var e = ex; e is not null; e = e.InnerException)
@@ -737,6 +840,10 @@ public sealed class SessionRunner(
         return false;
     }
 
+    /// <summary>
+    /// Truncates <paramref name="s"/> to at most <paramref name="max"/> characters,
+    /// appending an ellipsis when truncation occurs.
+    /// </summary>
     private static string TrimTo(string s, int max) =>
         s.Length <= max ? s : s[..max] + "…";
 }
