@@ -50,31 +50,32 @@ public static class FuseraftPaths
         }
         return Path.GetFullPath(path);
     }
-    public static string GlobalSkillsIndex      => Path.Combine(GlobalRoot, "skills", "index.db");
-    public static string GlobalSkillCurationLog => Path.Combine(GlobalRoot, "skill-curation.jsonl");
-    public static string GlobalSchedule    => Path.Combine(GlobalRoot, "schedule");
-    public static string GlobalMemoryRepl => Path.Combine(GlobalRoot, "memory", "repl");
+
+    public static string GlobalSkillsIndex              => Path.Combine(GlobalRoot, "skills", "index.db");
+    public static string GlobalSkillCurationLog         => Path.Combine(GlobalRoot, "skill-curation.jsonl");
+    public static string GlobalSchedule                 => Path.Combine(GlobalRoot, "schedule");
+    public static string GlobalMemoryRepl               => Path.Combine(GlobalRoot, "memory", "repl");
     public static string GlobalMemoryAgent(string name) => Path.Combine(GlobalRoot, "memory", "agents", name);
 
     // ── Project-local (.fuseraft/ relative to CWD) — user-authored, all tracked by git ──
 
     // artifacts/ — non-session-scoped outputs (local, agent-generated per run)
-    public const string LocalTestReport     = ".fuseraft/artifacts/test-report.json";
-    public const string LocalAuditFindings  = ".fuseraft/artifacts/audit-findings.json";
-    public const string LocalRemediationPlan = ".fuseraft/artifacts/remediation-plan.json";
-    public const string LocalOpsPlan        = ".fuseraft/artifacts/ops-plan.yaml";
+    public const string LocalTestReport           = ".fuseraft/artifacts/test-report.json";
+    public const string LocalAuditFindings        = ".fuseraft/artifacts/audit-findings.json";
+    public const string LocalRemediationPlan      = ".fuseraft/artifacts/remediation-plan.json";
+    public const string LocalOpsPlan              = ".fuseraft/artifacts/ops-plan.yaml";
 
     // data/ — data engineering outputs (local, agent-generated per run)
-    public const string LocalDataRoot            = ".fuseraft/data";
-    public const string LocalDataManifest        = ".fuseraft/data/manifest.json";
-    public const string LocalDataAnalysisResults = ".fuseraft/data/analysis-results.json";
+    public const string LocalDataRoot             = ".fuseraft/data";
+    public const string LocalDataManifest         = ".fuseraft/data/manifest.json";
+    public const string LocalDataAnalysisResults  = ".fuseraft/data/analysis-results.json";
 
     // docs/ (supplemental) — structured review artifacts
-    public const string LocalResearchFindings = ".fuseraft/docs/research-findings.md";
-    public const string LocalResearchReview   = ".fuseraft/docs/research-review.json";
-    public const string LocalDebatePosition   = ".fuseraft/docs/position.md";
-    public const string LocalDebateSummary    = ".fuseraft/docs/debate-summary.md";
-    public const string LocalDebateVerdict    = ".fuseraft/docs/verdict.md";
+    public const string LocalResearchFindings     = ".fuseraft/docs/research-findings.md";
+    public const string LocalResearchReview       = ".fuseraft/docs/research-review.json";
+    public const string LocalDebatePosition       = ".fuseraft/docs/position.md";
+    public const string LocalDebateSummary        = ".fuseraft/docs/debate-summary.md";
+    public const string LocalDebateVerdict        = ".fuseraft/docs/verdict.md";
 
     // ── Global project-scoped runtime paths (~/.fuseraft/) — keyed by {project_slug} ──
     // These are templates; expand with ExpandProjectPaths(path, slug) or
@@ -82,10 +83,10 @@ public static class FuseraftPaths
     // {project_slug} from CWD so existing callers work without change.
 
     // logs/ — project diagnostics (not session-specific)
-    public const string LocalLogs           = "~/.fuseraft/logs/{project_slug}";
-    public const string LocalReplEventsLog  = "~/.fuseraft/logs/{project_slug}/repl_events.jsonl";
-    public const string LocalProviderErrors = "~/.fuseraft/logs/{project_slug}/provider_errors.jsonl";
-    public const string LocalAppLog         = "~/.fuseraft/logs/{project_slug}/app.log";
+    public const string LocalLogs                 = "~/.fuseraft/logs/{project_slug}";
+    public const string LocalReplEventsLog        = "~/.fuseraft/logs/{project_slug}/repl_events.jsonl";
+    public const string LocalProviderErrors       = "~/.fuseraft/logs/{project_slug}/provider_errors.jsonl";
+    public const string LocalAppLog               = "~/.fuseraft/logs/{project_slug}/app.log";
 
     // state/ — cross-session mutable runtime state
     public const string LocalState                = "~/.fuseraft/state/{project_slug}";
@@ -111,6 +112,7 @@ public static class FuseraftPaths
     public const string LocalBrownfieldBrief      = "~/.fuseraft/sessions/{project_slug}/{session_id}/brief.brownfield.json";
     public const string LocalBriefReview          = "~/.fuseraft/sessions/{project_slug}/{session_id}/brief-review.json";
     public const string LocalChatroom             = "~/.fuseraft/sessions/{project_slug}/{session_id}/chatroom.jsonl";
+    public const string LocalSessionScratchpad    = "~/.fuseraft/sessions/{project_slug}/{session_id}/scratchpad";
     public const string LocalMemoryRefs           = "~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json";
     public const string LocalCtxViz               = "~/.fuseraft/sessions/{project_slug}/{session_id}/ctx_viz.html";
 
@@ -305,6 +307,7 @@ public static class FuseraftPaths
         sb.AppendLine($"  {LocalTestReport,-70} — tester output / validator input (if present)");
         sb.AppendLine($"  {Expand(LocalConventions),-70} — brownfield convention profile (if present)");
         sb.AppendLine($"  {Expand(LocalChatroom),-70} — cross-agent chatroom messages (if present)");
+        sb.AppendLine($"  {Expand(LocalSessionScratchpad),-70} — agent scratchpad files (session-scoped)");
         sb.AppendLine("## User-authored project files — tracked by git (in .fuseraft/)");
         sb.AppendLine("  .fuseraft/docs/                 — write all markdown notes, reports, and drafts here");
         sb.AppendLine("  .fuseraft/tests/                — write all test scripts and test support files here");

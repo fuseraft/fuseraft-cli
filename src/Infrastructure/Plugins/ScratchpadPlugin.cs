@@ -8,19 +8,13 @@ using fuseraft.Core;
 namespace fuseraft.Infrastructure.Plugins;
 
 /// <summary>
-/// Persistent per-agent scratchpad that survives across sessions.
+/// Per-agent scratchpad scoped to the current session.
 ///
 /// <para>
 /// Each agent gets an isolated JSON file at <c>{BasePath}/{AgentName}.json</c>.
 /// A <c>global</c> scope (<c>{BasePath}/global.json</c>) allows agents to share
-/// facts across the orchestration. Agents switch scope by passing <c>scope: "global"</c>
+/// facts within the same session. Agents switch scope by passing <c>scope: "global"</c>
 /// to any function.
-/// </para>
-///
-/// <para>
-/// Typical usage pattern in agent instructions: at the start of a resumed session,
-/// call <c>scratchpad_read_all</c> to restore context from prior sessions. Write new
-/// decisions or facts with <c>scratchpad_write</c> before ending the session.
 /// </para>
 /// </summary>
 public sealed class ScratchpadPlugin
