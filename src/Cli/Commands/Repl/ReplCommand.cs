@@ -229,10 +229,14 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         var memoryBlock   = memoryEntries.Count > 0
             ? await memoryStore.BuildPromptBlockAsync(cwd, sessionId)
             : null;
-        var systemPrompt = BuildSystemPrompt(settings.SystemPrompt, initialTools.Count, cwd, memoryBlock, modelId, sessionId, startedAt);
-
-        if (skillsCatalog is not null)
-            systemPrompt += $"\n\n{skillsCatalog}";
+        var systemPrompt = new SystemPromptBuilder()
+            .AddIdentity(modelId, cwd, initialTools.Count, settings.SystemPrompt)
+            .AddToolGuidance(initialTools.Count)
+            .AddSessionInfo(sessionId, startedAt, cwd, initialTools.Count)
+            .AddProjectInstructions(cwd)
+            .AddMemory(memoryBlock)
+            .AddSkills(skillsCatalog)
+            .Build();
 
         if (!jsonMode && !settings.NoBanner)
         {
@@ -392,103 +396,6 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable(env)))
                 return id;
         return null;
-    }
-
-    private static string BuildSystemPrompt(
-        string? settingsPrompt, int toolCount, string cwd, string? memoryBlock,
-        string? modelId = null, string? sessionId = null, DateTime? startedAt = null)
-    {
-        string prompt;
-        if (string.IsNullOrWhiteSpace(settingsPrompt))
-        {
-            var identity = modelId is not null
-                ? $"You are the fuseraft assistant, running on {modelId}."
-                : "You are the fuseraft assistant.";
-            prompt = toolCount > 0
-                ? $"{identity} You are a precise coding and research assistant with tools for files, shell, code search, git, and HTTP.\n" +
-                  $"\nCurrent working directory: {cwd}\n" +
-                  "\nGuidelines:\n" +
-                  "- Prefer tools over guessing.\n" +
-                  "- Read before writing or mutating.\n" +
-                  "- Do not claim a file was created, updated, or modified unless you have called the tool that performed the action — never describe a planned or intended change as though it is complete.\n" +
-                  "- Avoid destructive actions (rm, overwrite, force-push) unless explicitly requested.\n" +
-                  "- Only write files the user explicitly requests — never create unsolicited summaries, changelogs, or status files.\n" +
-                  "- For multi-step work, briefly state intent first.\n" +
-                  "- If a command fails due to missing project/config file: search subdirs for the entry point, then run `cd <dir> && <command>` in one shell_run call. Note the directory used.\n" +
-                  "- Always return to the original working directory for subsequent commands unless the task explicitly requires otherwise.\n"
-                : $"{identity} The current working directory is: {cwd}.";
-        }
-        else
-        {
-            prompt = settingsPrompt + $"\n\nThe current working directory is: {cwd}.";
-        }
-
-        // Guardrails appended unconditionally so custom settingsPrompt deployments receive them too.
-        if (toolCount > 0)
-        {
-            prompt +=
-                "\n- For large files: call get_file_summary first (shows first 30 lines and file size), grep_file to locate the relevant section, then read_file with startLine/maxLines for that section only — never cold-read a large file in full.\n" +
-                "- Context may contain [UNVERIFIED ASSUMPTION: ...] markers from a prior compaction — treat these as unconfirmed claims that require tool verification before acting on them.\n" +
-                "\nBefore signaling completion, verify:\n" +
-                "  Tools & verification:\n" +
-                "  - Every action was performed with a tool call — not described as if done\n" +
-                "  - Tool calls succeeded (no errors, exit code 0 for shell)\n" +
-                "  Files:\n" +
-                "  - For file writes: re-read the file to confirm content is correct\n" +
-                "  Shell:\n" +
-                "  - Shell output is shown; it confirms the goal was met\n" +
-                "  Completeness:\n" +
-                "  - Every part of the user's request has been addressed\n" +
-                "  - Nothing was deferred or skipped without explaining why\n" +
-                "  If any check fails, complete it before responding.\n";
-        }
-
-        if (sessionId is not null)
-        {
-            var snapshotPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".fuseraft", "repl-sessions", $"repl-{sessionId}.json");
-            var sessionStarted = startedAt.HasValue
-                ? startedAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz")
-                : "unknown";
-            prompt +=
-                $"\n\n# Current session\n" +
-                $"Session ID: {sessionId}\n" +
-                $"Started:    {sessionStarted}\n" +
-                $"Snapshot:   {snapshotPath}\n" +
-                $"Event log:  {FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalReplEventsLog, FuseraftPaths.ProjectSlug(cwd))}\n" +
-                $"Use the repl_session_* tools to inspect session metadata, list past sessions, or read log files.";
-        }
-
-        // Orient the REPL agent to the local .fuseraft/ folder so it never
-        // wastes context scanning the directory to discover what is in it.
-        // Logs are excluded here — the session block above already lists them
-        // and directs the agent to use the repl_session_* tools for log access.
-        if (toolCount > 0)
-            prompt += $"\n\n{FuseraftPaths.BuildFolderOrientationBlock(sessionId ?? "default", includeLogs: false)}";
-
-        var agentsBlock = ReadAgentsMd(cwd);
-        if (agentsBlock is not null)
-            prompt += $"\n\n{agentsBlock}";
-
-        if (memoryBlock is not null)
-            prompt += $"\n\n{memoryBlock}";
-
-        return prompt;
-    }
-
-    private static string? ReadAgentsMd(string cwd)
-    {
-        var path = Path.Combine(cwd, "AGENTS.md");
-        if (!File.Exists(path)) return null;
-        try
-        {
-            var content = File.ReadAllText(path).Trim();
-            return string.IsNullOrEmpty(content)
-                ? null
-                : $"# Project instructions (from AGENTS.md)\n\n{content}";
-        }
-        catch { return null; }
     }
 
     private static string? TryGetGitBranch(string cwd)
