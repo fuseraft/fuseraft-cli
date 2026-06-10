@@ -668,7 +668,7 @@ public sealed class SessionRunner(
 
         Action<string, int, int> onTokenBudgetWarning = (agent, inputTokens, threshold) =>
         {
-            statusUpdate?.Invoke($"[yellow]{Markup.Escape(agent)} thinking...[/]");
+            // statusUpdate?.Invoke($"[yellow]{Markup.Escape(agent)} thinking...[/]");
             if (statusUpdate is not null)
             {
                 AnsiConsole.WriteLine();
@@ -676,6 +676,7 @@ public sealed class SessionRunner(
                     $"[yellow]  ⚠ {Markup.Escape(agent)} used {inputTokens:N0} input tokens this turn " +
                     $"(warning threshold: {threshold:N0}). " +
                     $"Reduce file reads and shell output to avoid a budget blowup.[/]");
+                AnsiConsole.WriteLine();
             }
         };
 

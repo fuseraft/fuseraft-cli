@@ -1027,7 +1027,10 @@ public sealed class GraphOrchestrator(
             .ConfigureAwait(false);
 
         if (eventEmitter is not null)
+        {
+            eventEmitter.SetTurn(ctx.TurnIndex);
             await eventEmitter.EmitAsync("turn_start", agent: agentName, turn: ctx.TurnIndex);
+        }
 
         AgentResponse response;
         try
