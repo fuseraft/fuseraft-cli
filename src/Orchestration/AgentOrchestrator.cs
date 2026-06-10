@@ -823,7 +823,18 @@ public sealed class AgentOrchestrator(
 
         var contextList = context as IList<ChatMessage> ?? context.ToList();
         if (config.ContextBudget is { MaxToolResultTokens: > 0 } toolBudget)
-            contextList = ToolResultWindowTrimmer.Apply(contextList, toolBudget);
+        {
+            var (trimmed, manifest) = ToolResultWindowTrimmer.ApplyWithManifest(contextList, toolBudget);
+            if (manifest is not null)
+            {
+                var withManifest = new List<ChatMessage>(trimmed)
+                {
+                    new ChatMessage(ChatRole.User, manifest)
+                };
+                return withManifest;
+            }
+            return trimmed;
+        }
         return contextList;
     }
 
