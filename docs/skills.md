@@ -219,7 +219,7 @@ Add a `skillCuration` block to `~/.fuseraft/config`:
 
 ```json
 {
-  "modelId": "claude-sonnet-4-5",
+  "modelId": "claude-sonnet-4-6",
   "skillCuration": {
     "enabled": true
   }

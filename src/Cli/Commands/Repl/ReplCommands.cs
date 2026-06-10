@@ -1189,6 +1189,7 @@ internal static class ReplCommands
         ctx.PrevCtxEstimate        = 0;
         ctx.TurnTokenDeltas.Clear();
         ctx.LastExtractedTurnIndex = -1;
+        ctx.ContextWarningShown    = false;
         ctx.ResetPlanState();
 
         // Restore plan execution state from the snapshot.

@@ -810,7 +810,7 @@ SkillCuration:
 
 ```json
 {
-  "modelId": "claude-sonnet-4-5",
+  "modelId": "claude-sonnet-4-6",
   "skillCuration": {
     "enabled": true
   }
@@ -843,7 +843,7 @@ Curation is best-effort: any failure (LLM error, write failure, index error) is 
 Every curation attempt appends one JSON line to `~/.fuseraft/skill-curation.jsonl` (override with `LogPath`). Each line records the outcome, session ID, source (`run` or `repl`), slug, model, turn count, and any failure reason:
 
 ```jsonl
-{"ts":"2026-05-24T10:00:00Z","session":"abc123","source":"repl","outcome":"created","slug":"debug-dotnet-sqlite","path":"/home/user/.fuseraft/skills/debug-dotnet-sqlite/SKILL.md","turns_digested":12,"model":"claude-sonnet-4-5"}
+{"ts":"2026-05-24T10:00:00Z","session":"abc123","source":"repl","outcome":"created","slug":"debug-dotnet-sqlite","path":"/home/user/.fuseraft/skills/debug-dotnet-sqlite/SKILL.md","turns_digested":12,"model":"claude-sonnet-4-6"}
 {"ts":"2026-05-24T11:30:00Z","session":"def456","source":"run","outcome":"no_skill","turns_digested":6,"model":"gpt-4o-mini"}
 {"ts":"2026-05-24T12:15:00Z","session":"ghi789","source":"repl","outcome":"skipped","failure_reason":"Only 3 assistant turns (min 5)."}
 {"ts":"2026-05-24T13:00:00Z","session":"xyz012","source":"run","outcome":"failed","failure_reason":"LLM returned an empty response.","turns_digested":9,"model":"gpt-4o-mini"}
