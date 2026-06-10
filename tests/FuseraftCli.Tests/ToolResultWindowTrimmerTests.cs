@@ -314,4 +314,41 @@ public sealed class ToolResultWindowTrimmerTests
         Assert.NotNull(manifest);
         Assert.Contains("orphan-call", manifest);
     }
+
+    // ── ApplyWithManifest — all results evicted (window = 0) ──────────────────
+
+    [Fact]
+    public void ApplyWithManifest_manifest_with_all_results_evicted_shows_only_superseded()
+    {
+        // window = 0 retains nothing — every result is evicted once budget is exceeded.
+        var context = new List<ChatMessage>
+        {
+            ToolCall("c1", "read_file"),
+            ToolResult("c1", new string('a', 1_000)),
+            ToolCall("c2", "shell_run"),
+            ToolResult("c2", new string('b', 1_000)),
+        };
+
+        var (_, manifest) = ToolResultWindowTrimmer.ApplyWithManifest(context, Budget(100, window: 0));
+
+        Assert.NotNull(manifest);
+        Assert.Contains("Superseded", manifest);
+        Assert.DoesNotContain("Active tool results", manifest);
+    }
+
+    // ── Apply — returns same reference when budget disabled ───────────────────
+
+    [Fact]
+    public void Apply_returns_same_reference_when_budget_disabled()
+    {
+        var context = new List<ChatMessage>
+        {
+            ToolCall("c1", "read_file"),
+            ToolResult("c1", new string('x', 10_000)),
+        };
+
+        var result = ToolResultWindowTrimmer.Apply(context, Budget(0));
+
+        Assert.Same(context, result);
+    }
 }

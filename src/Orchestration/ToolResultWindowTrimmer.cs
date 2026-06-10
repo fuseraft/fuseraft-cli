@@ -32,6 +32,8 @@ public static class ToolResultWindowTrimmer
 
     internal const string TombstonePrefix = "[tool result — evicted";
 
+    private static readonly string[] s_labelKeys = ["path", "command", "query", "content", "name"];
+
     /// <summary>
     /// Returns a new list with old tool results tombstoned when the budget is exceeded,
     /// or returns <paramref name="context"/> unchanged when trimming is not needed.
@@ -44,7 +46,70 @@ public static class ToolResultWindowTrimmer
     /// </summary>
     public static IList<ChatMessage> Apply(IList<ChatMessage> context, ContextBudgetConfig budget)
     {
-        if (budget.MaxToolResultTokens <= 0) return context;
+        var (trimmed, _, _) = ApplyCore(context, budget);
+        return trimmed;
+    }
+
+    /// <summary>
+    /// Applies the tool-result window budget and returns a context manifest alongside
+    /// the trimmed message list. The manifest is non-null only when evictions occurred;
+    /// it lists active tool results and superseded (evicted) ones so the model knows
+    /// which reads are still available and which must be re-issued with targeted ranges.
+    /// </summary>
+    public static (IList<ChatMessage> Messages, string? Manifest) ApplyWithManifest(
+        IList<ChatMessage> context,
+        ContextBudgetConfig budget)
+    {
+        var (trimmed, callLabels, evicted) = ApplyCore(context, budget);
+        if (!evicted) return (trimmed, null);
+
+        var active     = new List<string>();
+        var superseded = new List<string>();
+
+        foreach (var msg in trimmed)
+        {
+            foreach (var fr in msg.Contents.OfType<FunctionResultContent>())
+            {
+                var callId = fr.CallId ?? "unknown";
+                var label  = callLabels.GetValueOrDefault(callId, callId);
+                var result = fr.Result?.ToString() ?? "";
+
+                if (result.StartsWith(TombstonePrefix, StringComparison.Ordinal))
+                    superseded.Add(label);
+                else
+                    active.Add(label);
+            }
+        }
+
+        if (active.Count == 0 && superseded.Count == 0) return (trimmed, null);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("[Context Manifest]");
+
+        if (active.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"Active tool results ({active.Count}):");
+            foreach (var a in active) sb.AppendLine($"- {a}");
+        }
+
+        if (superseded.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"Superseded ({superseded.Count}) — evicted from context. Re-read with targeted ranges if needed:");
+            foreach (var s in superseded) sb.AppendLine($"- {s}");
+        }
+
+        return (trimmed, sb.ToString().TrimEnd());
+    }
+
+    // Returns (trimmed list, callLabels map, evicted flag).
+    // When evicted is false, trimmed is the same reference as context and callLabels holds
+    // the map built during the scan (useful to ApplyWithManifest without a second pass).
+    private static (IList<ChatMessage> Trimmed, Dictionary<string, string> CallLabels, bool Evicted)
+        ApplyCore(IList<ChatMessage> context, ContextBudgetConfig budget)
+    {
+        if (budget.MaxToolResultTokens <= 0) return (context, [], false);
 
         // Pass 1: collect budget info and build callId → label map for enriched tombstones.
         var resultMessages = new List<(int MsgIdx, int EstTokens)>();
@@ -71,13 +136,13 @@ public static class ToolResultWindowTrimmer
         }
 
         // Fast path — nothing to trim.
-        if (totalEstTokens <= budget.MaxToolResultTokens) return context;
+        if (totalEstTokens <= budget.MaxToolResultTokens) return (context, callLabels, false);
 
         // Determine how many of the oldest results to evict.
         // Always keep at least the last InTurnToolWindow results verbatim.
         int retainCount = Math.Max(0, budget.InTurnToolWindow);
         int evictUpTo   = Math.Max(0, resultMessages.Count - retainCount);
-        if (evictUpTo == 0) return context;
+        if (evictUpTo == 0) return (context, callLabels, false);
 
         var evictIndices = new HashSet<int>(
             resultMessages.Take(evictUpTo).Select(r => r.MsgIdx));
@@ -123,73 +188,7 @@ public static class ToolResultWindowTrimmer
             }
         }
 
-        return trimmed;
-    }
-
-    /// <summary>
-    /// Applies the tool-result window budget and returns a context manifest alongside
-    /// the trimmed message list. The manifest is non-null only when evictions occurred;
-    /// it lists active tool results and superseded (evicted) ones so the model knows
-    /// which reads are still available and which must be re-issued with targeted ranges.
-    /// </summary>
-    public static (IList<ChatMessage> Messages, string? Manifest) ApplyWithManifest(
-        IList<ChatMessage> context,
-        ContextBudgetConfig budget)
-    {
-        var trimmed = Apply(context, budget);
-
-        // Apply returned the same reference — nothing was evicted, no manifest needed.
-        if (ReferenceEquals(trimmed, context)) return (trimmed, null);
-
-        // Build callId → label from the ORIGINAL context before eviction.
-        var callLabels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var msg in context)
-        {
-            foreach (var call in msg.Contents.OfType<FunctionCallContent>())
-            {
-                if (call.CallId is not null)
-                    callLabels[call.CallId] = FormatCallLabel(call);
-            }
-        }
-
-        var active     = new List<string>();
-        var superseded = new List<string>();
-
-        foreach (var msg in trimmed)
-        {
-            foreach (var fr in msg.Contents.OfType<FunctionResultContent>())
-            {
-                var callId = fr.CallId ?? "unknown";
-                var label  = callLabels.GetValueOrDefault(callId, callId);
-                var result = fr.Result?.ToString() ?? "";
-
-                if (result.StartsWith(TombstonePrefix, StringComparison.Ordinal))
-                    superseded.Add(label);
-                else
-                    active.Add(label);
-            }
-        }
-
-        if (active.Count == 0 && superseded.Count == 0) return (trimmed, null);
-
-        var sb = new StringBuilder();
-        sb.AppendLine("[Context Manifest]");
-
-        if (active.Count > 0)
-        {
-            sb.AppendLine();
-            sb.AppendLine($"Active tool results ({active.Count}):");
-            foreach (var a in active) sb.AppendLine($"- {a}");
-        }
-
-        if (superseded.Count > 0)
-        {
-            sb.AppendLine();
-            sb.AppendLine($"Superseded ({superseded.Count}) — evicted from context. Re-read with targeted ranges if needed:");
-            foreach (var s in superseded) sb.AppendLine($"- {s}");
-        }
-
-        return (trimmed, sb.ToString().TrimEnd());
+        return (trimmed, callLabels, true);
     }
 
     private static string FormatCallLabel(FunctionCallContent call)
@@ -197,7 +196,7 @@ public static class ToolResultWindowTrimmer
         var name = call.Name ?? "tool";
         if (call.Arguments is null || call.Arguments.Count == 0) return name;
 
-        foreach (var key in new[] { "path", "command", "query", "content", "name" })
+        foreach (var key in s_labelKeys)
         {
             if (call.Arguments.TryGetValue(key, out var val) && val is string s)
                 return $"{name}({(s.Length > 50 ? s[..50] + "…" : s)})";
