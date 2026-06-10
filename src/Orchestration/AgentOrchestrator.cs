@@ -113,25 +113,21 @@ public sealed class AgentOrchestrator(
     // async continuations that may run on different thread-pool threads.
     private volatile string _sessionId = string.Empty;
 
-    // Mutable reference to the live shared history for the current StreamAsync invocation.
-    // Updated at the start of each call so session-scoped hooks registered once at
-    // initialization always target the current session's history, not a stale one.
-    // volatile: the hook callback closure reads this field on whatever thread the emitter
-    // fires on; the assignment in StreamAsync must be visible immediately.
-    private volatile IList<ChatMessage>? _activeHistory;
+    // Points to the OrchestrationSession for the currently running StreamAsync call.
+    // volatile: the diagnostic hook callback reads this field from whatever thread the
+    // emitter fires on; the assignment in StreamAsync must be visible immediately.
+    private volatile OrchestrationSession? _activeSession;
 
     /// <summary>
-    /// The active selection strategy cast to <see cref="IContextSnapshotter"/>, or null
+    /// The active selection strategy's snapshot capability for the current session, or null
     /// when the current strategy does not support snapshotting (e.g. keyword or LLM strategy).
-    /// Updated at the start of each <see cref="StreamAsync"/> call.
     /// </summary>
-    public fuseraft.Core.Interfaces.IContextSnapshotter? CurrentSnapshotter { get; private set; }
+    public fuseraft.Core.Interfaces.IContextSnapshotter? CurrentSnapshotter => _activeSession?.Snapshotter;
 
     // Guards single hook registration across multiple StreamAsync calls on the same instance.
-    // volatile: the check-then-set happens across async boundaries; the flag only ever
-    // transitions false → true so no CAS is needed, but the write must be visible to
-    // future async continuations on any thread.
-    private volatile bool _diagnosticHookRegistered;
+    // 0 = unregistered, 1 = registered. Written with Interlocked.CompareExchange to prevent
+    // double-registration when two concurrent StreamAsync calls race to register.
+    private int _hookRegistered;
 
     /// <summary>
     /// Stamps the session ID onto routing/termination strategies so governance audit events
@@ -193,6 +189,13 @@ public sealed class AgentOrchestrator(
         if (config.Agents.Count == 0)
             throw new InvalidOperationException("Orchestration config has no agents defined.");
 
+        // Capture pre-session configuration into a session object, consuming the one-shot
+        // resume fields immediately so a subsequent StreamAsync call cannot re-apply them.
+        var session = new OrchestrationSession(_sessionId, _resumeStateName, _resumeSnapshot);
+        _resumeStateName = null;
+        _resumeSnapshot  = null;
+        _activeSession   = session;
+
         // Build fresh agents and strategies per session to avoid state bleed.
         var agents = config.Agents
             .Select(a => agentFactory.Create(a, config.ContextBudget, onToolCalling: (agent, tool, args) => ToolCalling?.Invoke(agent, tool, args)))
@@ -200,7 +203,7 @@ public sealed class AgentOrchestrator(
         if (!string.IsNullOrEmpty(_sessionId))
             strategyFactory.SetSessionId(_sessionId);
         var selection = strategyFactory.CreateSelection(config.Selection, agents, config.Validation, config.FailureHandling, config.Contracts, config.Verifier);
-        CurrentSnapshotter = selection as fuseraft.Core.Interfaces.IContextSnapshotter;
+        session.Snapshotter = selection as fuseraft.Core.Interfaces.IContextSnapshotter;
         var termination = strategyFactory.CreateTermination(config.Termination ?? new(), agents, config.Validation);
 
         // Resolve the optional verifier agent once per session.
@@ -209,21 +212,17 @@ public sealed class AgentOrchestrator(
             : null;
 
         // Shared history — all agents read from and write to this list.
-        var history = new List<ChatMessage>();
-
-        // Point the active-history cell at this session's list. Any hooks registered
-        // below via _activeHistory will automatically target the current invocation.
-        _activeHistory = history;
+        var history = session.History;
 
         // Register the validation diagnostic hook once per orchestrator instance.
         // The hook watches for validation_fail events and injects change-log context
         // into history on repeated failures so the re-invoked agent has ground-truth
         // data rather than only the validator's error message.
-        if (!_diagnosticHookRegistered && eventEmitter is not null && config.ChangeTracking is { } ctCfg)
+        if (Interlocked.CompareExchange(ref _hookRegistered, 1, 0) == 0
+            && eventEmitter is not null && config.ChangeTracking is { } ctCfg)
         {
-            _diagnosticHookRegistered = true;
             eventEmitter.RegisterHook(
-                new ValidationDiagnosticHook(ctCfg.Path, msg => _activeHistory?.Add(msg)));
+                new ValidationDiagnosticHook(ctCfg.Path, msg => _activeSession?.History.Add(msg)));
         }
 
         // Give selection and termination strategies a reference to the shared history
@@ -247,16 +246,12 @@ public sealed class AgentOrchestrator(
 
             // Restore state after compaction so the machine resumes from e.g. "Testing"
             // rather than resetting to its initial state ("Planning").
-            var stateName = _resumeStateName;
-            _resumeStateName = null; // consume before applying — prevents re-application if SetCurrentState throws
-            if (!string.IsNullOrWhiteSpace(stateName))
-                smss.SetCurrentState(stateName);
+            if (!string.IsNullOrWhiteSpace(session.ResumeStateName))
+                smss.SetCurrentState(session.ResumeStateName);
 
             // Restore failure-tracking counters so MaxConsecutiveContractFailures and
             // the REPLAN BLOCKED guard survive across compaction cycles.
-            var snap = _resumeSnapshot;
-            _resumeSnapshot = null; // consume once, same discipline as _resumeStateName
-            smss.RestoreFromSnapshot(snap);
+            smss.RestoreFromSnapshot(session.ResumeSnapshot);
         }
         WireHistory(termination, history);
         if (!string.IsNullOrEmpty(_sessionId))
@@ -497,75 +492,9 @@ public sealed class AgentOrchestrator(
             agentFactory.OnAgentTurnStarting();
             changeTracker?.BeginTurn(agent.Name ?? "Unknown", turn);
 
-            // Build the full context for this agent through the unified assembly pipeline.
-            // The pipeline handles: system prompt (instructions + ranked memory),
-            // intent-based knowledge retrieval, session context injection, history
-            // filtering, and artifact assembly — all through one code path for both
-            // sequential and parallel execution.
             var agentCfg = agentConfigs.GetValueOrDefault(agent.Name ?? "");
-            IEnumerable<ChatMessage> context;
-
-            if (contextPipeline is not null)
-            {
-                var assembled = await contextPipeline.AssembleAsync(
-                    new AgentExecutionRequest
-                    {
-                        AgentName     = agent.Name ?? string.Empty,
-                        Task          = task,
-                        SharedHistory = history,
-                        AgentConfig   = agentCfg,
-                        SessionId     = _sessionId,
-                    },
-                    cancellationToken);
-                context = assembled.Messages;
-                if (eventEmitter is not null)
-                    await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, turn,
-                        agentFactory.GetToolCount(agent.Name ?? ""));
-            }
-            else
-            {
-                // Legacy fallback — identical to the pre-pipeline behavior.
-                bool hasInstructions = agentInstructions.TryGetValue(agent.Name ?? "", out var instructions);
-                if (memoryManager is not null)
-                    instructions = await memoryManager.AugmentInstructionsAsync(agent.Name ?? "", instructions, cancellationToken);
-
-                IReadOnlyList<ChatMessage> filtered;
-                if (agentCfg?.Context is { Count: > 0 } agentContextSources && contextAssembler is not null)
-                {
-                    filtered = await contextAssembler.AssembleForAgentAsync(
-                        agent.Name ?? string.Empty, task, agentContextSources, history, cancellationToken);
-                }
-                else
-                {
-                    var raw = ContextWindowFilter.Apply(history, agentCfg?.ContextWindow);
-                    if (contextAssembler is not null)
-                    {
-                        var sessionCtx = await contextAssembler.ReadSessionContextAsync(cancellationToken);
-                        if (sessionCtx is not null)
-                        {
-                            var withCtx = new List<ChatMessage>(raw.Count + 1);
-                            if (raw.Count > 0) withCtx.Add(raw[0]);
-                            withCtx.Add(new ChatMessage(ChatRole.User, $"[Session Context]\n\n{sessionCtx.Trim()}"));
-                            withCtx.AddRange(raw.Skip(1));
-                            filtered = withCtx;
-                        }
-                        else filtered = raw;
-                    }
-                    else filtered = raw;
-                }
-
-                context = (hasInstructions || memoryManager is not null) && instructions is not null
-                    ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
-                    : filtered;
-            }
-
-            var contextList = context as IList<ChatMessage> ?? context.ToList();
-
-            // Sliding tool-result window: replace oldest tool results with tombstones
-            // when the estimated token cost exceeds MaxToolResultTokens. Applied to the
-            // context slice only — shared history is never modified.
-            if (config.ContextBudget is { MaxToolResultTokens: > 0 } toolBudget)
-                contextList = ToolResultWindowTrimmer.Apply(contextList, toolBudget);
+            var contextList = await BuildContextAsync(
+                agent.Name ?? string.Empty, task, history, agentCfg, agentInstructions, turn, cancellationToken);
 
             logger.LogDebug(
                 "[Orchestrator] Invoking '{Agent}' with {ContextCount} context messages " +
@@ -580,7 +509,7 @@ public sealed class AgentOrchestrator(
             // late (e.g. a file-read turn that consumes tens of thousands of tokens).
             if (config.MaxTotalTokens is { } preTurnLimit)
             {
-                var estimatedInputTokens = EstimateContextTokens(context);
+                var estimatedInputTokens = EstimateContextTokens(contextList);
                 if (cumulativeTokens + estimatedInputTokens > preTurnLimit)
                 {
                     logger.LogWarning(
@@ -591,8 +520,8 @@ public sealed class AgentOrchestrator(
             }
 
             AgentResponse response = governanceKernel?.CircuitBreaker is { } cb
-                ? await cb.ExecuteAsync(() => agent.RunAsync(context, null, null, cancellationToken))
-                : await agent.RunAsync(context, null, null, cancellationToken);
+                ? await cb.ExecuteAsync(() => agent.RunAsync(contextList, null, null, cancellationToken))
+                : await agent.RunAsync(contextList, null, null, cancellationToken);
 
             logger.LogDebug(
                 "[Orchestrator] '{Agent}' returned {MsgCount} message(s). Text='{Preview}'",
@@ -654,78 +583,7 @@ public sealed class AgentOrchestrator(
             if (config.MaxTotalTokens is { } limit && cumulativeTokens > limit)
                 throw new BudgetExceededException(cumulativeTokens, limit);
 
-            if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("turn_end",
-                    agent: agentMessage.AgentName,
-                    turn:  agentMessage.TurnIndex,
-                    payload: new
-                    {
-                        input_tokens  = agentMessage.Usage?.InputTokens,
-                        output_tokens = agentMessage.Usage?.OutputTokens,
-                    });
-
-            // Emit reasoning content when the model produced any (e.g. xAI reasoning models).
-            // Capped at 8 000 chars to keep events.jsonl compact for long reasoning traces.
-            if (eventEmitter is not null)
-            {
-                const int MaxReasoningChars = 8_000;
-                var reasoningText = string.Concat(
-                    response.Messages
-                        .SelectMany(m => m.Contents.OfType<TextReasoningContent>())
-                        .Select(r => r.Text));
-                if (!string.IsNullOrWhiteSpace(reasoningText))
-                {
-                    var truncated = reasoningText.Length > MaxReasoningChars
-                        ? reasoningText[..MaxReasoningChars] + $"\n[TRUNCATED — {reasoningText.Length:N0} chars total]"
-                        : reasoningText;
-                    await eventEmitter.EmitAsync("reasoning",
-                        agent:   agentMessage.AgentName,
-                        turn:    agentMessage.TurnIndex,
-                        payload: new { text = truncated });
-                }
-            }
-
-            // Flush change-tracking middleware queue for this turn to disk.
-            if (changeTracker is not null)
-            {
-                try { await changeTracker.FlushTurnAsync(agentMessage.AgentName, agentMessage.TurnIndex, CancellationToken.None); }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex,
-                        "ChangeTracker flush failed for turn {Turn} ({Agent}) — changes.json may be incomplete.",
-                        agentMessage.TurnIndex, agentMessage.AgentName);
-                }
-            }
-
-            // Offer the accumulated history to the memory provider for persistence.
-            if (memoryManager is not null)
-                await memoryManager.PostTurnAsync(agentMessage.AgentName, [..history], cancellationToken);
-
-            // Persist entity-scoped findings from this turn's tool calls for future session retrieval.
-            if (repositoryKnowledgeStore is not null && !string.IsNullOrEmpty(_sessionId))
-            {
-                try
-                {
-                    var observations = ObservationExtractor.Extract(
-                        (IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>)response.Messages,
-                        agentMessage.AgentName, agentMessage.TurnIndex);
-                    foreach (var obs in observations)
-                    {
-                        if (string.IsNullOrWhiteSpace(obs.Entity)) continue;
-                        await repositoryKnowledgeStore.AddAsync(new fuseraft.Core.Models.RepositoryKnowledgeFinding
-                        {
-                            Entity     = obs.Entity!,
-                            Finding    = obs.Finding,
-                            Source     = _sessionId,
-                            Confidence = obs.Confidence,
-                            AgentName  = obs.AgentName,
-                            Kind       = obs.Source is "write_file" or "patch_file" or "delete_file"
-                                         ? "change" : "observation",
-                        }, CancellationToken.None);
-                    }
-                }
-                catch { /* best-effort — never disrupt the session */ }
-            }
+            await PostTurnSideEffectsAsync(agentMessage, response, history, cancellationToken);
 
             // Periodic verifier: run the meta-agent every N turns to audit evidence, OR
             // immediately when a ConflictingEvidence / NoProgress correction was injected this
@@ -738,77 +596,13 @@ public sealed class AgentOrchestrator(
                     || (verCfg.TriggerOnSuspiciousTransition && HasSuspiciousTransitionSignal(history, preSelectCount, postSelectCount))
                 ))
             {
-                AgentStarting?.Invoke(verifierAgent.Name ?? "Verifier");
-                agentFactory.OnAgentTurnStarting();
-                changeTracker?.BeginTurn(verifierAgent.Name ?? "Verifier", turn);
-
                 var vAgentCfg = agentConfigs.GetValueOrDefault(verifierAgent.Name ?? "");
-                IEnumerable<ChatMessage> vContext;
-                if (contextPipeline is not null)
-                {
-                    var vAssembled = await contextPipeline.AssembleAsync(
-                        new AgentExecutionRequest
-                        {
-                            AgentName     = verifierAgent.Name ?? string.Empty,
-                            Task          = task,
-                            SharedHistory = history,
-                            AgentConfig   = vAgentCfg,
-                            SessionId     = _sessionId,
-                        },
-                        cancellationToken);
-                    vContext = vAssembled.Messages;
-                    if (eventEmitter is not null)
-                        await EmitContextAssemblyAsync(eventEmitter, vAssembled.Metrics, turn,
-                            agentFactory.GetToolCount(verifierAgent.Name ?? ""));
-                }
-                else
-                {
-                    var vFiltered  = ContextWindowFilter.Apply(history, vAgentCfg?.ContextWindow);
-                    bool vHasInstr = agentInstructions.TryGetValue(verifierAgent.Name ?? "", out var vInstr);
-                    if (memoryManager is not null)
-                        vInstr = await memoryManager.AugmentInstructionsAsync(verifierAgent.Name ?? "", vInstr, cancellationToken);
-                    vContext = (vHasInstr || memoryManager is not null) && vInstr is not null
-                        ? [new ChatMessage(ChatRole.System, vInstr), .. vFiltered]
-                        : vFiltered;
-                }
-
-                var vContextList = vContext as IList<ChatMessage> ?? vContext.ToList();
-                if (config.ContextBudget is { MaxToolResultTokens: > 0 } vToolBudget)
-                    vContextList = ToolResultWindowTrimmer.Apply(vContextList, vToolBudget);
-
-                AgentResponse vResponse = governanceKernel?.CircuitBreaker is { } vcb
-                    ? await vcb.ExecuteAsync(() => verifierAgent.RunAsync(vContextList, null, null, cancellationToken))
-                    : await verifierAgent.RunAsync(vContextList, null, null, cancellationToken);
-
-                foreach (var vMsg in vResponse.Messages)
-                {
-                    if (vMsg.Role == ChatRole.Assistant && string.IsNullOrEmpty(vMsg.AuthorName))
-                        vMsg.AuthorName = verifierAgent.Name;
-                    history.Add(vMsg);
-                }
-
-                // When the verifier reports a finding, inject an explicit correction message
-                // so the next primary agent turn has the finding as visible context.
-                if (vResponse.Text?.Contains(verCfg.FindingsKeyword, StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    history.Add(new ChatMessage(ChatRole.User,
-                        $"VERIFICATION FINDING [{verifierAgent.Name}]: An inconsistency was detected. " +
-                        $"Review the verifier's output and reconcile any discrepancies before continuing:\n\n" +
-                        vResponse.Text));
-                }
-
-                var verifierMessage = new AgentMessage
-                {
-                    AgentName = verifierAgent.Name ?? "Verifier",
-                    Content   = vResponse.Text ?? string.Empty,
-                    Role      = "assistant",
-                    TurnIndex = turn++,
-                    Usage     = OrchestratorHelpers.ExtractUsage(vResponse),
-                    ToolCalls = ExtractToolCalls(vResponse.Messages, verifierAgent.Name ?? "Verifier")
-                };
+                var verifierMessage = await RunVerifierAsync(
+                    verifierAgent, verCfg, history, task, vAgentCfg, agentInstructions, turn, cancellationToken);
 
                 eventEmitter?.SetTurn(verifierMessage.TurnIndex);
                 cumulativeTokens += verifierMessage.Usage?.TotalTokens ?? 0;
+                turn++;
 
                 var vWarnThreshold = config.WarnTurnTokens;
                 if (vWarnThreshold > 0 && verifierMessage.Usage?.InputTokens is { } vInputToks && vInputToks > vWarnThreshold)
@@ -957,5 +751,213 @@ public sealed class AgentOrchestrator(
                     _ => 0,
                 };
         return chars / 4;
+    }
+
+    // Assembles the trimmed context list for a single sequential agent turn (or verifier turn).
+    // Handles the unified pipeline path and the full legacy fallback (instructions + memory +
+    // context-source assembly + session-context injection + history filtering).
+    // Tool-result trimming is applied before returning so callers receive an invocation-ready slice.
+    private async Task<IList<ChatMessage>> BuildContextAsync(
+        string agentName,
+        string task,
+        IList<ChatMessage> history,
+        AgentConfig? agentCfg,
+        IReadOnlyDictionary<string, string> agentInstructions,
+        int turn,
+        CancellationToken cancellationToken)
+    {
+        IEnumerable<ChatMessage> context;
+
+        if (contextPipeline is not null)
+        {
+            var assembled = await contextPipeline.AssembleAsync(
+                new AgentExecutionRequest
+                {
+                    AgentName     = agentName,
+                    Task          = task,
+                    SharedHistory = (IReadOnlyList<ChatMessage>)history,
+                    AgentConfig   = agentCfg,
+                    SessionId     = _sessionId,
+                },
+                cancellationToken);
+            context = assembled.Messages;
+            if (eventEmitter is not null)
+                await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, turn,
+                    agentFactory.GetToolCount(agentName));
+        }
+        else
+        {
+            bool hasInstructions = agentInstructions.TryGetValue(agentName, out var instructions);
+            if (memoryManager is not null)
+                instructions = await memoryManager.AugmentInstructionsAsync(agentName, instructions, cancellationToken);
+
+            IReadOnlyList<ChatMessage> filtered;
+            if (agentCfg?.Context is { Count: > 0 } agentContextSources && contextAssembler is not null)
+            {
+                filtered = await contextAssembler.AssembleForAgentAsync(
+                    agentName, task, agentContextSources, history, cancellationToken);
+            }
+            else
+            {
+                var raw = ContextWindowFilter.Apply(history, agentCfg?.ContextWindow);
+                if (contextAssembler is not null)
+                {
+                    var sessionCtx = await contextAssembler.ReadSessionContextAsync(cancellationToken);
+                    if (sessionCtx is not null)
+                    {
+                        var withCtx = new List<ChatMessage>(raw.Count + 1);
+                        if (raw.Count > 0) withCtx.Add(raw[0]);
+                        withCtx.Add(new ChatMessage(ChatRole.User, $"[Session Context]\n\n{sessionCtx.Trim()}"));
+                        withCtx.AddRange(raw.Skip(1));
+                        filtered = withCtx;
+                    }
+                    else filtered = raw;
+                }
+                else filtered = raw;
+            }
+
+            context = (hasInstructions || memoryManager is not null) && instructions is not null
+                ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
+                : filtered;
+        }
+
+        var contextList = context as IList<ChatMessage> ?? context.ToList();
+        if (config.ContextBudget is { MaxToolResultTokens: > 0 } toolBudget)
+            contextList = ToolResultWindowTrimmer.Apply(contextList, toolBudget);
+        return contextList;
+    }
+
+    // Runs all post-yield side effects for a completed sequential agent turn:
+    // turn_end and reasoning telemetry, change-tracker flush, memory persistence,
+    // and repository knowledge store observations. Never throws — knowledge/change-tracker
+    // failures are logged and swallowed so session output is never disrupted.
+    private async Task PostTurnSideEffectsAsync(
+        AgentMessage msg,
+        AgentResponse response,
+        IList<ChatMessage> history,
+        CancellationToken cancellationToken)
+    {
+        if (eventEmitter is not null)
+        {
+            await eventEmitter.EmitAsync("turn_end",
+                agent: msg.AgentName,
+                turn:  msg.TurnIndex,
+                payload: new
+                {
+                    input_tokens  = msg.Usage?.InputTokens,
+                    output_tokens = msg.Usage?.OutputTokens,
+                });
+
+            // Emit reasoning content when the model produced any (e.g. xAI reasoning models).
+            // Capped at 8 000 chars to keep events.jsonl compact for long reasoning traces.
+            const int MaxReasoningChars = 8_000;
+            var reasoningText = string.Concat(
+                response.Messages
+                    .SelectMany(m => m.Contents.OfType<TextReasoningContent>())
+                    .Select(r => r.Text));
+            if (!string.IsNullOrWhiteSpace(reasoningText))
+            {
+                var truncated = reasoningText.Length > MaxReasoningChars
+                    ? reasoningText[..MaxReasoningChars] + $"\n[TRUNCATED — {reasoningText.Length:N0} chars total]"
+                    : reasoningText;
+                await eventEmitter.EmitAsync("reasoning",
+                    agent:   msg.AgentName,
+                    turn:    msg.TurnIndex,
+                    payload: new { text = truncated });
+            }
+        }
+
+        if (changeTracker is not null)
+        {
+            try { await changeTracker.FlushTurnAsync(msg.AgentName, msg.TurnIndex, CancellationToken.None); }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex,
+                    "ChangeTracker flush failed for turn {Turn} ({Agent}) — changes.json may be incomplete.",
+                    msg.TurnIndex, msg.AgentName);
+            }
+        }
+
+        if (memoryManager is not null)
+            await memoryManager.PostTurnAsync(msg.AgentName, [..history], cancellationToken);
+
+        if (repositoryKnowledgeStore is not null && !string.IsNullOrEmpty(_sessionId))
+        {
+            try
+            {
+                var observations = ObservationExtractor.Extract(
+                    (IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>)response.Messages,
+                    msg.AgentName, msg.TurnIndex);
+                foreach (var obs in observations)
+                {
+                    if (string.IsNullOrWhiteSpace(obs.Entity)) continue;
+                    await repositoryKnowledgeStore.AddAsync(new fuseraft.Core.Models.RepositoryKnowledgeFinding
+                    {
+                        Entity     = obs.Entity!,
+                        Finding    = obs.Finding,
+                        Source     = _sessionId,
+                        Confidence = obs.Confidence,
+                        AgentName  = obs.AgentName,
+                        Kind       = obs.Source is "write_file" or "patch_file" or "delete_file"
+                                     ? "change" : "observation",
+                    }, CancellationToken.None);
+                }
+            }
+            catch { /* best-effort — never disrupt the session */ }
+        }
+    }
+
+    // Executes a single verifier turn: fires lifecycle hooks, assembles context via BuildContextAsync,
+    // invokes the agent, appends messages to shared history, and injects a finding correction message
+    // when the verifier reports an issue. Returns the AgentMessage with TurnIndex = currentTurn;
+    // the caller is responsible for incrementing the turn counter after yielding.
+    private async Task<AgentMessage> RunVerifierAsync(
+        AIAgent verifierAgent,
+        VerifierConfig verCfg,
+        IList<ChatMessage> history,
+        string task,
+        AgentConfig? verifierAgentCfg,
+        IReadOnlyDictionary<string, string> agentInstructions,
+        int currentTurn,
+        CancellationToken cancellationToken)
+    {
+        AgentStarting?.Invoke(verifierAgent.Name ?? "Verifier");
+        agentFactory.OnAgentTurnStarting();
+        changeTracker?.BeginTurn(verifierAgent.Name ?? "Verifier", currentTurn);
+
+        var vContextList = await BuildContextAsync(
+            verifierAgent.Name ?? string.Empty, task, history, verifierAgentCfg,
+            agentInstructions, currentTurn, cancellationToken);
+
+        AgentResponse vResponse = governanceKernel?.CircuitBreaker is { } vcb
+            ? await vcb.ExecuteAsync(() => verifierAgent.RunAsync(vContextList, null, null, cancellationToken))
+            : await verifierAgent.RunAsync(vContextList, null, null, cancellationToken);
+
+        foreach (var vMsg in vResponse.Messages)
+        {
+            if (vMsg.Role == ChatRole.Assistant && string.IsNullOrEmpty(vMsg.AuthorName))
+                vMsg.AuthorName = verifierAgent.Name;
+            history.Add(vMsg);
+        }
+
+        // When the verifier reports a finding, inject an explicit correction message
+        // so the next primary agent turn has the finding as visible context.
+        if (vResponse.Text?.Contains(verCfg.FindingsKeyword, StringComparison.OrdinalIgnoreCase) == true)
+        {
+            history.Add(new ChatMessage(ChatRole.User,
+                $"VERIFICATION FINDING [{verifierAgent.Name}]: An inconsistency was detected. " +
+                $"Review the verifier's output and reconcile any discrepancies before continuing:\n\n" +
+                vResponse.Text));
+        }
+
+        return new AgentMessage
+        {
+            AgentName = verifierAgent.Name ?? "Verifier",
+            Content   = vResponse.Text ?? string.Empty,
+            Role      = "assistant",
+            TurnIndex = currentTurn,
+            Usage     = OrchestratorHelpers.ExtractUsage(vResponse),
+            ToolCalls = ExtractToolCalls(vResponse.Messages, verifierAgent.Name ?? "Verifier")
+        };
     }
 }
