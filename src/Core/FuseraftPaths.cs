@@ -192,6 +192,21 @@ public static class FuseraftPaths
                 .Replace("{project_slug}", projectSlug, StringComparison.Ordinal));
 
     /// <summary>
+    /// Replaces <c>{session_id}</c>, <c>{project_slug}</c>, and <c>~/</c> tokens inside
+    /// arbitrary text (e.g. agent Instructions). Unlike <see cref="ExpandSessionPaths"/>,
+    /// this does <em>not</em> call <c>Path.GetFullPath</c>, which would prepend the CWD to
+    /// the entire multi-line string and corrupt it.
+    /// </summary>
+    public static string ExpandTextTokens(string text, string sessionId, string projectSlug)
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return text
+            .Replace("{session_id}",   sessionId,   StringComparison.Ordinal)
+            .Replace("{project_slug}", projectSlug, StringComparison.Ordinal)
+            .Replace("~/",             home + "/",  StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Expands <c>{project_slug}</c> and a leading <c>~</c> in a path.
     /// Use for project-scoped runtime paths that have no <c>{session_id}</c> token.
     /// </summary>

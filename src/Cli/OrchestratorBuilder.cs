@@ -1831,11 +1831,12 @@ public static class OrchestratorBuilder
     {
         string  E(string  s) => FuseraftPaths.ExpandSessionPaths(s, sessionId, projectSlug);
         string? En(string? s) => s is null ? null : E(s);
+        string  Et(string s) => FuseraftPaths.ExpandTextTokens(s, sessionId, projectSlug);
 
         return config with
         {
             Agents = config.Agents
-                .Select(a => a with { Instructions = E(a.Instructions) })
+                .Select(a => a with { Instructions = Et(a.Instructions) })
                 .ToList(),
 
             Validation = config.Validation is { } v

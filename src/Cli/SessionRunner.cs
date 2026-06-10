@@ -700,7 +700,6 @@ public sealed class SessionRunner(
         {
             if (statusUpdate is not null)
             {
-                AnsiConsole.WriteLine();
                 AnsiConsole.MarkupLine(
                     $"[yellow]  ⚠ {Markup.Escape(agent)} used {inputTokens:N0} input tokens this turn " +
                     $"(warning threshold: {threshold:N0}). " +
