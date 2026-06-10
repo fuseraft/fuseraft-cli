@@ -41,7 +41,7 @@ public sealed class AgentOrchestrator(
         IReadOnlyList<AgentMessage>? priorHistory = null,
         CancellationToken cancellationToken = default)
     {
-        var sessionId = GenerateSessionId();
+        var sessionId = StringHelpers.NewSessionId();
         var messages = new List<AgentMessage>();
         var start = DateTime.UtcNow;
 
@@ -920,8 +920,6 @@ public sealed class AgentOrchestrator(
 
     private IReadOnlyList<ToolCallRecord>? ExtractToolCalls(IList<ChatMessage> messages, string agentName = "Unknown")
         => OrchestratorHelpers.ExtractToolCalls(messages, logger, agentName);
-
-    private static string GenerateSessionId() => Guid.NewGuid().ToString("N")[..8];
 
     // Scans messages at indices [from, to) for ConflictingEvidence or NoProgress correction
     // signals injected by the selection strategy. Returns true when any such signal is found,
