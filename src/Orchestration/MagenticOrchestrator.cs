@@ -840,6 +840,7 @@ public sealed class MagenticOrchestrator(
         };
 
         cumulativeTokens += agentMsg.Usage?.TotalTokens ?? 0;
+        eventEmitter?.SetTurn(agentMsg.TurnIndex);
         roundIndex++;
 
         var warnThreshold = config.WarnTurnTokens;

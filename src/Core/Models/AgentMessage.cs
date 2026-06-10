@@ -9,7 +9,9 @@ public record ToolCallRecord(
     /// <summary>Compact summary of the most informative argument (e.g. <c>path=src/main.rs</c>).</summary>
     string? ArgsSummary,
     /// <summary>True when the function did not return an error prefix.</summary>
-    bool Succeeded);
+    bool Succeeded,
+    /// <summary>Character length of the full serialized args JSON, used to estimate output token cost.</summary>
+    int ArgsCharCount = 0);
 
 /// <summary>
 /// A single message emitted during an orchestration session.

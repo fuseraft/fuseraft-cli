@@ -33,6 +33,7 @@ public sealed class EventEmitter : IDisposable
     private readonly List<IOrchestrationHook> _hooks = [];
     private readonly ILogger<EventEmitter>? _logger;
     private string? _sessionId;
+    private int?    _currentTurn;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -45,6 +46,9 @@ public sealed class EventEmitter : IDisposable
         _path   = path;
         _logger = logger;
     }
+
+    /// <summary>Stamps every subsequent event with this turn index when <c>turn</c> is not explicitly passed to <see cref="EmitAsync"/>.</summary>
+    public void SetTurn(int turn) => _currentTurn = turn;
 
     /// <summary>Stamps every subsequent event with this session ID.</summary>
     public void SetSessionId(string sessionId)
@@ -84,7 +88,7 @@ public sealed class EventEmitter : IDisposable
             Ts:        timestamp.ToString("O"),
             Session:   _sessionId,
             Agent:     agent,
-            Turn:      turn,
+            Turn:      turn ?? _currentTurn,
             EventType: eventType,
             Payload:   payload), JsonOpts) + "\n";
 
@@ -111,7 +115,7 @@ public sealed class EventEmitter : IDisposable
                 Timestamp: timestamp,
                 SessionId: _sessionId,
                 Agent:     agent,
-                Turn:      turn,
+                Turn:      turn ?? _currentTurn,
                 Payload:   payload);
 
             foreach (var hook in _hooks)

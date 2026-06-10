@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -32,7 +33,7 @@ internal static class OrchestratorHelpers
         ILogger? logger = null,
         string agentName = "Unknown")
     {
-        var calls   = new List<(string CallId, string Name, string? ArgsSummary)>();
+        var calls   = new List<(string CallId, string Name, string? ArgsSummary, int ArgsCharCount)>();
         var results = new Dictionary<string, bool>(StringComparer.Ordinal);
 
         try
@@ -42,7 +43,11 @@ internal static class OrchestratorHelpers
                 foreach (var content in msg.Contents)
                 {
                     if (content is FunctionCallContent fc)
-                        calls.Add((fc.CallId ?? fc.Name, fc.Name, ToolCallHelper.SummarizeArgs(fc.Arguments)));
+                    {
+                        var argsJson     = fc.Arguments is null ? "" : JsonSerializer.Serialize(fc.Arguments);
+                        var argsCharCount = argsJson.Length;
+                        calls.Add((fc.CallId ?? fc.Name, fc.Name, ToolCallHelper.SummarizeArgs(fc.Arguments), argsCharCount));
+                    }
                     else if (content is FunctionResultContent fr)
                     {
                         var key  = fr.CallId ?? string.Empty;
@@ -79,7 +84,8 @@ internal static class OrchestratorHelpers
             .Select(c => new ToolCallRecord(
                 c.Name,
                 c.ArgsSummary,
-                results.TryGetValue(c.CallId, out var s) ? s : true))
+                results.TryGetValue(c.CallId, out var s) ? s : true,
+                c.ArgsCharCount))
             .ToList();
     }
 

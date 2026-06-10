@@ -47,7 +47,7 @@ public sealed class SnapshotWriter : IDisposable
             Agent:                msg.AgentName,
             Role:                 msg.Role,
             Content:              msg.Content,
-            ToolCalls:            msg.ToolCalls?.Select(tc => new ToolCallEntry(tc.Name, tc.ArgsSummary, tc.Succeeded, msg.Usage?.InputTokens, msg.Usage?.OutputTokens)).ToArray(),
+            ToolCalls:            msg.ToolCalls?.Select(tc => new ToolCallEntry(tc.Name, tc.ArgsSummary, tc.Succeeded, EstOutputTokens(tc))).ToArray(),
             InputTokens:          msg.Usage?.InputTokens,
             OutputTokens:         msg.Usage?.OutputTokens,
             IsCompactionSummary:  msg.IsCompactionSummary ? true : null);
@@ -105,7 +105,12 @@ public sealed class SnapshotWriter : IDisposable
         int?     OutputTokens,
         bool?    IsCompactionSummary);
 
-    private sealed record ToolCallEntry(string Name, string? ArgsSummary, bool Succeeded, int? InputTokens, int? OutputTokens);
+    private sealed record ToolCallEntry(string Name, string? ArgsSummary, bool Succeeded, int? EstOutputTokens);
+
+    // Estimates the output tokens consumed by one tool_use block:
+    // name chars + args JSON chars + ~12 chars of block overhead, divided by 4 (chars per token).
+    private static int EstOutputTokens(ToolCallRecord tc) =>
+        Math.Max(1, (tc.Name.Length + tc.ArgsCharCount + 12) / 4);
 
     private sealed record ManifestRecord(
         string  Ts,

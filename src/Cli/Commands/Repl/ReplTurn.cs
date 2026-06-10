@@ -259,6 +259,7 @@ internal static class ReplTurn
         int stepTotal = 0,
         bool isCorrectionTurn = false)
     {
+        ctx.Emitter.SetTurn(ctx.TurnIndex);
         await ctx.Emitter.EmitAsync("user_input", turn: ctx.TurnIndex, payload: new { content = input });
         ctx.History.Add(new ChatMessage(ChatRole.User, input));
         await ctx.Emitter.EmitAsync("turn_start", turn: ctx.TurnIndex, payload: new { is_step = isStepRequest, is_correction = isCorrectionTurn });
@@ -691,7 +692,7 @@ internal static class ReplTurn
             var inspectSkip   = activeStep.Tool is not null && toolCallsThisTurn.Count > 0 &&
                                 toolCallsThisTurn.All(t => InspectTools.Contains(t));
             var skipped       = zeroCallSkip || inspectSkip;
-            await ctx.Emitter.EmitAsync("step_complete", payload: new
+            await ctx.Emitter.EmitAsync("step_complete", turn: ctx.TurnIndex, payload: new
             {
                 step       = activeStep.Step,
                 total,
@@ -720,7 +721,7 @@ internal static class ReplTurn
         }
         else
         {
-            await ctx.Emitter.EmitAsync("step_halted", payload: new
+            await ctx.Emitter.EmitAsync("step_halted", turn: ctx.TurnIndex, payload: new
             {
                 step              = activeStep.Step,
                 total,

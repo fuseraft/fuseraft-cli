@@ -424,6 +424,7 @@ public sealed class AgentOrchestrator(
                         };
 
                         cumulativeTokens += branchMsg.Usage?.TotalTokens ?? 0;
+                        eventEmitter?.SetTurn(branchMsg.TurnIndex);
 
                         if (eventEmitter is not null)
                             await eventEmitter.EmitAsync("turn_end",
@@ -626,6 +627,8 @@ public sealed class AgentOrchestrator(
                 ToolCalls = ExtractToolCalls(response.Messages, agent.Name ?? "Unknown")
             };
 
+            eventEmitter?.SetTurn(agentMessage.TurnIndex);
+
             // Fulfill this agent's produced tokens now that its turn is complete.
             dependencyPlanner?.Fulfill(agent.Name ?? string.Empty);
 
@@ -804,6 +807,7 @@ public sealed class AgentOrchestrator(
                     ToolCalls = ExtractToolCalls(vResponse.Messages, verifierAgent.Name ?? "Verifier")
                 };
 
+                eventEmitter?.SetTurn(verifierMessage.TurnIndex);
                 cumulativeTokens += verifierMessage.Usage?.TotalTokens ?? 0;
 
                 var vWarnThreshold = config.WarnTurnTokens;
