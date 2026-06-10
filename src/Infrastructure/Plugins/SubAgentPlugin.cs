@@ -401,5 +401,10 @@ public sealed class SubAgentPlugin(
         IReadOnlyList<AIFunction> tools,
         EventEmitter emitter,
         string? agentName)
-        => tools.Select(t => (AIFunction)new ToolEventNotifier(t, emitter, agentName)).ToList();
+        => tools.Select(t => (AIFunction)new NotifyingAIFunction(
+            t,
+            agentName ?? string.Empty,
+            (_, toolName, argsSummary) => emitter.EmitAsync("sub_agent_tool_call",
+                agent:   agentName,
+                payload: new { tool = toolName, args = argsSummary }))).ToList();
 }
