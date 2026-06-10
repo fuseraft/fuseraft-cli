@@ -202,6 +202,18 @@ public sealed class ContextAssembler
         var pendingCorrections = ExtractPendingCorrections(agentName, sharedHistory);
         result.AddRange(pendingCorrections);
 
+        // 5. Task reminder — sandwich the objective at both ends of a non-trivial context.
+        // The task is already at position 0 (primacy effect); repeating a brief version at the
+        // very end exploits the recency effect so the agent's goal stays visible after a long
+        // assembled context block. Only injected when there is enough content between the two
+        // endpoints to make the reminder worthwhile.
+        int charsAfterTask = result.Skip(1).Sum(m => m.Text?.Length ?? 0);
+        if (task.Length > 50 && charsAfterTask > 2_000)
+        {
+            var preview = task.Length > 200 ? task[..200] + "…" : task;
+            result.Add(new ChatMessage(ChatRole.User, $"[Task Reminder]\n\n{preview}"));
+        }
+
         return result;
     }
 
