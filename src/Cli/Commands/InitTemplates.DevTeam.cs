@@ -110,11 +110,16 @@ public static partial class InitTemplates
 
               1. READ THE BRIEF: Call read_file on {FuseraftPaths.LocalBrief}.
 
-              2. AUDIT files_to_change COMPLETENESS:
-                 Use sub_agent_explore to ask which files are affected by the goal in the brief.
-                 Compare the response against files_to_change. Flag any clearly in-scope file that
-                 is absent — call sites, test files, related modules, config. Do NOT flag
-                 out-of-scope files.
+              2. AUDIT files_to_change COMPLETENESS (existing-code only):
+                 Use sub_agent_locate to check whether the files listed in files_to_change already
+                 exist in the codebase. If NONE of them exist yet, this is a greenfield project —
+                 skip the rest of this step entirely; completeness cannot be audited via exploration
+                 for code that has not been written yet.
+                 If SOME files already exist, use sub_agent_explore to find any existing file that
+                 is clearly in-scope but absent from files_to_change — call sites, tests for
+                 existing symbols, related modules that must change. Flag only files that EXIST NOW
+                 and need to be modified. Do NOT flag files that need to be created; new files are
+                 the Developer's responsibility and are not a brief completeness gap.
 
               3. AUDIT acceptance_criteria TESTABILITY:
                  For each criterion ask: can an automated test produce a binary PASS/FAIL for this?
@@ -305,6 +310,12 @@ public static partial class InitTemplates
               2. Read {FuseraftPaths.LocalExecutionState} with read_file. Check:
                  - ActiveFailures: any build/compiler errors currently present.
                  - SignificantChanges: files written or patched this session.
+
+              2b. EARLY EXIT — implementation guard: read {FuseraftPaths.LocalBrief}
+                  and check files_to_change. If none of those paths appear in SignificantChanges,
+                  the Developer has not started yet. Output "Evidence verified — no inconsistencies found."
+                  and stop. Do not proceed to steps 3–4. All inconsistency patterns require
+                  at least one implementation file to have been written before they are meaningful.
 
               3. Cross-check for these specific inconsistency patterns:
                  a. REPEATED FAILURE: The same error code or error message appears in
