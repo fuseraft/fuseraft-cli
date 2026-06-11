@@ -1,0 +1,61 @@
+## Playwright MCP example: a single browser-automation agent backed by the Playwright MCP server.
+## Prerequisites:
+##   1. Install the correct Chromium build for the MCP server's playwright-core version:
+##        node $(npx --yes @playwright/mcp@latest node -e "process.exit(0)" 2>/dev/null; \
+##               find ~/.npm/_npx -name "cli.js" -path "*/playwright-core/*" | head -1) install chromium
+##      Or more simply, find the cli.js path and run: node <path> install chromium
+##   2. Ensure XAI_API_KEY is set in your environment.
+## Run:      fuseraft run --config config/examples/orchestration.yaml "Navigate to https://example.com and take a screenshot"
+## Validate: fuseraft validate config/examples/orchestration.yaml
+
+Orchestration:
+  Name: PlaywrightExample
+  Description: >-
+    Single-agent setup that drives a browser via the Playwright MCP server.
+    The agent can navigate pages, click elements, fill forms, and capture screenshots.
+
+  McpServers:
+    - Name: playwright
+      Transport: stdio
+      Command: npx
+      Args:
+        - "@playwright/mcp@latest"
+        - "--browser"
+        - "chromium"   # must match the browser installed via playwright-core's cli.js
+
+  Agents:
+    - Name: BrowserAgent
+      Description: Automates browser interactions using Playwright tools.
+      Instructions: |
+        You are a browser automation agent with access to Playwright tools.
+
+        Use the playwright MCP tools to complete the requested task:
+        - Navigate to URLs with browser_navigate
+        - Click elements with browser_click
+        - Fill forms with browser_fill
+        - Take screenshots with browser_screenshot
+        - Read page content with browser_snapshot
+
+        Be concise. Report what you did and what you observed.
+      Model:
+        ModelId: grok-4.3
+        Endpoint: https://api.x.ai/v1
+        ApiKeyEnvVar: XAI_API_KEY
+        MaxTokens: 4096
+      Plugins:
+        - playwright
+
+  Selection:
+    Type: roundrobin
+
+  Termination:
+    Type: composite
+    MaxIterations: 10
+    Strategies:
+      - Type: regex
+        Pattern: "(?i)\\bdone\\b"
+        AgentNames:
+          - BrowserAgent
+
+  Events:
+    Path: .fuseraft/events.jsonl
