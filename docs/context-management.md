@@ -18,6 +18,7 @@ Each agent turn — ContextAssemblyPipeline (always on)
   └─ Context window filter       → per-agent history slice (ContextWindow config)
   └─ Session context injection   → session summary prepended (if present)
   └─ Artifact offloading         → tool results > 40k chars stored to disk; stub replaces inline (always on)
+  └─ Task Reminder               → task repeated at recency end when context > 2 000 chars (primacy+recency sandwich)
 
 History too long
   └─ Compaction                  → replace old turns with a summary + tool-call trace
@@ -582,11 +583,13 @@ ContextBudget:
   InTurnToolWindow:    20      # always retain at least the last 20 results verbatim
 ```
 
-When the cumulative estimated token cost of all tool-result messages in the context slice exceeds `MaxToolResultTokens`, the oldest results beyond the last `InTurnToolWindow` are replaced with one-line tombstones of the form:
+When the cumulative estimated token cost of all tool-result messages in the context slice exceeds `MaxToolResultTokens`, the oldest results beyond the last `InTurnToolWindow` are replaced with enriched tombstones that include the tool name, a key argument label, and up to 300 characters of the original content as a preview:
 
 ```
-[tool result — evicted after tool window exceeded]
+[tool result — evicted: read_file(src/LargeService.cs). Preview: "using System;…". Re-read with targeted ranges if needed.]
 ```
+
+When evictions occur, a `[Context Manifest]` message is also appended at the end of the context slice listing active tool results still in context alongside the superseded (evicted) ones, so the agent knows which reads are still available and which must be re-issued with targeted ranges.
 
 **Key difference from `MaxInTurnToolPairs`:** `MaxInTurnToolPairs` is an agent-level count-based cap applied unconditionally before every inner LLM call. `MaxToolResultTokens` is a session-level token-budget cap applied at the `ContextBudget` layer — it only fires when the total tool-result token footprint actually exceeds the threshold, preserving full context for turns with few or small results.
 
@@ -743,12 +746,13 @@ Here is the full sequence from session start through a long-running session:
    │  └─ SanitizeToolPairs — strip orphaned assistant tool-call frames (strict providers)
    ├─ Session context injection → context_summary.md prepended when present
    ├─ Knowledge artifact appended as [Pipeline Knowledge] user message
+   ├─ Task Reminder appended when context > 2 000 chars — primacy+recency sandwich reduces lost-in-the-middle drift
    └─ Assembled context → sent to LLM
       ├─ Session read cache — read_file returns hint instead of full content if file unchanged since last read/write this session
       ├─ Tool-result artifact offloading — results > 40k chars stored to disk; stub replaces inline content
       ├─ MaxInTurnToolPairs — sliding window: keep only last N tool pairs per inner call
       ├─ MaxInTurnContextTokens — budget-reactive: trim oldest pairs when over budget
-      ├─ MaxToolResultTokens / InTurnToolWindow — tombstone oldest tool results beyond token budget
+      ├─ MaxToolResultTokens / InTurnToolWindow — tombstone oldest results with label+preview; append [Context Manifest] when evictions occur
       └─ On context/413 error → adaptive trim retry (up to 3 stages)
 
    Post-turn
