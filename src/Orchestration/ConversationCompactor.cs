@@ -125,7 +125,7 @@ public sealed class ConversationCompactor(
                 total -= (list[start].Content?.Length ?? 0) / 4;
                 list.RemoveAt(start);
             }
-            if (start < list.Count && list[start].Role == "assistant")
+            if (start + 1 < list.Count && list[start].Role == "assistant")
             {
                 total -= (list[start].Content?.Length ?? 0) / 4;
                 list.RemoveAt(start);
