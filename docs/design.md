@@ -11,7 +11,7 @@ This document describes the architecture and design decisions behind fuseraft-cl
 3. [Directory Layout](#3-directory-layout)
 4. [Configuration](#4-configuration)
 5. [Agent Construction](#5-agent-construction)
-6. [Orchestrators](#6-orchestrators)
+6. [Orchestrators](#6-orchestrators) (AgentOrchestrator, MagenticOrchestrator, GraphOrchestrator, AdversarialOrchestrator, MapReduceOrchestrator, ScatterGatherOrchestrator, sub-graph nodes)
 7. [Selection Strategies](#7-selection-strategies)
 8. [Termination Strategies](#8-termination-strategies)
 9. [Routing Validators](#9-routing-validators)
@@ -398,6 +398,56 @@ START
 
 **Why the context firewall matters:** If the critic saw the generator's reasoning chain it would be primed by the same assumptions and more likely to ratify flawed outputs. The fresh-context invariant is what makes adversarial critique structurally independent — violating it turns the orchestrator into a consensus loop rather than a quality gate.
 
+### 6.5 MapReduceOrchestrator
+
+A three-phase data-parallel orchestrator for `Selection.Type: mapreduce`. No MAF DAG is involved — phases are driven directly.
+
+**Phase 1 — Split:** The `Splitter` agent is invoked with the task. Its response must contain a JSON object with a string array at `ItemsJsonPath` (dot-notation). If the JSON is absent or the path resolves to a non-array, the splitter is retried up to `MaxSplitterRetries` times with a correction message. After exhausting retries a hard exception is thrown.
+
+**Phase 2 — Map:** The `Mapper` agent is invoked once per item using `Task.WhenAll`. Each mapper call receives an isolated snapshot of the base history (task + splitter output) plus a user message identifying its specific item. A `SemaphoreSlim` bounds parallelism when `MaxConcurrency > 0`. Results are collected in item-index order before being yielded or merged.
+
+**Phase 3 — Reduce:** The `Reducer` agent receives the full shared history (task + splitter output + all labeled mapper outputs) plus a synthesise prompt, then produces the terminal message.
+
+**Execution model:**
+
+```
+START
+  → InvokeSplitter (retry on no JSON array at ItemsJsonPath)
+  → (items.Count == 0 ? skip map, prompt reducer directly)
+  → Task.WhenAll (mapper × items, bounded by MaxConcurrency)
+  → Yield mapper outputs in index order → merge into shared history
+  → InvokeReducer → yield terminal message
+  → END
+```
+
+### 6.6 ScatterGatherOrchestrator
+
+A two-phase broadcast orchestrator for `Selection.Type: scattergather`. Distinct from map-reduce: all participants receive the same task rather than different items split from it. Distinct from graph parallel fan-out: no coordinator node, no keyword trigger, and participants are different named agents (not N copies of the same mapper).
+
+**Phase 1 — Scatter:** All `Participants` are invoked in parallel using `Task.WhenAll`. Each receives an isolated snapshot of the base history with no visibility into other participants' in-progress work. Concurrency is bounded by `MaxConcurrency` when non-zero.
+
+**Phase 2 — Gather:** The `Synthesizer` agent receives the original task history plus every participant's output labeled `[Participant: AgentName]`, then produces the terminal response.
+
+**Execution model:**
+
+```
+START
+  → Task.WhenAll (all Participants, isolated history snapshots, bounded by MaxConcurrency)
+  → Yield participant outputs in declaration order → merge into gather history
+  → InvokeSynthesizer (task + labeled participant outputs) → yield terminal message
+  → END
+```
+
+### 6.7 Sub-graph nodes in GraphOrchestrator
+
+A `GraphNodeConfig` with `SubGraphId` set runs a nested sub-orchestrator instead of a single agent. The spec is looked up from `GraphConfig.SubGraphs`, which maps string IDs to `SubGraphSpec` — a discriminated union with exactly one of:
+
+- `SubGraphSpec.Graph` → spawns a child `GraphOrchestrator` with a synthetic config where `Selection.Type = "graph"` and `Selection.Graph = subSpec.Graph`
+- `SubGraphSpec.MapReduce` → spawns a `MapReduceOrchestrator` with `Selection.Type = "mapreduce"` and `Selection.MapReduce = subSpec.MapReduce`
+- `SubGraphSpec.ScatterGather` → spawns a `ScatterGatherOrchestrator` with `Selection.Type = "scattergather"` and `Selection.ScatterGather = subSpec.ScatterGather`
+
+All sub-orchestrators share the parent's services (agentFactory, changeTracker, eventEmitter, governanceKernel). Messages streamed by the sub-orchestrator are forwarded directly to the parent's message sink. The sub-orchestrator's terminal assistant message is injected into the parent's shared history as a synthetic `ChatMessage`, enabling the parent's keyword detection and edge routing to work on the sub-orchestrator's output without any special-casing.
+
 ---
 
 ## 7. Selection Strategies
@@ -406,12 +456,15 @@ Built and returned by `StrategyFactory.CreateSelection`. All implement `IAgentSe
 
 | Type | Behavior |
 |---|---|
-| `sequential` / `roundrobin` | Cycles through agents in order |
+| `sequential` | `SequentialAgentSelector` — one-pass sweep through agents in declaration order; returns `null` after the last agent, ending the loop |
+| `roundrobin` | `RoundRobinAgentSelector` — cycles through agents in declaration order indefinitely; session ends only when a `Termination` strategy fires |
 | `llm` | Calls an `IChatClient` with a configurable prompt template to pick the next agent by name |
 | `keyword` | Scans the last assistant message for configured keywords; each keyword routes to a named agent. Optional validators gate the route before it fires. |
 | `statemachine` | Explicit state graph: agents emit signals matched against the current state's outgoing transitions; all declared contracts must pass before a transition fires. Eliminates routing hallucinations — agents emit signals, the machine resolves transitions. |
-| `structured` | Evaluates CEL-like condition expressions per route rather than string keywords |
+| `structured` | Evaluates condition expressions per route rather than string keywords |
 | `adversarial` | Handled entirely by `AdversarialOrchestrator`; agents are paired as generator/critic per stage. `StrategyFactory` is not involved. |
+| `mapreduce` | Handled entirely by `MapReduceOrchestrator`; `StrategyFactory` is not involved. |
+| `scattergather` | Handled entirely by `ScatterGatherOrchestrator`; `StrategyFactory` is not involved. |
 | `magentic` | Handled entirely by `MagenticOrchestrator`; `StrategyFactory` throws if this type reaches it |
 | `graph` | Handled entirely by `GraphOrchestrator`; routing is driven by per-node `AgentRouteTable` instances built at startup from the `Graph.Nodes` config. `StrategyFactory` is not involved. |
 
