@@ -646,6 +646,20 @@ public sealed class ChangeTracker
             _ = _eventEmitter.EmitAsync(EventTypes.ToolCall,
                 agent:   agentName,
                 payload: new { tool = name, arg, ok = succeeded, result_chars = resultText.Length, output = shellOutput, error = toolError });
+
+            // Emit typed outcome event alongside the generic tool_call.
+            if (resultText.StartsWith("[TIMEOUT]", StringComparison.Ordinal))
+                _ = _eventEmitter.EmitAsync(EventTypes.ToolTimeout,
+                    agent:   agentName,
+                    payload: new { tool = name, arg });
+            else if (!succeeded)
+                _ = _eventEmitter.EmitAsync(EventTypes.ToolError,
+                    agent:   agentName,
+                    payload: new { tool = name, arg, error = toolError });
+            else
+                _ = _eventEmitter.EmitAsync(EventTypes.ToolResult,
+                    agent:   agentName,
+                    payload: new { tool = name, arg, result_chars = resultText.Length });
         }
 
         // Intercept search_symbol results to populate SymbolDefinition evidence nodes.
