@@ -667,7 +667,7 @@ public sealed class FileSystemPluginTests : IDisposable
     [Fact]
     public async Task DeleteFile_FileDoesNotExist_ReturnsInfo()
     {
-        var result = _plugin.DeleteFile(TempPath("ghost.txt"));
+        var result = await _plugin.DeleteFileAsync(TempPath("ghost.txt"));
         Assert.StartsWith("[INFO]", result);
         Assert.Contains("does not exist", result, StringComparison.OrdinalIgnoreCase);
     }
@@ -676,16 +676,16 @@ public sealed class FileSystemPluginTests : IDisposable
     public async Task DeleteFile_ExistingFile_DeletesAndReturnsOk()
     {
         await File.WriteAllTextAsync(TempPath("del.txt"), "bye");
-        var result = _plugin.DeleteFile(TempPath("del.txt"));
+        var result = await _plugin.DeleteFileAsync(TempPath("del.txt"));
         Assert.StartsWith("[OK]", result);
         Assert.False(File.Exists(TempPath("del.txt")));
     }
 
     [Fact]
-    public void DeleteFile_SandboxDenial_ReturnsDenial()
+    public async Task DeleteFile_SandboxDenial_ReturnsDenial()
     {
         var outside = Path.Combine(Path.GetTempPath(), $"outside_{Guid.NewGuid():N}.txt");
-        var result = _plugin.DeleteFile(outside);
+        var result = await _plugin.DeleteFileAsync(outside);
         Assert.StartsWith("[DENIED]", result);
     }
 
