@@ -298,7 +298,7 @@ public sealed class GraphOrchestrator(
             logger.LogInformation("Resuming session — replaying {Turns} prior turns.", priorHistory.Count);
             foreach (var prior in priorHistory)
             {
-                var role    = prior.Role == "user" ? ChatRole.User : ChatRole.Assistant;
+                var role    = prior.Role == MessageRole.User ? ChatRole.User : ChatRole.Assistant;
                 var content = ContextWindowFilter.TruncateReplayContent(prior);
                 var msg     = new ChatMessage(role, content);
                 if (role == ChatRole.Assistant && prior.AgentName is not null)
