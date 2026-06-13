@@ -362,7 +362,7 @@ public sealed class KeywordSelectionStrategy : IAgentSelector
                         _validatorFailure = (failureKey, newCount, firstError);
 
                         if (_eventEmitter is not null)
-                            _ = _eventEmitter.EmitAsync("validation_fail",
+                            _ = _eventEmitter.EmitAsync(EventTypes.ValidationFail,
                                 agent: msg.AuthorName,
                                 payload: new { validator = failingValidatorName, consecutive = newCount });
 
@@ -589,7 +589,7 @@ public sealed class KeywordSelectionStrategy : IAgentSelector
             scanned, defaultAgent.Name);
 
         if (_eventEmitter is not null)
-            _ = _eventEmitter.EmitAsync("keyword_not_found",
+            _ = _eventEmitter.EmitAsync(EventTypes.KeywordNotFound,
                 agent: FindLastSpeakingAgent(history, agents)?.Name ?? _defaultAgentName,
                 payload: new { default_agent = _defaultAgentName, turns_scanned = scanned });
 

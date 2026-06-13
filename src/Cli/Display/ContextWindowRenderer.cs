@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using fuseraft.Orchestration;
 
 namespace fuseraft.Cli.Display;
 
@@ -19,7 +20,7 @@ public static class ContextWindowRenderer
 
     private static readonly HashSet<string> UsefulEventTypes = new(StringComparer.OrdinalIgnoreCase)
     {
-        "turn_end", "validation_fail", "tool_blocked", "context_assembly",
+        EventTypes.TurnEnd, EventTypes.ValidationFail, EventTypes.ToolBlocked, EventTypes.ContextAssembly,
     };
 
     /// <summary>

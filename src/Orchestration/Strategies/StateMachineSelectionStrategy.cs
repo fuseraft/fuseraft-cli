@@ -418,7 +418,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                 .Select(t => t.Signal!)
                 .Distinct()
                 .ToList();
-            _ = _eventEmitter.EmitAsync("keyword_not_found",
+            _ = _eventEmitter.EmitAsync(EventTypes.KeywordNotFound,
                 agent: state.Agent,
                 payload: new { state = _currentState, agent = state.Agent, expected_signals = expectedSignals });
         }
@@ -579,7 +579,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
         _transitionFailure = (failureKey, newCount, errorMessage);
 
         if (_eventEmitter is not null)
-            _ = _eventEmitter.EmitAsync("validation_fail",
+            _ = _eventEmitter.EmitAsync(EventTypes.ValidationFail,
                 agent: authorName,
                 payload: new { contract = failingContract, state = _currentState, transition = transition.To, consecutive = newCount, error = errorMessage });
 
