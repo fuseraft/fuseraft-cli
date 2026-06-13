@@ -4,7 +4,7 @@ using AgentGovernance.Audit;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Hooks;
 
 /// <summary>
 /// An <see cref="IOrchestrationHook"/> that appends a SHA-256 digest of each turn's

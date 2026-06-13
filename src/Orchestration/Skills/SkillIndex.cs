@@ -1,7 +1,7 @@
 using Microsoft.Data.Sqlite;
 using fuseraft.Core;
 
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Skills;
 
 /// <summary>
 /// SQLite FTS5-backed index of skills written to the skills library.

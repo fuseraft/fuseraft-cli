@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 using fuseraft.Core;
 using fuseraft.Core.Models;
 
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Skills;
 
 /// <summary>Outcome of a single skill curation attempt.</summary>
 public enum SkillCurationOutcome

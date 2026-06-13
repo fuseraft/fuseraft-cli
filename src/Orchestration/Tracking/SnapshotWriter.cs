@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using fuseraft.Core.Models;
 
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Tracking;
 
 /// <summary>
 /// Writes per-turn context snapshots and a final manifest to a session-scoped
