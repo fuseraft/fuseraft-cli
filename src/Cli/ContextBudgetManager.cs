@@ -70,7 +70,7 @@ internal sealed class ContextBudgetManager(
                     $"input tokens (warn_at: {contextBudget.WarnAt:N0}). " +
                     $"Context rot risk — compaction will trigger at {contextBudget.CutoverAt:N0} tokens.[/]");
                 if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("context_budget_warn",
+                    await eventEmitter.EmitAsync(EventTypes.ContextBudgetWarn,
                         agent: agentName,
                         payload: new { cumulative_input_tokens = cumulative, warn_at = contextBudget.WarnAt, cutover_at = contextBudget.CutoverAt });
             }

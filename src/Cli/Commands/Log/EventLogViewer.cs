@@ -125,16 +125,16 @@ internal static class EventLogViewer
     private static string ColorizeEvent(string eventType) => eventType switch
     {
         EventTypes.SessionStart                          => $"[cyan]{EventTypes.SessionStart}[/]",
-        "session_end"                                    => "[cyan]session_end[/]",
+        EventTypes.SessionEnd                            => $"[cyan]{EventTypes.SessionEnd}[/]",
         EventTypes.SessionError                          => $"[red]{EventTypes.SessionError}[/]",
-        "circuit_breaker_open"                           => "[red]circuit_breaker_open[/]",
+        EventTypes.CircuitBreakerOpen                    => $"[red]{EventTypes.CircuitBreakerOpen}[/]",
         EventTypes.ToolBlocked                           => $"[yellow]{EventTypes.ToolBlocked}[/]",
         EventTypes.ValidationFail                        => $"[yellow]{EventTypes.ValidationFail}[/]",
         EventTypes.HitlEscalation                        => $"[yellow]{EventTypes.HitlEscalation}[/]",
-        "skill_curation_complete"                        => "[green]skill_curation_complete[/]",
-        "skill_curation_start"                           => "[dim]skill_curation_start[/]",
+        EventTypes.SkillCurationComplete                 => $"[green]{EventTypes.SkillCurationComplete}[/]",
+        EventTypes.SkillCurationStart                    => $"[dim]{EventTypes.SkillCurationStart}[/]",
         EventTypes.TurnStart or EventTypes.TurnEnd       => $"[dim]{Markup.Escape(eventType)}[/]",
-        "command"                                        => "[dim]command[/]",
+        EventTypes.Command                               => $"[dim]{EventTypes.Command}[/]",
         _                                                => Markup.Escape(eventType),
     };
 
@@ -146,12 +146,12 @@ internal static class EventLogViewer
         {
             return eventType switch
             {
-                "command" =>
+                EventTypes.Command =>
                     Get(p, "command") is { } cmd
                         ? $"[dim]{Markup.Escape(Truncate(cmd, 60))}[/]"
                         : string.Empty,
 
-                "skill_curation_complete" =>
+                EventTypes.SkillCurationComplete =>
                     (Get(p, "outcome"), Get(p, "slug")) is ({ } outcome, { } slug)
                         ? $"[dim]{Markup.Escape(outcome)}  {Markup.Escape(slug)}[/]"
                         : Get(p, "outcome") is { } o

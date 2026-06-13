@@ -74,7 +74,7 @@ internal static class ReplCommands
         ctx.ContextWarningShown    = false;
         ctx.ResetPlanState();
         AnsiConsole.MarkupLine("[dim]History cleared.[/]");
-        await ctx.Emitter.EmitAsync("command", payload: new { command = "/clear" });
+        await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/clear" });
         return CommandResult.Continue;
     }
 
@@ -93,7 +93,7 @@ internal static class ReplCommands
             ctx.History.RemoveAll(m => m.Role == ChatRole.System);
             ctx.History.Insert(0, new ChatMessage(ChatRole.System, updated));
             AnsiConsole.MarkupLine("[dim]System prompt updated.[/]");
-            _ = ctx.Emitter.EmitAsync("command", payload: new { command = "/system", prompt = arg });
+            _ = ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/system", prompt = arg });
         }
         return CommandResult.Continue;
     }
@@ -145,14 +145,14 @@ internal static class ReplCommands
                 // from ChatOptions at call time, so Client/StepClient don't need rebuilding.
                 ctx.ChatOptions = ctx.BuildChatOptions();
                 AnsiConsole.MarkupLine($"[dim]{Markup.Escape(match)} tools disabled.[/]");
-                await ctx.Emitter.EmitAsync("command", payload: new { command = "/tools disable", category = match });
+                await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/tools disable", category = match });
             }
             else
             {
                 ctx.DisabledCategories.Remove(match);
                 ctx.ChatOptions = ctx.BuildChatOptions();
                 AnsiConsole.MarkupLine($"[dim]{Markup.Escape(match)} tools enabled.[/]");
-                await ctx.Emitter.EmitAsync("command", payload: new { command = "/tools enable", category = match });
+                await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/tools enable", category = match });
             }
         }
         else
@@ -199,7 +199,7 @@ internal static class ReplCommands
             : arg;
         SaveTranscript(ctx.History, ctx.ModelId, path);
         AnsiConsole.MarkupLine($"[dim]Transcript saved to[/] {Markup.Escape(path)}");
-        await ctx.Emitter.EmitAsync("command", payload: new { command = "/save", path });
+        await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/save", path });
         return CommandResult.Continue;
     }
 
@@ -280,7 +280,7 @@ internal static class ReplCommands
             }
             Console.Write(sb.ToString());
             ctx.PrevCtxEstimate = total;
-            await ctx.Emitter.EmitAsync("command", payload: new
+            await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new
             {
                 command = "/context",
                 estimated_tokens = total,
@@ -330,7 +330,7 @@ internal static class ReplCommands
         }
 
         ctx.PrevCtxEstimate = total;
-        await ctx.Emitter.EmitAsync("command", payload: new
+        await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new
         {
             command = "/context",
             estimated_tokens = total,
@@ -400,7 +400,7 @@ internal static class ReplCommands
         AnsiConsole.MarkupLine($"[dim]Settings saved to[/] [bold]{Markup.Escape(UserConfigStore.ConfigPath)}[/]");
         AnsiConsole.MarkupLine($"[dim]API key stored in[/] [bold]{Markup.Escape(ctx.KeyStore.StoreName)}[/]");
         AnsiConsole.MarkupLine($"[dim]Model:[/] [bold]{Markup.Escape(ctx.ModelId)}[/]  [dim](history cleared)[/]");
-        await ctx.Emitter.EmitAsync("command", payload: new { command = "/provider setup", model = ctx.ModelId });
+        await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/provider setup", model = ctx.ModelId });
         return CommandResult.Continue;
     }
 
@@ -437,7 +437,7 @@ internal static class ReplCommands
             $"Focus on intentful actions only — no defensive steps like verifying CWD or reading files back." +
             $"\n\nTask: {arg}";
 
-        await ctx.Emitter.EmitAsync("command", payload: new { command = "/plan", task = arg });
+        await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/plan", task = arg });
         return CommandResult.Send(planPrompt, capturePlan: true);
     }
 
@@ -458,7 +458,7 @@ internal static class ReplCommands
 
         AnsiConsole.MarkupLine($"[dim]Executing {total}-step plan…[/]");
         AnsiConsole.WriteLine();
-        await ctx.Emitter.EmitAsync("command", payload: new { command = "/execute", steps = total });
+        await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/execute", steps = total });
         return CommandResult.Continue;
     }
 
@@ -638,7 +638,7 @@ internal static class ReplCommands
                 AnsiConsole.MarkupLine($"    [dim]·[/] {Markup.Escape(name)}  [dim]{cnt}x[/]");
         }
 
-        await ctx.Emitter.EmitAsync("command", payload: new { command = "/events stats" });
+        await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/events stats" });
     }
 
     private static async Task<CommandResult> CmdSafeModeAsync(ReplSessionContext ctx, string arg)
@@ -666,7 +666,7 @@ internal static class ReplCommands
                 ctx.ChatOptions = ctx.BuildChatOptions();
                 ctx.SafeMode    = true;
                 AnsiConsole.MarkupLine("[dim]Safe mode[/] [green]on[/][dim]: Shell, Git, Http tools disabled.[/]");
-                await ctx.Emitter.EmitAsync("command", payload: new { command = "/safe-mode on" });
+                await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/safe-mode on" });
             }
         }
         else if (arg.Equals("off", StringComparison.OrdinalIgnoreCase))
@@ -684,7 +684,7 @@ internal static class ReplCommands
                 ctx.ChatOptions     = ctx.BuildChatOptions();
                 ctx.SafeMode        = false;
                 AnsiConsole.MarkupLine("[dim]Safe mode[/] [dim]off[/][dim]: tool categories restored.[/]");
-                await ctx.Emitter.EmitAsync("command", payload: new { command = "/safe-mode off" });
+                await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/safe-mode off" });
             }
         }
         else
@@ -717,13 +717,13 @@ internal static class ReplCommands
             }
             ctx.AdversarialMode = true;
             AnsiConsole.MarkupLine("[dim]Adversarial mode[/] [green]on[/][dim]: critic agent will review each /execute step.[/]");
-            _ = ctx.Emitter.EmitAsync("command", payload: new { command = "/adversarial on" });
+            _ = ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/adversarial on" });
         }
         else if (arg.Equals("off", StringComparison.OrdinalIgnoreCase))
         {
             ctx.AdversarialMode = false;
             AnsiConsole.MarkupLine("[dim]Adversarial mode[/] [dim]off[/][dim].[/]");
-            _ = ctx.Emitter.EmitAsync("command", payload: new { command = "/adversarial off" });
+            _ = ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/adversarial off" });
         }
         else
         {
@@ -773,7 +773,7 @@ internal static class ReplCommands
                 AnsiConsole.WriteLine(correction);
                 AnsiConsole.WriteLine();
             }
-            await ctx.Emitter.EmitAsync("command", payload: new { command = "/assist" });
+            await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/assist" });
             return CommandResult.Send(correction);
         }
         catch (OperationCanceledException)
@@ -843,7 +843,7 @@ internal static class ReplCommands
                 AnsiConsole.MarkupLine(deleted
                     ? $"[dim]Deleted memory '{Markup.Escape(memArg)}'.[/]"
                     : $"[yellow]No memory named '{Markup.Escape(memArg)}'.[/]");
-                await ctx.Emitter.EmitAsync("command", payload: new { command = "/memory delete", name = memArg });
+                await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/memory delete", name = memArg });
             }
         }
         else if (sub == "save")
@@ -869,7 +869,7 @@ internal static class ReplCommands
                             ? $"[dim]{saved.Count} memor{(saved.Count == 1 ? "y" : "ies")} saved.[/]"
                             : "[dim]Nothing worth saving found.[/]");
                     ctx.LastExtractedTurnIndex = ctx.TurnIndex;
-                    await ctx.Emitter.EmitAsync("command", payload: new
+                    await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new
                         { command = "/memory save", saved = saved.Count, parseFailed });
                 }
                 catch (Exception ex)
@@ -925,7 +925,7 @@ internal static class ReplCommands
             ReplJsonBridge.Emit(new { type = "compacted" });
         else
             AnsiConsole.MarkupLine("[dim]Session compacted — history replaced with handoff summary.[/]");
-        await ctx.Emitter.EmitAsync("command", payload: new { command = "/compact", arg });
+        await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/compact", arg });
         return CommandResult.Continue;
     }
 
@@ -977,7 +977,7 @@ internal static class ReplCommands
         ctx.ResetPlanState();
 
         var afterEst = ctx.EstimateTokens();
-        await ctx.Emitter.EmitAsync("compaction", payload: new
+        await ctx.Emitter.EmitAsync(EventTypes.Compaction, payload: new
         {
             source        = "manual",
             before_tokens = beforeEst,
@@ -1035,7 +1035,7 @@ internal static class ReplCommands
             await StopSpinner();
             if (headerPrinted) { if (!ctx.JsonMode) AnsiConsole.WriteLine(); }
             else AnsiConsole.MarkupLine("[dim](no output)[/]");
-            await ctx.Emitter.EmitAsync("command", payload: new { command = "/explore", query = arg });
+            await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/explore", query = arg });
         }
         catch (OperationCanceledException)
         {
@@ -1099,7 +1099,7 @@ internal static class ReplCommands
             await StopSpinner();
             if (gotOutput) { if (!ctx.JsonMode) AnsiConsole.WriteLine(); }
             else AnsiConsole.MarkupLine("[dim](not found)[/]");
-            await ctx.Emitter.EmitAsync("command", payload: new { command = "/locate", target = arg });
+            await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/locate", target = arg });
         }
         catch (OperationCanceledException)
         {
@@ -1244,7 +1244,7 @@ internal static class ReplCommands
                     $"[yellow]  ⚠ Plan halted at step {ctx.HaltedAt.Value.Step.Step} of {ctx.HaltedAt.Value.Total}. Run /recover or /resume.[/]");
         }
 
-        await ctx.Emitter.EmitAsync("command", payload: new
+        await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new
         {
             command   = "/switch",
             target_id = snapshot.SessionId,
@@ -1425,7 +1425,7 @@ internal static class ReplCommands
                 : $"[dim]Rewound to after turn {targetTurn} — {removed} turn{(removed == 1 ? "" : "s")} removed.[/]");
         }
 
-        await ctx.Emitter.EmitAsync("command", payload: new
+        await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new
             { command = "/rewind", target = targetTurn, removed, total_was = totalTurns });
         return CommandResult.Continue;
     }
@@ -1506,7 +1506,7 @@ internal static class ReplCommands
                 AnsiConsole.MarkupLine($"[dim]Switched to fork:[/] [bold cyan]{Markup.Escape(forkId)}[/]  [dim](was {Markup.Escape(prevId)})[/]");
             }
 
-            await ctx.Emitter.EmitAsync("command", payload: new
+            await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new
                 { command = "/fork switch", fork_id = forkId, prev_id = prevId, turns = ctx.TurnIndex });
         }
         else
@@ -1526,7 +1526,7 @@ internal static class ReplCommands
                 AnsiConsole.MarkupLine($"[dim]Or:[/] [bold]/fork switch[/] [dim]to branch and continue as the fork right now.[/]");
             }
 
-            await ctx.Emitter.EmitAsync("command", payload: new
+            await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new
                 { command = "/fork", fork_id = forkId, turns = ctx.TurnIndex });
         }
 
@@ -1596,7 +1596,7 @@ internal static class ReplCommands
         AnsiConsole.MarkupLine(
             $"[dim]Model:[/] [bold]{Markup.Escape(prevModel)}[/] [dim]→[/] [bold]{Markup.Escape(newModelId)}[/]{effortSuffix}  " +
             $"[dim](history preserved)[/]");
-        await ctx.Emitter.EmitAsync("command", payload: new { command = "/model", model = newModelId, prev = prevModel, reasoning_effort = newEffort });
+        await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/model", model = newModelId, prev = prevModel, reasoning_effort = newEffort });
         return CommandResult.Continue;
     }
 
@@ -1642,7 +1642,7 @@ internal static class ReplCommands
 
         var prevDisplay = prev ?? "(none)";
         AnsiConsole.MarkupLine($"[dim]Reasoning:[/] [bold]{Markup.Escape(prevDisplay)}[/] [dim]→[/] [bold]{Markup.Escape(effort)}[/]");
-        await ctx.Emitter.EmitAsync("command", payload: new { command = "/reasoning", reasoning_effort = effort, prev = prevDisplay, model = ctx.ModelId });
+        await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/reasoning", reasoning_effort = effort, prev = prevDisplay, model = ctx.ModelId });
         return CommandResult.Continue;
     }
 
@@ -1668,7 +1668,7 @@ internal static class ReplCommands
         else
             AnsiConsole.MarkupLine("[dim]Retrying last message…[/]");
 
-        _ = ctx.Emitter.EmitAsync("command", payload: new { command = "/retry" });
+        _ = ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/retry" });
         return CommandResult.Send(lastUserText);
     }
 
@@ -2025,7 +2025,7 @@ internal static class ReplCommands
 
             InjectRunContext(ctx, task, configPath, succeeded, exitCode, sw.Elapsed, output);
 
-            await ctx.Emitter.EmitAsync("command", payload: new
+            await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new
             {
                 command   = "/run",
                 config    = configPath,

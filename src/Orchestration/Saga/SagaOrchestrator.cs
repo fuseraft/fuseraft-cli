@@ -191,7 +191,7 @@ public sealed class SagaOrchestrator(
         CancellationToken ct)
     {
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("saga_compensating",
+            await eventEmitter.EmitAsync(EventTypes.SagaCompensating,
                 payload: new { steps = executedSteps.Count, max = sagaConfig.MaxCompensationSteps });
 
         int compensated = 0;
@@ -209,7 +209,7 @@ public sealed class SagaOrchestrator(
                 compensated++;
 
                 if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("saga_compensated",
+                    await eventEmitter.EmitAsync(EventTypes.SagaCompensated,
                         agent:   agentName,
                         payload: new { version = state.Version });
             }

@@ -239,7 +239,7 @@ public sealed class SubAgentPlugin(
                    "Ensure AgentFactory created a real SubAgentPlugin for this agent.";
 
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("sub_agent_start",
+            await eventEmitter.EmitAsync(EventTypes.SubAgentStart,
                 agent:   parentAgentName,
                 payload: new { query = userQuery.Length > 120 ? userQuery[..120] + "…" : userQuery, mode });
 
@@ -295,7 +295,7 @@ public sealed class SubAgentPlugin(
             }
 
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("sub_agent_end",
+                await eventEmitter.EmitAsync(EventTypes.SubAgentEnd,
                     agent:   parentAgentName,
                     payload: new { outcome, summary_chars = result.Length, mode,
                                    input_tokens = inputTok, output_tokens = outputTok });
@@ -306,7 +306,7 @@ public sealed class SubAgentPlugin(
         {
             outcome = cancellationToken.IsCancellationRequested ? "cancelled" : "timeout";
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("sub_agent_end",
+                await eventEmitter.EmitAsync(EventTypes.SubAgentEnd,
                     agent:   parentAgentName,
                     payload: new { outcome, mode });
             return outcome == "cancelled"
@@ -317,7 +317,7 @@ public sealed class SubAgentPlugin(
         {
             outcome = "error";
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("sub_agent_end",
+                await eventEmitter.EmitAsync(EventTypes.SubAgentEnd,
                     agent:   parentAgentName,
                     payload: new { outcome, error = ex.Message, mode });
             return $"Sub-agent failed: {ex.Message}";
@@ -404,7 +404,7 @@ public sealed class SubAgentPlugin(
         => tools.Select(t => (AIFunction)new NotifyingAIFunction(
             t,
             agentName ?? string.Empty,
-            (_, toolName, argsSummary) => emitter.EmitAsync("sub_agent_tool_call",
+            (_, toolName, argsSummary) => emitter.EmitAsync(EventTypes.SubAgentToolCall,
                 agent:   agentName,
                 payload: new { tool = toolName, args = argsSummary }))).ToList();
 }

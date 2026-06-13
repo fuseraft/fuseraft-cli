@@ -257,7 +257,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                             blockedFailure.LastError));
 
                     if (_eventEmitter is not null)
-                        _ = _eventEmitter.EmitAsync("replan_blocked",
+                        _ = _eventEmitter.EmitAsync(EventTypes.ReplanBlocked,
                             agent: state.Agent,
                             payload: new { from = _currentState, to = transition.To, blocked_transition = blockedTo, consecutive = blockedFailure.Count });
 
@@ -350,7 +350,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                         _history.Add(new ChatMessage(ChatRole.User, escalation));
 
                         if (_eventEmitter is not null)
-                            _ = _eventEmitter.EmitAsync("back_edge_escalation",
+                            _ = _eventEmitter.EmitAsync(EventTypes.BackEdgeEscalation,
                                 payload: new { from = _currentState, to = targetState, visit_count = newVisits, max_revisits = transition.MaxRevisits });
                     }
                 }
