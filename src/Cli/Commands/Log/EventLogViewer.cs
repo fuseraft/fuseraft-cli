@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Spectre.Console;
+using fuseraft.Orchestration;
 
 namespace fuseraft.Cli.Commands.Log;
 
@@ -123,18 +124,18 @@ internal static class EventLogViewer
 
     private static string ColorizeEvent(string eventType) => eventType switch
     {
-        "session_start"             => "[cyan]session_start[/]",
-        "session_end"               => "[cyan]session_end[/]",
-        "session_error"             => "[red]session_error[/]",
-        "circuit_breaker_open"      => "[red]circuit_breaker_open[/]",
-        "tool_blocked"              => "[yellow]tool_blocked[/]",
-        "validation_fail"           => "[yellow]validation_fail[/]",
-        "hitl_escalation"           => "[yellow]hitl_escalation[/]",
-        "skill_curation_complete"   => "[green]skill_curation_complete[/]",
-        "skill_curation_start"      => "[dim]skill_curation_start[/]",
-        "turn_start" or "turn_end"  => $"[dim]{Markup.Escape(eventType)}[/]",
-        "command"                   => "[dim]command[/]",
-        _                           => Markup.Escape(eventType),
+        EventTypes.SessionStart                          => $"[cyan]{EventTypes.SessionStart}[/]",
+        "session_end"                                    => "[cyan]session_end[/]",
+        EventTypes.SessionError                          => $"[red]{EventTypes.SessionError}[/]",
+        "circuit_breaker_open"                           => "[red]circuit_breaker_open[/]",
+        EventTypes.ToolBlocked                           => $"[yellow]{EventTypes.ToolBlocked}[/]",
+        EventTypes.ValidationFail                        => $"[yellow]{EventTypes.ValidationFail}[/]",
+        EventTypes.HitlEscalation                        => $"[yellow]{EventTypes.HitlEscalation}[/]",
+        "skill_curation_complete"                        => "[green]skill_curation_complete[/]",
+        "skill_curation_start"                           => "[dim]skill_curation_start[/]",
+        EventTypes.TurnStart or EventTypes.TurnEnd       => $"[dim]{Markup.Escape(eventType)}[/]",
+        "command"                                        => "[dim]command[/]",
+        _                                                => Markup.Escape(eventType),
     };
 
     private static string SummarizePayload(string? eventType, JsonElement? payload)
@@ -157,27 +158,27 @@ internal static class EventLogViewer
                             ? $"[dim]{Markup.Escape(o)}[/]"
                             : string.Empty,
 
-                "session_error" =>
+                EventTypes.SessionError =>
                     Get(p, "error") is { } err
                         ? $"[dim red]{Markup.Escape(Truncate(err, 80))}[/]"
                         : string.Empty,
 
-                "tool_blocked" =>
+                EventTypes.ToolBlocked =>
                     Get(p, "tool") is { } tool
                         ? $"[dim]{Markup.Escape(tool)}[/]"
                         : string.Empty,
 
-                "validation_fail" =>
+                EventTypes.ValidationFail =>
                     Get(p, "validator") is { } v
                         ? $"[dim]{Markup.Escape(v)}[/]"
                         : string.Empty,
 
-                "session_start" =>
+                EventTypes.SessionStart =>
                     Get(p, "model") is { } model
                         ? $"[dim]{Markup.Escape(Truncate(model, 30))}[/]"
                         : string.Empty,
 
-                "turn_end" =>
+                EventTypes.TurnEnd =>
                     Get(p, "agent") is { } agent
                         ? $"[dim]{Markup.Escape(agent)}[/]"
                         : string.Empty,

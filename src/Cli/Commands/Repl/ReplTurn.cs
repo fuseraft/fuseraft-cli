@@ -6,6 +6,7 @@ using Spectre.Console;
 using fuseraft.Cli.Display;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
+using fuseraft.Orchestration;
 
 namespace fuseraft.Cli.Commands.Repl;
 
@@ -262,7 +263,7 @@ internal static class ReplTurn
         ctx.Emitter.SetTurn(ctx.TurnIndex);
         await ctx.Emitter.EmitAsync("user_input", turn: ctx.TurnIndex, payload: new { content = input });
         ctx.History.Add(new ChatMessage(ChatRole.User, input));
-        await ctx.Emitter.EmitAsync("turn_start", turn: ctx.TurnIndex, payload: new { is_step = isStepRequest, is_correction = isCorrectionTurn });
+        await ctx.Emitter.EmitAsync(EventTypes.TurnStart, turn: ctx.TurnIndex, payload: new { is_step = isStepRequest, is_correction = isCorrectionTurn });
 
         // Preserve the user's input before the LLM call so a crash mid-turn still
         // leaves a recoverable snapshot with the typed text.
@@ -590,9 +591,9 @@ internal static class ReplTurn
                 $"[dim]  tokens (est.): {postEst:N0} / {ContextTokenBudget:N0}  rounds: {toolRounds}  tool calls: {toolCallsThisTurn.Count}[/]");
 
         foreach (var (name, args) in toolCallDetails)
-            await ctx.Emitter.EmitAsync("tool_call", turn: ctx.TurnIndex, payload: new { tool_name = name, args });
+            await ctx.Emitter.EmitAsync(EventTypes.ToolCall, turn: ctx.TurnIndex, payload: new { tool_name = name, args });
         await ctx.Emitter.EmitAsync("assistant_response", turn: ctx.TurnIndex, payload: new { content = responseText });
-        await ctx.Emitter.EmitAsync("turn_end", turn: ctx.TurnIndex, payload: new
+        await ctx.Emitter.EmitAsync(EventTypes.TurnEnd, turn: ctx.TurnIndex, payload: new
         {
             elapsed_ms       = (int)(DateTime.UtcNow - turnStart).TotalMilliseconds,
             estimated_tokens = postEst,

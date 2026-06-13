@@ -592,7 +592,7 @@ public sealed class MagenticOrchestrator(
         }
 
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("magentic_plan", agent: ManagerPlanTag, payload: new { plan = currentPlan });
+            await eventEmitter.EmitAsync(EventTypes.MagenticPlan, agent: ManagerPlanTag, payload: new { plan = currentPlan });
     }
 
     // -------------------------------------------------------------------------
@@ -856,7 +856,7 @@ public sealed class MagenticOrchestrator(
             new StreamState(currentPlan, currentPlanSteps, turn, cumulativeTokens, roundIndex));
 
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("turn_end",
+            await eventEmitter.EmitAsync(EventTypes.TurnEnd,
                 agent: agentMsg.AgentName,
                 turn:  agentMsg.TurnIndex,
                 payload: new
@@ -945,7 +945,7 @@ public sealed class MagenticOrchestrator(
             new StreamState(currentPlan, currentPlanSteps, turn, cumulativeTokens));
 
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("magentic_complete", agent: ManagerFinalTag,
+            await eventEmitter.EmitAsync(EventTypes.MagenticComplete, agent: ManagerFinalTag,
                 payload: new { rounds = roundIndex });
     }
 
@@ -953,7 +953,7 @@ public sealed class MagenticOrchestrator(
         EventEmitter emitter,
         fuseraft.Core.Models.ContextAssemblyMetrics metrics,
         int turn) =>
-        emitter.EmitAsync("context_assembly",
+        emitter.EmitAsync(EventTypes.ContextAssembly,
             agent: metrics.AgentName,
             turn:  turn,
             payload: new
