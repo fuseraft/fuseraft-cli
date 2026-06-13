@@ -56,7 +56,8 @@ public sealed class GraphOrchestrator(
     GovernanceKernel? governanceKernel = null,
     IHumanApprovalService? humanApprovalService = null,
     fuseraft.Core.Interfaces.IContextAssemblyPipeline? contextPipeline = null,
-    fuseraft.Infrastructure.Repository.RepositoryKnowledgeStore? repositoryKnowledgeStore = null) : IOrchestrator
+    fuseraft.Infrastructure.Repository.RepositoryKnowledgeStore? repositoryKnowledgeStore = null,
+    ILoggerFactory? loggerFactory = null) : IOrchestrator
 {
     // Default consecutive-failure limit per node. CorrectionEngine uses this same value
     // in its RETRY n/4 messages, so both stay in sync via this constant.
@@ -1830,7 +1831,10 @@ public sealed class GraphOrchestrator(
 
         logger.LogInformation(
             "[GraphOrchestrator] Node '{NodeId}' executing sub-graph '{SubGraphId}' (type: {Type}).",
-            nodeId, subGraphId, subSpec.IsMapReduce ? OrchestratorTypes.MapReduce : OrchestratorTypes.Graph);
+            nodeId, subGraphId,
+            subSpec.IsMapReduce ? OrchestratorTypes.MapReduce
+                : subSpec.IsScatterGather ? OrchestratorTypes.ScatterGather
+                : OrchestratorTypes.Graph);
 
         if (eventEmitter is not null)
             await eventEmitter.EmitAsync(EventTypes.AgentStart,
@@ -1850,7 +1854,8 @@ public sealed class GraphOrchestrator(
                     MapReduce = subSpec.MapReduce,
                 }
             };
-            var mrLogger = Microsoft.Extensions.Logging.Abstractions.NullLogger<MapReduceOrchestrator>.Instance;
+            var mrLogger = loggerFactory?.CreateLogger<MapReduceOrchestrator>()
+                ?? (ILogger<MapReduceOrchestrator>)Microsoft.Extensions.Logging.Abstractions.NullLogger<MapReduceOrchestrator>.Instance;
             subOrchestrator = new MapReduceOrchestrator(
                 subConfig, agentFactory, mrLogger,
                 changeTracker, eventEmitter, governanceKernel);
@@ -1866,7 +1871,8 @@ public sealed class GraphOrchestrator(
                     ScatterGather = subSpec.ScatterGather,
                 }
             };
-            var sgLogger = Microsoft.Extensions.Logging.Abstractions.NullLogger<ScatterGatherOrchestrator>.Instance;
+            var sgLogger = loggerFactory?.CreateLogger<ScatterGatherOrchestrator>()
+                ?? (ILogger<ScatterGatherOrchestrator>)Microsoft.Extensions.Logging.Abstractions.NullLogger<ScatterGatherOrchestrator>.Instance;
             subOrchestrator = new ScatterGatherOrchestrator(
                 subConfig, agentFactory, sgLogger,
                 changeTracker, eventEmitter, governanceKernel);
@@ -1890,16 +1896,34 @@ public sealed class GraphOrchestrator(
         subOrchestrator.SetSessionId(_sessionId);
 
         // Reconstruct the task text from the head of the shared history.
-        var subTask = ctx.History.FirstOrDefault(m => m.Role == ChatRole.User)
-                          ?.Contents.OfType<TextContent>().FirstOrDefault()?.Text
-                      ?? _task;
+        int firstUserIdx = ctx.History.FindIndex(m => m.Role == ChatRole.User);
+        var subTask = firstUserIdx >= 0
+            ? ctx.History[firstUserIdx].Contents.OfType<TextContent>().FirstOrDefault()?.Text ?? _task
+            : _task;
+
+        // Pass parent context accumulated after the original task so sub-graph agents
+        // can see prior phase outputs, handoff notes, and tool results.
+        IReadOnlyList<AgentMessage>? subPriorHistory = null;
+        if (firstUserIdx >= 0 && firstUserIdx + 1 < ctx.History.Count)
+        {
+            subPriorHistory = ctx.History
+                .Skip(firstUserIdx + 1)
+                .Select((m, i) => new AgentMessage
+                {
+                    Role      = m.Role == ChatRole.User ? "user" : "assistant",
+                    Content   = string.Concat(m.Contents.OfType<TextContent>().Select(t => t.Text)),
+                    AgentName = m.AuthorName,
+                    TurnIndex = i,
+                })
+                .ToList();
+        }
 
         // Stream the sub-orchestrator and collect messages.
         var subMessages   = new List<AgentMessage>();
         string? lastText  = null;
         string? lastAgent = null;
 
-        await foreach (var msg in subOrchestrator.StreamAsync(subTask, null, ct).ConfigureAwait(false))
+        await foreach (var msg in subOrchestrator.StreamAsync(subTask, subPriorHistory, ct).ConfigureAwait(false))
         {
             await ctx.MessageSink.WriteAsync(msg, ct).ConfigureAwait(false);
             subMessages.Add(msg);
@@ -1945,10 +1969,9 @@ public sealed class GraphOrchestrator(
         }
 
         // Keyword detection on the sub-graph's final output for forward-edge routing.
-        var handoffKw  = KeywordDetector.ExtractHandoffToolCallKeyword([], routeTable);
-        var allKeywords = handoffKw is not null
-            ? (IReadOnlyList<string>)[handoffKw]
-            : KeywordDetector.DetectKeywords(syntheticContent, routeTable);
+        // Tool-call keyword detection requires raw ChatMessages which the sub-orchestrator
+        // does not expose; fall back to text-based detection on the terminal output.
+        var allKeywords = KeywordDetector.DetectKeywords(syntheticContent, routeTable);
 
         string? foundKeyword = allKeywords.Count == 1 ? allKeywords[0] : null;
 

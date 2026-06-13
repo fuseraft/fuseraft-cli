@@ -43,7 +43,8 @@ public sealed class MapReduceOrchestrator(
     ILogger<MapReduceOrchestrator> logger,
     ChangeTracker? changeTracker = null,
     EventEmitter? eventEmitter = null,
-    GovernanceKernel? governanceKernel = null) : IOrchestrator
+    GovernanceKernel? governanceKernel = null,
+    IHumanApprovalService? humanApprovalService = null) : IOrchestrator
 {
     private readonly MapReduceConfig _mrConfig =
         config.Selection.MapReduce ?? new MapReduceConfig();
@@ -217,7 +218,7 @@ public sealed class MapReduceOrchestrator(
             if (items is null)
             {
                 splitRetries++;
-                if (splitRetries > _mrConfig.MaxSplitterRetries)
+                if (splitRetries >= _mrConfig.MaxSplitterRetries)
                     throw new InvalidOperationException(
                         $"MapReduce: Splitter '{_mrConfig.Splitter}' failed to emit a JSON array at " +
                         $"'{_mrConfig.ItemsJsonPath}' after {_mrConfig.MaxSplitterRetries} retries. " +
@@ -279,6 +280,8 @@ public sealed class MapReduceOrchestrator(
                 try
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+
+                    AgentStarting?.Invoke(mapper.Name ?? _mrConfig.Mapper);
 
                     if (eventEmitter is not null)
                         _ = eventEmitter.EmitAsync(EventTypes.ParallelBranchStart,
@@ -443,51 +446,76 @@ public sealed class MapReduceOrchestrator(
     }
 
     /// <summary>
-    /// Searches <paramref name="text"/> for the first JSON object and extracts the string
-    /// array at the dot-separated <paramref name="jsonPath"/>. Returns null when no valid
-    /// JSON is found or the path resolves to a non-array value.
+    /// Searches <paramref name="text"/> for a JSON object containing the array at
+    /// <paramref name="jsonPath"/>. On a parse failure the search advances past the
+    /// current <c>{</c> so that valid JSON embedded after invalid text is still found.
+    /// Returns null when no matching object exists in the text.
     /// </summary>
     private static IReadOnlyList<string>? TryParseItems(string text, string jsonPath)
     {
-        // Find the first '{' that starts a JSON object.
-        int start = text.IndexOf('{');
-        if (start < 0) return null;
+        int searchFrom = 0;
+        while (searchFrom < text.Length)
+        {
+            int start = text.IndexOf('{', searchFrom);
+            if (start < 0) return null;
 
-        // Walk to find the matching closing brace (simple bracket counter).
-        int depth   = 0;
-        int jsonEnd = -1;
+            int jsonEnd = FindJsonObjectEnd(text, start);
+            if (jsonEnd < 0) return null;
+
+            var jsonSlice = text[start..(jsonEnd + 1)];
+            try
+            {
+                using var doc = JsonDocument.Parse(jsonSlice);
+                var root  = doc.RootElement;
+                var parts = jsonPath.Split('.', StringSplitOptions.RemoveEmptyEntries);
+
+                JsonElement current = root;
+                foreach (var part in parts)
+                {
+                    if (!current.TryGetProperty(part, out current)) return null;
+                }
+
+                if (current.ValueKind != JsonValueKind.Array) return null;
+
+                return current.EnumerateArray()
+                    .Select(el => el.ValueKind == JsonValueKind.String
+                        ? el.GetString() ?? el.GetRawText()
+                        : el.GetRawText())
+                    .ToList();
+            }
+            catch (JsonException)
+            {
+                // Not valid JSON from this position — try the next '{'.
+                searchFrom = start + 1;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Finds the index of the closing <c>}</c> that matches the <c>{</c> at
+    /// <paramref name="start"/>, correctly skipping characters inside string literals
+    /// (including escaped quotes).
+    /// </summary>
+    private static int FindJsonObjectEnd(string text, int start)
+    {
+        int  depth    = 0;
+        bool inString = false;
+        bool escaped  = false;
+
         for (int i = start; i < text.Length; i++)
         {
-            if (text[i] == '{') depth++;
-            else if (text[i] == '}' && --depth == 0) { jsonEnd = i; break; }
+            char c = text[i];
+
+            if (escaped)              { escaped = false; continue; }
+            if (c == '\\' && inString) { escaped = true;  continue; }
+            if (c == '"')              { inString = !inString; continue; }
+            if (inString)              continue;
+
+            if      (c == '{') depth++;
+            else if (c == '}' && --depth == 0) return i;
         }
 
-        if (jsonEnd < 0) return null;
-
-        var jsonSlice = text[start..(jsonEnd + 1)];
-        try
-        {
-            using var doc = JsonDocument.Parse(jsonSlice);
-            var root = doc.RootElement;
-            var parts = jsonPath.Split('.', StringSplitOptions.RemoveEmptyEntries);
-
-            JsonElement current = root;
-            foreach (var part in parts)
-            {
-                if (!current.TryGetProperty(part, out current)) return null;
-            }
-
-            if (current.ValueKind != JsonValueKind.Array) return null;
-
-            return current.EnumerateArray()
-                .Select(el => el.ValueKind == JsonValueKind.String
-                    ? el.GetString() ?? el.GetRawText()
-                    : el.GetRawText())
-                .ToList();
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
+        return -1;
     }
 }
