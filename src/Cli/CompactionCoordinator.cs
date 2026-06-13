@@ -97,7 +97,8 @@ internal sealed class CompactionCoordinator(
             _pendingCompactionReason = CompactionReason.CumulativeBudget;
             AnsiConsole.MarkupLine(
                 $"[yellow]  ⚡ {Markup.Escape(agentName)} reached context budget cutover " +
-                $"({budgetResult.CumulativeInputTokens:N0} ≥ {budgetResult.CutoverThreshold:N0} input tokens). Compacting history...[/]");
+                $"({budgetResult.CumulativeInputTokens:N0} ≥ {budgetResult.CutoverThreshold:N0} tokens).[/]");
+            AnsiConsole.MarkupLine($"[yellow]  Compacting history...[/]");
             if (eventEmitter is not null)
                 await eventEmitter.EmitAsync(EventTypes.ContextBudgetCutover,
                     agent: agentName,

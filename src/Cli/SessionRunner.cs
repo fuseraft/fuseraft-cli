@@ -736,8 +736,9 @@ public sealed class SessionRunner(
             {
                 AnsiConsole.MarkupLine(
                     $"[yellow]  ⚠ {Markup.Escape(agent)} used {inputTokens:N0} input tokens this turn " +
-                    $"(warning threshold: {threshold:N0}). " +
-                    $"Reduce file reads and shell output to avoid a budget blowup.[/]");
+                    $"(warning threshold: {threshold:N0}).[/]");
+                AnsiConsole.MarkupLine(
+                    $"[yellow]  Reduce file reads and shell output to avoid a budget blowup.[/]");
                 AnsiConsole.WriteLine();
             }
         };

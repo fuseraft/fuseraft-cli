@@ -295,7 +295,7 @@ public sealed class GraphOrchestrator(
         agentCtx.History.Add(new ChatMessage(ChatRole.User, task));
         if (priorHistory?.Count > 0)
         {
-            logger.LogInformation("Resuming session — replaying {Turns} prior turns.", priorHistory.Count);
+            logger.LogDebug("Resuming session — replaying {Turns} prior turns.", priorHistory.Count);
             foreach (var prior in priorHistory)
             {
                 var role    = prior.Role == MessageRole.User ? ChatRole.User : ChatRole.Assistant;

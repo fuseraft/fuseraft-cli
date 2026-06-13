@@ -161,7 +161,7 @@ public sealed class ConversationCompactor(
         // toCompact.Count messages become 1 summary; net reduction = toCompact.Count - 1.
         RecordSavings((toCompact.Count - 1.0) / messages.Count);
 
-        logger.LogInformation(
+        logger.LogDebug(
             "Compacting {Compacted} turns (0–{LastCompacted}) into a summary; retaining {Kept} recent turns.",
             toCompact.Count, toCompact[^1].TurnIndex, toRetain.Count);
 
@@ -264,7 +264,7 @@ public sealed class ConversationCompactor(
             Usage     = AccumulateCompactedUsage(toCompact, null),
             ToolCalls = AccumulateCompactedToolCalls(toCompact),
         };
-        logger.LogInformation(
+        logger.LogDebug(
             "Lossless compaction: {Compacted} turns replaced by evidence reconstruction.",
             toCompact.Count);
         return (PrependFallbackNotice(reconstructed, intentFallbackNotice), toRetain);
