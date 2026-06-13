@@ -141,14 +141,14 @@ public sealed class AgentOrchestrator(
         contextPipeline?.SetSessionId(sessionId);
     }
 
-    private fuseraft.Core.Models.TaskModel? _structuredTask;
+    private TaskModel? _structuredTask;
 
     /// <summary>
     /// Sets the structured task model injected into history at session start.
     /// Call before <see cref="StreamAsync"/> to provide goal, constraints, and active targets.
     /// When null (default), no task model block is injected.
     /// </summary>
-    public void SetStructuredTask(fuseraft.Core.Models.TaskModel? model) => _structuredTask = model;
+    public void SetStructuredTask(TaskModel? model) => _structuredTask = model;
 
     // State machine state name to restore on the next StreamAsync call after compaction.
     // Consumed once and cleared so subsequent phase restarts infer state from signals normally.
@@ -694,7 +694,7 @@ public sealed class AgentOrchestrator(
 
     private static Task EmitContextAssemblyAsync(
         EventEmitter emitter,
-        fuseraft.Core.Models.ContextAssemblyMetrics metrics,
+        ContextAssemblyMetrics metrics,
         int turn,
         int toolCount = 0) =>
         emitter.EmitAsync(EventTypes.ContextAssembly,
@@ -975,7 +975,7 @@ public sealed class AgentOrchestrator(
                 foreach (var obs in observations)
                 {
                     if (string.IsNullOrWhiteSpace(obs.Entity)) continue;
-                    await repositoryKnowledgeStore.AddAsync(new fuseraft.Core.Models.RepositoryKnowledgeFinding
+                    await repositoryKnowledgeStore.AddAsync(new RepositoryKnowledgeFinding
                     {
                         Entity     = obs.Entity!,
                         Finding    = obs.Finding,

@@ -152,7 +152,7 @@ public sealed class MemoryManagerTests
     [Fact]
     public void FromConfig_ReturnsNull_ForUnknownProvider()
     {
-        var cfg = new fuseraft.Core.Models.MemoryConfig { Provider = "nonexistent" };
+        var cfg = new MemoryConfig { Provider = "nonexistent" };
         var result = MemoryManager.FromConfig(cfg);
         Assert.Null(result);
     }
@@ -171,7 +171,7 @@ public sealed class MemoryManagerTests
     [Fact]
     public void FromConfig_ReturnsNull_ForWebhookWithoutWebhookConfig()
     {
-        var cfg = new fuseraft.Core.Models.MemoryConfig { Provider = "webhook" };
+        var cfg = new MemoryConfig { Provider = "webhook" };
         var result = MemoryManager.FromConfig(cfg);
         Assert.Null(result);
     }

@@ -790,7 +790,7 @@ public sealed class MagenticOrchestrator(
         if (contextPipeline is not null)
         {
             var assembled = await contextPipeline.AssembleAsync(
-                new fuseraft.Core.Models.AgentExecutionRequest
+                new AgentExecutionRequest
                 {
                     AgentName     = nextAgent.Name ?? string.Empty,
                     Task          = task,
@@ -886,7 +886,7 @@ public sealed class MagenticOrchestrator(
                 foreach (var obs in observations)
                 {
                     if (string.IsNullOrWhiteSpace(obs.Entity)) continue;
-                    await repositoryKnowledgeStore.AddAsync(new fuseraft.Core.Models.RepositoryKnowledgeFinding
+                    await repositoryKnowledgeStore.AddAsync(new RepositoryKnowledgeFinding
                     {
                         Entity     = obs.Entity!,
                         Finding    = obs.Finding,
@@ -951,7 +951,7 @@ public sealed class MagenticOrchestrator(
 
     private static Task EmitContextAssemblyAsync(
         EventEmitter emitter,
-        fuseraft.Core.Models.ContextAssemblyMetrics metrics,
+        ContextAssemblyMetrics metrics,
         int turn) =>
         emitter.EmitAsync(EventTypes.ContextAssembly,
             agent: metrics.AgentName,
