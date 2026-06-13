@@ -1,5 +1,6 @@
 using System.Text;
 using fuseraft.Core.Models;
+using fuseraft.Orchestration;
 
 namespace fuseraft.Cli.Diagram;
 
@@ -29,25 +30,25 @@ public static class WorkflowDiagramGenerator
 
         switch (config.Selection.Type.ToLowerInvariant())
         {
-            case "keyword" when config.Selection.Routes is { Count: > 0 }:
+            case OrchestratorTypes.Keyword when config.Selection.Routes is { Count: > 0 }:
                 RenderKeyword(sb, config);
                 break;
-            case "structured" when config.Selection.StructuredRoutes is { Count: > 0 }:
+            case OrchestratorTypes.Structured when config.Selection.StructuredRoutes is { Count: > 0 }:
                 RenderStructured(sb, config);
                 break;
-            case "sequential":
+            case OrchestratorTypes.Sequential:
                 RenderSequential(sb, config);
                 break;
-            case "magentic":
+            case OrchestratorTypes.Magentic:
                 RenderMagentic(sb, config);
                 break;
-            case "graph" when config.Selection.Graph is not null:
+            case OrchestratorTypes.Graph when config.Selection.Graph is not null:
                 RenderGraph(sb, config.Selection.Graph);
                 break;
-            case "statemachine" when config.Selection.StateMachine is not null:
+            case OrchestratorTypes.StateMachine when config.Selection.StateMachine is not null:
                 RenderStateMachine(sb, config.Selection.StateMachine);
                 break;
-            case "adversarial" when config.Selection.Adversarial is not null:
+            case OrchestratorTypes.Adversarial when config.Selection.Adversarial is not null:
                 RenderAdversarial(sb, config.Selection.Adversarial);
                 break;
             default:
