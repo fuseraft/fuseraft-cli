@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using System.Text;
 using AgentGovernance;
 using AgentGovernance.Sre;
 using Microsoft.Agents.AI;
@@ -37,7 +36,8 @@ public sealed class ScatterGatherOrchestrator(
     ILogger<ScatterGatherOrchestrator> logger,
     ChangeTracker? changeTracker = null,
     EventEmitter? eventEmitter = null,
-    GovernanceKernel? governanceKernel = null) : IOrchestrator
+    GovernanceKernel? governanceKernel = null,
+    IHumanApprovalService? humanApprovalService = null) : IOrchestrator
 {
     private readonly ScatterGatherConfig _sgConfig =
         config.Selection.ScatterGather ?? new ScatterGatherConfig();
@@ -192,6 +192,8 @@ public sealed class ScatterGatherOrchestrator(
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                AgentStarting?.Invoke(p.Agent.Name ?? p.Name);
+
                 if (eventEmitter is not null)
                     _ = eventEmitter.EmitAsync(EventTypes.ParallelBranchStart,
                         agent: p.Name,
@@ -227,8 +229,7 @@ public sealed class ScatterGatherOrchestrator(
         var scatterResults = await Task.WhenAll(scatterTasks);
 
         // Yield scatter messages in declaration order; build gather context from them.
-        var gatherHistory  = new List<ChatMessage>(baseHistory);
-        var gatherNarrative = new StringBuilder();
+        var gatherHistory = new List<ChatMessage>(baseHistory);
 
         foreach (var r in scatterResults.OrderBy(r => r.Index))
         {
@@ -244,7 +245,6 @@ public sealed class ScatterGatherOrchestrator(
             // Inject into gather history as a labeled assistant message.
             var labeled = $"[Participant: {r.Name}]\n{r.Text}";
             gatherHistory.Add(new ChatMessage(ChatRole.Assistant, labeled) { AuthorName = r.Name });
-            gatherNarrative.AppendLine(labeled).AppendLine();
         }
 
         turn = baseTurn + participants.Count;

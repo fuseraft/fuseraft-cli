@@ -1478,7 +1478,8 @@ public static class OrchestratorBuilder
                 config, agentFactory, goLogger,
                 changeTracker, eventEmitter, governanceKernel,
                 hitlMode ? humanApprovalService : null,
-                contextPipeline, knowledgeStore);
+                contextPipeline, knowledgeStore,
+                loggerFactory);
         }
         else if (useAdversarial)
         {
@@ -1493,14 +1494,16 @@ public static class OrchestratorBuilder
             var mrLogger = loggerFactory.CreateLogger<MapReduceOrchestrator>();
             orchestrator  = new MapReduceOrchestrator(
                 config, agentFactory, mrLogger,
-                changeTracker, eventEmitter, governanceKernel);
+                changeTracker, eventEmitter, governanceKernel,
+                hitlMode ? humanApprovalService : null);
         }
         else if (useScatterGather)
         {
             var sgLogger = loggerFactory.CreateLogger<ScatterGatherOrchestrator>();
             orchestrator  = new ScatterGatherOrchestrator(
                 config, agentFactory, sgLogger,
-                changeTracker, eventEmitter, governanceKernel);
+                changeTracker, eventEmitter, governanceKernel,
+                hitlMode ? humanApprovalService : null);
         }
         else if (useMagentic)
         {
