@@ -2297,42 +2297,33 @@ public sealed class GraphOrchestrator(
 
         foreach (var name in names)
         {
-            IRoutingValidator? v = name.ToLowerInvariant() switch
-            {
-                "requireshellpass"        => new RequireShellPassValidator(
-                                                 requiredCommandPattern,
-                                                 config.Validation?.ChangeLogPath),
-                "requirewritefile"        => new HandoffToTesterValidator(
-                                                 shellFallbackPattern: shellFallbackPattern,
-                                                 changeLogPath:        config.Validation?.ChangeLogPath),
-                "blockonconsecutivefail"  => new ConsecutiveShellFailValidator(
-                                                 commandPattern: requiredCommandPattern,
-                                                 changeLogPath:  config.Validation?.ChangeLogPath),
-                "requireallfileswritten"  => briefPath is not null
-                                                 ? new RequireAllFilesWrittenValidator(
-                                                       briefPath,
-                                                       config.Validation!.ChangeLogPath)
-                                                 : null,
-                "requirebrief"            => briefPath is not null
-                                                 ? new RequireBriefValidator(briefPath)
-                                                 : null,
-                "testreportvalid"         => config.Validation is not null
-                                                 ? new HandoffToReviewerValidator(config.Validation)
-                                                 : null,
-                "requirereviewjudgement"  => new RequireReviewJudgementValidator(briefPath),
-                "requireacceptancecriteriapassed" => briefPath is not null
-                                                 ? new RequireAcceptanceCriteriaPassedValidator(
-                                                       briefPath,
-                                                       config.Validation!.ChangeLogPath)
-                                                 : null,
-                "requirerelatedtestspass" => config.TestSelector is not null
-                                                 ? new RequireRelatedTestsPassValidator(
-                                                       config.TestSelector,
-                                                       config.Validation?.ChangeLogPath,
-                                                       sandboxRoot)
-                                                 : null,
-                _ => null
-            };
+            IRoutingValidator? v = null;
+
+            if (name.Equals(ValidatorNames.RequireShellPass, StringComparison.OrdinalIgnoreCase))
+                v = new RequireShellPassValidator(requiredCommandPattern, config.Validation?.ChangeLogPath);
+            else if (name.Equals(ValidatorNames.RequireWriteFile, StringComparison.OrdinalIgnoreCase))
+                v = new HandoffToTesterValidator(
+                        shellFallbackPattern: shellFallbackPattern,
+                        changeLogPath:        config.Validation?.ChangeLogPath);
+            else if (name.Equals(ValidatorNames.BlockOnConsecutiveFail, StringComparison.OrdinalIgnoreCase))
+                v = new ConsecutiveShellFailValidator(
+                        commandPattern: requiredCommandPattern,
+                        changeLogPath:  config.Validation?.ChangeLogPath);
+            else if (name.Equals(ValidatorNames.RequireAllFilesWritten, StringComparison.OrdinalIgnoreCase) && briefPath is not null)
+                v = new RequireAllFilesWrittenValidator(briefPath, config.Validation!.ChangeLogPath);
+            else if (name.Equals(ValidatorNames.RequireBrief, StringComparison.OrdinalIgnoreCase) && briefPath is not null)
+                v = new RequireBriefValidator(briefPath);
+            else if (name.Equals(ValidatorNames.TestReportValid, StringComparison.OrdinalIgnoreCase) && config.Validation is not null)
+                v = new HandoffToReviewerValidator(config.Validation);
+            else if (name.Equals(ValidatorNames.RequireReviewJudgement, StringComparison.OrdinalIgnoreCase))
+                v = new RequireReviewJudgementValidator(briefPath);
+            else if (name.Equals(ValidatorNames.RequireAcceptanceCriteriaPassed, StringComparison.OrdinalIgnoreCase) && briefPath is not null)
+                v = new RequireAcceptanceCriteriaPassedValidator(briefPath, config.Validation!.ChangeLogPath);
+            else if (name.Equals(ValidatorNames.RequireRelatedTestsPass, StringComparison.OrdinalIgnoreCase) && config.TestSelector is not null)
+                v = new RequireRelatedTestsPassValidator(
+                        config.TestSelector,
+                        config.Validation?.ChangeLogPath,
+                        sandboxRoot);
 
             if (v is not null)
                 result.Add(v);

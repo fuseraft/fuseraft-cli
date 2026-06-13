@@ -8,6 +8,7 @@ using fuseraft.Core.Exceptions;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure.Plugins;
+using fuseraft.Orchestration;
 using fuseraft.Orchestration.Contracts;
 using fuseraft.Orchestration.Failure;
 using fuseraft.Orchestration.Parallel;
@@ -440,7 +441,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                 .Distinct());
             throw new ValidatorStuckException(
                 agentName:           state.Agent,
-                validatorName:       $"signal-required:{_currentState}",
+                validatorName:       $"{ValidatorNames.SignalRequiredPrefix}{_currentState}",
                 consecutiveFailures: noSigCount,
                 lastValidatorError:
                     $"Agent '{state.Agent}' completed {noSigCount} consecutive turns in state '{_currentState}' " +
