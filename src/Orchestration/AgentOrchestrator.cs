@@ -12,7 +12,7 @@ using fuseraft.Orchestration.Strategies;
 
 // Disambiguate from Microsoft.Agents.AI.AgentFactory
 using fuseraft.Infrastructure;
-using AgentFactory = fuseraft.Infrastructure.AgentFactory;
+using AgentFactory = fuseraft.Infrastructure.Agents.AgentFactory;
 
 namespace fuseraft.Orchestration;
 
@@ -28,11 +28,11 @@ public sealed class AgentOrchestrator(
     ChangeTracker? changeTracker = null,
     EventEmitter? eventEmitter = null,
     GovernanceKernel? governanceKernel = null,
-    fuseraft.Infrastructure.MemoryManager? memoryManager = null,
+    fuseraft.Infrastructure.Memory.MemoryManager? memoryManager = null,
     ContextAssembler? contextAssembler = null,
     DependencyPlanner? dependencyPlanner = null,
     fuseraft.Core.Interfaces.IContextAssemblyPipeline? contextPipeline = null,
-    fuseraft.Infrastructure.RepositoryKnowledgeStore? repositoryKnowledgeStore = null) : IOrchestrator
+    fuseraft.Infrastructure.Repository.RepositoryKnowledgeStore? repositoryKnowledgeStore = null) : IOrchestrator
 {
     // IOrchestrator
 

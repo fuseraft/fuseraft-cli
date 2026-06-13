@@ -28,8 +28,8 @@ public sealed class ConversationCompactor(
     IntentLog? intentLog = null,
     string? eventsLogPath = null,
     EvidenceStore? evidenceStore = null,
-    fuseraft.Infrastructure.ObjectiveManager? objectiveManager = null,
-    fuseraft.Infrastructure.KnowledgeSnapshotEnricher? knowledgeEnricher = null,
+    fuseraft.Infrastructure.Objectives.ObjectiveManager? objectiveManager = null,
+    fuseraft.Infrastructure.Knowledge.KnowledgeSnapshotEnricher? knowledgeEnricher = null,
     string? readCachePath = null,
     string? executionStatePath = null)
 {

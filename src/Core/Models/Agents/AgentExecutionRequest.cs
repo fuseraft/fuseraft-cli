@@ -25,7 +25,7 @@ public sealed record AgentExecutionRequest
 
     /// <summary>
     /// Additional runtime instructions to append to the agent's static instructions.
-    /// Populated by <see cref="fuseraft.Infrastructure.MemoryManager"/> per-turn augmentation.
+    /// Populated by <see cref="fuseraft.Infrastructure.Memory.MemoryManager"/> per-turn augmentation.
     /// </summary>
     public string? AdditionalInstructions { get; init; }
 }

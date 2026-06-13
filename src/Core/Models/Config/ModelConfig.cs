@@ -129,7 +129,7 @@ public record ModelConfig
 /// Allows <see cref="ModelConfig"/> to be specified as a plain string in JSON/config
 /// (e.g. <c>"Model": "gpt-4o"</c>), which is desugared to
 /// <c>new ModelConfig { ModelId = "gpt-4o" }</c>.
-/// The <see cref="fuseraft.Infrastructure.ChatClientFactory"/> then auto-detects the
+/// The <see cref="fuseraft.Infrastructure.Chat.ChatClientFactory"/> then auto-detects the
 /// provider, endpoint, and API key environment variable from the model ID prefix.
 /// </summary>
 public sealed class ModelConfigTypeConverter : TypeConverter

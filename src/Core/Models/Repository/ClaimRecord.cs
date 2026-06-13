@@ -5,7 +5,7 @@ namespace fuseraft.Core.Models.Repository;
 ///
 /// <para>
 /// <c>Status</c> is never caller-supplied: it is always computed by
-/// <see cref="fuseraft.Infrastructure.ConfidenceComputer.Compute"/> from the <see cref="Support"/>
+/// <see cref="fuseraft.Infrastructure.Chat.ConfidenceComputer.Compute"/> from the <see cref="Support"/>
 /// composition.  Callers set <see cref="ExpiresAt"/> based on the volatility of the claim —
 /// a build-pass claim expires quickly; an ADR-backed architectural claim may never expire.
 /// </para>

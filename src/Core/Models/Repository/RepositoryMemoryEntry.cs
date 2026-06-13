@@ -9,7 +9,7 @@ namespace fuseraft.Core.Models.Repository;
 /// reviewer agent. Candidates are never injected into agent prompts.
 /// When an approved pattern recurs across sessions, <see cref="ReinforcementCount"/>
 /// is incremented and <see cref="Confidence"/> is recomputed by
-/// <see cref="fuseraft.Infrastructure.ConfidenceComputer"/>.
+/// <see cref="fuseraft.Infrastructure.Chat.ConfidenceComputer"/>.
 /// </para>
 /// </summary>
 public sealed record RepositoryMemoryEntry
