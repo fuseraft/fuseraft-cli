@@ -10,7 +10,7 @@ namespace fuseraft.Orchestration;
 ///
 /// <para>
 /// The index lives at <c>~/.fuseraft/skills/index.db</c> by default (configurable
-/// via <see cref="fuseraft.Core.Models.SkillCurationConfig.IndexPath"/>).
+/// via <see cref="SkillCurationConfig.IndexPath"/>).
 /// It is updated by <see cref="SkillCurator"/> each time a new or updated skill
 /// is written to the library.
 /// </para>

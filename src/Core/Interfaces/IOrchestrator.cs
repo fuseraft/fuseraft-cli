@@ -58,7 +58,7 @@ public interface IOrchestrator
     /// When null (default), no task model block is injected.
     /// Defaults to a no-op; override in orchestrators that support context projection.
     /// </summary>
-    void SetStructuredTask(fuseraft.Core.Models.TaskModel? model) { }
+    void SetStructuredTask(TaskModel? model) { }
 
     /// <summary>
     /// Fires synchronously when an agent is selected but before its turn begins.

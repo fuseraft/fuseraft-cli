@@ -424,7 +424,7 @@ public sealed class ConversationCompactor(
     private AgentMessage BuildIntentDerivedSummary(
         int firstTurn,
         int lastTurn,
-        IReadOnlyList<fuseraft.Core.Models.IntentEntry> intents,
+        IReadOnlyList<IntentEntry> intents,
         string prefixBlock = "")
     {
         var sb = new StringBuilder();
@@ -440,11 +440,11 @@ public sealed class ConversationCompactor(
         {
             foreach (var intent in intents)
             {
-                var icon   = intent.Status == fuseraft.Core.Models.IntentStatus.Applied ? "✓"
-                           : intent.Status == fuseraft.Core.Models.IntentStatus.Failed  ? "✗"
+                var icon   = intent.Status == IntentStatus.Applied ? "✓"
+                           : intent.Status == IntentStatus.Failed  ? "✗"
                            : "⧖"; // hourglass for pending/retryable
                 var target = intent.Operation.TargetPath is { } p ? $" → \"{p}\"" : string.Empty;
-                var detail = intent.Status == fuseraft.Core.Models.IntentStatus.Failed && intent.ErrorMessage is { } err
+                var detail = intent.Status == IntentStatus.Failed && intent.ErrorMessage is { } err
                     ? $" — {err}"
                     : string.Empty;
 
@@ -454,7 +454,7 @@ public sealed class ConversationCompactor(
             }
         }
 
-        var pending = intents.Count(e => e.Status == fuseraft.Core.Models.IntentStatus.Pending);
+        var pending = intents.Count(e => e.Status == IntentStatus.Pending);
         if (pending > 0)
         {
             sb.AppendLine();

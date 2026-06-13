@@ -696,7 +696,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                     }
 
                     // Merge agent is required for Ranked and SemanticDiff.
-                    if (t.Merge is { Strategy: fuseraft.Core.Models.MergeStrategy.Ranked or fuseraft.Core.Models.MergeStrategy.SemanticDiff })
+                    if (t.Merge is { Strategy: MergeStrategy.Ranked or MergeStrategy.SemanticDiff })
                     {
                         if (string.IsNullOrWhiteSpace(t.Merge.Agent))
                             issues.Add(("error",

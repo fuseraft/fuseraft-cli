@@ -85,7 +85,7 @@ public sealed class ShowConfigCommand : Command<ShowConfigSettings>
 
     private static int ShowConfig(string path)
     {
-        Core.Models.OrchestrationConfig config;
+        OrchestrationConfig config;
         try
         {
             config = OrchestratorBuilder.LoadConfig(path);
@@ -149,7 +149,7 @@ public sealed class ShowConfigCommand : Command<ShowConfigSettings>
         return 0;
     }
 
-    private static string DescribeTermination(Core.Models.TerminationStrategyConfig t)
+    private static string DescribeTermination(TerminationStrategyConfig t)
     {
         var type = t.Type.ToLowerInvariant();
         var agents = t.AgentNames is { Length: > 0 }

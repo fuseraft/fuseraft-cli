@@ -6,7 +6,7 @@ namespace fuseraft.Infrastructure;
 
 /// <summary>
 /// Injects a <c>"reasoning": {"effort": "..."}</c> object into outgoing chat completion
-/// requests for models configured with <see cref="fuseraft.Core.Models.ModelConfig.ReasoningEffort"/>.
+/// requests for models configured with <see cref="ModelConfig.ReasoningEffort"/>.
 ///
 /// <para>
 /// The xAI API (grok-4.3+) controls reasoning depth via a top-level <c>reasoning</c>

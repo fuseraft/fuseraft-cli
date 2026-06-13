@@ -68,7 +68,7 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
             var cutoff = DateTime.UtcNow - age;
             var all    = await sessionStore.ListIndexAsync(cancellationToken);
 
-            IEnumerable<Core.Models.SessionIndexEntry> candidates = all
+            IEnumerable<SessionIndexEntry> candidates = all
                 .Where(s => s.LastUpdatedAt < cutoff);
 
             if (!string.IsNullOrWhiteSpace(settings.Project))
@@ -153,7 +153,7 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
         // List mode — uses the lightweight index; no message history loaded.
         var sessions = await sessionStore.ListIndexAsync(cancellationToken);
 
-        IEnumerable<Core.Models.SessionIndexEntry> visible = settings.All
+        IEnumerable<SessionIndexEntry> visible = settings.All
             ? sessions
             : sessions.Where(s => !s.IsComplete);
 

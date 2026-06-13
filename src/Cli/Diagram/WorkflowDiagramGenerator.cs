@@ -287,7 +287,7 @@ public static class WorkflowDiagramGenerator
         }
     }
 
-    private static void RenderAdversarial(StringBuilder sb, fuseraft.Core.Models.AdversarialConfig adv)
+    private static void RenderAdversarial(StringBuilder sb, AdversarialConfig adv)
     {
         sb.AppendLine();
         sb.AppendLine("  Task([Task])");

@@ -246,14 +246,14 @@ public sealed class ContextAssembler
         try
         {
             var json  = await File.ReadAllTextAsync(_executionStatePath, ct);
-            var state = JsonSerializer.Deserialize<fuseraft.Core.Models.ExecutionState>(json, JsonOpts);
+            var state = JsonSerializer.Deserialize<ExecutionState>(json, JsonOpts);
             if (state is null) return null;
             return Truncate(FormatExecutionState(state), maxChars);
         }
         catch { return null; }
     }
 
-    private static string FormatExecutionState(fuseraft.Core.Models.ExecutionState state)
+    private static string FormatExecutionState(ExecutionState state)
     {
         var sb = new StringBuilder();
 
@@ -308,14 +308,14 @@ public sealed class ContextAssembler
         try
         {
             var json = await File.ReadAllTextAsync(_investigationLogPath, ct);
-            var log  = JsonSerializer.Deserialize<fuseraft.Core.Models.InvestigationLog>(json, JsonOpts);
+            var log  = JsonSerializer.Deserialize<InvestigationLog>(json, JsonOpts);
             if (log is null) return null;
             return Truncate(FormatInvestigationLog(log), maxChars);
         }
         catch { return null; }
     }
 
-    private static string FormatInvestigationLog(fuseraft.Core.Models.InvestigationLog log)
+    private static string FormatInvestigationLog(InvestigationLog log)
     {
         var sb = new StringBuilder();
 
