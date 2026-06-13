@@ -753,10 +753,10 @@ public sealed class SessionRunner(
                 var elapsed = turnClock.Elapsed;
                 turnClock.Restart();
 
-                // Orchestrator-injected correction messages (AgentName="orchestrator", Role="user")
+                // Orchestrator-injected correction messages (AgentName="Orchestrator", Role="user")
                 // are persisted to checkpoint for resume but should not update the status spinner
                 // or appear in the rendered display — they are internal routing signals.
-                bool isOrchestratorMessage = msg.AgentName == "orchestrator";
+                bool isOrchestratorMessage = msg.AgentName == AgentNames.Orchestrator;
 
                 if (!isOrchestratorMessage)
                 {
@@ -851,7 +851,7 @@ public sealed class SessionRunner(
     /// </summary>
     private static AgentMessage HumanMessage(string content, int turnIndex) => new()
     {
-        AgentName = "Human",
+        AgentName = AgentNames.Human,
         Content   = content,
         Role      = "user",
         TurnIndex = turnIndex,

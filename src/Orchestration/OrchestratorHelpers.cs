@@ -31,7 +31,7 @@ internal static class OrchestratorHelpers
     internal static IReadOnlyList<ToolCallRecord>? ExtractToolCalls(
         IList<ChatMessage> messages,
         ILogger? logger = null,
-        string agentName = "Unknown")
+        string agentName = AgentNames.Unknown)
     {
         var calls   = new List<(string CallId, string Name, string? ArgsSummary, int ArgsCharCount)>();
         var results = new Dictionary<string, bool>(StringComparer.Ordinal);
