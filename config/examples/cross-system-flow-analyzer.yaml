@@ -69,7 +69,7 @@ Orchestration:
 
   Models:
     heavy:
-      ModelId: claude-opus-4-7
+      ModelId: claude-opus-4-8
     scout:
       ModelId: claude-haiku-4-5-20251001
 
@@ -94,12 +94,15 @@ Orchestration:
     CutoverAt: 110000   # compact early; artifact handoffs eliminate the need for large live contexts
 
   FailureHandling:
-    RetryCount: 2
-    OnAgentFailure:
-      - checkpoint
-      - compact
-      - retry
-      - escalate
+    MissingEvidence:
+      Action: Reinstruct
+      Threshold: 3
+    ConflictingEvidence:
+      Action: Reinstruct
+      Threshold: 2
+    NoProgress:
+      Action: Abort
+      Threshold: 3
 
   Events:
     Path: .fuseraft/logs/events.jsonl

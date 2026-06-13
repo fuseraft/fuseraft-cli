@@ -268,11 +268,11 @@ public sealed class AgentOrchestrator(
         // Re-inject prior history so agents continue where they left off.
         if (priorHistory?.Count > 0)
         {
-            logger.LogInformation("Resuming session... replaying {Turns} prior turns.", priorHistory.Count);
+            logger.LogDebug("Resuming session... replaying {Turns} prior turns.", priorHistory.Count);
 
             foreach (var prior in priorHistory)
             {
-                var role    = prior.Role == "user" ? ChatRole.User : ChatRole.Assistant;
+                var role    = prior.Role == MessageRole.User ? ChatRole.User : ChatRole.Assistant;
                 var content = ContextWindowFilter.TruncateReplayContent(prior);
                 var msg     = new ChatMessage(role, content);
                 if (role == ChatRole.Assistant && prior.AgentName is not null)
@@ -304,7 +304,16 @@ public sealed class AgentOrchestrator(
         {
             // Hard iteration cap — takes effect regardless of the termination strategy.
             if (config.Termination?.ResolveMaxIterations() is > 0 and var maxIter && turn >= maxIter)
+            {
+                if (eventEmitter is not null)
+                {
+                    _ = eventEmitter.EmitAsync(EventTypes.MaxTurnsExceeded,
+                        payload: new { turn, max = maxIter });
+                    _ = eventEmitter.EmitAsync(EventTypes.TerminationForced,
+                        payload: new { reason = "max_turns_exceeded", turn, max = maxIter });
+                }
                 break;
+            }
 
             // Parallel fan-out: check before the normal sequential SelectAsync path.
             if (selection is IParallelAgentSelector psel)
@@ -353,9 +362,32 @@ public sealed class AgentOrchestrator(
                                 : filtered;
                         }
 
-                        AgentResponse response = governanceKernel?.CircuitBreaker is { } cb
-                            ? await cb.ExecuteAsync(() => branchAgent.RunAsync(context, null, null, cancellationToken))
-                            : await branchAgent.RunAsync(context, null, null, cancellationToken);
+                        if (eventEmitter is not null)
+                            await eventEmitter.EmitAsync(EventTypes.ParallelBranchStart,
+                                agent: branchAgent.Name ?? "Unknown",
+                                payload: new { turn });
+
+                        AgentResponse response;
+                        try
+                        {
+                            response = governanceKernel?.CircuitBreaker is { } cb
+                                ? await cb.ExecuteAsync(() => branchAgent.RunAsync(context, null, null, cancellationToken))
+                                : await branchAgent.RunAsync(context, null, null, cancellationToken);
+                        }
+                        catch (OperationCanceledException) { throw; }
+                        catch (Exception branchEx)
+                        {
+                            if (eventEmitter is not null)
+                                _ = eventEmitter.EmitAsync(EventTypes.ParallelBranchError,
+                                    agent:   branchAgent.Name ?? "Unknown",
+                                    payload: new { turn, error = branchEx.Message });
+                            throw;
+                        }
+
+                        if (eventEmitter is not null)
+                            _ = eventEmitter.EmitAsync(EventTypes.ParallelBranchEnd,
+                                agent: branchAgent.Name ?? "Unknown",
+                                payload: new { turn });
 
                         return (branchAgent, response);
                     }).ToList();
@@ -410,19 +442,19 @@ public sealed class AgentOrchestrator(
                     {
                         var branchMsg = new AgentMessage
                         {
-                            AgentName = branchAgent.Name ?? "Unknown",
+                            AgentName = branchAgent.Name ?? AgentNames.Unknown,
                             Content   = branchResponse.Text ?? string.Empty,
                             Role      = "assistant",
                             TurnIndex = turn++,
                             Usage     = OrchestratorHelpers.ExtractUsage(branchResponse),
-                            ToolCalls = ExtractToolCalls(branchResponse.Messages, branchAgent.Name ?? "Unknown"),
+                            ToolCalls = ExtractToolCalls(branchResponse.Messages, branchAgent.Name ?? AgentNames.Unknown),
                         };
 
                         cumulativeTokens += branchMsg.Usage?.TotalTokens ?? 0;
                         eventEmitter?.SetTurn(branchMsg.TurnIndex);
 
                         if (eventEmitter is not null)
-                            await eventEmitter.EmitAsync("turn_end",
+                            await eventEmitter.EmitAsync(EventTypes.TurnEnd,
                                 agent:   branchMsg.AgentName,
                                 turn:    branchMsg.TurnIndex,
                                 payload: new
@@ -463,6 +495,12 @@ public sealed class AgentOrchestrator(
             var agent = await selection.SelectAsync(agents, history, cancellationToken);
             int postSelectCount = history.Count;
             if (agent is null) break;
+
+            if (eventEmitter is not null)
+                _ = eventEmitter.EmitAsync(EventTypes.SelectionEvaluated,
+                    agent: agent.Name ?? "Unknown",
+                    turn:  turn,
+                    payload: new { selected = agent.Name, strategy = selection.GetType().Name });
 
             // Prerequisite enforcement: if DependencyPlanner is active and the selected agent
             // has unmet Requires tokens, inject a blocker message into history so the selector
@@ -519,9 +557,28 @@ public sealed class AgentOrchestrator(
                 }
             }
 
-            AgentResponse response = governanceKernel?.CircuitBreaker is { } cb
-                ? await cb.ExecuteAsync(() => agent.RunAsync(contextList, null, null, cancellationToken))
-                : await agent.RunAsync(contextList, null, null, cancellationToken);
+            if (eventEmitter is not null)
+                await eventEmitter.EmitAsync(EventTypes.AgentStart,
+                    agent: agent.Name ?? "Unknown",
+                    turn:  turn);
+
+            AgentResponse response;
+            try
+            {
+                response = governanceKernel?.CircuitBreaker is { } cb
+                    ? await cb.ExecuteAsync(() => agent.RunAsync(contextList, null, null, cancellationToken))
+                    : await agent.RunAsync(contextList, null, null, cancellationToken);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception agentEx)
+            {
+                if (eventEmitter is not null)
+                    _ = eventEmitter.EmitAsync(EventTypes.AgentError,
+                        agent:   agent.Name ?? "Unknown",
+                        turn:    turn,
+                        payload: new { error = agentEx.GetType().Name, message = agentEx.Message });
+                throw;
+            }
 
             logger.LogDebug(
                 "[Orchestrator] '{Agent}' returned {MsgCount} message(s). Text='{Preview}'",
@@ -548,12 +605,12 @@ public sealed class AgentOrchestrator(
 
             var agentMessage = new AgentMessage
             {
-                AgentName = agent.Name ?? "Unknown",
+                AgentName = agent.Name ?? AgentNames.Unknown,
                 Content   = response.Text ?? string.Empty,
                 Role      = "assistant",
                 TurnIndex = turn++,
                 Usage     = OrchestratorHelpers.ExtractUsage(response),
-                ToolCalls = ExtractToolCalls(response.Messages, agent.Name ?? "Unknown")
+                ToolCalls = ExtractToolCalls(response.Messages, agent.Name ?? AgentNames.Unknown)
             };
 
             eventEmitter?.SetTurn(agentMessage.TurnIndex);
@@ -616,7 +673,14 @@ public sealed class AgentOrchestrator(
 
             // Check whether any termination condition has been satisfied.
             if (await termination.ShouldTerminateAsync(history, cancellationToken))
+            {
+                if (eventEmitter is not null)
+                    _ = eventEmitter.EmitAsync(EventTypes.TerminationSatisfied,
+                        agent: agentMessage.AgentName,
+                        turn:  agentMessage.TurnIndex,
+                        payload: new { turn });
                 break;
+            }
         }
     }
 
@@ -633,7 +697,7 @@ public sealed class AgentOrchestrator(
         fuseraft.Core.Models.ContextAssemblyMetrics metrics,
         int turn,
         int toolCount = 0) =>
-        emitter.EmitAsync("context_assembly",
+        emitter.EmitAsync(EventTypes.ContextAssembly,
             agent: metrics.AgentName,
             turn:  turn,
             payload: new
@@ -712,7 +776,7 @@ public sealed class AgentOrchestrator(
                 WireDidResolver(child, resolver);
     }
 
-    private IReadOnlyList<ToolCallRecord>? ExtractToolCalls(IList<ChatMessage> messages, string agentName = "Unknown")
+    private IReadOnlyList<ToolCallRecord>? ExtractToolCalls(IList<ChatMessage> messages, string agentName = AgentNames.Unknown)
         => OrchestratorHelpers.ExtractToolCalls(messages, logger, agentName);
 
     // Scans messages at indices [from, to) for ConflictingEvidence or NoProgress correction
@@ -823,7 +887,18 @@ public sealed class AgentOrchestrator(
 
         var contextList = context as IList<ChatMessage> ?? context.ToList();
         if (config.ContextBudget is { MaxToolResultTokens: > 0 } toolBudget)
-            contextList = ToolResultWindowTrimmer.Apply(contextList, toolBudget);
+        {
+            var (trimmed, manifest) = ToolResultWindowTrimmer.ApplyWithManifest(contextList, toolBudget);
+            if (manifest is not null)
+            {
+                var withManifest = new List<ChatMessage>(trimmed)
+                {
+                    new ChatMessage(ChatRole.User, manifest)
+                };
+                return withManifest;
+            }
+            return trimmed;
+        }
         return contextList;
     }
 
@@ -839,7 +914,16 @@ public sealed class AgentOrchestrator(
     {
         if (eventEmitter is not null)
         {
-            await eventEmitter.EmitAsync("turn_end",
+            await eventEmitter.EmitAsync(EventTypes.TurnEnd,
+                agent: msg.AgentName,
+                turn:  msg.TurnIndex,
+                payload: new
+                {
+                    input_tokens  = msg.Usage?.InputTokens,
+                    output_tokens = msg.Usage?.OutputTokens,
+                });
+
+            await eventEmitter.EmitAsync(EventTypes.AgentEnd,
                 agent: msg.AgentName,
                 turn:  msg.TurnIndex,
                 payload: new
@@ -860,7 +944,7 @@ public sealed class AgentOrchestrator(
                 var truncated = reasoningText.Length > MaxReasoningChars
                     ? reasoningText[..MaxReasoningChars] + $"\n[TRUNCATED — {reasoningText.Length:N0} chars total]"
                     : reasoningText;
-                await eventEmitter.EmitAsync("reasoning",
+                await eventEmitter.EmitAsync(EventTypes.Reasoning,
                     agent:   msg.AgentName,
                     turn:    msg.TurnIndex,
                     payload: new { text = truncated });
@@ -952,12 +1036,12 @@ public sealed class AgentOrchestrator(
 
         return new AgentMessage
         {
-            AgentName = verifierAgent.Name ?? "Verifier",
+            AgentName = verifierAgent.Name ?? AgentNames.Verifier,
             Content   = vResponse.Text ?? string.Empty,
             Role      = "assistant",
             TurnIndex = currentTurn,
             Usage     = OrchestratorHelpers.ExtractUsage(vResponse),
-            ToolCalls = ExtractToolCalls(vResponse.Messages, verifierAgent.Name ?? "Verifier")
+            ToolCalls = ExtractToolCalls(vResponse.Messages, verifierAgent.Name ?? AgentNames.Verifier)
         };
     }
 }

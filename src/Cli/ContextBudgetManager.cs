@@ -40,7 +40,7 @@ internal sealed class ContextBudgetManager(
     /// </summary>
     public async Task<BudgetEvalResult> EvaluateAsync(AgentMessage msg, bool statusActive)
     {
-        var agentName  = msg.AgentName ?? "Unknown";
+        var agentName  = msg.AgentName ?? AgentNames.Unknown;
         int inputToks  = 0;
         int cumulative = 0;
 
@@ -65,12 +65,16 @@ internal sealed class ContextBudgetManager(
                 && _warnedAgents.Add(agentName))
             {
                 if (statusActive) AnsiConsole.WriteLine();
+                // Split into two short lines so neither wraps in an 80-col terminal.
+                // A single long line wrapping inside a Spectre Status context causes the
+                // spinner's \r\x1b[2K to clobber the second visual line of the message.
                 AnsiConsole.MarkupLine(
-                    $"[yellow]  ⚠ {Markup.Escape(agentName)} has accumulated {cumulative:N0} cumulative " +
-                    $"input tokens (warn_at: {contextBudget.WarnAt:N0}). " +
-                    $"Context rot risk — compaction will trigger at {contextBudget.CutoverAt:N0} tokens.[/]");
+                    $"[yellow]  ⚠ {Markup.Escape(agentName)} accumulated {cumulative:N0} input tokens " +
+                    $"(warn_at: {contextBudget.WarnAt:N0}).[/]");
+                AnsiConsole.MarkupLine(
+                    $"[yellow]  Context rot risk — compaction will trigger at {contextBudget.CutoverAt:N0} tokens.[/]");
                 if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("context_budget_warn",
+                    await eventEmitter.EmitAsync(EventTypes.ContextBudgetWarn,
                         agent: agentName,
                         payload: new { cumulative_input_tokens = cumulative, warn_at = contextBudget.WarnAt, cutover_at = contextBudget.CutoverAt });
             }

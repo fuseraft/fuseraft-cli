@@ -42,12 +42,36 @@ public sealed class SubAgentPlugin(
     int maxOutputTokens = 2048,
     EventEmitter? eventEmitter = null,
     string? parentAgentName = null,
-    int maxToolCalls = 0)
+    int maxToolCalls = 0,
+    string? workspaceRoot = null)
 {
     private const double ExploreTimeoutMinutes = 8.0;
-    private const int DefaultMaxToolCalls = 20;
-    private const int LocateMaxToolCalls = 5;
-    private const int LocateMaxOutputTokens = 512;
+    private const double LocateTimeoutMinutes  = 2.0;
+    private const int DefaultMaxToolCalls      = 20;
+    private const int LocateMaxToolCalls       = 5;
+    private const int LocateMaxOutputTokens    = 512;
+
+    // Priority-ordered tool hints for Explore. Only tools actually present in explorerTools
+    // are included — prevents instructing the model to call tools that don't exist.
+    private static readonly (string Name, string Hint)[] ExploreToolPriority =
+    [
+        ("search_symbol",    "type, method, interface, or class definitions"),
+        ("search_files",     "file discovery by name pattern"),
+        ("search_content",   "content patterns across the codebase"),
+        ("get_file_summary", "before read_file on any unconfirmed file"),
+        ("grep_file",        "targeted in-file content search"),
+        ("read_file",        "actual implementation; only when summary is insufficient"),
+        ("shell_run",        "verify a specific hypothesis (build, test); never for browsing"),
+    ];
+
+    private static readonly (string Name, string Hint)[] LocateToolPriority =
+    [
+        ("search_symbol",  "first choice for types, methods, interfaces, class names"),
+        ("search_files",   "for filenames or path patterns"),
+        ("search_content", "for string patterns when search_symbol is insufficient"),
+        ("grep_file",      "for string patterns when search_symbol is insufficient"),
+        ("read_file",      "only to confirm the exact line number once the file is known"),
+    ];
 
     // Wrap tools with event-emitting proxies so sub-agent tool activity is visible in the
     // event log between sub_agent_start and sub_agent_end.
@@ -59,6 +83,9 @@ public sealed class SubAgentPlugin(
     private readonly int _effectiveMaxToolCalls =
         maxToolCalls > 0 ? maxToolCalls : DefaultMaxToolCalls;
 
+    private readonly string _workspaceRoot =
+        workspaceRoot ?? Directory.GetCurrentDirectory();
+
     // --- Public tools ---
 
     [Description("Broad codebase exploration. Returns a prose summary or file list. Use for multi-hop questions (e.g. 'Which files handle X?', 'What conventions does this repo use?').")]
@@ -69,11 +96,12 @@ public sealed class SubAgentPlugin(
         string format = "prose",
         CancellationToken cancellationToken = default)
         => RunLoopAsync(
-            BuildExplorePrompt(_tools, _effectiveMaxToolCalls, format),
+            BuildExplorePrompt(_tools, _effectiveMaxToolCalls, format, _workspaceRoot),
             query,
             _effectiveMaxToolCalls,
             maxOutputTokens,
             "explore",
+            ExploreTimeoutMinutes,
             cancellationToken);
 
     [Description("Locate where a symbol, type, method, interface, or file is defined. Returns file path and line number. Prefer over explore for single-target lookups.")]
@@ -82,11 +110,12 @@ public sealed class SubAgentPlugin(
         string target,
         CancellationToken cancellationToken = default)
         => RunLoopAsync(
-            BuildLocatePrompt(_tools),
+            BuildLocatePrompt(_tools, _workspaceRoot),
             $"Locate: {target}",
             LocateMaxToolCalls,
             LocateMaxOutputTokens,
             "locate",
+            LocateTimeoutMinutes,
             cancellationToken);
 
     // Single-turn session diagnosis — not a model tool (no [Description]).
@@ -113,7 +142,7 @@ public sealed class SubAgentPlugin(
 
         const int msgCap = 800;
         var transcript = new StringBuilder();
-        foreach (var m in history)
+        foreach (var m in history.TakeLast(40))
         {
             var role    = m.Role == ChatRole.System    ? "system"
                         : m.Role == ChatRole.User      ? "user"
@@ -139,7 +168,13 @@ public sealed class SubAgentPlugin(
             var text     = (response.Text ?? string.Empty).Trim();
             return string.IsNullOrEmpty(text) ? null : text;
         }
-        catch { return null; }
+        catch (Exception ex)
+        {
+            if (eventEmitter is not null)
+                try { await eventEmitter.EmitAsync(EventTypes.SubAgentEnd, agent: parentAgentName,
+                    payload: new { outcome = "error", error = ex.Message, mode = "diagnose" }); } catch { }
+            return null;
+        }
     }
 
     // Single-turn critic review — not a model tool (no [Description]).
@@ -187,8 +222,11 @@ public sealed class SubAgentPlugin(
                 ? (true, null)
                 : (false, string.IsNullOrEmpty(text) ? "Critic returned no feedback." : text);
         }
-        catch
+        catch (Exception ex)
         {
+            if (eventEmitter is not null)
+                try { await eventEmitter.EmitAsync(EventTypes.SubAgentEnd, agent: parentAgentName,
+                    payload: new { outcome = "error", error = ex.Message, mode = "critic" }); } catch { }
             return (true, null);
         }
     }
@@ -202,11 +240,12 @@ public sealed class SubAgentPlugin(
         string format = "prose",
         CancellationToken cancellationToken = default)
         => RunLoopAsync(
-            BuildExplorePrompt(_tools, _effectiveMaxToolCalls, format),
+            BuildExplorePrompt(_tools, _effectiveMaxToolCalls, format, _workspaceRoot),
             query,
             _effectiveMaxToolCalls,
             maxOutputTokens,
             "explore",
+            ExploreTimeoutMinutes,
             cancellationToken,
             onChunk);
 
@@ -215,11 +254,12 @@ public sealed class SubAgentPlugin(
         Func<string, Task> onChunk,
         CancellationToken cancellationToken = default)
         => RunLoopAsync(
-            BuildLocatePrompt(_tools),
+            BuildLocatePrompt(_tools, _workspaceRoot),
             $"Locate: {target}",
             LocateMaxToolCalls,
             LocateMaxOutputTokens,
             "locate",
+            LocateTimeoutMinutes,
             cancellationToken,
             onChunk);
 
@@ -231,6 +271,7 @@ public sealed class SubAgentPlugin(
         int maxIterations,
         int outputTokens,
         string mode,
+        double timeoutMinutes,
         CancellationToken cancellationToken,
         Func<string, Task>? onChunk = null)
     {
@@ -239,13 +280,13 @@ public sealed class SubAgentPlugin(
                    "Ensure AgentFactory created a real SubAgentPlugin for this agent.";
 
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("sub_agent_start",
+            await eventEmitter.EmitAsync(EventTypes.SubAgentStart,
                 agent:   parentAgentName,
                 payload: new { query = userQuery.Length > 120 ? userQuery[..120] + "…" : userQuery, mode });
 
         // Link the parent's CT so cancellation propagates immediately; timeout is a safety net.
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(TimeSpan.FromMinutes(ExploreTimeoutMinutes));
+        cts.CancelAfter(TimeSpan.FromMinutes(timeoutMinutes));
 
         var messages = new List<ChatMessage>
         {
@@ -268,8 +309,6 @@ public sealed class SubAgentPlugin(
         try
         {
             string result;
-            long? inputTok  = null;
-            long? outputTok = null;
             if (onChunk is not null)
             {
                 var sb = new StringBuilder();
@@ -283,22 +322,28 @@ public sealed class SubAgentPlugin(
                     }
                 }
                 result = sb.Length > 0 ? sb.ToString() : "Sub-agent produced no text output.";
+
+                // Streaming updates don't expose usage; omit token fields rather than emitting nulls.
+                if (eventEmitter is not null)
+                    await eventEmitter.EmitAsync(EventTypes.SubAgentEnd,
+                        agent:   parentAgentName,
+                        payload: new { outcome, summary_chars = result.Length, mode });
             }
             else
             {
-                var response = await loopClient.GetResponseAsync(messages, options, cts.Token);
-                inputTok  = response.Usage?.InputTokenCount;
-                outputTok = response.Usage?.OutputTokenCount;
+                var response  = await loopClient.GetResponseAsync(messages, options, cts.Token);
+                var inputTok  = response.Usage?.InputTokenCount;
+                var outputTok = response.Usage?.OutputTokenCount;
                 result = string.IsNullOrWhiteSpace(response.Text)
                     ? "Sub-agent produced no text output."
                     : response.Text;
-            }
 
-            if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("sub_agent_end",
-                    agent:   parentAgentName,
-                    payload: new { outcome, summary_chars = result.Length, mode,
-                                   input_tokens = inputTok, output_tokens = outputTok });
+                if (eventEmitter is not null)
+                    await eventEmitter.EmitAsync(EventTypes.SubAgentEnd,
+                        agent:   parentAgentName,
+                        payload: new { outcome, summary_chars = result.Length, mode,
+                                       input_tokens = inputTok, output_tokens = outputTok });
+            }
 
             return result;
         }
@@ -306,20 +351,20 @@ public sealed class SubAgentPlugin(
         {
             outcome = cancellationToken.IsCancellationRequested ? "cancelled" : "timeout";
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("sub_agent_end",
+                try { await eventEmitter.EmitAsync(EventTypes.SubAgentEnd,
                     agent:   parentAgentName,
-                    payload: new { outcome, mode });
+                    payload: new { outcome, mode }); } catch { }
             return outcome == "cancelled"
                 ? "Sub-agent was cancelled."
-                : $"Sub-agent timed out after {ExploreTimeoutMinutes} minutes.";
+                : $"Sub-agent timed out after {timeoutMinutes} minutes.";
         }
         catch (Exception ex)
         {
             outcome = "error";
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("sub_agent_end",
+                try { await eventEmitter.EmitAsync(EventTypes.SubAgentEnd,
                     agent:   parentAgentName,
-                    payload: new { outcome, error = ex.Message, mode });
+                    payload: new { outcome, error = ex.Message, mode }); } catch { }
             return $"Sub-agent failed: {ex.Message}";
         }
     }
@@ -329,12 +374,18 @@ public sealed class SubAgentPlugin(
     private static string BuildExplorePrompt(
         IReadOnlyList<AIFunction> tools,
         int maxToolCalls,
-        string format)
+        string format,
+        string cwd)
     {
-        var toolList = tools.Count > 0
-            ? string.Join(", ", tools.Select(t => t.Name))
-            : "(none configured)";
-        var cwd = Directory.GetCurrentDirectory();
+        var toolNames    = tools.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var priorityLines = ExploreToolPriority
+            .Where(p => toolNames.Contains(p.Name))
+            .Select((p, i) => $"{i + 1}. {p.Name}  — {p.Hint}.")
+            .ToList();
+        var toolPriority = priorityLines.Count > 0
+            ? "Tool selection priority (prefer earlier options when they suffice):\n" +
+              string.Join("\n", priorityLines)
+            : $"Available tools: {(tools.Count > 0 ? string.Join(", ", tools.Select(t => t.Name)) : "(none configured)")}.";
 
         var outputInstructions = format.ToLowerInvariant() == "file_list"
             ? """
@@ -347,16 +398,7 @@ public sealed class SubAgentPlugin(
         return $"""
             You are a codebase explorer sub-agent. Your ONLY job is to answer the query you are given.
             Working directory: {cwd}
-            Available tools: {toolList}.
-
-            Tool selection priority (prefer earlier options when they suffice):
-            1. search_symbol  — type, method, interface, or class definitions.
-            2. search_files   — file discovery by name pattern.
-            3. search_content — content patterns across the codebase.
-            4. get_file_summary — before read_file on any file you have not confirmed is relevant.
-            5. grep_file      — targeted in-file content search.
-            6. read_file      — actual implementation; only when summary is insufficient.
-            7. shell_run      — verify a specific hypothesis (build, test); never for browsing.
+            {toolPriority}
 
             Aim to answer within {maxToolCalls} tool calls using targeted queries.
             Do NOT implement, edit, delete, commit, or push anything.
@@ -366,25 +408,26 @@ public sealed class SubAgentPlugin(
             """;
     }
 
-    private static string BuildLocatePrompt(IReadOnlyList<AIFunction> tools)
+    private static string BuildLocatePrompt(IReadOnlyList<AIFunction> tools, string cwd)
     {
-        var toolList = tools.Count > 0
-            ? string.Join(", ", tools.Select(t => t.Name))
-            : "(none configured)";
-        var cwd        = Directory.GetCurrentDirectory();
-        var lineToken  = "{line}"; // literal placeholder shown to the model
+        var toolNames     = tools.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var priorityLines = LocateToolPriority
+            .Where(p => toolNames.Contains(p.Name))
+            .DistinctBy(p => p.Name)
+            .Select((p, i) => $"{i + 1}. {p.Name}  — {p.Hint}.")
+            .ToList();
+        var toolPriority = priorityLines.Count > 0
+            ? "Tool priority (use the cheapest that works; stop the moment you have the answer):\n" +
+              string.Join("\n", priorityLines)
+            : $"Available tools: {(tools.Count > 0 ? string.Join(", ", tools.Select(t => t.Name)) : "(none configured)")}.";
+
+        var lineToken = "{line}"; // literal placeholder shown to the model
 
         return $"""
             You are a symbol-locator sub-agent. Your ONLY job is to find where a symbol, type,
             method, interface, or file is defined in the codebase.
             Working directory: {cwd}
-            Available tools: {toolList}.
-
-            Tool priority (use the cheapest that works; stop the moment you have the answer):
-            1. search_symbol  — first choice for types, methods, interfaces, class names.
-            2. search_files   — for filenames or path patterns.
-            3. search_content / grep_file — for string patterns when search_symbol is insufficient.
-            4. read_file      — only to confirm the exact line number once the file is known.
+            {toolPriority}
 
             Use at most {LocateMaxToolCalls} tool calls.
             Skip .fuseraft/ — it is fuseraft-cli runtime metadata, not application code.
@@ -404,7 +447,7 @@ public sealed class SubAgentPlugin(
         => tools.Select(t => (AIFunction)new NotifyingAIFunction(
             t,
             agentName ?? string.Empty,
-            (_, toolName, argsSummary) => emitter.EmitAsync("sub_agent_tool_call",
+            (_, toolName, argsSummary) => emitter.EmitAsync(EventTypes.SubAgentToolCall,
                 agent:   agentName,
                 payload: new { tool = toolName, args = argsSummary }))).ToList();
 }

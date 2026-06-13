@@ -11,18 +11,6 @@ using MagenticOrchestrator = fuseraft.Orchestration.MagenticOrchestrator;
 
 namespace fuseraft.Cli;
 
-// Compaction trigger classification — informs the session_summary event and the
-// compaction event reason field so post-session analysis can identify the primary
-// cause of each compaction cycle.
-internal static class CompactionReason
-{
-    public const string SingleTurnLimit = "single_turn_limit";
-    public const string CumulativeBudget = "cumulative_budget";
-    public const string ShouldCompact    = "window_size";
-    public const string AgentRequested   = "agent_requested";
-    public const string ContextExceeded  = "context_exceeded";
-}
-
 /// <summary>
 /// Owns the compaction state machine: the pending compaction reason, the post-compaction
 /// grace flag, and all compaction execution logic. Extracted from <c>SessionRunner</c> so
@@ -64,7 +52,7 @@ internal sealed class CompactionCoordinator(
         BudgetEvalResult budgetResult,
         bool statusActive)
     {
-        var agentName = msg.AgentName ?? "Unknown";
+        var agentName = msg.AgentName ?? AgentNames.Unknown;
 
         // SingleTurnLimit: never suppressed by _justCompacted — a per-turn explosion must
         // always compact even on the turn immediately after a previous compaction.
@@ -78,7 +66,7 @@ internal sealed class CompactionCoordinator(
                 $"MaxSingleTurnInputTokens ({budgetResult.SingleTurnThreshold:N0}). " +
                 $"Compacting before next turn...[/]");
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("context_budget_cutover",
+                await eventEmitter.EmitAsync(EventTypes.ContextBudgetCutover,
                     agent: agentName,
                     payload: new { input_tokens = budgetResult.InputTokens, cutover_at = budgetResult.SingleTurnThreshold, reason = CompactionReason.SingleTurnLimit });
             return true;
@@ -109,9 +97,10 @@ internal sealed class CompactionCoordinator(
             _pendingCompactionReason = CompactionReason.CumulativeBudget;
             AnsiConsole.MarkupLine(
                 $"[yellow]  ⚡ {Markup.Escape(agentName)} reached context budget cutover " +
-                $"({budgetResult.CumulativeInputTokens:N0} ≥ {budgetResult.CutoverThreshold:N0} input tokens). Compacting history...[/]");
+                $"({budgetResult.CumulativeInputTokens:N0} ≥ {budgetResult.CutoverThreshold:N0} tokens).[/]");
+            AnsiConsole.MarkupLine($"[yellow]  Compacting history...[/]");
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("context_budget_cutover",
+                await eventEmitter.EmitAsync(EventTypes.ContextBudgetCutover,
                     agent: agentName,
                     payload: new { cumulative_input_tokens = budgetResult.CumulativeInputTokens, cutover_at = budgetResult.CutoverThreshold });
             return true;
@@ -193,7 +182,7 @@ internal sealed class CompactionCoordinator(
         if (orchestrator is not MagenticOrchestrator)
         {
             lastAssistantAgent = checkpoint.Messages
-                .LastOrDefault(m => m.Role == "assistant" && !string.IsNullOrWhiteSpace(m.AgentName))
+                .LastOrDefault(m => m.Role == MessageRole.Assistant && !string.IsNullOrWhiteSpace(m.AgentName))
                 ?.AgentName
                 ?.ToLowerInvariant();
 
@@ -223,7 +212,7 @@ internal sealed class CompactionCoordinator(
         }
 
         if (orchestrator is not MagenticOrchestrator && eventEmitter is not null)
-            _ = eventEmitter.EmitAsync("compaction_resume_candidate",
+            _ = eventEmitter.EmitAsync(EventTypes.CompactionResumeCandidate,
                 payload: new
                 {
                     last_assistant_agent = lastAssistantAgent,
@@ -253,10 +242,10 @@ internal sealed class CompactionCoordinator(
 
             sessionMetrics?.RecordCompaction(_pendingCompactionReason);
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("compaction",
+                await eventEmitter.EmitAsync(EventTypes.Compaction,
                     payload: new
                     {
-                        mode           = "window",
+                        mode           = CompactionModes.Window,
                         reason         = _pendingCompactionReason,
                         turns_dropped  = dropped,
                         turns_retained = trimmed.Count,
@@ -289,7 +278,7 @@ internal sealed class CompactionCoordinator(
 
         sessionMetrics?.RecordCompaction(_pendingCompactionReason);
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("compaction",
+            await eventEmitter.EmitAsync(EventTypes.Compaction,
                 payload: new
                 {
                     turns_compacted = turnsBefore - retained.Count,
@@ -313,7 +302,7 @@ internal sealed class CompactionCoordinator(
         for (int i = original.Count - 1; i >= 0; i--)
         {
             var m = original[i];
-            if (m.Role == "assistant" &&
+            if (m.Role == MessageRole.Assistant &&
                 m.ToolCalls?.Any(tc => string.Equals(tc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase)) == true)
             {
                 lastHandoff = m;
@@ -334,7 +323,7 @@ internal sealed class CompactionCoordinator(
         if (string.IsNullOrEmpty(routeKeyword)) return;
 
         bool alreadyPresent = retained.Any(m =>
-            m.Role == "assistant" &&
+            m.Role == MessageRole.Assistant &&
             m.ToolCalls?.Any(tc =>
                 string.Equals(tc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase) &&
                 tc.ArgsSummary?.EndsWith(routeKeyword, StringComparison.OrdinalIgnoreCase) == true) == true);

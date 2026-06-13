@@ -127,7 +127,7 @@ internal sealed class RawReasoningCaptureHandler(EventEmitter? eventEmitter) : D
                 ? text[..MaxReasoningChars] + $"\n[TRUNCATED — {text.Length:N0} chars total]"
                 : text;
 
-            _ = eventEmitter!.EmitAsync("http_reasoning",
+            _ = eventEmitter!.EmitAsync(EventTypes.HttpReasoning,
                 agent:   null,
                 turn:    null,
                 payload: new

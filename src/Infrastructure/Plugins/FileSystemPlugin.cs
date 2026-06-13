@@ -458,9 +458,11 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         await File.WriteAllTextAsync(resolved, patched);
 
-        // Invalidate both caches — content has changed.
+        // Invalidate caches — content has changed.
         _readThisTurn.Remove(resolved);
         _sessionCache?.Invalidate(resolved);
+        var patchSp = SummaryPath(resolved);
+        if (File.Exists(patchSp)) File.Delete(patchSp);
 
         // Record that this path was patched so write_file can detect the pattern.
         _patchedThisTurn.Add(resolved);
@@ -827,7 +829,7 @@ public sealed class FileSystemPlugin : ITurnResettable
                     var lastFence = trimmed.LastIndexOf("```");
                     if (lastFence >= 0)
                         trimmed = trimmed[..lastFence];
-                    content   = trimmed.Trim();
+                    content    = trimmed.Trim();
                     normalised = true;
                 }
                 // Strip XML <parameter name="content">…</parameter> wrappers.
@@ -839,10 +841,10 @@ public sealed class FileSystemPlugin : ITurnResettable
                     var closeTag = trimmed.IndexOf('>');
                     if (closeTag >= 0)
                     {
-                        var inner = trimmed[(closeTag + 1)..];
+                        var inner  = trimmed[(closeTag + 1)..];
                         var endTag = inner.LastIndexOf("</parameter>", StringComparison.OrdinalIgnoreCase);
                         if (endTag >= 0) inner = inner[..endTag];
-                        content   = inner.Trim();
+                        content    = inner.Trim();
                         normalised = true;
                     }
                 }
@@ -923,6 +925,9 @@ public sealed class FileSystemPlugin : ITurnResettable
             newVersion = await _versionStore.BumpVersionAsync(resolved, hash);
         }
 
+        var writeSp = SummaryPath(resolved);
+        if (File.Exists(writeSp)) File.Delete(writeSp);
+
         var note = normalised
             ? $" (content was normalised: code fences or over-escaped quotes were stripped)"
             : string.Empty;
@@ -964,7 +969,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     }
 
     [Description("Delete a file.")]
-    public string DeleteFile([Description("File path.")] string path)
+    public async Task<string> DeleteFileAsync([Description("File path.")] string path)
     {
         var denial = ResolveSafe(path, out var resolved);
         if (denial is not null) return denial;
@@ -973,6 +978,7 @@ public sealed class FileSystemPlugin : ITurnResettable
             return PluginResult.Info($"File does not exist: {resolved}");
 
         File.Delete(resolved);
+        await InvalidatePathAsync(resolved);
         return PluginResult.Ok($"Deleted: {resolved}");
     }
 
@@ -1069,7 +1075,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     }
 
     [Description("Delete a directory.")]
-    public string DeleteDirectory(
+    public async Task<string> DeleteDirectoryAsync(
         [Description("Directory path.")] string path,
         [Description("Delete non-empty directories recursively.")] bool recursive = false)
     {
@@ -1082,14 +1088,22 @@ public sealed class FileSystemPlugin : ITurnResettable
         // Refuse to delete the sandbox root itself.
         if (_sandboxRoot is not null)
         {
-            var comparison   = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-            var sandboxCheck = _sandboxRoot.TrimEnd(Path.DirectorySeparatorChar);
+            var comparison    = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            var sandboxCheck  = _sandboxRoot.TrimEnd(Path.DirectorySeparatorChar);
             var resolvedCheck = resolved.TrimEnd(Path.DirectorySeparatorChar);
             if (string.Equals(sandboxCheck, resolvedCheck, comparison))
                 return PluginResult.Denied("Cannot delete the sandbox root directory.");
         }
 
+        // Enumerate all contained files before deletion so their state can be invalidated
+        // after the directory tree is gone.
+        var files = Directory.EnumerateFiles(resolved, "*", SearchOption.AllDirectories).ToList();
+
         Directory.Delete(resolved, recursive);
+
+        foreach (var file in files)
+            await InvalidatePathAsync(file);
+
         return PluginResult.Ok($"Deleted directory: {resolved}");
     }
 
@@ -1116,42 +1130,54 @@ public sealed class FileSystemPlugin : ITurnResettable
             Directory.CreateDirectory(dir);
 
         await Task.Run(() => File.Copy(resolvedSrc, resolvedDst, overwrite));
+        await InvalidatePathAsync(resolvedDst);
+        _sessionCache?.RecordWrite(resolvedDst, new FileInfo(resolvedDst));
         return PluginResult.Ok($"Copied '{resolvedSrc}' → '{resolvedDst}'");
     }
 
     [Description("Move or rename a file or directory.")]
-    public Task<string> MoveFileAsync(
+    public async Task<string> MoveFileAsync(
         [Description("Source path.")] string source,
         [Description("Destination path.")] string destination,
         [Description("Overwrite if destination file exists.")] bool overwrite = false)
     {
         var srcDenial = ResolveSafe(source, out var resolvedSrc);
-        if (srcDenial is not null) return Task.FromResult(srcDenial);
+        if (srcDenial is not null) return srcDenial;
 
         var dstDenial = ResolveSafe(destination, out var resolvedDst);
-        if (dstDenial is not null) return Task.FromResult(dstDenial);
+        if (dstDenial is not null) return dstDenial;
 
         if (Directory.Exists(resolvedSrc))
         {
             if (Directory.Exists(resolvedDst))
-                return Task.FromResult(PluginResult.Error($"Destination directory already exists: {resolvedDst}"));
+                return PluginResult.Error($"Destination directory already exists: {resolvedDst}");
             var dstParent = Path.GetDirectoryName(resolvedDst);
             if (!string.IsNullOrEmpty(dstParent)) Directory.CreateDirectory(dstParent);
+            // Enumerate files before the move so we have the source paths for invalidation.
+            var movedFiles = Directory.EnumerateFiles(resolvedSrc, "*", SearchOption.AllDirectories).ToList();
             Directory.Move(resolvedSrc, resolvedDst);
-            return Task.FromResult(PluginResult.Ok($"Moved directory '{resolvedSrc}' → '{resolvedDst}'"));
+            foreach (var srcFile in movedFiles)
+            {
+                await InvalidatePathAsync(srcFile);
+                var dstFile = Path.Combine(resolvedDst, Path.GetRelativePath(resolvedSrc, srcFile));
+                await InvalidatePathAsync(dstFile);
+            }
+            return PluginResult.Ok($"Moved directory '{resolvedSrc}' → '{resolvedDst}'");
         }
 
         if (File.Exists(resolvedSrc))
         {
             if (!overwrite && File.Exists(resolvedDst))
-                return Task.FromResult(PluginResult.Error($"Destination already exists: {resolvedDst}. Set overwrite=true to replace it."));
+                return PluginResult.Error($"Destination already exists: {resolvedDst}. Set overwrite=true to replace it.");
             var dstParent = Path.GetDirectoryName(resolvedDst);
             if (!string.IsNullOrEmpty(dstParent)) Directory.CreateDirectory(dstParent);
             File.Move(resolvedSrc, resolvedDst, overwrite);
-            return Task.FromResult(PluginResult.Ok($"Moved '{resolvedSrc}' → '{resolvedDst}'"));
+            await InvalidatePathAsync(resolvedSrc);
+            await InvalidatePathAsync(resolvedDst);
+            return PluginResult.Ok($"Moved '{resolvedSrc}' → '{resolvedDst}'");
         }
 
-        return Task.FromResult(PluginResult.Error($"Source not found: {resolvedSrc}"));
+        return PluginResult.Error($"Source not found: {resolvedSrc}");
     }
 
     [Description("Get a cached summary or auto-preview of a file. Use before read_file on large files.")]
@@ -1283,6 +1309,21 @@ public sealed class FileSystemPlugin : ITurnResettable
             if (preview.Count < previewCount) preview.Add(ln);
         }
         return (preview, lineCount, new FileInfo(path).Length);
+    }
+
+    // Removes a path from every per-turn set, the session cache, the version store, and the
+    // summary cache. Call this on deletion, on the source side of a move, and on the
+    // destination side of a copy/move to clear stale state before priming fresh state.
+    private async Task InvalidatePathAsync(string resolved)
+    {
+        _readThisTurn.Remove(resolved);
+        _writtenThisTurn.Remove(resolved);
+        _patchedThisTurn.Remove(resolved);
+        _sessionCache?.Invalidate(resolved);
+        if (_versionStore is not null)
+            await _versionStore.RemoveAsync(resolved);
+        var sp = SummaryPath(resolved);
+        if (File.Exists(sp)) File.Delete(sp);
     }
 
     private string SummaryPath(string resolvedFilePath)

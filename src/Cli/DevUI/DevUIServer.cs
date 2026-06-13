@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using fuseraft.Core.Models;
+using fuseraft.Orchestration;
 
 namespace fuseraft.Cli.DevUI;
 
@@ -107,7 +108,7 @@ public sealed class DevUIServer : IAsyncDisposable
     // -------------------------------------------------------------------------
 
     public void BroadcastSessionStart(string sessionId, string task, string configName)
-        => Emit("session_start", new { sessionId, task, configName, ts = Ts() });
+        => Emit(EventTypes.SessionStart, new { sessionId, task, configName, ts = Ts() });
 
     public void BroadcastAgentStarting(string agentName)
         => Emit("agent_starting", new { agentName, ts = Ts() });

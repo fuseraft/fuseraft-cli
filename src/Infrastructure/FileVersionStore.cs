@@ -92,6 +92,22 @@ public sealed class FileVersionStore
     }
 
     /// <summary>
+    /// Removes the version record for <paramref name="path"/> (e.g. after the file is
+    /// deleted or moved). No-op when the path was never versioned.
+    /// </summary>
+    public async Task RemoveAsync(string path, CancellationToken ct = default)
+    {
+        await _lock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var store = await LoadAsync(ct);
+            if (store.Remove(NormalizePath(path)))
+                await SaveAsync(store, ct);
+        }
+        finally { _lock.Release(); }
+    }
+
+    /// <summary>
     /// Computes a SHA-256 hash of <paramref name="content"/> suitable for storing in a
     /// <see cref="FileVersionRecord"/>. Returns the first 12 hex chars (48-bit prefix).
     /// </summary>
