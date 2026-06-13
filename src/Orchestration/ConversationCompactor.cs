@@ -53,7 +53,7 @@ public sealed class ConversationCompactor(
     /// In window mode compaction is token-budget-based; no LLM call is made.
     /// </summary>
     public bool IsWindowMode =>
-        (config.Mode ?? "llm").Equals("window", StringComparison.OrdinalIgnoreCase);
+        (config.Mode ?? CompactionModes.Llm).Equals(CompactionModes.Window, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Returns true when <paramref name="messages"/> has reached or exceeded
@@ -89,7 +89,7 @@ public sealed class ConversationCompactor(
                 config.AntiThrashWindow, config.AntiThrashMinSavingsRatio);
             return false;
         }
-        var assistantTurns = messages.Count(m => m.Role == "assistant");
+        var assistantTurns = messages.Count(m => m.Role == MessageRole.Assistant);
         if (assistantTurns >= config.TriggerTurnCount)
         {
             logger.LogDebug(
@@ -120,12 +120,12 @@ public sealed class ConversationCompactor(
 
         while (total > config.TokenBudget && start + 1 < list.Count)
         {
-            if (list[start].Role == "user")
+            if (list[start].Role == MessageRole.User)
             {
                 total -= (list[start].Content?.Length ?? 0) / 4;
                 list.RemoveAt(start);
             }
-            if (start < list.Count && list[start].Role == "assistant")
+            if (start + 1 < list.Count && list[start].Role == MessageRole.Assistant)
             {
                 total -= (list[start].Content?.Length ?? 0) / 4;
                 list.RemoveAt(start);
@@ -149,7 +149,7 @@ public sealed class ConversationCompactor(
         if (messages.Count < 2)
         {
             logger.LogWarning("Compaction skipped: message list has {Count} message(s) — nothing to compact.", messages.Count);
-            var passthrough = messages.Count == 1 ? messages[0] : new AgentMessage { Role = "user", Content = "(empty session)", AgentName = "System" };
+            var passthrough = messages.Count == 1 ? messages[0] : new AgentMessage { Role = "user", Content = "(empty session)", AgentName = AgentNames.System };
             return (passthrough, []);
         }
 
@@ -161,11 +161,11 @@ public sealed class ConversationCompactor(
         // toCompact.Count messages become 1 summary; net reduction = toCompact.Count - 1.
         RecordSavings((toCompact.Count - 1.0) / messages.Count);
 
-        logger.LogInformation(
+        logger.LogDebug(
             "Compacting {Compacted} turns (0–{LastCompacted}) into a summary; retaining {Kept} recent turns.",
             toCompact.Count, toCompact[^1].TurnIndex, toRetain.Count);
 
-        var mode = (config.Mode ?? "llm").ToLowerInvariant();
+        var mode = (config.Mode ?? CompactionModes.Llm).ToLowerInvariant();
 
         var reasoningExcerpts = await ReadReasoningForRangeAsync(
             toCompact[0].TurnIndex, toCompact[^1].TurnIndex);
@@ -187,7 +187,7 @@ public sealed class ConversationCompactor(
         // When the intent log is unavailable, record a visible fallback notice so agents
         // resuming after compaction know the summary was degraded.
         string? intentFallbackNotice = null;
-        if (mode == "intent")
+        if (mode == CompactionModes.Intent)
         {
             if (intentLog is not null)
                 return await CompactFromIntentAsync(toCompact, toRetain, prefixBlock, cancellationToken);
@@ -203,15 +203,15 @@ public sealed class ConversationCompactor(
         }
 
         // Lossless: skip LLM call entirely; rebuild from durable state.
-        if ((mode == "lossless" || mode == "intent") && snapshotter is not null)
+        if ((mode == CompactionModes.Lossless || mode == CompactionModes.Intent) && snapshotter is not null)
             return await CompactLosslessAsync(toCompact, toRetain, snapshotter, prefixBlock, intentFallbackNotice, cancellationToken);
 
         // Hybrid: prepend reconstruction before the LLM summary.
-        if (mode == "hybrid" && snapshotter is not null)
+        if (mode == CompactionModes.Hybrid && snapshotter is not null)
             return await CompactHybridAsync(task, toCompact, toRetain, snapshotter, prefixBlock, filteredCompact, executionStateNote, cancellationToken);
 
         // LLM mode (default) — existing behaviour.
-        if (mode is "lossless" or "intent")
+        if (mode is CompactionModes.Lossless or CompactionModes.Intent)
             logger.LogWarning(
                 "Compaction mode is '{Mode}' but no snapshotter or intent log is available — falling back to LLM mode.",
                 mode);
@@ -264,7 +264,7 @@ public sealed class ConversationCompactor(
             Usage     = AccumulateCompactedUsage(toCompact, null),
             ToolCalls = AccumulateCompactedToolCalls(toCompact),
         };
-        logger.LogInformation(
+        logger.LogDebug(
             "Lossless compaction: {Compacted} turns replaced by evidence reconstruction.",
             toCompact.Count);
         return (PrependFallbackNotice(reconstructed, intentFallbackNotice), toRetain);
@@ -298,7 +298,7 @@ public sealed class ConversationCompactor(
 
             var hybridSummary = new AgentMessage
             {
-                AgentName           = "System",
+                AgentName           = AgentNames.System,
                 Content             = hybridContent,
                 Role                = "user",
                 TurnIndex           = toCompact[^1].TurnIndex,
@@ -344,7 +344,7 @@ public sealed class ConversationCompactor(
 
             var summary = new AgentMessage
             {
-                AgentName           = "System",
+                AgentName           = AgentNames.System,
                 Content             = FormatSummaryContent(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, summaryText, prefixBlock),
                 Role                = "user",
                 TurnIndex           = toCompact[^1].TurnIndex,
@@ -477,7 +477,7 @@ public sealed class ConversationCompactor(
 
         return new AgentMessage
         {
-            AgentName           = "System",
+            AgentName           = AgentNames.System,
             Content             = content,
             Role                = "user",
             TurnIndex           = lastTurn,
@@ -584,7 +584,7 @@ public sealed class ConversationCompactor(
         {
             var label = msg.IsCompactionSummary
                 ? $"[Prior Summary — covers turns 1–{msg.TurnIndex + 1}]"
-                : $"[{(msg.Role == "user" ? "Human" : msg.AgentName)} — Turn {msg.TurnIndex + 1}]";
+                : $"[{(msg.Role == MessageRole.User ? AgentNames.Human : msg.AgentName)} — Turn {msg.TurnIndex + 1}]";
 
             sb.AppendLine(label);
             sb.AppendLine(PruneContent(msg, maxCharsPerMessage));
@@ -649,7 +649,7 @@ public sealed class ConversationCompactor(
 
         return new AgentMessage
         {
-            AgentName           = "System",
+            AgentName           = AgentNames.System,
             Content             = content,
             Role                = "user",
             TurnIndex           = lastTurn,
@@ -699,7 +699,7 @@ public sealed class ConversationCompactor(
                 {
                     using var doc  = JsonDocument.Parse(line);
                     var root = doc.RootElement;
-                    if (!root.TryGetProperty("event_type", out var et) || et.GetString() != "reasoning") continue;
+                    if (!root.TryGetProperty("event_type", out var et) || et.GetString() != EventTypes.Reasoning) continue;
                     if (!root.TryGetProperty("turn", out var turnEl) || !turnEl.TryGetInt32(out var turn)) continue;
                     if (turn < firstTurn || turn > lastTurn) continue;
                     var text  = root.TryGetProperty("payload", out var payload)
@@ -881,7 +881,7 @@ public sealed class ConversationCompactor(
                     using var doc  = JsonDocument.Parse(line);
                     var root = doc.RootElement;
                     if (!root.TryGetProperty("session", out var ses) || ses.GetString() != _sessionId) continue;
-                    if (!root.TryGetProperty("event_type", out var et) || et.GetString() != "tool_call") continue;
+                    if (!root.TryGetProperty("event_type", out var et) || et.GetString() != EventTypes.ToolCall) continue;
                     if (!root.TryGetProperty("payload", out var payload)) continue;
                     if (!payload.TryGetProperty("tool", out var toolEl)) continue;
 

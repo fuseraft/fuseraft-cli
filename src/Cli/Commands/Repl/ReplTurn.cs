@@ -6,6 +6,7 @@ using Spectre.Console;
 using fuseraft.Cli.Display;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
+using fuseraft.Orchestration;
 
 namespace fuseraft.Cli.Commands.Repl;
 
@@ -260,9 +261,9 @@ internal static class ReplTurn
         bool isCorrectionTurn = false)
     {
         ctx.Emitter.SetTurn(ctx.TurnIndex);
-        await ctx.Emitter.EmitAsync("user_input", turn: ctx.TurnIndex, payload: new { content = input });
+        await ctx.Emitter.EmitAsync(EventTypes.UserInput, turn: ctx.TurnIndex, payload: new { content = input });
         ctx.History.Add(new ChatMessage(ChatRole.User, input));
-        await ctx.Emitter.EmitAsync("turn_start", turn: ctx.TurnIndex, payload: new { is_step = isStepRequest, is_correction = isCorrectionTurn });
+        await ctx.Emitter.EmitAsync(EventTypes.TurnStart, turn: ctx.TurnIndex, payload: new { is_step = isStepRequest, is_correction = isCorrectionTurn });
 
         // Preserve the user's input before the LLM call so a crash mid-turn still
         // leaves a recoverable snapshot with the typed text.
@@ -382,7 +383,7 @@ internal static class ReplTurn
         {
             await StopSpinnerAsync();
             spinCts.Dispose();
-            await ctx.Emitter.EmitAsync("cancelled", turn: ctx.TurnIndex);
+            await ctx.Emitter.EmitAsync(EventTypes.Cancelled, turn: ctx.TurnIndex);
             if (ctx.JsonMode)
                 ReplJsonBridge.Emit(new { type = "cancelled" });
             else
@@ -402,7 +403,7 @@ internal static class ReplTurn
             await StopSpinnerAsync();
             spinCts.Dispose();
 
-            await ctx.Emitter.EmitAsync("repl_error", turn: ctx.TurnIndex, payload: new
+            await ctx.Emitter.EmitAsync(EventTypes.ReplError, turn: ctx.TurnIndex, payload: new
             {
                 exception_type = ex.GetType().Name,
                 message        = ex.Message,
@@ -438,7 +439,7 @@ internal static class ReplTurn
             await StopSpinnerAsync();
             spinCts.Dispose();
 
-            await ctx.Emitter.EmitAsync("repl_error", turn: ctx.TurnIndex, payload: new
+            await ctx.Emitter.EmitAsync(EventTypes.ReplError, turn: ctx.TurnIndex, payload: new
             {
                 exception_type = ex.GetType().Name,
                 message        = ex.Message,
@@ -486,7 +487,7 @@ internal static class ReplTurn
             else
                 AnsiConsole.MarkupLine("[dim]  ↯ empty response — the model returned no content. Try again.[/]");
 
-            await ctx.Emitter.EmitAsync("repl_warning", turn: ctx.TurnIndex, payload: new
+            await ctx.Emitter.EmitAsync(EventTypes.ReplWarning, turn: ctx.TurnIndex, payload: new
             {
                 message = "empty_response",
             });
@@ -509,7 +510,7 @@ internal static class ReplTurn
         {
             if (!isCorrectionTurn)
             {
-                await ctx.Emitter.EmitAsync("correction_injected", turn: ctx.TurnIndex, payload: new { reason = "mutation_claimed_without_write_tool" });
+                await ctx.Emitter.EmitAsync(EventTypes.CorrectionInjected, turn: ctx.TurnIndex, payload: new { reason = "mutation_claimed_without_write_tool" });
                 if (!ctx.JsonMode)
                     AnsiConsole.MarkupLine("[dim]  ↺ mutation claimed without write tool — injecting correction[/]");
                 const string correctionMsg =
@@ -560,7 +561,7 @@ internal static class ReplTurn
             if (pct >= 0.75)
             {
                 ctx.ContextWarningShown = true;
-                await ctx.Emitter.EmitAsync("context_warning", turn: ctx.TurnIndex, payload: new
+                await ctx.Emitter.EmitAsync(EventTypes.ContextWarning, turn: ctx.TurnIndex, payload: new
                 {
                     estimated_tokens = postEst,
                     budget           = ContextTokenBudget,
@@ -590,9 +591,9 @@ internal static class ReplTurn
                 $"[dim]  tokens (est.): {postEst:N0} / {ContextTokenBudget:N0}  rounds: {toolRounds}  tool calls: {toolCallsThisTurn.Count}[/]");
 
         foreach (var (name, args) in toolCallDetails)
-            await ctx.Emitter.EmitAsync("tool_call", turn: ctx.TurnIndex, payload: new { tool_name = name, args });
-        await ctx.Emitter.EmitAsync("assistant_response", turn: ctx.TurnIndex, payload: new { content = responseText });
-        await ctx.Emitter.EmitAsync("turn_end", turn: ctx.TurnIndex, payload: new
+            await ctx.Emitter.EmitAsync(EventTypes.ToolCall, turn: ctx.TurnIndex, payload: new { tool_name = name, args });
+        await ctx.Emitter.EmitAsync(EventTypes.AssistantResponse, turn: ctx.TurnIndex, payload: new { content = responseText });
+        await ctx.Emitter.EmitAsync(EventTypes.TurnEnd, turn: ctx.TurnIndex, payload: new
         {
             elapsed_ms       = (int)(DateTime.UtcNow - turnStart).TotalMilliseconds,
             estimated_tokens = postEst,
@@ -633,7 +634,7 @@ internal static class ReplTurn
         if (TryParsePlan(responseText, out var steps) && steps.Length > 0)
         {
             ctx.CurrentPlan = steps;
-            _ = ctx.Emitter.EmitAsync("plan_captured", turn: ctx.TurnIndex, payload: new { step_count = steps.Length });
+            _ = ctx.Emitter.EmitAsync(EventTypes.PlanCaptured, turn: ctx.TurnIndex, payload: new { step_count = steps.Length });
             if (ctx.JsonMode)
             {
                 ReplJsonBridge.Emit(new { type = "plan", steps });
@@ -693,7 +694,7 @@ internal static class ReplTurn
             var inspectSkip   = activeStep.Tool is not null && toolCallsThisTurn.Count > 0 &&
                                 toolCallsThisTurn.All(t => InspectTools.Contains(t));
             var skipped       = zeroCallSkip || inspectSkip;
-            await ctx.Emitter.EmitAsync("step_complete", turn: ctx.TurnIndex, payload: new
+            await ctx.Emitter.EmitAsync(EventTypes.StepComplete, turn: ctx.TurnIndex, payload: new
             {
                 step       = activeStep.Step,
                 total,
@@ -722,7 +723,7 @@ internal static class ReplTurn
         }
         else
         {
-            await ctx.Emitter.EmitAsync("step_halted", turn: ctx.TurnIndex, payload: new
+            await ctx.Emitter.EmitAsync(EventTypes.StepHalted, turn: ctx.TurnIndex, payload: new
             {
                 step              = activeStep.Step,
                 total,

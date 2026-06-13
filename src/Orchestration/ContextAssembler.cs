@@ -43,6 +43,10 @@ public sealed class ContextAssembler
     // contains more text, but still bounded so 4 verbose turns don't silently cost 80k chars.
     private const int DefaultMaxCharsOwnHistory  = 8_000;
 
+    private const int TaskReminderMinContextChars = 2_000;
+    private const int TaskReminderMinTaskLength   = 50;
+    private const int TaskReminderPreviewChars    = 200;
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -201,6 +205,14 @@ public sealed class ContextAssembler
         // them here so the agent always sees the most recent feedback addressed to it.
         var pendingCorrections = ExtractPendingCorrections(agentName, sharedHistory);
         result.AddRange(pendingCorrections);
+
+        // 5. Repeat task at recency end — exploits primacy+recency sandwich for long contexts.
+        int charsAfterTask = result.Skip(1).Sum(m => m.Text?.Length ?? 0);
+        if (task.Length > TaskReminderMinTaskLength && charsAfterTask > TaskReminderMinContextChars)
+        {
+            var preview = task.Length > TaskReminderPreviewChars ? task[..TaskReminderPreviewChars] + "…" : task;
+            result.Add(new ChatMessage(ChatRole.User, $"[Task Reminder]\n\n{preview}"));
+        }
 
         return result;
     }

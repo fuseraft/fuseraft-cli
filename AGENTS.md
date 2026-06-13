@@ -7,10 +7,10 @@ Guide for AI coding assistants working in this repository. Read this before maki
 ## Build and test
 
 ```bash
+./build.sh            # full build + test + bin output (Linux/macOS)
+.\build.ps1           # full build + test + bin output (Windows)
 dotnet build          # build only
-dotnet test           # build + run all tests (323 tests, ~1s)
-./build.sh            # full build + bin output (Linux/macOS)
-.\build.ps1           # full build + bin output (Windows)
+dotnet test           # build + run all tests (681 tests, ~1s)
 ```
 
 All tests must pass before committing. There are no integration tests that require a live LLM — everything is unit-testable with fakes.
@@ -154,6 +154,23 @@ Validators must not call LLMs or external services. Violations collapse the dete
 
 ---
 
+## Context shaping
+
+Two mechanisms reduce lost-in-the-middle effects for long agent contexts:
+
+**Task Reminder** (`ContextAssembler`): When the assembled context exceeds 2 000 characters and the task string is longer than 50 characters, `ContextAssembler.AssembleAsync` appends a `[Task Reminder]` `ChatRole.User` message (up to 200 chars of the task) at the recency end of the context list. This exploits the primacy+recency sandwich — the task appears both at the top (system prompt) and at the bottom (reminder).
+
+**Context Manifest** (`ToolResultWindowTrimmer` + `AgentOrchestrator`): When `MaxToolResultTokens` is exceeded, `ToolResultWindowTrimmer.ApplyWithManifest` tombstones old results and returns a manifest string listing active vs. superseded tool results. `AgentOrchestrator` appends this manifest as a final `ChatRole.User` message so the agent knows which reads are still in context and which must be re-issued with targeted ranges.
+
+Tombstones now include the evicted tool's name, a key argument label, and up to 300 characters of the original content as a preview:
+```
+[tool result — evicted: read_file(src/Foo.cs). Preview: "using System;…". Re-read with targeted ranges if needed.]
+```
+
+`ToolResultWindowTrimmer.Apply` is still the zero-manifest entry point used by callers that don't need the manifest. Both delegate to the private `ApplyCore`.
+
+---
+
 ## Shared history invariant
 
 The system maintains two views of history:
@@ -236,5 +253,7 @@ When adding a new `FailureAction` or `FailureType` value, update:
 | How does AgentFile loading work? | `src/Cli/OrchestratorBuilder.cs` → `ResolveAgentFiles` |
 | How does compaction work? | `src/Orchestration/ConversationCompactor.cs` |
 | How does change tracking work? | `src/Orchestration/ChangeTracker.cs` |
+| How is agent context assembled? | `src/Orchestration/ContextAssemblyPipeline.cs` (main entry point, stages 1–6); `src/Orchestration/ContextAssembler.cs` (per-agent assembled contexts) |
+| How are tool results trimmed / tombstoned? | `src/Orchestration/ToolResultWindowTrimmer.cs` |
 | Full architecture decisions | `docs/design.md` |
 | Hardening configs against hallucination | `docs/harness-engineering.md` |

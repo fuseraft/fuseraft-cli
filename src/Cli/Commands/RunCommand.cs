@@ -377,7 +377,11 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         // Write a seed checkpoint immediately so this session appears in the sessions list
         // even if the process dies before the first agent turn completes.
         if (isNewSession)
+        {
             await activeStore.SaveAsync(checkpoint, cancellationToken);
+            _ = eventEmitter?.EmitAsync(EventTypes.CheckpointCreated,
+                payload: new { session = checkpoint.SessionId });
+        }
 
         // Set up the context window recorder — appends per-turn snapshots for post-run visualization.
         var ctxSnapshotsPath = fuseraft.Core.FuseraftPaths.ExpandSessionPaths(
@@ -407,6 +411,21 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         // Stamp the session ID on the event emitter, orchestrator, and compactor so every
         // component that uses session-scoped paths (e.g. brief.json) resolves them correctly.
         eventEmitter?.SetSessionId(checkpoint.SessionId);
+        if (activeStore is JsonSessionStore jsStore && eventEmitter is not null)
+            jsStore.OnCorruptionDetected = (sid, error) =>
+                eventEmitter.EmitAsync(EventTypes.EventCorruptionDetected,
+                    payload: new { session = sid, source = "session_checkpoint", error });
+        if (!isNewSession && eventEmitter is not null)
+        {
+            _ = eventEmitter.EmitAsync(EventTypes.SessionRecovered,
+                payload: new
+                {
+                    session      = checkpoint.SessionId,
+                    turns_prior  = checkpoint.Messages.Count,
+                });
+            _ = eventEmitter.EmitAsync(EventTypes.CheckpointLoaded,
+                payload: new { session = checkpoint.SessionId, turns = checkpoint.Messages.Count });
+        }
         orchestrator.SetSessionId(checkpoint.SessionId);
         compactor?.SetSessionId(checkpoint.SessionId);
 
@@ -470,8 +489,15 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             sessionMetrics: sessionMetrics,
             postmortemWriter: snapshotWriter);
 
+        if (!isNewSession && eventEmitter is not null)
+            _ = eventEmitter.EmitAsync(EventTypes.ResumeStarted,
+                payload: new { session = checkpoint.SessionId, turns_prior = checkpoint.Messages.Count });
+
         var result = await runner.RunAsync(task, checkpoint, settings.HumanInTheLoop, settings.ShowTools, cts.Token);
 
+        if (!isNewSession && result.Succeeded && eventEmitter is not null)
+            _ = eventEmitter.EmitAsync(EventTypes.ResumeCompleted,
+                payload: new { session = checkpoint.SessionId });
         devUI?.BroadcastSessionEnd(result.Succeeded, result.ErrorMessage);
 
         // Mark complete on success (distinct from per-turn saves above).
@@ -486,13 +512,13 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         {
             try
             {
-                await (eventEmitter?.EmitAsync("skill_curation_start",
+                await (eventEmitter?.EmitAsync(EventTypes.SkillCurationStart,
                     payload: new { session = checkpoint.SessionId, source = "run" }) ?? Task.CompletedTask);
 
                 var curationResult = await skillCurator.RunAsync(
                     checkpoint, result.Messages, CancellationToken.None, source: "run");
 
-                await (eventEmitter?.EmitAsync("skill_curation_complete",
+                await (eventEmitter?.EmitAsync(EventTypes.SkillCurationComplete,
                     payload: new
                     {
                         session        = checkpoint.SessionId,
@@ -537,8 +563,9 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         }
 
         // Context window visualization — render after the run so all snapshot data is flushed.
-        var ctxVizPath = fuseraft.Core.FuseraftPaths.ExpandSessionId(fuseraft.Core.FuseraftPaths.LocalCtxViz, checkpoint.SessionId);
-        if (await fuseraft.Cli.Display.ContextWindowRenderer.RenderAsync(ctxSnapshotsPath, ctxVizPath, checkpoint.SessionId))
+        var ctxVizPath    = fuseraft.Core.FuseraftPaths.ExpandSessionId(fuseraft.Core.FuseraftPaths.LocalCtxViz, checkpoint.SessionId);
+        var ctxEventsPath = Path.Combine(Path.GetDirectoryName(ctxSnapshotsPath)!, "events.jsonl");
+        if (await fuseraft.Cli.Display.ContextWindowRenderer.RenderAsync(ctxSnapshotsPath, ctxVizPath, checkpoint.SessionId, ctxEventsPath))
             AnsiConsole.MarkupLine($"[dim]Context viz → {Markup.Escape(ctxVizPath)}[/]");
 
         // Summary
@@ -629,7 +656,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
 
             checkpoint.Messages.Add(new AgentMessage
             {
-                AgentName = "System",
+                AgentName = AgentNames.System,
                 Content   = sb.ToString().TrimEnd(),
                 Role      = "user",
                 TurnIndex = 0,
@@ -733,7 +760,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         if (orchestrator is not MagenticOrchestrator)
         {
             checkpoint.ResumeExecutorId = checkpoint.Messages
-                .LastOrDefault(m => m.Role == "assistant" && !string.IsNullOrWhiteSpace(m.AgentName))
+                .LastOrDefault(m => m.Role == MessageRole.Assistant && !string.IsNullOrWhiteSpace(m.AgentName))
                 ?.AgentName
                 ?.ToLowerInvariant();
         }
@@ -779,7 +806,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             {
                 await writer.WriteLineAsync("---");
 
-                if (msg.Role == "user")
+                if (msg.Role == MessageRole.User)
                 {
                     await writer.WriteLineAsync($"## [Human] — Redirect");
                 }

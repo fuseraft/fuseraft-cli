@@ -103,9 +103,9 @@ public static class OrchestratorBuilder
                 config, loggerFactory, configPath, projectSlug,
                 pluginRegistry, infra.EventEmitter);
 
-        bool useMagentic    = config.Selection.Type.Equals("magentic",    StringComparison.OrdinalIgnoreCase);
-        bool useGraph       = config.Selection.Type.Equals("graph",       StringComparison.OrdinalIgnoreCase);
-        bool useAdversarial = config.Selection.Type.Equals("adversarial", StringComparison.OrdinalIgnoreCase);
+        bool useMagentic    = config.Selection.Type.Equals(OrchestratorTypes.Magentic,    StringComparison.OrdinalIgnoreCase);
+        bool useGraph       = config.Selection.Type.Equals(OrchestratorTypes.Graph,       StringComparison.OrdinalIgnoreCase);
+        bool useAdversarial = config.Selection.Type.Equals(OrchestratorTypes.Adversarial, StringComparison.OrdinalIgnoreCase);
 
         var (configAfterStrategy, compactor, skillCurator) = await ValidateAndSelectStrategy(
             config, loggerFactory, chatClientFactory, useMagentic, useGraph, useAdversarial,
@@ -596,7 +596,7 @@ public static class OrchestratorBuilder
         var toolArtifactsDir = sessionId is { Length: > 0 }
             ? FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionToolArtifacts, sessionId, projectSlug)
             : null;
-        var toolArtifactStore = new fuseraft.Infrastructure.ToolResultArtifactStore(toolArtifactsDir);
+        var toolArtifactStore = new fuseraft.Infrastructure.ToolResultArtifactStore(toolArtifactsDir, eventEmitter);
 
         // Session metrics: accumulates per-turn quality data (tokens, tool calls, cache hits,
         // patch failures) and renders a summary table at session end.
@@ -708,7 +708,7 @@ public static class OrchestratorBuilder
         if (eventEmitter is not null)
         {
             governanceKernel.OnEvent(GovernanceEventType.ToolCallBlocked, async evt =>
-                await eventEmitter.EmitAsync("tool_blocked", evt.AgentId,
+                await eventEmitter.EmitAsync(EventTypes.ToolBlocked, evt.AgentId,
                     payload: new { policy = evt.PolicyName, data = evt.Data }));
         }
 
@@ -808,7 +808,7 @@ public static class OrchestratorBuilder
         var goLogger = loggerFactory.CreateLogger<GraphOrchestrator>();
 
         // Eagerly validate the adversarial config when that strategy is selected.
-        if (config.Selection.Type.Equals("adversarial", StringComparison.OrdinalIgnoreCase))
+        if (config.Selection.Type.Equals(OrchestratorTypes.Adversarial, StringComparison.OrdinalIgnoreCase))
         {
             if (config.Selection.Adversarial is null)
                 throw new InvalidOperationException(
@@ -851,14 +851,14 @@ public static class OrchestratorBuilder
 
         // Warn when Selection.Adversarial is configured but Selection.Type is not "adversarial".
         if (config.Selection.Adversarial is not null &&
-            !config.Selection.Type.Equals("adversarial", StringComparison.OrdinalIgnoreCase))
+            !config.Selection.Type.Equals(OrchestratorTypes.Adversarial, StringComparison.OrdinalIgnoreCase))
             loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
                 "Selection.Adversarial is configured but Selection.Type is '{Type}', not 'adversarial'. " +
                 "The Adversarial block will be ignored. Set Selection.Type: adversarial to enable it.",
                 config.Selection.Type);
 
         // Eagerly validate the Magentic manager model and loop-counter config when that strategy is selected.
-        if (config.Selection.Type.Equals("magentic", StringComparison.OrdinalIgnoreCase))
+        if (config.Selection.Type.Equals(OrchestratorTypes.Magentic, StringComparison.OrdinalIgnoreCase))
         {
             if (config.Selection.Magentic?.Model is null)
                 throw new InvalidOperationException(
@@ -904,7 +904,7 @@ public static class OrchestratorBuilder
         // Warn when Selection.Magentic is configured but Selection.Type is not "magentic" —
         // the Magentic block would be silently ignored and the session would run as sequential.
         if (config.Selection.Magentic is not null &&
-            !config.Selection.Type.Equals("magentic", StringComparison.OrdinalIgnoreCase))
+            !config.Selection.Type.Equals(OrchestratorTypes.Magentic, StringComparison.OrdinalIgnoreCase))
             loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
                 "Selection.Magentic is configured but Selection.Type is '{Type}', not 'magentic'. " +
                 "The Magentic block will be ignored. Set Selection.Type: magentic to enable it.",
@@ -913,7 +913,7 @@ public static class OrchestratorBuilder
         // Warn when Selection.Graph is configured but Selection.Type is not "graph" —
         // the Graph block would be silently ignored and the session would run as sequential.
         if (config.Selection.Graph is not null &&
-            !config.Selection.Type.Equals("graph", StringComparison.OrdinalIgnoreCase))
+            !config.Selection.Type.Equals(OrchestratorTypes.Graph, StringComparison.OrdinalIgnoreCase))
             loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
                 "Selection.Graph is configured but Selection.Type is '{Type}', not 'graph'. " +
                 "The Graph block will be ignored. Set Selection.Type: graph to enable it.",
@@ -930,7 +930,7 @@ public static class OrchestratorBuilder
         }
 
         // Validate state machine config at startup when that strategy is selected.
-        if (config.Selection.Type.Equals("statemachine", StringComparison.OrdinalIgnoreCase))
+        if (config.Selection.Type.Equals(OrchestratorTypes.StateMachine, StringComparison.OrdinalIgnoreCase))
         {
             if (config.Selection.StateMachine is null)
                 throw new InvalidOperationException(
@@ -952,7 +952,7 @@ public static class OrchestratorBuilder
         // already declare them. This ensures build failures, compiler errors, failed attempts,
         // and rejected investigation paths survive compaction and are visible to every agent
         // on every turn, regardless of token pressure.
-        if (config.Selection.Type.Equals("statemachine", StringComparison.OrdinalIgnoreCase)
+        if (config.Selection.Type.Equals(OrchestratorTypes.StateMachine, StringComparison.OrdinalIgnoreCase)
             && executionStatePath is not null)
         {
             static string SourceType(string s)
@@ -1140,7 +1140,7 @@ public static class OrchestratorBuilder
                 objectiveManager, snapshotEnricher, readCachePath,
                 executionStatePath: executionStatePath);
 
-            if ((compactionConfig.Mode ?? string.Empty).Equals("intent", StringComparison.OrdinalIgnoreCase)
+            if ((compactionConfig.Mode ?? string.Empty).Equals(CompactionModes.Intent, StringComparison.OrdinalIgnoreCase)
                 && intentLog is null)
             {
                 loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
@@ -1298,6 +1298,7 @@ public static class OrchestratorBuilder
             contextAssembler: contextAssembler,
             graphExpander:    graphExpander,
             knowledgeStore:   knowledgeStore,
+            eventEmitter:     eventEmitter,
             logger:           pipelineLogger);
         if (!string.IsNullOrEmpty(sessionId))
             contextPipeline.SetSessionId(sessionId);

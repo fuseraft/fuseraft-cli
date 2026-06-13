@@ -1,9 +1,12 @@
+using System.Runtime.CompilerServices;
+using System.Text.Json;
 using fuseraft.Cli;
 using fuseraft.Core;
+using fuseraft.Core.Exceptions;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
+using fuseraft.Orchestration;
 using Moq;
-using System.Runtime.CompilerServices;
 
 namespace FuseraftCli.Tests;
 
@@ -46,6 +49,20 @@ public sealed class SessionRunnerTests : IDisposable
         telemetry:      null,
         modelIdByAgent: new Dictionary<string, string>());
 
+    private SessionRunner MakeRunnerWithEmitter(
+        IOrchestrator orchestrator,
+        EventEmitter emitter,
+        int maxIterations = 0) => new(
+        orchestrator,
+        compactor:      null,
+        _store.Object,
+        _approval.Object,
+        eventEmitter:   emitter,
+        telemetry:      null,
+        modelIdByAgent: new Dictionary<string, string>(),
+        maxIterations:  maxIterations,
+        quiet:          true);
+
     private static SessionCheckpoint MakeCheckpoint() => new()
     {
         SessionId  = Guid.NewGuid().ToString("N")[..8],
@@ -85,6 +102,118 @@ public sealed class SessionRunnerTests : IDisposable
     }
 
     // -----------------------------------------------------------------------
+    // Event wiring: emitted EventTypes constants
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task RunAsync_OperationCancelled_EmitsCancellationRequested()
+    {
+        var tmp = Path.GetTempFileName();
+        try
+        {
+            using var emitter = new EventEmitter(tmp);
+            var tcs = new TaskCompletionSource();
+            emitter.RegisterHook(new SignalOnEventHook(EventTypes.CancellationRequested, tcs));
+
+            var runner = MakeRunnerWithEmitter(
+                new ThrowingOrchestrator(new OperationCanceledException()), emitter);
+
+            await runner.RunAsync("task", MakeCheckpoint(), hitlMode: false, showTools: false, CancellationToken.None);
+
+            // CancellationRequested is fire-and-forget; wait for the hook to signal completion.
+            await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        }
+        finally { try { File.Delete(tmp); } catch { } }
+    }
+
+    [Fact]
+    public async Task RunAsync_MaxIterationsHit_EmitsMaxTurnsExceeded()
+    {
+        var tmp = Path.GetTempFileName();
+        try
+        {
+            using var emitter = new EventEmitter(tmp);
+            var runner = MakeRunnerWithEmitter(new EmptyOrchestrator(), emitter, maxIterations: 1);
+
+            var checkpoint = MakeCheckpoint();
+            checkpoint.Messages.Add(new AgentMessage
+            {
+                AgentName = "Agent",
+                Content   = "done",
+                Role      = "assistant",
+                TurnIndex = 0,
+            });
+
+            await runner.RunAsync("task", checkpoint, hitlMode: false, showTools: false, CancellationToken.None);
+
+            var events = await ReadEventTypesAsync(tmp);
+            Assert.Contains(EventTypes.MaxTurnsExceeded, events);
+        }
+        finally { try { File.Delete(tmp); } catch { } }
+    }
+
+    [Fact]
+    public async Task RunAsync_AgentBlocked_WithRedirect_EmitsHitlResolved()
+    {
+        _approval
+            .SetupSequence(a => a.PromptBlockerResolutionAsync(It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync("proceed")
+            .ReturnsAsync((string?)null);
+
+        var tmp = Path.GetTempFileName();
+        try
+        {
+            using var emitter = new EventEmitter(tmp);
+            var runner = MakeRunnerWithEmitter(
+                new ThrowingOrchestrator(new AgentBlockedException("TestAgent", "stuck")), emitter);
+
+            await runner.RunAsync("task", MakeCheckpoint(), hitlMode: false, showTools: false, CancellationToken.None);
+
+            var events = await ReadEventTypesAsync(tmp);
+            Assert.Contains(EventTypes.HitlResolved, events);
+        }
+        finally { try { File.Delete(tmp); } catch { } }
+    }
+
+    [Fact]
+    public async Task RunAsync_ValidatorStuck_WithRedirect_EmitsHitlResolved()
+    {
+        _approval
+            .SetupSequence(a => a.PromptValidatorStuckAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
+            .ReturnsAsync("try again")
+            .ReturnsAsync((string?)null);
+
+        var tmp = Path.GetTempFileName();
+        try
+        {
+            using var emitter = new EventEmitter(tmp);
+            var runner = MakeRunnerWithEmitter(
+                new ThrowingOrchestrator(new ValidatorStuckException("TestAgent", "RequireBrief", 3, "no brief")), emitter);
+
+            await runner.RunAsync("task", MakeCheckpoint(), hitlMode: false, showTools: false, CancellationToken.None);
+
+            var events = await ReadEventTypesAsync(tmp);
+            Assert.Contains(EventTypes.HitlResolved, events);
+        }
+        finally { try { File.Delete(tmp); } catch { } }
+    }
+
+    private static async Task<List<string>> ReadEventTypesAsync(string path)
+    {
+        if (!File.Exists(path)) return [];
+        var result = new List<string>();
+        foreach (var line in await File.ReadAllLinesAsync(path))
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            using var doc = JsonDocument.Parse(line);
+            if (doc.RootElement.TryGetProperty("event_type", out var et))
+                result.Add(et.GetString() ?? "");
+        }
+        return result;
+    }
+
+    // -----------------------------------------------------------------------
     // Stub orchestrator that throws during StreamAsync
     // -----------------------------------------------------------------------
 
@@ -114,5 +243,40 @@ public sealed class SessionRunnerTests : IDisposable
         }
 
         public void SetSessionId(string sessionId) { }
+    }
+
+    // Orchestrator that completes immediately without yielding any messages.
+    private sealed class EmptyOrchestrator : IOrchestrator
+    {
+        public event Action<string>?                  AgentStarting    { add { } remove { } }
+        public event Action<string, string, string?>? ToolCalling      { add { } remove { } }
+        public event Action<string, int, int>?        TokenBudgetWarning { add { } remove { } }
+
+        public Task<OrchestrationResult> RunAsync(
+            string task,
+            IReadOnlyList<AgentMessage>? priorHistory = null,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(new OrchestrationResult { SessionId = "test", Succeeded = true });
+
+        public async IAsyncEnumerable<AgentMessage> StreamAsync(
+            string task,
+            IReadOnlyList<AgentMessage>? priorHistory = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
+
+        public void SetSessionId(string sessionId) { }
+    }
+
+    // Signals a TaskCompletionSource when a specific event type is observed via a hook.
+    private sealed class SignalOnEventHook(string watchFor, TaskCompletionSource tcs) : IOrchestrationHook
+    {
+        public Task OnEventAsync(OrchestrationEvent evt, CancellationToken cancellationToken = default)
+        {
+            if (evt.EventType == watchFor) tcs.TrySetResult();
+            return Task.CompletedTask;
+        }
     }
 }
