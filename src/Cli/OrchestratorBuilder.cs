@@ -1140,7 +1140,7 @@ public static class OrchestratorBuilder
                 objectiveManager, snapshotEnricher, readCachePath,
                 executionStatePath: executionStatePath);
 
-            if ((compactionConfig.Mode ?? string.Empty).Equals("intent", StringComparison.OrdinalIgnoreCase)
+            if ((compactionConfig.Mode ?? string.Empty).Equals(CompactionModes.Intent, StringComparison.OrdinalIgnoreCase)
                 && intentLog is null)
             {
                 loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
