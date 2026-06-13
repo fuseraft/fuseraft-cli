@@ -465,7 +465,33 @@ public sealed class AgentFactory(
                                 EnforceContextBudget(config.Name, ctx, maxContextChars, toolSchemaChars);
                             if (maxPayloadBytes > 0)
                                 EnforcePayloadLimit(config.Name, ctx, toolSchemaChars, maxPayloadBytes);
-                            return await inner.GetResponseAsync(ctx, merged, ct);
+
+                            if (emitter is not null)
+                                _ = emitter.EmitAsync(EventTypes.ModelCall,
+                                    agent: config.Name, turn: null,
+                                    payload: new
+                                    {
+                                        model         = config.Model.ModelId,
+                                        attempt,
+                                        message_count = baseMsg.Count,
+                                        call_seq      = callSeq,
+                                    });
+
+                            var response = await inner.GetResponseAsync(ctx, merged, ct);
+
+                            if (emitter is not null)
+                                _ = emitter.EmitAsync(EventTypes.ModelResponse,
+                                    agent: config.Name, turn: null,
+                                    payload: new
+                                    {
+                                        model         = config.Model.ModelId,
+                                        finish_reason = response.FinishReason?.Value,
+                                        input_tokens  = response.Usage?.InputTokenCount,
+                                        output_tokens = response.Usage?.OutputTokenCount,
+                                        call_seq      = callSeq,
+                                    });
+
+                            return response;
                         }
                         catch (Exception ex) when (attempt < AdaptiveContextTrimMaxRetries
                                                    && IsContextLimitException(ex))
@@ -474,6 +500,34 @@ public sealed class AgentFactory(
                                 "[context-trim] {Agent} stage {Stage}/{Max}: {Error} — reducing tool results and retrying",
                                 config.Name, attempt + 1, AdaptiveContextTrimMaxRetries,
                                 ex.Message[..Math.Min(ex.Message.Length, 120)].Replace('\n', ' '));
+                        }
+                        catch (TimeoutException tex)
+                        {
+                            if (emitter is not null)
+                                _ = emitter.EmitAsync(EventTypes.ModelTimeout,
+                                    agent: config.Name, turn: null,
+                                    payload: new
+                                    {
+                                        model    = config.Model.ModelId,
+                                        attempt,
+                                        call_seq = callSeq,
+                                        message  = tex.Message[..Math.Min(tex.Message.Length, 200)],
+                                    });
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            if (emitter is not null)
+                                _ = emitter.EmitAsync(EventTypes.ModelError,
+                                    agent: config.Name, turn: null,
+                                    payload: new
+                                    {
+                                        model    = config.Model.ModelId,
+                                        attempt,
+                                        call_seq = callSeq,
+                                        error    = ex.Message[..Math.Min(ex.Message.Length, 200)],
+                                    });
+                            throw;
                         }
                     }
                 },
@@ -500,6 +554,11 @@ public sealed class AgentFactory(
                     if (maxContextChars > 0 || maxPayloadBytes > 0)
                         messages = ProactivelyTrimIfNeeded(
                             config.Name, messages, maxContextChars, maxPayloadBytes, toolSchemaChars, _logger);
+
+                    if (emitter is not null)
+                        _ = emitter.EmitAsync(EventTypes.ModelCall,
+                            agent: config.Name, turn: null,
+                            payload: new { model = config.Model.ModelId, streaming = true });
 
                     return inner.GetStreamingResponseAsync(messages, merged, ct);
                 })

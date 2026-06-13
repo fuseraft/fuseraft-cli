@@ -199,17 +199,17 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             toolsByCategory["Session"] = PluginRegistry.GetFunctionsFromObject(replSessionPlugin).ToList();
         }
 
+        using var emitter = new EventEmitter(eventsPath);
+        emitter.SetSessionId(sessionId);
+
         // Wrap every tool category with the artifact offload filter so oversized results are
         // stored to disk instead of accumulating verbatim in the conversation history.
         var toolArtifactsDir  = Path.Combine(cwd, FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalSessionToolArtifacts, sessionId));
-        var toolArtifactStore = new ToolResultArtifactStore(toolArtifactsDir);
+        var toolArtifactStore = new ToolResultArtifactStore(toolArtifactsDir, emitter);
         foreach (var key in toolsByCategory.Keys.ToList())
             toolsByCategory[key] = toolsByCategory[key]
                 .Select(f => (AIFunction)new ToolResultOffloadFilter(f, toolArtifactStore))
                 .ToList();
-
-        using var emitter = new EventEmitter(eventsPath);
-        emitter.SetSessionId(sessionId);
 
         if (explorerTools is not null)
             subAgent = new SubAgentPlugin(factory.Create(modelConfig), explorerTools,

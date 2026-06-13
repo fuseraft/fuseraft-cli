@@ -649,6 +649,11 @@ public sealed class KeywordSelectionStrategy : IAgentSelector
         // Inject a loop-warning if the same agent has been selected consecutively too many times.
         InjectLoopWarningIfNeeded(history, defaultAgent);
 
+        if (_eventEmitter is not null)
+            _ = _eventEmitter.EmitAsync(EventTypes.SelectionFallback,
+                agent: defaultAgent.Name ?? _defaultAgentName,
+                payload: new { default_agent = defaultAgent.Name, turns_scanned = scanned, strategy = "keyword" });
+
         return defaultAgent;
     }
 
