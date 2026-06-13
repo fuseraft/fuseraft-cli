@@ -4,6 +4,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
+using fuseraft.Orchestration;
 
 namespace fuseraft.Orchestration.Strategies;
 
@@ -172,7 +173,7 @@ public sealed class StructuredSelectionStrategy : IAgentSelector
             _parseFailure = null;
             throw new Core.Exceptions.ValidatorStuckException(
                 agentName:           agentKey,
-                validatorName:       "StructuredRouting",
+                validatorName:       ValidatorNames.StructuredRouting,
                 consecutiveFailures: newCount,
                 lastValidatorError:  isParseFail
                     ? "Agent did not return valid JSON."
