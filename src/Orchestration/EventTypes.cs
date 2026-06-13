@@ -47,7 +47,7 @@ public static class EventTypes
     public const string InnerCallContext        = "inner_call_context";
     public const string ContextBudgetWarn       = "context_budget_warn";
     public const string ContextBudgetCutover    = "context_budget_cutover";
-    public const string ContextCapWarning       = "context_cap_warning";
+    public const string ContextWindowWarn       = "context_window_warn";
     public const string ContextExceededRecovery = "context_exceeded_recovery";
     public const string ContextWarning          = "context_warning";
 
