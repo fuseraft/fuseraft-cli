@@ -317,7 +317,7 @@ public sealed class GraphOrchestrator(
         using var phaseCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("session_start",
+            await eventEmitter.EmitAsync(EventTypes.SessionStart,
                 payload: new { task, start_node = startNodeId, resume = priorHistory is { Count: > 0 } });
 
         var phaseTask = Task.Run(
@@ -1033,7 +1033,7 @@ public sealed class GraphOrchestrator(
         if (eventEmitter is not null)
         {
             eventEmitter.SetTurn(ctx.TurnIndex);
-            await eventEmitter.EmitAsync("turn_start", agent: agentName, turn: ctx.TurnIndex);
+            await eventEmitter.EmitAsync(EventTypes.TurnStart, agent: agentName, turn: ctx.TurnIndex);
         }
 
         AgentResponse response;
@@ -1395,7 +1395,7 @@ public sealed class GraphOrchestrator(
             throw new BudgetExceededException(ctx.CumulativeTokens, limit);
 
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("turn_end",
+            await eventEmitter.EmitAsync(EventTypes.TurnEnd,
                 agent: agentName,
                 turn:  agentMsg.TurnIndex,
                 payload: new
@@ -1417,7 +1417,7 @@ public sealed class GraphOrchestrator(
                 var truncated = reasoningText.Length > MaxReasoningChars
                     ? reasoningText[..MaxReasoningChars] + $"\n[TRUNCATED — {reasoningText.Length:N0} chars total]"
                     : reasoningText;
-                await eventEmitter.EmitAsync("reasoning",
+                await eventEmitter.EmitAsync(EventTypes.Reasoning,
                     agent:   agentName,
                     turn:    agentMsg.TurnIndex,
                     payload: new { text = truncated }).ConfigureAwait(false);
@@ -1468,7 +1468,7 @@ public sealed class GraphOrchestrator(
         EventEmitter emitter,
         fuseraft.Core.Models.ContextAssemblyMetrics metrics,
         int turn) =>
-        emitter.EmitAsync("context_assembly",
+        emitter.EmitAsync(EventTypes.ContextAssembly,
             agent: metrics.AgentName,
             turn:  turn,
             payload: new
@@ -1622,7 +1622,7 @@ public sealed class GraphOrchestrator(
         CancellationToken ct)
     {
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("validation_fail",
+            await eventEmitter.EmitAsync(EventTypes.ValidationFail,
                 agent:   agentName,
                 payload: new
                 {
@@ -1744,7 +1744,7 @@ public sealed class GraphOrchestrator(
             }
 
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("turn_start", agent: agentName, turn: ctx.TurnIndex);
+                await eventEmitter.EmitAsync(EventTypes.TurnStart, agent: agentName, turn: ctx.TurnIndex);
 
             AgentResponse response;
             try

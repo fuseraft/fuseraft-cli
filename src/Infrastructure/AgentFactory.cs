@@ -445,7 +445,7 @@ public sealed class AgentFactory(
                     var callSeq = Interlocked.Increment(ref innerCallSeq);
                     InnerCallId.Current.Value = callSeq;
                     if (emitter is not null)
-                        _ = emitter.EmitAsync("inner_call_context",
+                        _ = emitter.EmitAsync(EventTypes.InnerCallContext,
                             agent: config.Name, turn: null,
                             payload: BuildInnerCallContextPayload(
                                 baseMsg, toolSchemaChars, callSeq));

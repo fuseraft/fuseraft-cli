@@ -708,7 +708,7 @@ public static class OrchestratorBuilder
         if (eventEmitter is not null)
         {
             governanceKernel.OnEvent(GovernanceEventType.ToolCallBlocked, async evt =>
-                await eventEmitter.EmitAsync("tool_blocked", evt.AgentId,
+                await eventEmitter.EmitAsync(EventTypes.ToolBlocked, evt.AgentId,
                     payload: new { policy = evt.PolicyName, data = evt.Data }));
         }
 

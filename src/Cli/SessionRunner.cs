@@ -169,7 +169,7 @@ public sealed class SessionRunner(
             catch (TimeoutException tex)
             {
                 if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("hitl_escalation",
+                    await eventEmitter.EmitAsync(EventTypes.HitlEscalation,
                         payload: new { reason = "streaming_timeout", message = tex.Message });
 
                 AnsiConsole.MarkupLine(
@@ -339,7 +339,7 @@ public sealed class SessionRunner(
         CancellationToken cancellationToken)
     {
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("hitl_escalation",
+            await eventEmitter.EmitAsync(EventTypes.HitlEscalation,
                 agent: stuck.AgentName,
                 payload: new { validator = stuck.ValidatorName, consecutive_failures = stuck.ConsecutiveFailures, last_error = stuck.LastValidatorError });
 
@@ -384,7 +384,7 @@ public sealed class SessionRunner(
         }
 
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("session_error",
+            await eventEmitter.EmitAsync(EventTypes.SessionError,
                 payload: new { reason = "circuit_breaker_open", retry_after_seconds = cb.RetryAfter.TotalSeconds });
         AnsiConsole.MarkupLine(
             $"\n[red]✗ Circuit breaker open:[/] Too many consecutive LLM failures. " +
@@ -400,7 +400,7 @@ public sealed class SessionRunner(
     private async Task<HandlerOutcome> HandleBudgetExceededAsync(BudgetExceededException budget)
     {
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("session_error",
+            await eventEmitter.EmitAsync(EventTypes.SessionError,
                 payload: new { reason = "token_budget_exceeded", actual_tokens = budget.ActualTokens, limit_tokens = budget.LimitTokens });
         AnsiConsole.MarkupLine(
             $"\n[red]✗ Error:[/] Session used [bold]{budget.ActualTokens:N0}[/] tokens, " +
@@ -416,7 +416,7 @@ public sealed class SessionRunner(
     private async Task<HandlerOutcome> HandleRateLimitAsync(Exception ex, SessionCheckpoint checkpoint)
     {
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("session_error",
+            await eventEmitter.EmitAsync(EventTypes.SessionError,
                 payload: new { reason = "rate_limited_429", message = ex.Message });
         AnsiConsole.MarkupLine(
             $"\n[red]✗ API rate limit / quota exceeded (HTTP 429)[/]\n" +
@@ -455,7 +455,7 @@ public sealed class SessionRunner(
         }
 
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("session_error",
+            await eventEmitter.EmitAsync(EventTypes.SessionError,
                 payload: new { reason = "context_exceeded_no_compactor", message = TrimTo(ex.Message, 200) });
         AnsiConsole.MarkupLine(
             $"\n[red]✗ Context window exceeded[/] — no compactor configured.\n" +
@@ -477,7 +477,7 @@ public sealed class SessionRunner(
         CancellationToken cancellationToken)
     {
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("hitl_escalation",
+            await eventEmitter.EmitAsync(EventTypes.HitlEscalation,
                 payload: new { reason = "provider_400", message = TrimTo(ex.Message, 200) });
         AnsiConsole.MarkupLine(
             $"\n[yellow]⚠ Provider returned HTTP 400 (bad request).[/]\n" +

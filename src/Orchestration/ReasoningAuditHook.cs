@@ -21,7 +21,7 @@ public sealed class ReasoningAuditHook(AuditLogger auditLogger) : IOrchestration
 {
     public Task OnEventAsync(OrchestrationEvent evt, CancellationToken cancellationToken = default)
     {
-        if (!string.Equals(evt.EventType, "reasoning", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(evt.EventType, EventTypes.Reasoning, StringComparison.OrdinalIgnoreCase))
             return Task.CompletedTask;
 
         var text = ExtractText(evt.Payload);

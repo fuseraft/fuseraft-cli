@@ -699,7 +699,7 @@ public sealed class ConversationCompactor(
                 {
                     using var doc  = JsonDocument.Parse(line);
                     var root = doc.RootElement;
-                    if (!root.TryGetProperty("event_type", out var et) || et.GetString() != "reasoning") continue;
+                    if (!root.TryGetProperty("event_type", out var et) || et.GetString() != EventTypes.Reasoning) continue;
                     if (!root.TryGetProperty("turn", out var turnEl) || !turnEl.TryGetInt32(out var turn)) continue;
                     if (turn < firstTurn || turn > lastTurn) continue;
                     var text  = root.TryGetProperty("payload", out var payload)
@@ -881,7 +881,7 @@ public sealed class ConversationCompactor(
                     using var doc  = JsonDocument.Parse(line);
                     var root = doc.RootElement;
                     if (!root.TryGetProperty("session", out var ses) || ses.GetString() != _sessionId) continue;
-                    if (!root.TryGetProperty("event_type", out var et) || et.GetString() != "tool_call") continue;
+                    if (!root.TryGetProperty("event_type", out var et) || et.GetString() != EventTypes.ToolCall) continue;
                     if (!root.TryGetProperty("payload", out var payload)) continue;
                     if (!payload.TryGetProperty("tool", out var toolEl)) continue;
 

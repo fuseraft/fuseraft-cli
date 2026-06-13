@@ -643,7 +643,7 @@ public sealed class ChangeTracker
                     : resultText;
             }
 
-            _ = _eventEmitter.EmitAsync("tool_call",
+            _ = _eventEmitter.EmitAsync(EventTypes.ToolCall,
                 agent:   agentName,
                 payload: new { tool = name, arg, ok = succeeded, result_chars = resultText.Length, output = shellOutput, error = toolError });
         }

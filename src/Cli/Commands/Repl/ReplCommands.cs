@@ -7,6 +7,7 @@ using fuseraft.Cli.Display;
 using fuseraft.Core;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
+using fuseraft.Orchestration;
 
 namespace fuseraft.Cli.Commands.Repl;
 
@@ -586,7 +587,7 @@ internal static class ReplCommands
                         turnSet.Add(tEl.GetInt32());
                 }
 
-                if (et == "tool_call" &&
+                if (et == EventTypes.ToolCall &&
                     root.TryGetProperty("payload", out var pl) &&
                     pl.TryGetProperty("tool_name", out var tn))
                 {

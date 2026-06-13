@@ -422,7 +422,7 @@ public sealed class AgentOrchestrator(
                         eventEmitter?.SetTurn(branchMsg.TurnIndex);
 
                         if (eventEmitter is not null)
-                            await eventEmitter.EmitAsync("turn_end",
+                            await eventEmitter.EmitAsync(EventTypes.TurnEnd,
                                 agent:   branchMsg.AgentName,
                                 turn:    branchMsg.TurnIndex,
                                 payload: new
@@ -633,7 +633,7 @@ public sealed class AgentOrchestrator(
         fuseraft.Core.Models.ContextAssemblyMetrics metrics,
         int turn,
         int toolCount = 0) =>
-        emitter.EmitAsync("context_assembly",
+        emitter.EmitAsync(EventTypes.ContextAssembly,
             agent: metrics.AgentName,
             turn:  turn,
             payload: new
@@ -850,7 +850,7 @@ public sealed class AgentOrchestrator(
     {
         if (eventEmitter is not null)
         {
-            await eventEmitter.EmitAsync("turn_end",
+            await eventEmitter.EmitAsync(EventTypes.TurnEnd,
                 agent: msg.AgentName,
                 turn:  msg.TurnIndex,
                 payload: new
@@ -871,7 +871,7 @@ public sealed class AgentOrchestrator(
                 var truncated = reasoningText.Length > MaxReasoningChars
                     ? reasoningText[..MaxReasoningChars] + $"\n[TRUNCATED — {reasoningText.Length:N0} chars total]"
                     : reasoningText;
-                await eventEmitter.EmitAsync("reasoning",
+                await eventEmitter.EmitAsync(EventTypes.Reasoning,
                     agent:   msg.AgentName,
                     turn:    msg.TurnIndex,
                     payload: new { text = truncated });

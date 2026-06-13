@@ -57,7 +57,7 @@ public sealed class ValidationDiagnosticHook : IOrchestrationHook
 
     public async Task OnEventAsync(OrchestrationEvent evt, CancellationToken cancellationToken = default)
     {
-        if (!string.Equals(evt.EventType, "validation_fail", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(evt.EventType, EventTypes.ValidationFail, StringComparison.OrdinalIgnoreCase))
             return;
 
         // Extract the consecutive count from the anonymous payload.

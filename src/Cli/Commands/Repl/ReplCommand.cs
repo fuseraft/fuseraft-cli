@@ -215,7 +215,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             subAgent = new SubAgentPlugin(factory.Create(modelConfig), explorerTools,
                 eventEmitter:    emitter,
                 parentAgentName: "repl");
-        await emitter.EmitAsync("session_start", payload: new
+        await emitter.EmitAsync(EventTypes.SessionStart, payload: new
         {
             model         = modelId,
             cwd,
