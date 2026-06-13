@@ -103,13 +103,14 @@ public static class OrchestratorBuilder
                 config, loggerFactory, configPath, projectSlug,
                 pluginRegistry, infra.EventEmitter);
 
-        bool useMagentic    = config.Selection.Type.Equals(OrchestratorTypes.Magentic,    StringComparison.OrdinalIgnoreCase);
-        bool useGraph       = config.Selection.Type.Equals(OrchestratorTypes.Graph,       StringComparison.OrdinalIgnoreCase);
-        bool useAdversarial = config.Selection.Type.Equals(OrchestratorTypes.Adversarial, StringComparison.OrdinalIgnoreCase);
-        bool useMapReduce   = config.Selection.Type.Equals(OrchestratorTypes.MapReduce,   StringComparison.OrdinalIgnoreCase);
+        bool useMagentic      = config.Selection.Type.Equals(OrchestratorTypes.Magentic,      StringComparison.OrdinalIgnoreCase);
+        bool useGraph         = config.Selection.Type.Equals(OrchestratorTypes.Graph,         StringComparison.OrdinalIgnoreCase);
+        bool useAdversarial   = config.Selection.Type.Equals(OrchestratorTypes.Adversarial,   StringComparison.OrdinalIgnoreCase);
+        bool useMapReduce     = config.Selection.Type.Equals(OrchestratorTypes.MapReduce,     StringComparison.OrdinalIgnoreCase);
+        bool useScatterGather = config.Selection.Type.Equals(OrchestratorTypes.ScatterGather, StringComparison.OrdinalIgnoreCase);
 
         var (configAfterStrategy, compactor, skillCurator) = await ValidateAndSelectStrategy(
-            config, loggerFactory, chatClientFactory, useMagentic, useGraph, useAdversarial, useMapReduce,
+            config, loggerFactory, chatClientFactory, useMagentic, useGraph, useAdversarial, useMapReduce, useScatterGather,
             infra.KnowledgeLayer, infra.ObjectiveManager, infra.KnowledgeSandbox, projectSlug,
             infra.IntentLog, infra.EvidenceStore, infra.ExecutionStatePath, infra.InvestigationLogPath,
             sessionId, readCachePath: infra.ReadCachePath, cancellationToken);
@@ -119,7 +120,7 @@ public static class OrchestratorBuilder
 
         var orchestrator = CreateOrchestrator(
             config, loggerFactory, chatClientFactory, pluginRegistry,
-            governanceKernel, humanApprovalService, hitlMode, useMagentic, useGraph, useAdversarial, useMapReduce,
+            governanceKernel, humanApprovalService, hitlMode, useMagentic, useGraph, useAdversarial, useMapReduce, useScatterGather,
             infra.ChangeTracker, infra.EventEmitter, infra.KnowledgeLayer, infra.ObjectiveManager,
             infra.KnowledgeSandbox, projectSlug, sessionId,
             infra.ExecutionStatePath, infra.InvestigationLogPath,
@@ -795,6 +796,7 @@ public static class OrchestratorBuilder
         bool useGraph,
         bool useAdversarial,
         bool useMapReduce,
+        bool useScatterGather,
         fuseraft.Infrastructure.Knowledge.KnowledgeLayer knowledgeLayer,
         fuseraft.Infrastructure.Objectives.ObjectiveManager objectiveManager,
         string knowledgeSandbox,
@@ -1046,6 +1048,43 @@ public static class OrchestratorBuilder
                 "The MapReduce block will be ignored. Set Selection.Type: mapreduce to enable it.",
                 config.Selection.Type);
 
+        if (useScatterGather)
+        {
+            if (config.Selection.ScatterGather is null)
+                throw new InvalidOperationException(
+                    "Selection.Type 'scattergather' requires a 'Selection.ScatterGather' configuration block.");
+
+            var sg        = config.Selection.ScatterGather;
+            var sgAgents  = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            if (sg.Participants.Count == 0)
+                throw new InvalidOperationException("Selection.ScatterGather.Participants must contain at least one agent name.");
+
+            foreach (var p in sg.Participants)
+            {
+                if (string.IsNullOrWhiteSpace(p) || !sgAgents.Contains(p))
+                    throw new InvalidOperationException(
+                        $"Selection.ScatterGather.Participants contains '{p}' which is not defined in 'Orchestration.Agents'.");
+            }
+
+            if (string.IsNullOrWhiteSpace(sg.Synthesizer))
+                throw new InvalidOperationException("Selection.ScatterGather.Synthesizer must be a non-empty agent name.");
+            if (!sgAgents.Contains(sg.Synthesizer))
+                throw new InvalidOperationException(
+                    $"Selection.ScatterGather.Synthesizer '{sg.Synthesizer}' is not defined in 'Orchestration.Agents'.");
+            if (sg.MaxConcurrency < 0)
+                throw new InvalidOperationException(
+                    $"Selection.ScatterGather.MaxConcurrency must be >= 0 (got {sg.MaxConcurrency}). Use 0 for unlimited.");
+        }
+
+        // Warn when Selection.ScatterGather is configured but Selection.Type is not "scattergather".
+        if (config.Selection.ScatterGather is not null &&
+            !config.Selection.Type.Equals(OrchestratorTypes.ScatterGather, StringComparison.OrdinalIgnoreCase))
+            loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
+                "Selection.ScatterGather is configured but Selection.Type is '{Type}', not 'scattergather'. " +
+                "The ScatterGather block will be ignored. Set Selection.Type: scattergather to enable it.",
+                config.Selection.Type);
+
         // Validate graph config at startup when the graph strategy is selected.
         if (useGraph)
         {
@@ -1088,7 +1127,7 @@ public static class OrchestratorBuilder
 
                     if (!subSpec.IsValid)
                         throw new InvalidOperationException(
-                            $"SubGraph '{node.SubGraphId}' must set exactly one of 'Graph' or 'MapReduce', not both and not neither.");
+                            $"SubGraph '{node.SubGraphId}' must set exactly one of 'Graph', 'MapReduce', or 'ScatterGather'.");
 
                     if (subSpec.IsMapReduce)
                     {
@@ -1111,6 +1150,25 @@ public static class OrchestratorBuilder
                         if (string.IsNullOrWhiteSpace(mr.ItemsJsonPath))
                             throw new InvalidOperationException(
                                 $"SubGraph '{node.SubGraphId}' MapReduce.ItemsJsonPath must be a non-empty string.");
+                    }
+                    else if (subSpec.IsScatterGather)
+                    {
+                        var sg = subSpec.ScatterGather!;
+                        if (sg.Participants.Count == 0)
+                            throw new InvalidOperationException(
+                                $"SubGraph '{node.SubGraphId}' ScatterGather.Participants must contain at least one agent name.");
+                        foreach (var p in sg.Participants)
+                        {
+                            if (string.IsNullOrWhiteSpace(p) || !agentNames.Contains(p))
+                                throw new InvalidOperationException(
+                                    $"SubGraph '{node.SubGraphId}' ScatterGather.Participants contains '{p}' which is not defined in 'Orchestration.Agents'.");
+                        }
+                        if (string.IsNullOrWhiteSpace(sg.Synthesizer) || !agentNames.Contains(sg.Synthesizer))
+                            throw new InvalidOperationException(
+                                $"SubGraph '{node.SubGraphId}' ScatterGather.Synthesizer '{sg.Synthesizer}' is not defined in 'Orchestration.Agents'.");
+                        if (sg.MaxConcurrency < 0)
+                            throw new InvalidOperationException(
+                                $"SubGraph '{node.SubGraphId}' ScatterGather.MaxConcurrency must be >= 0 (got {sg.MaxConcurrency}).");
                     }
                 }
                 else
@@ -1213,7 +1271,7 @@ public static class OrchestratorBuilder
             var summaryModel = compactionConfig.Model ?? config.Agents[0].Model;
             // Magentic, adversarial, and map-reduce sessions have no brief.json or change log,
             // so the workflow-specific resumption note is suppressed to avoid wasting tokens.
-            bool suppressResumptionNote = useMagentic || useAdversarial || useMapReduce;
+            bool suppressResumptionNote = useMagentic || useAdversarial || useMapReduce || useScatterGather;
             var resumptionNote = suppressResumptionNote ? null : ConversationCompactor.WorkflowResumptionNote;
             var changeLogPath  = suppressResumptionNote ? null
                 : (config.Validation?.ChangeLogPath ?? config.ChangeTracking?.Path);
@@ -1328,6 +1386,7 @@ public static class OrchestratorBuilder
         bool useGraph,
         bool useAdversarial,
         bool useMapReduce,
+        bool useScatterGather,
         ChangeTracker? changeTracker,
         EventEmitter? eventEmitter,
         fuseraft.Infrastructure.Knowledge.KnowledgeLayer knowledgeLayer,
@@ -1434,6 +1493,13 @@ public static class OrchestratorBuilder
             var mrLogger = loggerFactory.CreateLogger<MapReduceOrchestrator>();
             orchestrator  = new MapReduceOrchestrator(
                 config, agentFactory, mrLogger,
+                changeTracker, eventEmitter, governanceKernel);
+        }
+        else if (useScatterGather)
+        {
+            var sgLogger = loggerFactory.CreateLogger<ScatterGatherOrchestrator>();
+            orchestrator  = new ScatterGatherOrchestrator(
+                config, agentFactory, sgLogger,
                 changeTracker, eventEmitter, governanceKernel);
         }
         else if (useMagentic)

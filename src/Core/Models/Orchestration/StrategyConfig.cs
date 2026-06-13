@@ -103,6 +103,18 @@ public record SelectionStrategyConfig
     /// </para>
     /// </summary>
     public MapReduceConfig? MapReduce { get; init; }
+
+    /// <summary>
+    /// Scatter-gather configuration for the <c>scattergather</c> selection type.
+    /// Required when <see cref="Type"/> is <c>"scattergather"</c>.
+    ///
+    /// <para>
+    /// All <see cref="ScatterGatherConfig.Participants"/> receive the same task in parallel
+    /// (using isolated history snapshots). Their independent outputs are passed to the
+    /// <see cref="ScatterGatherConfig.Synthesizer"/> agent, which produces the final answer.
+    /// </para>
+    /// </summary>
+    public ScatterGatherConfig? ScatterGather { get; init; }
 }
 
 /// <summary>
