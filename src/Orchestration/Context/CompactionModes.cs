@@ -1,4 +1,4 @@
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Context;
 
 /// <summary>
 /// Canonical string constants for the conversation compaction modes used in config.

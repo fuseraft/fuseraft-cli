@@ -2,7 +2,7 @@ using System.Text;
 using Microsoft.Extensions.AI;
 using fuseraft.Core.Models;
 
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Knowledge;
 
 /// <summary>
 /// Extracts factual <see cref="Observation"/> records from agent message history.

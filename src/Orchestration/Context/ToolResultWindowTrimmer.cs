@@ -2,7 +2,7 @@ using System.Text;
 using Microsoft.Extensions.AI;
 using fuseraft.Core.Models;
 
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Context;
 
 /// <summary>
 /// Enforces a sliding window over tool-result messages in a context list.

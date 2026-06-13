@@ -1,7 +1,7 @@
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Knowledge;
 
 /// <summary>
 /// Expands a set of seed symbol names into related symbols by traversing one hop

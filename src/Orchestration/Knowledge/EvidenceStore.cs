@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 using fuseraft.Core.Models;
 using Microsoft.Extensions.Logging;
 
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Knowledge;
 
 /// <summary>
 /// Manages the structured evidence graph: a typed, queryable log of every observable

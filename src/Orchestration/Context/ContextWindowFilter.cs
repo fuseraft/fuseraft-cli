@@ -1,7 +1,7 @@
 using Microsoft.Extensions.AI;
 using fuseraft.Core.Models;
 
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Context;
 
 /// <summary>
 /// Applies a <see cref="ContextWindowConfig"/> to a conversation history, returning a

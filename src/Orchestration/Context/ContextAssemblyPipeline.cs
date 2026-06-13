@@ -7,7 +7,7 @@ using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Context;
 
 /// <summary>
 /// Single entry point for all agent context construction.

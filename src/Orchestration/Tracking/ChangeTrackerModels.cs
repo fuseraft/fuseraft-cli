@@ -1,4 +1,4 @@
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Tracking;
 
 /// <summary>In-memory snapshot of one completed function invocation.</summary>
 public sealed record InvocationRecord(
