@@ -67,7 +67,7 @@ public sealed class SagaOrchestrator(
     public void SetResumeStateName(string? stateName) => inner.SetResumeStateName(stateName);
 
     /// <inheritdoc/>
-    public void SetStructuredTask(fuseraft.Core.Models.TaskModel? model) => inner.SetStructuredTask(model);
+    public void SetStructuredTask(TaskModel? model) => inner.SetStructuredTask(model);
 
     /// <inheritdoc/>
     public async Task<OrchestrationResult> RunAsync(

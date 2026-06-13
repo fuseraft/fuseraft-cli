@@ -72,7 +72,7 @@ public sealed class GraphOrchestrator(
     private string? _resumeNodeId;
     // Captured from StreamAsync for use in per-node executor helpers.
     private string _task = string.Empty;
-    private fuseraft.Core.Models.TaskModel? _structuredTask;
+    private TaskModel? _structuredTask;
 
     // Computed once per StreamAsync call from the graph config.
     // Keyed by node ID (case-insensitive).
@@ -136,7 +136,7 @@ public sealed class GraphOrchestrator(
     public void SetResumeExecutorId(string? executorId) => _resumeNodeId = executorId;
 
     /// <inheritdoc/>
-    public void SetStructuredTask(fuseraft.Core.Models.TaskModel? model) => _structuredTask = model;
+    public void SetStructuredTask(TaskModel? model) => _structuredTask = model;
 
     public event Action<string>? AgentStarting;
     public event Action<string, string, string?>? ToolCalling;
@@ -1170,7 +1170,7 @@ public sealed class GraphOrchestrator(
         if (contextPipeline is not null)
         {
             var assembled = await contextPipeline.AssembleAsync(
-                new fuseraft.Core.Models.AgentExecutionRequest
+                new AgentExecutionRequest
                 {
                     AgentName     = agentName,
                     Task          = _task,
@@ -1542,7 +1542,7 @@ public sealed class GraphOrchestrator(
                 foreach (var obs in observations)
                 {
                     if (string.IsNullOrWhiteSpace(obs.Entity)) continue;
-                    await repositoryKnowledgeStore.AddAsync(new fuseraft.Core.Models.RepositoryKnowledgeFinding
+                    await repositoryKnowledgeStore.AddAsync(new RepositoryKnowledgeFinding
                     {
                         Entity     = obs.Entity!,
                         Finding    = obs.Finding,
@@ -1562,7 +1562,7 @@ public sealed class GraphOrchestrator(
 
     private static Task EmitContextAssemblyAsync(
         EventEmitter emitter,
-        fuseraft.Core.Models.ContextAssemblyMetrics metrics,
+        ContextAssemblyMetrics metrics,
         int turn) =>
         emitter.EmitAsync(EventTypes.ContextAssembly,
             agent: metrics.AgentName,
@@ -1639,7 +1639,7 @@ public sealed class GraphOrchestrator(
             if (contextPipeline is not null)
             {
                 var assembled = await contextPipeline.AssembleAsync(
-                    new fuseraft.Core.Models.AgentExecutionRequest
+                    new AgentExecutionRequest
                     {
                         AgentName     = recoveryAgentName,
                         Task          = _task,
@@ -1817,7 +1817,7 @@ public sealed class GraphOrchestrator(
             if (contextPipeline is not null)
             {
                 var assembled = await contextPipeline.AssembleAsync(
-                    new fuseraft.Core.Models.AgentExecutionRequest
+                    new AgentExecutionRequest
                     {
                         AgentName     = agentName,
                         Task          = _task,

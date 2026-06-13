@@ -431,7 +431,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
 
         // Seed structured task model (resumed sessions may already have it in the checkpoint).
         orchestrator.SetStructuredTask(
-            checkpoint.StructuredTask ?? fuseraft.Core.Models.TaskModel.FromGoal(task));
+            checkpoint.StructuredTask ?? TaskModel.FromGoal(task));
 
         // Compact before the stream starts if the existing history is already over the threshold.
         // This covers the resume case where a prior session accumulated too many turns.
@@ -622,7 +622,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
     /// </summary>
     private static async Task InjectSkillContextAsync(
         string task,
-        fuseraft.Core.Models.SkillCurationConfig curationConfig,
+        SkillCurationConfig curationConfig,
         SessionCheckpoint checkpoint,
         CancellationToken ct)
     {
@@ -713,7 +713,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             }
 
             var selected = AnsiConsole.Prompt(
-                new SelectionPrompt<Core.Models.SessionIndexEntry>()
+                new SelectionPrompt<SessionIndexEntry>()
                     .Title("Select a session to resume:")
                     .UseConverter(e =>
                     {

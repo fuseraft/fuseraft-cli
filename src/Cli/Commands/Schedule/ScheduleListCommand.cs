@@ -20,7 +20,7 @@ public sealed class ScheduleListCommand : AsyncCommand<ScheduleListSettings>
             return Task.FromResult(0);
         }
 
-        var jobs = new List<fuseraft.Core.Models.ScheduledJob>();
+        var jobs = new List<ScheduledJob>();
         foreach (var file in Directory.GetFiles(dir, "*.yaml"))
         {
             try

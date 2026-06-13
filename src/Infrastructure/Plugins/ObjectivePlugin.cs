@@ -130,7 +130,7 @@ public sealed class ObjectivePlugin
 
     // ── Formatting ───────────────────────────────────────────────────────────
 
-    private static string FormatFull(fuseraft.Core.Models.Objective o)
+    private static string FormatFull(Objective o)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"Id: {o.Id}");
