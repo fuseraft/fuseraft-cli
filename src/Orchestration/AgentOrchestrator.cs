@@ -442,12 +442,12 @@ public sealed class AgentOrchestrator(
                     {
                         var branchMsg = new AgentMessage
                         {
-                            AgentName = branchAgent.Name ?? "Unknown",
+                            AgentName = branchAgent.Name ?? AgentNames.Unknown,
                             Content   = branchResponse.Text ?? string.Empty,
                             Role      = "assistant",
                             TurnIndex = turn++,
                             Usage     = OrchestratorHelpers.ExtractUsage(branchResponse),
-                            ToolCalls = ExtractToolCalls(branchResponse.Messages, branchAgent.Name ?? "Unknown"),
+                            ToolCalls = ExtractToolCalls(branchResponse.Messages, branchAgent.Name ?? AgentNames.Unknown),
                         };
 
                         cumulativeTokens += branchMsg.Usage?.TotalTokens ?? 0;
@@ -605,12 +605,12 @@ public sealed class AgentOrchestrator(
 
             var agentMessage = new AgentMessage
             {
-                AgentName = agent.Name ?? "Unknown",
+                AgentName = agent.Name ?? AgentNames.Unknown,
                 Content   = response.Text ?? string.Empty,
                 Role      = "assistant",
                 TurnIndex = turn++,
                 Usage     = OrchestratorHelpers.ExtractUsage(response),
-                ToolCalls = ExtractToolCalls(response.Messages, agent.Name ?? "Unknown")
+                ToolCalls = ExtractToolCalls(response.Messages, agent.Name ?? AgentNames.Unknown)
             };
 
             eventEmitter?.SetTurn(agentMessage.TurnIndex);
@@ -776,7 +776,7 @@ public sealed class AgentOrchestrator(
                 WireDidResolver(child, resolver);
     }
 
-    private IReadOnlyList<ToolCallRecord>? ExtractToolCalls(IList<ChatMessage> messages, string agentName = "Unknown")
+    private IReadOnlyList<ToolCallRecord>? ExtractToolCalls(IList<ChatMessage> messages, string agentName = AgentNames.Unknown)
         => OrchestratorHelpers.ExtractToolCalls(messages, logger, agentName);
 
     // Scans messages at indices [from, to) for ConflictingEvidence or NoProgress correction
@@ -1036,12 +1036,12 @@ public sealed class AgentOrchestrator(
 
         return new AgentMessage
         {
-            AgentName = verifierAgent.Name ?? "Verifier",
+            AgentName = verifierAgent.Name ?? AgentNames.Verifier,
             Content   = vResponse.Text ?? string.Empty,
             Role      = "assistant",
             TurnIndex = currentTurn,
             Usage     = OrchestratorHelpers.ExtractUsage(vResponse),
-            ToolCalls = ExtractToolCalls(vResponse.Messages, verifierAgent.Name ?? "Verifier")
+            ToolCalls = ExtractToolCalls(vResponse.Messages, verifierAgent.Name ?? AgentNames.Verifier)
         };
     }
 }

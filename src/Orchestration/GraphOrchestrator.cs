@@ -504,7 +504,7 @@ public sealed class GraphOrchestrator(
                     maxPhases);
                 await agentCtx.MessageSink.WriteAsync(new AgentMessage
                 {
-                    AgentName = "orchestrator",
+                    AgentName = AgentNames.Orchestrator,
                     Content   =
                         $"The session reached the maximum of {maxPhases} orchestration phases " +
                         "without completing the task. Review the conversation history and consider " +
@@ -1594,7 +1594,7 @@ public sealed class GraphOrchestrator(
 
             await ctx.MessageSink.WriteAsync(new AgentMessage
             {
-                AgentName = "orchestrator",
+                AgentName = AgentNames.Orchestrator,
                 Content   = correctionText,
                 Role      = "user",
                 TurnIndex = Math.Max(0, ctx.TurnIndex - 1),

@@ -440,7 +440,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 .Where(m => m.Role == ChatRole.Assistant && !string.IsNullOrWhiteSpace(m.Text))
                 .Select((m, i) => new AgentMessage
                 {
-                    AgentName = "Assistant",
+                    AgentName = AgentNames.Assistant,
                     Content   = m.Text!,
                     Role      = "assistant",
                     TurnIndex = i,

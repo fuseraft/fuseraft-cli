@@ -149,7 +149,7 @@ public sealed class ConversationCompactor(
         if (messages.Count < 2)
         {
             logger.LogWarning("Compaction skipped: message list has {Count} message(s) — nothing to compact.", messages.Count);
-            var passthrough = messages.Count == 1 ? messages[0] : new AgentMessage { Role = "user", Content = "(empty session)", AgentName = "System" };
+            var passthrough = messages.Count == 1 ? messages[0] : new AgentMessage { Role = "user", Content = "(empty session)", AgentName = AgentNames.System };
             return (passthrough, []);
         }
 
@@ -298,7 +298,7 @@ public sealed class ConversationCompactor(
 
             var hybridSummary = new AgentMessage
             {
-                AgentName           = "System",
+                AgentName           = AgentNames.System,
                 Content             = hybridContent,
                 Role                = "user",
                 TurnIndex           = toCompact[^1].TurnIndex,
@@ -344,7 +344,7 @@ public sealed class ConversationCompactor(
 
             var summary = new AgentMessage
             {
-                AgentName           = "System",
+                AgentName           = AgentNames.System,
                 Content             = FormatSummaryContent(toCompact[0].TurnIndex, toCompact[^1].TurnIndex, summaryText, prefixBlock),
                 Role                = "user",
                 TurnIndex           = toCompact[^1].TurnIndex,
@@ -477,7 +477,7 @@ public sealed class ConversationCompactor(
 
         return new AgentMessage
         {
-            AgentName           = "System",
+            AgentName           = AgentNames.System,
             Content             = content,
             Role                = "user",
             TurnIndex           = lastTurn,
@@ -584,7 +584,7 @@ public sealed class ConversationCompactor(
         {
             var label = msg.IsCompactionSummary
                 ? $"[Prior Summary — covers turns 1–{msg.TurnIndex + 1}]"
-                : $"[{(msg.Role == "user" ? "Human" : msg.AgentName)} — Turn {msg.TurnIndex + 1}]";
+                : $"[{(msg.Role == "user" ? AgentNames.Human : msg.AgentName)} — Turn {msg.TurnIndex + 1}]";
 
             sb.AppendLine(label);
             sb.AppendLine(PruneContent(msg, maxCharsPerMessage));
@@ -649,7 +649,7 @@ public sealed class ConversationCompactor(
 
         return new AgentMessage
         {
-            AgentName           = "System",
+            AgentName           = AgentNames.System,
             Content             = content,
             Role                = "user",
             TurnIndex           = lastTurn,

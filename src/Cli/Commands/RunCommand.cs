@@ -656,7 +656,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
 
             checkpoint.Messages.Add(new AgentMessage
             {
-                AgentName = "System",
+                AgentName = AgentNames.System,
                 Content   = sb.ToString().TrimEnd(),
                 Role      = "user",
                 TurnIndex = 0,

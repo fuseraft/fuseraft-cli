@@ -40,7 +40,7 @@ internal sealed class ContextBudgetManager(
     /// </summary>
     public async Task<BudgetEvalResult> EvaluateAsync(AgentMessage msg, bool statusActive)
     {
-        var agentName  = msg.AgentName ?? "Unknown";
+        var agentName  = msg.AgentName ?? AgentNames.Unknown;
         int inputToks  = 0;
         int cumulative = 0;
 
