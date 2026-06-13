@@ -100,7 +100,7 @@ public sealed class SessionRunner(
         var turnClock    = Stopwatch.StartNew();
         var succeeded    = true;
         string? errorMessage = null;
-        _totalAssistantTurnCount = messages.Count(m => m.Role == "assistant");
+        _totalAssistantTurnCount = messages.Count(m => m.Role == MessageRole.Assistant);
 
         if (messages.Count > 0 && eventEmitter is not null)
         {
@@ -803,7 +803,7 @@ public sealed class SessionRunner(
     {
         messages.Add(msg);
         checkpoint.Messages.Add(msg);
-        if (msg.Role == "assistant")
+        if (msg.Role == MessageRole.Assistant)
         {
             _totalAssistantTurnCount++;
             sessionMetrics?.RecordTurn(msg);

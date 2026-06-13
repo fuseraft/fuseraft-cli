@@ -13,6 +13,12 @@ public record ToolCallRecord(
     /// <summary>Character length of the full serialized args JSON, used to estimate output token cost.</summary>
     int ArgsCharCount = 0);
 
+public class MessageRole
+{
+    public const string Assistant = "assistant";
+    public const string User = "user";
+}
+
 /// <summary>
 /// A single message emitted during an orchestration session.
 /// Role is "assistant" for agent turns and "user" for human-in-the-loop injections.
@@ -42,7 +48,7 @@ public record AgentMessage
     /// <summary>
     /// "assistant" for agent turns, "user" for HITL injections.
     /// </summary>
-    public string Role { get; init; } = "assistant";
+    public string Role { get; init; } = MessageRole.Assistant;
 
     /// <summary>
     /// Token usage and estimated cost for this turn. Null for HITL messages.

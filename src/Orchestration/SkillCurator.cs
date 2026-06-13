@@ -95,7 +95,7 @@ public sealed class SkillCurator(
     {
         var modelId = chatClient.GetService<ChatClientMetadata>()?.DefaultModelId;
 
-        var assistantTurns = messages.Count(m => m.Role == "assistant");
+        var assistantTurns = messages.Count(m => m.Role == MessageRole.Assistant);
         if (assistantTurns < config.MinTurns)
         {
             var reason = $"Only {assistantTurns} assistant turn{(assistantTurns == 1 ? "" : "s")} (min {config.MinTurns}).";
@@ -233,7 +233,7 @@ public sealed class SkillCurator(
 
         // Text-only assistant turns, capped to DigestTurns most recent
         var textTurns = messages
-            .Where(m => m.Role == "assistant" && !string.IsNullOrWhiteSpace(m.Content))
+            .Where(m => m.Role == MessageRole.Assistant && !string.IsNullOrWhiteSpace(m.Content))
             .TakeLast(config.DigestTurns)
             .ToList();
 
