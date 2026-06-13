@@ -10,7 +10,7 @@ using fuseraft.Core.Models;
 
 // Disambiguate from Microsoft.Agents.AI.AgentFactory
 using fuseraft.Infrastructure;
-using AgentFactory = fuseraft.Infrastructure.AgentFactory;
+using AgentFactory = fuseraft.Infrastructure.Agents.AgentFactory;
 
 namespace fuseraft.Orchestration;
 

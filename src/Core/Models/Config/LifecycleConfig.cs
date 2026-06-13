@@ -48,7 +48,7 @@ public sealed record LifecyclePolicy
 }
 
 /// <summary>
-/// Report returned by <see cref="fuseraft.Infrastructure.KnowledgeLifecycleManager.RunAsync"/>.
+/// Report returned by <see cref="fuseraft.Infrastructure.Knowledge.KnowledgeLifecycleManager.RunAsync"/>.
 /// Describes what was archived, demoted, decayed, or pruned.
 /// </summary>
 public sealed record GcReport

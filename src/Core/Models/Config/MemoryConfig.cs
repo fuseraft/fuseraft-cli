@@ -2,7 +2,7 @@ namespace fuseraft.Core.Models.Config;
 
 /// <summary>
 /// Configures the pluggable memory provider for an orchestration session.
-/// When present, a <see cref="fuseraft.Infrastructure.MemoryManager"/> is built and wired
+/// When present, a <see cref="fuseraft.Infrastructure.Memory.MemoryManager"/> is built and wired
 /// into the orchestrator's pre- and post-turn hooks.
 /// </summary>
 public record MemoryConfig

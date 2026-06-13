@@ -45,7 +45,7 @@ public sealed record ContextSnapshot
 
     /// <summary>
     /// Active (Accepted-status) ADRs at snapshot time. Populated by
-    /// <see cref="fuseraft.Infrastructure.KnowledgeSnapshotEnricher"/> when an ADR registry
+    /// <see cref="fuseraft.Infrastructure.Knowledge.KnowledgeSnapshotEnricher"/> when an ADR registry
     /// is available. Empty when knowledge enrichment is not configured.
     /// </summary>
     public IReadOnlyList<AdrSummary> ActiveAdrs { get; init; } = [];
