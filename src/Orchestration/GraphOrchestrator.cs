@@ -1830,7 +1830,7 @@ public sealed class GraphOrchestrator(
 
         logger.LogInformation(
             "[GraphOrchestrator] Node '{NodeId}' executing sub-graph '{SubGraphId}' (type: {Type}).",
-            nodeId, subGraphId, subSpec.IsMapReduce ? "mapreduce" : "graph");
+            nodeId, subGraphId, subSpec.IsMapReduce ? OrchestratorTypes.MapReduce : OrchestratorTypes.Graph);
 
         if (eventEmitter is not null)
             await eventEmitter.EmitAsync(EventTypes.AgentStart,
