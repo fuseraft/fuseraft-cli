@@ -7,6 +7,7 @@ using fuseraft.Cli.Diagram;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Plugins;
+using fuseraft.Orchestration;
 
 namespace fuseraft.Cli.Commands;
 
@@ -123,31 +124,31 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
         // Selection strategy
         var selType = config.Selection.Type.ToLowerInvariant();
-        if (selType is not ("sequential" or "roundrobin" or "llm" or "keyword" or "structured" or "magentic" or "statemachine" or "graph" or "adversarial"))
+        if (selType is not (OrchestratorTypes.Sequential or OrchestratorTypes.RoundRobin or OrchestratorTypes.Llm or OrchestratorTypes.Keyword or OrchestratorTypes.Structured or OrchestratorTypes.Magentic or OrchestratorTypes.StateMachine or OrchestratorTypes.Graph or OrchestratorTypes.Adversarial))
             issues.Add(("error", $"Unknown selection type: '{config.Selection.Type}'."));
 
-        if (selType == "llm" && config.Selection.Model is null)
+        if (selType == OrchestratorTypes.Llm && config.Selection.Model is null)
             issues.Add(("error", "LLM selection requires Selection.Model to be set."));
 
-        if (selType == "keyword" && (config.Selection.Routes is null || config.Selection.Routes.Count == 0))
+        if (selType == OrchestratorTypes.Keyword && (config.Selection.Routes is null || config.Selection.Routes.Count == 0))
             issues.Add(("error", "Keyword selection requires at least one entry in Routes."));
 
-        if (selType == "structured")
+        if (selType == OrchestratorTypes.Structured)
             ValidateStructuredRoutes(config, issues);
 
-        if (selType == "magentic")
+        if (selType == OrchestratorTypes.Magentic)
             ValidateMagenticSelection(config, issues);
 
-        if (selType == "graph")
+        if (selType == OrchestratorTypes.Graph)
             ValidateGraph(config, issues);
 
-        if (selType == "statemachine")
+        if (selType == OrchestratorTypes.StateMachine)
             ValidateStateMachine(config, issues);
 
-        if (selType == "adversarial")
+        if (selType == OrchestratorTypes.Adversarial)
             ValidateAdversarialSelection(config, issues);
 
-        if (selType == "keyword" && config.Selection.Routes is { Count: > 1 })
+        if (selType == OrchestratorTypes.Keyword && config.Selection.Routes is { Count: > 1 })
         {
             // Detect routes that share the same keyword and SourceAgents but have different
             // validators. Because selection uses first-match-wins, the second route's validator

@@ -652,7 +652,7 @@ public sealed class KeywordSelectionStrategy : IAgentSelector
         if (_eventEmitter is not null)
             _ = _eventEmitter.EmitAsync(EventTypes.SelectionFallback,
                 agent: defaultAgent.Name ?? _defaultAgentName,
-                payload: new { default_agent = defaultAgent.Name, turns_scanned = scanned, strategy = "keyword" });
+                payload: new { default_agent = defaultAgent.Name, turns_scanned = scanned, strategy = OrchestratorTypes.Keyword });
 
         return defaultAgent;
     }
