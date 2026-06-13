@@ -829,7 +829,7 @@ public sealed class FileSystemPlugin : ITurnResettable
                     var lastFence = trimmed.LastIndexOf("```");
                     if (lastFence >= 0)
                         trimmed = trimmed[..lastFence];
-                    content   = trimmed.Trim();
+                    content    = trimmed.Trim();
                     normalised = true;
                 }
                 // Strip XML <parameter name="content">…</parameter> wrappers.
@@ -841,10 +841,10 @@ public sealed class FileSystemPlugin : ITurnResettable
                     var closeTag = trimmed.IndexOf('>');
                     if (closeTag >= 0)
                     {
-                        var inner = trimmed[(closeTag + 1)..];
+                        var inner  = trimmed[(closeTag + 1)..];
                         var endTag = inner.LastIndexOf("</parameter>", StringComparison.OrdinalIgnoreCase);
                         if (endTag >= 0) inner = inner[..endTag];
-                        content   = inner.Trim();
+                        content    = inner.Trim();
                         normalised = true;
                     }
                 }
