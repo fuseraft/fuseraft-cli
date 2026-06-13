@@ -102,6 +102,14 @@ public sealed class SessionRunner(
         string? errorMessage = null;
         _totalAssistantTurnCount = messages.Count(m => m.Role == "assistant");
 
+        if (messages.Count > 0 && eventEmitter is not null)
+        {
+            _ = eventEmitter.EmitAsync(EventTypes.EventReplayStart,
+                payload: new { session = checkpoint.SessionId, message_count = messages.Count });
+            _ = eventEmitter.EmitAsync(EventTypes.EventReplayComplete,
+                payload: new { session = checkpoint.SessionId, message_count = messages.Count });
+        }
+
         while (!cancellationToken.IsCancellationRequested)
         {
             string? injection        = null;
@@ -240,7 +248,13 @@ public sealed class SessionRunner(
                 if (outcome.ShouldBreak) break;
             }
 
-            if (cancellationToken.IsCancellationRequested) break;
+            if (cancellationToken.IsCancellationRequested)
+            {
+                if (eventEmitter is not null)
+                    _ = eventEmitter.EmitAsync(EventTypes.CancellationObserved,
+                        payload: new { session = checkpoint.SessionId });
+                break;
+            }
 
             // Session-level hard cap. Count only agent (assistant) turns across all StreamAsync
             // invocations. This fires even when compaction resets the internal phase counter.
@@ -412,8 +426,12 @@ public sealed class SessionRunner(
     private async Task<HandlerOutcome> HandleBudgetExceededAsync(BudgetExceededException budget)
     {
         if (eventEmitter is not null)
+        {
             await eventEmitter.EmitAsync(EventTypes.SessionError,
                 payload: new { reason = "token_budget_exceeded", actual_tokens = budget.ActualTokens, limit_tokens = budget.LimitTokens });
+            _ = eventEmitter.EmitAsync(EventTypes.TerminationForced,
+                payload: new { reason = "token_budget_exceeded", actual_tokens = budget.ActualTokens, limit_tokens = budget.LimitTokens });
+        }
         AnsiConsole.MarkupLine(
             $"\n[red]✗ Error:[/] Session used [bold]{budget.ActualTokens:N0}[/] tokens, " +
             $"exceeding the configured budget of [bold]{budget.LimitTokens:N0}[/].\n");
@@ -540,6 +558,10 @@ public sealed class SessionRunner(
         TimeSpan elapsed,
         SessionCheckpoint checkpoint)
     {
+        if (!succeeded && errorMessage != "Cancelled." && eventEmitter is not null)
+            _ = eventEmitter.EmitAsync(EventTypes.SessionAborted,
+                payload: new { session = checkpoint.SessionId, reason = errorMessage });
+
         if (sessionMetrics is not null)
             try { await sessionMetrics.PrintSummaryAsync(eventEmitter, checkpoint.SessionId); } catch { }
 

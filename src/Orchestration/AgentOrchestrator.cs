@@ -306,8 +306,12 @@ public sealed class AgentOrchestrator(
             if (config.Termination?.ResolveMaxIterations() is > 0 and var maxIter && turn >= maxIter)
             {
                 if (eventEmitter is not null)
+                {
                     _ = eventEmitter.EmitAsync(EventTypes.MaxTurnsExceeded,
                         payload: new { turn, max = maxIter });
+                    _ = eventEmitter.EmitAsync(EventTypes.TerminationForced,
+                        payload: new { reason = "max_turns_exceeded", turn, max = maxIter });
+                }
                 break;
             }
 
@@ -491,6 +495,12 @@ public sealed class AgentOrchestrator(
             var agent = await selection.SelectAsync(agents, history, cancellationToken);
             int postSelectCount = history.Count;
             if (agent is null) break;
+
+            if (eventEmitter is not null)
+                _ = eventEmitter.EmitAsync(EventTypes.SelectionEvaluated,
+                    agent: agent.Name ?? "Unknown",
+                    turn:  turn,
+                    payload: new { selected = agent.Name, strategy = selection.GetType().Name });
 
             // Prerequisite enforcement: if DependencyPlanner is active and the selected agent
             // has unmet Requires tokens, inject a blocker message into history so the selector
