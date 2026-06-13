@@ -312,7 +312,7 @@ public sealed class SessionRunner(
         CancellationToken cancellationToken)
     {
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("agent_blocked",
+            await eventEmitter.EmitAsync(EventTypes.AgentBlocked,
                 agent: blocked.AgentName,
                 payload: new { message = blocked.BlockerMessage });
 
@@ -372,7 +372,7 @@ public sealed class SessionRunner(
         if (!cancellationToken.IsCancellationRequested && cb.RetryAfter.TotalSeconds <= MaxAutoRetrySeconds)
         {
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("circuit_breaker_open",
+                await eventEmitter.EmitAsync(EventTypes.CircuitBreakerOpen,
                     payload: new { retry_after_seconds = cb.RetryAfter.TotalSeconds });
             var wait = cb.RetryAfter + TimeSpan.FromSeconds(2);
             AnsiConsole.MarkupLine(
@@ -444,7 +444,7 @@ public sealed class SessionRunner(
         if (withCompactor)
         {
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("context_exceeded_recovery",
+                await eventEmitter.EmitAsync(EventTypes.ContextExceededRecovery,
                     payload: new { message = TrimTo(ex.Message, 200) });
             AnsiConsole.MarkupLine(
                 $"\n[yellow]⚠ Context window exceeded — fallover chain exhausted.[/] Compacting history and retrying...\n" +
