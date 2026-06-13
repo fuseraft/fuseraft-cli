@@ -62,10 +62,13 @@ internal static class OrchestratorHelpers
                         if (!ok && logger is not null)
                         {
                             var toolName = calls.LastOrDefault(c => c.CallId == key).Name ?? key;
+                            // Show only the first line of the result so the WRN message fits on one
+                            // terminal line and doesn't bleed into the live-status spinner display.
+                            var firstLine = text.Split('\n', 2)[0].TrimEnd('\r');
+                            var preview   = firstLine.Length > 60 ? firstLine[..57] + "…" : firstLine;
                             logger.LogWarning(
                                 "[{Agent}] Tool '{Tool}' failed: {ResultPreview}",
-                                agentName, toolName,
-                                text.Length > 120 ? text[..120].Replace('\n', ' ') : text.Replace('\n', ' '));
+                                agentName, toolName, preview);
                         }
                     }
                 }
