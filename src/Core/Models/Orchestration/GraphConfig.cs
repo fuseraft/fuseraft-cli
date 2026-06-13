@@ -115,6 +115,39 @@ public record GraphConfig
     /// Defaults to 4, matching <c>GraphOrchestrator.DefaultMaxRetries</c>.
     /// </summary>
     public int MaxRetries { get; init; } = 4;
+
+    /// <summary>
+    /// Named sub-graph configurations that can be referenced by nodes via
+    /// <see cref="GraphNodeConfig.SubGraphId"/>. When a node runs a sub-graph,
+    /// the <c>GraphOrchestrator</c> recursively executes the sub-graph as a black-box
+    /// step and uses its terminal output as the node's response for keyword detection
+    /// and forward-edge routing. All agents referenced in sub-graph nodes must be
+    /// declared in the top-level <c>Orchestration.Agents</c> list.
+    ///
+    /// Example YAML:
+    /// <code>
+    /// Selection:
+    ///   Type: graph
+    ///   Graph:
+    ///     Nodes:
+    ///       - Id: team_analysis
+    ///         SubGraphId: analysis_team   # runs the named sub-graph
+    ///         Terminal: true
+    ///     SubGraphs:
+    ///       analysis_team:
+    ///         Nodes:
+    ///           - Id: analyst
+    ///             Agent: Analyst
+    ///           - Id: reviewer
+    ///             Agent: Reviewer
+    ///             Terminal: true
+    ///         Edges:
+    ///           - From: analyst
+    ///             To: reviewer
+    ///             Keyword: "ANALYSIS COMPLETE"
+    /// </code>
+    /// </summary>
+    public Dictionary<string, GraphConfig>? SubGraphs { get; init; }
 }
 
 /// <summary>A single node in the execution graph.</summary>
@@ -130,8 +163,22 @@ public record GraphNodeConfig
     /// <summary>
     /// Name of the agent responsible for work in this node. Must match a name in
     /// <c>Orchestration.Agents</c>. Multiple nodes may reference the same agent.
+    /// Must be empty when <see cref="SubGraphId"/> is set; required otherwise.
     /// </summary>
     public string Agent { get; init; } = string.Empty;
+
+    /// <summary>
+    /// When set, this node runs a named sub-graph instead of a single agent turn.
+    /// The sub-graph ID must match a key in <see cref="GraphConfig.SubGraphs"/>.
+    /// <see cref="Agent"/> must be empty when this is set.
+    ///
+    /// <para>
+    /// The sub-graph executes as a nested <c>GraphOrchestrator</c> run. Its messages
+    /// are streamed to the parent session and its terminal agent's final output is
+    /// injected into the parent's shared history for keyword detection and routing.
+    /// </para>
+    /// </summary>
+    public string? SubGraphId { get; init; }
 
     /// <summary>
     /// When <c>true</c>, the session terminates after the agent executes once in this

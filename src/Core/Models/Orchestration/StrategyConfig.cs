@@ -90,6 +90,19 @@ public record SelectionStrategyConfig
     /// </para>
     /// </summary>
     public AdversarialConfig? Adversarial { get; init; }
+
+    /// <summary>
+    /// Map-reduce pipeline configuration for the <c>mapreduce</c> selection type.
+    /// Required when <see cref="Type"/> is <c>"mapreduce"</c>.
+    ///
+    /// <para>
+    /// A splitter agent decomposes the task into a JSON array of work items. A mapper
+    /// agent is invoked in parallel for each item. A reducer agent synthesises all
+    /// mapper outputs into a final answer. Concurrency is capped by
+    /// <see cref="MapReduceConfig.MaxConcurrency"/>.
+    /// </para>
+    /// </summary>
+    public MapReduceConfig? MapReduce { get; init; }
 }
 
 /// <summary>
