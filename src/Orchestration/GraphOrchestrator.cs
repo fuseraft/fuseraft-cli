@@ -1075,7 +1075,7 @@ public sealed class GraphOrchestrator(
     /// <summary>
     /// Context cap warning and compaction trigger. Assembles the per-turn message list via
     /// the unified context pipeline (when configured) or the legacy
-    /// <see cref="ContextWindowFilter"/>, emits a <c>context_cap_warning</c> event when
+    /// <see cref="ContextWindowFilter"/>, emits a <c>context_window_warn</c> event when
     /// the filtered count approaches the configured cap fraction, and returns the assembled
     /// context ready for the agent call.
     /// </summary>
@@ -1100,14 +1100,14 @@ public sealed class GraphOrchestrator(
                     SessionId     = _sessionId,
                 }, ct);
             context = assembled.Messages;
-            await EmitContextCapWarningAsync(agentName, agentCfg, assembled.Messages, ctx);
+            await EmitContextWindowWarnAsync(agentName, agentCfg, assembled.Messages, ctx);
             if (eventEmitter is not null)
                 await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, ctx.TurnIndex);
         }
         else
         {
             var filtered = ContextWindowFilter.Apply(ctx.History, agentCfg.ContextWindow);
-            await EmitContextCapWarningAsync(agentName, agentCfg, filtered, ctx);
+            await EmitContextWindowWarnAsync(agentName, agentCfg, filtered, ctx);
             context = !string.IsNullOrWhiteSpace(instructions)
                 ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
                 : filtered;
@@ -1582,18 +1582,18 @@ public sealed class GraphOrchestrator(
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Emits a <c>context_cap_warning</c> event when the filtered message count is
+    /// Emits a <c>context_window_warn</c> event when the filtered message count is
     /// approaching the configured context-cap fraction. No-ops when
     /// <paramref name="eventEmitter"/> is null or the context window is not configured.
     /// </summary>
-    private async Task EmitContextCapWarningAsync(
+    private async Task EmitContextWindowWarnAsync(
         string agentName, AgentConfig agentCfg, IReadOnlyList<ChatMessage> filtered, AgentContext ctx)
     {
         if (eventEmitter is null) return;
         if (agentCfg.ContextWindow is not { ContextCapFraction: > 0, MaxTailMessages: > 0 } cw) return;
         if (filtered.Count <= (int)(cw.MaxTailMessages * cw.ContextCapFraction)) return;
 
-        await eventEmitter.EmitAsync(EventTypes.ContextCapWarning,
+        await eventEmitter.EmitAsync(EventTypes.ContextWindowWarn,
             agent: agentName,
             turn:  ctx.TurnIndex,
             payload: new
@@ -1730,14 +1730,14 @@ public sealed class GraphOrchestrator(
                         SessionId     = _sessionId,
                     }, ct);
                 context = assembled.Messages;
-                await EmitContextCapWarningAsync(agentName, agentCfg, assembled.Messages, ctx);
+                await EmitContextWindowWarnAsync(agentName, agentCfg, assembled.Messages, ctx);
                 if (eventEmitter is not null)
                     await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, ctx.TurnIndex);
             }
             else
             {
                 var filtered = ContextWindowFilter.Apply(ctx.History, agentCfg.ContextWindow);
-                await EmitContextCapWarningAsync(agentName, agentCfg, filtered, ctx);
+                await EmitContextWindowWarnAsync(agentName, agentCfg, filtered, ctx);
                 context = !string.IsNullOrWhiteSpace(instructions)
                     ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
                     : filtered;
