@@ -831,7 +831,7 @@ public sealed class MagenticOrchestrator(
 
         var agentMsg = new AgentMessage
         {
-            AgentName = nextAgent.Name ?? "Unknown",
+            AgentName = nextAgent.Name ?? AgentNames.Unknown,
             Content   = response.Text ?? string.Empty,
             Role      = "assistant",
             TurnIndex = turn++,

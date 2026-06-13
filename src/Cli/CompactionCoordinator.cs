@@ -64,7 +64,7 @@ internal sealed class CompactionCoordinator(
         BudgetEvalResult budgetResult,
         bool statusActive)
     {
-        var agentName = msg.AgentName ?? "Unknown";
+        var agentName = msg.AgentName ?? AgentNames.Unknown;
 
         // SingleTurnLimit: never suppressed by _justCompacted — a per-turn explosion must
         // always compact even on the turn immediately after a previous compaction.
