@@ -596,7 +596,7 @@ public static class OrchestratorBuilder
         var toolArtifactsDir = sessionId is { Length: > 0 }
             ? FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionToolArtifacts, sessionId, projectSlug)
             : null;
-        var toolArtifactStore = new fuseraft.Infrastructure.ToolResultArtifactStore(toolArtifactsDir);
+        var toolArtifactStore = new fuseraft.Infrastructure.ToolResultArtifactStore(toolArtifactsDir, eventEmitter);
 
         // Session metrics: accumulates per-turn quality data (tokens, tool calls, cache hits,
         // patch failures) and renders a summary table at session end.
@@ -1298,6 +1298,7 @@ public static class OrchestratorBuilder
             contextAssembler: contextAssembler,
             graphExpander:    graphExpander,
             knowledgeStore:   knowledgeStore,
+            eventEmitter:     eventEmitter,
             logger:           pipelineLogger);
         if (!string.IsNullOrEmpty(sessionId))
             contextPipeline.SetSessionId(sessionId);

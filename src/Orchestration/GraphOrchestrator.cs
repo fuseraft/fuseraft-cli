@@ -1058,6 +1058,12 @@ public sealed class GraphOrchestrator(
                     $"Node '{nodeId}' ({agentName}) emitted no routing keyword " +
                     $"for {consecutiveFails} consecutive turns.");
             }
+
+            if (eventEmitter is not null)
+                _ = eventEmitter.EmitAsync(EventTypes.RetryScheduled,
+                    agent:   agentName,
+                    turn:    agentMsg!.TurnIndex,
+                    payload: new { reason = "no-keyword", attempt = consecutiveFails + 1, max = maxRetries });
         }
     }
 
@@ -1109,6 +1115,9 @@ public sealed class GraphOrchestrator(
 
             if (eventEmitter is not null)
             {
+                await eventEmitter.EmitAsync(EventTypes.ModelTimeout,
+                    agent:   agentName,
+                    payload: new { message = tex.Message, consecutive = consecutiveFails });
                 await eventEmitter.EmitAsync(EventTypes.TurnTimeout,
                     agent:   agentName,
                     payload: new { message = tex.Message, consecutive = consecutiveFails });
@@ -1120,6 +1129,11 @@ public sealed class GraphOrchestrator(
             if (consecutiveFails >= maxRetries)
                 throw new ValidatorStuckException(agentName, "streaming-timeout",
                     consecutiveFails, tex.Message);
+
+            if (eventEmitter is not null)
+                _ = eventEmitter.EmitAsync(EventTypes.RetryScheduled,
+                    agent:   agentName,
+                    payload: new { reason = "streaming-timeout", attempt = consecutiveFails + 1, max = maxRetries });
 
             ctx.History.Add(new ChatMessage(ChatRole.User,
                 "TIMEOUT: Response timed out. Resume from where you left off — prior tool results are in context. " +
@@ -1840,9 +1854,14 @@ public sealed class GraphOrchestrator(
                 consecutiveFails++;
 
                 if (eventEmitter is not null)
+                {
+                    await eventEmitter.EmitAsync(EventTypes.ModelTimeout,
+                        agent:   agentName,
+                        payload: new { message = tex.Message, consecutive = consecutiveFails });
                     await eventEmitter.EmitAsync(EventTypes.TurnTimeout,
                         agent:   agentName,
                         payload: new { message = tex.Message, consecutive = consecutiveFails });
+                }
 
                 if (consecutiveFails >= maxRetries)
                     throw new ValidatorStuckException(agentName, "streaming-timeout",

@@ -139,6 +139,97 @@ All REPL events are tagged with the session ID (`session` field in the JSONL), s
 
 ---
 
+**Orchestration event types** emitted to `events.jsonl` by `fuseraft run`:
+
+*Session / turn lifecycle*
+
+| Event type | When emitted |
+|------------|-------------|
+| `session_start` | Session begins |
+| `session_end` | Session completes successfully |
+| `session_error` | Unrecoverable session error |
+| `session_recovered` | Session resumed from a prior checkpoint |
+| `session_aborted` | Session stopped before completion |
+| `session_summary` | Post-run summary written |
+| `turn_start` | Agent turn begins |
+| `turn_end` | Agent turn completes |
+| `turn_timeout` | Agent turn exceeded its time limit |
+
+*Checkpointing / resume*
+
+| Event type | When emitted |
+|------------|-------------|
+| `checkpoint_created` | Seed checkpoint written for a new session |
+| `checkpoint_loaded` | Existing checkpoint loaded for a resume |
+| `resume_started` | Resumed session is about to begin streaming |
+| `resume_completed` | Resumed session ran to successful completion |
+| `event_replay_start` | Prior message history is being replayed as context |
+| `event_replay_complete` | Message history replay finished |
+| `event_corruption_detected` | A session file failed to deserialise — payload: `session`, `source`, `error` |
+
+*Agent execution*
+
+| Event type | When emitted |
+|------------|-------------|
+| `agent_start` | Individual agent begins its turn |
+| `agent_end` | Individual agent turn completes |
+| `agent_error` | Agent threw an unhandled error |
+| `agent_timeout` | Agent exceeded its time limit |
+| `agent_routed` | Routing selected the next agent |
+| `agent_blocked` | Agent declared an unrecoverable blocker |
+
+*Model invocation*
+
+| Event type | When emitted | Key payload fields |
+|------------|-------------|-------------------|
+| `model_call` | LLM HTTP request is about to be sent — payload: `model`, `attempt`, `message_count`, `call_seq` | correlates with `inner_call_context` via `call_seq` |
+| `model_response` | LLM response received — payload: `model`, `finish_reason`, `input_tokens`, `output_tokens`, `call_seq` | |
+| `model_error` | LLM call failed (non-timeout) — payload: `model`, `attempt`, `call_seq`, `error` | includes context-limit exhaustion |
+| `model_timeout` | LLM call or streaming response timed out — payload: `model`, `attempt`, `message` | |
+
+*Tool use*
+
+| Event type | When emitted |
+|------------|-------------|
+| `tool_call` | Tool invoked by an agent |
+| `tool_result` | Tool result returned |
+| `tool_blocked` | Tool call denied by governance |
+| `tool_error` | Tool threw an exception |
+| `tool_timeout` | Tool execution timed out |
+
+*Validation / governance*
+
+| Event type | When emitted |
+|------------|-------------|
+| `validation_fail` | Validator rejected an agent response |
+| `hitl_escalation` | Human-in-the-loop intervention required |
+| `hitl_approved` | HITL operator approved continuation |
+| `hitl_rejected` | HITL operator rejected continuation |
+| `circuit_breaker_open` | Circuit breaker tripped on consecutive LLM failures |
+| `retry_scheduled` | Retry attempt queued after a recoverable failure |
+| `retry_exhausted` | All retry attempts consumed |
+| `max_turns_exceeded` | Session hit the `MaxIterations` cap |
+| `termination_satisfied` | Termination condition met naturally |
+| `termination_forced` | Session forcibly stopped (budget, cap, etc.) |
+
+*Cancellation*
+
+| Event type | When emitted |
+|------------|-------------|
+| `cancellation_requested` | `OperationCanceledException` caught mid-turn (Ctrl+C during streaming) |
+| `cancellation_observed` | Cancellation token checked between turns and loop is stopping cleanly |
+
+*Compaction*
+
+| Event type | When emitted |
+|------------|-------------|
+| `compaction` | Compaction applied to reduce history size |
+| `compaction_resume_candidate` | Session paused to await resume after compaction |
+
+All orchestration events include `ts` (ISO 8601 timestamp), `session` (8-char hex ID), `agent`, and `turn` fields alongside the `event_type` and `payload`. Use `fuseraft log` to view them in a formatted table.
+
+---
+
 ## Orchestration sessions (`fuseraft run`)
 
 ## How sessions work

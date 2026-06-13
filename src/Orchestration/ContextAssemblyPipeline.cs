@@ -32,6 +32,7 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
     private readonly GraphExpansionRetriever?  _graphExpander;
     private readonly MemoryManager?            _memoryManager;
     private readonly ContextAssembler?         _contextAssembler;
+    private readonly EventEmitter?             _emitter;
     private readonly ILogger?                  _logger;
 
     // Per-instance state, set by SetSessionId().
@@ -46,6 +47,7 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
         ContextAssembler?         contextAssembler  = null,
         GraphExpansionRetriever?  graphExpander     = null,
         RepositoryKnowledgeStore? knowledgeStore    = null,
+        EventEmitter?             eventEmitter      = null,
         ILogger<ContextAssemblyPipeline>? logger    = null)
     {
         _knowledgeLayer   = knowledgeLayer;
@@ -55,6 +57,7 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
         _graphExpander    = graphExpander;
         _memoryManager    = memoryManager;
         _contextAssembler = contextAssembler;
+        _emitter          = eventEmitter;
         _logger           = logger;
     }
 
@@ -97,7 +100,7 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
 
         if (weight != KnowledgeWeight.None && _retriever is not null && !signals.IsEmpty)
         {
-            var (retrieved, retrievedCount) = await RetrieveKnowledgeAsync(signals, weight, ct);
+            var (retrieved, retrievedCount) = await RetrieveKnowledgeAsync(agentName, signals, weight, ct);
             knRetrieved = retrievedCount;
             knowledgeItems.AddRange(retrieved);
 
@@ -252,10 +255,22 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
 
     // Returns (included items, total retrieved before budgeting).
     private async Task<(IReadOnlyList<KnowledgeItem> Items, int RetrievedCount)> RetrieveKnowledgeAsync(
+        string agentName,
         IntentSignals signals,
         KnowledgeWeight weight,
         CancellationToken ct)
     {
+        var queryCount = signals.ReferencedSymbols.Count + signals.Keywords.Count + signals.FailurePatterns.Count;
+        if (_emitter is not null)
+            _ = _emitter.EmitAsync(EventTypes.KnowledgeLookup, agent: agentName, payload: new
+            {
+                query_count      = queryCount,
+                symbols          = signals.ReferencedSymbols.Count,
+                keywords         = signals.Keywords.Count,
+                failure_patterns = signals.FailurePatterns.Count,
+                weight           = weight.ToString(),
+            });
+
         var allSignals = signals;
 
         // Graph expansion: for High-weight agents, expand seed symbols one hop.
@@ -303,6 +318,22 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
                 Content:    r.Result.Summary ?? string.Empty,
                 Confidence: TierToConfidence(r.ConfidenceTier)))
             .ToList();
+
+        if (_emitter is not null)
+        {
+            if (items.Count > 0)
+                _ = _emitter.EmitAsync(EventTypes.KnowledgeHit, agent: agentName, payload: new
+                {
+                    retrieved = retrievedCount,
+                    included  = items.Count,
+                });
+            else
+                _ = _emitter.EmitAsync(EventTypes.KnowledgeMiss, agent: agentName, payload: new
+                {
+                    retrieved   = retrievedCount,
+                    query_count = queryCount,
+                });
+        }
 
         return (items, retrievedCount);
     }

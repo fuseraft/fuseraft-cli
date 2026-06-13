@@ -246,6 +246,14 @@ public sealed class ChangeTracker
             if (_evidenceStore is not null)
                 await EmitEvidenceNodesAsync(agentName, turnIndex, records, cancellationToken);
 
+            // Emit artifact_deleted for every file removed this turn.
+            if (_eventEmitter is not null)
+            {
+                foreach (var deleted in entry.FilesDeleted)
+                    _ = _eventEmitter.EmitAsync(EventTypes.ArtifactDeleted, agent: agentName, turn: turnIndex,
+                        payload: new { path = deleted });
+            }
+
             await _fileLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
@@ -437,6 +445,9 @@ public sealed class ChangeTracker
             {
                 var abs = Path.GetFullPath(path);
                 _ = _graphBuilder.RebuildFileAsync(abs, CancellationToken.None); // fire-and-forget
+                if (_eventEmitter is not null)
+                    _ = _eventEmitter.EmitAsync(EventTypes.ArtifactUpdated, agent: agentName, turn: turnIndex,
+                        payload: new { path = abs, kind = "repository_graph" });
             }
         }
     }

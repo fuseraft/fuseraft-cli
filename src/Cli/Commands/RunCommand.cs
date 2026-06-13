@@ -377,7 +377,11 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         // Write a seed checkpoint immediately so this session appears in the sessions list
         // even if the process dies before the first agent turn completes.
         if (isNewSession)
+        {
             await activeStore.SaveAsync(checkpoint, cancellationToken);
+            _ = eventEmitter?.EmitAsync(EventTypes.CheckpointCreated,
+                payload: new { session = checkpoint.SessionId });
+        }
 
         // Set up the context window recorder — appends per-turn snapshots for post-run visualization.
         var ctxSnapshotsPath = fuseraft.Core.FuseraftPaths.ExpandSessionPaths(
@@ -407,6 +411,21 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         // Stamp the session ID on the event emitter, orchestrator, and compactor so every
         // component that uses session-scoped paths (e.g. brief.json) resolves them correctly.
         eventEmitter?.SetSessionId(checkpoint.SessionId);
+        if (activeStore is JsonSessionStore jsStore && eventEmitter is not null)
+            jsStore.OnCorruptionDetected = (sid, error) =>
+                eventEmitter.EmitAsync(EventTypes.EventCorruptionDetected,
+                    payload: new { session = sid, source = "session_checkpoint", error });
+        if (!isNewSession && eventEmitter is not null)
+        {
+            _ = eventEmitter.EmitAsync(EventTypes.SessionRecovered,
+                payload: new
+                {
+                    session      = checkpoint.SessionId,
+                    turns_prior  = checkpoint.Messages.Count,
+                });
+            _ = eventEmitter.EmitAsync(EventTypes.CheckpointLoaded,
+                payload: new { session = checkpoint.SessionId, turns = checkpoint.Messages.Count });
+        }
         orchestrator.SetSessionId(checkpoint.SessionId);
         compactor?.SetSessionId(checkpoint.SessionId);
 
@@ -470,8 +489,15 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             sessionMetrics: sessionMetrics,
             postmortemWriter: snapshotWriter);
 
+        if (!isNewSession && eventEmitter is not null)
+            _ = eventEmitter.EmitAsync(EventTypes.ResumeStarted,
+                payload: new { session = checkpoint.SessionId, turns_prior = checkpoint.Messages.Count });
+
         var result = await runner.RunAsync(task, checkpoint, settings.HumanInTheLoop, settings.ShowTools, cts.Token);
 
+        if (!isNewSession && result.Succeeded && eventEmitter is not null)
+            _ = eventEmitter.EmitAsync(EventTypes.ResumeCompleted,
+                payload: new { session = checkpoint.SessionId });
         devUI?.BroadcastSessionEnd(result.Succeeded, result.ErrorMessage);
 
         // Mark complete on success (distinct from per-turn saves above).

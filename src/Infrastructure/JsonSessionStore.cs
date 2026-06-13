@@ -18,6 +18,12 @@ public sealed class JsonSessionStore(ILogger<JsonSessionStore> logger, string? s
     private readonly string SessionDir = sessionDir ?? FuseraftPaths.GlobalSessions;
     private readonly SemaphoreSlim _indexLock = new(1, 1);
 
+    /// <summary>
+    /// Optional callback invoked when a session file fails to deserialize. Receives (sessionId, errorMessage).
+    /// Set by the caller after the event emitter is available to wire up EventCorruptionDetected.
+    /// </summary>
+    public Func<string, string, Task>? OnCorruptionDetected { get; set; }
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -55,7 +61,17 @@ public sealed class JsonSessionStore(ILogger<JsonSessionStore> logger, string? s
         if (!File.Exists(path)) return null;
 
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        return await JsonSerializer.DeserializeAsync<SessionCheckpoint>(stream, JsonOptions, cancellationToken);
+        try
+        {
+            return await JsonSerializer.DeserializeAsync<SessionCheckpoint>(stream, JsonOptions, cancellationToken);
+        }
+        catch (JsonException ex)
+        {
+            logger.LogWarning(ex, "Corrupt session file for {SessionId}: {Error}", sessionId, ex.Message);
+            if (OnCorruptionDetected is not null)
+                _ = OnCorruptionDetected(sessionId, ex.Message);
+            return null;
+        }
     }
 
     public async Task DeleteAsync(string sessionId, CancellationToken cancellationToken = default)
@@ -99,6 +115,8 @@ public sealed class JsonSessionStore(ILogger<JsonSessionStore> logger, string? s
             catch (Exception ex)
             {
                 logger.LogWarning("Could not read session file {File}: {Error}", file, ex.Message);
+                if (OnCorruptionDetected is not null)
+                    _ = OnCorruptionDetected(Path.GetFileNameWithoutExtension(file), ex.Message);
             }
         }
 
