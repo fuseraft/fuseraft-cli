@@ -591,7 +591,7 @@ public sealed class KeywordSelectionStrategy : IAgentSelector
         if (_eventEmitter is not null)
             _ = _eventEmitter.EmitAsync(EventTypes.KeywordNotFound,
                 agent: FindLastSpeakingAgent(history, agents)?.Name ?? _defaultAgentName,
-                payload: new { default_agent = _defaultAgentName, turns_scanned = scanned });
+                payload: new { default_agent = _defaultAgentName, turns_scanned = scanned, source = "keyword_strategy" });
 
         // Inject tool-refusal/code-in-text correction when the most recent agent message
         // contains markdown code blocks or tool-refusal phrases. This fires in the no-keyword-matched
