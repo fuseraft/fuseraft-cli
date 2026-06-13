@@ -192,6 +192,9 @@ public sealed class SessionRunner(
             }
             catch (OperationCanceledException)
             {
+                if (eventEmitter is not null)
+                    _ = eventEmitter.EmitAsync(EventTypes.CancellationRequested,
+                        payload: new { session = checkpoint.SessionId });
                 succeeded    = false;
                 errorMessage = "Cancelled.";
                 AnsiConsole.MarkupLine(
@@ -243,6 +246,9 @@ public sealed class SessionRunner(
             // invocations. This fires even when compaction resets the internal phase counter.
             if (maxIterations > 0 && _totalAssistantTurnCount >= maxIterations)
             {
+                if (eventEmitter is not null)
+                    await eventEmitter.EmitAsync(EventTypes.MaxTurnsExceeded,
+                        payload: new { turns = _totalAssistantTurnCount, max = maxIterations });
                 succeeded    = false;
                 errorMessage = $"Session exceeded MaxIterations limit of {maxIterations} agent turns.";
                 AnsiConsole.MarkupLine(
@@ -327,6 +333,9 @@ public sealed class SessionRunner(
                 Succeeded: false, ErrorMessage: $"Blocked: agent '{blocked.AgentName}' declared an unrecoverable blocker.");
         }
 
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync(EventTypes.HitlResolved,
+                payload: new { reason = "agent_blocked", agent = blocked.AgentName });
         await InjectAndSaveHumanMessageAsync(redirect, messages, checkpoint, cancellationToken);
         return new HandlerOutcome(ShouldBreak: false, ShouldContinue: true, CompactionNeeded: false,
             Succeeded: true, ErrorMessage: null);
@@ -355,6 +364,9 @@ public sealed class SessionRunner(
                 Succeeded: false, ErrorMessage: $"Aborted: agent '{stuck.AgentName}' stuck on validator '{stuck.ValidatorName}'.");
         }
 
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync(EventTypes.HitlResolved,
+                payload: new { reason = "validator_stuck", agent = stuck.AgentName, validator = stuck.ValidatorName });
         await InjectAndSaveHumanMessageAsync(redirect, messages, checkpoint, cancellationToken);
         return new HandlerOutcome(ShouldBreak: false, ShouldContinue: true, CompactionNeeded: false,
             Succeeded: true, ErrorMessage: null);

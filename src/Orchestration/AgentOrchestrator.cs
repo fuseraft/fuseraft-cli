@@ -304,7 +304,12 @@ public sealed class AgentOrchestrator(
         {
             // Hard iteration cap — takes effect regardless of the termination strategy.
             if (config.Termination?.ResolveMaxIterations() is > 0 and var maxIter && turn >= maxIter)
+            {
+                if (eventEmitter is not null)
+                    _ = eventEmitter.EmitAsync(EventTypes.MaxTurnsExceeded,
+                        payload: new { turn, max = maxIter });
                 break;
+            }
 
             // Parallel fan-out: check before the normal sequential SelectAsync path.
             if (selection is IParallelAgentSelector psel)
@@ -353,9 +358,32 @@ public sealed class AgentOrchestrator(
                                 : filtered;
                         }
 
-                        AgentResponse response = governanceKernel?.CircuitBreaker is { } cb
-                            ? await cb.ExecuteAsync(() => branchAgent.RunAsync(context, null, null, cancellationToken))
-                            : await branchAgent.RunAsync(context, null, null, cancellationToken);
+                        if (eventEmitter is not null)
+                            await eventEmitter.EmitAsync(EventTypes.ParallelBranchStart,
+                                agent: branchAgent.Name ?? "Unknown",
+                                payload: new { turn });
+
+                        AgentResponse response;
+                        try
+                        {
+                            response = governanceKernel?.CircuitBreaker is { } cb
+                                ? await cb.ExecuteAsync(() => branchAgent.RunAsync(context, null, null, cancellationToken))
+                                : await branchAgent.RunAsync(context, null, null, cancellationToken);
+                        }
+                        catch (OperationCanceledException) { throw; }
+                        catch (Exception branchEx)
+                        {
+                            if (eventEmitter is not null)
+                                _ = eventEmitter.EmitAsync(EventTypes.ParallelBranchError,
+                                    agent:   branchAgent.Name ?? "Unknown",
+                                    payload: new { turn, error = branchEx.Message });
+                            throw;
+                        }
+
+                        if (eventEmitter is not null)
+                            _ = eventEmitter.EmitAsync(EventTypes.ParallelBranchEnd,
+                                agent: branchAgent.Name ?? "Unknown",
+                                payload: new { turn });
 
                         return (branchAgent, response);
                     }).ToList();
@@ -519,9 +547,28 @@ public sealed class AgentOrchestrator(
                 }
             }
 
-            AgentResponse response = governanceKernel?.CircuitBreaker is { } cb
-                ? await cb.ExecuteAsync(() => agent.RunAsync(contextList, null, null, cancellationToken))
-                : await agent.RunAsync(contextList, null, null, cancellationToken);
+            if (eventEmitter is not null)
+                await eventEmitter.EmitAsync(EventTypes.AgentStart,
+                    agent: agent.Name ?? "Unknown",
+                    turn:  turn);
+
+            AgentResponse response;
+            try
+            {
+                response = governanceKernel?.CircuitBreaker is { } cb
+                    ? await cb.ExecuteAsync(() => agent.RunAsync(contextList, null, null, cancellationToken))
+                    : await agent.RunAsync(contextList, null, null, cancellationToken);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception agentEx)
+            {
+                if (eventEmitter is not null)
+                    _ = eventEmitter.EmitAsync(EventTypes.AgentError,
+                        agent:   agent.Name ?? "Unknown",
+                        turn:    turn,
+                        payload: new { error = agentEx.GetType().Name, message = agentEx.Message });
+                throw;
+            }
 
             logger.LogDebug(
                 "[Orchestrator] '{Agent}' returned {MsgCount} message(s). Text='{Preview}'",
@@ -616,7 +663,14 @@ public sealed class AgentOrchestrator(
 
             // Check whether any termination condition has been satisfied.
             if (await termination.ShouldTerminateAsync(history, cancellationToken))
+            {
+                if (eventEmitter is not null)
+                    _ = eventEmitter.EmitAsync(EventTypes.TerminationSatisfied,
+                        agent: agentMessage.AgentName,
+                        turn:  agentMessage.TurnIndex,
+                        payload: new { turn });
                 break;
+            }
         }
     }
 
@@ -851,6 +905,15 @@ public sealed class AgentOrchestrator(
         if (eventEmitter is not null)
         {
             await eventEmitter.EmitAsync(EventTypes.TurnEnd,
+                agent: msg.AgentName,
+                turn:  msg.TurnIndex,
+                payload: new
+                {
+                    input_tokens  = msg.Usage?.InputTokens,
+                    output_tokens = msg.Usage?.OutputTokens,
+                });
+
+            await eventEmitter.EmitAsync(EventTypes.AgentEnd,
                 agent: msg.AgentName,
                 turn:  msg.TurnIndex,
                 payload: new

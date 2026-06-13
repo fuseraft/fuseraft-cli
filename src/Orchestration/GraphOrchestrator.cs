@@ -481,6 +481,19 @@ public sealed class GraphOrchestrator(
                 currentStart         = nextStart;
             }
 
+            if (naturallyTerminated)
+            {
+                if (eventEmitter is not null)
+                    _ = eventEmitter.EmitAsync(EventTypes.TerminationSatisfied,
+                        payload: new { phases = phaseCount });
+            }
+            else if (!ct.IsCancellationRequested && maxPhases != int.MaxValue)
+            {
+                if (eventEmitter is not null)
+                    _ = eventEmitter.EmitAsync(EventTypes.MaxTurnsExceeded,
+                        payload: new { phases = phaseCount, max = maxPhases });
+            }
+
             // When the phase cap fires (rather than a natural terminal/break), emit an
             // explanatory message so the session transcript has a clear stopping reason —
             // mirrors the equivalent behaviour in MagenticOrchestrator.
@@ -672,6 +685,11 @@ public sealed class GraphOrchestrator(
         agentFactory.OnAgentTurnStarting();
         changeTracker?.BeginTurn(agentName, ctx.TurnIndex);
 
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync(EventTypes.AgentStart,
+                agent: agentName,
+                turn:  ctx.TurnIndex);
+
         int maxRetries      = config.Selection.Graph?.MaxRetries ?? DefaultMaxRetries;
         int maxTotalTurns   = maxRetries * 10;
         int consecutiveFails = 0;
@@ -680,8 +698,21 @@ public sealed class GraphOrchestrator(
         while (true)
         {
             if (totalTurns++ >= maxTotalTurns)
+            {
+                if (eventEmitter is not null)
+                    _ = eventEmitter.EmitAsync(EventTypes.RetryExhausted,
+                        agent:   agentName,
+                        turn:    ctx.TurnIndex,
+                        payload: new { reason = "total-turns", turns = totalTurns, max = maxTotalTurns });
                 throw new ValidatorStuckException(agentName, "total-turns", totalTurns,
                     $"Node '{nodeId}' ({agentName}) exceeded {maxTotalTurns} total turns without completing.");
+            }
+
+            if (totalTurns > 1 && eventEmitter is not null)
+                await eventEmitter.EmitAsync(EventTypes.RetryAttempt,
+                    agent:   agentName,
+                    turn:    ctx.TurnIndex,
+                    payload: new { attempt = totalTurns, consecutive_fails = consecutiveFails });
 
             var (response, agentMsg, updatedFails, shouldContinue) =
                 await RunSingleNodeTurnAsync(
@@ -927,9 +958,31 @@ public sealed class GraphOrchestrator(
                 }).ToList();
 
                 var parallelTasks = forkPairs
-                    .Select(fp => RunParallelNodeAsync(
-                        fp.NodeId, fp.AgentName, fp.Agent, fp.Instructions, fp.AgentCfg,
-                        fp.RouteTable, fp.Fork, ct, agents, agentInstructions, agentConfigs))
+                    .Select(async fp =>
+                    {
+                        if (eventEmitter is not null)
+                            await eventEmitter.EmitAsync(EventTypes.ParallelBranchStart,
+                                agent:   fp.AgentName,
+                                payload: new { node = fp.NodeId });
+                        try
+                        {
+                            await RunParallelNodeAsync(
+                                fp.NodeId, fp.AgentName, fp.Agent, fp.Instructions, fp.AgentCfg,
+                                fp.RouteTable, fp.Fork, ct, agents, agentInstructions, agentConfigs);
+                            if (eventEmitter is not null)
+                                _ = eventEmitter.EmitAsync(EventTypes.ParallelBranchEnd,
+                                    agent:   fp.AgentName,
+                                    payload: new { node = fp.NodeId });
+                        }
+                        catch (Exception branchEx)
+                        {
+                            if (eventEmitter is not null)
+                                _ = eventEmitter.EmitAsync(EventTypes.ParallelBranchError,
+                                    agent:   fp.AgentName,
+                                    payload: new { node = fp.NodeId, error = branchEx.Message });
+                            throw;
+                        }
+                    })
                     .ToArray();
 
                 await Task.WhenAll(parallelTasks).ConfigureAwait(false);
@@ -995,9 +1048,16 @@ public sealed class GraphOrchestrator(
             await PersistCorrectionsAsync(ctx, histBefore2, ct).ConfigureAwait(false);
 
             if (consecutiveFails >= maxRetries)
+            {
+                if (eventEmitter is not null)
+                    _ = eventEmitter.EmitAsync(EventTypes.RetryExhausted,
+                        agent:   agentName,
+                        turn:    agentMsg!.TurnIndex,
+                        payload: new { reason = "no-keyword", consecutive = consecutiveFails, max = maxRetries });
                 throw new ValidatorStuckException(agentName, "no-keyword", consecutiveFails,
                     $"Node '{nodeId}' ({agentName}) emitted no routing keyword " +
                     $"for {consecutiveFails} consecutive turns.");
+            }
         }
     }
 
@@ -1048,9 +1108,14 @@ public sealed class GraphOrchestrator(
             consecutiveFails++;
 
             if (eventEmitter is not null)
+            {
                 await eventEmitter.EmitAsync(EventTypes.TurnTimeout,
                     agent:   agentName,
                     payload: new { message = tex.Message, consecutive = consecutiveFails });
+                await eventEmitter.EmitAsync(EventTypes.AgentTimeout,
+                    agent:   agentName,
+                    payload: new { message = tex.Message, consecutive = consecutiveFails });
+            }
 
             if (consecutiveFails >= maxRetries)
                 throw new ValidatorStuckException(agentName, "streaming-timeout",
@@ -1233,6 +1298,12 @@ public sealed class GraphOrchestrator(
     {
         var approved = await _humanApprovalService!.PromptRouteApprovalAsync(
             keyword, agentName, targetName);
+
+        if (eventEmitter is not null)
+            _ = eventEmitter.EmitAsync(approved ? EventTypes.HitlApproved : EventTypes.HitlRejected,
+                agent:   agentName,
+                payload: new { keyword, target = targetName });
+
         if (!approved)
         {
             ctx.History.Add(new ChatMessage(ChatRole.User, blockedMessage));
@@ -1395,6 +1466,7 @@ public sealed class GraphOrchestrator(
             throw new BudgetExceededException(ctx.CumulativeTokens, limit);
 
         if (eventEmitter is not null)
+        {
             await eventEmitter.EmitAsync(EventTypes.TurnEnd,
                 agent: agentName,
                 turn:  agentMsg.TurnIndex,
@@ -1403,6 +1475,16 @@ public sealed class GraphOrchestrator(
                     input_tokens  = agentMsg.Usage?.InputTokens,
                     output_tokens = agentMsg.Usage?.OutputTokens,
                 }).ConfigureAwait(false);
+
+            await eventEmitter.EmitAsync(EventTypes.AgentEnd,
+                agent: agentName,
+                turn:  agentMsg.TurnIndex,
+                payload: new
+                {
+                    input_tokens  = agentMsg.Usage?.InputTokens,
+                    output_tokens = agentMsg.Usage?.OutputTokens,
+                }).ConfigureAwait(false);
+        }
 
         // Emit reasoning content when the model produced any.
         if (eventEmitter is not null)
