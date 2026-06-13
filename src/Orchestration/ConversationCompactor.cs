@@ -53,7 +53,7 @@ public sealed class ConversationCompactor(
     /// In window mode compaction is token-budget-based; no LLM call is made.
     /// </summary>
     public bool IsWindowMode =>
-        (config.Mode ?? "llm").Equals("window", StringComparison.OrdinalIgnoreCase);
+        (config.Mode ?? CompactionModes.Llm).Equals(CompactionModes.Window, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Returns true when <paramref name="messages"/> has reached or exceeded
@@ -165,7 +165,7 @@ public sealed class ConversationCompactor(
             "Compacting {Compacted} turns (0–{LastCompacted}) into a summary; retaining {Kept} recent turns.",
             toCompact.Count, toCompact[^1].TurnIndex, toRetain.Count);
 
-        var mode = (config.Mode ?? "llm").ToLowerInvariant();
+        var mode = (config.Mode ?? CompactionModes.Llm).ToLowerInvariant();
 
         var reasoningExcerpts = await ReadReasoningForRangeAsync(
             toCompact[0].TurnIndex, toCompact[^1].TurnIndex);
@@ -187,7 +187,7 @@ public sealed class ConversationCompactor(
         // When the intent log is unavailable, record a visible fallback notice so agents
         // resuming after compaction know the summary was degraded.
         string? intentFallbackNotice = null;
-        if (mode == "intent")
+        if (mode == CompactionModes.Intent)
         {
             if (intentLog is not null)
                 return await CompactFromIntentAsync(toCompact, toRetain, prefixBlock, cancellationToken);
@@ -203,15 +203,15 @@ public sealed class ConversationCompactor(
         }
 
         // Lossless: skip LLM call entirely; rebuild from durable state.
-        if ((mode == "lossless" || mode == "intent") && snapshotter is not null)
+        if ((mode == CompactionModes.Lossless || mode == CompactionModes.Intent) && snapshotter is not null)
             return await CompactLosslessAsync(toCompact, toRetain, snapshotter, prefixBlock, intentFallbackNotice, cancellationToken);
 
         // Hybrid: prepend reconstruction before the LLM summary.
-        if (mode == "hybrid" && snapshotter is not null)
+        if (mode == CompactionModes.Hybrid && snapshotter is not null)
             return await CompactHybridAsync(task, toCompact, toRetain, snapshotter, prefixBlock, filteredCompact, executionStateNote, cancellationToken);
 
         // LLM mode (default) — existing behaviour.
-        if (mode is "lossless" or "intent")
+        if (mode is CompactionModes.Lossless or CompactionModes.Intent)
             logger.LogWarning(
                 "Compaction mode is '{Mode}' but no snapshotter or intent log is available — falling back to LLM mode.",
                 mode);
