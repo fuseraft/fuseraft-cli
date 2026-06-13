@@ -46,12 +46,12 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
     {
         return config.Type.ToLowerInvariant() switch
         {
-            "sequential" or "roundrobin" => new SequentialAgentSelector(),
-            "llm"        => CreateLLMSelection(config, agents),
-            "keyword"    => CreateKeywordSelection(config, agents, validationConfig, failureHandling, contracts),
-            "structured" => CreateStructuredSelection(config, agents),
-            "statemachine" => CreateStateMachineSelection(config, validationConfig, failureHandling, contracts, verifier),
-            "magentic"   => throw new InvalidOperationException(
+            OrchestratorTypes.Sequential or OrchestratorTypes.RoundRobin => new SequentialAgentSelector(),
+            OrchestratorTypes.Llm         => CreateLLMSelection(config, agents),
+            OrchestratorTypes.Keyword     => CreateKeywordSelection(config, agents, validationConfig, failureHandling, contracts),
+            OrchestratorTypes.Structured  => CreateStructuredSelection(config, agents),
+            OrchestratorTypes.StateMachine => CreateStateMachineSelection(config, validationConfig, failureHandling, contracts, verifier),
+            OrchestratorTypes.Magentic    => throw new InvalidOperationException(
                 "The 'magentic' selection type is handled by MagenticOrchestrator and should " +
                 "never reach StrategyFactory. Verify that OrchestratorBuilder is routing " +
                 "this config correctly."),
@@ -97,18 +97,18 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
                 var validatorList = validatorNames
                     .Select(name =>
                     {
-                        if (string.Equals(name, "RequireShellPass", StringComparison.OrdinalIgnoreCase))
+                        if (string.Equals(name, ValidatorNames.RequireShellPass, StringComparison.OrdinalIgnoreCase))
                             return (IRoutingValidator)new RequireShellPassValidator(
                                 r.RequiredCommandPattern,
                                 validationConfig?.ChangeLogPath);
 
-                        if (string.Equals(name, "RequireWriteFile", StringComparison.OrdinalIgnoreCase))
+                        if (string.Equals(name, ValidatorNames.RequireWriteFile, StringComparison.OrdinalIgnoreCase))
                             return (IRoutingValidator)new HandoffToTesterValidator(
                                 shellFallbackPattern: r.ShellFallbackPattern,
                                 testReportPath: validationConfig?.TestReportPath,
                                 changeLogPath: validationConfig?.ChangeLogPath);
 
-                        if (string.Equals(name, "BlockOnConsecutiveFail", StringComparison.OrdinalIgnoreCase))
+                        if (string.Equals(name, ValidatorNames.BlockOnConsecutiveFail, StringComparison.OrdinalIgnoreCase))
                             return (IRoutingValidator)new ConsecutiveShellFailValidator(
                                 commandPattern:  r.RequiredCommandPattern,
                                 changeLogPath:   validationConfig?.ChangeLogPath);
@@ -247,15 +247,15 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
     {
         var registry = new Dictionary<string, IRoutingValidator>(StringComparer.OrdinalIgnoreCase)
         {
-            ["RequireWriteFile"] = new HandoffToTesterValidator(testReportPath: config?.TestReportPath, changeLogPath: config?.ChangeLogPath),
+            [ValidatorNames.RequireWriteFile] = new HandoffToTesterValidator(testReportPath: config?.TestReportPath, changeLogPath: config?.ChangeLogPath),
             // requireCurrentTurn=true for termination validators: prevents a stale change-log
             // entry from an earlier turn satisfying the check when APPROVED fires.
-            ["RequireShellPass"] = new RequireShellPassValidator(
+            [ValidatorNames.RequireShellPass] = new RequireShellPassValidator(
                 changeLogPath: config?.ChangeLogPath,
                 requireCurrentTurn: isTermination,
                 provenanceRegistry: provenanceRegistry),
             // Threshold defaults to 3; command pattern supplied per-route via RequiredCommandPattern.
-            ["BlockOnConsecutiveFail"] = new ConsecutiveShellFailValidator(
+            [ValidatorNames.BlockOnConsecutiveFail] = new ConsecutiveShellFailValidator(
                 changeLogPath: config?.ChangeLogPath)
         };
 
@@ -273,22 +273,22 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
                 }
             }
 
-            registry["TestReportValid"]          = new HandoffToReviewerValidator(config);
-            registry["RequireBrief"]             = new RequireBriefValidator(config.BriefPath);
-            registry["RequireAllFilesWritten"]   = new RequireAllFilesWrittenValidator(config.BriefPath, config.ChangeLogPath);
-            registry["RequireReviewJudgement"]   = new RequireReviewJudgementValidator();
+            registry[ValidatorNames.TestReportValid]          = new HandoffToReviewerValidator(config);
+            registry[ValidatorNames.RequireBrief]             = new RequireBriefValidator(config.BriefPath);
+            registry[ValidatorNames.RequireAllFilesWritten]   = new RequireAllFilesWrittenValidator(config.BriefPath, config.ChangeLogPath);
+            registry[ValidatorNames.RequireReviewJudgement]   = new RequireReviewJudgementValidator();
         }
 
         if (testSelector is { FindRelatedCommand.Length: > 0 })
         {
-            registry["RequireRelatedTestsPass"] = new RequireRelatedTestsPassValidator(
+            registry[ValidatorNames.RequireRelatedTestsPass] = new RequireRelatedTestsPassValidator(
                 testSelector,
                 changeLogPath: config?.ChangeLogPath,
                 sandboxRoot: sandboxRoot,
                 provenanceRegistry: provenanceRegistry);
         }
 
-        registry["ArchitectureValidator"] = new ArchitectureValidator(
+        registry[ValidatorNames.ArchitectureValidator] = new ArchitectureValidator(
             projectRoot: sandboxRoot,
             provenanceRegistry: provenanceRegistry);
 

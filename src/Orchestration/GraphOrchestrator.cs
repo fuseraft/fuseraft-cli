@@ -295,10 +295,10 @@ public sealed class GraphOrchestrator(
         agentCtx.History.Add(new ChatMessage(ChatRole.User, task));
         if (priorHistory?.Count > 0)
         {
-            logger.LogInformation("Resuming session — replaying {Turns} prior turns.", priorHistory.Count);
+            logger.LogDebug("Resuming session — replaying {Turns} prior turns.", priorHistory.Count);
             foreach (var prior in priorHistory)
             {
-                var role    = prior.Role == "user" ? ChatRole.User : ChatRole.Assistant;
+                var role    = prior.Role == MessageRole.User ? ChatRole.User : ChatRole.Assistant;
                 var content = ContextWindowFilter.TruncateReplayContent(prior);
                 var msg     = new ChatMessage(role, content);
                 if (role == ChatRole.Assistant && prior.AgentName is not null)
@@ -317,7 +317,7 @@ public sealed class GraphOrchestrator(
         using var phaseCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("session_start",
+            await eventEmitter.EmitAsync(EventTypes.SessionStart,
                 payload: new { task, start_node = startNodeId, resume = priorHistory is { Count: > 0 } });
 
         var phaseTask = Task.Run(
@@ -354,7 +354,7 @@ public sealed class GraphOrchestrator(
         finally
         {
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("session_end",
+                await eventEmitter.EmitAsync(EventTypes.SessionEnd,
                     payload: new
                     {
                         reason       = sessionEndReason,
@@ -397,7 +397,7 @@ public sealed class GraphOrchestrator(
                     phaseCount, currentStart);
 
                 if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("phase_start",
+                    await eventEmitter.EmitAsync(EventTypes.PhaseStart,
                         payload: new { phase = phaseCount, from = currentStart });
 
                 MafWorkflow workflow   = BuildPhaseWorkflow(bindings, currentStart);
@@ -455,7 +455,7 @@ public sealed class GraphOrchestrator(
                     : lastKeyword;
 
                 if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("phase_end",
+                    await eventEmitter.EmitAsync(EventTypes.PhaseEnd,
                         payload: new { phase = phaseCount, keyword = displayKeyword, next = nextStart ?? "terminal" });
 
                 if (nextStart is null)
@@ -481,6 +481,19 @@ public sealed class GraphOrchestrator(
                 currentStart         = nextStart;
             }
 
+            if (naturallyTerminated)
+            {
+                if (eventEmitter is not null)
+                    _ = eventEmitter.EmitAsync(EventTypes.TerminationSatisfied,
+                        payload: new { phases = phaseCount });
+            }
+            else if (!ct.IsCancellationRequested && maxPhases != int.MaxValue)
+            {
+                if (eventEmitter is not null)
+                    _ = eventEmitter.EmitAsync(EventTypes.MaxTurnsExceeded,
+                        payload: new { phases = phaseCount, max = maxPhases });
+            }
+
             // When the phase cap fires (rather than a natural terminal/break), emit an
             // explanatory message so the session transcript has a clear stopping reason —
             // mirrors the equivalent behaviour in MagenticOrchestrator.
@@ -491,7 +504,7 @@ public sealed class GraphOrchestrator(
                     maxPhases);
                 await agentCtx.MessageSink.WriteAsync(new AgentMessage
                 {
-                    AgentName = "orchestrator",
+                    AgentName = AgentNames.Orchestrator,
                     Content   =
                         $"The session reached the maximum of {maxPhases} orchestration phases " +
                         "without completing the task. Review the conversation history and consider " +
@@ -672,6 +685,11 @@ public sealed class GraphOrchestrator(
         agentFactory.OnAgentTurnStarting();
         changeTracker?.BeginTurn(agentName, ctx.TurnIndex);
 
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync(EventTypes.AgentStart,
+                agent: agentName,
+                turn:  ctx.TurnIndex);
+
         int maxRetries      = config.Selection.Graph?.MaxRetries ?? DefaultMaxRetries;
         int maxTotalTurns   = maxRetries * 10;
         int consecutiveFails = 0;
@@ -680,8 +698,21 @@ public sealed class GraphOrchestrator(
         while (true)
         {
             if (totalTurns++ >= maxTotalTurns)
+            {
+                if (eventEmitter is not null)
+                    _ = eventEmitter.EmitAsync(EventTypes.RetryExhausted,
+                        agent:   agentName,
+                        turn:    ctx.TurnIndex,
+                        payload: new { reason = "total-turns", turns = totalTurns, max = maxTotalTurns });
                 throw new ValidatorStuckException(agentName, "total-turns", totalTurns,
                     $"Node '{nodeId}' ({agentName}) exceeded {maxTotalTurns} total turns without completing.");
+            }
+
+            if (totalTurns > 1 && eventEmitter is not null)
+                await eventEmitter.EmitAsync(EventTypes.RetryAttempt,
+                    agent:   agentName,
+                    turn:    ctx.TurnIndex,
+                    payload: new { attempt = totalTurns, consecutive_fails = consecutiveFails });
 
             var (response, agentMsg, updatedFails, shouldContinue) =
                 await RunSingleNodeTurnAsync(
@@ -721,7 +752,7 @@ public sealed class GraphOrchestrator(
                 RecordNodeState(ctx, agentName);
 
                 if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("state_advanced",
+                    await eventEmitter.EmitAsync(EventTypes.StateAdvanced,
                         agent: agentName,
                         turn:  agentMsg!.TurnIndex,
                         payload: new { version = ctx.CurrentState.Version, terminal = true });
@@ -751,7 +782,7 @@ public sealed class GraphOrchestrator(
                         ctx.LastKeyword  = null;
 
                         if (eventEmitter is not null)
-                            await eventEmitter.EmitAsync("agent_routed",
+                            await eventEmitter.EmitAsync(EventTypes.AgentRouted,
                                 agent:   agentName,
                                 turn:    agentMsg!.TurnIndex,
                                 payload: new { keyword = "(unconditional)", to = autoFwdRoute.NextExecutorName });
@@ -805,7 +836,7 @@ public sealed class GraphOrchestrator(
                     RecordNodeState(ctx, autoBackDest ?? agentName);
 
                     if (eventEmitter is not null)
-                        await eventEmitter.EmitAsync("state_advanced",
+                        await eventEmitter.EmitAsync(EventTypes.StateAdvanced,
                             agent: agentName,
                             turn:  agentMsg!.TurnIndex,
                             payload: new { version = ctx.CurrentState.Version, phase_break = "(unconditional)", next = autoBackDest ?? "(terminal)" });
@@ -835,7 +866,7 @@ public sealed class GraphOrchestrator(
                 consecutiveFails++;
 
                 if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("multi_keyword",
+                    await eventEmitter.EmitAsync(EventTypes.MultiKeyword,
                         agent:   agentName,
                         turn:    agentMsg!.TurnIndex,
                         payload: new { keywords = allKeywords, consecutive = consecutiveFails });
@@ -856,7 +887,7 @@ public sealed class GraphOrchestrator(
             string? foundKeyword = allKeywords.Count == 1 ? allKeywords[0] : null;
 
             if (foundKeyword is not null && eventEmitter is not null)
-                await eventEmitter.EmitAsync("keyword_detected",
+                await eventEmitter.EmitAsync(EventTypes.KeywordDetected,
                     agent:   agentName,
                     turn:    agentMsg!.TurnIndex,
                     payload: new { keyword = foundKeyword });
@@ -907,7 +938,7 @@ public sealed class GraphOrchestrator(
                 }
 
                 if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("parallel_start",
+                    await eventEmitter.EmitAsync(EventTypes.ParallelStart,
                         agent:   agentName,
                         payload: new { keyword = foundKeyword, nodes = parallelGroup.NodeIds, merge_target = parallelGroup.MergeTargetName });
 
@@ -927,9 +958,31 @@ public sealed class GraphOrchestrator(
                 }).ToList();
 
                 var parallelTasks = forkPairs
-                    .Select(fp => RunParallelNodeAsync(
-                        fp.NodeId, fp.AgentName, fp.Agent, fp.Instructions, fp.AgentCfg,
-                        fp.RouteTable, fp.Fork, ct, agents, agentInstructions, agentConfigs))
+                    .Select(async fp =>
+                    {
+                        if (eventEmitter is not null)
+                            await eventEmitter.EmitAsync(EventTypes.ParallelBranchStart,
+                                agent:   fp.AgentName,
+                                payload: new { node = fp.NodeId });
+                        try
+                        {
+                            await RunParallelNodeAsync(
+                                fp.NodeId, fp.AgentName, fp.Agent, fp.Instructions, fp.AgentCfg,
+                                fp.RouteTable, fp.Fork, ct, agents, agentInstructions, agentConfigs);
+                            if (eventEmitter is not null)
+                                _ = eventEmitter.EmitAsync(EventTypes.ParallelBranchEnd,
+                                    agent:   fp.AgentName,
+                                    payload: new { node = fp.NodeId });
+                        }
+                        catch (Exception branchEx)
+                        {
+                            if (eventEmitter is not null)
+                                _ = eventEmitter.EmitAsync(EventTypes.ParallelBranchError,
+                                    agent:   fp.AgentName,
+                                    payload: new { node = fp.NodeId, error = branchEx.Message });
+                            throw;
+                        }
+                    })
                     .ToArray();
 
                 await Task.WhenAll(parallelTasks).ConfigureAwait(false);
@@ -944,11 +997,11 @@ public sealed class GraphOrchestrator(
 
                 if (eventEmitter is not null)
                 {
-                    await eventEmitter.EmitAsync("parallel_merge",
+                    await eventEmitter.EmitAsync(EventTypes.ParallelMerge,
                         agent:   agentName,
                         payload: new { keyword = foundKeyword, to = parallelGroup.MergeTargetName });
 
-                    await eventEmitter.EmitAsync("state_advanced",
+                    await eventEmitter.EmitAsync(EventTypes.StateAdvanced,
                         agent: agentName,
                         turn:  agentMsg!.TurnIndex,
                         payload: new { version = ctx.CurrentState.Version, parallel_merge = true, to = parallelGroup.MergeTargetName });
@@ -983,10 +1036,10 @@ public sealed class GraphOrchestrator(
             consecutiveFails++;
 
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("no_keyword",
+                await eventEmitter.EmitAsync(EventTypes.KeywordNotFound,
                     agent:   agentName,
                     turn:    agentMsg!.TurnIndex,
-                    payload: new { consecutive = consecutiveFails });
+                    payload: new { consecutive = consecutiveFails, source = "graph_orchestrator" });
 
             int histBefore2 = ctx.History.Count;
             await CorrectionEngine.InjectNoKeywordCorrection(
@@ -995,9 +1048,22 @@ public sealed class GraphOrchestrator(
             await PersistCorrectionsAsync(ctx, histBefore2, ct).ConfigureAwait(false);
 
             if (consecutiveFails >= maxRetries)
+            {
+                if (eventEmitter is not null)
+                    _ = eventEmitter.EmitAsync(EventTypes.RetryExhausted,
+                        agent:   agentName,
+                        turn:    agentMsg!.TurnIndex,
+                        payload: new { reason = "no-keyword", consecutive = consecutiveFails, max = maxRetries });
                 throw new ValidatorStuckException(agentName, "no-keyword", consecutiveFails,
                     $"Node '{nodeId}' ({agentName}) emitted no routing keyword " +
                     $"for {consecutiveFails} consecutive turns.");
+            }
+
+            if (eventEmitter is not null)
+                _ = eventEmitter.EmitAsync(EventTypes.RetryScheduled,
+                    agent:   agentName,
+                    turn:    agentMsg!.TurnIndex,
+                    payload: new { reason = "no-keyword", attempt = consecutiveFails + 1, max = maxRetries });
         }
     }
 
@@ -1033,7 +1099,7 @@ public sealed class GraphOrchestrator(
         if (eventEmitter is not null)
         {
             eventEmitter.SetTurn(ctx.TurnIndex);
-            await eventEmitter.EmitAsync("turn_start", agent: agentName, turn: ctx.TurnIndex);
+            await eventEmitter.EmitAsync(EventTypes.TurnStart, agent: agentName, turn: ctx.TurnIndex);
         }
 
         AgentResponse response;
@@ -1048,13 +1114,26 @@ public sealed class GraphOrchestrator(
             consecutiveFails++;
 
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("turn_timeout",
+            {
+                await eventEmitter.EmitAsync(EventTypes.ModelTimeout,
                     agent:   agentName,
                     payload: new { message = tex.Message, consecutive = consecutiveFails });
+                await eventEmitter.EmitAsync(EventTypes.TurnTimeout,
+                    agent:   agentName,
+                    payload: new { message = tex.Message, consecutive = consecutiveFails });
+                await eventEmitter.EmitAsync(EventTypes.AgentTimeout,
+                    agent:   agentName,
+                    payload: new { message = tex.Message, consecutive = consecutiveFails });
+            }
 
             if (consecutiveFails >= maxRetries)
                 throw new ValidatorStuckException(agentName, "streaming-timeout",
                     consecutiveFails, tex.Message);
+
+            if (eventEmitter is not null)
+                _ = eventEmitter.EmitAsync(EventTypes.RetryScheduled,
+                    agent:   agentName,
+                    payload: new { reason = "streaming-timeout", attempt = consecutiveFails + 1, max = maxRetries });
 
             ctx.History.Add(new ChatMessage(ChatRole.User,
                 "TIMEOUT: Response timed out. Resume from where you left off — prior tool results are in context. " +
@@ -1075,7 +1154,7 @@ public sealed class GraphOrchestrator(
     /// <summary>
     /// Context cap warning and compaction trigger. Assembles the per-turn message list via
     /// the unified context pipeline (when configured) or the legacy
-    /// <see cref="ContextWindowFilter"/>, emits a <c>context_cap_warning</c> event when
+    /// <see cref="ContextWindowFilter"/>, emits a <c>context_window_warn</c> event when
     /// the filtered count approaches the configured cap fraction, and returns the assembled
     /// context ready for the agent call.
     /// </summary>
@@ -1100,14 +1179,14 @@ public sealed class GraphOrchestrator(
                     SessionId     = _sessionId,
                 }, ct);
             context = assembled.Messages;
-            await EmitContextCapWarningAsync(agentName, agentCfg, assembled.Messages, ctx);
+            await EmitContextWindowWarnAsync(agentName, agentCfg, assembled.Messages, ctx);
             if (eventEmitter is not null)
                 await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, ctx.TurnIndex);
         }
         else
         {
             var filtered = ContextWindowFilter.Apply(ctx.History, agentCfg.ContextWindow);
-            await EmitContextCapWarningAsync(agentName, agentCfg, filtered, ctx);
+            await EmitContextWindowWarnAsync(agentName, agentCfg, filtered, ctx);
             context = !string.IsNullOrWhiteSpace(instructions)
                 ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
                 : filtered;
@@ -1204,7 +1283,7 @@ public sealed class GraphOrchestrator(
         RecordNodeState(ctx, backEdgeDest ?? agentName);
 
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("state_advanced",
+            await eventEmitter.EmitAsync(EventTypes.StateAdvanced,
                 agent: agentName,
                 turn:  agentMsg.TurnIndex,
                 payload: new { version = ctx.CurrentState.Version, phase_break = foundKeyword, next = backEdgeDest ?? "(terminal)" });
@@ -1233,6 +1312,12 @@ public sealed class GraphOrchestrator(
     {
         var approved = await _humanApprovalService!.PromptRouteApprovalAsync(
             keyword, agentName, targetName);
+
+        if (eventEmitter is not null)
+            _ = eventEmitter.EmitAsync(approved ? EventTypes.HitlApproved : EventTypes.HitlRejected,
+                agent:   agentName,
+                payload: new { keyword, target = targetName });
+
         if (!approved)
         {
             ctx.History.Add(new ChatMessage(ChatRole.User, blockedMessage));
@@ -1295,14 +1380,14 @@ public sealed class GraphOrchestrator(
             ctx.LastKeyword  = foundKeyword;
 
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("agent_routed",
+                await eventEmitter.EmitAsync(EventTypes.AgentRouted,
                     agent:   agentName,
                     turn:    agentMsg.TurnIndex,
                     payload: new { keyword = foundKeyword, to = route.NextExecutorName });
 
             RecordNodeState(ctx, route.NextExecutorName);
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("state_advanced",
+                await eventEmitter.EmitAsync(EventTypes.StateAdvanced,
                     agent: agentName,
                     turn:  agentMsg.TurnIndex,
                     payload: new { version = ctx.CurrentState.Version, to = route.NextExecutorName });
@@ -1395,7 +1480,8 @@ public sealed class GraphOrchestrator(
             throw new BudgetExceededException(ctx.CumulativeTokens, limit);
 
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("turn_end",
+        {
+            await eventEmitter.EmitAsync(EventTypes.TurnEnd,
                 agent: agentName,
                 turn:  agentMsg.TurnIndex,
                 payload: new
@@ -1403,6 +1489,16 @@ public sealed class GraphOrchestrator(
                     input_tokens  = agentMsg.Usage?.InputTokens,
                     output_tokens = agentMsg.Usage?.OutputTokens,
                 }).ConfigureAwait(false);
+
+            await eventEmitter.EmitAsync(EventTypes.AgentEnd,
+                agent: agentName,
+                turn:  agentMsg.TurnIndex,
+                payload: new
+                {
+                    input_tokens  = agentMsg.Usage?.InputTokens,
+                    output_tokens = agentMsg.Usage?.OutputTokens,
+                }).ConfigureAwait(false);
+        }
 
         // Emit reasoning content when the model produced any.
         if (eventEmitter is not null)
@@ -1417,7 +1513,7 @@ public sealed class GraphOrchestrator(
                 var truncated = reasoningText.Length > MaxReasoningChars
                     ? reasoningText[..MaxReasoningChars] + $"\n[TRUNCATED — {reasoningText.Length:N0} chars total]"
                     : reasoningText;
-                await eventEmitter.EmitAsync("reasoning",
+                await eventEmitter.EmitAsync(EventTypes.Reasoning,
                     agent:   agentName,
                     turn:    agentMsg.TurnIndex,
                     payload: new { text = truncated }).ConfigureAwait(false);
@@ -1468,7 +1564,7 @@ public sealed class GraphOrchestrator(
         EventEmitter emitter,
         fuseraft.Core.Models.ContextAssemblyMetrics metrics,
         int turn) =>
-        emitter.EmitAsync("context_assembly",
+        emitter.EmitAsync(EventTypes.ContextAssembly,
             agent: metrics.AgentName,
             turn:  turn,
             payload: new
@@ -1498,7 +1594,7 @@ public sealed class GraphOrchestrator(
 
             await ctx.MessageSink.WriteAsync(new AgentMessage
             {
-                AgentName = "orchestrator",
+                AgentName = AgentNames.Orchestrator,
                 Content   = correctionText,
                 Role      = "user",
                 TurnIndex = Math.Max(0, ctx.TurnIndex - 1),
@@ -1533,7 +1629,7 @@ public sealed class GraphOrchestrator(
             $"Failure: {validatorError}"));
 
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("recovery_activated",
+            await eventEmitter.EmitAsync(EventTypes.RecoveryActivated,
                 agent: recoveryAgentName,
                 payload: new { reason, keyword = triggeringKeyword });
 
@@ -1582,18 +1678,18 @@ public sealed class GraphOrchestrator(
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Emits a <c>context_cap_warning</c> event when the filtered message count is
+    /// Emits a <c>context_window_warn</c> event when the filtered message count is
     /// approaching the configured context-cap fraction. No-ops when
     /// <paramref name="eventEmitter"/> is null or the context window is not configured.
     /// </summary>
-    private async Task EmitContextCapWarningAsync(
+    private async Task EmitContextWindowWarnAsync(
         string agentName, AgentConfig agentCfg, IReadOnlyList<ChatMessage> filtered, AgentContext ctx)
     {
         if (eventEmitter is null) return;
         if (agentCfg.ContextWindow is not { ContextCapFraction: > 0, MaxTailMessages: > 0 } cw) return;
         if (filtered.Count <= (int)(cw.MaxTailMessages * cw.ContextCapFraction)) return;
 
-        await eventEmitter.EmitAsync("context_cap_warning",
+        await eventEmitter.EmitAsync(EventTypes.ContextWindowWarn,
             agent: agentName,
             turn:  ctx.TurnIndex,
             payload: new
@@ -1622,7 +1718,7 @@ public sealed class GraphOrchestrator(
         CancellationToken ct)
     {
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("validation_fail",
+            await eventEmitter.EmitAsync(EventTypes.ValidationFail,
                 agent:   agentName,
                 payload: new
                 {
@@ -1730,21 +1826,21 @@ public sealed class GraphOrchestrator(
                         SessionId     = _sessionId,
                     }, ct);
                 context = assembled.Messages;
-                await EmitContextCapWarningAsync(agentName, agentCfg, assembled.Messages, ctx);
+                await EmitContextWindowWarnAsync(agentName, agentCfg, assembled.Messages, ctx);
                 if (eventEmitter is not null)
                     await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, ctx.TurnIndex);
             }
             else
             {
                 var filtered = ContextWindowFilter.Apply(ctx.History, agentCfg.ContextWindow);
-                await EmitContextCapWarningAsync(agentName, agentCfg, filtered, ctx);
+                await EmitContextWindowWarnAsync(agentName, agentCfg, filtered, ctx);
                 context = !string.IsNullOrWhiteSpace(instructions)
                     ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
                     : filtered;
             }
 
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("turn_start", agent: agentName, turn: ctx.TurnIndex);
+                await eventEmitter.EmitAsync(EventTypes.TurnStart, agent: agentName, turn: ctx.TurnIndex);
 
             AgentResponse response;
             try
@@ -1758,9 +1854,14 @@ public sealed class GraphOrchestrator(
                 consecutiveFails++;
 
                 if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("turn_timeout",
+                {
+                    await eventEmitter.EmitAsync(EventTypes.ModelTimeout,
                         agent:   agentName,
                         payload: new { message = tex.Message, consecutive = consecutiveFails });
+                    await eventEmitter.EmitAsync(EventTypes.TurnTimeout,
+                        agent:   agentName,
+                        payload: new { message = tex.Message, consecutive = consecutiveFails });
+                }
 
                 if (consecutiveFails >= maxRetries)
                     throw new ValidatorStuckException(agentName, "streaming-timeout",
@@ -1791,7 +1892,7 @@ public sealed class GraphOrchestrator(
                 consecutiveFails++;
 
                 if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("multi_keyword",
+                    await eventEmitter.EmitAsync(EventTypes.MultiKeyword,
                         agent:   agentName,
                         turn:    agentMsg.TurnIndex,
                         payload: new { keywords = allKeywords, consecutive = consecutiveFails });
@@ -1812,7 +1913,7 @@ public sealed class GraphOrchestrator(
             string? foundKeyword = allKeywords.Count == 1 ? allKeywords[0] : null;
 
             if (foundKeyword is not null && eventEmitter is not null)
-                await eventEmitter.EmitAsync("keyword_detected",
+                await eventEmitter.EmitAsync(EventTypes.KeywordDetected,
                     agent:   agentName,
                     turn:    agentMsg.TurnIndex,
                     payload: new { keyword = foundKeyword, parallel = true });
@@ -1841,7 +1942,7 @@ public sealed class GraphOrchestrator(
                     ctx.LastKeyword  = foundKeyword;
 
                     if (eventEmitter is not null)
-                        await eventEmitter.EmitAsync("agent_routed",
+                        await eventEmitter.EmitAsync(EventTypes.AgentRouted,
                             agent:   agentName,
                             turn:    agentMsg.TurnIndex,
                             payload: new { keyword = foundKeyword, to = route.NextExecutorName, parallel = true });
@@ -1880,10 +1981,10 @@ public sealed class GraphOrchestrator(
             consecutiveFails++;
 
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("no_keyword",
+                await eventEmitter.EmitAsync(EventTypes.KeywordNotFound,
                     agent:   agentName,
                     turn:    agentMsg.TurnIndex,
-                    payload: new { consecutive = consecutiveFails });
+                    payload: new { consecutive = consecutiveFails, source = "graph_orchestrator" });
 
             int histBefore2 = ctx.History.Count;
             await CorrectionEngine.InjectNoKeywordCorrection(
@@ -2196,42 +2297,33 @@ public sealed class GraphOrchestrator(
 
         foreach (var name in names)
         {
-            IRoutingValidator? v = name.ToLowerInvariant() switch
-            {
-                "requireshellpass"        => new RequireShellPassValidator(
-                                                 requiredCommandPattern,
-                                                 config.Validation?.ChangeLogPath),
-                "requirewritefile"        => new HandoffToTesterValidator(
-                                                 shellFallbackPattern: shellFallbackPattern,
-                                                 changeLogPath:        config.Validation?.ChangeLogPath),
-                "blockonconsecutivefail"  => new ConsecutiveShellFailValidator(
-                                                 commandPattern: requiredCommandPattern,
-                                                 changeLogPath:  config.Validation?.ChangeLogPath),
-                "requireallfileswritten"  => briefPath is not null
-                                                 ? new RequireAllFilesWrittenValidator(
-                                                       briefPath,
-                                                       config.Validation!.ChangeLogPath)
-                                                 : null,
-                "requirebrief"            => briefPath is not null
-                                                 ? new RequireBriefValidator(briefPath)
-                                                 : null,
-                "testreportvalid"         => config.Validation is not null
-                                                 ? new HandoffToReviewerValidator(config.Validation)
-                                                 : null,
-                "requirereviewjudgement"  => new RequireReviewJudgementValidator(briefPath),
-                "requireacceptancecriteriapassed" => briefPath is not null
-                                                 ? new RequireAcceptanceCriteriaPassedValidator(
-                                                       briefPath,
-                                                       config.Validation!.ChangeLogPath)
-                                                 : null,
-                "requirerelatedtestspass" => config.TestSelector is not null
-                                                 ? new RequireRelatedTestsPassValidator(
-                                                       config.TestSelector,
-                                                       config.Validation?.ChangeLogPath,
-                                                       sandboxRoot)
-                                                 : null,
-                _ => null
-            };
+            IRoutingValidator? v = null;
+
+            if (name.Equals(ValidatorNames.RequireShellPass, StringComparison.OrdinalIgnoreCase))
+                v = new RequireShellPassValidator(requiredCommandPattern, config.Validation?.ChangeLogPath);
+            else if (name.Equals(ValidatorNames.RequireWriteFile, StringComparison.OrdinalIgnoreCase))
+                v = new HandoffToTesterValidator(
+                        shellFallbackPattern: shellFallbackPattern,
+                        changeLogPath:        config.Validation?.ChangeLogPath);
+            else if (name.Equals(ValidatorNames.BlockOnConsecutiveFail, StringComparison.OrdinalIgnoreCase))
+                v = new ConsecutiveShellFailValidator(
+                        commandPattern: requiredCommandPattern,
+                        changeLogPath:  config.Validation?.ChangeLogPath);
+            else if (name.Equals(ValidatorNames.RequireAllFilesWritten, StringComparison.OrdinalIgnoreCase) && briefPath is not null)
+                v = new RequireAllFilesWrittenValidator(briefPath, config.Validation!.ChangeLogPath);
+            else if (name.Equals(ValidatorNames.RequireBrief, StringComparison.OrdinalIgnoreCase) && briefPath is not null)
+                v = new RequireBriefValidator(briefPath);
+            else if (name.Equals(ValidatorNames.TestReportValid, StringComparison.OrdinalIgnoreCase) && config.Validation is not null)
+                v = new HandoffToReviewerValidator(config.Validation);
+            else if (name.Equals(ValidatorNames.RequireReviewJudgement, StringComparison.OrdinalIgnoreCase))
+                v = new RequireReviewJudgementValidator(briefPath);
+            else if (name.Equals(ValidatorNames.RequireAcceptanceCriteriaPassed, StringComparison.OrdinalIgnoreCase) && briefPath is not null)
+                v = new RequireAcceptanceCriteriaPassedValidator(briefPath, config.Validation!.ChangeLogPath);
+            else if (name.Equals(ValidatorNames.RequireRelatedTestsPass, StringComparison.OrdinalIgnoreCase) && config.TestSelector is not null)
+                v = new RequireRelatedTestsPassValidator(
+                        config.TestSelector,
+                        config.Validation?.ChangeLogPath,
+                        sandboxRoot);
 
             if (v is not null)
                 result.Add(v);

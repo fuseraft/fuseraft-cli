@@ -60,7 +60,7 @@ public sealed record ContextWindowConfig
     public int MaxTailMessages { get; init; }
 
     /// <summary>
-    /// Fraction of <see cref="MaxTailMessages"/> at which a <c>context_cap_warning</c>
+    /// Fraction of <see cref="MaxTailMessages"/> at which a <c>context_window_warn</c>
     /// event is emitted before the next agent turn.  For example, <c>0.4</c> warns when
     /// the filtered message count exceeds 40% of <see cref="MaxTailMessages"/>.
     ///

@@ -248,7 +248,7 @@ public static class MessageRenderer
             return;
         }
 
-        var agentMessages = messages.Where(m => m.Role == "assistant").ToList();
+        var agentMessages = messages.Where(m => m.Role == MessageRole.Assistant).ToList();
 
         // Per-agent turn count + tokens
         var agentStats = agentMessages

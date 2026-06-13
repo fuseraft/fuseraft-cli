@@ -8,6 +8,7 @@ using fuseraft.Core.Exceptions;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure.Plugins;
+using fuseraft.Orchestration;
 using fuseraft.Orchestration.Contracts;
 using fuseraft.Orchestration.Failure;
 using fuseraft.Orchestration.Parallel;
@@ -257,7 +258,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                             blockedFailure.LastError));
 
                     if (_eventEmitter is not null)
-                        _ = _eventEmitter.EmitAsync("replan_blocked",
+                        _ = _eventEmitter.EmitAsync(EventTypes.ReplanBlocked,
                             agent: state.Agent,
                             payload: new { from = _currentState, to = transition.To, blocked_transition = blockedTo, consecutive = blockedFailure.Count });
 
@@ -350,7 +351,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                         _history.Add(new ChatMessage(ChatRole.User, escalation));
 
                         if (_eventEmitter is not null)
-                            _ = _eventEmitter.EmitAsync("back_edge_escalation",
+                            _ = _eventEmitter.EmitAsync(EventTypes.BackEdgeEscalation,
                                 payload: new { from = _currentState, to = targetState, visit_count = newVisits, max_revisits = transition.MaxRevisits });
                     }
                 }
@@ -418,9 +419,9 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                 .Select(t => t.Signal!)
                 .Distinct()
                 .ToList();
-            _ = _eventEmitter.EmitAsync("keyword_not_found",
+            _ = _eventEmitter.EmitAsync(EventTypes.KeywordNotFound,
                 agent: state.Agent,
-                payload: new { state = _currentState, agent = state.Agent, expected_signals = expectedSignals });
+                payload: new { state = _currentState, agent = state.Agent, expected_signals = expectedSignals, source = "state_machine_strategy" });
         }
 
         // Accumulate consecutive no-signal turns in strategy state so the counter
@@ -440,7 +441,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                 .Distinct());
             throw new ValidatorStuckException(
                 agentName:           state.Agent,
-                validatorName:       $"signal-required:{_currentState}",
+                validatorName:       $"{ValidatorNames.SignalRequiredPrefix}{_currentState}",
                 consecutiveFailures: noSigCount,
                 lastValidatorError:
                     $"Agent '{state.Agent}' completed {noSigCount} consecutive turns in state '{_currentState}' " +
@@ -579,7 +580,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
         _transitionFailure = (failureKey, newCount, errorMessage);
 
         if (_eventEmitter is not null)
-            _ = _eventEmitter.EmitAsync("validation_fail",
+            _ = _eventEmitter.EmitAsync(EventTypes.ValidationFail,
                 agent: authorName,
                 payload: new { contract = failingContract, state = _currentState, transition = transition.To, consecutive = newCount, error = errorMessage });
 

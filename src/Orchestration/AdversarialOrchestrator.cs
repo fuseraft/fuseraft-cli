@@ -172,7 +172,7 @@ public sealed class AdversarialOrchestrator(
                 stageIndex + 1, _advConfig.Stages.Count, label);
 
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("adversarial_stage_start", agent: stageTag,
+                await eventEmitter.EmitAsync(EventTypes.AdversarialStageStart, agent: stageTag,
                     payload: new { stage = stageIndex + 1, label, generator = stage.Generator, critic = stage.Critic });
 
             // --- Initial generation ---
@@ -242,7 +242,7 @@ public sealed class AdversarialOrchestrator(
                         stageIndex + 1, label, round, _advConfig.Rounds);
 
                     if (eventEmitter is not null)
-                        await eventEmitter.EmitAsync("adversarial_stage_pass", agent: stageTag,
+                        await eventEmitter.EmitAsync(EventTypes.AdversarialStagePass, agent: stageTag,
                             payload: new { stage = stageIndex + 1, label, round });
                     break;
                 }
@@ -280,7 +280,7 @@ public sealed class AdversarialOrchestrator(
                     stageIndex + 1, label, _advConfig.Rounds);
 
                 if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("adversarial_stage_timeout", agent: stageTag,
+                    await eventEmitter.EmitAsync(EventTypes.AdversarialStageTimeout, agent: stageTag,
                         payload: new { stage = stageIndex + 1, label, rounds = _advConfig.Rounds });
             }
 
@@ -294,7 +294,7 @@ public sealed class AdversarialOrchestrator(
         logger.LogInformation("[AdversarialOrchestrator] All {Count} stages complete.", _advConfig.Stages.Count);
 
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("adversarial_complete", agent: "[Adversarial]",
+            await eventEmitter.EmitAsync(EventTypes.AdversarialComplete, agent: "[Adversarial]",
                 payload: new { stages = _advConfig.Stages.Count });
     }
 

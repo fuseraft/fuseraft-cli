@@ -13,9 +13,7 @@ namespace fuseraft.Orchestration;
 /// Schema: <c>{ ts, session, agent, turn, event_type, payload }</c>
 ///
 /// <para>
-/// Supported event types (see <see cref="OrchestrationEvent"/> for the full list):
-/// <c>turn_end</c>, <c>validation_fail</c>, <c>hitl_escalation</c>, <c>tool_blocked</c>,
-/// <c>keyword_not_found</c>, <c>magentic_plan</c>, <c>magentic_complete</c>.
+/// All event type strings are defined as constants in <see cref="EventTypes"/>.
 /// </para>
 ///
 /// <para>

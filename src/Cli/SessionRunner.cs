@@ -100,7 +100,15 @@ public sealed class SessionRunner(
         var turnClock    = Stopwatch.StartNew();
         var succeeded    = true;
         string? errorMessage = null;
-        _totalAssistantTurnCount = messages.Count(m => m.Role == "assistant");
+        _totalAssistantTurnCount = messages.Count(m => m.Role == MessageRole.Assistant);
+
+        if (messages.Count > 0 && eventEmitter is not null)
+        {
+            _ = eventEmitter.EmitAsync(EventTypes.EventReplayStart,
+                payload: new { session = checkpoint.SessionId, message_count = messages.Count });
+            _ = eventEmitter.EmitAsync(EventTypes.EventReplayComplete,
+                payload: new { session = checkpoint.SessionId, message_count = messages.Count });
+        }
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -169,7 +177,7 @@ public sealed class SessionRunner(
             catch (TimeoutException tex)
             {
                 if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync("hitl_escalation",
+                    await eventEmitter.EmitAsync(EventTypes.HitlEscalation,
                         payload: new { reason = "streaming_timeout", message = tex.Message });
 
                 AnsiConsole.MarkupLine(
@@ -192,6 +200,9 @@ public sealed class SessionRunner(
             }
             catch (OperationCanceledException)
             {
+                if (eventEmitter is not null)
+                    _ = eventEmitter.EmitAsync(EventTypes.CancellationRequested,
+                        payload: new { session = checkpoint.SessionId });
                 succeeded    = false;
                 errorMessage = "Cancelled.";
                 AnsiConsole.MarkupLine(
@@ -237,12 +248,21 @@ public sealed class SessionRunner(
                 if (outcome.ShouldBreak) break;
             }
 
-            if (cancellationToken.IsCancellationRequested) break;
+            if (cancellationToken.IsCancellationRequested)
+            {
+                if (eventEmitter is not null)
+                    _ = eventEmitter.EmitAsync(EventTypes.CancellationObserved,
+                        payload: new { session = checkpoint.SessionId });
+                break;
+            }
 
             // Session-level hard cap. Count only agent (assistant) turns across all StreamAsync
             // invocations. This fires even when compaction resets the internal phase counter.
             if (maxIterations > 0 && _totalAssistantTurnCount >= maxIterations)
             {
+                if (eventEmitter is not null)
+                    await eventEmitter.EmitAsync(EventTypes.MaxTurnsExceeded,
+                        payload: new { turns = _totalAssistantTurnCount, max = maxIterations });
                 succeeded    = false;
                 errorMessage = $"Session exceeded MaxIterations limit of {maxIterations} agent turns.";
                 AnsiConsole.MarkupLine(
@@ -312,7 +332,7 @@ public sealed class SessionRunner(
         CancellationToken cancellationToken)
     {
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("agent_blocked",
+            await eventEmitter.EmitAsync(EventTypes.AgentBlocked,
                 agent: blocked.AgentName,
                 payload: new { message = blocked.BlockerMessage });
 
@@ -327,6 +347,9 @@ public sealed class SessionRunner(
                 Succeeded: false, ErrorMessage: $"Blocked: agent '{blocked.AgentName}' declared an unrecoverable blocker.");
         }
 
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync(EventTypes.HitlResolved,
+                payload: new { reason = "agent_blocked", agent = blocked.AgentName });
         await InjectAndSaveHumanMessageAsync(redirect, messages, checkpoint, cancellationToken);
         return new HandlerOutcome(ShouldBreak: false, ShouldContinue: true, CompactionNeeded: false,
             Succeeded: true, ErrorMessage: null);
@@ -339,7 +362,7 @@ public sealed class SessionRunner(
         CancellationToken cancellationToken)
     {
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("hitl_escalation",
+            await eventEmitter.EmitAsync(EventTypes.HitlEscalation,
                 agent: stuck.AgentName,
                 payload: new { validator = stuck.ValidatorName, consecutive_failures = stuck.ConsecutiveFailures, last_error = stuck.LastValidatorError });
 
@@ -355,6 +378,9 @@ public sealed class SessionRunner(
                 Succeeded: false, ErrorMessage: $"Aborted: agent '{stuck.AgentName}' stuck on validator '{stuck.ValidatorName}'.");
         }
 
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync(EventTypes.HitlResolved,
+                payload: new { reason = "validator_stuck", agent = stuck.AgentName, validator = stuck.ValidatorName });
         await InjectAndSaveHumanMessageAsync(redirect, messages, checkpoint, cancellationToken);
         return new HandlerOutcome(ShouldBreak: false, ShouldContinue: true, CompactionNeeded: false,
             Succeeded: true, ErrorMessage: null);
@@ -372,7 +398,7 @@ public sealed class SessionRunner(
         if (!cancellationToken.IsCancellationRequested && cb.RetryAfter.TotalSeconds <= MaxAutoRetrySeconds)
         {
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("circuit_breaker_open",
+                await eventEmitter.EmitAsync(EventTypes.CircuitBreakerOpen,
                     payload: new { retry_after_seconds = cb.RetryAfter.TotalSeconds });
             var wait = cb.RetryAfter + TimeSpan.FromSeconds(2);
             AnsiConsole.MarkupLine(
@@ -384,7 +410,7 @@ public sealed class SessionRunner(
         }
 
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("session_error",
+            await eventEmitter.EmitAsync(EventTypes.SessionError,
                 payload: new { reason = "circuit_breaker_open", retry_after_seconds = cb.RetryAfter.TotalSeconds });
         AnsiConsole.MarkupLine(
             $"\n[red]✗ Circuit breaker open:[/] Too many consecutive LLM failures. " +
@@ -400,8 +426,12 @@ public sealed class SessionRunner(
     private async Task<HandlerOutcome> HandleBudgetExceededAsync(BudgetExceededException budget)
     {
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("session_error",
+        {
+            await eventEmitter.EmitAsync(EventTypes.SessionError,
                 payload: new { reason = "token_budget_exceeded", actual_tokens = budget.ActualTokens, limit_tokens = budget.LimitTokens });
+            _ = eventEmitter.EmitAsync(EventTypes.TerminationForced,
+                payload: new { reason = "token_budget_exceeded", actual_tokens = budget.ActualTokens, limit_tokens = budget.LimitTokens });
+        }
         AnsiConsole.MarkupLine(
             $"\n[red]✗ Error:[/] Session used [bold]{budget.ActualTokens:N0}[/] tokens, " +
             $"exceeding the configured budget of [bold]{budget.LimitTokens:N0}[/].\n");
@@ -416,7 +446,7 @@ public sealed class SessionRunner(
     private async Task<HandlerOutcome> HandleRateLimitAsync(Exception ex, SessionCheckpoint checkpoint)
     {
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("session_error",
+            await eventEmitter.EmitAsync(EventTypes.SessionError,
                 payload: new { reason = "rate_limited_429", message = ex.Message });
         AnsiConsole.MarkupLine(
             $"\n[red]✗ API rate limit / quota exceeded (HTTP 429)[/]\n" +
@@ -444,7 +474,7 @@ public sealed class SessionRunner(
         if (withCompactor)
         {
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("context_exceeded_recovery",
+                await eventEmitter.EmitAsync(EventTypes.ContextExceededRecovery,
                     payload: new { message = TrimTo(ex.Message, 200) });
             AnsiConsole.MarkupLine(
                 $"\n[yellow]⚠ Context window exceeded — fallover chain exhausted.[/] Compacting history and retrying...\n" +
@@ -455,7 +485,7 @@ public sealed class SessionRunner(
         }
 
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("session_error",
+            await eventEmitter.EmitAsync(EventTypes.SessionError,
                 payload: new { reason = "context_exceeded_no_compactor", message = TrimTo(ex.Message, 200) });
         AnsiConsole.MarkupLine(
             $"\n[red]✗ Context window exceeded[/] — no compactor configured.\n" +
@@ -477,7 +507,7 @@ public sealed class SessionRunner(
         CancellationToken cancellationToken)
     {
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("hitl_escalation",
+            await eventEmitter.EmitAsync(EventTypes.HitlEscalation,
                 payload: new { reason = "provider_400", message = TrimTo(ex.Message, 200) });
         AnsiConsole.MarkupLine(
             $"\n[yellow]⚠ Provider returned HTTP 400 (bad request).[/]\n" +
@@ -528,6 +558,10 @@ public sealed class SessionRunner(
         TimeSpan elapsed,
         SessionCheckpoint checkpoint)
     {
+        if (!succeeded && errorMessage != "Cancelled." && eventEmitter is not null)
+            _ = eventEmitter.EmitAsync(EventTypes.SessionAborted,
+                payload: new { session = checkpoint.SessionId, reason = errorMessage });
+
         if (sessionMetrics is not null)
             try { await sessionMetrics.PrintSummaryAsync(eventEmitter, checkpoint.SessionId); } catch { }
 
@@ -702,8 +736,9 @@ public sealed class SessionRunner(
             {
                 AnsiConsole.MarkupLine(
                     $"[yellow]  ⚠ {Markup.Escape(agent)} used {inputTokens:N0} input tokens this turn " +
-                    $"(warning threshold: {threshold:N0}). " +
-                    $"Reduce file reads and shell output to avoid a budget blowup.[/]");
+                    $"(warning threshold: {threshold:N0}).[/]");
+                AnsiConsole.MarkupLine(
+                    $"[yellow]  Reduce file reads and shell output to avoid a budget blowup.[/]");
                 AnsiConsole.WriteLine();
             }
         };
@@ -719,10 +754,10 @@ public sealed class SessionRunner(
                 var elapsed = turnClock.Elapsed;
                 turnClock.Restart();
 
-                // Orchestrator-injected correction messages (AgentName="orchestrator", Role="user")
+                // Orchestrator-injected correction messages (AgentName="Orchestrator", Role="user")
                 // are persisted to checkpoint for resume but should not update the status spinner
                 // or appear in the rendered display — they are internal routing signals.
-                bool isOrchestratorMessage = msg.AgentName == "orchestrator";
+                bool isOrchestratorMessage = msg.AgentName == AgentNames.Orchestrator;
 
                 if (!isOrchestratorMessage)
                 {
@@ -769,7 +804,7 @@ public sealed class SessionRunner(
     {
         messages.Add(msg);
         checkpoint.Messages.Add(msg);
-        if (msg.Role == "assistant")
+        if (msg.Role == MessageRole.Assistant)
         {
             _totalAssistantTurnCount++;
             sessionMetrics?.RecordTurn(msg);
@@ -817,7 +852,7 @@ public sealed class SessionRunner(
     /// </summary>
     private static AgentMessage HumanMessage(string content, int turnIndex) => new()
     {
-        AgentName = "Human",
+        AgentName = AgentNames.Human,
         Content   = content,
         Role      = "user",
         TurnIndex = turnIndex,

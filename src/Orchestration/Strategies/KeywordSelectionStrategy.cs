@@ -362,7 +362,7 @@ public sealed class KeywordSelectionStrategy : IAgentSelector
                         _validatorFailure = (failureKey, newCount, firstError);
 
                         if (_eventEmitter is not null)
-                            _ = _eventEmitter.EmitAsync("validation_fail",
+                            _ = _eventEmitter.EmitAsync(EventTypes.ValidationFail,
                                 agent: msg.AuthorName,
                                 payload: new { validator = failingValidatorName, consecutive = newCount });
 
@@ -589,9 +589,9 @@ public sealed class KeywordSelectionStrategy : IAgentSelector
             scanned, defaultAgent.Name);
 
         if (_eventEmitter is not null)
-            _ = _eventEmitter.EmitAsync("keyword_not_found",
+            _ = _eventEmitter.EmitAsync(EventTypes.KeywordNotFound,
                 agent: FindLastSpeakingAgent(history, agents)?.Name ?? _defaultAgentName,
-                payload: new { default_agent = _defaultAgentName, turns_scanned = scanned });
+                payload: new { default_agent = _defaultAgentName, turns_scanned = scanned, source = "keyword_strategy" });
 
         // Inject tool-refusal/code-in-text correction when the most recent agent message
         // contains markdown code blocks or tool-refusal phrases. This fires in the no-keyword-matched
@@ -648,6 +648,11 @@ public sealed class KeywordSelectionStrategy : IAgentSelector
 
         // Inject a loop-warning if the same agent has been selected consecutively too many times.
         InjectLoopWarningIfNeeded(history, defaultAgent);
+
+        if (_eventEmitter is not null)
+            _ = _eventEmitter.EmitAsync(EventTypes.SelectionFallback,
+                agent: defaultAgent.Name ?? _defaultAgentName,
+                payload: new { default_agent = defaultAgent.Name, turns_scanned = scanned, strategy = OrchestratorTypes.Keyword });
 
         return defaultAgent;
     }

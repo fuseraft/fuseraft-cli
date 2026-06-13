@@ -247,7 +247,7 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
             failures.Add($"session did not succeed: {result.ErrorMessage ?? "unknown"}");
 
         var finalContent = result.Messages
-            .LastOrDefault(m => m.Role == "assistant")?.Content ?? string.Empty;
+            .LastOrDefault(m => m.Role == MessageRole.Assistant)?.Content ?? string.Empty;
 
         foreach (var kw in evalCase.ExpectKeywords)
             if (!finalContent.Contains(kw, StringComparison.OrdinalIgnoreCase))

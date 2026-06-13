@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using fuseraft.Orchestration;
 
 namespace fuseraft.Infrastructure;
 
@@ -11,7 +12,8 @@ namespace fuseraft.Infrastructure;
 /// </summary>
 public sealed class ToolResultArtifactStore
 {
-    private readonly string? _artifactsDir;
+    private readonly string?        _artifactsDir;
+    private readonly EventEmitter?  _emitter;
 
     /// <summary>Results larger than this are offloaded. Default: 40,000 chars (~10k tokens).</summary>
     public int ThresholdChars { get; init; } = 40_000;
@@ -22,8 +24,11 @@ public sealed class ToolResultArtifactStore
         DefaultIgnoreCondition     = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    public ToolResultArtifactStore(string? artifactsDir)
-        => _artifactsDir = artifactsDir;
+    public ToolResultArtifactStore(string? artifactsDir, EventEmitter? eventEmitter = null)
+    {
+        _artifactsDir = artifactsDir;
+        _emitter      = eventEmitter;
+    }
 
     /// <summary>
     /// If <paramref name="content"/> exceeds <see cref="ThresholdChars"/>, writes it to disk
@@ -59,6 +64,14 @@ public sealed class ToolResultArtifactStore
             stub = content;
             return false;
         }
+
+        if (_emitter is not null)
+            _ = _emitter.EmitAsync(EventTypes.ArtifactCreated, payload: new
+            {
+                id,
+                tool  = toolName,
+                chars = content.Length,
+            });
 
         stub = BuildStub(toolName, hint, content.Length, id);
         return true;

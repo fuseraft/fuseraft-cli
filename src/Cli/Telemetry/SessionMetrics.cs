@@ -82,7 +82,7 @@ public sealed class SessionMetrics
         AnsiConsole.Write(table);
 
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("session_summary",
+            await eventEmitter.EmitAsync(EventTypes.SessionSummary,
                 payload: new
                 {
                     total_turns             = _totalTurns,

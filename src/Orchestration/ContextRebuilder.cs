@@ -135,7 +135,7 @@ public static class ContextRebuilder
 
         return new AgentMessage
         {
-            AgentName           = "System",
+            AgentName           = AgentNames.System,
             Content             = sb.ToString().TrimEnd(),
             Role                = "user",
             TurnIndex           = turnIndex,

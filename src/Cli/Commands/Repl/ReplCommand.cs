@@ -199,23 +199,23 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             toolsByCategory["Session"] = PluginRegistry.GetFunctionsFromObject(replSessionPlugin).ToList();
         }
 
+        using var emitter = new EventEmitter(eventsPath);
+        emitter.SetSessionId(sessionId);
+
         // Wrap every tool category with the artifact offload filter so oversized results are
         // stored to disk instead of accumulating verbatim in the conversation history.
         var toolArtifactsDir  = Path.Combine(cwd, FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalSessionToolArtifacts, sessionId));
-        var toolArtifactStore = new ToolResultArtifactStore(toolArtifactsDir);
+        var toolArtifactStore = new ToolResultArtifactStore(toolArtifactsDir, emitter);
         foreach (var key in toolsByCategory.Keys.ToList())
             toolsByCategory[key] = toolsByCategory[key]
                 .Select(f => (AIFunction)new ToolResultOffloadFilter(f, toolArtifactStore))
                 .ToList();
 
-        using var emitter = new EventEmitter(eventsPath);
-        emitter.SetSessionId(sessionId);
-
         if (explorerTools is not null)
             subAgent = new SubAgentPlugin(factory.Create(modelConfig), explorerTools,
                 eventEmitter:    emitter,
                 parentAgentName: "repl");
-        await emitter.EmitAsync("session_start", payload: new
+        await emitter.EmitAsync(EventTypes.SessionStart, payload: new
         {
             model         = modelId,
             cwd,
@@ -339,7 +339,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
         await ReplTurn.RunAsync(ctx, cancellationToken);
 
-        await emitter.EmitAsync("session_end", payload: new { turns = ctx.TurnIndex });
+        await emitter.EmitAsync(EventTypes.SessionEnd, payload: new { turns = ctx.TurnIndex });
         await ReplTurn.ExtractMemoriesOnExitAsync(ctx);
 
         // Post-session skill curation (best-effort — never fails the session).
@@ -432,7 +432,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
     {
         try
         {
-            await ctx.Emitter.EmitAsync("skill_curation_start",
+            await ctx.Emitter.EmitAsync(EventTypes.SkillCurationStart,
                 payload: new { session = ctx.SessionId, source = "repl" });
 
             // Convert ChatMessage history to AgentMessage list (assistant turns only).
@@ -440,7 +440,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 .Where(m => m.Role == ChatRole.Assistant && !string.IsNullOrWhiteSpace(m.Text))
                 .Select((m, i) => new AgentMessage
                 {
-                    AgentName = "Assistant",
+                    AgentName = AgentNames.Assistant,
                     Content   = m.Text!,
                     Role      = "assistant",
                     TurnIndex = i,
@@ -473,7 +473,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
             var result = await curator.RunAsync(checkpoint, messages, CancellationToken.None, source: "repl");
 
-            await ctx.Emitter.EmitAsync("skill_curation_complete",
+            await ctx.Emitter.EmitAsync(EventTypes.SkillCurationComplete,
                 payload: new
                 {
                     session       = ctx.SessionId,
@@ -501,7 +501,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             // Curation is best-effort — log but never surface as an error.
             try
             {
-                await ctx.Emitter.EmitAsync("skill_curation_complete",
+                await ctx.Emitter.EmitAsync(EventTypes.SkillCurationComplete,
                     payload: new { session = ctx.SessionId, source = "repl", outcome = "failed", failure_reason = ex.Message });
             }
             catch (Exception emitEx) { loggerFactory.CreateLogger<ReplCommand>().LogWarning(emitEx, "[SkillCuration] emitter failed: {Message}", emitEx.Message); }
