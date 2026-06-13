@@ -10,14 +10,27 @@ Configured under `Selection.Type`.
 
 ### sequential
 
-Agents take turns in the order they are declared in `Agents`. When the last agent finishes its turn, the cycle repeats from the first.
+Agents execute in the order they are declared in `Agents`, one pass from first to last. When the last agent finishes its turn the session ends (subject to `Termination` strategies).
 
 ```yaml
 Selection:
   Type: sequential
 ```
 
-Use this for simple pipelines where the flow is always the same, or for single-agent configs.
+Use this for simple linear pipelines where every agent runs exactly once, in order. For pipelines that cycle indefinitely use `roundrobin`.
+
+---
+
+### roundrobin
+
+Agents take turns in the order they are declared in `Agents`, cycling back to the first after the last. The session runs until a `Termination` strategy fires.
+
+```yaml
+Selection:
+  Type: roundrobin
+```
+
+Use this when every agent should participate in every round and the pipeline loops until an external condition stops it (e.g. a `maxiterations` cap or a `regex` termination pattern).
 
 ### keyword
 
@@ -544,22 +557,60 @@ Edges:
 
 In keyword routing this pattern requires two separate loop-back routes and depends on keyword scanning order. In graph routing the topology is explicit: each edge has a distinct target.
 
+**Hierarchical sub-graphs**
+
+A graph node can run a nested `GraphOrchestrator` instead of a single agent by setting `SubGraphId` instead of `Agent`. The sub-graph executes as a self-contained pipeline: all its messages are streamed to the parent session, and the sub-graph's terminal output is injected into the parent's shared history so keyword detection and edge routing work exactly as they would for a single agent turn.
+
+```yaml
+Selection:
+  Type: graph
+  Graph:
+    EntryNode: research_phase
+    Nodes:
+      - Id: research_phase
+        SubGraphId: research_team    # runs the nested graph instead of one agent
+      - Id: writer
+        Agent: Writer
+        Terminal: true
+    Edges:
+      - From: research_phase
+        To: writer
+        Keyword: "RESEARCH COMPLETE"
+    SubGraphs:
+      research_team:
+        EntryNode: gatherer
+        Nodes:
+          - Id: gatherer
+            Agent: DataGatherer
+          - Id: analyst
+            Agent: Analyst
+            Terminal: true
+        Edges:
+          - From: gatherer
+            To: analyst
+            Keyword: "DATA READY"
+```
+
+The `DataGatherer` and `Analyst` agents must be declared in the top-level `Orchestration.Agents` list. Sub-graphs share all services with the parent (change tracker, governance kernel, event emitter) but run with an isolated `GraphOrchestrator` instance.
+
 **`GraphConfig` fields**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `EntryNode` | string | no | Node ID of the first node to execute. Defaults to the first node when omitted. |
-| `Nodes` | array | yes | Node definitions. Each binds an agent role to a named position in the graph. |
+| `Nodes` | array | yes | Node definitions. Each binds an agent role (or sub-graph) to a named position in the graph. |
 | `Edges` | array | yes | Directed edges. Evaluated in declaration order — the first matching edge fires. |
 | `MaxRetries` | int | `4` | Maximum consecutive correction attempts per node before a `ValidatorStuckException` is thrown. |
+| `SubGraphs` | object | no | Named sub-graph configurations referenced by nodes via `SubGraphId`. Keys are sub-graph IDs; values are full `GraphConfig` objects. All agents referenced inside sub-graphs must be declared in the top-level `Orchestration.Agents` list. |
 
 **`GraphNodeConfig` fields**
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `Id` | string | — | Unique node identifier. Referenced by `EntryNode` and by edges' `From`/`To` fields. |
-| `Agent` | string | — | Agent name from the `Agents` list to invoke at this node. Multiple nodes may share the same agent. |
-| `Terminal` | bool | `false` | When `true`, the session terminates after the agent executes once. Outgoing edges are not evaluated. |
+| `Agent` | string | — | Agent name from the `Agents` list to invoke at this node. Multiple nodes may share the same agent. Must be empty when `SubGraphId` is set. |
+| `SubGraphId` | string | — | When set, this node runs the named sub-graph (declared in `GraphConfig.SubGraphs`) as a black-box step instead of invoking a single agent. The sub-graph's terminal output is injected into the parent's shared history for keyword detection and edge routing. `Agent` must be empty when this is set. |
+| `Terminal` | bool | `false` | When `true`, the session terminates after the agent (or sub-graph) executes once. Outgoing edges are not evaluated. |
 | `Parallel` | bool | `false` | When `true`, the node participates in a parallel fan-out group — runs concurrently with other `Parallel` nodes sharing the same triggering keyword. |
 | `Validators` | array | — | Validators that must all pass before a `Terminal` node ends the session. Ignored on non-terminal nodes. |
 
@@ -577,6 +628,51 @@ In keyword routing this pattern requires two separate loop-back routes and depen
 | `ShellFallbackPattern` | string | — | Used with `RequireWriteFile`. A shell command matching this pattern is accepted in lieu of `write_file`. |
 | `RequireHumanApproval` | bool | `false` | When `true`, the operator must explicitly approve (`y`) before this edge fires. If rejected, the source agent is re-invoked with a "route blocked" message. Applies to both forward edges and back-edges. |
 | `RecoveryAgent` | string | — | Optional. Agent to invoke for one intervention turn when a validator has failed two or more consecutive times on this edge. The recovery agent receives a diagnostic message and may fix the blocking issue. Activates at most once per edge per session. |
+
+---
+
+### mapreduce
+
+A three-phase data-parallel orchestration: a **splitter** agent decomposes the input into discrete items, a **mapper** agent processes each item independently (in parallel), and a **reducer** agent synthesises the mapper outputs into a final result.
+
+```yaml
+Selection:
+  Type: mapreduce
+  MapReduce:
+    Splitter: Splitter
+    Mapper: Mapper
+    Reducer: Reducer
+    ItemsJsonPath: items          # dot-path to the array inside the splitter's JSON response
+    MaxConcurrency: 4             # 0 = unlimited
+    MaxSplitterRetries: 3
+```
+
+**How it works**
+
+1. **Split phase:** the Splitter agent is invoked with the original task. Its response must contain a JSON object with an array at `ItemsJsonPath` (dot-notation supported). fuseraft extracts that array as the work list. If the splitter does not return parseable JSON with the expected path, it is retried up to `MaxSplitterRetries` times before the session stops with an error.
+2. **Map phase:** the Mapper agent is invoked once per item, receiving the item content as the task. When `MaxConcurrency` is 0 all mapper calls run concurrently (`Task.WhenAll`). When `MaxConcurrency > 0` a semaphore limits the number of concurrent mapper invocations. Results are collected in item-index order.
+3. **Reduce phase:** the Reducer agent is invoked with the concatenated mapper outputs as context. Its final response is the session's terminal output.
+
+**Agent instructions for map-reduce**
+
+- **Splitter:** instruct it to return a JSON object with the array at the key named by `ItemsJsonPath`. Example: `{"items": ["item 1", "item 2", "item 3"]}`.
+- **Mapper:** instruct it to process one item at a time. It receives each item as a standalone task with no shared cross-item history.
+- **Reducer:** instruct it to synthesise or aggregate. It receives all mapper outputs as prior context before its turn.
+
+**`MapReduceConfig` fields**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `Splitter` | string | — | **Required.** Agent that decomposes the input. Must match a name in `Agents`. |
+| `Mapper` | string | — | **Required.** Agent that processes each item. Must match a name in `Agents`. |
+| `Reducer` | string | — | **Required.** Agent that synthesises mapper outputs. Must match a name in `Agents`. |
+| `ItemsJsonPath` | string | `"items"` | Dot-notation path to the array in the splitter's JSON response. Example: `results.items`. |
+| `MaxConcurrency` | int | `0` | Maximum concurrent mapper invocations. `0` means unlimited. |
+| `MaxSplitterRetries` | int | `3` | Maximum retries before the split phase fails. Must be ≥ 1. |
+
+**`Termination` for map-reduce**
+
+The reducer's final response is the session's terminal message. `Termination` strategies are not evaluated — `MapReduceOrchestrator` terminates automatically after the reduce phase completes.
 
 ---
 
@@ -788,9 +884,15 @@ Child strategies can themselves be composite.
 
 ### Sequential
 
-Use sequential when the flow never changes: the same agents always run in the same order. Good for single-agent configs and simple two-agent pipelines where there is no branching and no conditional routing.
+Use sequential when every agent should run exactly once, in order, and the pipeline ends after the last agent completes. Good for single-agent configs and simple multi-step pipelines with no branching, no loops, and no conditional routing.
 
-Avoid it once you need any of: loops, early exit, conditional next-agent, or evidence-gated handoffs. Sequential has no routing logic — it cycles unconditionally.
+Avoid it once you need any of: loops, early exit, conditional next-agent, or evidence-gated handoffs. For indefinite cycling use `roundrobin` instead.
+
+### Round-robin
+
+Use round-robin when every agent should participate in every round, indefinitely, until an external condition stops the session. The cycle repeats from the first agent after the last one finishes.
+
+Avoid it for fixed-length pipelines — use `sequential` when each agent should run once and stop.
 
 ### State machine
 
@@ -870,6 +972,18 @@ Adversarial fits naturally when:
 
 Adversarial is also not a substitute for running real tests. A critic LLM reviewing code is a heuristic check, not a compiler or test suite. Use it alongside `RequireShellPass` validators in a keyword or graph pipeline if you need evidence-gated progression.
 
+### Map-reduce
+
+Use map-reduce when the task can be decomposed into independent items that benefit from parallel processing. The pattern is: one agent splits the input, one agent processes each item (in parallel), and one agent synthesises the results.
+
+Map-reduce fits naturally when:
+
+- The input is a list of independent work items (documents, files, test cases, URLs, entities) that can be processed without shared state
+- Processing time is dominated by per-item LLM calls and parallel execution matters
+- The final output is a synthesis or aggregation of the per-item results
+
+**What map-reduce trades away:** dynamic routing, loops, and evidence gating. The three-phase structure is fixed — there are no validators, no loop-back edges, and no way for the reducer to send items back to the mapper. If per-item quality matters, run each item through an adversarial stage first, then feed the approved artifacts into map-reduce.
+
 ### Graph
 
 Use graph when you need **explicit back-edge topology** — when different failure modes should route back to different prior nodes, or when you want the routing structure to be visible in the config rather than implied by keyword conventions.
@@ -887,20 +1001,21 @@ Graph and keyword routing use the same `handoff()` plugin for typed signalling, 
 
 ---
 
-## Choosing between keyword, state machine, structured, graph, and adversarial
+## Choosing between keyword, state machine, structured, graph, adversarial, and map-reduce
 
-| | Keyword | State machine | Structured | Graph | Adversarial |
-|---|---|---|---|---|---|
-| Handoff signal | Keyword on own line (relaxed) | Signal on own line (same as keyword) | JSON field value | Keyword alone on own line (strict) | PassKeyword from critic |
-| Evidence gating | Validators (per-route) | Contracts (per-transition, typed) | Instructions only | Validators (per-edge) | None (critic LLM only) |
-| Routing topology | All routes active at once | Only current state's transitions active | All routes active at once | Only current node's edges active | Fixed sequential stages |
-| Ghost signals | Possible — any agent can emit any keyword | Impossible — wrong-state signals are ignored | N/A | Reduced — wrong-node keywords are ignored | N/A — critic approval is the only signal |
-| Multi-target back-edges | Implicit (keyword scan order) | N/A (no back-edges) | N/A | Explicit — each back-edge has a distinct target node | No back-edges between stages |
-| Critic context isolation | No | No | No | No | Yes — critics receive no shared history |
-| Lossless compaction | No | Yes (requires EvidenceStore) | No | No | No |
-| Verifier integration | No | Yes | No | No | No |
-| Failure classification | Yes | Yes | No | Yes | No |
-| Best for | Phased pipelines, dev teams | Same + hallucination-resistant routing | Classifiers, triage | Explicit multi-target loop-back topology | Quality gates on discrete artifacts |
+| | Keyword | State machine | Structured | Graph | Adversarial | Map-reduce |
+|---|---|---|---|---|---|---|
+| Handoff signal | Keyword on own line (relaxed) | Signal on own line (same as keyword) | JSON field value | Keyword alone on own line (strict) | PassKeyword from critic | N/A — phase-driven |
+| Evidence gating | Validators (per-route) | Contracts (per-transition, typed) | Instructions only | Validators (per-edge) | None (critic LLM only) | None |
+| Routing topology | All routes active at once | Only current state's transitions active | All routes active at once | Only current node's edges active | Fixed sequential stages | Fixed 3-phase: split → map → reduce |
+| Ghost signals | Possible — any agent can emit any keyword | Impossible — wrong-state signals are ignored | N/A | Reduced — wrong-node keywords are ignored | N/A — critic approval is the only signal | N/A |
+| Multi-target back-edges | Implicit (keyword scan order) | N/A (no back-edges) | N/A | Explicit — each back-edge has a distinct target node | No back-edges between stages | No back-edges |
+| Parallel execution | No | Yes (fan-out transitions) | No | Yes (Parallel nodes) | No | Yes (mapper runs in parallel) |
+| Critic context isolation | No | No | No | No | Yes — critics receive no shared history | N/A |
+| Lossless compaction | No | Yes (requires EvidenceStore) | No | No | No | No |
+| Verifier integration | No | Yes | No | No | No | No |
+| Failure classification | Yes | Yes | No | Yes | No | No |
+| Best for | Phased pipelines, dev teams | Same + hallucination-resistant routing | Classifiers, triage | Explicit multi-target loop-back topology | Quality gates on discrete artifacts | Independent parallel item processing |
 
 For a human-like team of roles (Planner, Developer, Tester, Reviewer):
 - Start with **keyword** if you want a simple, validator-gated pipeline quickly
@@ -910,6 +1025,8 @@ For a human-like team of roles (Planner, Developer, Tester, Reviewer):
 For a pipeline where an agent computes a value and routing follows from it, prefer **structured**. The JSON is already the output — the routing field costs nothing to add.
 
 For a linear pipeline where each phase produces a discrete artifact (plan, code, document) and you want independent review between phases, prefer **adversarial**. The context firewall is the key mechanism — critics approach the artifact with no inherited assumptions from the generator.
+
+For tasks that decompose into independent items (documents, files, entities, test cases) where parallel processing matters, prefer **map-reduce**. The splitter defines the work list; the mapper processes items in parallel; the reducer synthesises. No routing logic required.
 
 ---
 
