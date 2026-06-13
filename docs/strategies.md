@@ -621,6 +621,33 @@ Selection:
           MaxConcurrency: 4
 ```
 
+**Scatter-gather sub-graph:**
+
+```yaml
+Selection:
+  Type: graph
+  Graph:
+    EntryNode: expert_review
+    Nodes:
+      - Id: expert_review
+        SubGraphId: multi_expert      # runs a nested ScatterGatherOrchestrator
+      - Id: writer
+        Agent: Writer
+        Terminal: true
+    Edges:
+      - From: expert_review
+        To: writer
+        Keyword: "REVIEW COMPLETE"
+    SubGraphs:
+      multi_expert:
+        ScatterGather:               # <-- "ScatterGather:" wraps the ScatterGatherConfig
+          Participants:
+            - LegalReviewer
+            - TechnicalReviewer
+            - BusinessReviewer
+          Synthesizer: LeadReviewer
+```
+
 All agents referenced inside any sub-graph must be declared in the top-level `Orchestration.Agents` list. Sub-graphs share all services with the parent (change tracker, governance kernel, event emitter) but run with an isolated orchestrator instance.
 
 **`GraphConfig` fields**
@@ -631,7 +658,7 @@ All agents referenced inside any sub-graph must be declared in the top-level `Or
 | `Nodes` | array | yes | Node definitions. Each binds an agent role (or sub-graph) to a named position in the graph. |
 | `Edges` | array | yes | Directed edges. Evaluated in declaration order — the first matching edge fires. |
 | `MaxRetries` | int | `4` | Maximum consecutive correction attempts per node before a `ValidatorStuckException` is thrown. |
-| `SubGraphs` | object | no | Named sub-graph specs referenced by nodes via `SubGraphId`. Keys are sub-graph IDs; values are `SubGraphSpec` objects — set exactly one of `Graph` (nested `GraphOrchestrator`) or `MapReduce` (nested `MapReduceOrchestrator`). All agents referenced inside any sub-graph must be in the top-level `Orchestration.Agents` list. |
+| `SubGraphs` | object | no | Named sub-graph specs referenced by nodes via `SubGraphId`. Keys are sub-graph IDs; values are `SubGraphSpec` objects — set exactly one of `Graph` (nested `GraphOrchestrator`), `MapReduce` (nested `MapReduceOrchestrator`), or `ScatterGather` (nested `ScatterGatherOrchestrator`). All agents must be in the top-level `Orchestration.Agents` list. |
 
 **`GraphNodeConfig` fields**
 
@@ -639,7 +666,7 @@ All agents referenced inside any sub-graph must be declared in the top-level `Or
 |-------|------|---------|-------------|
 | `Id` | string | — | Unique node identifier. Referenced by `EntryNode` and by edges' `From`/`To` fields. |
 | `Agent` | string | — | Agent name from the `Agents` list to invoke at this node. Multiple nodes may share the same agent. Must be empty when `SubGraphId` is set. |
-| `SubGraphId` | string | — | When set, this node runs the named sub-graph spec (declared in `GraphConfig.SubGraphs`) as a black-box step. `Graph` spawns a nested `GraphOrchestrator`; `MapReduce` spawns a nested `MapReduceOrchestrator`. The sub-orchestrator's terminal output is injected into the parent's shared history for keyword detection and edge routing. `Agent` must be empty when this is set. |
+| `SubGraphId` | string | — | When set, this node runs the named sub-graph spec (declared in `GraphConfig.SubGraphs`) as a black-box step. `Graph` spawns a nested `GraphOrchestrator`; `MapReduce` spawns a nested `MapReduceOrchestrator`; `ScatterGather` spawns a nested `ScatterGatherOrchestrator`. The sub-orchestrator's terminal output is injected into the parent's shared history for keyword detection and edge routing. `Agent` must be empty when this is set. |
 | `Terminal` | bool | `false` | When `true`, the session terminates after the agent (or sub-graph) executes once. Outgoing edges are not evaluated. |
 | `Parallel` | bool | `false` | When `true`, the node participates in a parallel fan-out group — runs concurrently with other `Parallel` nodes sharing the same triggering keyword. |
 | `Validators` | array | — | Validators that must all pass before a `Terminal` node ends the session. Ignored on non-terminal nodes. |
@@ -658,6 +685,57 @@ All agents referenced inside any sub-graph must be declared in the top-level `Or
 | `ShellFallbackPattern` | string | — | Used with `RequireWriteFile`. A shell command matching this pattern is accepted in lieu of `write_file`. |
 | `RequireHumanApproval` | bool | `false` | When `true`, the operator must explicitly approve (`y`) before this edge fires. If rejected, the source agent is re-invoked with a "route blocked" message. Applies to both forward edges and back-edges. |
 | `RecoveryAgent` | string | — | Optional. Agent to invoke for one intervention turn when a validator has failed two or more consecutive times on this edge. The recovery agent receives a diagnostic message and may fix the blocking issue. Activates at most once per edge per session. |
+
+---
+
+### scattergather
+
+A two-phase broadcast orchestration: all **participant** agents receive the same task in parallel (each in an isolated context window), and a **synthesizer** agent aggregates their independent responses into a single final answer.
+
+```yaml
+Selection:
+  Type: scattergather
+  ScatterGather:
+    Participants:
+      - LegalReviewer
+      - TechnicalReviewer
+      - BusinessReviewer
+    Synthesizer: LeadReviewer
+    MaxConcurrency: 0          # 0 = unlimited; all participants run simultaneously
+```
+
+**How it works**
+
+1. **Scatter phase:** every agent in `Participants` is invoked in parallel with the same task. Each participant runs in an isolated snapshot of the conversation history — they cannot see each other's in-progress work. Concurrency is bounded by `MaxConcurrency` (0 = unlimited).
+2. **Gather phase:** the `Synthesizer` agent receives the original task history plus every participant's labeled output (prefixed `[Participant: AgentName]`), then produces the single terminal response. The synthesizer may vote, merge, rank, or reconcile — depending on how it is instructed.
+
+**When to use scatter-gather**
+
+- **Multi-expert review** — legal, technical, and business reviewers each assess the same document independently; a lead reviewer synthesises their findings into a unified verdict
+- **Ensemble generation** — multiple agents each produce a solution; a voting agent picks the best or reconciles differences
+- **Diversity sampling** — run the same prompt against agents with different personas, temperatures, or system instructions; the synthesizer distils the best ideas from all of them
+- **Redundancy checking** — several agents independently verify the same artifact; the synthesizer flags any disagreements
+
+**Key differences from similar modes**
+
+| | Scatter-gather | Map-reduce | Graph parallel fan-out |
+|---|---|---|---|
+| All agents receive | Same task | One item each (split by Splitter) | Same turn context |
+| Trigger | Unconditional | After splitter emits array | Keyword from coordinator node |
+| Agent diversity | Different agents per participant slot | Same mapper agent for all items | Different agents per parallel node |
+| Synthesizer | Declared in config | Reducer agent | Merge-target node |
+
+**`ScatterGatherConfig` fields**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `Participants` | array | — | **Required.** Agent names to broadcast to, in parallel. Each must match a name in `Agents`. At least one required. |
+| `Synthesizer` | string | — | **Required.** Agent that aggregates all participant outputs into the final answer. Must match a name in `Agents`. |
+| `MaxConcurrency` | int | `0` | Maximum concurrent participant invocations. `0` means unlimited. |
+
+**`Termination` for scatter-gather**
+
+`ScatterGatherOrchestrator` terminates automatically after the gather phase completes. `Termination` strategies are not evaluated.
 
 ---
 
@@ -1002,6 +1080,18 @@ Adversarial fits naturally when:
 
 Adversarial is also not a substitute for running real tests. A critic LLM reviewing code is a heuristic check, not a compiler or test suite. Use it alongside `RequireShellPass` validators in a keyword or graph pipeline if you need evidence-gated progression.
 
+### Scatter-gather
+
+Use scatter-gather when the same task benefits from **multiple independent perspectives** rather than multiple independent work items. The defining property is broadcast: every participant receives the same input — you are not splitting work, you are asking different experts to evaluate the same thing simultaneously.
+
+Scatter-gather fits naturally when:
+
+- The value comes from diversity of viewpoint, not division of labour (different reviewer personas, different specialisms, different risk lenses)
+- You want N independent answers to the same question and a single reconciled conclusion
+- You want redundancy: multiple agents check the same artifact and a synthesizer flags disagreements
+
+**What scatter-gather trades away:** dynamic routing, loops, and evidence gating. The two-phase structure is fixed. If you need the synthesizer to send work back to participants, use graph or state machine instead.
+
 ### Map-reduce
 
 Use map-reduce when the task can be decomposed into independent items that benefit from parallel processing. The pattern is: one agent splits the input, one agent processes each item (in parallel), and one agent synthesises the results.
@@ -1031,21 +1121,23 @@ Graph and keyword routing use the same `handoff()` plugin for typed signalling, 
 
 ---
 
-## Choosing between keyword, state machine, structured, graph, adversarial, and map-reduce
+## Choosing between keyword, state machine, structured, graph, adversarial, scatter-gather, and map-reduce
 
-| | Keyword | State machine | Structured | Graph | Adversarial | Map-reduce |
-|---|---|---|---|---|---|---|
-| Handoff signal | Keyword on own line (relaxed) | Signal on own line (same as keyword) | JSON field value | Keyword alone on own line (strict) | PassKeyword from critic | N/A — phase-driven |
-| Evidence gating | Validators (per-route) | Contracts (per-transition, typed) | Instructions only | Validators (per-edge) | None (critic LLM only) | None |
-| Routing topology | All routes active at once | Only current state's transitions active | All routes active at once | Only current node's edges active | Fixed sequential stages | Fixed 3-phase: split → map → reduce |
-| Ghost signals | Possible — any agent can emit any keyword | Impossible — wrong-state signals are ignored | N/A | Reduced — wrong-node keywords are ignored | N/A — critic approval is the only signal | N/A |
-| Multi-target back-edges | Implicit (keyword scan order) | N/A (no back-edges) | N/A | Explicit — each back-edge has a distinct target node | No back-edges between stages | No back-edges |
-| Parallel execution | No | Yes (fan-out transitions) | No | Yes (Parallel nodes) | No | Yes (mapper runs in parallel) |
-| Critic context isolation | No | No | No | No | Yes — critics receive no shared history | N/A |
-| Lossless compaction | No | Yes (requires EvidenceStore) | No | No | No | No |
-| Verifier integration | No | Yes | No | No | No | No |
-| Failure classification | Yes | Yes | No | Yes | No | No |
-| Best for | Phased pipelines, dev teams | Same + hallucination-resistant routing | Classifiers, triage | Explicit multi-target loop-back topology | Quality gates on discrete artifacts | Independent parallel item processing |
+| | Keyword | State machine | Structured | Graph | Adversarial | Scatter-gather | Map-reduce |
+|---|---|---|---|---|---|---|---|
+| Handoff signal | Keyword on own line (relaxed) | Signal on own line (same as keyword) | JSON field value | Keyword alone on own line (strict) | PassKeyword from critic | N/A — phase-driven | N/A — phase-driven |
+| Evidence gating | Validators (per-route) | Contracts (per-transition, typed) | Instructions only | Validators (per-edge) | None (critic LLM only) | None | None |
+| Routing topology | All routes active at once | Only current state's transitions active | All routes active at once | Only current node's edges active | Fixed sequential stages | Fixed 2-phase: scatter → gather | Fixed 3-phase: split → map → reduce |
+| Ghost signals | Possible — any agent can emit any keyword | Impossible — wrong-state signals are ignored | N/A | Reduced — wrong-node keywords are ignored | N/A | N/A | N/A |
+| Multi-target back-edges | Implicit (keyword scan order) | N/A (no back-edges) | N/A | Explicit — each back-edge has a distinct target node | No back-edges between stages | No back-edges | No back-edges |
+| Parallel execution | No | Yes (fan-out transitions) | No | Yes (Parallel nodes) | No | Yes (all participants in parallel) | Yes (mapper runs in parallel) |
+| Agent diversity | N/A | N/A | N/A | Different agent per node | Generator vs. critic | **Different agent per participant slot** | Same mapper for all items |
+| What's broadcast | N/A | N/A | N/A | N/A | Artifact to critic | **Same task to all** | One item each |
+| Critic context isolation | No | No | No | No | Yes — critics receive no shared history | No | No |
+| Lossless compaction | No | Yes (requires EvidenceStore) | No | No | No | No | No |
+| Verifier integration | No | Yes | No | No | No | No | No |
+| Failure classification | Yes | Yes | No | Yes | No | No | No |
+| Best for | Phased pipelines, dev teams | Same + hallucination-resistant routing | Classifiers, triage | Explicit multi-target loop-back topology | Quality gates on discrete artifacts | Multi-expert review, ensemble, redundancy | Independent parallel item processing |
 
 For a human-like team of roles (Planner, Developer, Tester, Reviewer):
 - Start with **keyword** if you want a simple, validator-gated pipeline quickly
@@ -1055,6 +1147,8 @@ For a human-like team of roles (Planner, Developer, Tester, Reviewer):
 For a pipeline where an agent computes a value and routing follows from it, prefer **structured**. The JSON is already the output — the routing field costs nothing to add.
 
 For a linear pipeline where each phase produces a discrete artifact (plan, code, document) and you want independent review between phases, prefer **adversarial**. The context firewall is the key mechanism — critics approach the artifact with no inherited assumptions from the generator.
+
+For the same task needing multiple independent expert perspectives simultaneously, prefer **scatter-gather**. Participants are different agents with different specialisms; the synthesizer reconciles their outputs. No work splitting, no keyword routing required.
 
 For tasks that decompose into independent items (documents, files, entities, test cases) where parallel processing matters, prefer **map-reduce**. The splitter defines the work list; the mapper processes items in parallel; the reducer synthesises. No routing logic required.
 
