@@ -46,12 +46,12 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
     {
         return config.Type.ToLowerInvariant() switch
         {
-            "sequential" or "roundrobin" => new SequentialAgentSelector(),
-            "llm"        => CreateLLMSelection(config, agents),
-            "keyword"    => CreateKeywordSelection(config, agents, validationConfig, failureHandling, contracts),
-            "structured" => CreateStructuredSelection(config, agents),
-            "statemachine" => CreateStateMachineSelection(config, validationConfig, failureHandling, contracts, verifier),
-            "magentic"   => throw new InvalidOperationException(
+            OrchestratorTypes.Sequential or OrchestratorTypes.RoundRobin => new SequentialAgentSelector(),
+            OrchestratorTypes.Llm         => CreateLLMSelection(config, agents),
+            OrchestratorTypes.Keyword     => CreateKeywordSelection(config, agents, validationConfig, failureHandling, contracts),
+            OrchestratorTypes.Structured  => CreateStructuredSelection(config, agents),
+            OrchestratorTypes.StateMachine => CreateStateMachineSelection(config, validationConfig, failureHandling, contracts, verifier),
+            OrchestratorTypes.Magentic    => throw new InvalidOperationException(
                 "The 'magentic' selection type is handled by MagenticOrchestrator and should " +
                 "never reach StrategyFactory. Verify that OrchestratorBuilder is routing " +
                 "this config correctly."),
