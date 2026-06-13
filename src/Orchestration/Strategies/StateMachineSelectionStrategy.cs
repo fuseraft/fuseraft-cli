@@ -420,7 +420,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                 .ToList();
             _ = _eventEmitter.EmitAsync(EventTypes.KeywordNotFound,
                 agent: state.Agent,
-                payload: new { state = _currentState, agent = state.Agent, expected_signals = expectedSignals });
+                payload: new { state = _currentState, agent = state.Agent, expected_signals = expectedSignals, source = "state_machine_strategy" });
         }
 
         // Accumulate consecutive no-signal turns in strategy state so the counter
