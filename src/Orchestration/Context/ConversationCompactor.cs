@@ -7,7 +7,7 @@ using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Context;
 
 /// <summary>
 /// Summarises older conversation turns into a single context message using an LLM,

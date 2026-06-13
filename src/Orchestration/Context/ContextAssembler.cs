@@ -6,7 +6,7 @@ using fuseraft.Core;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Context;
 
 /// <summary>
 /// Assembles agent context and handoff blocks from durable disk artifacts rather than

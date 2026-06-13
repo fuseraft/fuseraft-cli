@@ -6,7 +6,7 @@ using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 using Microsoft.Extensions.Logging;
 
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Tracking;
 
 /// <summary>
 /// Projects invocation records and typed execution events into <see cref="ExecutionState"/>

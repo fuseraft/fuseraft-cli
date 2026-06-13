@@ -2,7 +2,7 @@ using fuseraft.Core;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Knowledge;
 
 /// <summary>
 /// A knowledge result enriched with provenance metadata for ranking by <see cref="ContextBudgeter"/>.

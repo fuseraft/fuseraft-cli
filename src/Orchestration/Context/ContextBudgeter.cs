@@ -1,4 +1,4 @@
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Context;
 
 /// <summary>
 /// Ranks <see cref="RetrievedItem"/> results by confidence tier and trims them to a

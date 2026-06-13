@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Tracking;
 
 
 /// <summary>

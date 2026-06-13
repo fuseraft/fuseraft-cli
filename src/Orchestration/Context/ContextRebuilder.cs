@@ -1,7 +1,7 @@
 using System.Text;
 using fuseraft.Core.Models;
 
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Context;
 
 /// <summary>
 /// Converts a <see cref="ContextSnapshot"/> into an <see cref="AgentMessage"/> that is

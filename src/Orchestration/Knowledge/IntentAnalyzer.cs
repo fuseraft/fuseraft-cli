@@ -1,4 +1,4 @@
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Knowledge;
 
 /// <summary>
 /// Signals extracted from a task description by <see cref="IntentAnalyzer"/>.

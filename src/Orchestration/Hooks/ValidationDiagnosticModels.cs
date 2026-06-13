@@ -1,4 +1,4 @@
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Hooks;
 
 // Minimal projections of the change log schema used only by ValidationDiagnosticHook
 // to deserialize the most recent entry for diagnostic context injection.

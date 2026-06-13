@@ -388,7 +388,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             fuseraft.Core.FuseraftPaths.GlobalCtxSnapshotsTemplate,
             checkpoint.SessionId,
             fuseraft.Core.FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory()));
-        using var ctxRecorder = new fuseraft.Orchestration.ContextWindowRecorder(ctxSnapshotsPath);
+        using var ctxRecorder = new fuseraft.Orchestration.Context.ContextWindowRecorder(ctxSnapshotsPath);
         ctxRecorder.SetSessionId(checkpoint.SessionId);
 
         // Postmortem snapshot writer — only active when --snapshot is passed.
@@ -397,7 +397,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             checkpoint.SessionId,
             fuseraft.Core.FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory()));
         using var snapshotWriter = settings.Snapshot
-            ? new fuseraft.Orchestration.SnapshotWriter(snapshotDir)
+            ? new fuseraft.Orchestration.Tracking.SnapshotWriter(snapshotDir)
             : null;
         snapshotWriter?.SetSessionId(checkpoint.SessionId);
         if (snapshotWriter is not null)

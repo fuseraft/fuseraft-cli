@@ -1256,7 +1256,7 @@ public static class OrchestratorBuilder
 
         // Context Broker (Gap 8): adaptive context pipeline backed by the shared knowledge layer.
         var brokerMemoryStore = new fuseraft.Infrastructure.Repository.RepositoryMemoryStore(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, projectSlug));
-        var contextBroker = new fuseraft.Orchestration.ContextBroker(
+        var contextBroker = new fuseraft.Orchestration.Context.ContextBroker(
             knowledgeLayer,
             brokerMemoryStore,
             knowledgeLayer.ProvenanceRegistry);
@@ -1289,10 +1289,10 @@ public static class OrchestratorBuilder
             FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, projectSlug));
         memoryManager?.AttachRepositoryMemory(repoMemoryStore);
 
-        var graphExpander   = new fuseraft.Orchestration.GraphExpansionRetriever(knowledgeLayer.GraphStore);
+        var graphExpander   = new fuseraft.Orchestration.Knowledge.GraphExpansionRetriever(knowledgeLayer.GraphStore);
         var knowledgeStore  = new fuseraft.Infrastructure.Repository.RepositoryKnowledgeStore(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalKnowledgeFindings, projectSlug));
-        var pipelineLogger  = loggerFactory.CreateLogger<fuseraft.Orchestration.ContextAssemblyPipeline>();
-        var contextPipeline = new fuseraft.Orchestration.ContextAssemblyPipeline(
+        var pipelineLogger  = loggerFactory.CreateLogger<fuseraft.Orchestration.Context.ContextAssemblyPipeline>();
+        var contextPipeline = new fuseraft.Orchestration.Context.ContextAssemblyPipeline(
             knowledgeLayer:   knowledgeLayer,
             memoryManager:    memoryManager,
             contextAssembler: contextAssembler,

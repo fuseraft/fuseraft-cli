@@ -4,7 +4,7 @@ using fuseraft.Core;
 using fuseraft.Core.Models;
 using Microsoft.Extensions.Logging;
 
-namespace fuseraft.Orchestration;
+namespace fuseraft.Orchestration.Knowledge;
 
 /// <summary>
 /// Append-only intent log stored at <c>.fuseraft/intents.json</c>.
