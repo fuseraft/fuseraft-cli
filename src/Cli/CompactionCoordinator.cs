@@ -78,7 +78,7 @@ internal sealed class CompactionCoordinator(
                 $"MaxSingleTurnInputTokens ({budgetResult.SingleTurnThreshold:N0}). " +
                 $"Compacting before next turn...[/]");
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("context_budget_cutover",
+                await eventEmitter.EmitAsync(EventTypes.ContextBudgetCutover,
                     agent: agentName,
                     payload: new { input_tokens = budgetResult.InputTokens, cutover_at = budgetResult.SingleTurnThreshold, reason = CompactionReason.SingleTurnLimit });
             return true;
@@ -111,7 +111,7 @@ internal sealed class CompactionCoordinator(
                 $"[yellow]  ⚡ {Markup.Escape(agentName)} reached context budget cutover " +
                 $"({budgetResult.CumulativeInputTokens:N0} ≥ {budgetResult.CutoverThreshold:N0} input tokens). Compacting history...[/]");
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("context_budget_cutover",
+                await eventEmitter.EmitAsync(EventTypes.ContextBudgetCutover,
                     agent: agentName,
                     payload: new { cumulative_input_tokens = budgetResult.CumulativeInputTokens, cutover_at = budgetResult.CutoverThreshold });
             return true;
@@ -223,7 +223,7 @@ internal sealed class CompactionCoordinator(
         }
 
         if (orchestrator is not MagenticOrchestrator && eventEmitter is not null)
-            _ = eventEmitter.EmitAsync("compaction_resume_candidate",
+            _ = eventEmitter.EmitAsync(EventTypes.CompactionResumeCandidate,
                 payload: new
                 {
                     last_assistant_agent = lastAssistantAgent,
@@ -253,7 +253,7 @@ internal sealed class CompactionCoordinator(
 
             sessionMetrics?.RecordCompaction(_pendingCompactionReason);
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync("compaction",
+                await eventEmitter.EmitAsync(EventTypes.Compaction,
                     payload: new
                     {
                         mode           = "window",
@@ -289,7 +289,7 @@ internal sealed class CompactionCoordinator(
 
         sessionMetrics?.RecordCompaction(_pendingCompactionReason);
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("compaction",
+            await eventEmitter.EmitAsync(EventTypes.Compaction,
                 payload: new
                 {
                     turns_compacted = turnsBefore - retained.Count,

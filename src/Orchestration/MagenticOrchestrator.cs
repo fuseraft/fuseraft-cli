@@ -751,7 +751,7 @@ public sealed class MagenticOrchestrator(
             new StreamState(currentPlan, currentPlanSteps, turn, cumulativeTokens, roundIndex, stallCount));
 
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync("magentic_replan", agent: ManagerReplanTag,
+            await eventEmitter.EmitAsync(EventTypes.MagenticReplan, agent: ManagerReplanTag,
                 payload: new { cycle = resetCount, plan = currentPlan });
     }
 

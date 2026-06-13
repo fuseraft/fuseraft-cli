@@ -339,7 +339,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
         await ReplTurn.RunAsync(ctx, cancellationToken);
 
-        await emitter.EmitAsync("session_end", payload: new { turns = ctx.TurnIndex });
+        await emitter.EmitAsync(EventTypes.SessionEnd, payload: new { turns = ctx.TurnIndex });
         await ReplTurn.ExtractMemoriesOnExitAsync(ctx);
 
         // Post-session skill curation (best-effort — never fails the session).
@@ -432,7 +432,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
     {
         try
         {
-            await ctx.Emitter.EmitAsync("skill_curation_start",
+            await ctx.Emitter.EmitAsync(EventTypes.SkillCurationStart,
                 payload: new { session = ctx.SessionId, source = "repl" });
 
             // Convert ChatMessage history to AgentMessage list (assistant turns only).
@@ -473,7 +473,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
             var result = await curator.RunAsync(checkpoint, messages, CancellationToken.None, source: "repl");
 
-            await ctx.Emitter.EmitAsync("skill_curation_complete",
+            await ctx.Emitter.EmitAsync(EventTypes.SkillCurationComplete,
                 payload: new
                 {
                     session       = ctx.SessionId,
@@ -501,7 +501,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             // Curation is best-effort — log but never surface as an error.
             try
             {
-                await ctx.Emitter.EmitAsync("skill_curation_complete",
+                await ctx.Emitter.EmitAsync(EventTypes.SkillCurationComplete,
                     payload: new { session = ctx.SessionId, source = "repl", outcome = "failed", failure_reason = ex.Message });
             }
             catch (Exception emitEx) { loggerFactory.CreateLogger<ReplCommand>().LogWarning(emitEx, "[SkillCuration] emitter failed: {Message}", emitEx.Message); }

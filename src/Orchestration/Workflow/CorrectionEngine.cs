@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
 using fuseraft.Core;
 using fuseraft.Core.Models;
+using fuseraft.Orchestration;
 
 namespace fuseraft.Orchestration.Workflow;
 
@@ -129,7 +130,7 @@ internal static class CorrectionEngine
             : errorMessage + buildDetail;
 
         history.Add(new ChatMessage(ChatRole.User, errorToInject));
-        await (eventEmitter?.EmitAsync("correction_injected",
+        await (eventEmitter?.EmitAsync(EventTypes.CorrectionInjected,
             payload: new { type = "validation_error", keyword = foundKeyword, consecutive = consecutiveCount }) ?? Task.CompletedTask);
     }
 
@@ -424,7 +425,7 @@ internal static class CorrectionEngine
               $"Pick the first file in files_to_change and write it now. No more reads.\n\nValid keywords: {validKeywordList}";
 
         history.Add(new ChatMessage(ChatRole.User, stagnationMsg));
-        await (eventEmitter?.EmitAsync("correction_injected",
+        await (eventEmitter?.EmitAsync(EventTypes.CorrectionInjected,
             agent:   agentName,
             payload: new { type = hasFailedWriteAttempts ? "stagnation_failed_writes" : "stagnation", consecutive = consecutiveCount }) ?? Task.CompletedTask);
         return true;
@@ -481,7 +482,7 @@ internal static class CorrectionEngine
         history.Add(new ChatMessage(ChatRole.User,
             $"HALLUCINATION: You claimed implementation but no write_file/patch_file/sed -i/git_add ran — nothing was written. " +
             $"Call write_file or patch_file now; describing code has no effect.\n\nValid keywords: {validKeywordList}"));
-        await (eventEmitter?.EmitAsync("correction_injected",
+        await (eventEmitter?.EmitAsync(EventTypes.CorrectionInjected,
             agent:   agentName,
             payload: new { type = "hallucination", consecutive = consecutiveCount }) ?? Task.CompletedTask);
         return true;
@@ -531,7 +532,7 @@ internal static class CorrectionEngine
             $"  2. Fix only the specific compiler error.\n" +
             $"  3. If tangled: shell_run(\"git checkout -- <file>\"), re-apply edits in one pass.\n" +
             $"  4. Re-run the build.\n\nValid keywords: {validKeywordList}"));
-        await (eventEmitter?.EmitAsync("correction_injected",
+        await (eventEmitter?.EmitAsync(EventTypes.CorrectionInjected,
             agent:   agentName,
             payload: new { type = "persistent_build_failure", consecutive = consecutiveCount }) ?? Task.CompletedTask);
     }
@@ -567,7 +568,7 @@ internal static class CorrectionEngine
                 $"  A. Build passes → emit handoff keyword now.\n" +
                 $"  B. Build failed → fix with patch_file/write_file, re-run, then emit keyword.\n\n" +
                 $"Valid keywords: {validKeywordList}"));
-            await (eventEmitter?.EmitAsync("correction_injected",
+            await (eventEmitter?.EmitAsync(EventTypes.CorrectionInjected,
                 agent:   agentName,
                 payload: new { type = "files_written_no_keyword", consecutive = consecutiveCount }) ?? Task.CompletedTask);
         }
@@ -584,7 +585,7 @@ internal static class CorrectionEngine
                 $"No handoff keyword emitted.{buildSection}{failedWriteSection}{directoryQueryReminder}\n" +
                 $"Valid keywords: {validKeywordList}\n\n" +
                 $"Work complete → emit keyword as your entire response. Work remains → one tool call, then keyword."));
-            await (eventEmitter?.EmitAsync("correction_injected",
+            await (eventEmitter?.EmitAsync(EventTypes.CorrectionInjected,
                 agent:   agentName,
                 payload: new { type = failedWriteErrors.Count > 0 ? "failed_write_no_keyword" : "no_keyword_generic", consecutive = consecutiveCount }) ?? Task.CompletedTask);
         }

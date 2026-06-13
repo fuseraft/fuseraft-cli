@@ -486,13 +486,13 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         {
             try
             {
-                await (eventEmitter?.EmitAsync("skill_curation_start",
+                await (eventEmitter?.EmitAsync(EventTypes.SkillCurationStart,
                     payload: new { session = checkpoint.SessionId, source = "run" }) ?? Task.CompletedTask);
 
                 var curationResult = await skillCurator.RunAsync(
                     checkpoint, result.Messages, CancellationToken.None, source: "run");
 
-                await (eventEmitter?.EmitAsync("skill_curation_complete",
+                await (eventEmitter?.EmitAsync(EventTypes.SkillCurationComplete,
                     payload: new
                     {
                         session        = checkpoint.SessionId,
