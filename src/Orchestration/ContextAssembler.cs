@@ -33,7 +33,7 @@ public sealed class ContextAssembler
     private readonly string? _investigationLogPath;
     private readonly RepositoryGraphStore? _graphStore;
     private readonly AdrRegistry? _adrRegistry;
-    private readonly fuseraft.Infrastructure.ObjectiveManager? _objectiveManager;
+    private readonly fuseraft.Infrastructure.Objectives.ObjectiveManager? _objectiveManager;
     private readonly ContextBroker? _contextBroker;
 
     private string _sessionId = string.Empty;
@@ -59,7 +59,7 @@ public sealed class ContextAssembler
         string? briefPath             = null,
         RepositoryGraphStore? graphStore       = null,
         AdrRegistry?          adrRegistry      = null,
-        fuseraft.Infrastructure.ObjectiveManager? objectiveManager = null,
+        fuseraft.Infrastructure.Objectives.ObjectiveManager? objectiveManager = null,
         ContextBroker?        contextBroker    = null,
         string? executionStatePath    = null,
         string? investigationLogPath  = null)

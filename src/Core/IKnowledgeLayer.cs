@@ -42,7 +42,7 @@ public interface IKnowledgeLayer
     /// <summary>
     /// Records a verifiable claim with supporting evidence. Confidence tier is computed
     /// automatically from the <paramref name="support"/> composition by
-    /// <see cref="fuseraft.Infrastructure.ConfidenceComputer"/>.
+    /// <see cref="fuseraft.Infrastructure.Chat.ConfidenceComputer"/>.
     /// </summary>
     Task<ClaimRecord> RecordClaimAsync(
         string claim,

@@ -21,7 +21,7 @@ using fuseraft.Orchestration.Workflow;
 // Disambiguate from Microsoft.Agents.AI.AgentFactory
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Plugins;
-using AgentFactory = fuseraft.Infrastructure.AgentFactory;
+using AgentFactory = fuseraft.Infrastructure.Agents.AgentFactory;
 
 namespace fuseraft.Orchestration;
 
@@ -56,7 +56,7 @@ public sealed class GraphOrchestrator(
     GovernanceKernel? governanceKernel = null,
     IHumanApprovalService? humanApprovalService = null,
     fuseraft.Core.Interfaces.IContextAssemblyPipeline? contextPipeline = null,
-    fuseraft.Infrastructure.RepositoryKnowledgeStore? repositoryKnowledgeStore = null) : IOrchestrator
+    fuseraft.Infrastructure.Repository.RepositoryKnowledgeStore? repositoryKnowledgeStore = null) : IOrchestrator
 {
     // Default consecutive-failure limit per node. CorrectionEngine uses this same value
     // in its RETRY n/4 messages, so both stay in sync via this constant.

@@ -361,7 +361,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
     /// <summary>
     /// Applies the Models registry alias lookup to a model config, mirroring the
-    /// first step of <see cref="fuseraft.Infrastructure.ChatClientFactory.Resolve"/>.
+    /// first step of <see cref="fuseraft.Infrastructure.Chat.ChatClientFactory.Resolve"/>.
     /// Per-agent Temperature/MaxTokens always take precedence over alias values.
     /// </summary>
     private static ModelConfig ResolveModelAlias(

@@ -393,7 +393,7 @@ public static class OrchestratorBuilder
 
         // Inject context items into every agent's system prompt so agents know what
         // reference material is available without burning a tool call on discovery.
-        var contextStore = new fuseraft.Infrastructure.ContextStore();
+        var contextStore = new fuseraft.Infrastructure.Context.ContextStore();
         var contextSummary = await contextStore.BuildPromptSummaryAsync(cancellationToken);
         if (contextSummary is not null)
         {
@@ -486,15 +486,15 @@ public static class OrchestratorBuilder
         McpSessionManager McpManager,
         EventEmitter? EventEmitter,
         EvidenceStore? EvidenceStore,
-        fuseraft.Infrastructure.KnowledgeLayer KnowledgeLayer,
+        fuseraft.Infrastructure.Knowledge.KnowledgeLayer KnowledgeLayer,
         ChangeTracker? ChangeTracker,
         IntentLog? IntentLog,
         StateProjector? StateProjector,
         string? ExecutionStatePath,
         string? InvestigationLogPath,
-        fuseraft.Infrastructure.ToolResultArtifactStore ToolArtifactStore,
+        fuseraft.Infrastructure.Tools.ToolResultArtifactStore ToolArtifactStore,
         fuseraft.Cli.Telemetry.SessionMetrics SessionMetrics,
-        fuseraft.Infrastructure.ObjectiveManager ObjectiveManager,
+        fuseraft.Infrastructure.Objectives.ObjectiveManager ObjectiveManager,
         string KnowledgeSandbox,
         string? ReadCachePath);
 
@@ -530,15 +530,15 @@ public static class OrchestratorBuilder
             ? FuseraftPaths.ExpandPath(ks)
             : Directory.GetCurrentDirectory();
         var knowledgeGraphPath = FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryGraph, projectSlug);
-        var objectiveStore = new fuseraft.Infrastructure.ObjectiveStore(FuseraftPaths.LocalObjectives);
-        var objectiveManager = new fuseraft.Infrastructure.ObjectiveManager(objectiveStore);
+        var objectiveStore = new fuseraft.Infrastructure.Objectives.ObjectiveStore(FuseraftPaths.LocalObjectives);
+        var objectiveManager = new fuseraft.Infrastructure.Objectives.ObjectiveManager(objectiveStore);
 
-        var knowledgeLayer = new fuseraft.Infrastructure.KnowledgeLayer(
-            new fuseraft.Infrastructure.AdrRegistry(
-                new fuseraft.Infrastructure.AdrStore(FuseraftPaths.LocalDecisions)),
-            new fuseraft.Infrastructure.RepositoryGraphStore(knowledgeGraphPath),
-            new fuseraft.Infrastructure.RepositoryGraphBuilder(
-                new fuseraft.Infrastructure.RepositoryGraphStore(knowledgeGraphPath),
+        var knowledgeLayer = new fuseraft.Infrastructure.Knowledge.KnowledgeLayer(
+            new fuseraft.Infrastructure.Knowledge.AdrRegistry(
+                new fuseraft.Infrastructure.Knowledge.AdrStore(FuseraftPaths.LocalDecisions)),
+            new fuseraft.Infrastructure.Repository.RepositoryGraphStore(knowledgeGraphPath),
+            new fuseraft.Infrastructure.Repository.RepositoryGraphBuilder(
+                new fuseraft.Infrastructure.Repository.RepositoryGraphStore(knowledgeGraphPath),
                 knowledgeSandbox),
             objectiveStore: objectiveStore);
         pluginRegistry.ConfigureKnowledge(knowledgeLayer);
@@ -579,7 +579,7 @@ public static class OrchestratorBuilder
         var versionStorePath = config.ChangeTracking is { } ct2
             ? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(ct2.Path)) ?? FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalState, projectSlug), "file_versions.json")
             : FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalFileVersions, projectSlug);
-        var fileVersionStore = new fuseraft.Infrastructure.FileVersionStore(versionStorePath, loggerFactory.CreateLogger<fuseraft.Infrastructure.FileVersionStore>());
+        var fileVersionStore = new fuseraft.Infrastructure.Storage.FileVersionStore(versionStorePath, loggerFactory.CreateLogger<fuseraft.Infrastructure.Storage.FileVersionStore>());
 
         // Session-level read cache: short-circuits cross-turn re-reads of unchanged files
         // so agents receive a "content unchanged since last read" hint instead of re-dumping
@@ -588,7 +588,7 @@ public static class OrchestratorBuilder
         var readCachePath = sessionId is { Length: > 0 }
             ? FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionReadCache, sessionId, projectSlug)
             : null;
-        var sessionReadCache = new fuseraft.Infrastructure.SessionReadCache(readCachePath);
+        var sessionReadCache = new fuseraft.Infrastructure.Context.SessionReadCache(readCachePath);
 
         // Tool-result artifact store: offloads tool results that exceed the size threshold
         // to disk so they never accumulate verbatim in the conversation history. Only active
@@ -596,7 +596,7 @@ public static class OrchestratorBuilder
         var toolArtifactsDir = sessionId is { Length: > 0 }
             ? FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionToolArtifacts, sessionId, projectSlug)
             : null;
-        var toolArtifactStore = new fuseraft.Infrastructure.ToolResultArtifactStore(toolArtifactsDir, eventEmitter);
+        var toolArtifactStore = new fuseraft.Infrastructure.Tools.ToolResultArtifactStore(toolArtifactsDir, eventEmitter);
 
         // Session metrics: accumulates per-turn quality data (tokens, tool calls, cache hits,
         // patch failures) and renders a summary table at session end.
@@ -793,8 +793,8 @@ public static class OrchestratorBuilder
         bool useMagentic,
         bool useGraph,
         bool useAdversarial,
-        fuseraft.Infrastructure.KnowledgeLayer knowledgeLayer,
-        fuseraft.Infrastructure.ObjectiveManager objectiveManager,
+        fuseraft.Infrastructure.Knowledge.KnowledgeLayer knowledgeLayer,
+        fuseraft.Infrastructure.Objectives.ObjectiveManager objectiveManager,
         string knowledgeSandbox,
         string projectSlug,
         IntentLog? intentLog,
@@ -1125,10 +1125,10 @@ public static class OrchestratorBuilder
 
             // Knowledge snapshot enricher: augments lossless/hybrid snapshots with ADR,
             // objective, architecture-violation, memory, and provenance-expiry state.
-            var snapshotEnricher = new fuseraft.Infrastructure.KnowledgeSnapshotEnricher(
+            var snapshotEnricher = new fuseraft.Infrastructure.Knowledge.KnowledgeSnapshotEnricher(
                 adrRegistry:      knowledgeLayer.AdrRegistry,
                 objectiveManager: objectiveManager,
-                memoryStore:      new fuseraft.Infrastructure.RepositoryMemoryStore(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, projectSlug)),
+                memoryStore:      new fuseraft.Infrastructure.Repository.RepositoryMemoryStore(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, projectSlug)),
                 provenance:       knowledgeLayer.ProvenanceRegistry,
                 manifestPath:     FuseraftPaths.LocalArchitectureManifest,
                 projectRoot:      knowledgeSandbox);
@@ -1234,8 +1234,8 @@ public static class OrchestratorBuilder
         bool useAdversarial,
         ChangeTracker? changeTracker,
         EventEmitter? eventEmitter,
-        fuseraft.Infrastructure.KnowledgeLayer knowledgeLayer,
-        fuseraft.Infrastructure.ObjectiveManager objectiveManager,
+        fuseraft.Infrastructure.Knowledge.KnowledgeLayer knowledgeLayer,
+        fuseraft.Infrastructure.Objectives.ObjectiveManager objectiveManager,
         string knowledgeSandbox,
         string projectSlug,
         string? sessionId,
@@ -1245,8 +1245,8 @@ public static class OrchestratorBuilder
         fuseraft.Orchestration.DependencyPlanner? dependencyPlanner,
         MemoryManager? memoryManager,
         IdentityRegistry identityRegistry,
-        fuseraft.Infrastructure.ToolResultArtifactStore toolArtifactStore,
-        out fuseraft.Infrastructure.RepositoryMemoryExtractor? repoMemoryExtractor)
+        fuseraft.Infrastructure.Tools.ToolResultArtifactStore toolArtifactStore,
+        out fuseraft.Infrastructure.Repository.RepositoryMemoryExtractor? repoMemoryExtractor)
     {
         var aoLogger = loggerFactory.CreateLogger<AgentOrchestrator>();
         var goLogger = loggerFactory.CreateLogger<GraphOrchestrator>();
@@ -1255,7 +1255,7 @@ public static class OrchestratorBuilder
             ? FuseraftPaths.ExpandPath(sbx) : null;
 
         // Context Broker (Gap 8): adaptive context pipeline backed by the shared knowledge layer.
-        var brokerMemoryStore = new fuseraft.Infrastructure.RepositoryMemoryStore(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, projectSlug));
+        var brokerMemoryStore = new fuseraft.Infrastructure.Repository.RepositoryMemoryStore(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, projectSlug));
         var contextBroker = new fuseraft.Orchestration.ContextBroker(
             knowledgeLayer,
             brokerMemoryStore,
@@ -1285,12 +1285,12 @@ public static class OrchestratorBuilder
         // Unified context assembly pipeline — shared across all orchestrator types.
         // Provides always-on knowledge retrieval, relevance-ranked memory, and metrics
         // telemetry for every agent invocation regardless of which orchestrator is active.
-        var repoMemoryStore = new fuseraft.Infrastructure.RepositoryMemoryStore(
+        var repoMemoryStore = new fuseraft.Infrastructure.Repository.RepositoryMemoryStore(
             FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, projectSlug));
         memoryManager?.AttachRepositoryMemory(repoMemoryStore);
 
         var graphExpander   = new fuseraft.Orchestration.GraphExpansionRetriever(knowledgeLayer.GraphStore);
-        var knowledgeStore  = new fuseraft.Infrastructure.RepositoryKnowledgeStore(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalKnowledgeFindings, projectSlug));
+        var knowledgeStore  = new fuseraft.Infrastructure.Repository.RepositoryKnowledgeStore(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalKnowledgeFindings, projectSlug));
         var pipelineLogger  = loggerFactory.CreateLogger<fuseraft.Orchestration.ContextAssemblyPipeline>();
         var contextPipeline = new fuseraft.Orchestration.ContextAssemblyPipeline(
             knowledgeLayer:   knowledgeLayer,
@@ -1356,9 +1356,9 @@ public static class OrchestratorBuilder
         repoMemoryExtractor = null;
         if (evidenceStore is not null)
         {
-            var extractorStore = new fuseraft.Infrastructure.RepositoryMemoryStore(
+            var extractorStore = new fuseraft.Infrastructure.Repository.RepositoryMemoryStore(
                 FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalRepositoryMemory, projectSlug));
-            repoMemoryExtractor = new fuseraft.Infrastructure.RepositoryMemoryExtractor(
+            repoMemoryExtractor = new fuseraft.Infrastructure.Repository.RepositoryMemoryExtractor(
                 evidenceStore, extractorStore);
         }
 

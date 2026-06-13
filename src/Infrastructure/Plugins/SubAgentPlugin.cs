@@ -30,7 +30,7 @@ namespace fuseraft.Infrastructure.Plugins;
 /// </para>
 ///
 /// <para>
-/// Per-agent instances are created in <see cref="fuseraft.Infrastructure.AgentFactory"/>
+/// Per-agent instances are created in <see cref="fuseraft.Infrastructure.Agents.AgentFactory"/>
 /// using the parent agent's resolved model and a sandboxed <see cref="FileSystemPlugin"/>.
 /// A stub is registered in <see cref="PluginRegistry.RegisterDefaults"/> so that
 /// <c>fuseraft plugins</c> can enumerate the tool names and descriptions.

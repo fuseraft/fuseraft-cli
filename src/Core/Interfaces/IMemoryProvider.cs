@@ -10,7 +10,7 @@ namespace fuseraft.Core.Interfaces;
 /// Implementations are registered via <c>Memory.Provider</c> in the orchestration config.
 /// Built-in values: <c>local</c> (file-backed <c>MemoryStore</c>) and <c>webhook</c>
 /// (generic HTTP endpoint). Custom providers can be wired in code via
-/// <see cref="fuseraft.Infrastructure.MemoryManager"/>.
+/// <see cref="fuseraft.Infrastructure.Memory.MemoryManager"/>.
 /// </para>
 ///
 /// <para>

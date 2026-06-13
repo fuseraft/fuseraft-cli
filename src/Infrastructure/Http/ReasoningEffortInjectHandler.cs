@@ -17,7 +17,7 @@ namespace fuseraft.Infrastructure;
 /// <para>
 /// The handler reads the <c>model</c> field from the JSON body and looks it up in
 /// <paramref name="modelEfforts"/> — a dictionary populated by
-/// <see cref="fuseraft.Infrastructure.ChatClientFactory"/> as clients are created.
+/// <see cref="fuseraft.Infrastructure.Chat.ChatClientFactory"/> as clients are created.
 /// Requests for models without a registered effort are passed through unchanged.
 /// </para>
 /// </summary>

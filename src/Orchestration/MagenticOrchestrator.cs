@@ -12,7 +12,7 @@ using fuseraft.Core.Models;
 
 // Disambiguate from Microsoft.Agents.AI.AgentFactory
 using fuseraft.Infrastructure;
-using AgentFactory = fuseraft.Infrastructure.AgentFactory;
+using AgentFactory = fuseraft.Infrastructure.Agents.AgentFactory;
 
 namespace fuseraft.Orchestration;
 
@@ -38,7 +38,7 @@ public sealed class MagenticOrchestrator(
     EventEmitter? eventEmitter = null,
     GovernanceKernel? governanceKernel = null,
     fuseraft.Core.Interfaces.IContextAssemblyPipeline? contextPipeline = null,
-    fuseraft.Infrastructure.RepositoryKnowledgeStore? repositoryKnowledgeStore = null) : IOrchestrator
+    fuseraft.Infrastructure.Repository.RepositoryKnowledgeStore? repositoryKnowledgeStore = null) : IOrchestrator
 {
     // Agent name tags used in the message stream so the UI and checkpoints can identify them.
     private const string ManagerPlanTag     = "[MagenticManager:Plan]";

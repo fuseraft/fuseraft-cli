@@ -69,7 +69,7 @@ public interface IOrchestrator
     /// <summary>
     /// Fires synchronously each time an agent invokes a tool during its turn.
     /// Arguments: (agentName, toolName, argsSummary) where <c>argsSummary</c> is a compact
-    /// <c>key=value</c> string produced by <see cref="fuseraft.Infrastructure.ToolCallHelper.SummarizeArgs"/>,
+    /// <c>key=value</c> string produced by <see cref="fuseraft.Infrastructure.Tools.ToolCallHelper.SummarizeArgs"/>,
     /// or <c>null</c> when the tool was called with no arguments.
     /// Used to update UI spinners and print real-time tool-call lines.
     /// </summary>
