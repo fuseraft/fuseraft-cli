@@ -983,10 +983,10 @@ public sealed class GraphOrchestrator(
             consecutiveFails++;
 
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync(EventTypes.NoKeyword,
+                await eventEmitter.EmitAsync(EventTypes.KeywordNotFound,
                     agent:   agentName,
                     turn:    agentMsg!.TurnIndex,
-                    payload: new { consecutive = consecutiveFails });
+                    payload: new { consecutive = consecutiveFails, source = "graph_orchestrator" });
 
             int histBefore2 = ctx.History.Count;
             await CorrectionEngine.InjectNoKeywordCorrection(
@@ -1880,10 +1880,10 @@ public sealed class GraphOrchestrator(
             consecutiveFails++;
 
             if (eventEmitter is not null)
-                await eventEmitter.EmitAsync(EventTypes.NoKeyword,
+                await eventEmitter.EmitAsync(EventTypes.KeywordNotFound,
                     agent:   agentName,
                     turn:    agentMsg.TurnIndex,
-                    payload: new { consecutive = consecutiveFails });
+                    payload: new { consecutive = consecutiveFails, source = "graph_orchestrator" });
 
             int histBefore2 = ctx.History.Count;
             await CorrectionEngine.InjectNoKeywordCorrection(

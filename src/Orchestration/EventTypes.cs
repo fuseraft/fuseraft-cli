@@ -22,7 +22,6 @@ public static class EventTypes
     public const string KeywordDetected      = "keyword_detected";
     public const string KeywordNotFound      = "keyword_not_found";
     public const string MultiKeyword         = "multi_keyword";
-    public const string NoKeyword            = "no_keyword";
     public const string BackEdgeEscalation   = "back_edge_escalation";
     public const string ReplanBlocked        = "replan_blocked";
 
