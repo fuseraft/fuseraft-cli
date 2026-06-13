@@ -624,6 +624,32 @@ public sealed class GraphOrchestrator(
 
         foreach (var node in config.Selection.Graph!.Nodes)
         {
+            var routeTable = routeTables.GetValueOrDefault(node.Id, new AgentRouteTable());
+
+            // Sub-graph node: run a nested GraphOrchestrator instead of a single agent.
+            if (!string.IsNullOrEmpty(node.SubGraphId))
+            {
+                var subGraphId = node.SubGraphId;
+                var isTerminal = node.Terminal;
+
+                Func<AgentContext, IWorkflowContext, CancellationToken, ValueTask> subHandler =
+                    async (ctx, wfCtx, ct) =>
+                        await RunSubGraphNodeAsync(
+                            node.Id, subGraphId, isTerminal, routeTable, ctx, wfCtx, ct)
+                        .ConfigureAwait(false);
+
+                var subExecutor = new FunctionExecutor<AgentContext>(
+                    node.Id.ToLowerInvariant(),
+                    subHandler,
+                    ExecutorOptions.Default,
+                    [typeof(AgentContext)],
+                    [typeof(AgentContext)],
+                    false);
+
+                bindings[node.Id] = subExecutor;
+                continue;
+            }
+
             if (!agents.ContainsKey(node.Agent))
             {
                 logger.LogWarning(
@@ -632,9 +658,8 @@ public sealed class GraphOrchestrator(
                 continue;
             }
 
-            var routeTable  = routeTables.GetValueOrDefault(node.Id, new AgentRouteTable());
             var agentName   = node.Agent;
-            var isTerminal  = node.Terminal;
+            var isAgentTerminal = node.Terminal;
             var agent       = agents[agentName];
             var instructions = agentInstructions.GetValueOrDefault(agentName, string.Empty);
             var agentCfg    = agentConfigs.GetValueOrDefault(agentName) ?? new AgentConfig();
@@ -643,7 +668,7 @@ public sealed class GraphOrchestrator(
                 async (ctx, wfCtx, ct) =>
                     await RunNodeExecutorAsync(
                         node.Id, agentName, agent, instructions, agentCfg,
-                        isTerminal, routeTable, ctx, wfCtx, ct,
+                        isAgentTerminal, routeTable, ctx, wfCtx, ct,
                         agents, agentInstructions, agentConfigs).ConfigureAwait(false);
 
             // Node ID (lowercase) is the executor ID — unique even when multiple nodes
@@ -1773,6 +1798,185 @@ public sealed class GraphOrchestrator(
                 $"Rate limit exceeded for validator failures on agent '{agentName}'.");
 
         governanceKernel.SloEngine.Get("policy-compliance")?.Record(0.0);
+    }
+
+    // -------------------------------------------------------------------------
+    // Sub-graph node executor
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Executes a nested <c>GraphOrchestrator</c> for a sub-graph node. The sub-orchestrator
+    /// runs with a synthetic config whose <c>Selection.Graph</c> is the sub-graph referenced
+    /// by <paramref name="subGraphId"/>. All shared services (agentFactory, changeTracker, etc.)
+    /// are forwarded from the parent so governance, audit, and context pipelines remain unified.
+    ///
+    /// <para>
+    /// Messages emitted by the sub-orchestrator are forwarded to <c>ctx.MessageSink</c> so they
+    /// appear in the parent session transcript. The sub-orchestrator's final assistant message is
+    /// injected into <c>ctx.History</c> so the parent's keyword detector can route normally.
+    /// </para>
+    /// </summary>
+    private async Task RunSubGraphNodeAsync(
+        string nodeId,
+        string subGraphId,
+        bool isTerminal,
+        AgentRouteTable routeTable,
+        AgentContext ctx,
+        IWorkflowContext wfCtx,
+        CancellationToken ct)
+    {
+        var graphCfg    = config.Selection.Graph!;
+        var subGraphCfg = graphCfg.SubGraphs![subGraphId];
+
+        logger.LogInformation(
+            "[GraphOrchestrator] Node '{NodeId}' executing sub-graph '{SubGraphId}'.",
+            nodeId, subGraphId);
+
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync(EventTypes.AgentStart,
+                agent: $"[SubGraph:{subGraphId}]",
+                turn:  ctx.TurnIndex);
+
+        // Build a synthetic config with the sub-graph as the Selection.Graph.
+        var subConfig = config with
+        {
+            Selection = config.Selection with
+            {
+                Type  = OrchestratorTypes.Graph,
+                Graph = subGraphCfg,
+            }
+        };
+
+        var subLogger          = logger;
+        var subOrchestrator    = new GraphOrchestrator(
+            subConfig, agentFactory, subLogger,
+            changeTracker, eventEmitter, governanceKernel,
+            _humanApprovalService, contextPipeline, repositoryKnowledgeStore);
+
+        subOrchestrator.SetSessionId(_sessionId);
+
+        // Reconstruct the task text from the head of the shared history.
+        var subTask = ctx.History.FirstOrDefault(m => m.Role == ChatRole.User)
+                          ?.Contents.OfType<TextContent>().FirstOrDefault()?.Text
+                      ?? _task;
+
+        // Stream the sub-orchestrator and collect messages.
+        var subMessages   = new List<AgentMessage>();
+        string? lastText  = null;
+        string? lastAgent = null;
+
+        await foreach (var msg in subOrchestrator.StreamAsync(subTask, null, ct).ConfigureAwait(false))
+        {
+            await ctx.MessageSink.WriteAsync(msg, ct).ConfigureAwait(false);
+            subMessages.Add(msg);
+
+            if (string.Equals(msg.Role, "assistant", StringComparison.OrdinalIgnoreCase))
+            {
+                lastText  = msg.Content;
+                lastAgent = msg.AgentName;
+            }
+
+            ctx.TurnIndex        = Math.Max(ctx.TurnIndex, msg.TurnIndex + 1);
+            ctx.CumulativeTokens += msg.Usage?.TotalTokens ?? 0;
+        }
+
+        if (lastText is null)
+        {
+            logger.LogWarning(
+                "[GraphOrchestrator] Sub-graph '{SubGraphId}' produced no assistant messages.",
+                subGraphId);
+        }
+
+        // Inject the sub-graph's terminal output into the parent history so the parent
+        // orchestrator can detect routing keywords from it.
+        var syntheticContent = lastText ?? $"[sub-graph '{subGraphId}' completed with no output]";
+        var syntheticMsg     = new ChatMessage(ChatRole.Assistant, syntheticContent)
+        {
+            AuthorName = lastAgent ?? $"SubGraph:{subGraphId}"
+        };
+        ctx.History.Add(syntheticMsg);
+
+        if (eventEmitter is not null)
+            await eventEmitter.EmitAsync(EventTypes.AgentEnd,
+                agent: $"[SubGraph:{subGraphId}]",
+                turn:  ctx.TurnIndex);
+
+        // Terminal sub-graph node: end the session.
+        if (isTerminal)
+        {
+            ctx.LastKeyword = TerminalSentinel;
+            RecordNodeState(ctx, nodeId);
+            await wfCtx.YieldOutputAsync(ctx, ct).ConfigureAwait(false);
+            return;
+        }
+
+        // Keyword detection on the sub-graph's final output for forward-edge routing.
+        var handoffKw  = KeywordDetector.ExtractHandoffToolCallKeyword([], routeTable);
+        var allKeywords = handoffKw is not null
+            ? (IReadOnlyList<string>)[handoffKw]
+            : KeywordDetector.DetectKeywords(syntheticContent, routeTable);
+
+        string? foundKeyword = allKeywords.Count == 1 ? allKeywords[0] : null;
+
+        // Back-edge keyword.
+        if (foundKeyword is not null && routeTable.PhaseBreakKeywords.Contains(foundKeyword))
+        {
+            ctx.LastKeyword = foundKeyword;
+            RecordNodeState(ctx, _backEdgeDestinations.TryGetValue(foundKeyword, out var bd) ? bd ?? nodeId : nodeId);
+
+            if (eventEmitter is not null)
+                await eventEmitter.EmitAsync(EventTypes.StateAdvanced,
+                    agent: $"[SubGraph:{subGraphId}]",
+                    turn:  ctx.TurnIndex,
+                    payload: new { version = ctx.CurrentState.Version, phase_break = foundKeyword });
+
+            await wfCtx.YieldOutputAsync(ctx, ct).ConfigureAwait(false);
+            return;
+        }
+
+        // Forward-edge keyword.
+        if (foundKeyword is not null && routeTable.Routes.TryGetValue(foundKeyword, out var route))
+        {
+            ctx.LastKeyword = foundKeyword;
+            RecordNodeState(ctx, route.NextExecutorName);
+
+            if (eventEmitter is not null)
+                await eventEmitter.EmitAsync(EventTypes.AgentRouted,
+                    agent:   $"[SubGraph:{subGraphId}]",
+                    turn:    ctx.TurnIndex,
+                    payload: new { keyword = foundKeyword, to = route.NextExecutorName });
+
+            ctx.History.Add(new ChatMessage(ChatRole.User,
+                $"[fuseraft: SubGraph:{subGraphId} → {route.NextExecutorName}]"));
+
+            await wfCtx.SendMessageAsync(ctx, route.NextExecutorId, ct).ConfigureAwait(false);
+            return;
+        }
+
+        // No keyword — if there are no keyword routes at all, treat as unconditional.
+        bool hasKeywordRoutes = routeTable.Routes.Count > 0 || routeTable.PhaseBreakKeywords.Count > 0;
+        if (!hasKeywordRoutes)
+        {
+            if (_unconditionalForwardRoutes.TryGetValue(nodeId, out var autoRoute))
+            {
+                ctx.LastKeyword = null;
+                RecordNodeState(ctx, autoRoute.NextExecutorName);
+                ctx.History.Add(new ChatMessage(ChatRole.User,
+                    $"[fuseraft: SubGraph:{subGraphId} → {autoRoute.NextExecutorName}]"));
+                await wfCtx.SendMessageAsync(ctx, autoRoute.NextExecutorId, ct).ConfigureAwait(false);
+                return;
+            }
+        }
+
+        // Sub-graph produced no recognisable keyword — log and terminate the node gracefully.
+        logger.LogWarning(
+            "[GraphOrchestrator] Sub-graph node '{NodeId}' produced no routing keyword. " +
+            "Treating as terminal. Ensure the sub-graph's terminal agent emits a valid keyword.",
+            nodeId);
+
+        ctx.LastKeyword = TerminalSentinel;
+        RecordNodeState(ctx, nodeId);
+        await wfCtx.YieldOutputAsync(ctx, ct).ConfigureAwait(false);
     }
 
     // -------------------------------------------------------------------------

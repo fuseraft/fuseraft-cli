@@ -106,9 +106,10 @@ public static class OrchestratorBuilder
         bool useMagentic    = config.Selection.Type.Equals(OrchestratorTypes.Magentic,    StringComparison.OrdinalIgnoreCase);
         bool useGraph       = config.Selection.Type.Equals(OrchestratorTypes.Graph,       StringComparison.OrdinalIgnoreCase);
         bool useAdversarial = config.Selection.Type.Equals(OrchestratorTypes.Adversarial, StringComparison.OrdinalIgnoreCase);
+        bool useMapReduce   = config.Selection.Type.Equals(OrchestratorTypes.MapReduce,   StringComparison.OrdinalIgnoreCase);
 
         var (configAfterStrategy, compactor, skillCurator) = await ValidateAndSelectStrategy(
-            config, loggerFactory, chatClientFactory, useMagentic, useGraph, useAdversarial,
+            config, loggerFactory, chatClientFactory, useMagentic, useGraph, useAdversarial, useMapReduce,
             infra.KnowledgeLayer, infra.ObjectiveManager, infra.KnowledgeSandbox, projectSlug,
             infra.IntentLog, infra.EvidenceStore, infra.ExecutionStatePath, infra.InvestigationLogPath,
             sessionId, readCachePath: infra.ReadCachePath, cancellationToken);
@@ -118,7 +119,7 @@ public static class OrchestratorBuilder
 
         var orchestrator = CreateOrchestrator(
             config, loggerFactory, chatClientFactory, pluginRegistry,
-            governanceKernel, humanApprovalService, hitlMode, useMagentic, useGraph, useAdversarial,
+            governanceKernel, humanApprovalService, hitlMode, useMagentic, useGraph, useAdversarial, useMapReduce,
             infra.ChangeTracker, infra.EventEmitter, infra.KnowledgeLayer, infra.ObjectiveManager,
             infra.KnowledgeSandbox, projectSlug, sessionId,
             infra.ExecutionStatePath, infra.InvestigationLogPath,
@@ -793,6 +794,7 @@ public static class OrchestratorBuilder
         bool useMagentic,
         bool useGraph,
         bool useAdversarial,
+        bool useMapReduce,
         fuseraft.Infrastructure.Knowledge.KnowledgeLayer knowledgeLayer,
         fuseraft.Infrastructure.Objectives.ObjectiveManager objectiveManager,
         string knowledgeSandbox,
@@ -996,6 +998,54 @@ public static class OrchestratorBuilder
             };
         }
 
+        // Validate map-reduce config at startup when that strategy is selected.
+        if (useMapReduce)
+        {
+            if (config.Selection.MapReduce is null)
+                throw new InvalidOperationException(
+                    "Selection.Type 'mapreduce' requires a 'Selection.MapReduce' configuration block.");
+
+            var mr        = config.Selection.MapReduce;
+            var mrAgents  = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            if (string.IsNullOrWhiteSpace(mr.Splitter))
+                throw new InvalidOperationException("Selection.MapReduce.Splitter must be a non-empty agent name.");
+            if (!mrAgents.Contains(mr.Splitter))
+                throw new InvalidOperationException(
+                    $"Selection.MapReduce.Splitter '{mr.Splitter}' is not defined in 'Orchestration.Agents'.");
+
+            if (string.IsNullOrWhiteSpace(mr.Mapper))
+                throw new InvalidOperationException("Selection.MapReduce.Mapper must be a non-empty agent name.");
+            if (!mrAgents.Contains(mr.Mapper))
+                throw new InvalidOperationException(
+                    $"Selection.MapReduce.Mapper '{mr.Mapper}' is not defined in 'Orchestration.Agents'.");
+
+            if (string.IsNullOrWhiteSpace(mr.Reducer))
+                throw new InvalidOperationException("Selection.MapReduce.Reducer must be a non-empty agent name.");
+            if (!mrAgents.Contains(mr.Reducer))
+                throw new InvalidOperationException(
+                    $"Selection.MapReduce.Reducer '{mr.Reducer}' is not defined in 'Orchestration.Agents'.");
+
+            if (mr.MaxConcurrency < 0)
+                throw new InvalidOperationException(
+                    $"Selection.MapReduce.MaxConcurrency must be >= 0 (got {mr.MaxConcurrency}). Use 0 for unlimited.");
+
+            if (mr.MaxSplitterRetries < 1)
+                throw new InvalidOperationException(
+                    $"Selection.MapReduce.MaxSplitterRetries must be at least 1 (got {mr.MaxSplitterRetries}).");
+
+            if (string.IsNullOrWhiteSpace(mr.ItemsJsonPath))
+                throw new InvalidOperationException("Selection.MapReduce.ItemsJsonPath must be a non-empty string.");
+        }
+
+        // Warn when Selection.MapReduce is configured but Selection.Type is not "mapreduce".
+        if (config.Selection.MapReduce is not null &&
+            !config.Selection.Type.Equals(OrchestratorTypes.MapReduce, StringComparison.OrdinalIgnoreCase))
+            loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
+                "Selection.MapReduce is configured but Selection.Type is '{Type}', not 'mapreduce'. " +
+                "The MapReduce block will be ignored. Set Selection.Type: mapreduce to enable it.",
+                config.Selection.Type);
+
         // Validate graph config at startup when the graph strategy is selected.
         if (useGraph)
         {
@@ -1021,13 +1071,31 @@ public static class OrchestratorBuilder
                 if (!seenNodeIds.Add(node.Id))
                     throw new InvalidOperationException(
                         $"Duplicate node Id '{node.Id}' found in Selection.Graph.Nodes. Node Ids must be unique.");
-                if (string.IsNullOrWhiteSpace(node.Agent))
-                    throw new InvalidOperationException(
-                        $"Graph node '{node.Id}' must specify an 'Agent' name.");
-                if (!agentNames.Contains(node.Agent))
-                    throw new InvalidOperationException(
-                        $"Graph node '{node.Id}' references agent '{node.Agent}' " +
-                        $"which is not defined in 'Orchestration.Agents'.");
+
+                bool isSubGraphNode = !string.IsNullOrWhiteSpace(node.SubGraphId);
+
+                if (isSubGraphNode)
+                {
+                    if (!string.IsNullOrWhiteSpace(node.Agent))
+                        throw new InvalidOperationException(
+                            $"Graph node '{node.Id}' has both 'Agent' and 'SubGraphId' set. " +
+                            $"Use one or the other — leave 'Agent' empty when using 'SubGraphId'.");
+
+                    if (graphCfg.SubGraphs is null || !graphCfg.SubGraphs.ContainsKey(node.SubGraphId!))
+                        throw new InvalidOperationException(
+                            $"Graph node '{node.Id}' references SubGraphId '{node.SubGraphId}' " +
+                            $"which is not defined in Selection.Graph.SubGraphs.");
+                }
+                else
+                {
+                    if (string.IsNullOrWhiteSpace(node.Agent))
+                        throw new InvalidOperationException(
+                            $"Graph node '{node.Id}' must specify an 'Agent' name (or set 'SubGraphId' for a sub-graph node).");
+                    if (!agentNames.Contains(node.Agent))
+                        throw new InvalidOperationException(
+                            $"Graph node '{node.Id}' references agent '{node.Agent}' " +
+                            $"which is not defined in 'Orchestration.Agents'.");
+                }
             }
 
             // Validate edge node references.
@@ -1116,9 +1184,9 @@ public static class OrchestratorBuilder
                     $"less than Compaction.TriggerTurnCount ({compactionConfig.TriggerTurnCount}).");
 
             var summaryModel = compactionConfig.Model ?? config.Agents[0].Model;
-            // Magentic and adversarial sessions have no brief.json or change log, so the
-            // workflow-specific resumption note is suppressed to avoid wasting tokens.
-            bool suppressResumptionNote = useMagentic || useAdversarial;
+            // Magentic, adversarial, and map-reduce sessions have no brief.json or change log,
+            // so the workflow-specific resumption note is suppressed to avoid wasting tokens.
+            bool suppressResumptionNote = useMagentic || useAdversarial || useMapReduce;
             var resumptionNote = suppressResumptionNote ? null : ConversationCompactor.WorkflowResumptionNote;
             var changeLogPath  = suppressResumptionNote ? null
                 : (config.Validation?.ChangeLogPath ?? config.ChangeTracking?.Path);
@@ -1232,6 +1300,7 @@ public static class OrchestratorBuilder
         bool useMagentic,
         bool useGraph,
         bool useAdversarial,
+        bool useMapReduce,
         ChangeTracker? changeTracker,
         EventEmitter? eventEmitter,
         fuseraft.Infrastructure.Knowledge.KnowledgeLayer knowledgeLayer,
@@ -1332,6 +1401,13 @@ public static class OrchestratorBuilder
                 config, agentFactory, advLogger,
                 changeTracker, eventEmitter, governanceKernel,
                 hitlMode ? humanApprovalService : null);
+        }
+        else if (useMapReduce)
+        {
+            var mrLogger = loggerFactory.CreateLogger<MapReduceOrchestrator>();
+            orchestrator  = new MapReduceOrchestrator(
+                config, agentFactory, mrLogger,
+                changeTracker, eventEmitter, governanceKernel);
         }
         else if (useMagentic)
         {

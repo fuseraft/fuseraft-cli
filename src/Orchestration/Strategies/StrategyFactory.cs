@@ -46,7 +46,8 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
     {
         return config.Type.ToLowerInvariant() switch
         {
-            OrchestratorTypes.Sequential or OrchestratorTypes.RoundRobin => new SequentialAgentSelector(),
+            OrchestratorTypes.Sequential  => new SequentialAgentSelector(),
+            OrchestratorTypes.RoundRobin  => new RoundRobinAgentSelector(),
             OrchestratorTypes.Llm         => CreateLLMSelection(config, agents),
             OrchestratorTypes.Keyword     => CreateKeywordSelection(config, agents, validationConfig, failureHandling, contracts),
             OrchestratorTypes.Structured  => CreateStructuredSelection(config, agents),
@@ -56,7 +57,7 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
                 "never reach StrategyFactory. Verify that OrchestratorBuilder is routing " +
                 "this config correctly."),
             _ => throw new NotSupportedException(
-                $"Unknown selection strategy type: '{config.Type}'. Valid: sequential, llm, keyword, structured, statemachine, magentic.")
+                $"Unknown selection strategy type: '{config.Type}'. Valid: sequential, roundrobin, llm, keyword, structured, statemachine, magentic.")
         };
     }
 

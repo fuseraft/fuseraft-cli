@@ -15,4 +15,5 @@ public static class OrchestratorTypes
     public const string StateMachine = "statemachine";
     public const string Graph       = "graph";
     public const string Adversarial = "adversarial";
+    public const string MapReduce   = "mapreduce";
 }

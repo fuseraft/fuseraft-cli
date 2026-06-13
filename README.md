@@ -101,7 +101,7 @@ The binary lands in `./bin/`.
 - Evidence contracts gate transitions with predicates: `FileExists`, `FilesWritten`, `CommandSucceeded`
 
 **Orchestration**
-- Nine routing modes: sequential, round-robin, keyword, structured, state machine, graph (with parallel fan-out), LLM, Magentic, adversarial generate→critique
+- Ten routing modes: sequential (one-pass), round-robin (cycling), keyword, structured, state machine, graph (parallel fan-out + hierarchical sub-graphs), LLM, Magentic, adversarial generate→critique, map-reduce (parallel item processing)
 - Saga mode adds compensating rollback on failure
 - Inline agents or reusable `AgentFile` YAML; mix providers in one pipeline
 - Federate slots via A2A protocol
@@ -129,10 +129,8 @@ The binary lands in `./bin/`.
 | [Configuration](docs/configuration.md) | YAML/JSON schema |
 | [Models & Providers](docs/models.md) | Model configuration and provider auto-detection |
 | [Plugins](docs/plugins.md) | All built-in tools agents can call |
-| [Strategies](docs/strategies.md) | Routing & termination |
-| [Validators](docs/validators.md) | Anti-hallucination guards |
 | [Strategies](docs/strategies.md) | Selection and termination strategies |
-| [Routing Validators](docs/validators.md) | Anti-hallucination handoff guards |
+| [Validators](docs/validators.md) | Anti-hallucination handoff guards |
 | [Harness Engineering](docs/harness-engineering.md) | Configs that enforce real progress mechanically |
 | [MCP Integration](docs/mcp.md) | Connecting external MCP servers |
 | [Security & Sandbox](docs/security.md) | File and network containment |
@@ -243,6 +241,42 @@ flowchart TD
     Developer    -->|artifact| CodeReviewer
     CodeReviewer -->|"APPROVED"| Done
     CodeReviewer -.->|revise| Developer
+```
+
+**Map-reduce (parallel item processing)**
+
+```mermaid
+flowchart TD
+    Task((Task))
+    Splitter([Splitter])
+    MapperA(["Mapper · item 1"])
+    MapperB(["Mapper · item 2"])
+    MapperC(["Mapper · item N"])
+    Reducer(["Reducer\n✓ terminal"])
+
+    Task     --> Splitter
+    Splitter -->|item 1| MapperA
+    Splitter -->|item 2| MapperB
+    Splitter -->|item N| MapperC
+    MapperA  --> Reducer
+    MapperB  --> Reducer
+    MapperC  --> Reducer
+```
+
+**Hierarchical sub-graphs**
+
+```mermaid
+flowchart TD
+    Task((Task))
+    SubGraph["research_phase\n(nested graph)"]
+    Gatherer([DataGatherer])
+    Analyst(["Analyst\n✓ sub-graph terminal"])
+    Writer(["Writer\n✓ terminal"])
+
+    Task     --> SubGraph
+    SubGraph --> Gatherer
+    Gatherer -->|"DATA READY"| Analyst
+    SubGraph -->|"RESEARCH COMPLETE"| Writer
 ```
 
 ---
