@@ -56,7 +56,7 @@ A turn ends only after the agent produces a final text response. This definition
 | `IAgentSelector` | Picks the next agent each turn | `KeywordSelectionStrategy`, `StateMachineSelectionStrategy`, `LlmSelectionStrategy`, `SequentialAgentSelector`, `RoundRobinAgentSelector`, `StructuredSelectionStrategy` |
 | `ITerminationCondition` | Decides when the session ends | `RegexTerminationCondition`, `MaxIterationsTerminationCondition`, `CompositeTerminationCondition` |
 | `IRoutingValidator` | Blocks a handoff unless evidence is present | `RequireBriefValidator`, `HandoffToTesterValidator`, `HandoffToReviewerValidator`, `RequireShellPassValidator`, `RequireAllFilesWrittenValidator`, `RequireReviewJudgementValidator` |
-| `IOrchestrator` | Drives the agent loop | `AgentOrchestrator`, `GraphOrchestrator`, `MagenticOrchestrator`, `AdversarialOrchestrator`, `MapReduceOrchestrator`, `SagaOrchestrator` (compensating rollback wrapper) |
+| `IOrchestrator` | Drives the agent loop | `AgentOrchestrator`, `GraphOrchestrator`, `MagenticOrchestrator`, `AdversarialOrchestrator`, `MapReduceOrchestrator`, `ScatterGatherOrchestrator`, `SagaOrchestrator` (compensating rollback wrapper) |
 | `ICompensatingAgent` | Rolls back an agent's work when the saga aborts | Provided by callers; none built-in |
 | `ISessionStore` | Saves/loads checkpoints | `JsonSessionStore`, `InMemorySessionStore` |
 
@@ -70,7 +70,8 @@ A turn ends only after the agent produces a final text response. This definition
 2. `MagenticOrchestrator` — when `Selection.Type == "magentic"`
 3. `AdversarialOrchestrator` — when `Selection.Type == "adversarial"`; runs fixed generate→critique→revise stages with a context firewall between generator and critic
 4. `MapReduceOrchestrator` — when `Selection.Type == "mapreduce"`; runs a three-phase split→parallel-map→reduce pipeline
-5. `AgentOrchestrator` — everything else (`keyword`, `statemachine`, `llm`, `sequential`, `roundrobin`, `structured`); driven by an `IAgentSelector` + `ITerminationCondition`
+5. `ScatterGatherOrchestrator` — when `Selection.Type == "scattergather"`; broadcasts the same task to all participants in parallel then synthesises their independent outputs
+6. `AgentOrchestrator` — everything else (`keyword`, `statemachine`, `llm`, `sequential`, `roundrobin`, `structured`); driven by an `IAgentSelector` + `ITerminationCondition`
 
 `SagaOrchestrator` wraps whichever orchestrator is selected when `Saga.Enabled == true`.
 
@@ -258,11 +259,12 @@ When adding a new `FailureAction` or `FailureType` value, update:
 | How does graph orchestration work? | `src/Orchestration/GraphOrchestrator.cs`, `src/Core/Models/Orchestration/GraphConfig.cs` |
 | How do sub-graph nodes work? | `src/Orchestration/GraphOrchestrator.cs` → `BuildExecutorBindings`, `RunSubGraphNodeAsync`; `src/Core/Models/Orchestration/GraphConfig.cs` → `SubGraphs`, `SubGraphId` |
 | How does map-reduce work? | `src/Orchestration/MapReduceOrchestrator.cs`, `src/Core/Models/Orchestration/MapReduceConfig.cs` |
+| How does scatter-gather work? | `src/Orchestration/ScatterGatherOrchestrator.cs`, `src/Core/Models/Orchestration/ScatterGatherConfig.cs` |
 | How does adversarial orchestration work? | `src/Orchestration/AdversarialOrchestrator.cs` |
 | How do validators work? | `src/Orchestration/Validation/` |
 | How are contracts evaluated? | `src/Orchestration/Contracts/ContractEngine.cs` |
 | What tools do agents have? | `src/Infrastructure/Plugins/` |
-| How is the config schema defined? | `src/Core/Models/OrchestrationConfig.cs`, `StrategyConfig.cs`, `StateMachineConfig.cs`, `GraphConfig.cs`, `MapReduceConfig.cs` |
+| How is the config schema defined? | `src/Core/Models/OrchestrationConfig.cs`, `StrategyConfig.cs`, `StateMachineConfig.cs`, `GraphConfig.cs`, `MapReduceConfig.cs`, `ScatterGatherConfig.cs` |
 | How does AgentFile loading work? | `src/Cli/OrchestratorBuilder.cs` → `ResolveAgentFiles` |
 | How does compaction work? | `src/Orchestration/ConversationCompactor.cs` |
 | How does change tracking work? | `src/Orchestration/ChangeTracker.cs` |

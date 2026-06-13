@@ -475,7 +475,7 @@ Selection:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `Type` | string | `"sequential"` | `sequential`, `roundrobin`, `keyword`, `llm`, `structured`, `statemachine`, `magentic`, `graph`, `adversarial`, or `mapreduce`. |
+| `Type` | string | `"sequential"` | `sequential`, `roundrobin`, `keyword`, `llm`, `structured`, `statemachine`, `magentic`, `graph`, `adversarial`, `mapreduce`, or `scattergather`. |
 | `Routes` | array | — | Required for `keyword`. List of keyword → agent mappings. |
 | `StructuredRoutes` | array | — | Required for `structured`. List of condition → agent mappings. See [Strategies](strategies.md#structured). |
 | `DefaultAgent` | string | first agent | Fallback agent when no keyword/condition matches (`keyword` and `structured` only). |
@@ -484,6 +484,7 @@ Selection:
 | `Magentic` | object | — | Required for `magentic` selection. See [MagenticManagerConfig](#magenticmanagerconfig) below. |
 | `Graph` | object | — | Required for `graph` selection. See [Strategies — graph](strategies.md#graph) for `GraphConfig`, `GraphNodeConfig`, and `GraphEdgeConfig` field references. |
 | `MapReduce` | object | — | Required for `mapreduce` selection. See [Strategies — mapreduce](strategies.md#mapreduce) for `MapReduceConfig` field reference. |
+| `ScatterGather` | object | — | Required for `scattergather` selection. See [Strategies — scattergather](strategies.md#scattergather) for `ScatterGatherConfig` field reference. |
 
 ### KeywordRoute
 

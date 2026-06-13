@@ -1841,7 +1841,6 @@ public sealed class GraphOrchestrator(
 
         if (subSpec.IsMapReduce)
         {
-            // Build a synthetic config with the map-reduce spec as Selection.MapReduce.
             var subConfig = config with
             {
                 Selection = config.Selection with
@@ -1856,9 +1855,24 @@ public sealed class GraphOrchestrator(
                 subConfig, agentFactory, mrLogger,
                 changeTracker, eventEmitter, governanceKernel);
         }
+        else if (subSpec.IsScatterGather)
+        {
+            var subConfig = config with
+            {
+                Selection = config.Selection with
+                {
+                    Type          = OrchestratorTypes.ScatterGather,
+                    Graph         = null,
+                    ScatterGather = subSpec.ScatterGather,
+                }
+            };
+            var sgLogger = Microsoft.Extensions.Logging.Abstractions.NullLogger<ScatterGatherOrchestrator>.Instance;
+            subOrchestrator = new ScatterGatherOrchestrator(
+                subConfig, agentFactory, sgLogger,
+                changeTracker, eventEmitter, governanceKernel);
+        }
         else
         {
-            // Build a synthetic config with the sub-graph as the Selection.Graph.
             var subConfig = config with
             {
                 Selection = config.Selection with
