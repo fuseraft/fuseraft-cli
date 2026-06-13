@@ -256,7 +256,7 @@ internal sealed class CompactionCoordinator(
                 await eventEmitter.EmitAsync(EventTypes.Compaction,
                     payload: new
                     {
-                        mode           = "window",
+                        mode           = CompactionModes.Window,
                         reason         = _pendingCompactionReason,
                         turns_dropped  = dropped,
                         turns_retained = trimmed.Count,
