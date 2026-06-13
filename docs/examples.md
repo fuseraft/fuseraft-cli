@@ -997,6 +997,115 @@ Orchestration:
 
 ---
 
+## Scatter-gather — multi-expert review
+
+Three specialist reviewers each assess the same document independently in parallel; a lead reviewer synthesises their findings into a single verdict. No routing keywords or shared context between reviewers — each produces an independent evaluation.
+
+**Key features:**
+- All participants receive the same task simultaneously in isolated history snapshots
+- Participants are different agents with different specialisms — diversity is the point
+- Synthesizer receives all labeled outputs and produces the final answer
+- `MaxConcurrency: 0` means all three run at the same time (unbounded parallelism)
+
+```yaml
+Orchestration:
+  Name: Multi-Expert Review
+  Description: >
+    Three specialist reviewers independently assess the same document.
+    A lead reviewer synthesises their findings into a unified verdict.
+
+  Agents:
+    - Name: LegalReviewer
+      Instructions: |
+        You are a legal reviewer. Assess the document for regulatory compliance,
+        liability exposure, and contractual risk. Be specific and cite exact clauses.
+        End your review with a clear APPROVE or REJECT verdict.
+
+    - Name: TechnicalReviewer
+      Instructions: |
+        You are a technical reviewer. Assess the document for technical accuracy,
+        feasibility, and implementation risk. Flag any unrealistic claims or
+        missing technical detail. End with APPROVE or REJECT.
+
+    - Name: BusinessReviewer
+      Instructions: |
+        You are a business reviewer. Assess the document for market viability,
+        commercial risk, and strategic alignment. End with APPROVE or REJECT.
+
+    - Name: LeadReviewer
+      Instructions: |
+        You are the lead reviewer. You will receive independent evaluations from
+        Legal, Technical, and Business reviewers. Synthesise their findings into
+        a single coherent verdict. Highlight consensus, note disagreements, and
+        provide a final recommendation with your reasoning.
+
+  Selection:
+    Type: scattergather
+    ScatterGather:
+      Participants:
+        - LegalReviewer
+        - TechnicalReviewer
+        - BusinessReviewer
+      Synthesizer: LeadReviewer
+      MaxConcurrency: 0    # all three run simultaneously
+```
+
+---
+
+## Map-reduce — parallel document analysis
+
+A Planner breaks the task into a list of documents to analyse; an Analyst processes each document independently in parallel; a Synthesizer combines the findings into a final report.
+
+**Key features:**
+- Splitter emits a JSON object with an array at `ItemsJsonPath`; retried automatically on parse failure
+- Mapper is invoked once per item with an isolated context — no cross-item visibility
+- `MaxConcurrency: 4` caps parallel mapper calls to avoid rate limits
+- Reducer receives all mapper outputs and produces the terminal report
+
+```yaml
+Orchestration:
+  Name: Document Analysis Pipeline
+  Description: >
+    Decomposes a document set into individual files, analyses each in parallel,
+    then synthesises findings into a unified report.
+
+  Agents:
+    - Name: Planner
+      Instructions: |
+        You are a task planner. Given a description of documents to analyse,
+        produce a JSON object listing each document path as a separate work item.
+        Respond with ONLY valid JSON. Example:
+        {"documents": ["path/to/doc1.md", "path/to/doc2.md", "path/to/doc3.md"]}
+      Plugins:
+        - FileSystem
+
+    - Name: Analyst
+      Instructions: |
+        You are a document analyst. You will be given one document to analyse.
+        Read the document, identify key themes, risks, and recommendations.
+        Produce a concise structured analysis.
+      Plugins:
+        - FileSystem
+
+    - Name: Synthesizer
+      Instructions: |
+        You are a synthesis agent. You will receive individual analyses of multiple
+        documents. Produce a unified report that identifies cross-cutting themes,
+        aggregates risks, and provides consolidated recommendations.
+
+  Selection:
+    Type: mapreduce
+    MapReduce:
+      Splitter: Planner
+      Mapper: Analyst
+      Reducer: Synthesizer
+      ItemsJsonPath: documents   # path to the array in the Planner's JSON response
+      MaxConcurrency: 4
+      MaxSplitterRetries: 3
+```
+
+---
+
 ## Orchestration designer
 
 A single-agent orchestration that helps you design, write, and validate fuseraft configs interactively. Describe your use case in plain language and the Designer generates a ready-to-run YAML config, writes it to disk, and runs `fuseraft validate` to confirm it is correct.
