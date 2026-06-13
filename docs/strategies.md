@@ -559,7 +559,9 @@ In keyword routing this pattern requires two separate loop-back routes and depen
 
 **Hierarchical sub-graphs**
 
-A graph node can run a nested `GraphOrchestrator` instead of a single agent by setting `SubGraphId` instead of `Agent`. The sub-graph executes as a self-contained pipeline: all its messages are streamed to the parent session, and the sub-graph's terminal output is injected into the parent's shared history so keyword detection and edge routing work exactly as they would for a single agent turn.
+A graph node can run a nested orchestrator instead of a single agent by setting `SubGraphId` instead of `Agent`. Each entry in `SubGraphs` is a `SubGraphSpec` with exactly one of `Graph` (runs a nested `GraphOrchestrator`) or `MapReduce` (runs a nested `MapReduceOrchestrator`). The sub-orchestrator executes as a self-contained pipeline: all its messages are streamed to the parent session, and its terminal output is injected into the parent's shared history so keyword detection and edge routing work exactly as they would for a single agent turn.
+
+**Graph sub-graph:**
 
 ```yaml
 Selection:
@@ -568,7 +570,7 @@ Selection:
     EntryNode: research_phase
     Nodes:
       - Id: research_phase
-        SubGraphId: research_team    # runs the nested graph instead of one agent
+        SubGraphId: research_team    # runs a nested GraphOrchestrator
       - Id: writer
         Agent: Writer
         Terminal: true
@@ -578,20 +580,48 @@ Selection:
         Keyword: "RESEARCH COMPLETE"
     SubGraphs:
       research_team:
-        EntryNode: gatherer
-        Nodes:
-          - Id: gatherer
-            Agent: DataGatherer
-          - Id: analyst
-            Agent: Analyst
-            Terminal: true
-        Edges:
-          - From: gatherer
-            To: analyst
-            Keyword: "DATA READY"
+        Graph:                       # <-- "Graph:" wraps the GraphConfig
+          EntryNode: gatherer
+          Nodes:
+            - Id: gatherer
+              Agent: DataGatherer
+            - Id: analyst
+              Agent: Analyst
+              Terminal: true
+          Edges:
+            - From: gatherer
+              To: analyst
+              Keyword: "DATA READY"
 ```
 
-The `DataGatherer` and `Analyst` agents must be declared in the top-level `Orchestration.Agents` list. Sub-graphs share all services with the parent (change tracker, governance kernel, event emitter) but run with an isolated `GraphOrchestrator` instance.
+**Map-reduce sub-graph:**
+
+```yaml
+Selection:
+  Type: graph
+  Graph:
+    EntryNode: parallel_analysis
+    Nodes:
+      - Id: parallel_analysis
+        SubGraphId: item_processor   # runs a nested MapReduceOrchestrator
+      - Id: writer
+        Agent: Writer
+        Terminal: true
+    Edges:
+      - From: parallel_analysis
+        To: writer
+        Keyword: "ANALYSIS COMPLETE"
+    SubGraphs:
+      item_processor:
+        MapReduce:                   # <-- "MapReduce:" wraps the MapReduceConfig
+          Splitter: TaskSplitter
+          Mapper: Analyst
+          Reducer: Synthesizer
+          ItemsJsonPath: tasks
+          MaxConcurrency: 4
+```
+
+All agents referenced inside any sub-graph must be declared in the top-level `Orchestration.Agents` list. Sub-graphs share all services with the parent (change tracker, governance kernel, event emitter) but run with an isolated orchestrator instance.
 
 **`GraphConfig` fields**
 
@@ -601,7 +631,7 @@ The `DataGatherer` and `Analyst` agents must be declared in the top-level `Orche
 | `Nodes` | array | yes | Node definitions. Each binds an agent role (or sub-graph) to a named position in the graph. |
 | `Edges` | array | yes | Directed edges. Evaluated in declaration order — the first matching edge fires. |
 | `MaxRetries` | int | `4` | Maximum consecutive correction attempts per node before a `ValidatorStuckException` is thrown. |
-| `SubGraphs` | object | no | Named sub-graph configurations referenced by nodes via `SubGraphId`. Keys are sub-graph IDs; values are full `GraphConfig` objects. All agents referenced inside sub-graphs must be declared in the top-level `Orchestration.Agents` list. |
+| `SubGraphs` | object | no | Named sub-graph specs referenced by nodes via `SubGraphId`. Keys are sub-graph IDs; values are `SubGraphSpec` objects — set exactly one of `Graph` (nested `GraphOrchestrator`) or `MapReduce` (nested `MapReduceOrchestrator`). All agents referenced inside any sub-graph must be in the top-level `Orchestration.Agents` list. |
 
 **`GraphNodeConfig` fields**
 
@@ -609,7 +639,7 @@ The `DataGatherer` and `Analyst` agents must be declared in the top-level `Orche
 |-------|------|---------|-------------|
 | `Id` | string | — | Unique node identifier. Referenced by `EntryNode` and by edges' `From`/`To` fields. |
 | `Agent` | string | — | Agent name from the `Agents` list to invoke at this node. Multiple nodes may share the same agent. Must be empty when `SubGraphId` is set. |
-| `SubGraphId` | string | — | When set, this node runs the named sub-graph (declared in `GraphConfig.SubGraphs`) as a black-box step instead of invoking a single agent. The sub-graph's terminal output is injected into the parent's shared history for keyword detection and edge routing. `Agent` must be empty when this is set. |
+| `SubGraphId` | string | — | When set, this node runs the named sub-graph spec (declared in `GraphConfig.SubGraphs`) as a black-box step. `Graph` spawns a nested `GraphOrchestrator`; `MapReduce` spawns a nested `MapReduceOrchestrator`. The sub-orchestrator's terminal output is injected into the parent's shared history for keyword detection and edge routing. `Agent` must be empty when this is set. |
 | `Terminal` | bool | `false` | When `true`, the session terminates after the agent (or sub-graph) executes once. Outgoing edges are not evaluated. |
 | `Parallel` | bool | `false` | When `true`, the node participates in a parallel fan-out group — runs concurrently with other `Parallel` nodes sharing the same triggering keyword. |
 | `Validators` | array | — | Validators that must all pass before a `Terminal` node ends the session. Ignored on non-terminal nodes. |

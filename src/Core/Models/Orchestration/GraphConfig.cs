@@ -117,37 +117,44 @@ public record GraphConfig
     public int MaxRetries { get; init; } = 4;
 
     /// <summary>
-    /// Named sub-graph configurations that can be referenced by nodes via
-    /// <see cref="GraphNodeConfig.SubGraphId"/>. When a node runs a sub-graph,
-    /// the <c>GraphOrchestrator</c> recursively executes the sub-graph as a black-box
-    /// step and uses its terminal output as the node's response for keyword detection
-    /// and forward-edge routing. All agents referenced in sub-graph nodes must be
-    /// declared in the top-level <c>Orchestration.Agents</c> list.
+    /// Named sub-graph specs referenced by nodes via <see cref="GraphNodeConfig.SubGraphId"/>.
+    /// Each spec must set exactly one of <c>Graph</c> (nested <c>GraphOrchestrator</c>) or
+    /// <c>MapReduce</c> (nested <c>MapReduceOrchestrator</c>). The sub-orchestrator executes
+    /// as a black-box step and its terminal output is injected into the parent history for
+    /// keyword detection and forward-edge routing. All agents referenced inside sub-graphs
+    /// must be declared in the top-level <c>Orchestration.Agents</c> list.
     ///
-    /// Example YAML:
+    /// Graph sub-graph example:
     /// <code>
-    /// Selection:
-    ///   Type: graph
-    ///   Graph:
-    ///     Nodes:
-    ///       - Id: team_analysis
-    ///         SubGraphId: analysis_team   # runs the named sub-graph
-    ///         Terminal: true
-    ///     SubGraphs:
-    ///       analysis_team:
-    ///         Nodes:
-    ///           - Id: analyst
-    ///             Agent: Analyst
-    ///           - Id: reviewer
-    ///             Agent: Reviewer
-    ///             Terminal: true
-    ///         Edges:
-    ///           - From: analyst
-    ///             To: reviewer
-    ///             Keyword: "ANALYSIS COMPLETE"
+    /// SubGraphs:
+    ///   analysis_team:
+    ///     Graph:
+    ///       EntryNode: analyst
+    ///       Nodes:
+    ///         - Id: analyst
+    ///           Agent: Analyst
+    ///         - Id: reviewer
+    ///           Agent: Reviewer
+    ///           Terminal: true
+    ///       Edges:
+    ///         - From: analyst
+    ///           To: reviewer
+    ///           Keyword: "ANALYSIS COMPLETE"
+    /// </code>
+    ///
+    /// Map-reduce sub-graph example:
+    /// <code>
+    /// SubGraphs:
+    ///   parallel_analysis:
+    ///     MapReduce:
+    ///       Splitter: TaskSplitter
+    ///       Mapper: Analyst
+    ///       Reducer: Synthesizer
+    ///       ItemsJsonPath: tasks
+    ///       MaxConcurrency: 4
     /// </code>
     /// </summary>
-    public Dictionary<string, GraphConfig>? SubGraphs { get; init; }
+    public Dictionary<string, SubGraphSpec>? SubGraphs { get; init; }
 }
 
 /// <summary>A single node in the execution graph.</summary>
@@ -168,14 +175,16 @@ public record GraphNodeConfig
     public string Agent { get; init; } = string.Empty;
 
     /// <summary>
-    /// When set, this node runs a named sub-graph instead of a single agent turn.
-    /// The sub-graph ID must match a key in <see cref="GraphConfig.SubGraphs"/>.
-    /// <see cref="Agent"/> must be empty when this is set.
+    /// When set, this node runs the named <see cref="SubGraphSpec"/> from
+    /// <see cref="GraphConfig.SubGraphs"/> as a black-box step instead of invoking a
+    /// single agent. <see cref="Agent"/> must be empty when this is set.
     ///
     /// <para>
-    /// The sub-graph executes as a nested <c>GraphOrchestrator</c> run. Its messages
-    /// are streamed to the parent session and its terminal agent's final output is
-    /// injected into the parent's shared history for keyword detection and routing.
+    /// A <c>SubGraphSpec.Graph</c> entry spawns a nested <c>GraphOrchestrator</c>;
+    /// a <c>SubGraphSpec.MapReduce</c> entry spawns a nested <c>MapReduceOrchestrator</c>.
+    /// All messages produced by the sub-orchestrator are streamed to the parent session
+    /// and its terminal output is injected into the parent's shared history for keyword
+    /// detection and forward-edge routing.
     /// </para>
     /// </summary>
     public string? SubGraphId { get; init; }

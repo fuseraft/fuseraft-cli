@@ -1081,10 +1081,37 @@ public static class OrchestratorBuilder
                             $"Graph node '{node.Id}' has both 'Agent' and 'SubGraphId' set. " +
                             $"Use one or the other — leave 'Agent' empty when using 'SubGraphId'.");
 
-                    if (graphCfg.SubGraphs is null || !graphCfg.SubGraphs.ContainsKey(node.SubGraphId!))
+                    if (graphCfg.SubGraphs is null || !graphCfg.SubGraphs.TryGetValue(node.SubGraphId!, out var subSpec))
                         throw new InvalidOperationException(
                             $"Graph node '{node.Id}' references SubGraphId '{node.SubGraphId}' " +
                             $"which is not defined in Selection.Graph.SubGraphs.");
+
+                    if (!subSpec.IsValid)
+                        throw new InvalidOperationException(
+                            $"SubGraph '{node.SubGraphId}' must set exactly one of 'Graph' or 'MapReduce', not both and not neither.");
+
+                    if (subSpec.IsMapReduce)
+                    {
+                        var mr = subSpec.MapReduce!;
+                        if (string.IsNullOrWhiteSpace(mr.Splitter) || !agentNames.Contains(mr.Splitter))
+                            throw new InvalidOperationException(
+                                $"SubGraph '{node.SubGraphId}' MapReduce.Splitter '{mr.Splitter}' is not defined in 'Orchestration.Agents'.");
+                        if (string.IsNullOrWhiteSpace(mr.Mapper) || !agentNames.Contains(mr.Mapper))
+                            throw new InvalidOperationException(
+                                $"SubGraph '{node.SubGraphId}' MapReduce.Mapper '{mr.Mapper}' is not defined in 'Orchestration.Agents'.");
+                        if (string.IsNullOrWhiteSpace(mr.Reducer) || !agentNames.Contains(mr.Reducer))
+                            throw new InvalidOperationException(
+                                $"SubGraph '{node.SubGraphId}' MapReduce.Reducer '{mr.Reducer}' is not defined in 'Orchestration.Agents'.");
+                        if (mr.MaxConcurrency < 0)
+                            throw new InvalidOperationException(
+                                $"SubGraph '{node.SubGraphId}' MapReduce.MaxConcurrency must be >= 0 (got {mr.MaxConcurrency}).");
+                        if (mr.MaxSplitterRetries < 1)
+                            throw new InvalidOperationException(
+                                $"SubGraph '{node.SubGraphId}' MapReduce.MaxSplitterRetries must be at least 1 (got {mr.MaxSplitterRetries}).");
+                        if (string.IsNullOrWhiteSpace(mr.ItemsJsonPath))
+                            throw new InvalidOperationException(
+                                $"SubGraph '{node.SubGraphId}' MapReduce.ItemsJsonPath must be a non-empty string.");
+                    }
                 }
                 else
                 {

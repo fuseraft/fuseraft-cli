@@ -1825,33 +1825,53 @@ public sealed class GraphOrchestrator(
         IWorkflowContext wfCtx,
         CancellationToken ct)
     {
-        var graphCfg    = config.Selection.Graph!;
-        var subGraphCfg = graphCfg.SubGraphs![subGraphId];
+        var graphCfg = config.Selection.Graph!;
+        var subSpec  = graphCfg.SubGraphs![subGraphId];
 
         logger.LogInformation(
-            "[GraphOrchestrator] Node '{NodeId}' executing sub-graph '{SubGraphId}'.",
-            nodeId, subGraphId);
+            "[GraphOrchestrator] Node '{NodeId}' executing sub-graph '{SubGraphId}' (type: {Type}).",
+            nodeId, subGraphId, subSpec.IsMapReduce ? "mapreduce" : "graph");
 
         if (eventEmitter is not null)
             await eventEmitter.EmitAsync(EventTypes.AgentStart,
                 agent: $"[SubGraph:{subGraphId}]",
                 turn:  ctx.TurnIndex);
 
-        // Build a synthetic config with the sub-graph as the Selection.Graph.
-        var subConfig = config with
-        {
-            Selection = config.Selection with
-            {
-                Type  = OrchestratorTypes.Graph,
-                Graph = subGraphCfg,
-            }
-        };
+        IOrchestrator subOrchestrator;
 
-        var subLogger          = logger;
-        var subOrchestrator    = new GraphOrchestrator(
-            subConfig, agentFactory, subLogger,
-            changeTracker, eventEmitter, governanceKernel,
-            _humanApprovalService, contextPipeline, repositoryKnowledgeStore);
+        if (subSpec.IsMapReduce)
+        {
+            // Build a synthetic config with the map-reduce spec as Selection.MapReduce.
+            var subConfig = config with
+            {
+                Selection = config.Selection with
+                {
+                    Type      = OrchestratorTypes.MapReduce,
+                    Graph     = null,
+                    MapReduce = subSpec.MapReduce,
+                }
+            };
+            var mrLogger = Microsoft.Extensions.Logging.Abstractions.NullLogger<MapReduceOrchestrator>.Instance;
+            subOrchestrator = new MapReduceOrchestrator(
+                subConfig, agentFactory, mrLogger,
+                changeTracker, eventEmitter, governanceKernel);
+        }
+        else
+        {
+            // Build a synthetic config with the sub-graph as the Selection.Graph.
+            var subConfig = config with
+            {
+                Selection = config.Selection with
+                {
+                    Type  = OrchestratorTypes.Graph,
+                    Graph = subSpec.Graph,
+                }
+            };
+            subOrchestrator = new GraphOrchestrator(
+                subConfig, agentFactory, logger,
+                changeTracker, eventEmitter, governanceKernel,
+                _humanApprovalService, contextPipeline, repositoryKnowledgeStore);
+        }
 
         subOrchestrator.SetSessionId(_sessionId);
 
