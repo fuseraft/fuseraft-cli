@@ -760,7 +760,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         if (orchestrator is not MagenticOrchestrator)
         {
             checkpoint.ResumeExecutorId = checkpoint.Messages
-                .LastOrDefault(m => m.Role == "assistant" && !string.IsNullOrWhiteSpace(m.AgentName))
+                .LastOrDefault(m => m.Role == MessageRole.Assistant && !string.IsNullOrWhiteSpace(m.AgentName))
                 ?.AgentName
                 ?.ToLowerInvariant();
         }
@@ -806,7 +806,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             {
                 await writer.WriteLineAsync("---");
 
-                if (msg.Role == "user")
+                if (msg.Role == MessageRole.User)
                 {
                     await writer.WriteLineAsync($"## [Human] — Redirect");
                 }

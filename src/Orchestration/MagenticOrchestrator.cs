@@ -394,7 +394,7 @@ public sealed class MagenticOrchestrator(
         // Reconstruct both histories from the persisted message stream.
         foreach (var prior in priorHistory)
         {
-            var role = prior.Role == "user" ? ChatRole.User : ChatRole.Assistant;
+            var role = prior.Role == MessageRole.User ? ChatRole.User : ChatRole.Assistant;
 
             if ((prior.AgentName ?? string.Empty).StartsWith("[MagenticManager:", StringComparison.Ordinal))
             {

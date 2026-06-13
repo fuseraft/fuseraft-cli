@@ -89,7 +89,7 @@ public sealed class ConversationCompactor(
                 config.AntiThrashWindow, config.AntiThrashMinSavingsRatio);
             return false;
         }
-        var assistantTurns = messages.Count(m => m.Role == "assistant");
+        var assistantTurns = messages.Count(m => m.Role == MessageRole.Assistant);
         if (assistantTurns >= config.TriggerTurnCount)
         {
             logger.LogDebug(
@@ -120,12 +120,12 @@ public sealed class ConversationCompactor(
 
         while (total > config.TokenBudget && start + 1 < list.Count)
         {
-            if (list[start].Role == "user")
+            if (list[start].Role == MessageRole.User)
             {
                 total -= (list[start].Content?.Length ?? 0) / 4;
                 list.RemoveAt(start);
             }
-            if (start + 1 < list.Count && list[start].Role == "assistant")
+            if (start + 1 < list.Count && list[start].Role == MessageRole.Assistant)
             {
                 total -= (list[start].Content?.Length ?? 0) / 4;
                 list.RemoveAt(start);
@@ -584,7 +584,7 @@ public sealed class ConversationCompactor(
         {
             var label = msg.IsCompactionSummary
                 ? $"[Prior Summary — covers turns 1–{msg.TurnIndex + 1}]"
-                : $"[{(msg.Role == "user" ? AgentNames.Human : msg.AgentName)} — Turn {msg.TurnIndex + 1}]";
+                : $"[{(msg.Role == MessageRole.User ? AgentNames.Human : msg.AgentName)} — Turn {msg.TurnIndex + 1}]";
 
             sb.AppendLine(label);
             sb.AppendLine(PruneContent(msg, maxCharsPerMessage));

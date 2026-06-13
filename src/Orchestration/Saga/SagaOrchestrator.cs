@@ -161,7 +161,7 @@ public sealed class SagaOrchestrator(
             }
 
             // Track agent transitions for the unwind stack.
-            if (msg.Role == "assistant" && !string.IsNullOrWhiteSpace(msg.AgentName))
+            if (msg.Role == MessageRole.Assistant && !string.IsNullOrWhiteSpace(msg.AgentName))
             {
                 if (lastAgentName is not null
                     && !string.Equals(lastAgentName, msg.AgentName, StringComparison.OrdinalIgnoreCase))
