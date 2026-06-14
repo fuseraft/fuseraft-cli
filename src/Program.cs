@@ -157,6 +157,7 @@ services.AddTransient<ObjectiveListCommand>();
 services.AddTransient<ObjectiveStatusCommand>();
 services.AddTransient<EvalCommand>();
 services.AddTransient<EvalInitCommand>();
+services.AddTransient<KeychainCommand>();
 
 // Use CommandApp<ReplCommand> so bare `fuseraft` drops straight into the REPL.
 var registrar = new ServiceCollectionRegistrar(services);
@@ -357,6 +358,10 @@ app.Configure(cfg =>
         .WithDescription("Fetch the latest fuseraft release from GitHub and replace the running binary.")
         .WithExample(["update"])
         .WithExample(["update", "--check"]);
+
+    cfg.AddCommand<KeychainCommand>("keychain")
+        .WithDescription("Manage the fuseraft API key in the OS keychain (bidirectional sync with the VS Code extension).")
+        .IsHidden();
 
     cfg.AddBranch("graph", branch =>
     {
