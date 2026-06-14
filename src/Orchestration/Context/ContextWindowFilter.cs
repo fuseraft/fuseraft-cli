@@ -88,7 +88,7 @@ public static class ContextWindowFilter
             messages = messages.Where(m =>
                 m.Role != ChatRole.Assistant ||
                 !window.ExcludeAgents.Contains(
-                    m.AuthorName ?? string.Empty,
+                    m.AuthorName ?? AgentNames.Unknown,
                     StringComparer.OrdinalIgnoreCase));
         }
 
