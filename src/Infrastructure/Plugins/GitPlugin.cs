@@ -187,6 +187,39 @@ public sealed class GitPlugin
         return result.ToPluginOutput();
     }
 
+    [Description("Rebase the current branch onto an upstream ref, or control an in-progress rebase. " +
+                 "For a simple rebase supply upstream. For --onto supply both onto and upstream. " +
+                 "To abort, continue, or skip a rebase in progress, supply control only.")]
+    public async Task<string> RebaseAsync(
+        [Description("Upstream ref (branch, commit, or HEAD~N). Required unless using control.")] string? upstream = null,
+        [Description("New base for --onto rebase. Requires upstream.")] string? onto = null,
+        [Description("Control an in-progress rebase: 'abort', 'continue', or 'skip'.")] string? control = null,
+        [Description("Repo path.")] string? repoPath = null)
+    {
+        if (!string.IsNullOrWhiteSpace(control))
+        {
+            control = control.Trim().ToLowerInvariant();
+            if (control is not ("abort" or "continue" or "skip"))
+                return PluginResult.Error($"Invalid control value '{control}'. Must be 'abort', 'continue', or 'skip'.");
+            var result = await ProcessHelper.RunAsync("git", ["rebase", $"--{control}"], repoPath);
+            return result.ToPluginOutput();
+        }
+
+        if (string.IsNullOrWhiteSpace(upstream))
+            return PluginResult.Error("upstream is required when not using control.");
+
+        if (!string.IsNullOrWhiteSpace(onto))
+        {
+            var result = await ProcessHelper.RunAsync("git", ["rebase", "--onto", onto.Trim(), upstream.Trim()], repoPath);
+            return result.ToPluginOutput();
+        }
+        else
+        {
+            var result = await ProcessHelper.RunAsync("git", ["rebase", upstream.Trim()], repoPath);
+            return result.ToPluginOutput();
+        }
+    }
+
     // Helpers
 
     private static Task<ProcessResult> Git(string args, string? workingDirectory = null) =>
