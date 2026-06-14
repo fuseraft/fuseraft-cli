@@ -859,7 +859,7 @@ internal static class ReplTurn
     {
         "write_file", "patch_file", "create_directory", "delete_file",
         "move_file", "copy_file", "set_permissions", "shell_run",
-        "git_commit", "git_add",
+        "git_commit", "git_add", "git_rebase",
     };
 
     // Matches "I updated", "I've created", "I have fixed", "I just patched", etc.
