@@ -204,6 +204,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         var startedAt  = snapshot?.StartedAt  ?? DateTime.UtcNow;
 
         ReplSessionPlugin? replSessionPlugin = null;
+        List<IHasArtifact>  activePlugins    = [];
         if (!settings.NoTools)
         {
             replSessionPlugin = new ReplSessionPlugin(sessionId, startedAt, modelId, cwd);
@@ -213,20 +214,32 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             var slug    = FuseraftPaths.ProjectSlug(cwd);
 
             if (enabled.Contains("Changes"))
-                toolsByCategory["Changes"] = PluginRegistry.GetFunctionsFromObject(
-                    new ChangesPlugin(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalChanges, slug))).ToList();
+            {
+                var p = new ChangesPlugin(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalChanges, slug));
+                toolsByCategory["Changes"] = PluginRegistry.GetFunctionsFromObject(p).ToList();
+                activePlugins.Add(p);
+            }
 
             if (enabled.Contains("Chatroom"))
-                toolsByCategory["Chatroom"] = PluginRegistry.GetFunctionsFromObject(
-                    new ChatroomPlugin("repl", FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalChatroom, sessionId, slug))).ToList();
+            {
+                var p = new ChatroomPlugin("repl", FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalChatroom, sessionId, slug));
+                toolsByCategory["Chatroom"] = PluginRegistry.GetFunctionsFromObject(p).ToList();
+                activePlugins.Add(p);
+            }
 
             if (enabled.Contains("SessionContext"))
-                toolsByCategory["SessionContext"] = PluginRegistry.GetFunctionsFromObject(
-                    new SessionContextPlugin(FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionContext, sessionId, slug))).ToList();
+            {
+                var p = new SessionContextPlugin(FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionContext, sessionId, slug));
+                toolsByCategory["SessionContext"] = PluginRegistry.GetFunctionsFromObject(p).ToList();
+                activePlugins.Add(p);
+            }
 
             if (enabled.Contains("Scratchpad"))
-                toolsByCategory["Scratchpad"] = PluginRegistry.GetFunctionsFromObject(
-                    new ScratchpadPlugin("repl", FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionScratchpad, sessionId, slug))).ToList();
+            {
+                var p = new ScratchpadPlugin("repl", FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionScratchpad, sessionId, slug));
+                toolsByCategory["Scratchpad"] = PluginRegistry.GetFunctionsFromObject(p).ToList();
+                activePlugins.Add(p);
+            }
         }
 
         using var emitter = new EventEmitter(eventsPath);
@@ -262,7 +275,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         var systemPrompt = new SystemPromptBuilder()
             .AddIdentity(modelId, cwd, initialTools.Count, settings.SystemPrompt)
             .AddToolGuidance(initialTools.Count)
-            .AddSessionInfo(sessionId, startedAt, cwd, initialTools.Count)
+            .AddSessionInfo(sessionId, startedAt, cwd, initialTools.Count, activePlugins)
             .AddProjectInstructions(cwd)
             .AddMemory(memoryBlock)
             .AddSkills(skillsCatalog)

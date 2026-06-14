@@ -1912,7 +1912,7 @@ public sealed class GraphOrchestrator(
                 {
                     Role      = m.Role == ChatRole.User ? "user" : "assistant",
                     Content   = string.Concat(m.Contents.OfType<TextContent>().Select(t => t.Text)),
-                    AgentName = m.AuthorName,
+                    AgentName = m.AuthorName ?? string.Empty,
                     TurnIndex = i,
                 })
                 .ToList();

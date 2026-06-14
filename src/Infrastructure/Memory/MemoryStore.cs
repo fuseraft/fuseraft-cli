@@ -122,7 +122,7 @@ public sealed class MemoryStore
     {
         var sb        = new StringBuilder();
         var remaining = maxChars;
-        sb.AppendLine("MEMORY — facts recalled from prior sessions:");
+        sb.AppendLine("## MEMORY: facts recalled from prior sessions");
 
         foreach (var e in entries.OrderBy(e => e.Type).ThenBy(e => e.Name))
         {

@@ -15,10 +15,14 @@ namespace fuseraft.Infrastructure.Plugins;
 /// file on disk so messages are visible to all agents in the session.
 /// </para>
 /// </summary>
-public sealed class ChatroomPlugin
+public sealed class ChatroomPlugin : IHasArtifact
 {
     private readonly string _agentName;
     private readonly string _chatPath;
+
+    internal const string Label = "cross-agent chatroom messages (if present)";
+    public string ArtifactPath  => _chatPath;
+    public string ArtifactLabel => Label;
 
     // One lock per file path — prevents interleaved writes when agents run concurrently.
     private static readonly Dictionary<string, SemaphoreSlim> _locks =

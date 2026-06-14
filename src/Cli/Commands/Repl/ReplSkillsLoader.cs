@@ -76,7 +76,7 @@ internal static class ReplSkillsLoader
         if (skillDirs.Count == 0) return (null, null);
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine("AVAILABLE SKILLS:");
+        sb.AppendLine("## SKILLS available");
         foreach (var slug in skillDirs.Keys.OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
         {
             var desc = descriptions.GetValueOrDefault(slug);

@@ -18,8 +18,12 @@ namespace fuseraft.Infrastructure.Plugins;
 /// Agents use this instead of asking "what did the Developer change?" — they just call
 /// <c>changes_read_latest</c> and know exactly which files to test or review.
 /// </summary>
-public sealed class ChangesPlugin(string logPath)
+public sealed class ChangesPlugin(string logPath) : IHasArtifact
 {
+    internal const string Label = "tool-call change log";
+    public string ArtifactPath  => logPath;
+    public string ArtifactLabel => Label;
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         PropertyNameCaseInsensitive = true,

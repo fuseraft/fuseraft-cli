@@ -336,13 +336,15 @@ public static class OrchestratorBuilder
 
         // Orient every agent to the local .fuseraft/ folder layout so they never
         // scan it with list_files to discover what is there — they already know.
-        var folderOrientationBlock = FuseraftPaths.BuildFolderOrientationBlock(sessionId ?? "default");
+        // Each agent only sees artifact paths for the plugins it actually has.
         config = config with
         {
             Agents = config.Agents
-                .Select(a => a with
+                .Select(a =>
                 {
-                    Instructions = a.Instructions.TrimEnd() + "\n\n" + folderOrientationBlock
+                    var artifacts = BuildPluginArtifacts(a.Plugins, config, sessionId);
+                    var block = FuseraftPaths.BuildFolderOrientationBlock(sessionId ?? "default", pluginArtifacts: artifacts);
+                    return a with { Instructions = a.Instructions.TrimEnd() + "\n\n" + block };
                 })
                 .ToList()
         };
@@ -1906,6 +1908,42 @@ public static class OrchestratorBuilder
         sb.AppendLine($"  Wrong:    {dirName}/{dirName}/src/module/file.py  ← double-nested, file will not exist");
         sb.Append("Files you have already read this session are cached. If the file is unchanged you will see a hint instead of the full content — use grep_in_file for targeted lookup or pass startLine/maxLines for a specific section.");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Produces artifact path descriptors for the plugins an agent actually has, so the
+    /// folder orientation block injected into that agent's system prompt only references
+    /// paths it can meaningfully use.
+    /// </summary>
+    private static IEnumerable<(string Path, string Label)> BuildPluginArtifacts(
+        List<string> pluginNames,
+        OrchestrationConfig config,
+        string? sessionId)
+    {
+        var sid = sessionId ?? "default";
+        foreach (var name in pluginNames)
+        {
+            if (name.Equals("Changes", StringComparison.OrdinalIgnoreCase))
+            {
+                if (config.ChangeTracking?.Path is { } changesPath)
+                    yield return (changesPath, ChangesPlugin.Label);
+            }
+            else if (name.Equals("SessionContext", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return (FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalSessionContext, sid), SessionContextPlugin.Label);
+            }
+            else if (name.Equals("Chatroom", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return (FuseraftPaths.ExpandSessionId(config.Chatroom?.Path ?? FuseraftPaths.LocalChatroom, sid), ChatroomPlugin.Label);
+            }
+            else if (name.Equals("Scratchpad", StringComparison.OrdinalIgnoreCase))
+            {
+                var scratchPath = sessionId is { Length: > 0 }
+                    ? FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalSessionScratchpad, sessionId)
+                    : FuseraftPaths.ExpandPath(config.Scratchpad?.BasePath ?? FuseraftPaths.GlobalScratchpad);
+                yield return (scratchPath, ScratchpadPlugin.Label);
+            }
+        }
     }
 
     private static string? BuildGitIgnoreBlock()
