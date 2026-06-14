@@ -1,4 +1,5 @@
 using fuseraft.Core;
+using fuseraft.Infrastructure.Plugins;
 
 namespace fuseraft.Cli.Commands.Repl;
 
@@ -81,7 +82,8 @@ internal sealed class SystemPromptBuilder
     /// <c>~/.fuseraft/</c> folder orientation map so the agent never scans for artifacts.
     /// </summary>
     internal SystemPromptBuilder AddSessionInfo(
-        string? sessionId, DateTime? startedAt, string cwd, int toolCount)
+        string? sessionId, DateTime? startedAt, string cwd, int toolCount,
+        IEnumerable<IHasArtifact>? activePlugins = null)
     {
         if (sessionId is not null)
         {
@@ -103,7 +105,11 @@ internal sealed class SystemPromptBuilder
         // Orient the agent to the .fuseraft/ layout so it never wastes context
         // scanning the directory. Logs excluded — the session block above covers them.
         if (toolCount > 0)
-            _sb.Append($"\n\n{FuseraftPaths.BuildFolderOrientationBlock(sessionId ?? "default", includeLogs: false)}");
+        {
+            var descriptors = activePlugins?
+                .Select(p => (p.ArtifactPath, p.ArtifactLabel));
+            _sb.Append($"\n\n{FuseraftPaths.BuildFolderOrientationBlock(sessionId ?? "default", includeLogs: false, includeInfrastructure: false, pluginArtifacts: descriptors)}");
+        }
 
         return this;
     }

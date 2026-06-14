@@ -48,6 +48,7 @@ public sealed class MapReduceOrchestrator(
 {
     private readonly MapReduceConfig _mrConfig =
         config.Selection.MapReduce ?? new MapReduceConfig();
+    private readonly IHumanApprovalService? _humanApprovalService = humanApprovalService;
 
     private string _sessionId = string.Empty;
 

@@ -17,11 +17,15 @@ namespace fuseraft.Infrastructure.Plugins;
 /// to any function.
 /// </para>
 /// </summary>
-public sealed class ScratchpadPlugin
+public sealed class ScratchpadPlugin : IHasArtifact
 {
     private readonly string _agentName;
     private readonly string _basePath;
     private readonly SemaphoreSlim _lock = new(1, 1);
+
+    internal const string Label = "agent scratchpad files (session-scoped)";
+    public string ArtifactPath  => _basePath;
+    public string ArtifactLabel => Label;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {

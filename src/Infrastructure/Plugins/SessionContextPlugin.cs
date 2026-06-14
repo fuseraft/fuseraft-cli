@@ -23,10 +23,14 @@ namespace fuseraft.Infrastructure.Plugins;
 /// file always reflects the current state of the session.
 /// </para>
 /// </summary>
-public sealed class SessionContextPlugin
+public sealed class SessionContextPlugin : IHasArtifact
 {
     private readonly string _summaryPath;
     private readonly int    _maxChars;
+
+    internal const string Label = "shared handoff notes (read at turn start; write before handoff)";
+    public string ArtifactPath  => _summaryPath;
+    public string ArtifactLabel => Label;
 
     /// <param name="maxChars">
     /// Maximum characters to return from the summary file. Content beyond this limit is
