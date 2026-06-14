@@ -296,7 +296,22 @@ public static class FuseraftPaths
             .ToString();
     }
 
-    public static string BuildFolderOrientationBlock(string sessionId, bool includeLogs = true)
+    /// <param name="includeInfrastructure">
+    /// When true (default), includes paths for orchestration-only artifacts: intent records,
+    /// evidence graph, file version counters, briefs, test report, and conventions.
+    /// Pass false in REPL sessions where these orchestration artifacts do not exist.
+    /// </param>
+    /// <param name="pluginArtifacts">
+    /// Resolved artifact paths for the plugins actually loaded in this context.
+    /// When non-null, only these entries are shown for the plugin-backed paths; when null
+    /// and <paramref name="includeInfrastructure"/> is true, the full hardcoded list is used
+    /// as a fallback so existing callers that have not adopted per-agent filtering still work.
+    /// </param>
+    public static string BuildFolderOrientationBlock(
+        string sessionId,
+        bool includeLogs = true,
+        bool includeInfrastructure = true,
+        IEnumerable<(string Path, string Label)>? pluginArtifacts = null)
     {
         var slug = ProjectSlug(Directory.GetCurrentDirectory());
 
@@ -304,25 +319,49 @@ public static class FuseraftPaths
         string ExpandP(string template) => ExpandProjectPaths(template, slug);
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine("## Runtime artifacts — all stored globally under ~/.fuseraft/ (do not scan)");
-        sb.AppendLine("Reference these paths directly when needed:");
+
+        // Collect artifact entries first; only emit the header if there is something to list.
+        var artifacts = new System.Text.StringBuilder();
         if (includeLogs)
         {
-            sb.AppendLine($"  {Expand(LocalEventsLog),-70} — agent/orchestration event log (JSONL)");
-            sb.AppendLine($"  {ExpandP(LocalReplEventsLog),-70} — REPL event log (JSONL)");
-            sb.AppendLine($"  {ExpandP(LocalAppLog),-70} — application log");
+            artifacts.AppendLine($"  {Expand(LocalEventsLog),-70} — agent/orchestration event log (JSONL)");
+            artifacts.AppendLine($"  {ExpandP(LocalReplEventsLog),-70} — REPL event log (JSONL)");
+            artifacts.AppendLine($"  {ExpandP(LocalAppLog),-70} — application log");
         }
-        sb.AppendLine($"  {ExpandP(LocalChanges),-70} — tool-call change log");
-        sb.AppendLine($"  {Expand(LocalIntents),-70} — in-progress intent records (consult before repeating work)");
-        sb.AppendLine($"  {Expand(LocalSessionContext),-70} — shared handoff notes (read at turn start; write before handoff)");
-        sb.AppendLine($"  {ExpandP(LocalEvidence),-70} — structured evidence graph");
-        sb.AppendLine($"  {ExpandP(LocalFileVersions),-70} — per-file versioned write counters");
-        sb.AppendLine($"  {Expand(LocalBrief),-70} — task brief (if present)");
-        sb.AppendLine($"  {Expand(LocalBrownfieldBrief),-70} — brownfield discovery brief (if present)");
-        sb.AppendLine($"  {LocalTestReport,-70} — tester output / validator input (if present)");
-        sb.AppendLine($"  {Expand(LocalConventions),-70} — brownfield convention profile (if present)");
-        sb.AppendLine($"  {Expand(LocalChatroom),-70} — cross-agent chatroom messages (if present)");
-        sb.AppendLine($"  {Expand(LocalSessionScratchpad),-70} — agent scratchpad files (session-scoped)");
+
+        // Orchestration-only infrastructure paths — always shown for orchestrator agents.
+        if (includeInfrastructure)
+        {
+            artifacts.AppendLine($"  {Expand(LocalIntents),-70} — in-progress intent records (consult before repeating work)");
+            artifacts.AppendLine($"  {ExpandP(LocalEvidence),-70} — structured evidence graph");
+            artifacts.AppendLine($"  {ExpandP(LocalFileVersions),-70} — per-file versioned write counters");
+            artifacts.AppendLine($"  {Expand(LocalBrief),-70} — task brief (if present)");
+            artifacts.AppendLine($"  {Expand(LocalBrownfieldBrief),-70} — brownfield discovery brief (if present)");
+            artifacts.AppendLine($"  {LocalTestReport,-70} — tester output / validator input (if present)");
+            artifacts.AppendLine($"  {Expand(LocalConventions),-70} — brownfield convention profile (if present)");
+        }
+
+        // Plugin artifact paths: per-agent collection when available, otherwise hardcoded fallback.
+        if (pluginArtifacts is not null)
+        {
+            foreach (var (path, label) in pluginArtifacts)
+                artifacts.AppendLine($"  {path,-70} — {label}");
+        }
+        else if (includeInfrastructure)
+        {
+            artifacts.AppendLine($"  {ExpandP(LocalChanges),-70} — tool-call change log");
+            artifacts.AppendLine($"  {Expand(LocalSessionContext),-70} — shared handoff notes (read at turn start; write before handoff)");
+            artifacts.AppendLine($"  {Expand(LocalChatroom),-70} — cross-agent chatroom messages (if present)");
+            artifacts.AppendLine($"  {Expand(LocalSessionScratchpad),-70} — agent scratchpad files (session-scoped)");
+        }
+
+        if (artifacts.Length > 0)
+        {
+            sb.AppendLine("## Runtime artifacts — all stored globally under ~/.fuseraft/ (do not scan)");
+            sb.AppendLine("Reference these paths directly when needed:");
+            sb.Append(artifacts);
+        }
+
         sb.AppendLine("## User-authored project files — tracked by git (in .fuseraft/)");
         sb.AppendLine("  .fuseraft/docs/                 — write all markdown notes, reports, and drafts here");
         sb.AppendLine("  .fuseraft/tests/                — write all test scripts and test support files here");

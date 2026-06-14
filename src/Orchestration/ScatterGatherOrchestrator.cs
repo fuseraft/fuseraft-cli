@@ -41,6 +41,7 @@ public sealed class ScatterGatherOrchestrator(
 {
     private readonly ScatterGatherConfig _sgConfig =
         config.Selection.ScatterGather ?? new ScatterGatherConfig();
+    private readonly IHumanApprovalService? _humanApprovalService = humanApprovalService;
 
     private string _sessionId = string.Empty;
 
