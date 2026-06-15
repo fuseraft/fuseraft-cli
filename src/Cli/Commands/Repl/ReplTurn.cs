@@ -377,8 +377,13 @@ internal static class ReplTurn
                         else if (spinning)
                         {
                             await StopSpinnerAsync();
+                            // Restore to just after the "fuseraft agent:" header and clear,
+                            // so this segment replaces the previous one rather than appending.
+                            if (!Console.IsOutputRedirected)
+                                Console.Write("\x1b8\x1b[J");
                         }
-                        Console.Write(text);
+                        if (!Console.IsOutputRedirected)
+                            Console.Write(text);
                     }
                 }
             }
