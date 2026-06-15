@@ -328,6 +328,11 @@ internal static class ReplTurn
                     }
                     else
                     {
+                        // If text has already been streamed inline, move to a fresh line
+                        // so the spinner doesn't overwrite the last streamed characters.
+                        if (textStarted && !Console.IsOutputRedirected)
+                            AnsiConsole.WriteLine();
+
                         // Update spinner label to show the accumulating tool chain live.
                         var chain = toolCallsThisTurn.Count <= 4
                             ? string.Join(" → ", toolCallsThisTurn)
@@ -361,19 +366,19 @@ internal static class ReplTurn
                         {
                             textStarted = true;
                             await StopSpinnerAsync();
-                            if (toolCallsThisTurn.Count > 0 && !Console.IsOutputRedirected)
-                                AnsiConsole.MarkupLine(
-                                    $"  [dim]⚙  {Markup.Escape(BuildToolSummary(toolCallsThisTurn))}[/]");
+                            if (!Console.IsOutputRedirected)
+                                ClearSpinnerLine();
+                            AnsiConsole.WriteLine();
+                            AnsiConsole.MarkupLine("[dim]fuseraft agent:[/]");
+                            // Save cursor so we can restore and overwrite with Markdown after streaming.
+                            if (!Console.IsOutputRedirected)
+                                Console.Write("\x1b7");
                         }
                         else if (spinning)
                         {
                             await StopSpinnerAsync();
                         }
-                        if (!Console.IsOutputRedirected)
-                        {
-                            var approxTokens = (sb.Length + 3) / 4;
-                            Console.Write($"\r\x1b[2K\x1b[2m receiving… {approxTokens} tokens\x1b[0m");
-                        }
+                        Console.Write(text);
                     }
                 }
             }
@@ -469,11 +474,26 @@ internal static class ReplTurn
 
         if (!capturePlan && responseText.Length > 0 && !ctx.JsonMode)
         {
-            if (!Console.IsOutputRedirected)
-                ClearSpinnerLine();
-            AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[dim]fuseraft agent:[/]");
-            AnsiConsole.Write(MarkdownRenderer.Render(responseText));
+            if (!textStarted)
+            {
+                // Nothing was streamed inline — render the full response with Markdown.
+                if (!Console.IsOutputRedirected)
+                    ClearSpinnerLine();
+                AnsiConsole.WriteLine();
+                AnsiConsole.MarkupLine("[dim]fuseraft agent:[/]");
+                AnsiConsole.Write(MarkdownRenderer.Render(responseText));
+            }
+            else
+            {
+                if (!Console.IsOutputRedirected)
+                {
+                    // Restore cursor to the position saved just after the "fuseraft agent:"
+                    // header, clear everything below it, then re-render with Markdown.
+                    // This replaces the plain streaming text with the formatted version.
+                    Console.Write("\x1b8\x1b[J");
+                }
+                AnsiConsole.Write(MarkdownRenderer.Render(responseText));
+            }
         }
         if (!ctx.JsonMode) AnsiConsole.WriteLine();
         if (responseText.Length > 0)
