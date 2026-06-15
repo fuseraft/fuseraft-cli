@@ -39,9 +39,20 @@ public sealed class ReplSettings : CommandSettings
     [Description("Resume a previous REPL session by ID (e.g. --resume abc123ef).")]
     public string? Resume { get; set; }
 
+    [CommandOption("--plugins")]
+    [Description("Comma-separated list of optional plugins to enable: Changes, Chatroom, SessionContext, Scratchpad.")]
+    public string? Plugins { get; set; }
+
     [CommandOption("--vscode")]
     [Description("Run in VS Code webview mode (JSON bridge over stdio). Set globally by Program.cs pre-parse; declared here so Spectre does not reject it as an unknown flag.")]
     public bool VsCode { get; set; }
+
+    internal IReadOnlySet<string> EnabledPlugins =>
+        Plugins is null
+            ? (IReadOnlySet<string>)new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(
+                Plugins.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<ReplSettings>
@@ -197,6 +208,25 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         {
             replSessionPlugin = new ReplSessionPlugin(sessionId, startedAt, modelId, cwd);
             toolsByCategory["Session"] = PluginRegistry.GetFunctionsFromObject(replSessionPlugin).ToList();
+
+            var enabled = settings.EnabledPlugins;
+            var slug    = FuseraftPaths.ProjectSlug(cwd);
+
+            if (enabled.Contains("Changes"))
+                toolsByCategory["Changes"] = PluginRegistry.GetFunctionsFromObject(
+                    new ChangesPlugin(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalChanges, slug))).ToList();
+
+            if (enabled.Contains("Chatroom"))
+                toolsByCategory["Chatroom"] = PluginRegistry.GetFunctionsFromObject(
+                    new ChatroomPlugin("repl", FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalChatroom, sessionId, slug))).ToList();
+
+            if (enabled.Contains("SessionContext"))
+                toolsByCategory["SessionContext"] = PluginRegistry.GetFunctionsFromObject(
+                    new SessionContextPlugin(FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionContext, sessionId, slug))).ToList();
+
+            if (enabled.Contains("Scratchpad"))
+                toolsByCategory["Scratchpad"] = PluginRegistry.GetFunctionsFromObject(
+                    new ScratchpadPlugin("repl", FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionScratchpad, sessionId, slug))).ToList();
         }
 
         using var emitter = new EventEmitter(eventsPath);
