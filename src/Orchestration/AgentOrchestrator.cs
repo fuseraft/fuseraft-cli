@@ -12,6 +12,7 @@ using fuseraft.Orchestration.Strategies;
 
 // Disambiguate from Microsoft.Agents.AI.AgentFactory
 using fuseraft.Infrastructure;
+using fuseraft.Infrastructure.Plugins;
 using AgentFactory = fuseraft.Infrastructure.Agents.AgentFactory;
 
 namespace fuseraft.Orchestration;
@@ -274,7 +275,22 @@ public sealed class AgentOrchestrator(
             {
                 var role    = prior.Role == MessageRole.User ? ChatRole.User : ChatRole.Assistant;
                 var content = ContextWindowFilter.TruncateReplayContent(prior);
-                var msg     = new ChatMessage(role, content);
+
+                // FunctionCallContent is not preserved in AgentMessage, so tool-call-only turns
+                // (zero text, finish_reason=tool_calls) replay as empty messages. Recover the
+                // handoff keyword so IsSignalOnOwnLine can detect it without FunctionCallContent.
+                if (role == ChatRole.Assistant && string.IsNullOrEmpty(content))
+                {
+                    var handoff = prior.ToolCalls?.FirstOrDefault(tc =>
+                        string.Equals(tc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase));
+                    if (handoff?.ArgsSummary is { } s &&
+                        s.StartsWith($"{HandoffPlugin.ArgumentName}=", StringComparison.OrdinalIgnoreCase))
+                    {
+                        content = s[(HandoffPlugin.ArgumentName.Length + 1)..].Trim();
+                    }
+                }
+
+                var msg = new ChatMessage(role, content);
                 if (role == ChatRole.Assistant && prior.AgentName is not null)
                     msg.AuthorName = prior.AgentName;
                 history.Add(msg);
