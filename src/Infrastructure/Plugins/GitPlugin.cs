@@ -120,6 +120,16 @@ public sealed class GitPlugin
         return result.ToPluginOutput();
     }
 
+    [Description("Returns 'true' if the path is inside a git working tree, 'false' otherwise.")]
+    public async Task<string> IsInsideWorkTreeAsync(
+        [Description("Repo path to check (defaults to CWD).")] string? repoPath = null)
+    {
+        var result = await Git("rev-parse --is-inside-work-tree", repoPath);
+        return result.ExitCode is 128 or 129 ? "false"
+             : result.Succeeded               ? "true"
+             : "false";
+    }
+
     [Description("Push commits to a remote.")]
     public async Task<string> PushAsync(
         [Description("Remote name.")] string? remote = null,

@@ -418,8 +418,16 @@ Compaction:
 
 ### Enriching summaries
 
-Two optional flags add structured context blocks before the LLM summary text. Both are
-prefixed in this order when both are enabled: symbol graph first, then reasoning excerpts.
+Several structured context blocks are automatically prepended before the LLM summary text.
+When all are enabled, they appear in this order: brief snapshot, symbol graph, objectives,
+reasoning excerpts, exploration history.
+
+**`[BRIEF SNAPSHOT]`** — always prepended when `Validation.BriefPath` is configured and the
+brief file exists. Embeds the brief's `goal`, `files_to_change`, `verify_command`, and
+`execution_checklist` directly in every compaction summary. With the brief content in the
+summary, agents resuming after compaction do not need to re-read `brief.json` — the resumption
+note's step (1) becomes a no-op. No configuration flag: the block is present whenever
+`Validation.BriefPath` resolves to an existing file.
 
 **`IncludeReasoning`** (default `true`) — prepends a `[REASONING EXCERPTS]` block containing
 the model's thinking for each compacted turn (truncated to ~500 tokens per turn). Useful when
@@ -433,6 +441,12 @@ written during the session. Gives agents an explicit map of what symbols were in
 the compacted turns. Requires `EvidenceStore` and `ChangeTracking` to be configured. When no
 evidence store is wired the block is omitted silently.
 
+**`IncludeExploration`** (default `true`) — prepends an `[EXPLORATION HISTORY]` block listing
+files read, files grepped, and shell searches performed before compaction. When the session
+events log has no reads yet (e.g. on the first compaction), the block falls back to
+`read_cache.json` (written synchronously on every `read_file` call) so the history is never
+empty due to event-log timing. Omitted silently when both sources are empty.
+
 ```yaml
 Compaction:
   TriggerTurnCount: 40
@@ -440,7 +454,13 @@ Compaction:
   Mode: hybrid
   IncludeReasoning: true    # default; set to false to suppress
   IncludeSymbolGraph: true  # default; set to false to suppress
+  IncludeExploration: true  # default; set to false to suppress
 ```
+
+**Conditional resumption note** — the `RESUMPTION NOTE` appended to every compaction summary
+instructs agents to re-read `brief.json` only when the brief's `goal` and `files_to_change`
+are not already visible in the summary. When the `[BRIEF SNAPSHOT]` block is present (i.e.
+`Validation.BriefPath` is configured), agents skip the re-read automatically.
 
 ### History pre-pruning
 

@@ -101,11 +101,12 @@ public sealed class ContractEngine
         return pred.Type.ToLowerInvariant() switch
         {
             "fileswritten"       => await EvaluateFilesWrittenAsync(pred, contractName, cancellationToken),
+            "checklistcomplete"  => await EvaluateChecklistCompleteAsync(pred, contractName, cancellationToken),
             "commandsucceeded"   => await EvaluateCommandSucceededAsync(pred, contractName, cancellationToken),
             "fileexists"         => EvaluateFileExists(pred, contractName),
             "testreport"         => await EvaluateTestReportAsync(pred, contractName, cancellationToken),
             "relatedtestspass"   => await EvaluateRelatedTestsPassAsync(contractName, cancellationToken),
-            _ => (false, $"Contract '{contractName}' error: unknown predicate type '{pred.Type}'. Valid: FilesWritten, CommandSucceeded, FileExists, TestReport, RelatedTestsPass.")
+            _ => (false, $"Contract '{contractName}' error: unknown predicate type '{pred.Type}'. Valid: FilesWritten, ChecklistComplete, CommandSucceeded, FileExists, TestReport, RelatedTestsPass.")
         };
     }
 
@@ -188,6 +189,88 @@ public sealed class ContractEngine
 
         return (false,
             $"Contract '{contractName}' failed — files from '{source}'['{pred.Field}'] not written:\n" +
+            string.Join("\n", missing.Select(f => $"  ✗ {f}")) +
+            "\n\nWrite them with write_file before handing off.");
+    }
+
+    // ChecklistComplete
+
+    private static readonly HashSet<string> ChecklistFileExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".cs", ".ts", ".tsx", ".js", ".jsx", ".json", ".yaml", ".yml",
+        ".md", ".txt", ".go", ".py", ".rb", ".rs", ".cpp", ".c", ".h",
+        ".java", ".xml", ".csproj", ".sln", ".sh", ".ps1", ".toml", ".cfg", ".ini"
+    };
+
+    private async Task<(bool, string?)> EvaluateChecklistCompleteAsync(
+        ContractPredicate pred,
+        string contractName,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(pred.Source) || string.IsNullOrWhiteSpace(pred.Field))
+            return (false,
+                $"Contract '{contractName}' config error: ChecklistComplete requires 'Source' (JSON path) and 'Field' (array field name).");
+
+        var source = Expand(pred.Source);
+
+        if (!File.Exists(source))
+            return (false,
+                $"Contract '{contractName}' failed: ChecklistComplete source '{source}' does not exist.");
+
+        List<string> checklistItems;
+        try
+        {
+            var raw = TryUnwrapDoubleSerializedJson(await File.ReadAllTextAsync(source, ct));
+            using var doc = JsonDocument.Parse(raw);
+            var root = doc.RootElement;
+
+            if (!root.TryGetProperty(pred.Field, out var fieldEl) &&
+                !root.TryGetProperty(pred.Field.ToLowerInvariant(), out fieldEl))
+                return (true, null); // no checklist — nothing to check
+
+            checklistItems = [];
+            foreach (var item in fieldEl.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.String)
+                {
+                    var s = item.GetString();
+                    if (!string.IsNullOrWhiteSpace(s)) checklistItems.Add(s);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            return (false,
+                $"Contract '{contractName}' error: could not parse '{source}': {ex.Message}");
+        }
+
+        if (checklistItems.Count == 0)
+            return (true, null);
+
+        // Extract file-path tokens from each checklist step.
+        // A token is a file path when it contains '/' or ends with a known extension.
+        var filePaths = checklistItems
+            .SelectMany(item => item.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .Where(token => token.Contains('/') ||
+                            ChecklistFileExtensions.Contains(Path.GetExtension(token)))
+            .Select(PathHelpers.NormalizePath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (filePaths.Count == 0)
+            return (true, null); // no file-path steps — nothing to enforce
+
+        var written = await LoadWrittenFilesAsync(ct);
+
+        var missing = filePaths
+            .Where(req => !written.Any(w => PathHelpers.PathsMatch(w, req)) && !FileExistsInSandbox(req))
+            .ToList();
+
+        if (missing.Count == 0)
+            return (true, null);
+
+        return (false,
+            $"Contract '{contractName}' failed — checklist file steps from '{source}'['{pred.Field}'] not written:\n" +
             string.Join("\n", missing.Select(f => $"  ✗ {f}")) +
             "\n\nWrite them with write_file before handing off.");
     }

@@ -688,7 +688,7 @@ Orchestration:
 | Reusable across routes | No — attach individually | Yes — reference by name |
 | Supported routing types | Keyword, termination | Keyword, state machine |
 | Evidence source | Conversation history scan | Evidence graph (or `changes.json`) |
-| Custom predicates | No | Yes (FilesWritten, CommandSucceeded, FileExists, TestReport, RelatedTestsPass) |
+| Custom predicates | No | Yes (FilesWritten, ChecklistComplete, CommandSucceeded, FileExists, TestReport, RelatedTestsPass) |
 
 Contracts and validators compose: a route may declare both `Validators` and `Contracts`. All must pass (AND semantics).
 
