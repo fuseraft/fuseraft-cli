@@ -136,6 +136,7 @@ services.AddTransient<ContextAddCommand>();
 services.AddTransient<ContextListCommand>();
 services.AddTransient<ContextRemoveCommand>();
 services.AddTransient<ReplCommand>();
+services.AddTransient<ReplNextCommand>();
 services.AddTransient<ScheduleAddCommand>();
 services.AddTransient<ScheduleListCommand>();
 services.AddTransient<ScheduleRemoveCommand>();
@@ -160,8 +161,12 @@ services.AddTransient<EvalInitCommand>();
 services.AddTransient<KeychainCommand>();
 
 // Use CommandApp<ReplCommand> so bare `fuseraft` drops straight into the REPL.
+// Set FUSERAFT_REPL_NEXT=1 to switch the default entry-point to the new REPL UX.
 var registrar = new ServiceCollectionRegistrar(services);
-var app = new CommandApp<ReplCommand>(registrar);
+bool useNextRepl = Environment.GetEnvironmentVariable("FUSERAFT_REPL_NEXT") is "1" or "true";
+ICommandApp app = useNextRepl
+    ? new CommandApp<ReplNextCommand>(registrar)
+    : new CommandApp<ReplCommand>(registrar);
 
 // MinVer stamps the full semver (including pre-release and git hash) into
 // AssemblyInformationalVersionAttribute at build time — no manual file needed.
@@ -262,6 +267,10 @@ app.Configure(cfg =>
         .WithExample(["repl"])
         .WithExample(["repl", "--model", "gpt-4o"])
         .WithExample(["repl", "--model", "claude-sonnet-4-6", "--system", "You are a helpful coding assistant."]);
+
+    cfg.AddCommand<ReplNextCommand>("repl-next")
+        .WithDescription("Next-gen REPL (experimental). Also activated as default via FUSERAFT_REPL_NEXT=1.")
+        .IsHidden();
 
     cfg.AddBranch("context", branch =>
     {
