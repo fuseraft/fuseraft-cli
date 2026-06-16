@@ -945,7 +945,14 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (denial is not null) return denial;
 
         if (!Directory.Exists(resolved))
+        {
+            if (File.Exists(resolved))
+                return PluginResult.Error(
+                    $"'{resolved}' is a file, not a directory. " +
+                    $"Use read_file to read its content, or call list_files on its parent: " +
+                    $"'{Path.GetDirectoryName(resolved) ?? resolved}'");
             return PluginResult.Error($"Directory not found: {resolved}");
+        }
 
         const int maxFiles = 500;
         var sep = Path.DirectorySeparatorChar;
@@ -1268,7 +1275,14 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (denial is not null) return denial;
 
         if (!Directory.Exists(resolved))
+        {
+            if (File.Exists(resolved))
+                return PluginResult.Error(
+                    $"'{resolved}' is a file, not a directory. " +
+                    $"Use read_file to read its content, or call list_directory on its parent: " +
+                    $"'{Path.GetDirectoryName(resolved) ?? resolved}'");
             return PluginResult.Error($"Directory not found: {resolved}");
+        }
 
         const int maxEntries = 500;
 
