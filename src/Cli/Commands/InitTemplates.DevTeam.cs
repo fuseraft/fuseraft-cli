@@ -14,12 +14,95 @@ public static partial class InitTemplates
     /// </summary>
     private static GeneratedConfig Swe(string model, string? endpoint)
     {
+        var preflight = $"""
+            Name: Preflight
+            Description: Validates the execution environment before planning begins.
+            Instructions: |
+              You are an environment validator. Run exactly once, at session start.
+              Your job is to confirm the sandbox is ready before any code is written.
+              Complete these steps in order, then route.
+
+              STEP 1 — SCAN SANDBOX
+              Call list_directory on "." to confirm the sandbox root exists and see
+              its top-level contents. Note everything present.
+
+              STEP 2 — DETECT PROJECT TYPE
+              Call path_exists for each indicator file below:
+                Python: pyproject.toml, setup.py, requirements.txt, setup.cfg
+                Node:   package.json
+                Rust:   Cargo.toml
+                .NET:   global.json  (also call list_files(".", "*.csproj") — any hit = .NET)
+                Go:     go.mod
+              Record every type whose file is present. If none match, type = "unknown".
+
+              STEP 3 — VERIFY RUNTIME(S)
+              For each detected type, run the version command below:
+                Python: shell_run("python3 --version")  [fallback: shell_run("python --version")]
+                Node:   shell_run("node --version")
+                Rust:   shell_run("rustc --version")
+                .NET:   shell_run("dotnet --version")
+                Go:     shell_run("go version")
+              If type = "unknown", run all five to detect what is available.
+              Exit 0 = runtime present. Exit 127 or 128 = missing.
+
+              STEP 4 — CHECK GIT
+              shell_run("git rev-parse --is-inside-work-tree")
+                Exit 0   → git repo. Also run shell_run("git status --short") and note
+                           whether the working tree is clean.
+                Exit 128 → not a git repo. Record this — agents will skip git steps.
+
+              STEP 5 — WRITE PREFLIGHT REPORT
+              Write a JSON object to {FuseraftPaths.LocalPreflight} with these fields:
+                project_types    — string array of detected types, e.g. ["python"]
+                runtime_versions — object mapping runtime name to version string
+                missing_runtimes — string array of runtimes that returned exit 127/128
+                git_repo         — boolean: true if git rev-parse exited 0
+                git_clean        — boolean or null: true if git status --short output is empty
+                warnings         — string array of non-fatal observations
+
+              STEP 6 — DETERMINE OUTCOME
+              FAILURE condition: a specific project type was detected (not "unknown")
+              AND its primary runtime is missing (exit 127/128 from step 3).
+
+              ON FAILURE — do NOT call handoff. Write a clear description of what is
+              missing and what the user must install to fix it, then emit BLOCKED on
+              its own line as the very last line of your response:
+
+                Python project detected (pyproject.toml present) but 'python3' and
+                'python' both returned exit 128 (command not found).
+                Install Python 3.x and re-run: https://python.org/downloads
+
+                BLOCKED
+
+              ON SUCCESS — include any warnings (e.g. "git repo not detected — git
+              commit steps will be skipped by Developer and Reviewer") as plain text,
+              then call handoff(route_keyword: "PREFLIGHT PASSED").
+            Model:
+              ModelId: {model}{EpAgent(endpoint)}
+            Plugins:
+              - FileSystem
+              - Shell
+              - Handoff
+            FunctionChoice: required
+            SkipExecutionState: true
+            ContextWindow:
+              TextOnly: true
+              MaxTurnAge: 1
+            {AgentFileOptions}
+            """;
+
         var planner = $"""
             Name: Planner
             Description: Analyses the task and writes a structured brief.
             Instructions: |
               You are a software architect and planner. Your job is to:
               1. {ContextReadStep}
+                 Also read {FuseraftPaths.LocalPreflight} if it exists — it records
+                 the detected project type, available runtimes, and git repo status.
+                 If the file is absent (e.g. session resumed directly to Planning),
+                 infer these values from the codebase instead. When it is present:
+                 • Write a verify_command that matches the available runtime.
+                 • Omit git steps from verify_command when git_repo is false.
               2. Read and understand the task thoroughly.
               3. Use sub_agent_explore for broad codebase questions without filling your context
                  with raw file contents. For any direct file reads: {LargeFileProtocol}
@@ -361,12 +444,26 @@ public static partial class InitTemplates
                  and record the result. If no files_to_change have been written yet, skip
                  this step — the Developer has not started and a pre-implementation failure
                  is not an inconsistency.
+                 e. VERIFY COMMAND STILL FAILING: If you ran verify_command in step 4 and
+                    it exited with a non-zero code, that is an inconsistency — the Developer
+                    handed off before the verify_command actually passed. Record the exit
+                    code and the first relevant output line.
 
-              5. Report outcome:
-                 - If consistent: "Evidence verified — no inconsistencies found."
-                 - If inconsistent: "INCONSISTENCY DETECTED: <pattern letter> — <what was claimed
-                   vs what the evidence shows, with specific error codes, file names, and build
-                   unit attribution where applicable>"
+              5. Report outcome — output EXACTLY ONE of the following lines, never both:
+                 - If consistent (no patterns found AND verify_command either was not run
+                   or exited 0): output only this line:
+                   "Evidence verified — no inconsistencies found."
+                 - If any inconsistency pattern fired (a–e): output only this line:
+                   "INCONSISTENCY DETECTED: <pattern letter> — <what was claimed vs what
+                   the evidence shows, with specific error codes, file names, exit codes,
+                   and build unit attribution where applicable>"
+
+              CRITICAL — routing signal prohibition:
+                 Never emit "REPLAN REQUIRED", "HANDOFF TO TESTER", "BRIEF APPROVED",
+                 "BRIEF REJECTED", "BUGS FOUND", or any other workflow routing keyword.
+                 These signals are for workflow agents only. The Verifier's sole valid
+                 outputs are the two lines in step 5 above. Emitting a routing keyword
+                 will corrupt the workflow state machine.
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
@@ -482,6 +579,7 @@ public static partial class InitTemplates
               # Each agent lives in its own YAML file in agents/ — edit, version, or reuse
               # them independently across configs. Inline fields override the file at load time.
               Agents:
+                - AgentFile: agents/preflight.yaml
                 - AgentFile: agents/planner.yaml
                 - AgentFile: agents/planner-critic.yaml
                 - AgentFile: agents/developer.yaml
@@ -492,9 +590,15 @@ public static partial class InitTemplates
               Selection:
                 Type: statemachine
                 StateMachine:
-                  Initial: Planning
+                  Initial: Preflight
 
                   States:
+                    Preflight:
+                      Agent: Preflight
+                      Transitions:
+                        - To: Planning
+                          Signal: "PREFLIGHT PASSED"
+
                     Planning:
                       Agent: Planner
                       Transitions:
@@ -595,6 +699,7 @@ public static partial class InitTemplates
             """;
 
         return new GeneratedConfig(mainConfig, [
+            ("agents/preflight.yaml",       preflight),
             ("agents/planner.yaml",         planner),
             ("agents/planner-critic.yaml",  plannerCritic),
             ("agents/developer.yaml",       developer),

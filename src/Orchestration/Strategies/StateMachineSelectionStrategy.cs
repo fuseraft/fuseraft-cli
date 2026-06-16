@@ -71,6 +71,20 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
     // Used to detect back-edge signals to already-completed states.
     private readonly HashSet<string> _visitedStates = new(StringComparer.OrdinalIgnoreCase);
 
+    // Ordinal position (1-based, counted among all HandoffPlugin tool calls seen in the
+    // live history) of the last handoff signal that successfully fired a transition —
+    // sequential or parallel. Compared by name/identity, not history index, because
+    // history (ChatMessage) and checkpoint.Messages (AgentMessage) are not index-aligned,
+    // and because parallel fan-out has no single "current agent" to compare against.
+    // Lives only as long as this strategy instance — compaction reads it directly off
+    // the live snapshotter, so it never needs to round-trip through the checkpoint.
+    private int _lastConsumedHandoffOrdinal;
+
+    // Used by CompactionCoordinator to decide whether the last handoff signal found in
+    // pre-compaction history was already consumed by a fired transition, regardless of
+    // whether that firing went through SelectAsync or TrySelectParallelAsync.
+    public int LastConsumedHandoffOrdinal => _lastConsumedHandoffOrdinal;
+
     // Verifier support.
     private readonly string? _verifierAgentName;
     private readonly bool _triggerVerifierOnConflict;
@@ -173,41 +187,23 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
         }
 
         // Scan the last few agent messages for signals from the current state's agent.
-        int scanned = 0;
-        for (int i = history.Count - 1; i >= 0 && scanned < OrchestratorHelpers.AgentMessageLookback; i--)
+        foreach (var (i, msg, toolSignal, content, isCurrentAgent) in ScanSignals(history, state))
         {
-            var msg = history[i];
-            if (msg.Role == ChatRole.Tool) continue;
-
-            // Extract HandoffPlugin keyword if present (same logic as keyword strategy).
-            string? toolSignal = null;
-            if (msg.Role == ChatRole.Assistant)
-            {
-                foreach (var item in msg.Contents)
-                {
-                    if (item is FunctionCallContent fc
-                        && string.Equals(fc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase)
-                        && fc.Arguments?.TryGetValue(HandoffPlugin.ArgumentName, out var kwObj) == true
-                        && kwObj?.ToString() is { Length: > 0 } kw)
-                    {
-                        toolSignal = kw;
-                        break;
-                    }
-                }
-            }
-
-            var content = toolSignal ?? msg.Text;
-            if (string.IsNullOrEmpty(content)) continue;
-            if (msg.Role == ChatRole.Assistant) scanned++;
-
-            // Source-agent restriction: if the message isn't from the current state's
-            // agent, it cannot trigger transitions (prevents ghost signals from other
-            // agents bleeding through the lookback window).
-            bool isCurrentAgent = string.Equals(
-                msg.AuthorName, state.Agent, StringComparison.OrdinalIgnoreCase);
-
             foreach (var transition in state.Transitions)
             {
+                // Default signal-source restriction: only the current state's agent can
+                // fire a transition via its message text or HandoffPlugin tool call.
+                // Transitions opt in to accepting other agents' signals via SourceAgents.
+                // Without this guard, periodic meta-agents such as Verifier can accidentally
+                // fire routing transitions when their narrative output contains a signal
+                // phrase (e.g. "REPLAN REQUIRED" written as prose, not as a handoff call).
+                // ChatRole.User messages are intentionally exempt — HITL users need to be
+                // able to inject redirect keywords.
+                if (msg.Role == ChatRole.Assistant
+                    && !isCurrentAgent
+                    && transition.SourceAgents is null or { Count: 0 })
+                    continue;
+
                 // Signal check.
                 bool signalPresent = string.IsNullOrWhiteSpace(transition.Signal)
                     || (toolSignal is not null
@@ -413,6 +409,14 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
 
                 _visitedStates.Add(_currentState);
                 _currentState = targetState;
+
+                // Record which handoff (by ordinal position, not list index) this
+                // transition consumed, so compaction can avoid re-pinning a signal that
+                // already fired — even though history (ChatMessage) and
+                // checkpoint.Messages (AgentMessage) are different lists.
+                if (toolSignal is not null)
+                    _lastConsumedHandoffOrdinal = CountHandoffOrdinal(history, i);
+
                 return FindAgent(agents, nextState.Agent)
                        ?? throw new InvalidOperationException(
                            $"[StateMachine] Agent '{nextState.Agent}' not found in pool for state '{targetState}'.");
@@ -420,11 +424,14 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
         }
 
         // BLOCKED: agent declared an unrecoverable blocker — halt immediately, no correction loop.
-        var lastAssistantText = history
-            .LastOrDefault(m => m.Role == ChatRole.Assistant)
+        // Restrict to the current state's agent so that meta-agents (Verifier, PlannerCritic)
+        // whose narrative output contains "BLOCKED" as prose do not abort the session.
+        var lastCurrentAgentText = history
+            .LastOrDefault(m => m.Role == ChatRole.Assistant
+                && string.Equals(m.AuthorName, state.Agent, StringComparison.OrdinalIgnoreCase))
             ?.Text;
-        if (lastAssistantText is not null && IsSignalOnOwnLine(lastAssistantText, "BLOCKED"))
-            throw new AgentBlockedException(state.Agent, lastAssistantText);
+        if (lastCurrentAgentText is not null && IsSignalOnOwnLine(lastCurrentAgentText, "BLOCKED"))
+            throw new AgentBlockedException(state.Agent, lastCurrentAgentText);
 
         // No signal matched — re-invoke the current state's agent with corrective nudge if needed.
         _logger.LogDebug(
@@ -488,35 +495,18 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
         if (!_machine.States.TryGetValue(_currentState, out var state) || state.Terminal)
             return Task.FromResult<ParallelAgentBatch?>(null);
 
-        int scanned = 0;
-        for (int i = history.Count - 1; i >= 0 && scanned < OrchestratorHelpers.AgentMessageLookback; i--)
+        foreach (var (i, msg, toolSignal, content, isCurrentAgent) in ScanSignals(history, state))
         {
-            var msg = history[i];
-            if (msg.Role == ChatRole.Tool) continue;
-
-            string? toolSignal = null;
-            if (msg.Role == ChatRole.Assistant)
-            {
-                foreach (var item in msg.Contents)
-                {
-                    if (item is FunctionCallContent fc
-                        && string.Equals(fc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase)
-                        && fc.Arguments?.TryGetValue(HandoffPlugin.ArgumentName, out var kwObj) == true
-                        && kwObj?.ToString() is { Length: > 0 } kw)
-                    {
-                        toolSignal = kw;
-                        break;
-                    }
-                }
-            }
-
-            var content = toolSignal ?? msg.Text;
-            if (string.IsNullOrEmpty(content)) continue;
-            if (msg.Role == ChatRole.Assistant) scanned++;
-
             foreach (var transition in state.Transitions)
             {
                 if (!transition.Parallel || transition.Targets is null or { Count: 0 }) continue;
+
+                // Same source restriction as SelectAsync: only the current state's agent
+                // can fire a parallel transition unless SourceAgents is explicitly set.
+                if (msg.Role == ChatRole.Assistant
+                    && !isCurrentAgent
+                    && transition.SourceAgents is null or { Count: 0 })
+                    continue;
 
                 bool signalPresent = string.IsNullOrWhiteSpace(transition.Signal)
                     || (toolSignal is not null
@@ -566,6 +556,11 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                     _currentState, string.Join(", ", transition.Targets), joinState);
 
                 _currentState = joinState;
+
+                // Same bookkeeping as the sequential path — see SelectAsync for why this
+                // is ordinal-based rather than an index into history.
+                if (toolSignal is not null)
+                    _lastConsumedHandoffOrdinal = CountHandoffOrdinal(history, i);
 
                 return Task.FromResult<ParallelAgentBatch?>(
                     new ParallelAgentBatch(branches, transition.Merge ?? new MergeConfig(), joinState));
@@ -862,6 +857,56 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
         }
     }
 
+    // One candidate signal-bearing message from the lookback scan, pre-resolved so callers
+    // don't need to re-extract the HandoffPlugin keyword or recompute author identity.
+    private readonly record struct ScannedSignal(
+        int Index, ChatMessage Message, string? ToolSignal, string Content, bool IsCurrentAgent);
+
+    // Shared lookback scan used by both SelectAsync and TrySelectParallelAsync: walks history
+    // backwards, extracts the HandoffPlugin keyword (or falls back to message text), and skips
+    // non-current-agent messages that cannot fire any transition on this state — before they
+    // consume the lookback budget. Kept as a single iterator so the two callers can't drift on
+    // this scaffolding; only the per-transition matching logic differs between them.
+    private static IEnumerable<ScannedSignal> ScanSignals(IList<ChatMessage> history, StateConfig state)
+    {
+        bool hasSourceAgentsTransitions = state.Transitions.Any(t => t.SourceAgents is { Count: > 0 });
+        int scanned = 0;
+        for (int i = history.Count - 1; i >= 0 && scanned < OrchestratorHelpers.AgentMessageLookback; i--)
+        {
+            var msg = history[i];
+            if (msg.Role == ChatRole.Tool) continue;
+
+            string? toolSignal = null;
+            if (msg.Role == ChatRole.Assistant)
+            {
+                foreach (var item in msg.Contents)
+                {
+                    if (item is FunctionCallContent fc
+                        && string.Equals(fc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase)
+                        && fc.Arguments?.TryGetValue(HandoffPlugin.ArgumentName, out var kwObj) == true
+                        && kwObj?.ToString() is { Length: > 0 } kw)
+                    {
+                        toolSignal = kw;
+                        break;
+                    }
+                }
+            }
+
+            var content = toolSignal ?? msg.Text;
+            if (string.IsNullOrEmpty(content)) continue;
+
+            bool isCurrentAgent = string.Equals(
+                msg.AuthorName, state.Agent, StringComparison.OrdinalIgnoreCase);
+
+            if (msg.Role == ChatRole.Assistant && !isCurrentAgent && !hasSourceAgentsTransitions)
+                continue;
+
+            if (msg.Role == ChatRole.Assistant) scanned++;
+
+            yield return new ScannedSignal(i, msg, toolSignal, content, isCurrentAgent);
+        }
+    }
+
     // Returns true when a keyword appears alone on its own line (same rules as KeywordSelectionStrategy).
     private static bool IsSignalOnOwnLine(string content, string signal)
     {
@@ -910,6 +955,31 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
             return true;
         }
         return false;
+    }
+
+    // Counts HandoffPlugin tool calls in history[0..indexInclusive], giving the 1-based
+    // ordinal position of history[indexInclusive] among all handoff calls so far. Used to
+    // mark which handoff (by position, not list index) last fired a transition, so that
+    // position can later be compared against the same count taken over checkpoint.Messages
+    // — a different list with different indices but the same handoff occurrences.
+    private static int CountHandoffOrdinal(IList<ChatMessage> history, int indexInclusive)
+    {
+        int count = 0;
+        for (int k = 0; k <= indexInclusive; k++)
+        {
+            var m = history[k];
+            if (m.Role != ChatRole.Assistant) continue;
+            foreach (var item in m.Contents)
+            {
+                if (item is FunctionCallContent fc &&
+                    string.Equals(fc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase))
+                {
+                    count++;
+                    break;
+                }
+            }
+        }
+        return count;
     }
 
     // IContextSnapshotter ─────────────────────────────────────────────────────

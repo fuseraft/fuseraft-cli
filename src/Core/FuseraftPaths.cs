@@ -111,6 +111,7 @@ public static class FuseraftPaths
     public const string LocalConventions          = "~/.fuseraft/sessions/{project_slug}/{session_id}/conventions.json";
     public const string LocalBrownfieldBrief      = "~/.fuseraft/sessions/{project_slug}/{session_id}/brief.brownfield.json";
     public const string LocalBriefReview          = "~/.fuseraft/sessions/{project_slug}/{session_id}/brief-review.json";
+    public const string LocalPreflight            = "~/.fuseraft/sessions/{project_slug}/{session_id}/preflight.json";
     public const string LocalChatroom             = "~/.fuseraft/sessions/{project_slug}/{session_id}/chatroom.jsonl";
     public const string LocalSessionScratchpad    = "~/.fuseraft/sessions/{project_slug}/{session_id}/scratchpad";
     public const string LocalMemoryRefs           = "~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json";
