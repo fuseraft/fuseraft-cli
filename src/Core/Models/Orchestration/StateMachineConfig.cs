@@ -274,6 +274,13 @@ public record TransitionConfig
     public int MaxRevisits { get; init; } = 0;
 
     /// <summary>
+    /// Number of escalation attempts allowed after <see cref="MaxRevisits"/> is exceeded
+    /// before the orchestrator hard-stops with a <see cref="ValidatorStuckException"/>.
+    /// Defaults to 2. Set to 0 to disable the hard-stop (escalation messages only).
+    /// </summary>
+    public int MaxEscalations { get; init; } = 2;
+
+    /// <summary>
     /// Path to the artifact file containing the reviewer's objections, injected into the
     /// escalation message when <see cref="MaxRevisits"/> is exceeded. Relative to the
     /// sandbox root. When null the escalation message is generic.
