@@ -166,6 +166,7 @@ public static partial class InitTemplates
               You are a senior software engineer. Your job is to:
               1. {ContextReadStep}
               2. Read {FuseraftPaths.LocalBrief}. Check for these fields:
+                 NOTE: Do NOT read brief-review.json (Critic → Planner artifact; its blocking_issues are not yours to resolve). brief.json is your sole source of truth.
                    known_pitfalls — approaches already tried and known to fail. You MUST NOT
                                     repeat any listed approach, even partially.
                    execution_checklist — ordered steps. Work through them in order.
