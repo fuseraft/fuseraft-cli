@@ -82,6 +82,11 @@ public static partial class InitTemplates
                   e. execution_checklist: write an execution_checklist array of discrete,
                      ordered, verifiable steps ("create fwc/Counter.cs", "add glob exclusion
                      to main.csproj"). The Developer works through this list in order.
+                     After writing execution_checklist, verify that every step that creates
+                     or modifies a file names a path that also appears in files_to_change.
+                     Add any missing paths — a file referenced only in execution_checklist
+                     and absent from files_to_change bypasses the ImplementationComplete
+                     contract silently.
               6. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO CRITIC").
             Model:
@@ -207,7 +212,15 @@ public static partial class InitTemplates
                  without first making a change.
               5. Commit with git_add and git_commit.
               6. {ContextWriteStep}
-              When done, call handoff(route_keyword: "HANDOFF TO TESTER").
+              Before calling handoff(route_keyword: "HANDOFF TO TESTER"):
+                - Call changes_read_latest and confirm every file-write step in
+                  execution_checklist appears in filesWritten.
+                - If any step is incomplete, continue implementing — do NOT hand off
+                  with stubs or partial files.
+                - If the remaining work cannot fit in the current context window, call
+                  handoff(route_keyword: "REPLAN REQUIRED") so the Planner can split
+                  the checklist into sub-objectives.
+              When all checklist steps are confirmed complete, call handoff(route_keyword: "HANDOFF TO TESTER").
               If the brief is missing or contradictory: handoff(route_keyword: "REPLAN REQUIRED").
             Model:
               ModelId: {model}{EpAgent(endpoint)}
@@ -339,11 +352,15 @@ public static partial class InitTemplates
 
               4. Only if SignificantChanges shows that at least one file from brief.json
                  `files_to_change` has been written (i.e., implementation has started): if
-                 the change log shows verify_command has not yet run successfully, use
-                 shell_run to execute the verify_command from {FuseraftPaths.LocalBrief} and
-                 record the result. If no files_to_change have been written yet, skip this
-                 step — the Developer has not started and a pre-implementation failure is
-                 not an inconsistency.
+                 the change log shows verify_command has not yet run successfully, before
+                 running any git command first probe with
+                 shell_run("git rev-parse --is-inside-work-tree") — if exit code is 128 or
+                 129 the sandbox is not a git repository and you must skip every git command
+                 in this step; only proceed with git operations when exit code is 0. Then
+                 use shell_run to execute the verify_command from {FuseraftPaths.LocalBrief}
+                 and record the result. If no files_to_change have been written yet, skip
+                 this step — the Developer has not started and a pre-implementation failure
+                 is not an inconsistency.
 
               5. Report outcome:
                  - If consistent: "Evidence verified — no inconsistencies found."
@@ -394,6 +411,9 @@ public static partial class InitTemplates
                     - Type: FilesWritten
                       Source: {FuseraftPaths.LocalBrief}
                       Field: files_to_change
+                    - Type: ChecklistComplete
+                      Source: {FuseraftPaths.LocalBrief}
+                      Field: execution_checklist
                     - Type: CommandSucceeded
                       PatternField: verify_command
                       Pattern: "build|compile|test|check"

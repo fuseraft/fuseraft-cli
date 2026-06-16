@@ -85,6 +85,7 @@ Read and write a Git repository.
 | `git_show` | `commitRef`, `repoPath`, `maxLines` (default 300) | Show the content and diff of a specific commit. |
 | `git_branch_list` | `repoPath`, `includeRemotes` (default false) | List branches. |
 | `git_stash_list` | `repoPath` | List all stashed changesets. |
+| `git_is_inside_work_tree` | `repoPath` (optional) | Returns `"true"` if the path is inside a git working tree, `"false"` otherwise (exit codes 128 or 129 map to `"false"`). Use this to guard git operations when the sandbox may not be a git repository. |
 
 **Write operations**
 
