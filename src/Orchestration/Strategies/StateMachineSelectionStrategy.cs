@@ -327,9 +327,28 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
 
                     if (newVisits > transition.MaxRevisits)
                     {
+                        var escalationAttempt = newVisits - transition.MaxRevisits;
+
+                        // Hard-stop once escalation attempts are exhausted.
+                        if (transition.MaxEscalations > 0 && escalationAttempt > transition.MaxEscalations)
+                        {
+                            _logger.LogError(
+                                "[StateMachine] Back-edge '{From}' → '{To}' exhausted {Max} escalation attempts — aborting session.",
+                                _currentState, targetState, transition.MaxEscalations);
+
+                            throw new ValidatorStuckException(
+                                agentName:           state.Agent,
+                                validatorName:       $"MaxRevisits+MaxEscalations ({transition.MaxRevisits}+{transition.MaxEscalations})",
+                                consecutiveFailures: newVisits,
+                                lastValidatorError:
+                                    $"Back-edge '{_currentState}' → '{targetState}' fired {newVisits} times. " +
+                                    $"MaxRevisits={transition.MaxRevisits}, MaxEscalations={transition.MaxEscalations}. " +
+                                    $"The planning loop could not converge — human intervention required.");
+                        }
+
                         _logger.LogWarning(
-                            "[StateMachine] Back-edge '{From}' → '{To}' has fired {Count} times (MaxRevisits={Max}) — injecting escalation.",
-                            _currentState, targetState, newVisits, transition.MaxRevisits);
+                            "[StateMachine] Back-edge '{From}' → '{To}' has fired {Count} times (MaxRevisits={Max}) — injecting escalation {Attempt}/{MaxEsc}.",
+                            _currentState, targetState, newVisits, transition.MaxRevisits, escalationAttempt, transition.MaxEscalations);
 
                         string objections = string.Empty;
                         if (transition.ReviewArtifactPath is { Length: > 0 } artifactPath
@@ -341,7 +360,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
 
                         var escalation =
                             $"You have received the same critique {newVisits} times (limit: {transition.MaxRevisits}). " +
-                            $"This is escalation attempt {newVisits - transition.MaxRevisits}.\n\n" +
+                            $"This is escalation attempt {escalationAttempt} of {transition.MaxEscalations} — after which the session will abort.\n\n" +
                             (objections.Length > 0
                                 ? $"Outstanding objections from the last review:\n{objections.Trim()}\n\n"
                                 : string.Empty) +
@@ -352,7 +371,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
 
                         if (_eventEmitter is not null)
                             _ = _eventEmitter.EmitAsync(EventTypes.BackEdgeEscalation,
-                                payload: new { from = _currentState, to = targetState, visit_count = newVisits, max_revisits = transition.MaxRevisits });
+                                payload: new { from = _currentState, to = targetState, visit_count = newVisits, max_revisits = transition.MaxRevisits, escalation_attempt = escalationAttempt, max_escalations = transition.MaxEscalations });
                     }
                 }
 
