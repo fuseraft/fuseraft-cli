@@ -205,10 +205,13 @@ internal sealed class CompactionCoordinator(
             catch (Exception ex) { Debug.WriteLine($"[CompactionCoordinator] state snapshot failed: {ex.Message}"); }
         }
 
+        int lastConsumedHandoffOrdinal = 0;
         if (snapshotter is StateMachineSelectionStrategy smStrategy)
         {
             try { checkpoint.StateMachineState = smStrategy.TakeCheckpointState(); }
             catch (Exception ex) { Debug.WriteLine($"[CompactionCoordinator] failure-state capture failed: {ex.Message}"); }
+
+            lastConsumedHandoffOrdinal = smStrategy.LastConsumedHandoffOrdinal;
         }
 
         if (orchestrator is not MagenticOrchestrator && eventEmitter is not null)
@@ -236,7 +239,7 @@ internal sealed class CompactionCoordinator(
             checkpoint.Messages.AddRange(trimmed);
 
             if (originalMessages is not null)
-                TryPinLastRoutingSignal(checkpoint.Messages, originalMessages);
+                TryPinLastRoutingSignal(checkpoint.Messages, originalMessages, lastConsumedHandoffOrdinal);
 
             checkpoint.LastUpdatedAt = DateTime.UtcNow;
 
@@ -272,7 +275,7 @@ internal sealed class CompactionCoordinator(
         checkpoint.Messages.AddRange(retained);
 
         if (originalMessages is not null)
-            TryPinLastRoutingSignal(checkpoint.Messages, originalMessages);
+            TryPinLastRoutingSignal(checkpoint.Messages, originalMessages, lastConsumedHandoffOrdinal);
 
         checkpoint.LastUpdatedAt = DateTime.UtcNow;
 
@@ -294,22 +297,36 @@ internal sealed class CompactionCoordinator(
     // Re-injects the last handoff signal at the head of the retained window if it was
     // dropped by compaction. Prevents keyword_not_found re-invocations on the first turn
     // after compaction when the signal fell outside the retained tail.
+    //
+    // lastConsumedHandoffOrdinal is the 1-based position (among all HandoffPlugin calls
+    // observed) of the last handoff that the state machine actually consumed via a fired
+    // transition (sequential or parallel — see StateMachineSelectionStrategy). It is
+    // compared against the same count taken over `original` rather than against a list
+    // index, because `original` (AgentMessage) and the live ChatMessage history the
+    // ordinal was recorded against are different lists with different lengths. If the
+    // last handoff in `original` is at or before that ordinal, the state machine already
+    // moved on, and re-pinning it as a synthetic message risks it spuriously re-matching
+    // a transition in whatever state the machine has since reached.
     private static void TryPinLastRoutingSignal(
         List<AgentMessage> retained,
-        IReadOnlyList<AgentMessage> original)
+        IReadOnlyList<AgentMessage> original,
+        int lastConsumedHandoffOrdinal)
     {
         AgentMessage? lastHandoff = null;
-        for (int i = original.Count - 1; i >= 0; i--)
+        int handoffOrdinal = 0;
+        for (int i = 0; i < original.Count; i++)
         {
             var m = original[i];
             if (m.Role == MessageRole.Assistant &&
                 m.ToolCalls?.Any(tc => string.Equals(tc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase)) == true)
             {
+                handoffOrdinal++;
                 lastHandoff = m;
-                break;
             }
         }
         if (lastHandoff is null) return;
+
+        if (handoffOrdinal <= lastConsumedHandoffOrdinal) return;
 
         var handoffCall = lastHandoff.ToolCalls!.First(tc =>
             string.Equals(tc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase));
