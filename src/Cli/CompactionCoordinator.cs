@@ -322,11 +322,12 @@ internal sealed class CompactionCoordinator(
             : null;
         if (string.IsNullOrEmpty(routeKeyword)) return;
 
+        // Check whether the keyword survives as *text* in retained content, not just as a
+        // ToolCalls record. FunctionCallContent is stripped on every StreamAsync replay, so a
+        // ToolCalls record existing does not mean the signal will be detectable after replay.
         bool alreadyPresent = retained.Any(m =>
-            m.Role == MessageRole.Assistant &&
-            m.ToolCalls?.Any(tc =>
-                string.Equals(tc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase) &&
-                tc.ArgsSummary?.EndsWith(routeKeyword, StringComparison.OrdinalIgnoreCase) == true) == true);
+            !string.IsNullOrEmpty(m.Content) &&
+            m.Content.Contains(routeKeyword, StringComparison.OrdinalIgnoreCase));
         if (alreadyPresent) return;
 
         // Appended at the end so TransitionAlreadyFired finds no [fuseraft:] markers after it —
