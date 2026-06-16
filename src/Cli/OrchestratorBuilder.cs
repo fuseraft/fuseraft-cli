@@ -1293,7 +1293,8 @@ public static class OrchestratorBuilder
                 loggerFactory.CreateLogger<ConversationCompactor>(),
                 resumptionNote, changeLogPath, intentLog, config.Events?.Path, evidenceStore,
                 objectiveManager, snapshotEnricher, readCachePath,
-                executionStatePath: executionStatePath);
+                executionStatePath: executionStatePath,
+                briefPath: config.Validation?.BriefPath);
 
             if ((compactionConfig.Mode ?? string.Empty).Equals(CompactionModes.Intent, StringComparison.OrdinalIgnoreCase)
                 && intentLog is null)

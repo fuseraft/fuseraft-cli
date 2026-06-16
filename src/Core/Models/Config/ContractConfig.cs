@@ -98,8 +98,8 @@ public record ContractConfig
 public record ContractPredicate
 {
     /// <summary>
-    /// Predicate type. One of: <c>FilesWritten</c>, <c>CommandSucceeded</c>,
-    /// <c>FileExists</c>, <c>TestReport</c>, <c>RelatedTestsPass</c>.
+    /// Predicate type. One of: <c>FilesWritten</c>, <c>ChecklistComplete</c>,
+    /// <c>CommandSucceeded</c>, <c>FileExists</c>, <c>TestReport</c>, <c>RelatedTestsPass</c>.
     /// <para>
     /// <c>RelatedTestsPass</c> runs incremental test selection scoped to the current
     /// session's changed files using <c>TestSelector.FindRelatedCommand</c>, then

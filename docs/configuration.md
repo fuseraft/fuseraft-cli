@@ -1101,6 +1101,7 @@ Contracts are referenced by name from keyword route `Contracts` lists or from st
 | Type | Fields | Passes when |
 |------|--------|-------------|
 | `FilesWritten` | `Source`, `Field` | Every path listed in the `Field` array of the `Source` JSON file has been written to disk (current session). |
+| `ChecklistComplete` | `Source`, `Field` | Every file-write step in the `Field` array of the `Source` JSON file (heuristic: items containing `/` or a known extension) has been written to disk (current session). Use this alongside `FilesWritten` to catch paths referenced only in `execution_checklist` that were never mirrored into `files_to_change`. |
 | `CommandSucceeded` | `Pattern` or `PatternField` | At least one shell command whose text matches any pipe-separated alternative in `Pattern` (literal string) or in the value of the field named by `PatternField` inside `PatternSource` (defaults to brief.json) exited 0 this session. Use `PatternField: "verify_command"` to read the pattern from the brief, making the predicate language-agnostic. `Pattern` and `PatternField` are mutually exclusive. |
 | `FileExists` | `Path` | The file at `Path` exists on disk. |
 | `TestReport` | `NoFailures`, `HasAssertions` | `test-report.json` exists, has results, and satisfies the declared checks. |

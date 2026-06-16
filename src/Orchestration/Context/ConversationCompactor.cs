@@ -31,7 +31,8 @@ public sealed class ConversationCompactor(
     fuseraft.Infrastructure.Objectives.ObjectiveManager? objectiveManager = null,
     fuseraft.Infrastructure.Knowledge.KnowledgeSnapshotEnricher? knowledgeEnricher = null,
     string? readCachePath = null,
-    string? executionStatePath = null)
+    string? executionStatePath = null,
+    string? briefPath = null)
 {
     // Tracks savings ratios from the last AntiThrashWindow compactions so we can detect
     // conversations that are thrashing (repeatedly compacting but saving very little).
@@ -172,9 +173,13 @@ public sealed class ConversationCompactor(
         var reasoningBlock    = BuildReasoningBlock(reasoningExcerpts);
         var symbolBlock       = await BuildSymbolGraphBlockAsync(cancellationToken);
         var objectiveBlock    = await BuildObjectiveBlockAsync(cancellationToken);
+        var briefBlock        = await BuildBriefBlockAsync(cancellationToken);
         var explorationBlock  = await BuildExplorationBlockAsync(cancellationToken);
         var prefixBlock       = CombineBlocks(
-                                    CombineBlocks(CombineBlocks(symbolBlock, objectiveBlock), reasoningBlock),
+                                    CombineBlocks(
+                                        CombineBlocks(
+                                            CombineBlocks(briefBlock, symbolBlock), objectiveBlock),
+                                        reasoningBlock),
                                     explorationBlock);
 
         // Phase 3: load ExecutionState once here so both LLM and hybrid paths can use it
@@ -665,7 +670,7 @@ public sealed class ConversationCompactor(
     /// </summary>
     public const string WorkflowResumptionNote =
         "RESUMPTION NOTE: History compacted. Before acting: " +
-        $"(1) read_file {FuseraftPaths.LocalBrief}, " +
+        $"(1) if the summary above does not already show the goal and files_to_change from {FuseraftPaths.LocalBrief}, read_file it now — otherwise use what is in the summary, " +
         "(2) changes_read_latest to confirm what is already done, " +
         "(3) if an EXPLORATION HISTORY block appears above, use it — " +
         "those files were already investigated; jump directly to the candidate locations listed, " +
@@ -746,6 +751,44 @@ public sealed class ConversationCompactor(
         {
             var summary = await objectiveManager.BuildActiveSummaryAsync(ct);
             return summary ?? string.Empty;
+        }
+        catch { return string.Empty; }
+    }
+
+    private async Task<string> BuildBriefBlockAsync(CancellationToken ct)
+    {
+        if (briefPath is null || !File.Exists(briefPath)) return string.Empty;
+        try
+        {
+            var json = await File.ReadAllTextAsync(briefPath, ct);
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            var sb = new StringBuilder();
+            sb.AppendLine("[BRIEF SNAPSHOT — goal, files_to_change, verify_command, execution_checklist]");
+            sb.AppendLine();
+
+            if (root.TryGetProperty("goal", out var goal))
+                sb.AppendLine($"goal: {goal.GetString()}");
+
+            if (root.TryGetProperty("files_to_change", out var files))
+            {
+                sb.AppendLine("files_to_change:");
+                foreach (var f in files.EnumerateArray())
+                    sb.AppendLine($"  - {f.GetString()}");
+            }
+
+            if (root.TryGetProperty("verify_command", out var verifyCmd))
+                sb.AppendLine($"verify_command: {verifyCmd.GetString()}");
+
+            if (root.TryGetProperty("execution_checklist", out var checklist))
+            {
+                sb.AppendLine("execution_checklist:");
+                foreach (var item in checklist.EnumerateArray())
+                    sb.AppendLine($"  - {item.GetString()}");
+            }
+
+            return sb.ToString().TrimEnd();
         }
         catch { return string.Empty; }
     }
@@ -856,8 +899,14 @@ public sealed class ConversationCompactor(
         if (eventsLogPath is null || _sessionId is not { Length: > 0 }) return string.Empty;
 
         var (fileReads, fileGreps) = await ParseToolCallEventsAsync();
-        var shellPatterns          = await ExtractShellGrepPatternsAsync(ct);
         var fileSizes              = ReadFileSizesFromCache();
+
+        // When the event log has no reads for this session yet, seed from the read cache.
+        // The cache is written synchronously on every read_file call and is always current.
+        if (fileReads.Count == 0 && fileSizes.Count > 0)
+            fileReads = fileSizes.ToDictionary(kv => kv.Key, _ => 1, StringComparer.OrdinalIgnoreCase);
+
+        var shellPatterns = await ExtractShellGrepPatternsAsync(ct);
 
         if (fileReads.Count == 0 && fileGreps.Count == 0 && shellPatterns.Count == 0)
             return string.Empty;
