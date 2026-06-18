@@ -453,6 +453,14 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         if (checkpoint.ResumeExecutorId is not null)
             orchestrator.SetResumeExecutorId(checkpoint.ResumeExecutorId);
 
+        // Restore the state machine's current state so --resume picks up at the correct
+        // workflow state (e.g. "Testing") instead of restarting from the initial state.
+        // checkpoint.CurrentStateName is saved at every compaction and at every abort.
+        if (checkpoint.CurrentStateName is not null)
+            orchestrator.SetResumeStateName(checkpoint.CurrentStateName);
+        if (orchestrator is AgentOrchestrator agentOrch && checkpoint.StateMachineState is { } smState)
+            agentOrch.SetResumeSnapshot(smState);
+
         // Restore Magentic loop-counter state so the orchestrator resumes at the correct
         // round without replaying the planning phase.
         if (orchestrator is MagenticOrchestrator magentic && checkpoint.MagenticState is { } magState)
