@@ -248,11 +248,13 @@ public sealed class ContractEngine
             return (true, null);
 
         // Extract file-path tokens from each checklist step.
-        // A token is a file path when it contains '/' or ends with a known extension.
+        // A token is a file path when it ends with a recognized source-file extension.
+        // We intentionally do NOT match on '/' alone — that would treat package-group
+        // notation ("typer/rich/langchain"), directory paths ("src/lily/defaults/"), and
+        // URLs as required file artifacts, producing false ImplementationComplete failures.
         var filePaths = checklistItems
             .SelectMany(item => item.Split(' ', StringSplitOptions.RemoveEmptyEntries))
-            .Where(token => token.Contains('/') ||
-                            ChecklistFileExtensions.Contains(Path.GetExtension(token)))
+            .Where(token => ChecklistFileExtensions.Contains(Path.GetExtension(token)))
             .Select(PathHelpers.NormalizePath)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
