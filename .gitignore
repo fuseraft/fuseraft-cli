@@ -59,3 +59,4 @@ hashnode/
 .fuseraft/memory/
 temp/TestMetadata/
 CHECKLIST.md
+.fuseraft/

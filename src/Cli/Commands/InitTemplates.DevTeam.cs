@@ -349,7 +349,7 @@ public static partial class InitTemplates
               - Handoff
             FunctionChoice: required
             MaxInTurnToolPairs: 12
-            MaxInTurnContextTokens: 30000
+            MaxInTurnContextTokens: 60000
             Context:
               - Source: session_context
               - Source: changes_recent:5
@@ -513,7 +513,6 @@ public static partial class InitTemplates
                       Field: execution_checklist
                     - Type: CommandSucceeded
                       PatternField: verify_command
-                      Pattern: "build|compile|test|check"
 
                 - Name: TestsValid
                   Requires:
@@ -540,11 +539,11 @@ public static partial class InitTemplates
                 # Escalate to HITL when an agent runs this many turns without emitting
                 # any routing signal. Survives compaction — unlike the history-scan loop
                 # warning — so it catches agents stuck after repeated compaction cycles.
-                MaxConsecutiveTurnsWithoutSignal: 8
+                MaxConsecutiveTurnsWithoutSignal: 5
 
               Verifier:
                 AgentName: Verifier
-                EveryNTurns: 4
+                EveryNTurns: 8
                 TriggerOnSuspiciousTransition: true
                 FindingsKeyword: INCONSISTENCY
 
@@ -557,7 +556,7 @@ public static partial class InitTemplates
               # WarnTurnTokens: warn when a single turn's input exceeds this value.
               # Keep this below ContextBudget.CutoverAt so the warning fires before
               # compaction is forced, giving an advance signal rather than a post-hoc note.
-              WarnTurnTokens: 60000
+              WarnTurnTokens: 100000
 
               # ContextBudget: per-agent cumulative input-token thresholds. Warns before
               # context rot sets in, then triggers compaction automatically. Counters reset
@@ -567,8 +566,8 @@ public static partial class InitTemplates
               # MaxToolResultTokens caps individual tool result size before it enters the
               # context slice — prevents a single large build log from filling the budget.
               ContextBudget:
-                WarnAt: 60000
-                CutoverAt: 100000
+                WarnAt: 100000
+                CutoverAt: 180000
                 MaxSingleTurnInputTokens: 200000
                 MaxToolResultTokens: 6000
                 InTurnToolWindow: 5
