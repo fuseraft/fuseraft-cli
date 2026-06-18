@@ -225,10 +225,6 @@ internal static class ReplNextTurn
         var fileChangeSeen     = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var toolRounds        = 0;
         var inToolBatch       = false;
-        var textStarted       = false;
-        var totalLinesAdvanced = 0;
-        var charsOnLine        = 0;
-        var termWidth          = Console.IsOutputRedirected ? int.MaxValue : Math.Max(Console.WindowWidth, 1);
 
         var turnStart = DateTime.UtcNow;
         var reqCts    = new CancellationTokenSource();
@@ -275,13 +271,6 @@ internal static class ReplNextTurn
                     }
                     else
                     {
-                        if (textStarted && !Console.IsOutputRedirected)
-                        {
-                            AnsiConsole.WriteLine();
-                            totalLinesAdvanced++;
-                            charsOnLine = 0;
-                        }
-
                         var chain = toolCallsThisTurn.Count <= 4
                             ? string.Join(" → ", toolCallsThisTurn)
                             : string.Join(" → ", toolCallsThisTurn.TakeLast(4)) +
@@ -301,57 +290,12 @@ internal static class ReplNextTurn
                 inToolBatch = false;
                 sb.Append(text);
 
-                if (!capturePlan)
-                {
-                    if (ctx.JsonMode)
-                    {
-                        ReplJsonBridge.Emit(new { type = "token", text });
-                    }
-                    else
-                    {
-                        if (!textStarted)
-                        {
-                            textStarted = true;
-                            await StopSpinnerAsync();
-                            if (!Console.IsOutputRedirected)
-                                ReplTurn.ClearSpinnerLine();
-                            AnsiConsole.WriteLine();
-                            if (!Console.IsOutputRedirected)
-                                Console.Write("\x1b7"); // save cursor at start of text area
-                            totalLinesAdvanced = 0;
-                            charsOnLine        = 0;
-                        }
-                        else if (spinning)
-                        {
-                            await StopSpinnerAsync();
-                            if (!Console.IsOutputRedirected)
-                            {
-                                var th = Math.Max(Console.WindowHeight, 1);
-                                if (totalLinesAdvanced < th - 1)
-                                {
-                                    Console.Write("\x1b8\x1b[J"); // restore cursor + clear
-                                    Console.Write("\x1b7");       // re-save for next batch
-                                }
-                                else
-                                {
-                                    Console.WriteLine();          // scrolled: continue below
-                                    Console.Write("\x1b7");
-                                }
-                            }
-                            totalLinesAdvanced = 0;
-                            charsOnLine        = 0;
-                        }
-                        if (!Console.IsOutputRedirected)
-                        {
-                            foreach (var ch in text)
-                            {
-                                if (ch == '\n') { totalLinesAdvanced++; charsOnLine = 0; }
-                                else if (++charsOnLine >= termWidth) { totalLinesAdvanced++; charsOnLine = 0; }
-                            }
-                            Console.Write(text);
-                        }
-                    }
-                }
+                // Terminal REPL never prints text live — only the spinner/tool chain is
+                // shown while generating; the full response is markdown-rendered once the
+                // turn completes (see below). JSON mode still streams tokens for the
+                // VS Code integration's own renderer.
+                if (!capturePlan && ctx.JsonMode)
+                    ReplJsonBridge.Emit(new { type = "token", text });
             }
             break;
         }
@@ -396,8 +340,7 @@ internal static class ReplNextTurn
 
             sb.Clear(); toolCallsThisTurn.Clear(); toolCallDetails.Clear();
             fileChanges.Clear(); fileChangeSeen.Clear();
-            toolRounds = 0; inToolBatch = false; textStarted = false;
-            totalLinesAdvanced = 0; charsOnLine = 0;
+            toolRounds = 0; inToolBatch = false;
 
             spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
             spinTask = ctx.JsonMode
@@ -440,25 +383,10 @@ internal static class ReplNextTurn
 
         if (!capturePlan && responseText.Length > 0 && !ctx.JsonMode)
         {
-            if (!textStarted)
-            {
-                if (!Console.IsOutputRedirected)
-                    ReplTurn.ClearSpinnerLine();
-                AnsiConsole.WriteLine();
-                AnsiConsole.Write(MarkdownRenderer.Render(responseText));
-            }
-            else
-            {
-                if (!Console.IsOutputRedirected)
-                {
-                    var termHeight = Math.Max(Console.WindowHeight, 1);
-                    if (totalLinesAdvanced < termHeight - 1)
-                        Console.Write("\x1b8\x1b[J"); // restore saved cursor + clear
-                    else
-                        Console.WriteLine();           // scrolled: render below raw text
-                }
-                AnsiConsole.Write(MarkdownRenderer.Render(responseText));
-            }
+            if (!Console.IsOutputRedirected)
+                ReplTurn.ClearSpinnerLine();
+            AnsiConsole.WriteLine();
+            AnsiConsole.Write(MarkdownRenderer.Render(responseText));
         }
         if (!ctx.JsonMode) AnsiConsole.WriteLine();
         if (responseText.Length > 0)

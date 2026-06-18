@@ -277,10 +277,6 @@ internal static class ReplTurn
         var fileChangeSeen     = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var toolRounds        = 0;
         var inToolBatch       = false;
-        var textStarted       = false;
-        var totalLinesAdvanced = 0;
-        var charsOnLine        = 0;
-        var termWidth          = Console.IsOutputRedirected ? int.MaxValue : Math.Max(Console.WindowWidth, 1);
 
         var turnStart = DateTime.UtcNow;
         var reqCts    = new CancellationTokenSource();
@@ -331,15 +327,6 @@ internal static class ReplTurn
                     }
                     else
                     {
-                        // If text has already been streamed inline, move to a fresh line
-                        // so the spinner doesn't overwrite the last streamed characters.
-                        if (textStarted && !Console.IsOutputRedirected)
-                        {
-                            AnsiConsole.WriteLine();
-                            totalLinesAdvanced++;
-                            charsOnLine = 0;
-                        }
-
                         // Update spinner label to show the accumulating tool chain live.
                         var chain = toolCallsThisTurn.Count <= 4
                             ? string.Join(" → ", toolCallsThisTurn)
@@ -361,58 +348,12 @@ internal static class ReplTurn
                 inToolBatch = false;
                 sb.Append(text);
 
-                if (!capturePlan)
-                {
-                    if (ctx.JsonMode)
-                    {
-                        ReplJsonBridge.Emit(new { type = "token", text });
-                    }
-                    else
-                    {
-                        if (!textStarted)
-                        {
-                            textStarted = true;
-                            await StopSpinnerAsync();
-                            if (!Console.IsOutputRedirected)
-                                ClearSpinnerLine();
-                            AnsiConsole.WriteLine();
-                            AnsiConsole.MarkupLine("[dim]fuseraft agent:[/]");
-                            if (!Console.IsOutputRedirected)
-                                Console.Write("\x1b7"); // save cursor at start of text area
-                            totalLinesAdvanced = 0;
-                            charsOnLine        = 0;
-                        }
-                        else if (spinning)
-                        {
-                            await StopSpinnerAsync();
-                            if (!Console.IsOutputRedirected)
-                            {
-                                var th = Math.Max(Console.WindowHeight, 1);
-                                if (totalLinesAdvanced < th - 1)
-                                {
-                                    Console.Write("\x1b8\x1b[J"); // restore cursor + clear
-                                    Console.Write("\x1b7");       // re-save for next batch
-                                }
-                                else
-                                {
-                                    Console.WriteLine();          // scrolled: continue below
-                                    Console.Write("\x1b7");
-                                }
-                            }
-                            totalLinesAdvanced = 0;
-                            charsOnLine        = 0;
-                        }
-                        if (!Console.IsOutputRedirected)
-                        {
-                            foreach (var ch in text)
-                            {
-                                if (ch == '\n') { totalLinesAdvanced++; charsOnLine = 0; }
-                                else if (++charsOnLine >= termWidth) { totalLinesAdvanced++; charsOnLine = 0; }
-                            }
-                            Console.Write(text);
-                        }
-                    }
-                }
+                // Terminal REPL never prints text live — only the spinner/tool chain is
+                // shown while generating; the full response is markdown-rendered once the
+                // turn completes (see below). JSON mode still streams tokens for the
+                // VS Code integration's own renderer.
+                if (!capturePlan && ctx.JsonMode)
+                    ReplJsonBridge.Emit(new { type = "token", text });
             }
             break; // streaming succeeded — exit retry loop
         }
@@ -461,8 +402,7 @@ internal static class ReplTurn
             // Reset per-attempt accumulators before reissuing the request.
             sb.Clear(); toolCallsThisTurn.Clear(); toolCallDetails.Clear();
             fileChanges.Clear(); fileChangeSeen.Clear();
-            toolRounds = 0; inToolBatch = false; textStarted = false;
-            totalLinesAdvanced = 0; charsOnLine = 0;
+            toolRounds = 0; inToolBatch = false;
 
             // Restart spinner for the fresh attempt.
             spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
@@ -507,27 +447,11 @@ internal static class ReplTurn
 
         if (!capturePlan && responseText.Length > 0 && !ctx.JsonMode)
         {
-            if (!textStarted)
-            {
-                // Nothing was streamed inline — render the full response with Markdown.
-                if (!Console.IsOutputRedirected)
-                    ClearSpinnerLine();
-                AnsiConsole.WriteLine();
-                AnsiConsole.MarkupLine("[dim]fuseraft agent:[/]");
-                AnsiConsole.Write(MarkdownRenderer.Render(responseText));
-            }
-            else
-            {
-                if (!Console.IsOutputRedirected)
-                {
-                    var termHeight = Math.Max(Console.WindowHeight, 1);
-                    if (totalLinesAdvanced < termHeight - 1)
-                        Console.Write("\x1b8\x1b[J"); // restore saved cursor + clear
-                    else
-                        Console.WriteLine();           // scrolled: render below raw text
-                }
-                AnsiConsole.Write(MarkdownRenderer.Render(responseText));
-            }
+            if (!Console.IsOutputRedirected)
+                ClearSpinnerLine();
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[dim]fuseraft agent:[/]");
+            AnsiConsole.Write(MarkdownRenderer.Render(responseText));
         }
         if (!ctx.JsonMode) AnsiConsole.WriteLine();
         if (responseText.Length > 0)
