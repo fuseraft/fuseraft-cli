@@ -125,10 +125,15 @@ public static class MarkdownRenderer
             if (lm.Success)
             {
                 var indentLen = lm.Groups[1].Value.Length;
-                var content   = lm.Groups[2].Value;
+                var content   = new StringBuilder(lm.Groups[2].Value);
                 var prefix    = indentLen > 0 ? new string(' ', indentLen) : "";
-                blocks.Add(new Markup($"{prefix}[dim]•[/] {ConvertInline(content)}"));
                 i++;
+                while (i < lines.Length && !IsBlockBoundary(lines[i]))
+                {
+                    content.Append(' ').Append(lines[i].Trim());
+                    i++;
+                }
+                blocks.Add(new Markup($"{prefix}[dim]•[/] {ConvertInline(content.ToString())}"));
                 continue;
             }
 
@@ -137,31 +142,27 @@ public static class MarkdownRenderer
             if (om.Success)
             {
                 var indentLen = om.Groups[1].Value.Length;
-                var content   = om.Groups[2].Value;
+                var content   = new StringBuilder(om.Groups[2].Value);
                 var numMatch  = Regex.Match(line, @"^\s*(\d+)");
                 var num       = numMatch.Success ? numMatch.Groups[1].Value : "1";
                 var prefix    = indentLen > 0 ? new string(' ', indentLen) : "";
-                blocks.Add(new Markup($"{prefix}[dim]{Markup.Escape(num)}.[/] {ConvertInline(content)}"));
                 i++;
+                while (i < lines.Length && !IsBlockBoundary(lines[i]))
+                {
+                    content.Append(' ').Append(lines[i].Trim());
+                    i++;
+                }
+                blocks.Add(new Markup($"{prefix}[dim]{Markup.Escape(num)}.[/] {ConvertInline(content.ToString())}"));
                 continue;
             }
 
-            // Paragraph: accumulate contiguous non-structural lines
+            // Paragraph: accumulate contiguous non-structural lines, reflowed as one
+            // logical line so Spectre.Console can wrap it to the actual console width.
             var para = new StringBuilder();
-            while (i < lines.Length)
+            while (i < lines.Length && !IsBlockBoundary(lines[i]))
             {
-                var pLine    = lines[i];
-                var pTrimmed = pLine.TrimStart();
-                if (string.IsNullOrWhiteSpace(pLine)) break;
-                if (pTrimmed.StartsWith("```")) break;
-                if (pTrimmed.StartsWith("|")) break;
-                if (HeadingPattern.IsMatch(pLine)) break;
-                if (pTrimmed.StartsWith(">")) break;
-                if (ListPattern.IsMatch(pLine)) break;
-                if (OListPattern.IsMatch(pLine)) break;
-                if (HrPattern.IsMatch(pTrimmed)) break;
-                if (para.Length > 0) para.Append('\n');
-                para.Append(pLine.TrimEnd());
+                if (para.Length > 0) para.Append(' ');
+                para.Append(lines[i].Trim());
                 i++;
             }
 
@@ -170,6 +171,21 @@ public static class MarkdownRenderer
         }
 
         return blocks;
+    }
+
+    // True if a line starts a new block (or is blank) and therefore cannot be a
+    // soft-wrapped continuation of the paragraph/list item being accumulated.
+    private static bool IsBlockBoundary(string line)
+    {
+        var trimmed = line.TrimStart();
+        return string.IsNullOrWhiteSpace(line)
+            || trimmed.StartsWith("```")
+            || trimmed.StartsWith("|")
+            || HeadingPattern.IsMatch(line)
+            || trimmed.StartsWith(">")
+            || ListPattern.IsMatch(line)
+            || OListPattern.IsMatch(line)
+            || HrPattern.IsMatch(trimmed);
     }
 
     // -------------------------------------------------------------------------
