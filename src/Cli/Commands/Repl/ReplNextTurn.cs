@@ -226,6 +226,9 @@ internal static class ReplNextTurn
         var toolRounds        = 0;
         var inToolBatch       = false;
         var textStarted       = false;
+        var totalLinesAdvanced = 0;
+        var charsOnLine        = 0;
+        var termWidth          = Console.IsOutputRedirected ? int.MaxValue : Math.Max(Console.WindowWidth, 1);
 
         var turnStart = DateTime.UtcNow;
         var reqCts    = new CancellationTokenSource();
@@ -273,7 +276,11 @@ internal static class ReplNextTurn
                     else
                     {
                         if (textStarted && !Console.IsOutputRedirected)
+                        {
                             AnsiConsole.WriteLine();
+                            totalLinesAdvanced++;
+                            charsOnLine = 0;
+                        }
 
                         var chain = toolCallsThisTurn.Count <= 4
                             ? string.Join(" → ", toolCallsThisTurn)
@@ -309,19 +316,30 @@ internal static class ReplNextTurn
                             if (!Console.IsOutputRedirected)
                                 ReplTurn.ClearSpinnerLine();
                             AnsiConsole.WriteLine();
-                            // Save cursor for Markdown re-render after streaming completes.
-                            if (!Console.IsOutputRedirected)
-                                Console.Write("\x1b7");
+                            totalLinesAdvanced = 0;
+                            charsOnLine        = 0;
                         }
                         else if (spinning)
                         {
                             await StopSpinnerAsync();
-                            // Restore to saved position and clear so the new segment replaces the previous one.
                             if (!Console.IsOutputRedirected)
-                                Console.Write("\x1b8\x1b[J");
+                            {
+                                if (totalLinesAdvanced > 0)
+                                    Console.Write($"\x1b[{totalLinesAdvanced}A");
+                                Console.Write("\r\x1b[J");
+                            }
+                            totalLinesAdvanced = 0;
+                            charsOnLine        = 0;
                         }
                         if (!Console.IsOutputRedirected)
+                        {
+                            foreach (var ch in text)
+                            {
+                                if (ch == '\n') { totalLinesAdvanced++; charsOnLine = 0; }
+                                else if (++charsOnLine >= termWidth) { totalLinesAdvanced++; charsOnLine = 0; }
+                            }
                             Console.Write(text);
+                        }
                     }
                 }
             }
@@ -369,6 +387,7 @@ internal static class ReplNextTurn
             sb.Clear(); toolCallsThisTurn.Clear(); toolCallDetails.Clear();
             fileChanges.Clear(); fileChangeSeen.Clear();
             toolRounds = 0; inToolBatch = false; textStarted = false;
+            totalLinesAdvanced = 0; charsOnLine = 0;
 
             spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
             spinTask = ctx.JsonMode
@@ -421,7 +440,11 @@ internal static class ReplNextTurn
             else
             {
                 if (!Console.IsOutputRedirected)
-                    Console.Write("\x1b8\x1b[J");
+                {
+                    if (totalLinesAdvanced > 0)
+                        Console.Write($"\x1b[{totalLinesAdvanced}A");
+                    Console.Write("\r\x1b[J");
+                }
                 AnsiConsole.Write(MarkdownRenderer.Render(responseText));
             }
         }
