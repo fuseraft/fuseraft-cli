@@ -371,6 +371,10 @@ public sealed class SessionRunner(
 
         if (redirect == null)
         {
+            // Persist the current state machine position so --resume restores to the correct
+            // state (e.g. "Testing") rather than restarting from the initial state.
+            await TrySaveStateMachinePositionAsync(checkpoint);
+
             AnsiConsole.MarkupLine(
                 $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] paused — resume with:[/] " +
                 $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
@@ -543,6 +547,26 @@ public sealed class SessionRunner(
             $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
         return Task.FromResult(new HandlerOutcome(ShouldBreak: true, ShouldContinue: false, CompactionNeeded: false,
             Succeeded: false, ErrorMessage: ex.Message));
+    }
+
+    // Captures the state machine's current state name and failure counters into the
+    // checkpoint and persists it. Called before aborting so --resume can restore the
+    // correct workflow state instead of restarting from the initial state (Preflight).
+    private async Task TrySaveStateMachinePositionAsync(SessionCheckpoint checkpoint)
+    {
+        try
+        {
+            if (orchestrator is not AgentOrchestrator ao) return;
+            if (ao.CurrentSnapshotter is not Orchestration.Strategies.StateMachineSelectionStrategy smss) return;
+
+            var snap = await smss.SnapshotAsync(CancellationToken.None);
+            if (!string.IsNullOrWhiteSpace(snap.CurrentStateName))
+                checkpoint.CurrentStateName = snap.CurrentStateName;
+
+            checkpoint.StateMachineState = smss.TakeCheckpointState();
+            await sessionStore.SaveAsync(checkpoint, CancellationToken.None);
+        }
+        catch { /* best-effort: if this fails the checkpoint is stale but the session still ends cleanly */ }
     }
 
     // ── Session finalization ──────────────────────────────────────────────────
