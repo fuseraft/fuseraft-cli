@@ -316,6 +316,8 @@ internal static class ReplNextTurn
                             if (!Console.IsOutputRedirected)
                                 ReplTurn.ClearSpinnerLine();
                             AnsiConsole.WriteLine();
+                            if (!Console.IsOutputRedirected)
+                                Console.Write("\x1b7"); // save cursor at start of text area
                             totalLinesAdvanced = 0;
                             charsOnLine        = 0;
                         }
@@ -324,9 +326,17 @@ internal static class ReplNextTurn
                             await StopSpinnerAsync();
                             if (!Console.IsOutputRedirected)
                             {
-                                if (totalLinesAdvanced > 0)
-                                    Console.Write($"\x1b[{totalLinesAdvanced}A");
-                                Console.Write("\r\x1b[J");
+                                var th = Math.Max(Console.WindowHeight, 1);
+                                if (totalLinesAdvanced < th - 1)
+                                {
+                                    Console.Write("\x1b8\x1b[J"); // restore cursor + clear
+                                    Console.Write("\x1b7");       // re-save for next batch
+                                }
+                                else
+                                {
+                                    Console.WriteLine();          // scrolled: continue below
+                                    Console.Write("\x1b7");
+                                }
                             }
                             totalLinesAdvanced = 0;
                             charsOnLine        = 0;
@@ -441,9 +451,11 @@ internal static class ReplNextTurn
             {
                 if (!Console.IsOutputRedirected)
                 {
-                    if (totalLinesAdvanced > 0)
-                        Console.Write($"\x1b[{totalLinesAdvanced}A");
-                    Console.Write("\r\x1b[J");
+                    var termHeight = Math.Max(Console.WindowHeight, 1);
+                    if (totalLinesAdvanced < termHeight - 1)
+                        Console.Write("\x1b8\x1b[J"); // restore saved cursor + clear
+                    else
+                        Console.WriteLine();           // scrolled: render below raw text
                 }
                 AnsiConsole.Write(MarkdownRenderer.Render(responseText));
             }
