@@ -24,17 +24,18 @@ public static partial class InitTemplates
     public static GeneratedConfig Build(string template, string model, string? endpoint) =>
         template switch
         {
-            "solo"       => GeneratedConfig.Inline(Solo(model, endpoint)),
-            "research"   => Research(model, endpoint),
-            "pipeline"   => Pipeline(model, endpoint),
-            "swe"        => Swe(model, endpoint),
-            "brownfield" => Brownfield(model, endpoint),
-            "magentic"   => GeneratedConfig.Inline(Magentic(model, endpoint)),
-            "debate"     => GeneratedConfig.Inline(Debate(model, endpoint)),
-            "audit"      => Audit(model, endpoint),
-            "data"       => Data(model, endpoint),
-            "devops"     => DevOps(model, endpoint),
-            _            => Swe(model, endpoint),
+            "solo"        => GeneratedConfig.Inline(Solo(model, endpoint)),
+            "research"    => Research(model, endpoint),
+            "pipeline"    => Pipeline(model, endpoint),
+            "swe"         => Swe(model, endpoint),
+            "greenfield"  => Greenfield(model, endpoint),
+            "brownfield"  => Brownfield(model, endpoint),
+            "magentic"    => GeneratedConfig.Inline(Magentic(model, endpoint)),
+            "debate"      => GeneratedConfig.Inline(Debate(model, endpoint)),
+            "audit"       => Audit(model, endpoint),
+            "data"        => Data(model, endpoint),
+            "devops"      => DevOps(model, endpoint),
+            _             => Swe(model, endpoint),
         };
 
     /// <summary>Returns a newline-prefixed <c>Endpoint:</c> line for inline agent blocks, or empty when <paramref name="endpoint"/> is unset.</summary>
@@ -68,7 +69,7 @@ public static partial class InitTemplates
     // Standard ContextWindow blocks used by developer and tester agents to strip tool
     // frames from cross-turn history and cap how far back each turn looks.
     private const string DeveloperContextWindow = """
-        MaxInTurnContextTokens: 30000
+        MaxInTurnContextTokens: 60000
         ContextWindow:
           TextOnly: true
           MaxTurnAge: 5
