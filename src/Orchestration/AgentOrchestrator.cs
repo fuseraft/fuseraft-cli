@@ -271,6 +271,21 @@ public sealed class AgentOrchestrator(
         {
             logger.LogDebug("Resuming session... replaying {Turns} prior turns.", priorHistory.Count);
 
+            // Build a set of signals that are valid exits for the current state so that
+            // wrong-signal handoff calls from a prior stuck run are not reconstructed as
+            // plain text. Surfacing them would mislead the resumed agent into copying the
+            // bad signal rather than emitting the correct one.
+            var validSignalsForCurrentState = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var currentStateAgentName = string.Empty;
+            if (!string.IsNullOrWhiteSpace(session.ResumeStateName)
+                && config.Selection.StateMachine?.States.TryGetValue(
+                    session.ResumeStateName, out var resumeStateConfig) == true)
+            {
+                currentStateAgentName = resumeStateConfig.Agent ?? string.Empty;
+                foreach (var t in resumeStateConfig.Transitions.Where(t => !string.IsNullOrWhiteSpace(t.Signal)))
+                    validSignalsForCurrentState.Add(t.Signal!);
+            }
+
             foreach (var prior in priorHistory)
             {
                 var role    = prior.Role == MessageRole.User ? ChatRole.User : ChatRole.Assistant;
@@ -279,6 +294,9 @@ public sealed class AgentOrchestrator(
                 // FunctionCallContent is not preserved in AgentMessage, so tool-call-only turns
                 // (zero text, finish_reason=tool_calls) replay as empty messages. Recover the
                 // handoff keyword so IsSignalOnOwnLine can detect it without FunctionCallContent.
+                // Only inject signals that are valid for the current state when the message
+                // is from the current state's agent — a wrong signal from a prior stuck run
+                // would appear as an in-context example and confuse the resumed model.
                 if (role == ChatRole.Assistant && string.IsNullOrEmpty(content))
                 {
                     var handoff = prior.ToolCalls?.FirstOrDefault(tc =>
@@ -286,7 +304,13 @@ public sealed class AgentOrchestrator(
                     if (handoff?.ArgsSummary is { } s &&
                         s.StartsWith($"{HandoffPlugin.ArgumentName}=", StringComparison.OrdinalIgnoreCase))
                     {
-                        content = s[(HandoffPlugin.ArgumentName.Length + 1)..].Trim();
+                        var routeKeyword = s[(HandoffPlugin.ArgumentName.Length + 1)..].Trim();
+                        bool isCurrentAgent = string.Equals(
+                            prior.AgentName, currentStateAgentName, StringComparison.OrdinalIgnoreCase);
+                        bool isValidSignal = validSignalsForCurrentState.Count == 0
+                            || validSignalsForCurrentState.Contains(routeKeyword);
+                        if (!isCurrentAgent || isValidSignal)
+                            content = routeKeyword;
                     }
                 }
 

@@ -807,33 +807,66 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
     {
         if (_history is null || state.Transitions.Count == 0) return;
 
-        // Find the most recent agent text message.
+        var validSignals = state.Transitions
+            .Where(t => !string.IsNullOrWhiteSpace(t.Signal))
+            .Select(t => t.Signal!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (validSignals.Count == 0) return;
+
         for (int i = history.Count - 1; i >= 0; i--)
         {
             var msg = history[i];
             if (msg.Role == ChatRole.Tool) continue;
             if (msg.Role == ChatRole.User) return;
-            if (msg.Role != ChatRole.Assistant || string.IsNullOrEmpty(msg.Text)) continue;
+            if (msg.Role != ChatRole.Assistant) continue;
 
-            // Only nudge when the last agent in history is the current state's agent.
+            // Extract the handoff signal from an FCC call, if present.
+            string? fccSignal = null;
+            foreach (var item in msg.Contents)
+            {
+                if (item is FunctionCallContent fc
+                    && string.Equals(fc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase)
+                    && fc.Arguments?.TryGetValue(HandoffPlugin.ArgumentName, out var kwObj) == true
+                    && kwObj?.ToString() is { Length: > 0 } kw)
+                {
+                    fccSignal = kw;
+                    break;
+                }
+            }
+
+            // Skip the empty shortcircuit tail message (no text, no handoff FCC).
+            if (string.IsNullOrEmpty(msg.Text) && fccSignal is null) continue;
+
+            // Only nudge when the last substantive agent message is from the current state's agent.
             if (!string.Equals(msg.AuthorName, state.Agent, StringComparison.OrdinalIgnoreCase))
                 return;
 
-            var signals = state.Transitions
-                .Where(t => !string.IsNullOrWhiteSpace(t.Signal))
-                .Select(t => $"'{t.Signal}'")
-                .Distinct()
-                .ToList();
+            var signalList = string.Join(", ", validSignals.Select(s => $"'{s}'"));
+            string correction;
+            if (fccSignal is not null
+                && !validSignals.Contains(fccSignal, StringComparer.OrdinalIgnoreCase))
+            {
+                // Targeted correction: name the wrong signal so the model knows exactly what to fix.
+                correction =
+                    $"You called handoff with '{fccSignal}' but that signal is not valid in " +
+                    $"state '{_currentState}'. Do NOT use '{fccSignal}'. " +
+                    $"The valid signals for this state are: {signalList}. " +
+                    $"Complete your work and emit one of those signals.";
+            }
+            else
+            {
+                correction =
+                    $"Your last turn ended without emitting a required transition signal. " +
+                    $"If your work in state '{_currentState}' is complete, emit one of the " +
+                    $"following signals as the last line of your response: " +
+                    $"{signalList}. " +
+                    $"If work remains, complete it first (one tool call at a time), " +
+                    $"then end your response with the appropriate signal.";
+            }
 
-            if (signals.Count == 0) return;
-
-            _history.Add(new ChatMessage(ChatRole.User,
-                $"Your last turn ended without emitting a required transition signal. " +
-                $"If your work in state '{_currentState}' is complete, emit one of the " +
-                $"following signals as the last line of your response: " +
-                $"{string.Join(", ", signals)}. " +
-                $"If work remains, complete it first (one tool call at a time), " +
-                $"then end your response with the appropriate signal."));
+            _history.Add(new ChatMessage(ChatRole.User, correction));
             return;
         }
     }
