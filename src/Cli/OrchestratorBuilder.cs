@@ -105,12 +105,13 @@ public static class OrchestratorBuilder
 
         bool useMagentic      = config.Selection.Type.Equals(OrchestratorTypes.Magentic,      StringComparison.OrdinalIgnoreCase);
         bool useGraph         = config.Selection.Type.Equals(OrchestratorTypes.Graph,         StringComparison.OrdinalIgnoreCase);
+        bool useWorkflow      = config.Selection.Type.Equals(OrchestratorTypes.Workflow,      StringComparison.OrdinalIgnoreCase);
         bool useAdversarial   = config.Selection.Type.Equals(OrchestratorTypes.Adversarial,   StringComparison.OrdinalIgnoreCase);
         bool useMapReduce     = config.Selection.Type.Equals(OrchestratorTypes.MapReduce,     StringComparison.OrdinalIgnoreCase);
         bool useScatterGather = config.Selection.Type.Equals(OrchestratorTypes.ScatterGather, StringComparison.OrdinalIgnoreCase);
 
         var (configAfterStrategy, compactor, skillCurator) = await ValidateAndSelectStrategy(
-            config, loggerFactory, chatClientFactory, useMagentic, useGraph, useAdversarial, useMapReduce, useScatterGather,
+            config, loggerFactory, chatClientFactory, useMagentic, useGraph, useWorkflow, useAdversarial, useMapReduce, useScatterGather,
             infra.KnowledgeLayer, infra.ObjectiveManager, infra.KnowledgeSandbox, projectSlug,
             infra.IntentLog, infra.EvidenceStore, infra.ExecutionStatePath, infra.InvestigationLogPath,
             sessionId, readCachePath: infra.ReadCachePath, cancellationToken);
@@ -120,7 +121,7 @@ public static class OrchestratorBuilder
 
         var orchestrator = CreateOrchestrator(
             config, loggerFactory, chatClientFactory, pluginRegistry,
-            governanceKernel, humanApprovalService, hitlMode, useMagentic, useGraph, useAdversarial, useMapReduce, useScatterGather,
+            governanceKernel, humanApprovalService, hitlMode, useMagentic, useGraph, useWorkflow, useAdversarial, useMapReduce, useScatterGather,
             infra.ChangeTracker, infra.EventEmitter, infra.KnowledgeLayer, infra.ObjectiveManager,
             infra.KnowledgeSandbox, projectSlug, sessionId,
             infra.ExecutionStatePath, infra.InvestigationLogPath,
@@ -796,6 +797,7 @@ public static class OrchestratorBuilder
         ChatClientFactory chatClientFactory,
         bool useMagentic,
         bool useGraph,
+        bool useWorkflow,
         bool useAdversarial,
         bool useMapReduce,
         bool useScatterGather,
@@ -916,13 +918,15 @@ public static class OrchestratorBuilder
                 "The Magentic block will be ignored. Set Selection.Type: magentic to enable it.",
                 config.Selection.Type);
 
-        // Warn when Selection.Graph is configured but Selection.Type is not "graph" —
-        // the Graph block would be silently ignored and the session would run as sequential.
+        // Warn when Selection.Graph is configured but Selection.Type is neither "graph" nor
+        // "workflow" (both consume the same Selection.Graph block) — it would be silently
+        // ignored and the session would run as sequential.
         if (config.Selection.Graph is not null &&
-            !config.Selection.Type.Equals(OrchestratorTypes.Graph, StringComparison.OrdinalIgnoreCase))
+            !config.Selection.Type.Equals(OrchestratorTypes.Graph, StringComparison.OrdinalIgnoreCase) &&
+            !config.Selection.Type.Equals(OrchestratorTypes.Workflow, StringComparison.OrdinalIgnoreCase))
             loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
-                "Selection.Graph is configured but Selection.Type is '{Type}', not 'graph'. " +
-                "The Graph block will be ignored. Set Selection.Type: graph to enable it.",
+                "Selection.Graph is configured but Selection.Type is '{Type}', not 'graph' or 'workflow'. " +
+                "The Graph block will be ignored. Set Selection.Type: graph or workflow to enable it.",
                 config.Selection.Type);
 
         // Validate verifier config: the named agent must exist in the agent pool.
@@ -1253,6 +1257,98 @@ public static class OrchestratorBuilder
             }
         }
 
+        // Validate workflow config at startup when the cycle-native workflow strategy is
+        // selected. WorkflowOrchestrator reuses Selection.Graph (same schema as 'graph') but
+        // is a v1 implementation — Parallel, SubGraphId, RequireHumanApproval, RecoveryAgent,
+        // and no-keyword (unconditional) edges are rejected here rather than silently ignored.
+        // See WorkflowOrchestrator's class doc comment and docs/strategies.md for rationale.
+        if (useWorkflow)
+        {
+            if (config.Selection.Graph is null)
+                throw new InvalidOperationException(
+                    "Selection.Type 'workflow' requires a 'Selection.Graph' configuration block.");
+
+            var wfCfg      = config.Selection.Graph;
+            var agentByName = config.Agents.ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
+            var agentNames = agentByName.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var nodeIds    = wfCfg.Nodes.Select(n => n.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            if (wfCfg.Nodes.Count == 0)
+                throw new InvalidOperationException(
+                    "Selection.Graph.Nodes must contain at least one node.");
+
+            var seenNodeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var node in wfCfg.Nodes)
+            {
+                if (string.IsNullOrWhiteSpace(node.Id))
+                    throw new InvalidOperationException(
+                        "Every node in Selection.Graph.Nodes must have a non-empty 'Id'.");
+                if (!seenNodeIds.Add(node.Id))
+                    throw new InvalidOperationException(
+                        $"Duplicate node Id '{node.Id}' found in Selection.Graph.Nodes. Node Ids must be unique.");
+
+                if (!string.IsNullOrWhiteSpace(node.SubGraphId))
+                    throw new InvalidOperationException(
+                        $"Workflow node '{node.Id}' sets 'SubGraphId', which Selection.Type 'workflow' " +
+                        "does not support in this version. Use Selection.Type 'graph' for sub-graph nodes.");
+
+                if (node.Parallel)
+                    throw new InvalidOperationException(
+                        $"Workflow node '{node.Id}' sets 'Parallel: true', which Selection.Type 'workflow' " +
+                        "does not support in this version. Use Selection.Type 'graph' for parallel fan-out.");
+
+                if (string.IsNullOrWhiteSpace(node.Agent))
+                    throw new InvalidOperationException(
+                        $"Workflow node '{node.Id}' must specify an 'Agent' name.");
+                if (!agentByName.TryGetValue(node.Agent, out var nodeAgentCfg))
+                    throw new InvalidOperationException(
+                        $"Workflow node '{node.Id}' references agent '{node.Agent}' " +
+                        $"which is not defined in 'Orchestration.Agents'.");
+
+                // Selection.Type 'workflow' routes exclusively via the Handoff plugin's
+                // handoff(route_keyword: ...) tool call — there is no text-on-its-own-line
+                // fallback the way 'graph' has. Reject rather than silently fail every turn.
+                if (!nodeAgentCfg.Plugins.Contains(HandoffPlugin.PluginName, StringComparer.OrdinalIgnoreCase))
+                    throw new InvalidOperationException(
+                        $"Workflow node '{node.Id}' agent '{node.Agent}' does not have the " +
+                        $"'{HandoffPlugin.PluginName}' plugin enabled. " +
+                        "Selection.Type 'workflow' routes exclusively via handoff(route_keyword: ...) " +
+                        "tool calls (no text-keyword fallback) — add 'Handoff' to this agent's Plugins list.");
+            }
+
+            foreach (var edge in wfCfg.Edges)
+            {
+                if (!nodeIds.Contains(edge.From))
+                    throw new InvalidOperationException(
+                        $"Workflow edge From='{edge.From}' does not match any node Id in Selection.Graph.Nodes.");
+                if (!nodeIds.Contains(edge.To))
+                    throw new InvalidOperationException(
+                        $"Workflow edge To='{edge.To}' does not match any node Id in Selection.Graph.Nodes.");
+
+                if (string.IsNullOrEmpty(edge.Keyword))
+                    throw new InvalidOperationException(
+                        $"Workflow edge From='{edge.From}' To='{edge.To}' has no 'Keyword'. " +
+                        "Selection.Type 'workflow' requires every edge to declare a Keyword in this version " +
+                        "(no unconditional routing). Use Selection.Type 'graph' for unconditional edges.");
+
+                if (edge.RequireHumanApproval)
+                    throw new InvalidOperationException(
+                        $"Workflow edge From='{edge.From}' To='{edge.To}' sets 'RequireHumanApproval: true', " +
+                        "which Selection.Type 'workflow' does not support in this version. " +
+                        "Use Selection.Type 'graph' for human-approval gates.");
+
+                if (edge.RecoveryAgent is not null)
+                    throw new InvalidOperationException(
+                        $"Workflow edge From='{edge.From}' To='{edge.To}' sets 'RecoveryAgent', " +
+                        "which Selection.Type 'workflow' does not support in this version. " +
+                        "Use Selection.Type 'graph' for recovery agents.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(wfCfg.EntryNode) && !nodeIds.Contains(wfCfg.EntryNode))
+                throw new InvalidOperationException(
+                    $"Selection.Graph.EntryNode '{wfCfg.EntryNode}' does not match any node Id in Selection.Graph.Nodes.");
+        }
+
         ConversationCompactor? compactor = null;
         if (config.Compaction is { } compactionConfig)
         {
@@ -1387,6 +1483,7 @@ public static class OrchestratorBuilder
         bool hitlMode,
         bool useMagentic,
         bool useGraph,
+        bool useWorkflow,
         bool useAdversarial,
         bool useMapReduce,
         bool useScatterGather,
@@ -1483,6 +1580,13 @@ public static class OrchestratorBuilder
                 hitlMode ? humanApprovalService : null,
                 contextPipeline, knowledgeStore,
                 loggerFactory);
+        }
+        else if (useWorkflow)
+        {
+            var wfLogger = loggerFactory.CreateLogger<WorkflowOrchestrator>();
+            orchestrator  = new WorkflowOrchestrator(
+                config, agentFactory, wfLogger,
+                changeTracker, eventEmitter);
         }
         else if (useAdversarial)
         {
