@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Text;
 using A2A;
 using AgentGovernance;
@@ -6,6 +7,7 @@ using AgentGovernance.Audit;
 using AgentGovernance.Hypervisor;
 using AgentGovernance.Trust;
 using Microsoft.Agents.AI;
+using Microsoft.Agents.AI.Compaction;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using fuseraft.Core;
@@ -422,7 +424,7 @@ public sealed class AgentFactory(
                     messages = TruncateIntermediateAssistantReasoning(messages);
 
                     if (maxInTurnToolPairs > 0)
-                        messages = KeepLastToolPairs(messages, maxInTurnToolPairs);
+                        messages = await KeepLastToolPairs(messages, maxInTurnToolPairs, ct);
 
                     if (maxInTurnChars > 0)
                         messages = TrimInTurnContext(messages, maxInTurnChars);
@@ -532,37 +534,49 @@ public sealed class AgentFactory(
                     }
                 },
                 getStreamingResponseFunc: (messages, options, inner, ct) =>
-                {
-                    messages = DropSupersededWritePairs(messages);
-                    messages = DropSupersededObservationalPairs(messages);
-                    messages = CompressSupersededShellPairs(messages);
-                    messages = TruncateIntermediateAssistantReasoning(messages);
-
-                    if (maxInTurnToolPairs > 0)
-                        messages = KeepLastToolPairs(messages, maxInTurnToolPairs);
-
-                    if (maxInTurnChars > 0)
-                        messages = TrimInTurnContext(messages, maxInTurnChars);
-                    if (hasHandoff && HandoffWasInvoked(messages))
-                        return EmptyStreamingResponse();
-
-                    var merged = chatOptions is not null ? MergeOptions(messages, options, chatOptions) : options;
-
-                    // Cannot retry mid-stream — pre-trim proactively when limits are known.
-                    // Without configured limits we have no target, so trimming is skipped and
-                    // a provider rejection surfaces as a normal error for the user to see.
-                    if (maxContextChars > 0 || maxPayloadBytes > 0)
-                        messages = ProactivelyTrimIfNeeded(
-                            config.Name, messages, maxContextChars, maxPayloadBytes, toolSchemaChars, _logger);
-
-                    if (emitter is not null)
-                        _ = emitter.EmitAsync(EventTypes.ModelCall,
-                            agent: config.Name, turn: null,
-                            payload: new { model = config.Model.ModelId, streaming = true });
-
-                    return inner.GetStreamingResponseAsync(messages, merged, ct);
-                })
+                    StreamWithToolPairWindowAsync(messages, options, inner, ct))
             .Build();
+
+        // KeepLastToolPairs is async (it delegates to MAF's ToolResultCompactionStrategy),
+        // so the streaming path — unlike getResponseFunc above, which is already async —
+        // needs to be its own async iterator rather than a synchronous lambda that returns
+        // inner.GetStreamingResponseAsync(...) directly.
+        async IAsyncEnumerable<ChatResponseUpdate> StreamWithToolPairWindowAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options,
+            IChatClient inner,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            messages = DropSupersededWritePairs(messages);
+            messages = DropSupersededObservationalPairs(messages);
+            messages = CompressSupersededShellPairs(messages);
+            messages = TruncateIntermediateAssistantReasoning(messages);
+
+            if (maxInTurnToolPairs > 0)
+                messages = await KeepLastToolPairs(messages, maxInTurnToolPairs, ct);
+
+            if (maxInTurnChars > 0)
+                messages = TrimInTurnContext(messages, maxInTurnChars);
+            if (hasHandoff && HandoffWasInvoked(messages))
+                yield break;
+
+            var merged = chatOptions is not null ? MergeOptions(messages, options, chatOptions) : options;
+
+            // Cannot retry mid-stream — pre-trim proactively when limits are known.
+            // Without configured limits we have no target, so trimming is skipped and
+            // a provider rejection surfaces as a normal error for the user to see.
+            if (maxContextChars > 0 || maxPayloadBytes > 0)
+                messages = ProactivelyTrimIfNeeded(
+                    config.Name, messages, maxContextChars, maxPayloadBytes, toolSchemaChars, _logger);
+
+            if (emitter is not null)
+                _ = emitter.EmitAsync(EventTypes.ModelCall,
+                    agent: config.Name, turn: null,
+                    payload: new { model = config.Model.ModelId, streaming = true });
+
+            await foreach (var update in inner.GetStreamingResponseAsync(messages, merged, ct))
+                yield return update;
+        }
     }
 
     /// <summary>
@@ -1119,69 +1133,42 @@ public sealed class AgentFactory(
         return result;
     }
 
-    private static IEnumerable<ChatMessage> KeepLastToolPairs(
+    // One ToolResultCompactionStrategy per distinct maxPairs value, shared across all agents
+    // and calls that use it — the strategy is stateless (just a trigger + a count), so
+    // there's no reason to reallocate it on every inner LLM call.
+    private static readonly ConcurrentDictionary<int, ToolResultCompactionStrategy> _toolPairStrategies = new();
+
+    /// <summary>
+    /// Deterministic sliding-window cap: collapses tool-call/result groups beyond the most
+    /// recent <paramref name="maxPairs"/> into compact summaries via MAF's
+    /// <see cref="ToolResultCompactionStrategy"/>, applied unconditionally on every call
+    /// (<see cref="CompactionTriggers.Always"/>) — <see cref="ToolResultCompactionStrategy.MinimumPreservedGroups"/>
+    /// is the actual limiting mechanism, so this stays O(maxPairs) regardless of how many
+    /// tool calls the agent has made.
+    /// </summary>
+    /// <remarks>
+    /// Collapsing replaces the entire atomic tool-call group — the calling assistant message
+    /// plus all of its tool results, including any <c>ProtectedData</c> reasoning blob — with
+    /// one new assistant summary message. A <see cref="FunctionCallContent"/> is therefore
+    /// never left without its matching <see cref="FunctionResultContent"/>, which strict
+    /// providers require.
+    /// <para>
+    /// Note: <paramref name="maxPairs"/> now bounds MAF "groups" (one assistant turn plus all
+    /// of its tool results, even when the turn issued several parallel calls), not individual
+    /// <see cref="ChatRole.Tool"/> messages as the previous hand-rolled implementation counted.
+    /// Turns with parallel tool calls collapse as a single unit rather than per call.
+    /// </para>
+    /// </remarks>
+    internal static async Task<IEnumerable<ChatMessage>> KeepLastToolPairs(
         IEnumerable<ChatMessage> messages,
-        int maxPairs)
+        int maxPairs,
+        CancellationToken cancellationToken = default)
     {
-        var list = messages as IList<ChatMessage> ?? messages.ToList();
+        var strategy = _toolPairStrategies.GetOrAdd(maxPairs,
+            n => new ToolResultCompactionStrategy(CompactionTriggers.Always, minimumPreservedGroups: n));
 
-        // Collect indices of ChatRole.Tool messages in order (oldest → newest).
-        var toolIndices = new List<int>(list.Count);
-        for (int i = 0; i < list.Count; i++)
-            if (list[i].Role == ChatRole.Tool) toolIndices.Add(i);
-
-        if (toolIndices.Count <= maxPairs) return list;
-
-        var result = new List<ChatMessage>(list);
-        const string Placeholder = "[result omitted — sliding window]";
-        int cutoff = toolIndices.Count - maxPairs;
-
-        // Track assistant messages whose paired tool results are being evicted so their
-        // ProtectedData (accumulated extended-thinking blobs) can be stripped in tandem.
-        // Keeping ProtectedData on evicted rounds causes O(N×thinking) token accumulation
-        // since EstimateContentChars now accounts for it and the budget trimmer will fire —
-        // but proactively dropping it here keeps the sliding window truly O(maxPairs).
-        var assistantIndicesToStrip = new HashSet<int>();
-
-        for (int k = 0; k < cutoff; k++)
-        {
-            int idx = toolIndices[k];
-            var old = result[idx];
-            var trimmed = old.Contents
-                .OfType<FunctionResultContent>()
-                .Select(fr => (AIContent)new FunctionResultContent(fr.CallId, Placeholder))
-                .ToList<AIContent>();
-            result[idx] = new ChatMessage(old.Role,
-                trimmed.Count > 0 ? trimmed : [new TextContent(Placeholder)]);
-
-            // Find the assistant message that issued these tool calls (immediately preceding).
-            for (int j = idx - 1; j >= 0; j--)
-            {
-                if (result[j].Role == ChatRole.Assistant)
-                {
-                    assistantIndicesToStrip.Add(j);
-                    break;
-                }
-            }
-        }
-
-        // Strip ProtectedData from assistant messages whose tool pairs are being evicted.
-        // The reasoning for those rounds is stale and is no longer needed by the provider.
-        foreach (int aIdx in assistantIndicesToStrip)
-        {
-            var msg = result[aIdx];
-            if (!msg.Contents.OfType<TextReasoningContent>().Any(trc => trc.ProtectedData is not null))
-                continue;
-
-            var stripped = msg.Contents
-                .Select(c => c is TextReasoningContent trc && trc.ProtectedData is not null
-                    ? (AIContent)new TextReasoningContent(trc.Text) { ProtectedData = null }
-                    : c)
-                .ToList();
-            result[aIdx] = new ChatMessage(msg.Role, stripped) { AuthorName = msg.AuthorName };
-        }
-
-        return result;
+        return await CompactionProvider.CompactAsync(strategy, messages, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1619,12 +1606,6 @@ public sealed class AgentFactory(
             break; // User message = turn boundary; no handoff in this batch.
         }
         return false;
-    }
-
-    private static async IAsyncEnumerable<ChatResponseUpdate> EmptyStreamingResponse()
-    {
-        await Task.CompletedTask;
-        yield break;
     }
 
     private static ChatOptions MergeOptions(
