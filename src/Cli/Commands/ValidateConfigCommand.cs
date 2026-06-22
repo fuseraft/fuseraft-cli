@@ -148,6 +148,12 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
             ValidateWorkflowRestrictions(config, issues);
         }
 
+        if (selType == OrchestratorTypes.MapReduce)
+            ValidateMapReduce(config, issues);
+
+        if (selType == OrchestratorTypes.ScatterGather)
+            ValidateScatterGather(config, issues);
+
         if (selType == OrchestratorTypes.StateMachine)
             ValidateStateMachine(config, issues);
 
@@ -570,6 +576,75 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
             if (!string.IsNullOrWhiteSpace(edge.RecoveryAgent) && !agentNames.Contains(edge.RecoveryAgent))
                 issues.Add(("warning", $"{prefix}: RecoveryAgent '{edge.RecoveryAgent}' is not defined in Agents."));
         }
+    }
+
+    // Mirrors OrchestratorBuilder.ValidateAndSelectStrategy's Selection.MapReduce checks.
+    private static void ValidateMapReduce(
+        OrchestrationConfig config,
+        List<(string Level, string Message)> issues)
+    {
+        var mr = config.Selection.MapReduce;
+        if (mr is null)
+        {
+            issues.Add(("error", "Selection.Type 'mapreduce' requires a 'Selection.MapReduce' configuration block."));
+            return;
+        }
+
+        var agentNames = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (string.IsNullOrWhiteSpace(mr.Splitter))
+            issues.Add(("error", "Selection.MapReduce.Splitter must be a non-empty agent name."));
+        else if (!agentNames.Contains(mr.Splitter))
+            issues.Add(("error", $"Selection.MapReduce.Splitter '{mr.Splitter}' is not defined in 'Orchestration.Agents'."));
+
+        if (string.IsNullOrWhiteSpace(mr.Mapper))
+            issues.Add(("error", "Selection.MapReduce.Mapper must be a non-empty agent name."));
+        else if (!agentNames.Contains(mr.Mapper))
+            issues.Add(("error", $"Selection.MapReduce.Mapper '{mr.Mapper}' is not defined in 'Orchestration.Agents'."));
+
+        if (string.IsNullOrWhiteSpace(mr.Reducer))
+            issues.Add(("error", "Selection.MapReduce.Reducer must be a non-empty agent name."));
+        else if (!agentNames.Contains(mr.Reducer))
+            issues.Add(("error", $"Selection.MapReduce.Reducer '{mr.Reducer}' is not defined in 'Orchestration.Agents'."));
+
+        if (mr.MaxConcurrency < 0)
+            issues.Add(("error", $"Selection.MapReduce.MaxConcurrency must be >= 0 (got {mr.MaxConcurrency}). Use 0 for unlimited."));
+
+        if (mr.MaxSplitterRetries < 1)
+            issues.Add(("error", $"Selection.MapReduce.MaxSplitterRetries must be at least 1 (got {mr.MaxSplitterRetries})."));
+
+        if (string.IsNullOrWhiteSpace(mr.ItemsJsonPath))
+            issues.Add(("error", "Selection.MapReduce.ItemsJsonPath must be a non-empty string."));
+    }
+
+    // Mirrors OrchestratorBuilder.ValidateAndSelectStrategy's Selection.ScatterGather checks.
+    private static void ValidateScatterGather(
+        OrchestrationConfig config,
+        List<(string Level, string Message)> issues)
+    {
+        var sg = config.Selection.ScatterGather;
+        if (sg is null)
+        {
+            issues.Add(("error", "Selection.Type 'scattergather' requires a 'Selection.ScatterGather' configuration block."));
+            return;
+        }
+
+        var agentNames = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (sg.Participants.Count == 0)
+            issues.Add(("error", "Selection.ScatterGather.Participants must contain at least one agent name."));
+
+        foreach (var p in sg.Participants)
+            if (string.IsNullOrWhiteSpace(p) || !agentNames.Contains(p))
+                issues.Add(("error", $"Selection.ScatterGather.Participants contains '{p}' which is not defined in 'Orchestration.Agents'."));
+
+        if (string.IsNullOrWhiteSpace(sg.Synthesizer))
+            issues.Add(("error", "Selection.ScatterGather.Synthesizer must be a non-empty agent name."));
+        else if (!agentNames.Contains(sg.Synthesizer))
+            issues.Add(("error", $"Selection.ScatterGather.Synthesizer '{sg.Synthesizer}' is not defined in 'Orchestration.Agents'."));
+
+        if (sg.MaxConcurrency < 0)
+            issues.Add(("error", $"Selection.ScatterGather.MaxConcurrency must be >= 0 (got {sg.MaxConcurrency}). Use 0 for unlimited."));
     }
 
     // Selection.Type 'workflow' reuses the same Selection.Graph block as 'graph' (checked by
