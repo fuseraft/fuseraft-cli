@@ -124,7 +124,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
         // Selection strategy
         var selType = config.Selection.Type.ToLowerInvariant();
-        if (selType is not (OrchestratorTypes.Sequential or OrchestratorTypes.RoundRobin or OrchestratorTypes.Llm or OrchestratorTypes.Keyword or OrchestratorTypes.Structured or OrchestratorTypes.Magentic or OrchestratorTypes.StateMachine or OrchestratorTypes.Graph or OrchestratorTypes.Adversarial))
+        if (selType is not (OrchestratorTypes.Sequential or OrchestratorTypes.RoundRobin or OrchestratorTypes.Llm or OrchestratorTypes.Keyword or OrchestratorTypes.Structured or OrchestratorTypes.Magentic or OrchestratorTypes.StateMachine or OrchestratorTypes.Graph or OrchestratorTypes.Workflow or OrchestratorTypes.Adversarial or OrchestratorTypes.MapReduce or OrchestratorTypes.ScatterGather))
             issues.Add(("error", $"Unknown selection type: '{config.Selection.Type}'."));
 
         if (selType == OrchestratorTypes.Llm && config.Selection.Model is null)
@@ -141,6 +141,12 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
         if (selType == OrchestratorTypes.Graph)
             ValidateGraph(config, issues);
+
+        if (selType == OrchestratorTypes.Workflow)
+        {
+            ValidateGraph(config, issues);
+            ValidateWorkflowRestrictions(config, issues);
+        }
 
         if (selType == OrchestratorTypes.StateMachine)
             ValidateStateMachine(config, issues);
@@ -563,6 +569,53 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
             if (!string.IsNullOrWhiteSpace(edge.RecoveryAgent) && !agentNames.Contains(edge.RecoveryAgent))
                 issues.Add(("warning", $"{prefix}: RecoveryAgent '{edge.RecoveryAgent}' is not defined in Agents."));
+        }
+    }
+
+    // Selection.Type 'workflow' reuses the same Selection.Graph block as 'graph' (checked by
+    // ValidateGraph above) but is a v1 implementation that rejects Parallel, SubGraphId,
+    // RequireHumanApproval, RecoveryAgent, and no-keyword edges, and requires every node's
+    // agent to have the Handoff plugin (routing is tool-call-only, no text-keyword fallback).
+    // Mirrors the same checks OrchestratorBuilder.ValidateAndSelectStrategy enforces at run
+    // time, so 'fuseraft validate' surfaces them without needing to actually run a session.
+    private static void ValidateWorkflowRestrictions(
+        OrchestrationConfig config,
+        List<(string Level, string Message)> issues)
+    {
+        var graph = config.Selection.Graph;
+        if (graph is null) return;
+
+        var agentByName = config.Agents.ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < graph.Nodes.Count; i++)
+        {
+            var node   = graph.Nodes[i];
+            var prefix = $"Selection.Graph.Nodes[{i}] (id='{node.Id}')";
+
+            if (!string.IsNullOrWhiteSpace(node.SubGraphId))
+                issues.Add(("error", $"{prefix}: 'SubGraphId' is not supported under Selection.Type 'workflow'. Use 'graph' instead."));
+
+            if (node.Parallel)
+                issues.Add(("error", $"{prefix}: 'Parallel: true' is not supported under Selection.Type 'workflow'. Use 'graph' instead."));
+
+            if (!string.IsNullOrWhiteSpace(node.Agent) && agentByName.TryGetValue(node.Agent, out var agentCfg)
+                && !agentCfg.Plugins.Contains(HandoffPlugin.PluginName, StringComparer.OrdinalIgnoreCase))
+                issues.Add(("error", $"{prefix}: agent '{node.Agent}' must have '{HandoffPlugin.PluginName}' in Plugins — 'workflow' routes exclusively via handoff(route_keyword: ...) tool calls."));
+        }
+
+        for (int i = 0; i < graph.Edges.Count; i++)
+        {
+            var edge   = graph.Edges[i];
+            var prefix = $"Selection.Graph.Edges[{i}] (From='{edge.From}' To='{edge.To}')";
+
+            if (string.IsNullOrEmpty(edge.Keyword))
+                issues.Add(("error", $"{prefix}: 'Keyword' is required under Selection.Type 'workflow' — unconditional edges are not supported. Use 'graph' instead."));
+
+            if (edge.RequireHumanApproval)
+                issues.Add(("error", $"{prefix}: 'RequireHumanApproval' is not supported under Selection.Type 'workflow'. Use 'graph' instead."));
+
+            if (edge.RecoveryAgent is not null)
+                issues.Add(("error", $"{prefix}: 'RecoveryAgent' is not supported under Selection.Type 'workflow'. Use 'graph' instead."));
         }
     }
 
