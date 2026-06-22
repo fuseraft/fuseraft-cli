@@ -688,6 +688,84 @@ All agents referenced inside any sub-graph must be declared in the top-level `Or
 
 ---
 
+### workflow
+
+A cycle-native sibling of `graph`. It reads the **same** `Selection.Graph` block — switching
+`Selection.Type` from `graph` to `workflow` on an existing config is close to a drop-in engine
+swap (subject to the v1 limitations below, including every node's agent needing the `Handoff`
+plugin enabled — already true of the shipped `graph` template's agents, so usually a no-op in
+practice). The difference is internal: `graph`
+compiles forward edges into a Microsoft Agent Framework (MAF) workflow per "phase" and restarts
+that phase when a back-edge fires; `workflow` compiles the *entire* graph — cyclic edges included
+— into one persistent MAF workflow built once per session. There is no forward/back-edge
+distinction at all: every edge, looping or not, is an ordinary keyword-gated route.
+
+```yaml
+Selection:
+  Type: workflow
+  Graph:
+    EntryNode: planner
+    Nodes:
+      - Id: planner
+        Agent: Planner
+      - Id: developer
+        Agent: Developer
+      - Id: tester
+        Agent: Tester
+      - Id: approved
+        Agent: Tester
+        Terminal: true
+    Edges:
+      - From: planner
+        To: developer
+        Keyword: "HANDOFF TO DEVELOPER"
+        Validators:
+          - RequireBrief
+      - From: developer
+        To: tester
+        Keyword: "HANDOFF TO TESTER"
+        Validators:
+          - RequireWriteFile
+      - From: tester
+        To: developer
+        Keyword: BUGS FOUND      # a cycle — just an ordinary edge here, nothing special
+      - From: tester
+        To: approved
+        Keyword: APPROVED
+```
+
+**v1 limitations** — config validation rejects these rather than silently ignoring them; use
+`graph` instead if you need them:
+
+- `Parallel: true` nodes and `SubGraphId` (sub-graph) nodes are not supported.
+- `RequireHumanApproval` and `RecoveryAgent` on edges are not supported.
+- Every edge must declare a `Keyword` — unconditional (no-keyword) edges are not supported.
+- Routing is **tool-call-only**: every node's agent must declare `Handoff` in its `Plugins` list
+  (config validation rejects the config otherwise) and must route by calling
+  `handoff(route_keyword: "KEYWORD")`. Unlike `graph`, there is no fallback that scans the
+  agent's free-text response for the keyword on its own line — this matches how MAF's own native
+  handoff pattern routes (real tool calls, not text scanning), and removes a class of correction
+  retries caused by text-parsing fragility (markdown-wrapped keywords, keywords embedded in
+  prose, etc.).
+
+Other differences from `graph`, not config-rejected but worth knowing:
+
+- No governance/circuit-breaker integration, no unified context-assembly pipeline (always uses
+  the legacy `ContextWindowFilter`), no `context_window_warn` events, and no
+  repository-knowledge-store observation extraction.
+- Sessions always start from `EntryNode`; there is no resume-from-the-interrupted-node support
+  after compaction (`graph` resumes from wherever it left off — `workflow` restarts the whole
+  pipeline). For long, compaction-prone sessions this is a real usability gap to weigh against
+  the simpler cycle handling.
+- The iteration cap (`Termination.MaxIterations`) counts total node executions across the whole
+  session, not "phases" (since there are no phases) — size it accordingly.
+
+All `GraphConfig`/`GraphNodeConfig`/`GraphEdgeConfig` fields are identical to `graph` (see the
+tables above) except that the v1-rejected fields, when set under `Selection.Type: workflow`,
+fail config validation at startup with a message pointing at `graph` as the alternative.
+
+---
+
 ### scattergather
 
 A two-phase broadcast orchestration: all **participant** agents receive the same task in parallel (each in an isolated context window), and a **synthesizer** agent aggregates their independent responses into a single final answer.
@@ -1118,6 +1196,15 @@ Graph fits naturally when:
 Graph and keyword routing use the same `handoff()` plugin for typed signalling, but their text-scan rules differ: keyword routing uses relaxed matching (keyword at start of line followed by whitespace or punctuation also fires), while graph uses strict matching (keyword must be alone on its own line, no trailing text). Migrating an existing keyword config to graph requires mapping agents to node IDs and routes to edges. The main addition is the explicit `EntryNode` and the flat `Edges` list with `From`/`To` fields.
 
 **What graph trades away:** lossless compaction and Verifier integration. For hallucination-resistant routing where agents cannot route themselves to an unexpected node, state machine remains the stronger choice.
+
+### Workflow
+
+Same topology model as graph — same config block, same back-edges-as-explicit-edges idea —
+but built on a single persistent MAF workflow instead of graph's per-cycle phase restart. Try
+`workflow` over `graph` when you want the simpler engine and don't need `Parallel`/`SubGraphId`/
+`RequireHumanApproval`/`RecoveryAgent` or resume-after-compaction from the interrupted node (see
+the v1 limitations under the `workflow` reference section above). Switching back to `graph` later
+is just changing `Selection.Type` back — the `Selection.Graph` block doesn't need to change.
 
 ---
 
