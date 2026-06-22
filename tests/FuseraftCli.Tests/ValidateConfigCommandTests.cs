@@ -928,16 +928,49 @@ public class ValidateConfigCommandTests : IDisposable
     }
 
     // -----------------------------------------------------------------------
-    // MapReduce / ScatterGather selection-type recognition
+    // MapReduce selection tests
     // -----------------------------------------------------------------------
 
     [Fact]
-    public async Task MapReduceSelection_Recognized_NotUnknownType()
+    public async Task MapReduceSelection_ValidConfig_Returns0()
     {
-        // Regression test: 'mapreduce' was also missing from the selection-type allowlist —
-        // found incidentally while fixing the same gap for 'workflow'. ValidateConfigCommand
-        // has no dedicated structural checks for MapReduce (unlike Graph/Magentic/Adversarial),
-        // so this only proves the type is recognized, not that its config block is validated.
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "Splitter", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Mapper", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Reducer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
+            ],
+            "Selection": {
+              "Type": "mapreduce",
+              "MapReduce": {
+                "Splitter": "Splitter",
+                "Mapper": "Mapper",
+                "Reducer": "Reducer",
+                "ItemsJsonPath": "items"
+              }
+            }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(0, exitCode);
+    }
+
+    [Fact]
+    public async Task MapReduceSelection_MissingBlock_Errors()
+    {
+        // Regression test: 'mapreduce' was missing from the selection-type allowlist entirely
+        // (found while fixing the same gap for 'workflow'), so this used to report "Unknown
+        // selection type" instead of the more useful "missing MapReduce block" message.
         var config = """
         {
           "Orchestration": {
@@ -954,13 +987,116 @@ public class ValidateConfigCommandTests : IDisposable
         var command = new ValidateConfigCommand(registry);
         var exitCode = await command.ExecuteAsync(null!, settings);
 
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task MapReduceSelection_UnknownSplitterAgent_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "Mapper", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Reducer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
+            ],
+            "Selection": {
+              "Type": "mapreduce",
+              "MapReduce": {
+                "Splitter": "Missing",
+                "Mapper": "Mapper",
+                "Reducer": "Reducer"
+              }
+            }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task MapReduceSelection_MaxSplitterRetriesZero_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "Splitter", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Mapper", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Reducer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
+            ],
+            "Selection": {
+              "Type": "mapreduce",
+              "MapReduce": {
+                "Splitter": "Splitter",
+                "Mapper": "Mapper",
+                "Reducer": "Reducer",
+                "MaxSplitterRetries": 0
+              }
+            }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    // -----------------------------------------------------------------------
+    // ScatterGather selection tests
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task ScatterGatherSelection_ValidConfig_Returns0()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "Expert1", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Expert2", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Synthesizer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
+            ],
+            "Selection": {
+              "Type": "scattergather",
+              "ScatterGather": {
+                "Participants": ["Expert1", "Expert2"],
+                "Synthesizer": "Synthesizer"
+              }
+            }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
         Assert.Equal(0, exitCode);
     }
 
     [Fact]
-    public async Task ScatterGatherSelection_Recognized_NotUnknownType()
+    public async Task ScatterGatherSelection_MissingBlock_Errors()
     {
-        // Same regression as MapReduce above, for 'scattergather'.
+        // Regression test: 'scattergather' was missing from the selection-type allowlist
+        // entirely (found alongside the same 'mapreduce' gap).
         var config = """
         {
           "Orchestration": {
@@ -977,7 +1113,66 @@ public class ValidateConfigCommandTests : IDisposable
         var command = new ValidateConfigCommand(registry);
         var exitCode = await command.ExecuteAsync(null!, settings);
 
-        Assert.Equal(0, exitCode);
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task ScatterGatherSelection_NoParticipants_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [{"Name": "Synthesizer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
+            "Selection": {
+              "Type": "scattergather",
+              "ScatterGather": {
+                "Participants": [],
+                "Synthesizer": "Synthesizer"
+              }
+            }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task ScatterGatherSelection_UnknownParticipant_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "Expert1", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Synthesizer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
+            ],
+            "Selection": {
+              "Type": "scattergather",
+              "ScatterGather": {
+                "Participants": ["Expert1", "Missing"],
+                "Synthesizer": "Synthesizer"
+              }
+            }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
     }
 
     // -----------------------------------------------------------------------
