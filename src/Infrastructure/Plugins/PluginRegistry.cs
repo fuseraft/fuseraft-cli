@@ -110,10 +110,10 @@ public sealed class PluginRegistry : IDisposable
         Register("SessionContext", () => new SessionContextPlugin(
             Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "state", "sessions", "default", "context_summary.md")));
 
-        // Stubs — OrchestratorBuilder replaces these with session-scoped instances. All four are
-        // the same ArtifactPlugin class registered under different names/paths/tool identities —
-        // see ArtifactPlugin's doc comment for why one class can serve every recon-style agent
-        // without any of them seeing a write function meant for a different agent.
+        // Stubs — OrchestratorBuilder replaces these with session-scoped instances. All are the
+        // same ArtifactPlugin class registered under different names/paths/tool identities —
+        // see ArtifactPlugin's doc comment for why one class can serve every recon/planning-style
+        // agent without any of them seeing a write function meant for a different agent.
         var defaultArtifactBase = Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "state", "sessions", "default");
         Register("Conventions", () => new ArtifactPlugin(
             Path.Combine(defaultArtifactBase, "conventions.json"), ArtifactFormat.Json,
@@ -124,11 +124,29 @@ public sealed class PluginRegistry : IDisposable
         Register("Preflight", () => new ArtifactPlugin(
             Path.Combine(defaultArtifactBase, "preflight.json"), ArtifactFormat.Json,
             "write_file_preflight", ReconDescriptions.Preflight));
+        Register("Brief", () => new ArtifactPlugin(
+            Path.Combine(defaultArtifactBase, "brief.json"), ArtifactFormat.Json,
+            "write_file_brief", ReconDescriptions.Brief));
+        Register("BriefReview", () => new ArtifactPlugin(
+            Path.Combine(defaultArtifactBase, "brief-review.json"), ArtifactFormat.Json,
+            "write_file_brief_review", ReconDescriptions.BriefReview));
 
-        // Stub — Configure() replaces this with a sandbox-rooted instance.
+        // Stubs — Configure() replaces these with sandbox-rooted instances.
         Register("AuditFindings", () => new ArtifactPlugin(
             Path.Combine(Directory.GetCurrentDirectory(), FuseraftPaths.LocalAuditFindings), ArtifactFormat.Json,
             "write_file_audit_findings", ReconDescriptions.AuditFindings));
+        Register("RemediationPlan", () => new ArtifactPlugin(
+            Path.Combine(Directory.GetCurrentDirectory(), FuseraftPaths.LocalRemediationPlan), ArtifactFormat.Json,
+            "write_file_remediation_plan", ReconDescriptions.RemediationPlan));
+        Register("OpsPlan", () => new ArtifactPlugin(
+            Path.Combine(Directory.GetCurrentDirectory(), FuseraftPaths.LocalOpsPlan), ArtifactFormat.Yaml,
+            "write_file_ops_plan", ReconDescriptions.OpsPlan));
+        Register("ResearchFindings", () => new ArtifactPlugin(
+            Path.Combine(Directory.GetCurrentDirectory(), FuseraftPaths.LocalResearchFindings), ArtifactFormat.Md,
+            "write_file_research_findings", ReconDescriptions.ResearchFindings));
+        Register("ResearchReview", () => new ArtifactPlugin(
+            Path.Combine(Directory.GetCurrentDirectory(), FuseraftPaths.LocalResearchReview), ArtifactFormat.Json,
+            "write_file_research_review", ReconDescriptions.ResearchReview));
 
         // Stub — ReplCommand replaces this with a real instance bound to the live session.
         Register("Session", () => new ReplSessionPlugin("stub", DateTime.UtcNow, "unknown", Directory.GetCurrentDirectory()));
@@ -177,12 +195,27 @@ public sealed class PluginRegistry : IDisposable
         Register("Http",       () => new HttpPlugin(_sharedHttpClient, allowedHosts, apiProfiles, allowPrivateHosts, _loggerFactory?.CreateLogger<HttpPlugin>()));
         Register("Document",   () => new DocumentPlugin(sandboxRoot));
 
-        // Resolve against the same root FileSystemPlugin uses, so the Auditor's findings land
-        // exactly where Prioritizer's read_file expects them regardless of sandbox configuration.
-        var auditFindingsBase = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : Directory.GetCurrentDirectory();
+        // Resolve against the same root FileSystemPlugin uses, so each artifact lands exactly
+        // where its downstream reader's read_file expects it regardless of sandbox configuration.
+        // Same rationale as the session-scoped Conventions/DiscoveryBrief/Preflight/Brief/
+        // BriefReview registrations in OrchestratorBuilder — these four just have no
+        // {session_id}/{project_slug} in their path, so they're sandbox- not session-scoped.
+        var artifactBase = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : Directory.GetCurrentDirectory();
         Register("AuditFindings", () => new ArtifactPlugin(
-            Path.Combine(auditFindingsBase, FuseraftPaths.LocalAuditFindings), ArtifactFormat.Json,
+            Path.Combine(artifactBase, FuseraftPaths.LocalAuditFindings), ArtifactFormat.Json,
             "write_file_audit_findings", ReconDescriptions.AuditFindings));
+        Register("RemediationPlan", () => new ArtifactPlugin(
+            Path.Combine(artifactBase, FuseraftPaths.LocalRemediationPlan), ArtifactFormat.Json,
+            "write_file_remediation_plan", ReconDescriptions.RemediationPlan));
+        Register("OpsPlan", () => new ArtifactPlugin(
+            Path.Combine(artifactBase, FuseraftPaths.LocalOpsPlan), ArtifactFormat.Yaml,
+            "write_file_ops_plan", ReconDescriptions.OpsPlan));
+        Register("ResearchFindings", () => new ArtifactPlugin(
+            Path.Combine(artifactBase, FuseraftPaths.LocalResearchFindings), ArtifactFormat.Md,
+            "write_file_research_findings", ReconDescriptions.ResearchFindings));
+        Register("ResearchReview", () => new ArtifactPlugin(
+            Path.Combine(artifactBase, FuseraftPaths.LocalResearchReview), ArtifactFormat.Json,
+            "write_file_research_review", ReconDescriptions.ResearchReview));
         return this;
     }
 

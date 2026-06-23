@@ -117,9 +117,10 @@ public static partial class InitTemplates
                  commands, test failures, or "REPLAN REQUIRED" in the session context.
                  IF a failure signal is present:
                    - Read the test report and recent changes to understand the specific failure.
-                   - Update {FuseraftPaths.LocalBrief}: revise implementation_hints to target
-                     the root cause, add a failure_analysis field describing what went wrong
-                     and why the previous approach failed.
+                   - Revise the brief: call write_file_brief(content: ..., format: "json") with
+                     the full updated brief — implementation_hints retargeted at the root cause,
+                     plus a new failure_analysis field describing what went wrong and why the
+                     previous approach failed.
                    - Do NOT re-handoff with the same brief — the Developer already tried it.
                    - Append to (or create) the known_pitfalls array in the brief: each entry
                      names an approach already tried and why it failed. The Developer reads
@@ -134,7 +135,8 @@ public static partial class InitTemplates
                   Address every blocking issue explicitly in the revised brief.
                   Do NOT re-handoff with blocking issues unresolved — the same brief will
                   be rejected again. For each fix, note what you changed in implementation_hints.
-              5. Write a brief to {FuseraftPaths.LocalBrief} with fields:
+              5. Call write_file_brief(content: ..., format: "json"). content must be a JSON
+                 object with exactly these top-level fields:
                    goal — one-sentence description of what to build
                    files_to_change — array of paths RELATIVE TO THE SANDBOX ROOT
                      Correct:  src/module/file.py
@@ -179,6 +181,10 @@ public static partial class InitTemplates
                      contract silently.
               6. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO CRITIC").
+
+              You are read-only with respect to this project's own files — you have no
+              write_file/patch_file access. write_file_brief is the only way to persist this
+              brief; implementing the task itself is the Developer's job, not yours.
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
@@ -188,7 +194,10 @@ public static partial class InitTemplates
               - SubAgent
               - Decision
               - Objective
+              - Brief
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;
@@ -230,8 +239,8 @@ public static partial class InitTemplates
                  Each hint must name a file AND a symbol/method AND explain why it matters. Flag
                  hints that name only a file with no symbol ("src/foo.py — relevant").
 
-              6a. IF ANY BLOCKING ISSUES: Call write_file to save {FuseraftPaths.LocalBriefReview}
-                  as a JSON object with two fields:
+              6a. IF ANY BLOCKING ISSUES: Call write_file_brief_review(content: ..., format: "json").
+                  content must be a JSON object with two fields:
                     "blocking_issues"      — array of strings, each a mandatory fix the Planner
                                              MUST address before the brief can be approved
                                              (missing files, untestable criteria, hollow commands)
@@ -242,14 +251,21 @@ public static partial class InitTemplates
                   do not inflate this list with stylistic preferences.
 
               6b. IF NO BLOCKING ISSUES: Call handoff(route_keyword: "BRIEF APPROVED").
-                  Optional improvements may still be written to {FuseraftPaths.LocalBriefReview}
-                  as a record, but do not block on them.
+                  Optional improvements may still be written via write_file_brief_review as a
+                  record, but do not block on them.
+
+              You are read-only with respect to this project's own files — you have no
+              write_file/patch_file access. write_file_brief_review is the only way to persist
+              your review; revising or implementing the brief is the Planner's job, not yours.
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
               - FileSystem
               - SubAgent
+              - BriefReview
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;

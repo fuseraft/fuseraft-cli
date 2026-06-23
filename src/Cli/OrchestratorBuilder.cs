@@ -620,11 +620,12 @@ public static class OrchestratorBuilder
             : FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionContext, "default", projectSlug);
         pluginRegistry.Register("SessionContext", () => new fuseraft.Infrastructure.Plugins.SessionContextPlugin(ctxSummaryPath));
 
-        // Narrow, fixed-path artifact writers for recon-style agents (brownfield's
-        // Archaeologist, greenfield/swe's Preflight) so they can be locked to FileSystem:[read]
-        // via Capabilities while still persisting their own findings. One ArtifactPlugin class
-        // registered three times — see ArtifactPlugin's doc comment for why each registration
-        // still gives its agent exactly one, uniquely-named write function.
+        // Narrow, fixed-path artifact writers for recon/planning-style agents (brownfield's
+        // Archaeologist, greenfield/swe's Preflight, every template's Planner, swe's
+        // PlannerCritic) so they can be locked to FileSystem:[read] via Capabilities while
+        // still persisting their own findings. One ArtifactPlugin class registered many times
+        // — see ArtifactPlugin's doc comment for why each registration still gives its agent
+        // exactly one, uniquely-named write function.
         var reconSessionId = sessionId is { Length: > 0 } ? sessionId : "default";
         pluginRegistry.Register("Conventions", () => new fuseraft.Infrastructure.Plugins.ArtifactPlugin(
             FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalConventions, reconSessionId, projectSlug),
@@ -638,6 +639,14 @@ public static class OrchestratorBuilder
             FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalPreflight, reconSessionId, projectSlug),
             fuseraft.Infrastructure.Plugins.ArtifactFormat.Json,
             "write_file_preflight", fuseraft.Infrastructure.Plugins.ReconDescriptions.Preflight));
+        pluginRegistry.Register("Brief", () => new fuseraft.Infrastructure.Plugins.ArtifactPlugin(
+            FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalBrief, reconSessionId, projectSlug),
+            fuseraft.Infrastructure.Plugins.ArtifactFormat.Json,
+            "write_file_brief", fuseraft.Infrastructure.Plugins.ReconDescriptions.Brief));
+        pluginRegistry.Register("BriefReview", () => new fuseraft.Infrastructure.Plugins.ArtifactPlugin(
+            FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalBriefReview, reconSessionId, projectSlug),
+            fuseraft.Infrastructure.Plugins.ArtifactFormat.Json,
+            "write_file_brief_review", fuseraft.Infrastructure.Plugins.ReconDescriptions.BriefReview));
 
         // Brownfield: seed the change envelope from the Archaeologist's discovery brief
         // when the brief already exists on disk (written by a prior recon pass).

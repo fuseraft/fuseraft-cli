@@ -22,7 +22,8 @@ public static partial class InitTemplates
                  For any direct file reads: {LargeFileProtocol}
               4. Check if {FuseraftPaths.LocalOpsPlan} already exists. If it does, read it — if it
                  still covers the current task, call handoff(route_keyword: "PLAN READY") immediately.
-              5. Write an ops plan to {FuseraftPaths.LocalOpsPlan} (YAML) with these fields:
+              5. Call write_file_ops_plan(content: ..., format: "yaml"). content must be YAML
+                 with these top-level fields:
                    goal           — what the operation achieves (one sentence)
                    steps          — ordered list of exact shell commands to execute
                    verify_command — the exact command to confirm success (health check, smoke test)
@@ -32,13 +33,20 @@ public static partial class InitTemplates
                    notes          — any warnings, known dependencies, or timing constraints
               6. {ContextWriteStep}
               When the plan is ready, call handoff(route_keyword: "PLAN READY").
+
+              You are read-only with respect to this project's own files — you have no
+              write_file/patch_file access. write_file_ops_plan is the only way to persist this
+              plan; running the operation is the Executor's job, not yours.
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
               - FileSystem
               - SessionContext
               - SubAgent
+              - OpsPlan
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;
