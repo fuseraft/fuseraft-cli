@@ -32,15 +32,15 @@ public static partial class InitTemplates
                  - Use read_file (with startLine/maxLines) to read relevant code sections in full.
               3. For each issue found, call record_investigation(summary, conclusion) so your
                  findings survive compaction and are visible to subsequent agents.
-              4. Call write_file_audit_findings(...) with one parallel array per field, all the
-                 same length — one entry per finding, in the same order:
-                   ids             — sequential by type: "SEC-001", "QUA-001", "CMP-001", "COR-001"
-                   severities      — "critical", "high", "medium", or "low"
-                   types           — "security", "quality", "compliance", or "correctness"
-                   files           — relative file path
-                   lines           — line number (integer)
-                   descriptions    — what the issue is
-                   recommendations — what to do about it
+              4. Call write_file_audit_findings(content: ..., format: "json"). content must be a
+                 JSON object with a single "findings" array. Each element has these fields:
+                   id             — sequential ID by type: "SEC-001", "QUA-001", "CMP-001", "COR-001"
+                   severity       — "critical", "high", "medium", or "low"
+                   type           — "security", "quality", "compliance", or "correctness"
+                   file           — relative file path
+                   line           — line number (integer)
+                   description    — what the issue is
+                   recommendation — what to do about it
               5. Verify the file is written and non-empty before routing.
               When the scan is complete, call handoff(route_keyword: "AUDIT COMPLETE").
             Model:
@@ -51,7 +51,7 @@ public static partial class InitTemplates
               - Shell
               - SubAgent
               - Investigation
-              - Audit
+              - AuditFindings
               - Handoff
             Capabilities:
               FileSystem: [read]
