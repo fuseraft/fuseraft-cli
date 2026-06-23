@@ -75,6 +75,8 @@ public static partial class InitTemplates
               - Changes
               - SessionContext
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             MaxInTurnToolPairs: 12
             {AgentFileOptions}
@@ -103,6 +105,8 @@ public static partial class InitTemplates
               - Changes
               - SessionContext
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;
