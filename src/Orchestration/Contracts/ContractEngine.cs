@@ -461,21 +461,40 @@ public sealed class ContractEngine
 
         if (pred.HasAssertions == true && _validationConfig?.ChangeLogPath is { } logPath)
         {
-            var succeededCommands = await LoadSucceededCommandsAsync(ct);
-            var reportCommands    = report.Results
-                .SelectMany(r => new[] { r.Command, r.Evidence })
-                .Where(c => !string.IsNullOrWhiteSpace(c))
-                .Select(c => c!)
+            var succeededCommands = (await LoadSucceededCommandsAsync(ct))
+                .Select(NormalizeWhitespace)
                 .ToList();
 
-            bool anyVerified = reportCommands.Any(rc =>
-                succeededCommands.Any(sc =>
-                    sc.Contains(rc, StringComparison.OrdinalIgnoreCase) ||
-                    rc.Contains(sc, StringComparison.OrdinalIgnoreCase)));
+            if (succeededCommands.Count > 0)
+            {
+                // Each result's claimed command must itself have actually run — i.e. it must be
+                // a substring of (or equal to) some command that succeeded. Only that direction
+                // counts: a real "pytest" run does NOT verify a fabricated, more specific claim
+                // like "pytest tests/test_foo.py::test_bar" just because "pytest" appears inside
+                // it — that's exactly the per-test fabrication pattern this check exists to catch.
+                // Verification is per-row, not "any one row in the whole report" — otherwise a
+                // single genuine command could vouch for an arbitrary number of fabricated ones.
+                var unverified = report.Results
+                    .Where(r => !string.IsNullOrWhiteSpace(r.Command) || !string.IsNullOrWhiteSpace(r.Evidence))
+                    .Where(r =>
+                    {
+                        var claims = new[] { r.Command, r.Evidence }
+                            .Where(c => !string.IsNullOrWhiteSpace(c))
+                            .Select(c => NormalizeWhitespace(c!));
+                        return !claims.Any(rc =>
+                            succeededCommands.Any(sc => sc.Contains(rc, StringComparison.OrdinalIgnoreCase)));
+                    })
+                    .ToList();
 
-            if (!anyVerified && succeededCommands.Count > 0)
-                return (false,
-                    $"Contract '{contractName}' failed — test report commands not found in session log (possible fabrication). Re-run tests with shell_run and update the report.");
+                if (unverified.Count > 0)
+                    return (false,
+                        $"Contract '{contractName}' failed — {unverified.Count} test report result(s) cite a command that never ran (possible fabrication):\n" +
+                        string.Join("\n", unverified.Select(r =>
+                            $"  ✗ {r.Criterion ?? "(unnamed)"}: \"{r.Command ?? r.Evidence}\"")) +
+                        "\nEvery result's command must be one you actually ran with shell_run. If one test " +
+                        "run verifies multiple criteria, cite that same exact command for each — do not " +
+                        "invent more specific per-test variants that were never actually run.");
+            }
         }
 
         return (true, null);
