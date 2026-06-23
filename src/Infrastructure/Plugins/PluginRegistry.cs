@@ -110,18 +110,25 @@ public sealed class PluginRegistry : IDisposable
         Register("SessionContext", () => new SessionContextPlugin(
             Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "state", "sessions", "default", "context_summary.md")));
 
-        // Stub — OrchestratorBuilder replaces this with a session-scoped instance.
-        Register("Recon", () => new ReconPlugin(
-            Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "state", "sessions", "default", "conventions.json"),
-            Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "state", "sessions", "default", "brief.brownfield.json")));
-
-        // Stub — OrchestratorBuilder replaces this with a session-scoped instance.
-        Register("Preflight", () => new PreflightPlugin(
-            Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "state", "sessions", "default", "preflight.json")));
+        // Stubs — OrchestratorBuilder replaces these with session-scoped instances. All four are
+        // the same ArtifactPlugin class registered under different names/paths/tool identities —
+        // see ArtifactPlugin's doc comment for why one class can serve every recon-style agent
+        // without any of them seeing a write function meant for a different agent.
+        var defaultArtifactBase = Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "state", "sessions", "default");
+        Register("Conventions", () => new ArtifactPlugin(
+            Path.Combine(defaultArtifactBase, "conventions.json"), ArtifactFormat.Json,
+            "write_file_conventions", ReconDescriptions.Conventions));
+        Register("DiscoveryBrief", () => new ArtifactPlugin(
+            Path.Combine(defaultArtifactBase, "brief.brownfield.json"), ArtifactFormat.Json,
+            "write_file_discovery_brief", ReconDescriptions.DiscoveryBrief));
+        Register("Preflight", () => new ArtifactPlugin(
+            Path.Combine(defaultArtifactBase, "preflight.json"), ArtifactFormat.Json,
+            "write_file_preflight", ReconDescriptions.Preflight));
 
         // Stub — Configure() replaces this with a sandbox-rooted instance.
-        Register("Audit", () => new AuditPlugin(
-            Path.Combine(Directory.GetCurrentDirectory(), FuseraftPaths.LocalAuditFindings)));
+        Register("AuditFindings", () => new ArtifactPlugin(
+            Path.Combine(Directory.GetCurrentDirectory(), FuseraftPaths.LocalAuditFindings), ArtifactFormat.Json,
+            "write_file_audit_findings", ReconDescriptions.AuditFindings));
 
         // Stub — ReplCommand replaces this with a real instance bound to the live session.
         Register("Session", () => new ReplSessionPlugin("stub", DateTime.UtcNow, "unknown", Directory.GetCurrentDirectory()));
@@ -173,7 +180,9 @@ public sealed class PluginRegistry : IDisposable
         // Resolve against the same root FileSystemPlugin uses, so the Auditor's findings land
         // exactly where Prioritizer's read_file expects them regardless of sandbox configuration.
         var auditFindingsBase = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : Directory.GetCurrentDirectory();
-        Register("Audit", () => new AuditPlugin(Path.Combine(auditFindingsBase, FuseraftPaths.LocalAuditFindings)));
+        Register("AuditFindings", () => new ArtifactPlugin(
+            Path.Combine(auditFindingsBase, FuseraftPaths.LocalAuditFindings), ArtifactFormat.Json,
+            "write_file_audit_findings", ReconDescriptions.AuditFindings));
         return this;
     }
 
@@ -238,7 +247,7 @@ public sealed class PluginRegistry : IDisposable
     // names are already self-describing (e.g. ReadFile, WriteFile). Adding "file_system_"
     // would break all existing tool references in agent instructions.
     private static readonly HashSet<string> NoPrefixPlugins =
-        new(StringComparer.OrdinalIgnoreCase) { "FileSystem", "Handoff", "Skills", "Compaction", "Recon", "Preflight", "Audit" };
+        new(StringComparer.OrdinalIgnoreCase) { "FileSystem", "Handoff", "Skills", "Compaction" };
 
     /// <summary>
     /// Builds <see cref="AIFunction"/> instances from a plugin object by reflecting over
@@ -249,6 +258,21 @@ public sealed class PluginRegistry : IDisposable
     /// </summary>
     public static IReadOnlyList<AIFunction> GetFunctionsFromObject(object plugin)
     {
+        // ArtifactPlugin carries its own tool name/description per instance instead of
+        // deriving them from the class name — the same class is registered many times under
+        // different names (Conventions, DiscoveryBrief, Preflight, AuditFindings, ...) and
+        // each registration still needs its own uniquely-named write function so an agent
+        // that includes two of them never sees a name collision.
+        if (plugin is ArtifactPlugin artifact)
+        {
+            var method = typeof(ArtifactPlugin).GetMethod(nameof(ArtifactPlugin.WriteFileAsync))!;
+            return [AIFunctionFactory.Create(method, artifact, new AIFunctionFactoryOptions
+            {
+                Name        = artifact.ToolName,
+                Description = artifact.Description,
+            })];
+        }
+
         var className = plugin.GetType().Name;
         var rawPrefix = className.EndsWith("Plugin", StringComparison.Ordinal) ? className[..^6] : className;
         var prefix    = NoPrefixPlugins.Contains(rawPrefix) ? null : ToSnakeCase(rawPrefix);

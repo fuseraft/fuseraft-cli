@@ -52,7 +52,8 @@ public static partial class InitTemplates
                 Exit 128 → not a git repo. Record this — agents will skip git steps.
 
               STEP 5 — WRITE PREFLIGHT REPORT
-              Call write_file_preflight with these fields:
+              Call write_file_preflight(content: ..., format: "json"). content must be a JSON
+              object with exactly these top-level fields:
                 project_types    — array of detected types, e.g. ["python"]
                 runtime_versions — array, each entry "runtime: version", e.g. ["python3: 3.12.1"]
                 missing_runtimes — array of runtimes that returned exit 127/128
