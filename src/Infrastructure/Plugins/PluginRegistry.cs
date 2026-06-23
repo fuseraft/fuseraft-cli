@@ -119,6 +119,10 @@ public sealed class PluginRegistry : IDisposable
         Register("Preflight", () => new PreflightPlugin(
             Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "state", "sessions", "default", "preflight.json")));
 
+        // Stub — Configure() replaces this with a sandbox-rooted instance.
+        Register("Audit", () => new AuditPlugin(
+            Path.Combine(Directory.GetCurrentDirectory(), FuseraftPaths.LocalAuditFindings)));
+
         // Stub — ReplCommand replaces this with a real instance bound to the live session.
         Register("Session", () => new ReplSessionPlugin("stub", DateTime.UtcNow, "unknown", Directory.GetCurrentDirectory()));
         return this;
@@ -165,6 +169,11 @@ public sealed class PluginRegistry : IDisposable
         Register("FileSystem", () => new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore, sessionCache: sessionReadCache, onWrite: shellInstance.InvalidateRunCache, onCacheHit: onCacheHit, exemptedPaths: ["~/.fuseraft/"]));
         Register("Http",       () => new HttpPlugin(_sharedHttpClient, allowedHosts, apiProfiles, allowPrivateHosts, _loggerFactory?.CreateLogger<HttpPlugin>()));
         Register("Document",   () => new DocumentPlugin(sandboxRoot));
+
+        // Resolve against the same root FileSystemPlugin uses, so the Auditor's findings land
+        // exactly where Prioritizer's read_file expects them regardless of sandbox configuration.
+        var auditFindingsBase = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : Directory.GetCurrentDirectory();
+        Register("Audit", () => new AuditPlugin(Path.Combine(auditFindingsBase, FuseraftPaths.LocalAuditFindings)));
         return this;
     }
 
@@ -229,7 +238,7 @@ public sealed class PluginRegistry : IDisposable
     // names are already self-describing (e.g. ReadFile, WriteFile). Adding "file_system_"
     // would break all existing tool references in agent instructions.
     private static readonly HashSet<string> NoPrefixPlugins =
-        new(StringComparer.OrdinalIgnoreCase) { "FileSystem", "Handoff", "Skills", "Compaction", "Recon", "Preflight" };
+        new(StringComparer.OrdinalIgnoreCase) { "FileSystem", "Handoff", "Skills", "Compaction", "Recon", "Preflight", "Audit" };
 
     /// <summary>
     /// Builds <see cref="AIFunction"/> instances from a plugin object by reflecting over
