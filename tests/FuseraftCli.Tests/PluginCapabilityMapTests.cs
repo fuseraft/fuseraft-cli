@@ -5,8 +5,9 @@ namespace FuseraftCli.Tests;
 /// <summary>
 /// <see cref="PluginCapabilityMap.IsAllowed"/> is the enforcement point every per-agent
 /// <c>Capabilities</c> restriction relies on — including the read-only locks applied to the
-/// recon/review/verify-only agents across the init templates (ReconPlugin, PreflightPlugin,
-/// AuditPlugin, and the plain FileSystem:[read] locks on Reviewer/Verifier/Executor agents).
+/// recon/review/verify-only agents across the init templates (ArtifactPlugin instances like
+/// Conventions/DiscoveryBrief/Preflight/AuditFindings, and the plain FileSystem:[read] locks
+/// on Reviewer/Verifier/Executor agents).
 /// Despite that, it had no direct unit coverage. These tests close that gap at the one place
 /// all of those fixes ultimately depend on, instead of re-proving the same already-verified
 /// wiring with another live model run per agent.

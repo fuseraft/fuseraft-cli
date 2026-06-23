@@ -30,16 +30,18 @@ public static partial class InitTemplates
                  read every file; prefer sub_agent_explore for structural questions.
               4. Identify: primary language and framework, naming conventions (snake_case vs camelCase),
                  import style, test framework, build system, and key architectural patterns.
-              5. Call write_file_conventions with: language, naming_patterns (array), error_handling
-                 (array of idioms to follow), forbidden_patterns (array), test_patterns (array),
-                 structural_notes (array — fold framework/import-style observations in here),
-                 build_command, test_command.
+              5. Call write_file_conventions(content: ..., format: "json"). content must be a JSON
+                 object with exactly these top-level fields: language (string), naming_patterns
+                 (array), error_handling (array of idioms to follow), forbidden_patterns (array),
+                 test_patterns (array), structural_notes (array — fold framework/import-style
+                 observations in here), build_command (string), test_command (string).
               6. Identify the files most likely to need modification for the given task.
-              7. Call write_file_discovery_brief with: summary (one paragraph describing the
-                 codebase structure), in_scope_files (array of paths likely relevant to the task),
-                 fragility_signals (array, each entry formatted "path — reason", e.g.
-                 "internal/legacy/queue.go — no tests, high churn"), test_coverage_gaps (array
-                 of files lacking a corresponding test file).
+              7. Call write_file_discovery_brief(content: ..., format: "json"). content must be a
+                 JSON object with exactly these top-level fields: summary (one-paragraph string
+                 describing the codebase structure), in_scope_files (array of paths likely relevant
+                 to the task), fragility_signals (array of objects, each a "file" string and a
+                 "reason" string — e.g. file "internal/legacy/queue.go", reason "no tests, high
+                 churn"), test_coverage_gaps (array of files lacking a corresponding test file).
               8. For each significant architectural risk or pattern you uncover, call
                  record_investigation(summary, conclusion) — these findings survive compaction
                  and will be visible to every subsequent agent without re-reading the codebase.
@@ -58,7 +60,8 @@ public static partial class InitTemplates
               - Search
               - SubAgent
               - Investigation
-              - Recon
+              - Conventions
+              - DiscoveryBrief
               - Handoff
             Capabilities:
               FileSystem: [read]
