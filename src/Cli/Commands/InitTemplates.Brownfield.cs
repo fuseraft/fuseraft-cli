@@ -83,8 +83,9 @@ public static partial class InitTemplates
                      the Developer already tried. Do not propose an approach that is already
                      rejected. If you now know definitively why it failed, call
                      identify_root_cause(cause) before writing the revised brief.
-                   - Update {FuseraftPaths.LocalBrief}: revise implementation_hints to target
-                     the root cause, add a failure_analysis field describing what went wrong.
+                   - Revise the brief: call write_file_brief(content: ..., format: "json") with
+                     the full updated brief — implementation_hints retargeted at the root cause,
+                     plus a new failure_analysis field describing what went wrong.
                    - Do NOT re-handoff with the same brief — the Developer already tried it.
                  IF no failure signal and {FuseraftPaths.LocalBrief} already exists and still
                  covers the current task: call handoff(route_keyword: "HANDOFF TO DEVELOPER")
@@ -93,7 +94,8 @@ public static partial class InitTemplates
               4. Read {FuseraftPaths.LocalConventions} — follow the project's conventions exactly.
               5. Use sub_agent_explore for additional targeted questions. For direct file reads:
                  {LargeFileProtocol}
-              6. Write a scoped brief to {FuseraftPaths.LocalBrief} with fields:
+              6. Call write_file_brief(content: ..., format: "json"). content must be a JSON
+                 object with exactly these top-level fields:
                    goal — one-sentence description of the change
                    findings — summary of relevant existing code to modify
                    files_to_change — only the files that genuinely need to change
@@ -108,6 +110,10 @@ public static partial class InitTemplates
                    convention_notes — specific conventions to follow from the profile
               7. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
+
+              You are read-only with respect to this project's own files — you have no
+              write_file/patch_file access. write_file_brief is the only way to persist this
+              brief; implementing the task itself is the Developer's job, not yours.
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
@@ -115,7 +121,10 @@ public static partial class InitTemplates
               - Search
               - SessionContext
               - SubAgent
+              - Brief
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;

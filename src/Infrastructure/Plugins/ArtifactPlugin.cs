@@ -108,11 +108,13 @@ public sealed class ArtifactPlugin
 }
 
 /// <summary>
-/// Tool descriptions for the four <see cref="ArtifactPlugin"/> instances registered today
-/// (brownfield's two recon artifacts, greenfield/swe's preflight report, audit's findings
-/// report) — shared between the stub registrations in <see cref="PluginRegistry.RegisterDefaults"/>
-/// and the real session/sandbox-scoped registrations in <c>OrchestratorBuilder</c> and
-/// <see cref="PluginRegistry.Configure"/> so the description text lives in exactly one place.
+/// Tool descriptions for every <see cref="ArtifactPlugin"/> instance registered across the init
+/// templates (brownfield's two recon artifacts, greenfield/swe's preflight report, audit's
+/// findings and remediation plan, devops's ops plan, research's findings and review, and swe's
+/// brief/brief-review pair) — shared between the stub registrations in
+/// <see cref="PluginRegistry.RegisterDefaults"/> and the real session/sandbox-scoped
+/// registrations in <c>OrchestratorBuilder</c> and <see cref="PluginRegistry.Configure"/> so the
+/// description text lives in exactly one place.
 /// </summary>
 internal static class ReconDescriptions
 {
@@ -127,4 +129,22 @@ internal static class ReconDescriptions
 
     public const string AuditFindings =
         "Write the audit findings report. Use this instead of write_file — your role here is read-only with respect to the project's own source files.";
+
+    public const string Brief =
+        "Write the task brief for the Developer. Use this instead of write_file — your role here is to plan, not to implement.";
+
+    public const string BriefReview =
+        "Write your review of the brief. Use this instead of write_file — your role here is to critique the brief, not to rewrite or implement it.";
+
+    public const string RemediationPlan =
+        "Write the remediation plan. Use this instead of write_file — your role here is to triage and order findings, not to fix them yourself.";
+
+    public const string OpsPlan =
+        "Write the operations plan. Use this instead of write_file — your role here is to plan the operation, not to execute it.";
+
+    public const string ResearchFindings =
+        "Write your research findings. Use this instead of write_file.";
+
+    public const string ResearchReview =
+        "Write your review of the research findings. Use this instead of write_file — your role here is to critique the findings, not to rewrite them yourself.";
 }
