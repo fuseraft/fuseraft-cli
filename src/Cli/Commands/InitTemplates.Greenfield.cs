@@ -124,8 +124,9 @@ public static partial class InitTemplates
               IF a failure signal is present:
                 - Read {FuseraftPaths.LocalTestReport} and recent changes to understand
                   the specific failure.
-                - Update {FuseraftPaths.LocalBrief}: revise implementation_hints to target
-                  the root cause; add a failure_analysis field; append to known_pitfalls.
+                - Revise the brief: call write_file_brief(content: ..., format: "json") with
+                  the full updated brief — implementation_hints retargeted at the root cause,
+                  a new failure_analysis field, and known_pitfalls appended to.
                 - Do NOT re-handoff with the same brief the Developer already tried.
               IF no failure signal:
                 - If {FuseraftPaths.LocalBrief} already exists: read it now.
@@ -135,7 +136,8 @@ public static partial class InitTemplates
                 - Otherwise: write or update the brief as described in STEP 4.
 
               STEP 4 — WRITE THE BRIEF
-              Write {FuseraftPaths.LocalBrief} with these fields:
+              Call write_file_brief(content: ..., format: "json"). content must be a JSON
+              object with exactly these top-level fields:
 
               goal
                 One sentence describing what to build.
@@ -230,6 +232,10 @@ public static partial class InitTemplates
               {ContextWriteStep}
 
               When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
+
+              You are read-only with respect to this project's own files — you have no
+              write_file/patch_file access. write_file_brief is the only way to persist this
+              brief; implementing the task itself is the Developer's job, not yours.
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
@@ -239,7 +245,10 @@ public static partial class InitTemplates
               - SubAgent
               - Decision
               - Objective
+              - Brief
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;

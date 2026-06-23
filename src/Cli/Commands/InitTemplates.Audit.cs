@@ -67,8 +67,9 @@ public static partial class InitTemplates
               1. Read {FuseraftPaths.LocalAuditFindings} and understand every finding.
               2. Group findings by severity: critical → high → medium → low.
               3. Within each severity group, order by: security > correctness > compliance > quality.
-              4. Write a remediation plan to {FuseraftPaths.LocalRemediationPlan} as a JSON object
-                 with a single "action_items" array. Each element has these fields:
+              4. Call write_file_remediation_plan(content: ..., format: "json"). content must
+                 be a JSON object with a single "action_items" array. Each element has these
+                 fields:
                    finding_id  — the ID from the audit findings (e.g. "SEC-001")
                    priority    — integer, 1 = highest
                    summary     — one-line description of what to fix
@@ -76,11 +77,18 @@ public static partial class InitTemplates
                    verify_hint — how to confirm the fix worked
               5. Verify the file is written and non-empty before routing.
               When the plan is ready, call handoff(route_keyword: "PLAN READY").
+
+              You are read-only with respect to this project's own files — you have no
+              write_file/patch_file access. write_file_remediation_plan is the only way to
+              persist this plan; fixing the findings yourself is the Developer's job, not yours.
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
               - FileSystem
+              - RemediationPlan
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;
