@@ -388,6 +388,8 @@ public static partial class InitTemplates
               - Changes
               - SessionContext
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: auto
             Context:
               - Source: session_context
@@ -476,6 +478,8 @@ public static partial class InitTemplates
               - FileSystem
               - Changes
               - Shell
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             SkipExecutionState: true
             {VerifierContextWindow}

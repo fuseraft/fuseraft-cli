@@ -147,6 +147,8 @@ public static partial class InitTemplates
               - Shell
               - Changes
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;

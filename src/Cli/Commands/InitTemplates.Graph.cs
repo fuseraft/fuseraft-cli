@@ -142,6 +142,8 @@ public static partial class InitTemplates
               - Changes
               - SessionContext
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: auto
             ContextWindow:
               TextOnly: true
