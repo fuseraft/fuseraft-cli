@@ -110,6 +110,15 @@ public sealed class PluginRegistry : IDisposable
         Register("SessionContext", () => new SessionContextPlugin(
             Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "state", "sessions", "default", "context_summary.md")));
 
+        // Stub — OrchestratorBuilder replaces this with a session-scoped instance.
+        Register("Recon", () => new ReconPlugin(
+            Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "state", "sessions", "default", "conventions.json"),
+            Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "state", "sessions", "default", "brief.brownfield.json")));
+
+        // Stub — OrchestratorBuilder replaces this with a session-scoped instance.
+        Register("Preflight", () => new PreflightPlugin(
+            Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "state", "sessions", "default", "preflight.json")));
+
         // Stub — ReplCommand replaces this with a real instance bound to the live session.
         Register("Session", () => new ReplSessionPlugin("stub", DateTime.UtcNow, "unknown", Directory.GetCurrentDirectory()));
         return this;
@@ -220,7 +229,7 @@ public sealed class PluginRegistry : IDisposable
     // names are already self-describing (e.g. ReadFile, WriteFile). Adding "file_system_"
     // would break all existing tool references in agent instructions.
     private static readonly HashSet<string> NoPrefixPlugins =
-        new(StringComparer.OrdinalIgnoreCase) { "FileSystem", "Handoff", "Skills", "Compaction" };
+        new(StringComparer.OrdinalIgnoreCase) { "FileSystem", "Handoff", "Skills", "Compaction", "Recon", "Preflight" };
 
     /// <summary>
     /// Builds <see cref="AIFunction"/> instances from a plugin object by reflecting over

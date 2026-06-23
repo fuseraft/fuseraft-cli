@@ -30,20 +30,27 @@ public static partial class InitTemplates
                  read every file; prefer sub_agent_explore for structural questions.
               4. Identify: primary language and framework, naming conventions (snake_case vs camelCase),
                  import style, test framework, build system, and key architectural patterns.
-              5. Write the convention profile to {FuseraftPaths.LocalConventions} with fields:
-                   language, framework, naming_convention, import_style, test_framework,
-                   build_command, lint_command, notes (array of key architectural observations).
+              5. Call write_file_conventions with: language, naming_patterns (array), error_handling
+                 (array of idioms to follow), forbidden_patterns (array), test_patterns (array),
+                 structural_notes (array — fold framework/import-style observations in here),
+                 build_command, test_command.
               6. Identify the files most likely to need modification for the given task.
-              7. Write the discovery brief to {FuseraftPaths.LocalBrownfieldBrief} with fields:
-                   summary — one paragraph describing the codebase structure
-                   in_scope_files — array of file paths likely relevant to the task
-                   dependencies — key external dependencies to be aware of
-                   risks — array of fragility signals (e.g. no tests, circular deps, god objects)
+              7. Call write_file_discovery_brief with: summary (one paragraph describing the
+                 codebase structure), in_scope_files (array of paths likely relevant to the task),
+                 fragility_signals (array, each entry formatted "path — reason", e.g.
+                 "internal/legacy/queue.go — no tests, high churn"), test_coverage_gaps (array
+                 of files lacking a corresponding test file).
               8. For each significant architectural risk or pattern you uncover, call
                  record_investigation(summary, conclusion) — these findings survive compaction
                  and will be visible to every subsequent agent without re-reading the codebase.
 
-              When both files are written, call handoff(route_keyword: "RECON COMPLETE").
+              You are read-only with respect to this project's own files — you have no
+              write_file/patch_file access. write_file_conventions and write_file_discovery_brief
+              are the only ways to persist your findings; implementing the task itself is the
+              Developer's job, not yours.
+
+              When both write_file_conventions and write_file_discovery_brief have been called,
+              call handoff(route_keyword: "RECON COMPLETE").
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
@@ -51,7 +58,10 @@ public static partial class InitTemplates
               - Search
               - SubAgent
               - Investigation
+              - Recon
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;

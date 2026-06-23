@@ -59,13 +59,16 @@ public static partial class InitTemplates
                 Exit 128 → not a git repo. Record this — agents will skip git steps.
 
               STEP 5 — WRITE PREFLIGHT REPORT
-              Write a JSON object to {FuseraftPaths.LocalPreflight} with these fields:
-                project_types    — string array of detected types, e.g. ["python"]
-                runtime_versions — object mapping runtime name to version string
-                missing_runtimes — string array of runtimes that returned exit 127/128
+              Call write_file_preflight with these fields:
+                project_types    — array of detected types, e.g. ["python"]
+                runtime_versions — array, each entry "runtime: version", e.g. ["python3: 3.12.1"]
+                missing_runtimes — array of runtimes that returned exit 127/128
                 git_repo         — boolean: true if git rev-parse exited 0
                 git_clean        — boolean or null: true if git status --short output is empty
-                warnings         — string array of non-fatal observations
+                warnings         — array of non-fatal observations
+              You are read-only with respect to this project's own files — you have no
+              write_file/patch_file access. write_file_preflight is the only way to persist
+              this report; implementing the task itself is the Developer's job, not yours.
 
               STEP 6 — DETERMINE OUTCOME
               FAILURE condition: a specific project type was detected (not "unknown")
@@ -82,7 +85,10 @@ public static partial class InitTemplates
             Plugins:
               - FileSystem
               - Shell
+              - Preflight
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             SkipExecutionState: true
             ContextWindow:
