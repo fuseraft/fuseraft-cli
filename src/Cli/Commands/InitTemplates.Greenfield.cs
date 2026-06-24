@@ -170,6 +170,7 @@ public static partial class InitTemplates
                 Correct: "python -m lily --help"
                 Wrong:   "python -m pytest tests/"
                 Wrong:   "dotnet build" (compile only — no feature logic)
+                {BackgroundedVerifyCommandRule}
 
               build_command
                 Command to install dependencies before the Tester runs its suite.
@@ -227,6 +228,10 @@ public static partial class InitTemplates
                  in files_to_change. Add any missing paths — a file referenced only in the
                  checklist but absent from files_to_change bypasses the ImplementationComplete
                  contract silently.
+
+              f. VERIFY COMMAND BACKGROUNDING SAFETY: if verify_command backgrounds a
+                 long-running process, confirm it follows the rule above — built binary,
+                 not a run-wrapper; defensive cleanup prefix; kill within the same command.
 
               STEP 6 — WRITE CONTEXT
               {ContextWriteStep}

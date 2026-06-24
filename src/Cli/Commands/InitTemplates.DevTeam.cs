@@ -157,6 +157,7 @@ public static partial class InitTemplates
                      IMPORTANT: write the full literal command — never abbreviate with "...".
                      Abbreviated commands cannot be matched against the session log and will
                      cause ImplementationComplete to loop indefinitely.
+                     {BackgroundedVerifyCommandRule}
                    acceptance_criteria — array of testable criteria the code must satisfy
               5b. SELF-CRITIQUE — run these checks against the brief you just wrote (or
                   the existing brief if you skipped step 5). Fix before continuing.
@@ -169,6 +170,9 @@ public static partial class InitTemplates
                      compile. Flags that assume pre-built state (--no-build, --no-restore)
                      are only valid when the build step precedes them in the same command
                      chain (&&). Rewrite any command that uses such flags standalone.
+                     If it backgrounds a long-running process, confirm it follows the
+                     backgrounding-safety rule above (built binary, not a run-wrapper;
+                     defensive cleanup prefix; kill within the same command).
                   d. implementation_hints specificity: every hint must name file + symbol/
                      method + why it matters. Remove or expand file-only hints.
                   e. execution_checklist: write an execution_checklist array of discrete,
@@ -233,7 +237,11 @@ public static partial class InitTemplates
               4. AUDIT verify_command CONCRETENESS:
                  The command must exercise a real code path of the feature — not just compile or
                  import it. Flag commands that only call --help, --version, or build/compile without
-                 running the actual feature logic.
+                 running the actual feature logic. If it backgrounds a long-running process
+                 (server, daemon, listener) via a build-and-run wrapper (go run, npm run dev,
+                 cargo run) instead of a built binary, flag it — the wrapper execs into a
+                 differently-named child that "$!"/pkill cannot target, leaking an orphan that
+                 blocks the port for every later shell_run call this session.
 
               5. AUDIT implementation_hints SPECIFICITY:
                  Each hint must name a file AND a symbol/method AND explain why it matters. Flag
