@@ -77,6 +77,20 @@ public static partial class InitTemplates
         "\"pkill -f /tmp/srv 2>/dev/null; sleep 0.2;\", so a stale orphan self-heals instead " +
         "of cascading into every later verify_command attempt.";
 
+    // Closes the gap where a Reviewer spot-check succeeds by luck against a stale
+    // process left running by an earlier agent, then the Reviewer ignores its own
+    // failed re-verification attempts and approves anyway. A spot-check is only
+    // evidence if it ran cleanly, this turn, against a process the Reviewer controls.
+    private const string ReviewerVerificationIntegrityRule =
+        "A spot-check only counts as evidence if it ran cleanly THIS turn. If shell_run " +
+        "fails (non-zero exit, \"address already in use\", connection refused, timeout, or " +
+        "any error unrelated to the feature itself), the check is INCONCLUSIVE — do not " +
+        "approve on an earlier lucky result, and do not treat a response from a process you " +
+        "did not start this turn as evidence (a server left running by an earlier agent is " +
+        "not proof the change works). If every spot-check attempt this turn fails, do not " +
+        "call APPROVED — fix the command and retry once, or call handoff(route_keyword: " +
+        "\"REVISION REQUIRED\") noting that verification could not be completed.";
+
     // Session context handoff protocol — read on entry, write before routing.
     // These steps prevent agents from re-reading files that previous agents already
     // summarised, and give successor agents a current-state snapshot without needing

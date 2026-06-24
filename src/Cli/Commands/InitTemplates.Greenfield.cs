@@ -415,6 +415,7 @@ public static partial class InitTemplates
                  files_to_change, and {FuseraftPaths.LocalTestReport}. For any large file:
                  {LargeFileProtocolReviewer}
               3. Run at least one acceptance criterion as a spot-check with shell_run.
+              4. {ReviewerVerificationIntegrityRule}
               If the code meets all acceptance criteria, call handoff(route_keyword: "APPROVED").
               If changes are needed, call handoff(route_keyword: "REVISION REQUIRED").
                 For each fix: name the file and line, quote the current incorrect code,
