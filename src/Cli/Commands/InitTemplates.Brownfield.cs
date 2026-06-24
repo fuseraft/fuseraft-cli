@@ -187,6 +187,7 @@ public static partial class InitTemplates
               5. Confirm no files outside files_to_change were modified (use changes_read_latest).
               6. Run the build command from the convention profile to confirm the project compiles.
               7. Run the verify_command from the brief to confirm runtime correctness.
+              8. {ReviewerVerificationIntegrityRule}
               Emit a JSON review block covering every acceptance criterion with verdict (PASS/FAIL)
               and evidence before your routing keyword.
               If all criteria pass, call handoff(route_keyword: "APPROVED").
