@@ -245,12 +245,16 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         using var emitter = new EventEmitter(eventsPath);
         emitter.SetSessionId(sessionId);
 
-        // Wrap every tool category with the artifact offload filter so oversized results are
-        // stored to disk instead of accumulating verbatim in the conversation history.
+        // Wrap every tool category:
+        // 1. ToolResultLoggingFilter (inner) — emits tool_call/tool_result/tool_error events
+        //    with the raw result before any transformation.
+        // 2. ToolResultOffloadFilter (outer) — replaces oversized results with a compact stub
+        //    and emits artifact_created when offloading occurs.
         var toolArtifactsDir  = Path.Combine(cwd, FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalSessionToolArtifacts, sessionId));
         var toolArtifactStore = new ToolResultArtifactStore(toolArtifactsDir, emitter);
         foreach (var key in toolsByCategory.Keys.ToList())
             toolsByCategory[key] = toolsByCategory[key]
+                .Select(f => (AIFunction)new ToolResultLoggingFilter(f, emitter))
                 .Select(f => (AIFunction)new ToolResultOffloadFilter(f, toolArtifactStore))
                 .ToList();
 
