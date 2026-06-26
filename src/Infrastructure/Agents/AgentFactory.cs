@@ -733,7 +733,7 @@ public sealed class AgentFactory(
     /// </list>
     /// Pure-text (non-tool) messages are never modified.
     /// </summary>
-    private static IEnumerable<ChatMessage> TruncateIntermediateAssistantReasoning(
+    internal static IEnumerable<ChatMessage> TruncateIntermediateAssistantReasoning(
         IEnumerable<ChatMessage> messages)
     {
         var list = messages as IList<ChatMessage> ?? messages.ToList();
@@ -856,7 +856,7 @@ public sealed class AgentFactory(
     /// ("succeeded" / "failed [exit N]"). The command call itself is left intact so the
     /// sequence of attempts remains visible in context. The latest call keeps its full output.
     /// </summary>
-    private static IEnumerable<ChatMessage> CompressSupersededShellPairs(
+    internal static IEnumerable<ChatMessage> CompressSupersededShellPairs(
         IEnumerable<ChatMessage> messages)
     {
         var list = messages as IList<ChatMessage> ?? messages.ToList();
@@ -950,7 +950,7 @@ public sealed class AgentFactory(
     /// with identical arguments. Only the freshest result for each (tool, args) combination
     /// is preserved; earlier identical calls are stubbed out.
     /// </summary>
-    private static IEnumerable<ChatMessage> DropSupersededObservationalPairs(
+    internal static IEnumerable<ChatMessage> DropSupersededObservationalPairs(
         IEnumerable<ChatMessage> messages)
     {
         var list = messages as IList<ChatMessage> ?? messages.ToList();
@@ -1052,7 +1052,7 @@ public sealed class AgentFactory(
     /// A call is superseded when a subsequent <c>write_file</c> overwrites the same path
     /// entirely, making the earlier write irrelevant to context.
     /// </summary>
-    private static IEnumerable<ChatMessage> DropSupersededWritePairs(
+    internal static IEnumerable<ChatMessage> DropSupersededWritePairs(
         IEnumerable<ChatMessage> messages)
     {
         var list = messages as IList<ChatMessage> ?? messages.ToList();
@@ -1491,7 +1491,7 @@ public sealed class AgentFactory(
         };
     }
 
-    private static int EstimateContentChars(AIContent content) => content switch
+    internal static int EstimateContentChars(AIContent content) => content switch
     {
         TextContent t           => t.Text?.Length ?? 0,
         FunctionResultContent r => r.Result is string s ? s.Length : r.Result?.ToString()?.Length ?? 0,
