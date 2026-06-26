@@ -149,4 +149,6 @@ public static class EventTypes
     public const string CancellationObserved  = "cancellation_observed";
     public const string ReplError             = "repl_error";
     public const string ReplWarning           = "repl_warning";
+    public const string FileChanges           = "file_changes";
+    public const string HistoryTrimmed        = "history_trimmed";
 }
