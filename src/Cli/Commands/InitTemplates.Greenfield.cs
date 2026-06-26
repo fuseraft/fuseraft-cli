@@ -53,10 +53,10 @@ public static partial class InitTemplates
               Exit 0 = runtime present. Exit 127 or 128 = missing.
 
               STEP 4 — CHECK GIT
-              shell_run("git rev-parse --is-inside-work-tree")
-                Exit 0   → git repo. Also run shell_run("git status --short") and note
-                           whether the working tree is clean.
-                Exit 128 → not a git repo. Record this — agents will skip git steps.
+              git_is_inside_work_tree()
+                Returns "true"  → git repo. Also run git_status() and note whether
+                                  the working tree is clean (no lines beyond the branch header).
+                Returns "false" → not a git repo. Record this — agents will skip git steps.
 
               STEP 5 — WRITE PREFLIGHT REPORT
               Call write_file_preflight(content: ..., format: "json"). content must be a JSON
@@ -64,8 +64,8 @@ public static partial class InitTemplates
                 project_types    — array of detected types, e.g. ["python"]
                 runtime_versions — array, each entry "runtime: version", e.g. ["python3: 3.12.1"]
                 missing_runtimes — array of runtimes that returned exit 127/128
-                git_repo         — boolean: true if git rev-parse exited 0
-                git_clean        — boolean or null: true if git status --short output is empty
+                git_repo         — boolean: true if git_is_inside_work_tree() returned "true"
+                git_clean        — boolean or null: true if git_status() output has no changed-file lines
                 warnings         — array of non-fatal observations
               You are read-only with respect to this project's own files — you have no
               write_file/patch_file access. write_file_preflight is the only way to persist

@@ -281,6 +281,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         var systemPrompt = new SystemPromptBuilder()
             .AddIdentity(modelId, cwd, initialTools.Count, settings.SystemPrompt)
             .AddToolGuidance(initialTools.Count)
+            .AddOsEnvironment()
             .AddSessionInfo(sessionId, startedAt, cwd, initialTools.Count, activePlugins)
             .AddProjectInstructions(cwd)
             .AddMemory(memoryBlock)
