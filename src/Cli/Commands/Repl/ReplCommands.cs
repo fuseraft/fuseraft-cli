@@ -236,12 +236,15 @@ internal static class ReplCommands
 
     private static async Task CmdContextAsync(ReplSessionContext ctx)
     {
-        var active   = ctx.GetActiveTools();
-        var sysTok   = ctx.History.Where(m => m.Role == ChatRole.System).Sum(m => (m.Text?.Length ?? 0) / 4);
-        var userTok  = ctx.History.Where(m => m.Role == ChatRole.User).Sum(m => (m.Text?.Length ?? 0) / 4);
-        var asstTok  = ctx.History.Where(m => m.Role == ChatRole.Assistant).Sum(m => (m.Text?.Length ?? 0) / 4);
-        var toolTok  = active.Sum(t => t.JsonSchema.GetRawText().Length / 4);
-        var total    = sysTok + userTok + asstTok + toolTok;
+        static int EstMsg(ChatMessage m) => m.Contents.Sum(AgentFactory.EstimateContentChars) / 4;
+
+        var active      = ctx.GetActiveTools();
+        var sysTok      = ctx.History.Where(m => m.Role == ChatRole.System).Sum(EstMsg);
+        var userTok     = ctx.History.Where(m => m.Role == ChatRole.User).Sum(EstMsg);
+        var asstTok     = ctx.History.Where(m => m.Role == ChatRole.Assistant).Sum(EstMsg);
+        var toolResTok  = ctx.History.Where(m => m.Role == ChatRole.Tool).Sum(EstMsg);
+        var toolTok     = active.Sum(t => t.JsonSchema.GetRawText().Length / 4);
+        var total       = sysTok + userTok + asstTok + toolResTok + toolTok;
         var pct      = (double)total / ReplTurn.ContextTokenBudget * 100;
 
         if (ctx.JsonMode)
@@ -268,6 +271,8 @@ internal static class ReplCommands
                 sb.AppendLine($"- Tools ({active.Count}): {toolTok:N0} tok ({(double)toolTok / total * 100:F1}%) *(per request)*");
             sb.AppendLine($"- User messages: {userTok:N0} tok ({(double)userTok / total * 100:F1}%)");
             sb.AppendLine($"- Assistant messages: {asstTok:N0} tok ({(double)asstTok / total * 100:F1}%)");
+            if (toolResTok > 0)
+                sb.AppendLine($"- Tool results: {toolResTok:N0} tok ({(double)toolResTok / total * 100:F1}%)");
             if (ctx.TurnTokenDeltas.Count >= 1)
             {
                 var avg = (int)Math.Round(ctx.TurnTokenDeltas.Average());
@@ -286,7 +291,7 @@ internal static class ReplCommands
                 estimated_tokens = total,
                 token_budget = ReplTurn.ContextTokenBudget,
                 turns = ctx.TurnIndex,
-                breakdown = new { system = sysTok, tools = toolTok, user = userTok, assistant = asstTok }
+                breakdown = new { system = sysTok, tools = toolTok, user = userTok, assistant = asstTok, tool_results = toolResTok }
             });
             return;
         }
@@ -317,6 +322,8 @@ internal static class ReplCommands
             PrintContextRow($"tools ({active.Count})", toolTok, total, "(per req.)");
         PrintContextRow("user messages",  userTok, total);
         PrintContextRow("assistant msgs", asstTok, total);
+        if (toolResTok > 0)
+            PrintContextRow("tool results",  toolResTok, total);
 
         if (ctx.TurnTokenDeltas.Count >= 1)
         {

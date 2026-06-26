@@ -255,7 +255,9 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 .ToList();
 
         if (explorerTools is not null)
-            subAgent = new SubAgentPlugin(factory.Create(modelConfig), explorerTools,
+            subAgent = new SubAgentPlugin(
+                ReplFactory.BuildClient(modelConfig, factory, explorerTools.Count > 0),
+                explorerTools,
                 eventEmitter:    emitter,
                 parentAgentName: "repl");
         await emitter.EmitAsync(EventTypes.SessionStart, payload: new
