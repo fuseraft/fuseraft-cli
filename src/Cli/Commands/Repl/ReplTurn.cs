@@ -272,7 +272,6 @@ internal static class ReplTurn
 
         var sb                = new StringBuilder();
         var toolCallsThisTurn = new List<string>();
-        var toolCallDetails   = new List<(string Name, string? Args)>();
         var fileChanges        = new List<(char Sigil, string Path)>();
         var fileChangeSeen     = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var toolRounds        = 0;
@@ -312,7 +311,6 @@ internal static class ReplTurn
                 {
                     if (!inToolBatch) { toolRounds++; inToolBatch = true; }
                     toolCallsThisTurn.Add(funcCall.Name);
-                    toolCallDetails.Add((funcCall.Name, SummarizeToolArgs(funcCall.Arguments)));
                     TrackFileChange(funcCall.Name, funcCall.Arguments, fileChanges, fileChangeSeen, ctx.Cwd);
 
                     if (ctx.JsonMode)
@@ -400,7 +398,7 @@ internal static class ReplTurn
             await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, streamAttempt)));
 
             // Reset per-attempt accumulators before reissuing the request.
-            sb.Clear(); toolCallsThisTurn.Clear(); toolCallDetails.Clear();
+            sb.Clear(); toolCallsThisTurn.Clear();
             fileChanges.Clear(); fileChangeSeen.Clear();
             toolRounds = 0; inToolBatch = false;
 
@@ -558,18 +556,19 @@ internal static class ReplTurn
             }
         }
 
-        if (TrimHistory(ctx.History))
+        var trimmedCount = TrimHistory(ctx.History);
+        if (trimmedCount > 0)
         {
             if (!ctx.JsonMode)
                 AnsiConsole.MarkupLine("[dim]  (old messages trimmed to fit context window)[/]");
+            await ctx.Emitter.EmitAsync(EventTypes.HistoryTrimmed, turn: ctx.TurnIndex,
+                payload: new { messages_removed = trimmedCount, estimated_tokens = ctx.EstimateTokens() });
         }
 
         if (!ctx.JsonMode && ctx.Verbose)
             AnsiConsole.MarkupLine(
                 $"[dim]  tokens (est.): {postEst:N0} / {ContextTokenBudget:N0}  rounds: {toolRounds}  tool calls: {toolCallsThisTurn.Count}[/]");
 
-        foreach (var (name, args) in toolCallDetails)
-            await ctx.Emitter.EmitAsync(EventTypes.ToolCall, turn: ctx.TurnIndex, payload: new { tool_name = name, args });
         await ctx.Emitter.EmitAsync(EventTypes.AssistantResponse, turn: ctx.TurnIndex, payload: new { content = responseText });
         await ctx.Emitter.EmitAsync(EventTypes.TurnEnd, turn: ctx.TurnIndex, payload: new
         {
@@ -592,16 +591,15 @@ internal static class ReplTurn
             ctx.PendingSave = false;
         }
 
-        if (ctx.JsonMode)
+        if (fileChanges.Count > 0)
         {
-            if (fileChanges.Count > 0)
-                ReplJsonBridge.Emit(new
-                {
-                    type    = "file_changes",
-                    changes = fileChanges.Select(f => new { sigil = f.Sigil.ToString(), path = f.Path }).ToArray(),
-                });
-            ReplJsonBridge.Emit(new { type = "message_end", turnIndex = ctx.TurnIndex, toolCalls = toolCallsThisTurn.ToArray() });
+            var changeArray = fileChanges.Select(f => new { sigil = f.Sigil.ToString(), path = f.Path }).ToArray();
+            await ctx.Emitter.EmitAsync(EventTypes.FileChanges, turn: ctx.TurnIndex, payload: new { changes = changeArray });
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new { type = "file_changes", changes = changeArray });
         }
+        if (ctx.JsonMode)
+            ReplJsonBridge.Emit(new { type = "message_end", turnIndex = ctx.TurnIndex, toolCalls = toolCallsThisTurn.ToArray() });
 
         ctx.TurnIndex++;
         return stepPassed;
@@ -612,7 +610,19 @@ internal static class ReplTurn
         if (TryParsePlan(responseText, out var steps) && steps.Length > 0)
         {
             ctx.CurrentPlan = steps;
-            _ = ctx.Emitter.EmitAsync(EventTypes.PlanCaptured, turn: ctx.TurnIndex, payload: new { step_count = steps.Length });
+            _ = ctx.Emitter.EmitAsync(EventTypes.PlanCaptured, turn: ctx.TurnIndex, payload: new
+            {
+                step_count = steps.Length,
+                steps = steps.Select(s => new
+                {
+                    step        = s.Step,
+                    description = s.Description,
+                    tool        = s.Tool,
+                    creates     = s.Creates,
+                    verifies    = s.Verifies,
+                    depends_on  = s.DependsOn,
+                }).ToArray(),
+            });
             if (ctx.JsonMode)
             {
                 ReplJsonBridge.Emit(new { type = "plan", steps });
@@ -648,7 +658,7 @@ internal static class ReplTurn
         ReplSessionContext ctx, PlanStep activeStep, int total, List<string> toolCallsThisTurn, bool hitIterationCap,
         string responseText = "", CancellationToken cancellationToken = default)
     {
-        var passed    = await VerifyStepAsync(activeStep, toolCallsThisTurn, ctx.Cwd, cancellationToken);
+        var (passed, verifyOutput) = await VerifyStepAsync(activeStep, toolCallsThisTurn, ctx.Cwd, cancellationToken);
         var stepsLeft = ctx.ExecutionQueue.Count;
 
         // When deterministic checks pass and adversarial mode is on, ask the critic.
@@ -679,6 +689,7 @@ internal static class ReplTurn
                 skipped,
                 steps_left = stepsLeft,
                 hit_iteration_cap = hitIterationCap,
+                verify_output     = verifyOutput,
             });
             if (ctx.JsonMode)
             {
@@ -709,6 +720,7 @@ internal static class ReplTurn
                 expected_creates  = activeStep.Creates,
                 hit_iteration_cap = hitIterationCap,
                 tool_calls        = toolCallsThisTurn.ToArray(),
+                verify_output     = verifyOutput,
             });
             if (!ctx.JsonMode)
             {
@@ -774,15 +786,17 @@ internal static class ReplTurn
     // Static utilities
     // -------------------------------------------------------------------------
 
-    internal static bool TrimHistory(List<ChatMessage> history)
+    // Returns the number of ChatMessage entries removed (0 when no trimming was needed).
+    internal static int TrimHistory(List<ChatMessage> history)
     {
         static int EstimateMessage(ChatMessage m) =>
             m.Contents.Sum(AgentFactory.EstimateContentChars) / 4;
 
         var total = history.Sum(EstimateMessage);
-        if (total <= ContextTokenBudget) return false;
+        if (total <= ContextTokenBudget) return 0;
 
-        int sysEnd = history.Count > 0 && history[0].Role == ChatRole.System ? 1 : 0;
+        int sysEnd  = history.Count > 0 && history[0].Role == ChatRole.System ? 1 : 0;
+        int removed = 0;
         while (total > ContextTokenBudget)
         {
             // Evict the oldest complete turn group (User + all following non-User
@@ -804,9 +818,10 @@ internal static class ReplTurn
             {
                 total -= EstimateMessage(history[sysEnd]);
                 history.RemoveAt(sysEnd);
+                removed++;
             }
         }
-        return true;
+        return removed;
     }
 
     internal static string BuildStepMessage(PlanStep step, int total)
@@ -871,7 +886,9 @@ internal static class ReplTurn
                lower.Contains(".vue") || lower.Contains(".kt")   || lower.Contains(".swift");
     }
 
-    internal static async Task<bool> VerifyStepAsync(
+    // Returns (Passed, VerifyOutput) where VerifyOutput is the trimmed command output when
+    // a verify command ran, or null when the check was purely structural (tool/file presence).
+    internal static async Task<(bool Passed, string? VerifyOutput)> VerifyStepAsync(
         PlanStep step, List<string> toolCalls, string cwd,
         CancellationToken cancellationToken = default)
     {
@@ -887,14 +904,16 @@ internal static class ReplTurn
                      File.Exists(Path.Combine(cwd, step.Creates)) ||
                      Directory.Exists(Path.Combine(cwd, step.Creates));
 
-        if (!toolOk || !fileOk) return false;
-        if (step.Verifies is null)  return true;
+        if (!toolOk || !fileOk) return (false, null);
+        if (step.Verifies is null)  return (true, null);
 
         return await RunVerifyCommandAsync(step.Verifies, cwd, cancellationToken);
     }
 
-    private static async Task<bool> RunVerifyCommandAsync(string command, string cwd, CancellationToken cancellationToken)
+    private static async Task<(bool Succeeded, string? Output)> RunVerifyCommandAsync(
+        string command, string cwd, CancellationToken cancellationToken)
     {
+        const int MaxVerifyOutputChars = 300;
         try
         {
             var result = await (OperatingSystem.IsWindows()
@@ -902,9 +921,13 @@ internal static class ReplTurn
                     "cmd.exe",   ["/c", command], workingDirectory: cwd, timeoutSeconds: 10, cancellationToken: cancellationToken)
                 : fuseraft.Infrastructure.Plugins.ProcessHelper.RunAsync(
                     "/bin/bash", ["-c", command], workingDirectory: cwd, timeoutSeconds: 10, cancellationToken: cancellationToken));
-            return result.Succeeded;
+            var raw = result.ToPluginOutput();
+            var output = raw.Length > MaxVerifyOutputChars
+                ? raw[..MaxVerifyOutputChars] + $"…[{raw.Length - MaxVerifyOutputChars} chars truncated]"
+                : raw;
+            return (result.Succeeded, string.IsNullOrWhiteSpace(output) ? null : output);
         }
-        catch { return false; }
+        catch (Exception ex) { return (false, ex.Message); }
     }
 
     internal static bool TryParsePlan(string text, out PlanStep[] steps) =>
