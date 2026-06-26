@@ -164,6 +164,6 @@ internal sealed class ReplSessionContext
     }
 
     public int EstimateTokens() =>
-        History.Sum(m => (m.Text?.Length ?? 0) / 4) +
+        History.Sum(m => m.Contents.Sum(AgentFactory.EstimateContentChars) / 4) +
         GetActiveTools().Sum(t => t.JsonSchema.GetRawText().Length / 4);
 }

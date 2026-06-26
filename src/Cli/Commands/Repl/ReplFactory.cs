@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
 using fuseraft.Core.Models;
@@ -30,12 +31,49 @@ internal static class ReplFactory
     {
         var client = factory.Create(config);
         if (addFunctionInvocation)
+        {
+            // Apply the same in-turn context filters that AgentFactory uses: deduplication of
+            // superseded writes/reads/shells, intermediate-reasoning truncation, and a
+            // sliding tool-pair window. These run on each inner LLM call within the
+            // FunctionInvokingChatClient loop, keeping O(N²) token growth in check.
             client = client
                 .AsBuilder()
+                .Use(
+                    getResponseFunc: async (messages, options, inner, ct) =>
+                    {
+                        messages = AgentFactory.DropSupersededWritePairs(messages);
+                        messages = AgentFactory.DropSupersededObservationalPairs(messages);
+                        messages = AgentFactory.CompressSupersededShellPairs(messages);
+                        messages = AgentFactory.TruncateIntermediateAssistantReasoning(messages);
+                        messages = await AgentFactory.KeepLastToolPairs(messages, InTurnToolPairLimit, ct);
+                        return await inner.GetResponseAsync(messages, options, ct);
+                    },
+                    getStreamingResponseFunc: (messages, options, inner, ct) =>
+                        StreamWithFiltersAsync(messages, options, inner, ct))
                 .UseFunctionInvocation(configure: c => c.MaximumIterationsPerRequest = maxIterations)
                 .Build();
+        }
         return client;
+
+        async IAsyncEnumerable<ChatResponseUpdate> StreamWithFiltersAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options,
+            IChatClient inner,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            messages = AgentFactory.DropSupersededWritePairs(messages);
+            messages = AgentFactory.DropSupersededObservationalPairs(messages);
+            messages = AgentFactory.CompressSupersededShellPairs(messages);
+            messages = AgentFactory.TruncateIntermediateAssistantReasoning(messages);
+            messages = await AgentFactory.KeepLastToolPairs(messages, InTurnToolPairLimit, ct);
+            await foreach (var update in inner.GetStreamingResponseAsync(messages, options, ct))
+                yield return update;
+        }
     }
+
+    // Matches AgentFactory.DefaultToolPairsWhenBudgeted — keeps at most this many
+    // tool-call/result groups in full per inner LLM call within a single REPL turn.
+    private const int InTurnToolPairLimit = 12;
 
     internal static (UserConfig? Config, string? ApiKey) RunSetupWizard(
         string? currentModelId, UserConfig? currentCfg)

@@ -776,27 +776,34 @@ internal static class ReplTurn
 
     internal static bool TrimHistory(List<ChatMessage> history)
     {
-        static int Estimate(ChatMessage m) => (m.Text?.Length ?? 0) / 4;
+        static int EstimateMessage(ChatMessage m) =>
+            m.Contents.Sum(AgentFactory.EstimateContentChars) / 4;
 
-        var total = history.Sum(Estimate);
+        var total = history.Sum(EstimateMessage);
         if (total <= ContextTokenBudget) return false;
 
-        int start = history.Count > 0 && history[0].Role == ChatRole.System ? 1 : 0;
-        while (total > ContextTokenBudget && start + 1 < history.Count)
+        int sysEnd = history.Count > 0 && history[0].Role == ChatRole.System ? 1 : 0;
+        while (total > ContextTokenBudget)
         {
-            // Remove one message per iteration across all roles that form a turn:
-            // user prompt, interleaved assistant tool-call stubs, tool results
-            // (ChatRole.Tool), and the final assistant reply are all evicted together
-            // as the loop advances through the turn sequence.
-            var role = history[start].Role;
-            if (role == ChatRole.User || role == ChatRole.Assistant || role == ChatRole.Tool)
+            // Evict the oldest complete turn group (User + all following non-User
+            // messages). Removing partial groups can leave orphaned FunctionCallContent
+            // without a preceding User message, which is invalid for Anthropic.
+            if (sysEnd >= history.Count || history[sysEnd].Role != ChatRole.User)
+                break;
+
+            int nextUserIdx = sysEnd + 1;
+            while (nextUserIdx < history.Count && history[nextUserIdx].Role != ChatRole.User)
+                nextUserIdx++;
+
+            // Always keep at least one turn group.
+            if (nextUserIdx >= history.Count)
+                break;
+
+            int groupSize = nextUserIdx - sysEnd;
+            for (int i = 0; i < groupSize; i++)
             {
-                total -= Estimate(history[start]);
-                history.RemoveAt(start);
-            }
-            else
-            {
-                start++; // unexpected role — advance to avoid an infinite loop
+                total -= EstimateMessage(history[sysEnd]);
+                history.RemoveAt(sysEnd);
             }
         }
         return true;
