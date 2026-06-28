@@ -93,12 +93,36 @@ internal static class ReplTurn
                     stepTotal:     total);
                 if (passed)
                 {
-                    // Trim step messages (user prompt + agent response) and replace with a
-                    // compact summary so each subsequent step gets a clean, focused context.
-                    while (ctx.History.Count > historyMarker)
-                        ctx.History.RemoveAt(historyMarker);
-                    ctx.History.Add(new ChatMessage(ChatRole.User,
-                        $"[Step {step.Step} of {total} complete] {step.Description}"));
+                    if (ctx.LastStepWasInspectOnly)
+                    {
+                        // Inspect-only step: replace the step prompt with a compact label that
+                        // embeds the actual tool outputs so the next step can reference them.
+                        var labelSb = new StringBuilder(
+                            $"[Step {step.Step} of {total} complete — findings below] {step.Description}");
+                        if (ctx.LastStepInspectResults?.Count > 0)
+                        {
+                            labelSb.AppendLine("\n[Tool outputs:]");
+                            foreach (var (toolName, output) in ctx.LastStepInspectResults)
+                            {
+                                labelSb.AppendLine($"// {toolName}:");
+                                labelSb.AppendLine(
+                                    output.Length > 4000 ? output[..4000] + "\n…(truncated)" : output);
+                            }
+                        }
+                        if (ctx.History.Count > historyMarker)
+                            ctx.History[historyMarker] = new ChatMessage(ChatRole.User, labelSb.ToString());
+                    }
+                    else
+                    {
+                        // Write/mutation step: trim everything and leave a compact summary so
+                        // each subsequent step gets a clean, focused context.
+                        while (ctx.History.Count > historyMarker)
+                            ctx.History.RemoveAt(historyMarker);
+                        ctx.History.Add(new ChatMessage(ChatRole.User,
+                            $"[Step {step.Step} of {total} complete] {step.Description}"));
+                    }
+                    ctx.LastStepWasInspectOnly = false;
+                    ctx.LastStepInspectResults = null;
                 }
                 // Checkpoint after every step so a crash mid-plan can be recovered on --resume.
                 await SaveSnapshotAsync(ctx);
@@ -276,6 +300,9 @@ internal static class ReplTurn
         var fileChangeSeen     = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var toolRounds        = 0;
         var inToolBatch       = false;
+        // Captured tool outputs for inspect-step history injection (step execution only).
+        List<(string ToolName, string Output)>? capturedResults = isStepRequest ? [] : null;
+        Dictionary<string, string>? callIdToName = isStepRequest ? [] : null;
 
         var turnStart = DateTime.UtcNow;
         var reqCts    = new CancellationTokenSource();
@@ -312,6 +339,8 @@ internal static class ReplTurn
                     if (!inToolBatch) { toolRounds++; inToolBatch = true; }
                     toolCallsThisTurn.Add(funcCall.Name);
                     TrackFileChange(funcCall.Name, funcCall.Arguments, fileChanges, fileChangeSeen, ctx.Cwd);
+                    if (callIdToName is not null && funcCall.CallId is not null)
+                        callIdToName[funcCall.CallId] = funcCall.Name;
 
                     if (ctx.JsonMode)
                     {
@@ -338,6 +367,16 @@ internal static class ReplTurn
                         spinTask = RunSpinnerAsync($"{verb}…  {chain}", spinCts.Token, turnStart);
                         spinning = true;
                     }
+                    continue;
+                }
+
+                var funcResult = chunk.Contents.OfType<FunctionResultContent>().FirstOrDefault();
+                if (funcResult is not null && capturedResults is not null)
+                {
+                    var toolName = funcResult.CallId is not null &&
+                                  callIdToName?.TryGetValue(funcResult.CallId, out var n) == true
+                                  ? n : "tool";
+                    capturedResults.Add((toolName, funcResult.Result?.ToString() ?? string.Empty));
                     continue;
                 }
 
@@ -400,6 +439,7 @@ internal static class ReplTurn
             // Reset per-attempt accumulators before reissuing the request.
             sb.Clear(); toolCallsThisTurn.Clear();
             fileChanges.Clear(); fileChangeSeen.Clear();
+            capturedResults?.Clear(); callIdToName?.Clear();
             toolRounds = 0; inToolBatch = false;
 
             // Restart spinner for the fresh attempt.
@@ -475,7 +515,8 @@ internal static class ReplTurn
         bool stepPassed = true;
         if (isStepRequest && activeStep is not null)
             stepPassed = await HandleStepResult(ctx, activeStep, stepTotal, toolCallsThisTurn,
-                hitIterationCap: toolRounds >= StepIterationLimit, responseText, cancellationToken);
+                capturedResults ?? [], hitIterationCap: toolRounds >= StepIterationLimit,
+                responseText, cancellationToken);
 
         // Free-form turns: if the response claims a mutation but no write tool was called,
         // auto-inject a correction so the agent is required to actually call the tool.
@@ -655,7 +696,8 @@ internal static class ReplTurn
     }
 
     internal static async Task<bool> HandleStepResult(
-        ReplSessionContext ctx, PlanStep activeStep, int total, List<string> toolCallsThisTurn, bool hitIterationCap,
+        ReplSessionContext ctx, PlanStep activeStep, int total, List<string> toolCallsThisTurn,
+        List<(string ToolName, string Output)> capturedResults, bool hitIterationCap,
         string responseText = "", CancellationToken cancellationToken = default)
     {
         var (passed, verifyOutput) = await VerifyStepAsync(activeStep, toolCallsThisTurn, ctx.Cwd, cancellationToken);
@@ -682,6 +724,12 @@ internal static class ReplTurn
             var inspectSkip   = activeStep.Tool is not null && toolCallsThisTurn.Count > 0 &&
                                 toolCallsThisTurn.All(t => InspectTools.Contains(t));
             var skipped       = zeroCallSkip || inspectSkip;
+            // Broader than inspectSkip: preserve history whenever only read-only tools were
+            // called, even if the step had no expected tool declared.
+            ctx.LastStepWasInspectOnly = toolCallsThisTurn.Count > 0 &&
+                                        toolCallsThisTurn.All(t => InspectTools.Contains(t));
+            ctx.LastStepInspectResults = ctx.LastStepWasInspectOnly && capturedResults.Count > 0
+                ? capturedResults : null;
             await ctx.Emitter.EmitAsync(EventTypes.StepComplete, turn: ctx.TurnIndex, payload: new
             {
                 step       = activeStep.Step,
@@ -846,7 +894,7 @@ internal static class ReplTurn
     // determined no action was needed — treat as a conditional skip rather than a failure.
     private static readonly HashSet<string> InspectTools = new(StringComparer.OrdinalIgnoreCase)
     {
-        "grep_file", "read_file", "list_directory",
+        "grep_file", "read_file", "list_directory", "list_files",
         "search_files", "search_content",
         "git_status", "git_log", "git_diff",
         "get_env", "which",
