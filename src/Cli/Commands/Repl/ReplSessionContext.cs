@@ -84,6 +84,11 @@ internal sealed class ReplSessionContext
     // Adversarial mode — critic agent reviews each /execute step result
     public bool AdversarialMode;
 
+    // Set by HandleStepResult when a step passed using only inspect (read-only) tools.
+    // RunLoopAsync uses these to inject tool outputs into history so subsequent steps can see them.
+    public bool LastStepWasInspectOnly;
+    public List<(string ToolName, string Output)>? LastStepInspectResults;
+
     // Max output tokens (0 = provider default)
     public int MaxOutputTokens;
 
