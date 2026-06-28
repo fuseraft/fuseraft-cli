@@ -38,6 +38,7 @@ internal static partial class ReplCommands
             case "/conversation":  CmdConversation(ctx); return CommandResult.Continue;
             case "/rewind":        return await CmdRewindAsync(ctx, arg, cancellationToken);
             case "/model":         return await CmdModelAsync(ctx, arg);
+            case "/models":        return await CmdModelsAsync(ctx, cancellationToken);
             case "/reasoning":     return await CmdReasoningAsync(ctx, arg);
             case "/retry":         return CmdRetry(ctx);
             case "/last":          CmdLast(ctx); return CommandResult.Continue;
@@ -104,6 +105,7 @@ internal static partial class ReplCommands
             Console.WriteLine("- `/compact <focus>` — Same, but tailor the summary toward the next session's focus");
             Console.WriteLine("- `/model` — Show current model and reasoning effort");
             Console.WriteLine("- `/model <id> [effort]` — Switch model; optional effort: none, low, medium, high");
+            Console.WriteLine("- `/models` — List models available from the current provider");
             Console.WriteLine("- `/reasoning` — Show current reasoning effort");
             Console.WriteLine("- `/reasoning <none|low|medium|high>` — Set reasoning effort for the current model");
             Console.WriteLine("- `/max-tokens <n>` — Set max output tokens for each response");
@@ -196,6 +198,7 @@ internal static partial class ReplCommands
         ctx.AddRow("[bold cyan]/compact <focus>[/]",    "Same, but tailor the summary toward the next session's focus");
         ctx.AddRow("[bold cyan]/model[/]",                          "Show current model and reasoning effort");
         ctx.AddRow("[bold cyan]/model <id> [[effort]][/]",          "Switch model; effort: none, low, medium, high");
+        ctx.AddRow("[bold cyan]/models[/]",                         "List models available from the current provider");
         ctx.AddRow("[bold cyan]/reasoning[/]",                     "Show current reasoning effort");
         ctx.AddRow("[bold cyan]/reasoning <effort>[/]",            "Set reasoning effort for the current model");
         ctx.AddRow("[bold cyan]/max-tokens <n>[/]",     "Set max output tokens for each response");

@@ -112,7 +112,7 @@ For any model not matching the table, specify `Provider`, `Endpoint`, and `ApiKe
 }
 ```
 
-Set this file via `fuseraft repl` (the setup wizard writes it automatically) or edit it directly.
+Set this file via `fuseraft repl` or `fuseraft models` (the setup wizard runs automatically on first use) or edit it directly. Run `fuseraft models` to see all models available from the configured provider, or use `/models` inside a REPL session for the same list.
 
 ### OS keychain fallback
 
