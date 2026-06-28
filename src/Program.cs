@@ -159,6 +159,7 @@ services.AddTransient<ObjectiveStatusCommand>();
 services.AddTransient<EvalCommand>();
 services.AddTransient<EvalInitCommand>();
 services.AddTransient<KeychainCommand>();
+services.AddTransient<ModelsCommand>();
 
 // Use CommandApp<ReplCommand> so bare `fuseraft` drops straight into the REPL.
 // Set FUSERAFT_REPL_NEXT=1 to switch the default entry-point to the new REPL UX.
@@ -362,6 +363,10 @@ app.Configure(cfg =>
             .WithExample(["log", "app", "--last", "100"])
             .WithExample(["log", "app", "--level", "err"]);
     });
+
+    cfg.AddCommand<ModelsCommand>("models")
+        .WithDescription("List models available from the configured provider.")
+        .WithExample(["models"]);
 
     cfg.AddCommand<UpdateCommand>("update")
         .WithDescription("Fetch the latest fuseraft release from GitHub and replace the running binary.")
