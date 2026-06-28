@@ -467,4 +467,64 @@ public sealed class ContextWindowFilterTests
         Assert.Contains(result, m => m.AuthorName == "Developer");
         Assert.Contains(result, m => m.AuthorName == "Tester");
     }
+
+    // MaxTurnAge — slice must start with a user message
+
+    [Fact]
+    public void MaxTurnAge_1_slice_starts_with_user_after_two_turns()
+    {
+        // After 2 turns the old code set cutIndex to the second assistant message
+        // and produced [Asst1, Tool1] — first message assistant, invalid for Anthropic.
+        var history = new List<ChatMessage>
+        {
+            User("task"),
+            Text("Dev", "turn 0 done"),
+            User("correction"),
+            Text("Dev", "turn 1 done"),
+        };
+
+        var result = ContextWindowFilter.Apply(history, new ContextWindowConfig { MaxTurnAge = 1 });
+
+        Assert.Equal(ChatRole.User, result[0].Role);
+    }
+
+    [Fact]
+    public void MaxTurnAge_2_retains_two_complete_turns()
+    {
+        var history = new List<ChatMessage>
+        {
+            User("task"),
+            Text("Dev", "turn 0"),
+            User("c1"),
+            Text("Dev", "turn 1"),
+            User("c2"),
+            Text("Dev", "turn 2"),
+        };
+
+        var result = ContextWindowFilter.Apply(history, new ContextWindowConfig { MaxTurnAge = 2 });
+
+        // Should keep the last 2 turns: [c1, turn1, c2, turn2]
+        Assert.Equal(ChatRole.User, result[0].Role);
+        Assert.Equal(4, result.Count);
+    }
+
+    [Fact]
+    public void MaxTurnAge_with_tool_pairs_slice_starts_with_user()
+    {
+        // Turn groups that include tool call/result pairs.
+        var history = new List<ChatMessage>
+        {
+            User("task"),
+            ToolFrame("Dev"),
+            ToolResult("output0"),
+            User("c1"),
+            ToolFrame("Dev"),
+            ToolResult("output1"),
+        };
+
+        var result = ContextWindowFilter.Apply(history, new ContextWindowConfig { MaxTurnAge = 1 });
+
+        Assert.Equal(ChatRole.User, result[0].Role);
+    }
+
 }
