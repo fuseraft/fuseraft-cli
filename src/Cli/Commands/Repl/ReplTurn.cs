@@ -989,42 +989,6 @@ internal static class ReplTurn
     internal static bool TryParsePlan(string text, out PlanStep[] steps) =>
         PlanStep.TryParse(text, out steps);
 
-    private static string BuildToolSummary(List<string> toolCalls)
-    {
-        int reads = 0, searches = 0, writes = 0, shell = 0, git = 0, skills = 0, other = 0;
-        foreach (var name in toolCalls)
-        {
-            var n = name.Replace("_", "").ToLowerInvariant();
-            if (n is "readfile" or "listdirectory" or "listfiles" or "grepfile"
-                    or "getfilesummary" or "getfileinfo")
-                reads++;
-            else if (n.StartsWith("search"))
-                searches++;
-            else if (n is "writefile" or "patchfile" or "createdirectory"
-                    or "deletefile" or "deletedirectory" or "copyfile" or "movefile")
-                writes++;
-            else if (n.StartsWith("shell"))
-                shell++;
-            else if (n.StartsWith("git"))
-                git++;
-            else if (n is "loadskill")
-                skills++;
-            else
-                other++;
-        }
-        var parts = new List<string>();
-        if (reads    > 0) parts.Add($"{reads} read{(reads    == 1 ? "" : "s")}");
-        if (searches > 0) parts.Add($"{searches} search{(searches == 1 ? "" : "es")}");
-        if (writes   > 0) parts.Add($"{writes} write{(writes   == 1 ? "" : "s")}");
-        if (shell    > 0) parts.Add($"{shell} shell");
-        if (git      > 0) parts.Add($"{git} git");
-        if (skills   > 0) parts.Add($"{skills} skill{(skills   == 1 ? "" : "s")}");
-        if (other    > 0) parts.Add($"{other} other");
-        var total  = toolCalls.Count;
-        var detail = parts.Count > 1 ? $"  ({string.Join(" · ", parts)})" : string.Empty;
-        return $"{total} tool{(total == 1 ? "" : "s")}{detail}";
-    }
-
     private static void TrackFileChange(
         string toolName,
         IDictionary<string, object?>? args,
@@ -1072,23 +1036,6 @@ internal static class ReplTurn
             return abs;
         }
         catch { return path; }
-    }
-
-    private static string? SummarizeToolArgs(IDictionary<string, object?>? args)
-    {
-        if (args is null || args.Count == 0) return null;
-        ReadOnlySpan<string> priority = ["path", "command", "script", "url", "key", "query", "message", "branch"];
-        foreach (var key in priority)
-        {
-            if (args.TryGetValue(key, out var val) && val is not null)
-            {
-                var s = val.ToString() ?? string.Empty;
-                return $"{key}={(s.Length > 60 ? s[..60] : s)}";
-            }
-        }
-        var first = args.First();
-        var fv = first.Value?.ToString() ?? string.Empty;
-        return $"{first.Key}={(fv.Length > 60 ? fv[..60] : fv)}";
     }
 
     // Drip-prints text character by character so large chunks don't pop in all at once.
