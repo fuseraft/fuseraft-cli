@@ -846,6 +846,336 @@ public class ValidateConfigCommandTests : IDisposable
     }
 
     // -----------------------------------------------------------------------
+    // Workflow selection tests
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task WorkflowSelection_ValidConfig_Returns0()
+    {
+        // Regression test: 'workflow' was missing from the selection-type allowlist entirely,
+        // so even a fully valid config reported "Unknown selection type: 'workflow'".
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "Writer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "Plugins": ["Handoff"]},
+              {"Name": "Reviewer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "Plugins": ["Handoff"]}
+            ],
+            "Selection": {
+              "Type": "workflow",
+              "Graph": {
+                "EntryNode": "writer",
+                "Nodes": [
+                  {"Id": "writer", "Agent": "Writer"},
+                  {"Id": "reviewer", "Agent": "Reviewer", "Terminal": true}
+                ],
+                "Edges": [
+                  {"From": "writer", "To": "reviewer", "Keyword": "HANDOFF TO REVIEWER"}
+                ]
+              }
+            }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(0, exitCode);
+    }
+
+    [Fact]
+    public async Task WorkflowSelection_MissingHandoffPlugin_Errors()
+    {
+        // 'workflow' routes exclusively via handoff() tool calls (no text-keyword fallback),
+        // so an agent referenced by a workflow node without the Handoff plugin must error.
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "Writer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Reviewer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "Plugins": ["Handoff"]}
+            ],
+            "Selection": {
+              "Type": "workflow",
+              "Graph": {
+                "EntryNode": "writer",
+                "Nodes": [
+                  {"Id": "writer", "Agent": "Writer"},
+                  {"Id": "reviewer", "Agent": "Reviewer", "Terminal": true}
+                ],
+                "Edges": [
+                  {"From": "writer", "To": "reviewer", "Keyword": "HANDOFF TO REVIEWER"}
+                ]
+              }
+            }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    // -----------------------------------------------------------------------
+    // MapReduce selection tests
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task MapReduceSelection_ValidConfig_Returns0()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "Splitter", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Mapper", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Reducer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
+            ],
+            "Selection": {
+              "Type": "mapreduce",
+              "MapReduce": {
+                "Splitter": "Splitter",
+                "Mapper": "Mapper",
+                "Reducer": "Reducer",
+                "ItemsJsonPath": "items"
+              }
+            }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(0, exitCode);
+    }
+
+    [Fact]
+    public async Task MapReduceSelection_MissingBlock_Errors()
+    {
+        // Regression test: 'mapreduce' was missing from the selection-type allowlist entirely
+        // (found while fixing the same gap for 'workflow'), so this used to report "Unknown
+        // selection type" instead of the more useful "missing MapReduce block" message.
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
+            "Selection": {"Type": "mapreduce"}
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task MapReduceSelection_UnknownSplitterAgent_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "Mapper", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Reducer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
+            ],
+            "Selection": {
+              "Type": "mapreduce",
+              "MapReduce": {
+                "Splitter": "Missing",
+                "Mapper": "Mapper",
+                "Reducer": "Reducer"
+              }
+            }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task MapReduceSelection_MaxSplitterRetriesZero_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "Splitter", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Mapper", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Reducer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
+            ],
+            "Selection": {
+              "Type": "mapreduce",
+              "MapReduce": {
+                "Splitter": "Splitter",
+                "Mapper": "Mapper",
+                "Reducer": "Reducer",
+                "MaxSplitterRetries": 0
+              }
+            }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    // -----------------------------------------------------------------------
+    // ScatterGather selection tests
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task ScatterGatherSelection_ValidConfig_Returns0()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "Expert1", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Expert2", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Synthesizer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
+            ],
+            "Selection": {
+              "Type": "scattergather",
+              "ScatterGather": {
+                "Participants": ["Expert1", "Expert2"],
+                "Synthesizer": "Synthesizer"
+              }
+            }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(0, exitCode);
+    }
+
+    [Fact]
+    public async Task ScatterGatherSelection_MissingBlock_Errors()
+    {
+        // Regression test: 'scattergather' was missing from the selection-type allowlist
+        // entirely (found alongside the same 'mapreduce' gap).
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
+            "Selection": {"Type": "scattergather"}
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task ScatterGatherSelection_NoParticipants_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [{"Name": "Synthesizer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
+            "Selection": {
+              "Type": "scattergather",
+              "ScatterGather": {
+                "Participants": [],
+                "Synthesizer": "Synthesizer"
+              }
+            }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task ScatterGatherSelection_UnknownParticipant_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "Expert1", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Synthesizer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
+            ],
+            "Selection": {
+              "Type": "scattergather",
+              "ScatterGather": {
+                "Participants": ["Expert1", "Missing"],
+                "Synthesizer": "Synthesizer"
+              }
+            }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    // -----------------------------------------------------------------------
     // YAML config tests
     // -----------------------------------------------------------------------
 

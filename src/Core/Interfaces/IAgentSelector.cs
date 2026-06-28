@@ -4,7 +4,7 @@ using Microsoft.Extensions.AI;
 namespace fuseraft.Core.Interfaces;
 
 /// <summary>
-/// Selects the next agent to run in a multi-agent orchestration loop.
+/// Selects the next agent to run in a multi-agent coordination loop.
 /// Called after each agent turn to determine which agent should respond next.
 /// </summary>
 public interface IAgentSelector

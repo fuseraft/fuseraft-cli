@@ -56,7 +56,7 @@ A turn ends only after the agent produces a final text response. This definition
 | `IAgentSelector` | Picks the next agent each turn | `KeywordSelectionStrategy`, `StateMachineSelectionStrategy`, `LlmSelectionStrategy`, `SequentialAgentSelector`, `RoundRobinAgentSelector`, `StructuredSelectionStrategy` |
 | `ITerminationCondition` | Decides when the session ends | `RegexTerminationCondition`, `MaxIterationsTerminationCondition`, `CompositeTerminationCondition` |
 | `IRoutingValidator` | Blocks a handoff unless evidence is present | `RequireBriefValidator`, `HandoffToTesterValidator`, `HandoffToReviewerValidator`, `RequireShellPassValidator`, `RequireAllFilesWrittenValidator`, `RequireReviewJudgementValidator` |
-| `IOrchestrator` | Drives the agent loop | `AgentOrchestrator`, `GraphOrchestrator`, `MagenticOrchestrator`, `AdversarialOrchestrator`, `MapReduceOrchestrator`, `ScatterGatherOrchestrator`, `SagaOrchestrator` (compensating rollback wrapper) |
+| `IOrchestrator` | Drives the agent loop | `AgentOrchestrator`, `GraphOrchestrator`, `WorkflowOrchestrator`, `MagenticOrchestrator`, `AdversarialOrchestrator`, `MapReduceOrchestrator`, `ScatterGatherOrchestrator`, `SagaOrchestrator` (compensating rollback wrapper) |
 | `ICompensatingAgent` | Rolls back an agent's work when the saga aborts | Provided by callers; none built-in |
 | `ISessionStore` | Saves/loads checkpoints | `JsonSessionStore`, `InMemorySessionStore` |
 
@@ -67,11 +67,12 @@ A turn ends only after the agent produces a final text response. This definition
 `OrchestratorBuilder` picks the orchestrator at startup:
 
 1. `GraphOrchestrator` — when `Selection.Type == "graph"`; drives a declarative directed graph with named nodes, keyword-gated edges, optional parallel fan-out/fan-in via `Parallel: true` nodes, and hierarchical sub-graphs via `SubGraphId` nodes
-2. `MagenticOrchestrator` — when `Selection.Type == "magentic"`
-3. `AdversarialOrchestrator` — when `Selection.Type == "adversarial"`; runs fixed generate→critique→revise stages with a context firewall between generator and critic
-4. `MapReduceOrchestrator` — when `Selection.Type == "mapreduce"`; runs a three-phase split→parallel-map→reduce pipeline
-5. `ScatterGatherOrchestrator` — when `Selection.Type == "scattergather"`; broadcasts the same task to all participants in parallel then synthesises their independent outputs
-6. `AgentOrchestrator` — everything else (`keyword`, `statemachine`, `llm`, `sequential`, `roundrobin`, `structured`); driven by an `IAgentSelector` + `ITerminationCondition`
+2. `WorkflowOrchestrator` — when `Selection.Type == "workflow"`; reuses the same `Selection.Graph` config as `graph`, but compiles the whole graph (cycles included) into a single persistent MAF workflow instead of restarting a phase per back-edge. v1: no `Parallel`/`SubGraphId`/`RequireHumanApproval`/`RecoveryAgent`/unconditional edges — config validation rejects those, pointing at `graph` instead
+3. `MagenticOrchestrator` — when `Selection.Type == "magentic"`
+4. `AdversarialOrchestrator` — when `Selection.Type == "adversarial"`; runs fixed generate→critique→revise stages with a context firewall between generator and critic
+5. `MapReduceOrchestrator` — when `Selection.Type == "mapreduce"`; runs a three-phase split→parallel-map→reduce pipeline
+6. `ScatterGatherOrchestrator` — when `Selection.Type == "scattergather"`; broadcasts the same task to all participants in parallel then synthesises their independent outputs
+7. `AgentOrchestrator` — everything else (`keyword`, `statemachine`, `llm`, `sequential`, `roundrobin`, `structured`); driven by an `IAgentSelector` + `ITerminationCondition`
 
 `SagaOrchestrator` wraps whichever orchestrator is selected when `Saga.Enabled == true`.
 
@@ -106,6 +107,12 @@ A turn ends only after the agent produces a final text response. This definition
 - Nodes with `Parallel: true` participate in fan-out groups: a source node fans out to all parallel nodes that share the triggering keyword, runs them concurrently with isolated history snapshots, then merges outputs before advancing
 - Nodes with `SubGraphId` run a nested `GraphOrchestrator` (declared in `GraphConfig.SubGraphs`) as a black-box step; the sub-graph's terminal output is injected into the parent's shared history for keyword detection and edge routing
 - Terminal nodes end the session after the agent (or sub-graph) executes once; the node may declare its own `Validators` list
+
+**`WorkflowOrchestrator`** (`workflow` type — not a selection strategy):
+- Same `GraphConfig`/`GraphNodeConfig`/`GraphEdgeConfig` shape as `graph`; same `BuildNodeRouteTables`-style construction, but with no forward/back-edge classification — every edge, cyclic or not, becomes a plain `AgentRouteTable.Routes` entry, and every routing decision is a uniform `SendMessageAsync` to the matched target
+- The whole graph (cycles included) is wired into one `WorkflowBuilder` graph built once per session via plain `AddEdge` calls — no BFS layering, no per-cycle phase rebuild
+- Does not implement `Parallel`, `SubGraphId`, `RequireHumanApproval`, `RecoveryAgent`, or unconditional edges — config validation in `OrchestratorBuilder` rejects configs that use them under `Selection.Type: workflow`
+- Independently implemented from `GraphOrchestrator` (not extracted/shared) — same convention as `StrategyFactory`'s and `GraphOrchestrator`'s separate validator-resolution logic. `KeywordDetector`, `CorrectionEngine`, and `AgentRouteTable` (already `internal`-shared types in `Orchestration/Workflow/`) are reused as-is
 
 **Failure classification** (keyword and statemachine strategies):
 - `FailureType` enum: `MissingEvidence`, `InvalidTransition`, `ConflictingEvidence`, `NoProgress`
@@ -257,6 +264,7 @@ When adding a new `FailureAction` or `FailureType` value, update:
 |----------|--------------|
 | How is the next agent selected? | `src/Orchestration/Strategies/KeywordSelectionStrategy.cs`, `StateMachineSelectionStrategy.cs`, `SequentialAgentSelector.cs`, `RoundRobinAgentSelector.cs` |
 | How does graph orchestration work? | `src/Orchestration/GraphOrchestrator.cs`, `src/Core/Models/Orchestration/GraphConfig.cs` |
+| How does the cycle-native workflow orchestrator work? | `src/Orchestration/WorkflowOrchestrator.cs` — reuses `GraphConfig`; see its class doc comment for what's deliberately not implemented |
 | How do sub-graph nodes work? | `src/Orchestration/GraphOrchestrator.cs` → `BuildExecutorBindings`, `RunSubGraphNodeAsync`; `src/Core/Models/Orchestration/GraphConfig.cs` → `SubGraphs`, `SubGraphId` |
 | How does map-reduce work? | `src/Orchestration/MapReduceOrchestrator.cs`, `src/Core/Models/Orchestration/MapReduceConfig.cs` |
 | How does scatter-gather work? | `src/Orchestration/ScatterGatherOrchestrator.cs`, `src/Core/Models/Orchestration/ScatterGatherConfig.cs` |

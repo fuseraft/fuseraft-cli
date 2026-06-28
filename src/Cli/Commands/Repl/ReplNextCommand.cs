@@ -206,6 +206,7 @@ public sealed class ReplNextCommand(ILoggerFactory loggerFactory) : AsyncCommand
         var toolArtifactStore = new ToolResultArtifactStore(toolArtifactsDir, emitter);
         foreach (var key in toolsByCategory.Keys.ToList())
             toolsByCategory[key] = toolsByCategory[key]
+                .Select(f => (AIFunction)new ToolResultLoggingFilter(f, emitter))
                 .Select(f => (AIFunction)new ToolResultOffloadFilter(f, toolArtifactStore))
                 .ToList();
 

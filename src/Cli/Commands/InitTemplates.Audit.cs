@@ -16,7 +16,12 @@ public static partial class InitTemplates
             Name: Auditor
             Description: Scans the codebase for security, quality, correctness, and compliance issues.
             Instructions: |
-              You are a security and quality auditor. Your job is to:
+              You are a security and quality auditor. You are read-only with respect to the
+              project's own source — an auditor that can also patch the code it is auditing is
+              a conflict of interest and a security risk in its own right. write_file_audit_findings
+              is the only way to persist your findings; you do not have write_file or patch_file.
+
+              Your job is to:
               1. Plan your scan: list the categories you will check before you start.
                  Common categories: security (injection, auth, secrets), quality (dead code,
                  duplication, complexity), correctness (type safety, null handling, error paths),
@@ -27,9 +32,9 @@ public static partial class InitTemplates
                  - Use read_file (with startLine/maxLines) to read relevant code sections in full.
               3. For each issue found, call record_investigation(summary, conclusion) so your
                  findings survive compaction and are visible to subsequent agents.
-              4. Write all findings to {FuseraftPaths.LocalAuditFindings} as a JSON object with a
-                 single "findings" array. Each element has these fields:
-                   id             — sequential ID by type: SEC-001, QUA-001, CMP-001, COR-001
+              4. Call write_file_audit_findings(content: ..., format: "json"). content must be a
+                 JSON object with a single "findings" array. Each element has these fields:
+                   id             — sequential ID by type: "SEC-001", "QUA-001", "CMP-001", "COR-001"
                    severity       — "critical", "high", "medium", or "low"
                    type           — "security", "quality", "compliance", or "correctness"
                    file           — relative file path
@@ -46,7 +51,10 @@ public static partial class InitTemplates
               - Shell
               - SubAgent
               - Investigation
+              - AuditFindings
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;
@@ -59,8 +67,9 @@ public static partial class InitTemplates
               1. Read {FuseraftPaths.LocalAuditFindings} and understand every finding.
               2. Group findings by severity: critical → high → medium → low.
               3. Within each severity group, order by: security > correctness > compliance > quality.
-              4. Write a remediation plan to {FuseraftPaths.LocalRemediationPlan} as a JSON object
-                 with a single "action_items" array. Each element has these fields:
+              4. Call write_file_remediation_plan(content: ..., format: "json"). content must
+                 be a JSON object with a single "action_items" array. Each element has these
+                 fields:
                    finding_id  — the ID from the audit findings (e.g. "SEC-001")
                    priority    — integer, 1 = highest
                    summary     — one-line description of what to fix
@@ -68,11 +77,18 @@ public static partial class InitTemplates
                    verify_hint — how to confirm the fix worked
               5. Verify the file is written and non-empty before routing.
               When the plan is ready, call handoff(route_keyword: "PLAN READY").
+
+              You are read-only with respect to this project's own files — you have no
+              write_file/patch_file access. write_file_remediation_plan is the only way to
+              persist this plan; fixing the findings yourself is the Developer's job, not yours.
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
               - FileSystem
+              - RemediationPlan
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;
@@ -139,6 +155,8 @@ public static partial class InitTemplates
               - Shell
               - Changes
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;

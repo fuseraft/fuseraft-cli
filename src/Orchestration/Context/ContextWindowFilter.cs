@@ -114,7 +114,16 @@ public static class ContextWindowFilter
             }
             // Only trim when we actually found enough turns; otherwise keep everything.
             if (assistantTurnsSeen >= window.MaxTurnAge && cutIndex > 0)
-                list = list.Skip(cutIndex).ToList();
+            {
+                // Walk cutIndex back to the user message that starts the turn group.
+                // The counting loop stops at an assistant message; cutting there would
+                // produce a slice whose first message is assistant with no preceding user,
+                // which Anthropic rejects with a 400 (same class of bug as REPL TrimHistory).
+                while (cutIndex > 0 && list[cutIndex].Role != ChatRole.User)
+                    cutIndex--;
+                if (cutIndex > 0)
+                    list = list.Skip(cutIndex).ToList();
+            }
         }
 
         // Step 4: Tail limit — keep only the last N messages.

@@ -387,6 +387,7 @@ Use `/tools` to see the full list at runtime.
 | `/model` | Show current model and reasoning effort |
 | `/model <id>` | Switch to a different model without clearing history |
 | `/model <id> <effort>` | Switch model and set reasoning effort in one step (e.g. `/model grok-4.3 low`) |
+| `/models` | List all models available from the current provider. Highlights the active model. |
 | `/reasoning` | Show current reasoning effort |
 | `/reasoning <effort>` | Set reasoning effort for the current model — `none`, `low`, `medium`, `high`. Injected as `"reasoning": {"effort": "..."}` in the request; supported by xAI `grok-4.3`. |
 | `/max-tokens <n>` | Cap the model's output to `n` tokens per response |
@@ -2038,6 +2039,36 @@ fuseraft log app --level err
 
 # Show the last 200 lines
 fuseraft log app --last 200
+```
+
+---
+
+## `fuseraft models`
+
+List all models available from the configured provider.
+
+```
+fuseraft models
+```
+
+Reads `~/.fuseraft/config` to resolve the provider endpoint and API key, then calls the provider's models listing endpoint (`GET {endpoint}/models` for OpenAI-compatible providers; `GET {endpoint}/api/tags` for Ollama). The currently configured model is highlighted.
+
+If `~/.fuseraft/config` is missing or incomplete, the command runs the same interactive setup wizard as `fuseraft repl` — prompting for a model ID, provider URL, and API key — and saves the result before fetching the model list.
+
+**Example**
+
+```bash
+fuseraft models
+```
+
+```
+  Available models from https://api.anthropic.com/v1 (12)
+
+  claude-3-5-haiku-20241022
+  claude-3-5-sonnet-20241022
+  claude-3-haiku-20240307
+  claude-sonnet-4-6  ← current
+  …
 ```
 
 ---

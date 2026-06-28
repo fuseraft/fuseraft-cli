@@ -57,6 +57,40 @@ public static partial class InitTemplates
     private const string LargeFileProtocolReviewer =
         "call get_file_summary first, grep_file to locate the section to inspect, then read_file with startLine/maxLines — never cold-read a large file in full.";
 
+    // Guards against the most common verify_command failure mode: backgrounding a
+    // build-and-run wrapper (go run, npm run dev, cargo run) leaves an orphaned child
+    // process that "$!"/pkill cannot target (the wrapper execs into a differently-named
+    // PID), blocking the port for every later shell_run call in the session. The
+    // CommandSucceeded contract matches verify_command as a substring of a single
+    // shell_run invocation, so the fix must keep the smoke test self-contained rather
+    // than route it through shell_run_background (which the contract does not see).
+    private const string BackgroundedVerifyCommandRule =
+        "If verify_command must start a long-running process (server, daemon, listener) to " +
+        "exercise it, keep the whole check as ONE shell_run command and never background a " +
+        "build-and-run wrapper (go run, npm run dev, cargo run) — they exec into a " +
+        "differently-named child process that \"$!\" and pkill cannot reliably target, " +
+        "leaving an orphan bound to the port for every later shell_run call this session. " +
+        "Build the artifact first, then background the built binary directly, e.g.: " +
+        "\"go build -o /tmp/srv ./cmd/server && (/tmp/srv & PID=$!; sleep 1; " +
+        "curl -f http://localhost:8080/health; EXIT=$?; kill $PID 2>/dev/null; exit $EXIT)\". " +
+        "Prefix the command with a defensive cleanup of any leaked prior instance, e.g. " +
+        "\"pkill -f /tmp/srv 2>/dev/null; sleep 0.2;\", so a stale orphan self-heals instead " +
+        "of cascading into every later verify_command attempt.";
+
+    // Closes the gap where a Reviewer spot-check succeeds by luck against a stale
+    // process left running by an earlier agent, then the Reviewer ignores its own
+    // failed re-verification attempts and approves anyway. A spot-check is only
+    // evidence if it ran cleanly, this turn, against a process the Reviewer controls.
+    private const string ReviewerVerificationIntegrityRule =
+        "A spot-check only counts as evidence if it ran cleanly THIS turn. If shell_run " +
+        "fails (non-zero exit, \"address already in use\", connection refused, timeout, or " +
+        "any error unrelated to the feature itself), the check is INCONCLUSIVE — do not " +
+        "approve on an earlier lucky result, and do not treat a response from a process you " +
+        "did not start this turn as evidence (a server left running by an earlier agent is " +
+        "not proof the change works). If every spot-check attempt this turn fails, do not " +
+        "call APPROVED — fix the command and retry once, or call handoff(route_keyword: " +
+        "\"REVISION REQUIRED\") noting that verification could not be completed.";
+
     // Session context handoff protocol — read on entry, write before routing.
     // These steps prevent agents from re-reading files that previous agents already
     // summarised, and give successor agents a current-state snapshot without needing

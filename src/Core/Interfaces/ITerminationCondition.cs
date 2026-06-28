@@ -3,7 +3,7 @@ using Microsoft.Extensions.AI;
 namespace fuseraft.Core.Interfaces;
 
 /// <summary>
-/// Determines whether a multi-agent orchestration should terminate after each agent turn.
+/// Determines whether a multi-agent coordination loop should terminate after each agent turn.
 /// </summary>
 public interface ITerminationCondition
 {
