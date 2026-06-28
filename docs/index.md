@@ -1,6 +1,6 @@
 # fuseraft-cli Documentation
 
-fuseraft-cli is a multi-agent orchestration CLI built on [Microsoft Agent Framework](https://github.com/microsoft/agents) and [Microsoft.Extensions.AI](https://github.com/dotnet/extensions). You define teams of AI agents in a YAML config — each agent has a system prompt, a model, and a set of plugins — and the orchestrator drives them through a conversation until the task is done.
+fuseraft-cli is a multi-agent coordination CLI built on [Microsoft Agent Framework](https://github.com/microsoft/agents) and [Microsoft.Extensions.AI](https://github.com/dotnet/extensions). You define teams of AI agents in a YAML config — each agent has a system prompt, a model, and a set of plugins — and the coordinator drives them through a pipeline until the task is done.
 
 fuseraft-cli is actively maintained and in production use. New features ship regularly.
 
