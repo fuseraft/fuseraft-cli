@@ -9,7 +9,7 @@
     <AssemblyName>fuseraft</AssemblyName>
     <AssemblyTitle>fuseraft CLI</AssemblyTitle>
     <ApplicationIcon>fuseraft.ico</ApplicationIcon>
-    <Description>Multi-agent orchestration powered by Microsoft Agent Framework.</Description>
+    <Description>Multi-agent coordination framework with runtime verification, powered by Microsoft Agent Framework.</Description>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <NoWarn>$(NoWarn);MAAI001</NoWarn>
   </PropertyGroup>

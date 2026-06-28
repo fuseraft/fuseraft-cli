@@ -59,7 +59,7 @@ public static class MessageRenderer
             : string.Empty;
 
         var content = new Markup(
-            $"[bold]fuseraft[/] [dim]- multi-agent orchestration framework (v{Markup.Escape(semver)})[/]\n" +
+            $"[bold]fuseraft[/] [dim]- multi-agent coordination framework (v{Markup.Escape(semver)})[/]\n" +
             $"\n" +
             $"[dim]Model:[/]    {Markup.Escape(modelId)}\n" +
             $"[dim]Path:[/]     {Markup.Escape(displayPath)}\n" +
