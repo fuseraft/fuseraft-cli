@@ -1,10 +1,10 @@
 # fuseraft
 
-<img src="docs/.assets/fuseraft-banner.png" alt="fuseraft — an agent orchestration framework">
+<img src="docs/.assets/fuseraft-banner.png" alt="fuseraft — a multi-agent coordination framework">
 
 fuseraft runs teams of AI agents and mechanically enforces that they did what they claim before advancing the pipeline.
 
-Validators inspect tool-call records, file presence, and shell exit codes — not agent assertions. Claims are not evidence; artifacts and command results are.
+Validators inspect tool-call records, file presence, and shell exit codes — not agent assertions. Claims are not evidence; artifacts and command results are. This is runtime verification: observable behavior, not self-reported outcomes.
 
 Define pipelines in YAML with agents, routing strategy, and contracts. Works with Anthropic, xAI, OpenAI, Azure, Ollama, and any OpenAI-compatible provider. Built on Microsoft Agent Framework.
 
@@ -100,7 +100,7 @@ The binary lands in `./bin/`.
 - Change tracker logs every `write_file`, `shell_run`, and `git_commit` to a JSONL audit log
 - Evidence contracts gate transitions with predicates: `FileExists`, `FilesWritten`, `CommandSucceeded`
 
-**Orchestration**
+**Coordination**
 - Eleven routing modes: sequential (one-pass), round-robin (cycling), keyword, structured, state machine, graph (parallel fan-out + hierarchical sub-graphs), LLM, Magentic, adversarial generate→critique, map-reduce (parallel item processing), scatter-gather (broadcast + synthesize)
 - Saga mode adds compensating rollback on failure
 - Inline agents or reusable `AgentFile` YAML; mix providers in one pipeline
