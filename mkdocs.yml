@@ -1,6 +1,6 @@
 site_name: fuseraft-cli
 site_description: Multi-agent orchestration CLI built on Microsoft Agent Framework
-site_url: https://fuseraft.github.io/fuseraft-cli/
+site_url: https://fuseraft.ai/
 repo_url: https://github.com/fuseraft/fuseraft-cli
 repo_name: fuseraft/fuseraft-cli
 edit_uri: https://github.com/fuseraft/fuseraft-cli/edit/main/docs/
@@ -54,6 +54,7 @@ nav:
   - Sessions: sessions.md
   - Context Management: context-management.md
   - Context Store: context-store.md
+  - Knowledge Layer: knowledge.md
   - Examples: examples.md
   - Design: design.md
 
@@ -63,6 +64,9 @@ extra_css:
 markdown_extensions:
   - attr_list
   - md_in_html
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - admonition
   - pymdownx.details
   - pymdownx.superfences
