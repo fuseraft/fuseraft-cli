@@ -1,31 +1,134 @@
-# fuseraft-cli Documentation
+---
+template: home.html
+hide:
+  - navigation
+  - toc
+---
 
-fuseraft-cli is a multi-agent coordination CLI built on [Microsoft Agent Framework](https://github.com/microsoft/agents) and [Microsoft.Extensions.AI](https://github.com/dotnet/extensions). You define teams of AI agents in a YAML config — each agent has a system prompt, a model, and a set of plugins — and the coordinator drives them through a pipeline until the task is done.
-
-fuseraft-cli is actively maintained and in production use. New features ship regularly.
+<div class="fuseraft-section" markdown>
 
 ## What it does
+{: .fuseraft-section-title }
 
-- Runs any number of agents in a coordinated loop driven by keyword routing, LLM-based selection, or fully autonomous Magentic orchestration
-- Gives each agent access to tools: filesystem, shell, git, HTTP, JSON, search, Docker sandboxes, MCP servers
-- Saves a checkpoint after every turn so sessions can always be resumed
-- Tracks token usage and estimated cost; can enforce a hard spending cap
-- Enforces correctness with routing validators that block handoffs unless evidence is present
-- Sandboxes agent file and shell access to a configured directory tree
-- Applies per-agent execution rings, prompt injection detection, and a hash-chain audit log via the Agent Governance Toolkit
-- Supports mixing any combination of LLM providers per agent
-- Auto-curates reusable skills from completed sessions and injects relevant ones at session start via a SQLite FTS5 index
-- Schedules recurring sessions via cron expressions (`fuseraft schedule add/list/run`)
-- Rotates API keys automatically on 429 rate-limit responses when a key pool is configured
-- Accumulates durable cross-session knowledge: architecture decisions, repository graph, provenance claims, repository memory patterns, and long-horizon objectives — all queryable by agents via the adaptive context broker
+Define teams of AI agents in YAML. fuseraft-cli drives them through a coordinated pipeline — from planning to implementation to review — until the task is done.
+{: .fuseraft-section-lead }
 
-## Guides
+<div class="grid cards" markdown>
+
+-   :material-robot-outline:{ .lg .middle } **Agent teams as YAML**
+
+    ---
+
+    Define each agent's name, model, system prompt, and plugins in a single YAML config. The coordinator routes work between them automatically.
+
+    [:octicons-arrow-right-24: Configuration](configuration.md)
+
+-   :material-swap-horizontal:{ .lg .middle } **LLM-agnostic**
+
+    ---
+
+    Mix Anthropic, OpenAI, Google, Mistral, xAI, DeepSeek, and Azure OpenAI per agent in the same team. Rotate API keys automatically on rate limits.
+
+    [:octicons-arrow-right-24: Models & Providers](models.md)
+
+-   :material-tools-outline:{ .lg .middle } **Rich plugin ecosystem**
+
+    ---
+
+    Every agent can call filesystem, shell, git, HTTP, JSON, search, and Docker sandbox tools out of the box. Connect any external MCP server.
+
+    [:octicons-arrow-right-24: Plugins](plugins.md)
+
+-   :material-content-save-outline:{ .lg .middle } **Resilient sessions**
+
+    ---
+
+    Sessions checkpoint after every turn. Interrupt anytime and resume exactly where you left off — no work is lost.
+
+    [:octicons-arrow-right-24: Sessions](sessions.md)
+
+-   :material-file-document-check-outline:{ .lg .middle } **Spec-driven development**
+
+    ---
+
+    Use `--spec` to anchor the team to an agreed specification before implementation begins. Routing validators block handoffs until evidence is present.
+
+    [:octicons-arrow-right-24: Spec-Driven Development](spec-driven.md)
+
+-   :material-shield-check-outline:{ .lg .middle } **Governance & cost control**
+
+    ---
+
+    Track token usage and estimated cost per turn. Enforce hard spending caps. Apply execution rings, prompt injection detection, and a hash-chain audit log.
+
+    [:octicons-arrow-right-24: Governance](governance.md)
+
+</div>
+</div>
+
+---
+
+## Quick start
+
+=== "Linux / macOS"
+
+    ```bash
+    git clone https://github.com/fuseraft/fuseraft-cli
+    cd fuseraft-cli
+    ./build.sh
+    ```
+
+    Then run the setup wizard on first launch:
+
+    ```
+    ./bin/fuseraft
+    ```
+
+    ```
+    No configuration found at ~/.fuseraft/config
+
+    Provider setup
+    Configure your default model and API key.
+
+    Model ID      [claude-sonnet-4-6]:
+    Provider URL  [https://api.anthropic.com/v1]:
+    API Key:      ••••••••
+
+    >
+    ```
+
+=== "Windows"
+
+    ```powershell
+    git clone https://github.com/fuseraft/fuseraft-cli
+    cd fuseraft-cli
+    .\build.ps1
+    ```
+
+    Then run the setup wizard on first launch:
+
+    ```
+    .\bin\fuseraft.exe
+    ```
+
+Generate a team config and run your first task:
+
+```bash
+./bin/fuseraft init
+./bin/fuseraft run -c .fuseraft/config/orchestration.yaml "Add a hello-world endpoint to this project"
+```
+
+[:octicons-arrow-right-24: Full installation guide](getting-started.md)
+
+---
+
+## Documentation
 
 | Doc | What it covers |
-|-----|---------------|
+|-----|----------------|
 | [Getting Started](getting-started.md) | Prerequisites, installation, first run |
-| [Writing Effective Tasks](writing-tasks.md) | How to write task descriptions that produce correct, verifiable results |
-| [Spec-Driven Development](spec-driven.md) | Using `--spec` to anchor agents to an agreed specification before implementation begins |
+| [Writing Effective Tasks](writing-tasks.md) | Task descriptions that produce correct, verifiable results |
+| [Spec-Driven Development](spec-driven.md) | Using `--spec` to anchor agents before implementation begins |
 | [CLI Reference](cli-reference.md) | All commands and flags |
 | [Configuration](configuration.md) | Full config schema (YAML and JSON) |
 | [Models & Providers](models.md) | Model configuration and auto-detection |
@@ -40,9 +143,10 @@ fuseraft-cli is actively maintained and in production use. New features ship reg
 | [Sessions](sessions.md) | Resumption, HITL, cost tracking, compaction |
 | [Context Management](context-management.md) | How fuseraft manages context across a long session |
 | [Context Store](context-store.md) | Importing reference material for agents |
-| [Skills](skills.md) | Portable skill packages, skill curation, and the cross-session skill index |
-| [Knowledge Layer](knowledge.md) | ADR registry, repository graph, provenance tracking, repository memory, objectives, context broker, and lifecycle GC |
+| [Skills](skills.md) | Portable skill packages and cross-session skill index |
 | [Examples](examples.md) | Ready-to-use config examples |
+
+---
 
 ## VS Code Extension
 

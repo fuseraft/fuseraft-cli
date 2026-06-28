@@ -1,0 +1,186 @@
+/* ─── Hero ──────────────────────────────────────────────────────────────────── */
+
+.fuseraft-hero {
+  background: linear-gradient(160deg, #000B21 0%, #001235 30%, #021b4e 55%, #0b2e6b 80%, #153b7c 100%);
+  padding: 5.5rem 1.5rem 5rem;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.fuseraft-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 80% 60% at 50% -10%, rgba(75, 130, 200, 0.25) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.fuseraft-hero::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(100, 150, 220, 0.4), transparent);
+}
+
+.fuseraft-hero__inner {
+  position: relative;
+  z-index: 1;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.fuseraft-hero__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 2rem;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.65);
+  letter-spacing: 0.02em;
+  margin-bottom: 2rem;
+}
+
+.fuseraft-hero__badge-dot {
+  width: 7px;
+  height: 7px;
+  background: #4caf94;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px #4caf94;
+}
+
+.fuseraft-hero__logo {
+  width: 88px;
+  height: 88px;
+  margin-bottom: 1.25rem;
+  border-radius: 18px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.fuseraft-hero__title {
+  font-size: clamp(2.4rem, 5vw, 3.6rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.75rem;
+  background: linear-gradient(135deg, #ffffff 0%, #b8d0f0 45%, #e8c97a 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1.1;
+}
+
+.fuseraft-hero__subtitle {
+  font-size: 1.15rem;
+  color: rgba(255, 255, 255, 0.72);
+  max-width: 480px;
+  margin: 0 auto 2.25rem;
+  line-height: 1.65;
+}
+
+.fuseraft-hero__actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* ─── Hero buttons ──────────────────────────────────────────────────────────── */
+
+.fuseraft-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.65rem 1.5rem;
+  border-radius: 0.4rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none !important;
+  transition: transform 0.15s, box-shadow 0.15s, background 0.15s;
+}
+
+.fuseraft-btn:hover {
+  transform: translateY(-1px);
+}
+
+.fuseraft-btn--primary {
+  background: #3b5bdb;
+  color: #fff !important;
+  box-shadow: 0 4px 14px rgba(59, 91, 219, 0.45);
+}
+
+.fuseraft-btn--primary:hover {
+  background: #4c6ef5;
+  box-shadow: 0 6px 20px rgba(59, 91, 219, 0.55);
+}
+
+.fuseraft-btn--secondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.fuseraft-btn--secondary:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+/* ─── Landing page content ──────────────────────────────────────────────────── */
+
+.fuseraft-section {
+  padding: 3.5rem 0 1rem;
+}
+
+.fuseraft-section-title {
+  font-size: 1.65rem;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 0.4rem;
+}
+
+.fuseraft-section-lead {
+  text-align: center;
+  color: var(--md-default-fg-color--light);
+  margin-bottom: 2.5rem;
+  font-size: 1rem;
+}
+
+/* ─── Grid card icon sizing ─────────────────────────────────────────────────── */
+
+.md-typeset .grid.cards .lg {
+  font-size: 2rem;
+}
+
+/* ─── Quick install block ───────────────────────────────────────────────────── */
+
+.fuseraft-install {
+  background: var(--md-code-bg-color);
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.5rem;
+  padding: 1.25rem 1.5rem;
+  font-family: var(--md-code-font);
+  font-size: 0.85rem;
+  margin: 1.5rem 0;
+}
+
+/* ─── Responsive tweaks ─────────────────────────────────────────────────────── */
+
+@media screen and (max-width: 600px) {
+  .fuseraft-hero {
+    padding: 4rem 1rem 3.5rem;
+  }
+
+  .fuseraft-hero__title {
+    font-size: 2.2rem;
+  }
+
+  .fuseraft-hero__logo {
+    width: 68px;
+    height: 68px;
+  }
+}
