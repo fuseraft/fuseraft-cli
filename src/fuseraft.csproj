@@ -58,7 +58,7 @@
 
     <!-- MCP client SDK -->
     <PackageReference Include="ModelContextProtocol" Version="1.4.0" />
-    <PackageReference Include="YamlDotNet" Version="18.0.0" />
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
 
     <!-- SQLite — skill index FTS5 -->
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />
