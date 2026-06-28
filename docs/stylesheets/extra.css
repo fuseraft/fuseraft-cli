@@ -71,24 +71,13 @@
   flex-shrink: 0;
 }
 
-.fuseraft-hero__logo {
-  width: 88px;
-  height: 88px;
-  margin-bottom: 1.25rem;
-  border-radius: 18px;
+.fuseraft-hero__banner {
+  width: 100%;
+  max-width: 720px;
+  height: auto;
+  margin-bottom: 1.5rem;
+  border-radius: 14px;
   box-shadow: 0 8px 32px rgba(26, 20, 15, 0.14);
-}
-
-.fuseraft-hero__title {
-  font-size: clamp(2.4rem, 5vw, 3.6rem);
-  font-weight: 800;
-  letter-spacing: -0.04em;
-  margin: 0 0 0.75rem;
-  line-height: 1.1;
-  background: linear-gradient(135deg, var(--fr-primary) 0%, #d98c4f 50%, var(--fr-accent) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
 }
 
 .fuseraft-hero__subtitle {
@@ -208,8 +197,7 @@
     font-size: 2.2rem;
   }
 
-  .fuseraft-hero__logo {
-    width: 68px;
-    height: 68px;
+  .fuseraft-hero__banner {
+    border-radius: 10px;
   }
 }

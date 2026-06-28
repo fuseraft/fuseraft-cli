@@ -665,7 +665,7 @@ When a session has stalled — the agent keeps making the same mistake, misunder
 
 `/assist` does not modify the plan queue or halted state. It injects one message and then the session continues normally. Use it at any point — during plan execution, after a halt, or in a free-form conversation that has drifted off track.
 
-**Memory commands**
+### Memory commands
 
 The REPL automatically maintains a persistent memory store at `~/.fuseraft/memory/repl/`. Each entry is identified by a UUID and stored as `memory_{guid}.md`. Memories are **scoped to the working directory** where they were created:
 

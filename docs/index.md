@@ -8,7 +8,6 @@ hide:
 <div class="fuseraft-section" markdown>
 
 ## What it does
-{: .fuseraft-section-title }
 
 Define teams of AI agents in YAML. fuseraft-cli drives them through a coordinated pipeline — from planning to implementation to review — until the task is done.
 {: .fuseraft-section-lead }
@@ -31,7 +30,7 @@ Define teams of AI agents in YAML. fuseraft-cli drives them through a coordinate
 
     [:octicons-arrow-right-24: Models & Providers](models.md)
 
--   :material-tools-outline:{ .lg .middle } **Rich plugin ecosystem**
+-   :material-toolbox-outline:{ .lg .middle } **Rich plugin ecosystem**
 
     ---
 

@@ -1,18 +1,21 @@
 {% extends "main.html" %}
 
+{% block content %}
+{% include "partials/tags.html" %}
+{% include "partials/actions.html" %}
+{{ page.content }}
+{% include "partials/source-file.html" %}
+{% include "partials/feedback.html" %}
+{% include "partials/comments.html" %}
+{% endblock %}
+
 {% block tabs %}
 {{ super() }}
 
 <section class="fuseraft-hero">
   <div class="fuseraft-hero__inner">
-    <div class="fuseraft-hero__badge">
-      <span class="fuseraft-hero__badge-dot"></span>
-      Built on Microsoft Agent Framework
-    </div>
-    <img src="{{ 'assets/logo.svg' | url }}" class="fuseraft-hero__logo" alt="fuseraft" />
-    <h1 class="fuseraft-hero__title">fuseraft-cli</h1>
+    <img src="{{ 'assets/fuseraft-banner.png' | url }}" class="fuseraft-hero__banner" alt="fuseraft-cli" />
     <p class="fuseraft-hero__subtitle">
-      Multi-agent AI orchestration.<br>
       Coordinated. Configurable. Production-ready.
     </p>
     <div class="fuseraft-hero__actions">
