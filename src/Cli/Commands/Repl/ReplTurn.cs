@@ -111,6 +111,9 @@ internal static class ReplTurn
                         }
                         if (ctx.History.Count > historyMarker)
                             ctx.History[historyMarker] = new ChatMessage(ChatRole.User, labelSb.ToString());
+                        // Trim assistant response — raw outputs are already in the label above.
+                        while (ctx.History.Count > historyMarker + 1)
+                            ctx.History.RemoveAt(historyMarker + 1);
                     }
                     else
                     {
@@ -894,10 +897,15 @@ internal static class ReplTurn
     // determined no action was needed — treat as a conditional skip rather than a failure.
     private static readonly HashSet<string> InspectTools = new(StringComparer.OrdinalIgnoreCase)
     {
+        // FileSystem (no prefix)
         "grep_file", "read_file", "list_directory", "list_files",
-        "search_files", "search_content",
-        "git_status", "git_log", "git_diff",
-        "get_env", "which",
+        "get_file_summary", "get_file_info", "stat_file",
+        // Search
+        "search_files", "search_content", "search_symbol", "search_callers",
+        // Git
+        "git_status", "git_log", "git_diff", "git_show", "git_branch_list", "git_stash_list",
+        // Shell (shell_ prefix — get_env and which were stale names)
+        "shell_get_env", "shell_which",
     };
 
     // Write-class tools whose presence confirms the agent actually mutated state.
