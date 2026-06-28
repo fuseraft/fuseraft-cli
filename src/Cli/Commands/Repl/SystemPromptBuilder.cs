@@ -38,8 +38,7 @@ internal sealed class SystemPromptBuilder
                 "- Avoid destructive actions (rm, overwrite, force-push) unless explicitly requested.\n" +
                 "- Only write files the user explicitly requests — never create unsolicited summaries, changelogs, or status files.\n" +
                 "- For multi-step work, briefly state intent first.\n" +
-                "- If a command fails due to missing project/config file: search subdirs for the entry point, then run `cd <dir> && <command>` in one shell_run call. Note the directory used.\n" +
-                "- Always return to the original working directory for subsequent commands unless the task explicitly requires otherwise.\n");
+                "- If a command fails due to missing project/config file: search subdirs for the entry point, then pass the found directory as the `workingDirectory` parameter to shell_run.\n");
         }
         else
         {
@@ -123,6 +122,13 @@ internal sealed class SystemPromptBuilder
         var block = ReadAgentsMd(cwd);
         if (block is not null)
             _sb.Append($"\n\n{block}");
+        return this;
+    }
+
+    /// <summary>Appends the OS/runtime environment block (OS, arch, shell, CWD, date/time).</summary>
+    internal SystemPromptBuilder AddOsEnvironment()
+    {
+        _sb.Append($"\n\n{FuseraftPaths.BuildOsEnvironmentBlock()}");
         return this;
     }
 

@@ -9,7 +9,7 @@
     <AssemblyName>fuseraft</AssemblyName>
     <AssemblyTitle>fuseraft CLI</AssemblyTitle>
     <ApplicationIcon>fuseraft.ico</ApplicationIcon>
-    <Description>Multi-agent orchestration powered by Microsoft Agent Framework.</Description>
+    <Description>Multi-agent coordination framework with runtime verification, powered by Microsoft Agent Framework.</Description>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <NoWarn>$(NoWarn);MAAI001</NoWarn>
   </PropertyGroup>
@@ -28,8 +28,8 @@
     <!-- Microsoft Agent Framework -->
     <PackageReference Include="Cronos" Version="0.13.0" />
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
-    <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.9.0" />
-    <PackageReference Include="Microsoft.Agents.AI.Workflows" Version="1.9.0" />
+    <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.11.1" />
+    <PackageReference Include="Microsoft.Agents.AI.Workflows" Version="1.11.1" />
 
     <!-- A2A protocol — client-side agent federation -->
     <PackageReference Include="A2A" Version="1.0.0-preview2" />
@@ -43,10 +43,10 @@
     <PackageReference Include="OllamaSharp" Version="5.4.25" />
 
     <!-- DI -->
-    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.15.1" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.16.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.16.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.15.1" />
-    <PackageReference Include="PdfPig" Version="0.1.14" />
+    <PackageReference Include="PdfPig" Version="0.1.15" />
 
     <!-- Structured logging -->
     <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
@@ -58,7 +58,7 @@
 
     <!-- MCP client SDK -->
     <PackageReference Include="ModelContextProtocol" Version="1.4.0" />
-    <PackageReference Include="YamlDotNet" Version="18.0.0" />
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
 
     <!-- SQLite — skill index FTS5 -->
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />

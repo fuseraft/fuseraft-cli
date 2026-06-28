@@ -30,20 +30,29 @@ public static partial class InitTemplates
                  read every file; prefer sub_agent_explore for structural questions.
               4. Identify: primary language and framework, naming conventions (snake_case vs camelCase),
                  import style, test framework, build system, and key architectural patterns.
-              5. Write the convention profile to {FuseraftPaths.LocalConventions} with fields:
-                   language, framework, naming_convention, import_style, test_framework,
-                   build_command, lint_command, notes (array of key architectural observations).
+              5. Call write_file_conventions(content: ..., format: "json"). content must be a JSON
+                 object with exactly these top-level fields: language (string), naming_patterns
+                 (array), error_handling (array of idioms to follow), forbidden_patterns (array),
+                 test_patterns (array), structural_notes (array — fold framework/import-style
+                 observations in here), build_command (string), test_command (string).
               6. Identify the files most likely to need modification for the given task.
-              7. Write the discovery brief to {FuseraftPaths.LocalBrownfieldBrief} with fields:
-                   summary — one paragraph describing the codebase structure
-                   in_scope_files — array of file paths likely relevant to the task
-                   dependencies — key external dependencies to be aware of
-                   risks — array of fragility signals (e.g. no tests, circular deps, god objects)
+              7. Call write_file_discovery_brief(content: ..., format: "json"). content must be a
+                 JSON object with exactly these top-level fields: summary (one-paragraph string
+                 describing the codebase structure), in_scope_files (array of paths likely relevant
+                 to the task), fragility_signals (array of objects, each a "file" string and a
+                 "reason" string — e.g. file "internal/legacy/queue.go", reason "no tests, high
+                 churn"), test_coverage_gaps (array of files lacking a corresponding test file).
               8. For each significant architectural risk or pattern you uncover, call
                  record_investigation(summary, conclusion) — these findings survive compaction
                  and will be visible to every subsequent agent without re-reading the codebase.
 
-              When both files are written, call handoff(route_keyword: "RECON COMPLETE").
+              You are read-only with respect to this project's own files — you have no
+              write_file/patch_file access. write_file_conventions and write_file_discovery_brief
+              are the only ways to persist your findings; implementing the task itself is the
+              Developer's job, not yours.
+
+              When both write_file_conventions and write_file_discovery_brief have been called,
+              call handoff(route_keyword: "RECON COMPLETE").
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
@@ -51,7 +60,11 @@ public static partial class InitTemplates
               - Search
               - SubAgent
               - Investigation
+              - Conventions
+              - DiscoveryBrief
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;
@@ -70,8 +83,9 @@ public static partial class InitTemplates
                      the Developer already tried. Do not propose an approach that is already
                      rejected. If you now know definitively why it failed, call
                      identify_root_cause(cause) before writing the revised brief.
-                   - Update {FuseraftPaths.LocalBrief}: revise implementation_hints to target
-                     the root cause, add a failure_analysis field describing what went wrong.
+                   - Revise the brief: call write_file_brief(content: ..., format: "json") with
+                     the full updated brief — implementation_hints retargeted at the root cause,
+                     plus a new failure_analysis field describing what went wrong.
                    - Do NOT re-handoff with the same brief — the Developer already tried it.
                  IF no failure signal and {FuseraftPaths.LocalBrief} already exists and still
                  covers the current task: call handoff(route_keyword: "HANDOFF TO DEVELOPER")
@@ -80,7 +94,8 @@ public static partial class InitTemplates
               4. Read {FuseraftPaths.LocalConventions} — follow the project's conventions exactly.
               5. Use sub_agent_explore for additional targeted questions. For direct file reads:
                  {LargeFileProtocol}
-              6. Write a scoped brief to {FuseraftPaths.LocalBrief} with fields:
+              6. Call write_file_brief(content: ..., format: "json"). content must be a JSON
+                 object with exactly these top-level fields:
                    goal — one-sentence description of the change
                    findings — summary of relevant existing code to modify
                    files_to_change — only the files that genuinely need to change
@@ -95,6 +110,10 @@ public static partial class InitTemplates
                    convention_notes — specific conventions to follow from the profile
               7. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
+
+              You are read-only with respect to this project's own files — you have no
+              write_file/patch_file access. write_file_brief is the only way to persist this
+              brief; implementing the task itself is the Developer's job, not yours.
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
@@ -102,7 +121,10 @@ public static partial class InitTemplates
               - Search
               - SessionContext
               - SubAgent
+              - Brief
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;
@@ -165,6 +187,7 @@ public static partial class InitTemplates
               5. Confirm no files outside files_to_change were modified (use changes_read_latest).
               6. Run the build command from the convention profile to confirm the project compiles.
               7. Run the verify_command from the brief to confirm runtime correctness.
+              8. {ReviewerVerificationIntegrityRule}
               Emit a JSON review block covering every acceptance criterion with verdict (PASS/FAIL)
               and evidence before your routing keyword.
               If all criteria pass, call handoff(route_keyword: "APPROVED").
@@ -179,6 +202,8 @@ public static partial class InitTemplates
               - Changes
               - SessionContext
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: auto
             ContextWindow:
               TextOnly: true

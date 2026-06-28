@@ -53,19 +53,23 @@ public static partial class InitTemplates
               Exit 0 = runtime present. Exit 127 or 128 = missing.
 
               STEP 4 — CHECK GIT
-              shell_run("git rev-parse --is-inside-work-tree")
-                Exit 0   → git repo. Also run shell_run("git status --short") and note
-                           whether the working tree is clean.
-                Exit 128 → not a git repo. Record this — agents will skip git steps.
+              git_is_inside_work_tree()
+                Returns "true"  → git repo. Also run git_status() and note whether
+                                  the working tree is clean (no lines beyond the branch header).
+                Returns "false" → not a git repo. Record this — agents will skip git steps.
 
               STEP 5 — WRITE PREFLIGHT REPORT
-              Write a JSON object to {FuseraftPaths.LocalPreflight} with these fields:
-                project_types    — string array of detected types, e.g. ["python"]
-                runtime_versions — object mapping runtime name to version string
-                missing_runtimes — string array of runtimes that returned exit 127/128
-                git_repo         — boolean: true if git rev-parse exited 0
-                git_clean        — boolean or null: true if git status --short output is empty
-                warnings         — string array of non-fatal observations
+              Call write_file_preflight(content: ..., format: "json"). content must be a JSON
+              object with exactly these top-level fields:
+                project_types    — array of detected types, e.g. ["python"]
+                runtime_versions — array, each entry "runtime: version", e.g. ["python3: 3.12.1"]
+                missing_runtimes — array of runtimes that returned exit 127/128
+                git_repo         — boolean: true if git_is_inside_work_tree() returned "true"
+                git_clean        — boolean or null: true if git_status() output has no changed-file lines
+                warnings         — array of non-fatal observations
+              You are read-only with respect to this project's own files — you have no
+              write_file/patch_file access. write_file_preflight is the only way to persist
+              this report; implementing the task itself is the Developer's job, not yours.
 
               STEP 6 — DETERMINE OUTCOME
               FAILURE condition: a specific project type was detected (not "unknown")
@@ -82,7 +86,10 @@ public static partial class InitTemplates
             Plugins:
               - FileSystem
               - Shell
+              - Preflight
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             SkipExecutionState: true
             ContextWindow:
@@ -117,8 +124,9 @@ public static partial class InitTemplates
               IF a failure signal is present:
                 - Read {FuseraftPaths.LocalTestReport} and recent changes to understand
                   the specific failure.
-                - Update {FuseraftPaths.LocalBrief}: revise implementation_hints to target
-                  the root cause; add a failure_analysis field; append to known_pitfalls.
+                - Revise the brief: call write_file_brief(content: ..., format: "json") with
+                  the full updated brief — implementation_hints retargeted at the root cause,
+                  a new failure_analysis field, and known_pitfalls appended to.
                 - Do NOT re-handoff with the same brief the Developer already tried.
               IF no failure signal:
                 - If {FuseraftPaths.LocalBrief} already exists: read it now.
@@ -128,7 +136,8 @@ public static partial class InitTemplates
                 - Otherwise: write or update the brief as described in STEP 4.
 
               STEP 4 — WRITE THE BRIEF
-              Write {FuseraftPaths.LocalBrief} with these fields:
+              Call write_file_brief(content: ..., format: "json"). content must be a JSON
+              object with exactly these top-level fields:
 
               goal
                 One sentence describing what to build.
@@ -161,6 +170,7 @@ public static partial class InitTemplates
                 Correct: "python -m lily --help"
                 Wrong:   "python -m pytest tests/"
                 Wrong:   "dotnet build" (compile only — no feature logic)
+                {BackgroundedVerifyCommandRule}
 
               build_command
                 Command to install dependencies before the Tester runs its suite.
@@ -219,10 +229,18 @@ public static partial class InitTemplates
                  checklist but absent from files_to_change bypasses the ImplementationComplete
                  contract silently.
 
+              f. VERIFY COMMAND BACKGROUNDING SAFETY: if verify_command backgrounds a
+                 long-running process, confirm it follows the rule above — built binary,
+                 not a run-wrapper; defensive cleanup prefix; kill within the same command.
+
               STEP 6 — WRITE CONTEXT
               {ContextWriteStep}
 
               When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
+
+              You are read-only with respect to this project's own files — you have no
+              write_file/patch_file access. write_file_brief is the only way to persist this
+              brief; implementing the task itself is the Developer's job, not yours.
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
@@ -232,7 +250,10 @@ public static partial class InitTemplates
               - SubAgent
               - Decision
               - Objective
+              - Brief
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;
@@ -394,6 +415,7 @@ public static partial class InitTemplates
                  files_to_change, and {FuseraftPaths.LocalTestReport}. For any large file:
                  {LargeFileProtocolReviewer}
               3. Run at least one acceptance criterion as a spot-check with shell_run.
+              4. {ReviewerVerificationIntegrityRule}
               If the code meets all acceptance criteria, call handoff(route_keyword: "APPROVED").
               If changes are needed, call handoff(route_keyword: "REVISION REQUIRED").
                 For each fix: name the file and line, quote the current incorrect code,
@@ -408,6 +430,8 @@ public static partial class InitTemplates
               - Changes
               - SessionContext
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: auto
             Context:
               - Source: session_context

@@ -46,19 +46,23 @@ public static partial class InitTemplates
               Exit 0 = runtime present. Exit 127 or 128 = missing.
 
               STEP 4 — CHECK GIT
-              shell_run("git rev-parse --is-inside-work-tree")
-                Exit 0   → git repo. Also run shell_run("git status --short") and note
-                           whether the working tree is clean.
-                Exit 128 → not a git repo. Record this — agents will skip git steps.
+              git_is_inside_work_tree()
+                Returns "true"  → git repo. Also run git_status() and note whether
+                                  the working tree is clean (no lines beyond the branch header).
+                Returns "false" → not a git repo. Record this — agents will skip git steps.
 
               STEP 5 — WRITE PREFLIGHT REPORT
-              Write a JSON object to {FuseraftPaths.LocalPreflight} with these fields:
-                project_types    — string array of detected types, e.g. ["python"]
-                runtime_versions — object mapping runtime name to version string
-                missing_runtimes — string array of runtimes that returned exit 127/128
-                git_repo         — boolean: true if git rev-parse exited 0
-                git_clean        — boolean or null: true if git status --short output is empty
-                warnings         — string array of non-fatal observations
+              Call write_file_preflight(content: ..., format: "json"). content must be a JSON
+              object with exactly these top-level fields:
+                project_types    — array of detected types, e.g. ["python"]
+                runtime_versions — array, each entry "runtime: version", e.g. ["python3: 3.12.1"]
+                missing_runtimes — array of runtimes that returned exit 127/128
+                git_repo         — boolean: true if git_is_inside_work_tree() returned "true"
+                git_clean        — boolean or null: true if git_status() output has no changed-file lines
+                warnings         — array of non-fatal observations
+              You are read-only with respect to this project's own files — you have no
+              write_file/patch_file access. write_file_preflight is the only way to persist
+              this report; implementing the task itself is the Developer's job, not yours.
 
               STEP 6 — DETERMINE OUTCOME
               FAILURE condition: a specific project type was detected (not "unknown")
@@ -82,7 +86,10 @@ public static partial class InitTemplates
             Plugins:
               - FileSystem
               - Shell
+              - Preflight
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             SkipExecutionState: true
             ContextWindow:
@@ -110,9 +117,10 @@ public static partial class InitTemplates
                  commands, test failures, or "REPLAN REQUIRED" in the session context.
                  IF a failure signal is present:
                    - Read the test report and recent changes to understand the specific failure.
-                   - Update {FuseraftPaths.LocalBrief}: revise implementation_hints to target
-                     the root cause, add a failure_analysis field describing what went wrong
-                     and why the previous approach failed.
+                   - Revise the brief: call write_file_brief(content: ..., format: "json") with
+                     the full updated brief — implementation_hints retargeted at the root cause,
+                     plus a new failure_analysis field describing what went wrong and why the
+                     previous approach failed.
                    - Do NOT re-handoff with the same brief — the Developer already tried it.
                    - Append to (or create) the known_pitfalls array in the brief: each entry
                      names an approach already tried and why it failed. The Developer reads
@@ -127,7 +135,8 @@ public static partial class InitTemplates
                   Address every blocking issue explicitly in the revised brief.
                   Do NOT re-handoff with blocking issues unresolved — the same brief will
                   be rejected again. For each fix, note what you changed in implementation_hints.
-              5. Write a brief to {FuseraftPaths.LocalBrief} with fields:
+              5. Call write_file_brief(content: ..., format: "json"). content must be a JSON
+                 object with exactly these top-level fields:
                    goal — one-sentence description of what to build
                    files_to_change — array of paths RELATIVE TO THE SANDBOX ROOT
                      Correct:  src/module/file.py
@@ -148,6 +157,7 @@ public static partial class InitTemplates
                      IMPORTANT: write the full literal command — never abbreviate with "...".
                      Abbreviated commands cannot be matched against the session log and will
                      cause ImplementationComplete to loop indefinitely.
+                     {BackgroundedVerifyCommandRule}
                    acceptance_criteria — array of testable criteria the code must satisfy
               5b. SELF-CRITIQUE — run these checks against the brief you just wrote (or
                   the existing brief if you skipped step 5). Fix before continuing.
@@ -160,6 +170,9 @@ public static partial class InitTemplates
                      compile. Flags that assume pre-built state (--no-build, --no-restore)
                      are only valid when the build step precedes them in the same command
                      chain (&&). Rewrite any command that uses such flags standalone.
+                     If it backgrounds a long-running process, confirm it follows the
+                     backgrounding-safety rule above (built binary, not a run-wrapper;
+                     defensive cleanup prefix; kill within the same command).
                   d. implementation_hints specificity: every hint must name file + symbol/
                      method + why it matters. Remove or expand file-only hints.
                   e. execution_checklist: write an execution_checklist array of discrete,
@@ -172,6 +185,10 @@ public static partial class InitTemplates
                      contract silently.
               6. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO CRITIC").
+
+              You are read-only with respect to this project's own files — you have no
+              write_file/patch_file access. write_file_brief is the only way to persist this
+              brief; implementing the task itself is the Developer's job, not yours.
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
@@ -181,7 +198,10 @@ public static partial class InitTemplates
               - SubAgent
               - Decision
               - Objective
+              - Brief
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;
@@ -217,14 +237,18 @@ public static partial class InitTemplates
               4. AUDIT verify_command CONCRETENESS:
                  The command must exercise a real code path of the feature — not just compile or
                  import it. Flag commands that only call --help, --version, or build/compile without
-                 running the actual feature logic.
+                 running the actual feature logic. If it backgrounds a long-running process
+                 (server, daemon, listener) via a build-and-run wrapper (go run, npm run dev,
+                 cargo run) instead of a built binary, flag it — the wrapper execs into a
+                 differently-named child that "$!"/pkill cannot target, leaking an orphan that
+                 blocks the port for every later shell_run call this session.
 
               5. AUDIT implementation_hints SPECIFICITY:
                  Each hint must name a file AND a symbol/method AND explain why it matters. Flag
                  hints that name only a file with no symbol ("src/foo.py — relevant").
 
-              6a. IF ANY BLOCKING ISSUES: Call write_file to save {FuseraftPaths.LocalBriefReview}
-                  as a JSON object with two fields:
+              6a. IF ANY BLOCKING ISSUES: Call write_file_brief_review(content: ..., format: "json").
+                  content must be a JSON object with two fields:
                     "blocking_issues"      — array of strings, each a mandatory fix the Planner
                                              MUST address before the brief can be approved
                                              (missing files, untestable criteria, hollow commands)
@@ -235,14 +259,21 @@ public static partial class InitTemplates
                   do not inflate this list with stylistic preferences.
 
               6b. IF NO BLOCKING ISSUES: Call handoff(route_keyword: "BRIEF APPROVED").
-                  Optional improvements may still be written to {FuseraftPaths.LocalBriefReview}
-                  as a record, but do not block on them.
+                  Optional improvements may still be written via write_file_brief_review as a
+                  record, but do not block on them.
+
+              You are read-only with respect to this project's own files — you have no
+              write_file/patch_file access. write_file_brief_review is the only way to persist
+              your review; revising or implementing the brief is the Planner's job, not yours.
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
               - FileSystem
               - SubAgent
+              - BriefReview
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;
@@ -369,6 +400,7 @@ public static partial class InitTemplates
                  files_to_change, and {FuseraftPaths.LocalTestReport}. For any large file:
                  {LargeFileProtocolReviewer}
               3. Run at least one acceptance criterion as a spot-check with shell_run.
+              4. {ReviewerVerificationIntegrityRule}
               If the code meets all acceptance criteria, call handoff(route_keyword: "APPROVED").
               If changes are needed, call handoff(route_keyword: "REVISION REQUIRED").
                 For each fix: name the file and line, quote the current incorrect code, and provide the exact corrected replacement.
@@ -382,6 +414,8 @@ public static partial class InitTemplates
               - Changes
               - SessionContext
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: auto
             Context:
               - Source: session_context
@@ -437,9 +471,9 @@ public static partial class InitTemplates
                  `files_to_change` has been written (i.e., implementation has started): if
                  the change log shows verify_command has not yet run successfully, before
                  running any git command first probe with
-                 shell_run("git rev-parse --is-inside-work-tree") — if exit code is 128 or
-                 129 the sandbox is not a git repository and you must skip every git command
-                 in this step; only proceed with git operations when exit code is 0. Then
+                 git_is_inside_work_tree() — if the result is "false" the sandbox is not a
+                 git repository and you must skip every git command in this step; only
+                 proceed with git operations when the result is "true". Then
                  use shell_run to execute the verify_command from {FuseraftPaths.LocalBrief}
                  and record the result. If no files_to_change have been written yet, skip
                  this step — the Developer has not started and a pre-implementation failure
@@ -470,6 +504,8 @@ public static partial class InitTemplates
               - FileSystem
               - Changes
               - Shell
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             SkipExecutionState: true
             {VerifierContextWindow}
