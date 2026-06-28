@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
 using fuseraft.Infrastructure;
+using fuseraft.Infrastructure.Chat;
 
 namespace fuseraft.Cli.Commands.Repl;
 
@@ -345,6 +346,64 @@ internal static partial class ReplCommands
         var prevDisplay = prev ?? "(none)";
         AnsiConsole.MarkupLine($"[dim]Reasoning:[/] [bold]{Markup.Escape(prevDisplay)}[/] [dim]→[/] [bold]{Markup.Escape(effort)}[/]");
         await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/reasoning", reasoning_effort = effort, prev = prevDisplay, model = ctx.ModelId });
+        return CommandResult.Continue;
+    }
+
+    // -------------------------------------------------------------------------
+    // /models
+    // -------------------------------------------------------------------------
+
+    private static async Task<CommandResult> CmdModelsAsync(ReplSessionContext ctx, CancellationToken cancellationToken)
+    {
+        fuseraft.Core.Models.Config.ModelConfig resolved;
+        try
+        {
+            resolved = ctx.Factory.Resolve(ctx.ModelConfig);
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]✗ Could not resolve provider config:[/] {Markup.Escape(ex.Message)}");
+            return CommandResult.Continue;
+        }
+
+        var endpoint = resolved.Endpoint.TrimEnd('/');
+        var apiKey = !string.IsNullOrEmpty(resolved.ApiKey)
+            ? resolved.ApiKey
+            : string.IsNullOrEmpty(resolved.ApiKeyEnvVar)
+                ? string.Empty
+                : Environment.GetEnvironmentVariable(resolved.ApiKeyEnvVar) ?? string.Empty;
+
+        bool isOllama = resolved.Provider.Equals("ollama", StringComparison.OrdinalIgnoreCase);
+
+        List<string> modelIds;
+        try
+        {
+            modelIds = await ProviderModelsClient.FetchAsync(endpoint, apiKey, isOllama, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(ex.Message)}[/]");
+            return CommandResult.Continue;
+        }
+
+        if (ctx.JsonMode)
+        {
+            Console.WriteLine($"## Available Models ({modelIds.Count})\n");
+            foreach (var m in modelIds)
+                Console.WriteLine($"- `{m}`{(m.Equals(ctx.ModelId, StringComparison.OrdinalIgnoreCase) ? " ← current" : "")}");
+            return CommandResult.Continue;
+        }
+
+        AnsiConsole.MarkupLine($"  [dim]Available models from[/] [bold]{Markup.Escape(endpoint)}[/] [dim]({modelIds.Count})[/]");
+        AnsiConsole.WriteLine();
+        foreach (var m in modelIds)
+        {
+            if (m.Equals(ctx.ModelId, StringComparison.OrdinalIgnoreCase))
+                AnsiConsole.MarkupLine($"  [bold green]{Markup.Escape(m)}[/] [dim]← current[/]");
+            else
+                AnsiConsole.MarkupLine($"  {Markup.Escape(m)}");
+        }
+
         return CommandResult.Continue;
     }
 
