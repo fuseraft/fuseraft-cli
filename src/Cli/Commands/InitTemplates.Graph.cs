@@ -24,7 +24,8 @@ public static partial class InitTemplates
               4. Check if {FuseraftPaths.LocalBrief} already exists. If it does, read it — if it
                  still covers the current task, call handoff(route_keyword: "HANDOFF TO DEVELOPER")
                  immediately without rewriting it.
-              5. Write a brief to {FuseraftPaths.LocalBrief} with fields:
+              5. Call write_file_brief(content: ..., format: "json"). content must be a JSON
+                 object with exactly these top-level fields:
                    goal — one-sentence description of what to build
                    files_to_change — array of paths RELATIVE TO THE SANDBOX ROOT
                      Correct:  src/module/file.py
@@ -32,6 +33,10 @@ public static partial class InitTemplates
                    acceptance_criteria — array of testable criteria the code must satisfy
               6. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
+
+              You are read-only with respect to this project's own files — you have no
+              write_file/patch_file access. write_file_brief is the only way to persist this
+              brief; implementing the task itself is the Developer's job, not yours.
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
@@ -39,7 +44,10 @@ public static partial class InitTemplates
               - Search
               - SessionContext
               - SubAgent
+              - Brief
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;
@@ -142,6 +150,8 @@ public static partial class InitTemplates
               - Changes
               - SessionContext
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: auto
             ContextWindow:
               TextOnly: true

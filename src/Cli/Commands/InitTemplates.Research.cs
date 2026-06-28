@@ -20,8 +20,8 @@ public static partial class InitTemplates
               1. Break the topic into focused questions — list them before you start.
               2. For each question: search, read sources, and record findings with citations.
                  Use Http for web content and Search for filesystem content.
-              3. Write structured findings to {FuseraftPaths.LocalResearchFindings}.
-                 Format: one section per question, each with:
+              3. Call write_file_research_findings(content: ..., format: "md") with structured
+                 Markdown findings. One section per question, each with:
                    - finding: what you learned
                    - sources: URLs or file paths consulted
                    - confidence: "high" | "medium" | "low" with a brief justification
@@ -30,13 +30,20 @@ public static partial class InitTemplates
                  you did not verify.
               When research is thorough and every original question is answered (or documented
               as unanswerable), call handoff(route_keyword: "HANDOFF TO CRITIC").
+
+              You are read-only with respect to this project's own files — you have no
+              write_file/patch_file access. write_file_research_findings is the only way to
+              persist your findings.
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
               - Http
               - Search
               - FileSystem
+              - ResearchFindings
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;
@@ -60,7 +67,8 @@ public static partial class InitTemplates
                  for any conclusion; these must be resolved or the conclusion must be hedged.
               5. MISSING PERSPECTIVES — on contested topics, findings that present only one side.
 
-              Write a review to {FuseraftPaths.LocalResearchReview} as a JSON object with two fields:
+              Call write_file_research_review(content: ..., format: "json"). content must be a
+              JSON object with two fields:
                 blocking_issues      — array of strings; each a mandatory gap the Researcher MUST
                                        fix before the Writer can start (unsupported claims, missing
                                        coverage of central topics, logical contradictions)
@@ -72,11 +80,18 @@ public static partial class InitTemplates
 
               If there are NO blocking issues, call handoff(route_keyword: "FINDINGS APPROVED").
               If there are blocking issues, call handoff(route_keyword: "FINDINGS REJECTED").
+
+              You are read-only with respect to this project's own files — you have no
+              write_file/patch_file access. write_file_research_review is the only way to
+              persist your review; revising the findings is the Researcher's job, not yours.
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
               - FileSystem
+              - ResearchReview
               - Handoff
+            Capabilities:
+              FileSystem: [read]
             FunctionChoice: required
             {AgentFileOptions}
             """;

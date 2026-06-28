@@ -93,12 +93,39 @@ internal static class ReplTurn
                     stepTotal:     total);
                 if (passed)
                 {
-                    // Trim step messages (user prompt + agent response) and replace with a
-                    // compact summary so each subsequent step gets a clean, focused context.
-                    while (ctx.History.Count > historyMarker)
-                        ctx.History.RemoveAt(historyMarker);
-                    ctx.History.Add(new ChatMessage(ChatRole.User,
-                        $"[Step {step.Step} of {total} complete] {step.Description}"));
+                    if (ctx.LastStepWasInspectOnly)
+                    {
+                        // Inspect-only step: replace the step prompt with a compact label that
+                        // embeds the actual tool outputs so the next step can reference them.
+                        var labelSb = new StringBuilder(
+                            $"[Step {step.Step} of {total} complete — findings below] {step.Description}");
+                        if (ctx.LastStepInspectResults?.Count > 0)
+                        {
+                            labelSb.AppendLine("\n[Tool outputs:]");
+                            foreach (var (toolName, output) in ctx.LastStepInspectResults)
+                            {
+                                labelSb.AppendLine($"// {toolName}:");
+                                labelSb.AppendLine(
+                                    output.Length > 4000 ? output[..4000] + "\n…(truncated)" : output);
+                            }
+                        }
+                        if (ctx.History.Count > historyMarker)
+                            ctx.History[historyMarker] = new ChatMessage(ChatRole.User, labelSb.ToString());
+                        // Trim assistant response — raw outputs are already in the label above.
+                        while (ctx.History.Count > historyMarker + 1)
+                            ctx.History.RemoveAt(historyMarker + 1);
+                    }
+                    else
+                    {
+                        // Write/mutation step: trim everything and leave a compact summary so
+                        // each subsequent step gets a clean, focused context.
+                        while (ctx.History.Count > historyMarker)
+                            ctx.History.RemoveAt(historyMarker);
+                        ctx.History.Add(new ChatMessage(ChatRole.User,
+                            $"[Step {step.Step} of {total} complete] {step.Description}"));
+                    }
+                    ctx.LastStepWasInspectOnly = false;
+                    ctx.LastStepInspectResults = null;
                 }
                 // Checkpoint after every step so a crash mid-plan can be recovered on --resume.
                 await SaveSnapshotAsync(ctx);
@@ -272,11 +299,13 @@ internal static class ReplTurn
 
         var sb                = new StringBuilder();
         var toolCallsThisTurn = new List<string>();
-        var toolCallDetails   = new List<(string Name, string? Args)>();
         var fileChanges        = new List<(char Sigil, string Path)>();
         var fileChangeSeen     = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var toolRounds        = 0;
         var inToolBatch       = false;
+        // Captured tool outputs for inspect-step history injection (step execution only).
+        List<(string ToolName, string Output)>? capturedResults = isStepRequest ? [] : null;
+        Dictionary<string, string>? callIdToName = isStepRequest ? [] : null;
 
         var turnStart = DateTime.UtcNow;
         var reqCts    = new CancellationTokenSource();
@@ -312,8 +341,9 @@ internal static class ReplTurn
                 {
                     if (!inToolBatch) { toolRounds++; inToolBatch = true; }
                     toolCallsThisTurn.Add(funcCall.Name);
-                    toolCallDetails.Add((funcCall.Name, SummarizeToolArgs(funcCall.Arguments)));
                     TrackFileChange(funcCall.Name, funcCall.Arguments, fileChanges, fileChangeSeen, ctx.Cwd);
+                    if (callIdToName is not null && funcCall.CallId is not null)
+                        callIdToName[funcCall.CallId] = funcCall.Name;
 
                     if (ctx.JsonMode)
                     {
@@ -340,6 +370,16 @@ internal static class ReplTurn
                         spinTask = RunSpinnerAsync($"{verb}…  {chain}", spinCts.Token, turnStart);
                         spinning = true;
                     }
+                    continue;
+                }
+
+                var funcResult = chunk.Contents.OfType<FunctionResultContent>().FirstOrDefault();
+                if (funcResult is not null && capturedResults is not null)
+                {
+                    var toolName = funcResult.CallId is not null &&
+                                  callIdToName?.TryGetValue(funcResult.CallId, out var n) == true
+                                  ? n : "tool";
+                    capturedResults.Add((toolName, funcResult.Result?.ToString() ?? string.Empty));
                     continue;
                 }
 
@@ -400,8 +440,9 @@ internal static class ReplTurn
             await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, streamAttempt)));
 
             // Reset per-attempt accumulators before reissuing the request.
-            sb.Clear(); toolCallsThisTurn.Clear(); toolCallDetails.Clear();
+            sb.Clear(); toolCallsThisTurn.Clear();
             fileChanges.Clear(); fileChangeSeen.Clear();
+            capturedResults?.Clear(); callIdToName?.Clear();
             toolRounds = 0; inToolBatch = false;
 
             // Restart spinner for the fresh attempt.
@@ -477,7 +518,8 @@ internal static class ReplTurn
         bool stepPassed = true;
         if (isStepRequest && activeStep is not null)
             stepPassed = await HandleStepResult(ctx, activeStep, stepTotal, toolCallsThisTurn,
-                hitIterationCap: toolRounds >= StepIterationLimit, responseText, cancellationToken);
+                capturedResults ?? [], hitIterationCap: toolRounds >= StepIterationLimit,
+                responseText, cancellationToken);
 
         // Free-form turns: if the response claims a mutation but no write tool was called,
         // auto-inject a correction so the agent is required to actually call the tool.
@@ -558,18 +600,19 @@ internal static class ReplTurn
             }
         }
 
-        if (TrimHistory(ctx.History))
+        var trimmedCount = TrimHistory(ctx.History);
+        if (trimmedCount > 0)
         {
             if (!ctx.JsonMode)
                 AnsiConsole.MarkupLine("[dim]  (old messages trimmed to fit context window)[/]");
+            await ctx.Emitter.EmitAsync(EventTypes.HistoryTrimmed, turn: ctx.TurnIndex,
+                payload: new { messages_removed = trimmedCount, estimated_tokens = ctx.EstimateTokens() });
         }
 
         if (!ctx.JsonMode && ctx.Verbose)
             AnsiConsole.MarkupLine(
                 $"[dim]  tokens (est.): {postEst:N0} / {ContextTokenBudget:N0}  rounds: {toolRounds}  tool calls: {toolCallsThisTurn.Count}[/]");
 
-        foreach (var (name, args) in toolCallDetails)
-            await ctx.Emitter.EmitAsync(EventTypes.ToolCall, turn: ctx.TurnIndex, payload: new { tool_name = name, args });
         await ctx.Emitter.EmitAsync(EventTypes.AssistantResponse, turn: ctx.TurnIndex, payload: new { content = responseText });
         await ctx.Emitter.EmitAsync(EventTypes.TurnEnd, turn: ctx.TurnIndex, payload: new
         {
@@ -592,16 +635,15 @@ internal static class ReplTurn
             ctx.PendingSave = false;
         }
 
-        if (ctx.JsonMode)
+        if (fileChanges.Count > 0)
         {
-            if (fileChanges.Count > 0)
-                ReplJsonBridge.Emit(new
-                {
-                    type    = "file_changes",
-                    changes = fileChanges.Select(f => new { sigil = f.Sigil.ToString(), path = f.Path }).ToArray(),
-                });
-            ReplJsonBridge.Emit(new { type = "message_end", turnIndex = ctx.TurnIndex, toolCalls = toolCallsThisTurn.ToArray() });
+            var changeArray = fileChanges.Select(f => new { sigil = f.Sigil.ToString(), path = f.Path }).ToArray();
+            await ctx.Emitter.EmitAsync(EventTypes.FileChanges, turn: ctx.TurnIndex, payload: new { changes = changeArray });
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new { type = "file_changes", changes = changeArray });
         }
+        if (ctx.JsonMode)
+            ReplJsonBridge.Emit(new { type = "message_end", turnIndex = ctx.TurnIndex, toolCalls = toolCallsThisTurn.ToArray() });
 
         ctx.TurnIndex++;
         return stepPassed;
@@ -612,7 +654,19 @@ internal static class ReplTurn
         if (TryParsePlan(responseText, out var steps) && steps.Length > 0)
         {
             ctx.CurrentPlan = steps;
-            _ = ctx.Emitter.EmitAsync(EventTypes.PlanCaptured, turn: ctx.TurnIndex, payload: new { step_count = steps.Length });
+            _ = ctx.Emitter.EmitAsync(EventTypes.PlanCaptured, turn: ctx.TurnIndex, payload: new
+            {
+                step_count = steps.Length,
+                steps = steps.Select(s => new
+                {
+                    step        = s.Step,
+                    description = s.Description,
+                    tool        = s.Tool,
+                    creates     = s.Creates,
+                    verifies    = s.Verifies,
+                    depends_on  = s.DependsOn,
+                }).ToArray(),
+            });
             if (ctx.JsonMode)
             {
                 ReplJsonBridge.Emit(new { type = "plan", steps });
@@ -645,10 +699,11 @@ internal static class ReplTurn
     }
 
     internal static async Task<bool> HandleStepResult(
-        ReplSessionContext ctx, PlanStep activeStep, int total, List<string> toolCallsThisTurn, bool hitIterationCap,
+        ReplSessionContext ctx, PlanStep activeStep, int total, List<string> toolCallsThisTurn,
+        List<(string ToolName, string Output)> capturedResults, bool hitIterationCap,
         string responseText = "", CancellationToken cancellationToken = default)
     {
-        var passed    = await VerifyStepAsync(activeStep, toolCallsThisTurn, ctx.Cwd, cancellationToken);
+        var (passed, verifyOutput) = await VerifyStepAsync(activeStep, toolCallsThisTurn, ctx.Cwd, cancellationToken);
         var stepsLeft = ctx.ExecutionQueue.Count;
 
         // When deterministic checks pass and adversarial mode is on, ask the critic.
@@ -672,6 +727,12 @@ internal static class ReplTurn
             var inspectSkip   = activeStep.Tool is not null && toolCallsThisTurn.Count > 0 &&
                                 toolCallsThisTurn.All(t => InspectTools.Contains(t));
             var skipped       = zeroCallSkip || inspectSkip;
+            // Broader than inspectSkip: preserve history whenever only read-only tools were
+            // called, even if the step had no expected tool declared.
+            ctx.LastStepWasInspectOnly = toolCallsThisTurn.Count > 0 &&
+                                        toolCallsThisTurn.All(t => InspectTools.Contains(t));
+            ctx.LastStepInspectResults = ctx.LastStepWasInspectOnly && capturedResults.Count > 0
+                ? capturedResults : null;
             await ctx.Emitter.EmitAsync(EventTypes.StepComplete, turn: ctx.TurnIndex, payload: new
             {
                 step       = activeStep.Step,
@@ -679,6 +740,7 @@ internal static class ReplTurn
                 skipped,
                 steps_left = stepsLeft,
                 hit_iteration_cap = hitIterationCap,
+                verify_output     = verifyOutput,
             });
             if (ctx.JsonMode)
             {
@@ -709,6 +771,7 @@ internal static class ReplTurn
                 expected_creates  = activeStep.Creates,
                 hit_iteration_cap = hitIterationCap,
                 tool_calls        = toolCallsThisTurn.ToArray(),
+                verify_output     = verifyOutput,
             });
             if (!ctx.JsonMode)
             {
@@ -774,32 +837,42 @@ internal static class ReplTurn
     // Static utilities
     // -------------------------------------------------------------------------
 
-    internal static bool TrimHistory(List<ChatMessage> history)
+    // Returns the number of ChatMessage entries removed (0 when no trimming was needed).
+    internal static int TrimHistory(List<ChatMessage> history)
     {
-        static int Estimate(ChatMessage m) => (m.Text?.Length ?? 0) / 4;
+        static int EstimateMessage(ChatMessage m) =>
+            m.Contents.Sum(AgentFactory.EstimateContentChars) / 4;
 
-        var total = history.Sum(Estimate);
-        if (total <= ContextTokenBudget) return false;
+        var total = history.Sum(EstimateMessage);
+        if (total <= ContextTokenBudget) return 0;
 
-        int start = history.Count > 0 && history[0].Role == ChatRole.System ? 1 : 0;
-        while (total > ContextTokenBudget && start + 1 < history.Count)
+        int sysEnd  = history.Count > 0 && history[0].Role == ChatRole.System ? 1 : 0;
+        int removed = 0;
+        while (total > ContextTokenBudget)
         {
-            // Remove one message per iteration across all roles that form a turn:
-            // user prompt, interleaved assistant tool-call stubs, tool results
-            // (ChatRole.Tool), and the final assistant reply are all evicted together
-            // as the loop advances through the turn sequence.
-            var role = history[start].Role;
-            if (role == ChatRole.User || role == ChatRole.Assistant || role == ChatRole.Tool)
+            // Evict the oldest complete turn group (User + all following non-User
+            // messages). Removing partial groups can leave orphaned FunctionCallContent
+            // without a preceding User message, which is invalid for Anthropic.
+            if (sysEnd >= history.Count || history[sysEnd].Role != ChatRole.User)
+                break;
+
+            int nextUserIdx = sysEnd + 1;
+            while (nextUserIdx < history.Count && history[nextUserIdx].Role != ChatRole.User)
+                nextUserIdx++;
+
+            // Always keep at least one turn group.
+            if (nextUserIdx >= history.Count)
+                break;
+
+            int groupSize = nextUserIdx - sysEnd;
+            for (int i = 0; i < groupSize; i++)
             {
-                total -= Estimate(history[start]);
-                history.RemoveAt(start);
-            }
-            else
-            {
-                start++; // unexpected role — advance to avoid an infinite loop
+                total -= EstimateMessage(history[sysEnd]);
+                history.RemoveAt(sysEnd);
+                removed++;
             }
         }
-        return true;
+        return removed;
     }
 
     internal static string BuildStepMessage(PlanStep step, int total)
@@ -824,10 +897,15 @@ internal static class ReplTurn
     // determined no action was needed — treat as a conditional skip rather than a failure.
     private static readonly HashSet<string> InspectTools = new(StringComparer.OrdinalIgnoreCase)
     {
-        "grep_file", "read_file", "list_directory",
-        "search_files", "search_content",
-        "git_status", "git_log", "git_diff",
-        "get_env", "which",
+        // FileSystem (no prefix)
+        "grep_file", "read_file", "list_directory", "list_files",
+        "get_file_summary", "get_file_info", "stat_file",
+        // Search
+        "search_files", "search_content", "search_symbol", "search_callers",
+        // Git
+        "git_status", "git_log", "git_diff", "git_show", "git_branch_list", "git_stash_list",
+        // Shell (shell_ prefix — get_env and which were stale names)
+        "shell_get_env", "shell_which",
     };
 
     // Write-class tools whose presence confirms the agent actually mutated state.
@@ -864,7 +942,9 @@ internal static class ReplTurn
                lower.Contains(".vue") || lower.Contains(".kt")   || lower.Contains(".swift");
     }
 
-    internal static async Task<bool> VerifyStepAsync(
+    // Returns (Passed, VerifyOutput) where VerifyOutput is the trimmed command output when
+    // a verify command ran, or null when the check was purely structural (tool/file presence).
+    internal static async Task<(bool Passed, string? VerifyOutput)> VerifyStepAsync(
         PlanStep step, List<string> toolCalls, string cwd,
         CancellationToken cancellationToken = default)
     {
@@ -880,14 +960,16 @@ internal static class ReplTurn
                      File.Exists(Path.Combine(cwd, step.Creates)) ||
                      Directory.Exists(Path.Combine(cwd, step.Creates));
 
-        if (!toolOk || !fileOk) return false;
-        if (step.Verifies is null)  return true;
+        if (!toolOk || !fileOk) return (false, null);
+        if (step.Verifies is null)  return (true, null);
 
         return await RunVerifyCommandAsync(step.Verifies, cwd, cancellationToken);
     }
 
-    private static async Task<bool> RunVerifyCommandAsync(string command, string cwd, CancellationToken cancellationToken)
+    private static async Task<(bool Succeeded, string? Output)> RunVerifyCommandAsync(
+        string command, string cwd, CancellationToken cancellationToken)
     {
+        const int MaxVerifyOutputChars = 300;
         try
         {
             var result = await (OperatingSystem.IsWindows()
@@ -895,49 +977,17 @@ internal static class ReplTurn
                     "cmd.exe",   ["/c", command], workingDirectory: cwd, timeoutSeconds: 10, cancellationToken: cancellationToken)
                 : fuseraft.Infrastructure.Plugins.ProcessHelper.RunAsync(
                     "/bin/bash", ["-c", command], workingDirectory: cwd, timeoutSeconds: 10, cancellationToken: cancellationToken));
-            return result.Succeeded;
+            var raw = result.ToPluginOutput();
+            var output = raw.Length > MaxVerifyOutputChars
+                ? raw[..MaxVerifyOutputChars] + $"…[{raw.Length - MaxVerifyOutputChars} chars truncated]"
+                : raw;
+            return (result.Succeeded, string.IsNullOrWhiteSpace(output) ? null : output);
         }
-        catch { return false; }
+        catch (Exception ex) { return (false, ex.Message); }
     }
 
     internal static bool TryParsePlan(string text, out PlanStep[] steps) =>
         PlanStep.TryParse(text, out steps);
-
-    private static string BuildToolSummary(List<string> toolCalls)
-    {
-        int reads = 0, searches = 0, writes = 0, shell = 0, git = 0, skills = 0, other = 0;
-        foreach (var name in toolCalls)
-        {
-            var n = name.Replace("_", "").ToLowerInvariant();
-            if (n is "readfile" or "listdirectory" or "listfiles" or "grepfile"
-                    or "getfilesummary" or "getfileinfo")
-                reads++;
-            else if (n.StartsWith("search"))
-                searches++;
-            else if (n is "writefile" or "patchfile" or "createdirectory"
-                    or "deletefile" or "deletedirectory" or "copyfile" or "movefile")
-                writes++;
-            else if (n.StartsWith("shell"))
-                shell++;
-            else if (n.StartsWith("git"))
-                git++;
-            else if (n is "loadskill")
-                skills++;
-            else
-                other++;
-        }
-        var parts = new List<string>();
-        if (reads    > 0) parts.Add($"{reads} read{(reads    == 1 ? "" : "s")}");
-        if (searches > 0) parts.Add($"{searches} search{(searches == 1 ? "" : "es")}");
-        if (writes   > 0) parts.Add($"{writes} write{(writes   == 1 ? "" : "s")}");
-        if (shell    > 0) parts.Add($"{shell} shell");
-        if (git      > 0) parts.Add($"{git} git");
-        if (skills   > 0) parts.Add($"{skills} skill{(skills   == 1 ? "" : "s")}");
-        if (other    > 0) parts.Add($"{other} other");
-        var total  = toolCalls.Count;
-        var detail = parts.Count > 1 ? $"  ({string.Join(" · ", parts)})" : string.Empty;
-        return $"{total} tool{(total == 1 ? "" : "s")}{detail}";
-    }
 
     private static void TrackFileChange(
         string toolName,
@@ -986,23 +1036,6 @@ internal static class ReplTurn
             return abs;
         }
         catch { return path; }
-    }
-
-    private static string? SummarizeToolArgs(IDictionary<string, object?>? args)
-    {
-        if (args is null || args.Count == 0) return null;
-        ReadOnlySpan<string> priority = ["path", "command", "script", "url", "key", "query", "message", "branch"];
-        foreach (var key in priority)
-        {
-            if (args.TryGetValue(key, out var val) && val is not null)
-            {
-                var s = val.ToString() ?? string.Empty;
-                return $"{key}={(s.Length > 60 ? s[..60] : s)}";
-            }
-        }
-        var first = args.First();
-        var fv = first.Value?.ToString() ?? string.Empty;
-        return $"{first.Key}={(fv.Length > 60 ? fv[..60] : fv)}";
     }
 
     // Drip-prints text character by character so large chunks don't pop in all at once.
