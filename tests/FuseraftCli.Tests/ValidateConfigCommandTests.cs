@@ -1298,6 +1298,188 @@ public class ValidateConfigCommandTests : IDisposable
     }
 
     // -----------------------------------------------------------------------
+    // Fractional range validation tests
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task TrustScore_OutOfRange_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "TrustScore": 1.5}
+            ],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task TrustScore_OutOfRange_Negative_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "TrustScore": -0.1}
+            ],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task TrustScore_BoundaryValues_Valid()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "TrustScore": 0.0},
+              {"Name": "B", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "TrustScore": 1.0}
+            ],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(0, exitCode);
+    }
+
+    [Fact]
+    public async Task ContextCapFraction_OutOfRange_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "ContextWindow": {"ContextCapFraction": 1.5}}
+            ],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task ContextCapFraction_Negative_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "ContextWindow": {"ContextCapFraction": -0.2}}
+            ],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task AntiThrashMinSavingsRatio_OutOfRange_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
+            ],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
+            "Compaction": {"AntiThrashMinSavingsRatio": 1.1}
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task AntiThrashMinSavingsRatio_Negative_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
+            ],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
+            "Compaction": {"AntiThrashMinSavingsRatio": -0.05}
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
