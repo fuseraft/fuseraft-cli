@@ -177,6 +177,8 @@ Search the filesystem by name or content.
 | `search_symbol` | `symbol`, `directory` (default `"."`), `extension` (default `""`), `maxResults` (default 50) | Find symbol definitions (class, function, interface, variable, etc.) using language-agnostic patterns. Results are automatically recorded as `SymbolDefinition` nodes in the evidence graph when `EvidenceStore` is configured. |
 | `search_callers` | `symbol`, `directory` (default `"."`), `extension` (default `""`), `maxResults` (default 100) | Find call sites and usages of a symbol: invocations, constructor calls, type annotations, and inheritance declarations. Excludes definition lines so results contain only references. Results are automatically recorded as `SymbolReference` nodes in the evidence graph when `EvidenceStore` is configured; `TargetFile` is resolved from any existing `SymbolDefinition` nodes for the same symbol. |
 
+**Directory exclusions:** all four functions skip `.git`, `node_modules`, `bin`, `obj`, `.vs`, `.idea`, `.nuget`, `.venv`, `__pycache__`, and `.fuseraft` — the same list `list_files` (FileSystem) uses. This matters most for `search_content`: without it, an unscoped query (`directory: "."`, `filePattern: "*"`) walks into compiled build output and can match inside a `.dll`/`.pdb` read as text, returning megabytes of garbage. Pass a narrower `directory` or `filePattern` (e.g. `*.cs`) to scope a search further.
+
 ---
 
 ## Probe
