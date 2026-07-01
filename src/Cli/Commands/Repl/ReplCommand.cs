@@ -245,6 +245,21 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         using var emitter = new EventEmitter(eventsPath);
         emitter.SetSessionId(sessionId);
 
+        // Built before the wrap loop below so sub_agent_explore/sub_agent_locate get the same
+        // ToolResultLoggingFilter/ToolResultOffloadFilter treatment as every other REPL tool,
+        // and so the model can call them directly instead of only via /explore and /locate.
+        // Live-tested against grok-4.3 with ~58 tools registered (2026-06-30): no empty
+        // completions — the historical "54-tool" concern from commit cf897d2 did not reproduce.
+        if (explorerTools is not null)
+        {
+            subAgent = new SubAgentPlugin(
+                ReplFactory.BuildClient(modelConfig, factory, explorerTools.Count > 0),
+                explorerTools,
+                eventEmitter:    emitter,
+                parentAgentName: "repl");
+            toolsByCategory["SubAgent"] = PluginRegistry.GetFunctionsFromObject(subAgent).ToList();
+        }
+
         // Wrap every tool category:
         // 1. ToolResultLoggingFilter (inner) — emits tool_call/tool_result/tool_error events
         //    with the raw result before any transformation.
@@ -258,12 +273,10 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 .Select(f => (AIFunction)new ToolResultOffloadFilter(f, toolArtifactStore))
                 .ToList();
 
-        if (explorerTools is not null)
-            subAgent = new SubAgentPlugin(
-                ReplFactory.BuildClient(modelConfig, factory, explorerTools.Count > 0),
-                explorerTools,
-                eventEmitter:    emitter,
-                parentAgentName: "repl");
+        // Recompute now that SubAgent (and any optional --plugins categories) are registered,
+        // so the session-start event, system prompt, and startup banner report the true count.
+        initialTools = toolsByCategory.Values.SelectMany(v => v).ToList();
+
         await emitter.EmitAsync(EventTypes.SessionStart, payload: new
         {
             model         = modelId,

@@ -34,6 +34,7 @@ internal sealed class SystemPromptBuilder
                 "\nGuidelines:\n" +
                 "- Prefer tools over guessing.\n" +
                 "- Read before writing or mutating.\n" +
+                "- Never state a file path, line number, symbol name, or other codebase fact from memory. Verify it with a tool call in this turn first — search_symbol/sub_agent_locate for a single target, sub_agent_explore for a broad question. If you have not verified a claim, say \"unverified\" instead of guessing.\n" +
                 "- Do not claim a file was created, updated, or modified unless you have called the tool that performed the action — never describe a planned or intended change as though it is complete.\n" +
                 "- Avoid destructive actions (rm, overwrite, force-push) unless explicitly requested.\n" +
                 "- Only write files the user explicitly requests — never create unsolicited summaries, changelogs, or status files.\n" +

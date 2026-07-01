@@ -147,7 +147,7 @@ internal static partial class ReplCommands
         if (string.IsNullOrEmpty(arg))
         {
             AnsiConsole.MarkupLine(ctx.AdversarialMode
-                ? "[dim]Adversarial mode:[/] [green]on[/]  [dim](critic agent reviews each /execute step)[/]"
+                ? "[dim]Adversarial mode:[/] [green]on[/]  [dim](critic agent reviews every /execute step and free-form response)[/]"
                 : "[dim]Adversarial mode:[/] [dim]off[/]");
             AnsiConsole.MarkupLine("[dim]Run[/] [bold]/adversarial on[/] [dim]or[/] [bold]/adversarial off[/][dim].[/]");
             return CommandResult.Continue;
@@ -161,7 +161,7 @@ internal static partial class ReplCommands
                 return CommandResult.Continue;
             }
             ctx.AdversarialMode = true;
-            AnsiConsole.MarkupLine("[dim]Adversarial mode[/] [green]on[/][dim]: critic agent will review each /execute step.[/]");
+            AnsiConsole.MarkupLine("[dim]Adversarial mode[/] [green]on[/][dim]: critic agent will review every /execute step and free-form response.[/]");
             _ = ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/adversarial on" });
         }
         else if (arg.Equals("off", StringComparison.OrdinalIgnoreCase))
@@ -174,7 +174,7 @@ internal static partial class ReplCommands
         {
             AnsiConsole.MarkupLine($"[yellow]Unknown /adversarial argument:[/] {Markup.Escape(arg)}");
             AnsiConsole.MarkupLine("[dim]Usage: /adversarial     — show current status[/]");
-            AnsiConsole.MarkupLine("[dim]       /adversarial on  — enable critic agent for /execute steps[/]");
+            AnsiConsole.MarkupLine("[dim]       /adversarial on  — enable critic agent for /execute steps and free-form responses[/]");
             AnsiConsole.MarkupLine("[dim]       /adversarial off — disable critic agent[/]");
         }
         return CommandResult.Continue;
