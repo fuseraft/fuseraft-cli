@@ -195,10 +195,11 @@ internal static partial class ReplCommands
         }
 
         AnsiConsole.WriteLine();
-        var (newCfg, newKey) = ReplFactory.RunSetupWizard(ctx.ModelId, ctx.UserCfg);
+        var (newCfg, newKey) = await ReplFactory.RunSetupWizardAsync(ctx.ModelId, ctx.UserCfg);
         if (newCfg is null || newKey is null) return CommandResult.Continue;
 
-        await ctx.KeyStore.StoreAsync(newKey);
+        if (!string.IsNullOrEmpty(newKey))
+            await ctx.KeyStore.StoreAsync(newKey);
         newCfg.ApiKey    = newKey;
         ctx.UserCfg      = newCfg;
         ctx.ModelId      = newCfg.ModelId;

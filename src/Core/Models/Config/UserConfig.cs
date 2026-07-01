@@ -23,8 +23,10 @@ public sealed class UserConfig
     [JsonIgnore]
     public string ApiKey { get; set; } = string.Empty;
 
+    // Ollama runs locally without an API key, so a configured Ollama provider is
+    // considered complete without one.
     [JsonIgnore]
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(ModelId) &&
-        !string.IsNullOrWhiteSpace(ApiKey);
+        (!string.IsNullOrWhiteSpace(ApiKey) || Provider.Equals("ollama", StringComparison.OrdinalIgnoreCase));
 }
