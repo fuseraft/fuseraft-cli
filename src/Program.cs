@@ -152,6 +152,7 @@ services.AddTransient<UpdateCommand>();
 services.AddTransient<GraphBuildCommand>();
 services.AddTransient<MemoryReviewCommand>();
 services.AddTransient<MemoryDeleteCommand>();
+services.AddTransient<MemoryListCommand>();
 services.AddTransient<ArchCheckCommand>();
 services.AddTransient<KnowledgeGcCommand>();
 services.AddTransient<ObjectiveCreateCommand>();
@@ -391,12 +392,17 @@ app.Configure(cfg =>
 
     cfg.AddBranch("memory", branch =>
     {
-        branch.SetDescription("Persistent memory — REPL/agent facts (delete) and repository patterns extracted from evidence (review).");
+        branch.SetDescription("Persistent memory — REPL/agent facts (list/delete) and repository patterns extracted from evidence (review).");
 
         branch.AddCommand<MemoryReviewCommand>("review")
             .WithDescription("Review candidate repository memories and approve or reject them.")
             .WithExample(["memory", "review"])
             .WithExample(["memory", "review", "--all"]);
+
+        branch.AddCommand<MemoryListCommand>("list")
+            .WithDescription("List stored REPL/agent memories.")
+            .WithExample(["memory", "list"])
+            .WithExample(["memory", "list", "--agent", "reviewer"]);
 
         branch.AddCommand<MemoryDeleteCommand>("delete")
             .WithDescription("Delete a stored REPL/agent memory by name, or wipe the store with --all.")
