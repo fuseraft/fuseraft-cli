@@ -3,11 +3,20 @@ using System.Text.Json;
 
 namespace fuseraft.Infrastructure.Chat;
 
+/// <summary>
+/// Thrown when the request to the provider's models endpoint never got a response
+/// (DNS/TCP/TLS failure). Callers can use this to tell "wrong path" failures (worth
+/// retrying with a different endpoint shape) apart from "host unreachable" failures
+/// (retrying a different path on the same host/port will fail identically).
+/// </summary>
+public sealed class ProviderConnectException(string message, Exception inner) : InvalidOperationException(message, inner);
+
 public static class ProviderModelsClient
 {
     /// <summary>
     /// Fetches available model IDs from the provider's models endpoint.
-    /// Throws <see cref="InvalidOperationException"/> on HTTP errors or unexpected response shape.
+    /// Throws <see cref="ProviderConnectException"/> when the connection itself fails, or
+    /// <see cref="InvalidOperationException"/> on HTTP error statuses or unexpected response shape.
     /// </summary>
     public static async Task<List<string>> FetchAsync(
         string endpoint, string apiKey, bool isOllama, CancellationToken cancellationToken = default)
@@ -25,7 +34,7 @@ public static class ProviderModelsClient
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            throw new InvalidOperationException($"Request to {url} failed: {ex.Message}", ex);
+            throw new ProviderConnectException($"Request to {url} failed: {ex.Message}", ex);
         }
 
         var body = await response.Content.ReadAsStringAsync(cancellationToken);

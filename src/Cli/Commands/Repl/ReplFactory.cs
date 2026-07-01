@@ -176,19 +176,33 @@ internal static class ReplFactory
         {
             return (await ProviderModelsClient.FetchAsync(endpoint, apiKey, isOllama: false), false);
         }
-        catch
+        catch (ProviderConnectException ex)
+        {
+            // The host/port itself is unreachable — retrying a different path on the same
+            // host would fail the same way, so don't bother and don't mask this error.
+            ReportFetchFailure(endpoint, ex);
+            return (null, false);
+        }
+        catch (Exception firstEx)
         {
             try
             {
                 return (await ProviderModelsClient.FetchAsync(endpoint, apiKey, isOllama: true), true);
             }
-            catch (Exception ex)
+            catch
             {
-                AnsiConsole.MarkupLine($"[yellow]⚠ Could not fetch a model list from {Markup.Escape(endpoint)}:[/] [dim]{Markup.Escape(ex.Message)}[/]");
-                AnsiConsole.MarkupLine("[dim]You can enter a model ID manually instead.[/]");
-                AnsiConsole.WriteLine();
+                // Neither shape worked — report the /models failure since that's the
+                // standard endpoint; the /api/tags retry was just a guess.
+                ReportFetchFailure(endpoint, firstEx);
                 return (null, false);
             }
         }
+    }
+
+    private static void ReportFetchFailure(string endpoint, Exception ex)
+    {
+        AnsiConsole.MarkupLine($"[yellow]⚠ Could not fetch a model list from {Markup.Escape(endpoint)}:[/] [dim]{Markup.Escape(ex.Message)}[/]");
+        AnsiConsole.MarkupLine("[dim]You can enter a model ID manually instead.[/]");
+        AnsiConsole.WriteLine();
     }
 }
