@@ -177,7 +177,7 @@ Search the filesystem by name or content.
 | `search_symbol` | `symbol`, `directory` (default `"."`), `extension` (default `""`), `maxResults` (default 50) | Find symbol definitions (class, function, interface, variable, etc.) using language-agnostic patterns. Results are automatically recorded as `SymbolDefinition` nodes in the evidence graph when `EvidenceStore` is configured. |
 | `search_callers` | `symbol`, `directory` (default `"."`), `extension` (default `""`), `maxResults` (default 100) | Find call sites and usages of a symbol: invocations, constructor calls, type annotations, and inheritance declarations. Excludes definition lines so results contain only references. Results are automatically recorded as `SymbolReference` nodes in the evidence graph when `EvidenceStore` is configured; `TargetFile` is resolved from any existing `SymbolDefinition` nodes for the same symbol. |
 
-**Directory exclusions:** all four functions skip `.git`, `node_modules`, `bin`, `obj`, `.vs`, `.idea`, `.nuget`, `.venv`, `__pycache__`, and `.fuseraft` — the same list `list_files` (FileSystem) uses. This matters most for `search_content`: without it, an unscoped query (`directory: "."`, `filePattern: "*"`) walks into compiled build output and can match inside a `.dll`/`.pdb` read as text, returning megabytes of garbage. Pass a narrower `directory` or `filePattern` (e.g. `*.cs`) to scope a search further.
+**Directory exclusions:** all four functions skip `.git`, `node_modules`, `bin`, `obj`, `.vs`, `.idea`, `.nuget`, `.venv`, `__pycache__`, `.fuseraft`, and `vendor` — the same list `list_files` (FileSystem) uses. This matters most for `search_content`: without it, an unscoped query (`directory: "."`, `filePattern: "*"`) walks into compiled build output and can match inside a `.dll`/`.pdb` read as text, returning megabytes of garbage. Pass a narrower `directory` or `filePattern` (e.g. `*.cs`) to scope a search further.
 
 ---
 
@@ -523,11 +523,11 @@ Architecture Decision Registry (ADR) — record, search, and supersede architect
 
 ## Graph
 
-Read the repository semantic graph — nodes (files, types, methods, interfaces, ADRs) and edges (references, inheritance, implementation, dependencies). The graph is populated automatically by the `search_symbol` and `search_callers` tools and by `decision_create`.
+Read the repository semantic graph — nodes (files, packages/namespaces, types, methods, interfaces, ADRs) and edges (references, inheritance, implementation, dependencies), covering C#, Go, and Python source. The graph is populated automatically by the `search_symbol` and `search_callers` tools and by `decision_create`.
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
-| `graph_search` | `query` (default `""`), `kind` (optional), `file` (optional) | Find graph nodes by name, kind, or file path. `kind` accepts `File`, `Namespace`, `Type`, `Interface`, `Method`, `Property`, `Field`, or `Adr`. Returns up to 50 results. |
+| `graph_search` | `query` (default `""`), `kind` (optional), `file` (optional) | Find graph nodes by name, kind, or file path. `kind` accepts `File`, `Namespace`, `Package`, `Type`, `Interface`, `Method`, `Property`, `Field`, or `Adr`. Returns up to 50 results. |
 | `graph_refs` | `symbolId` | Find all nodes that reference, implement, or inherit from the given symbol ID (e.g. `type:fuseraft.Core.Models.AdrEntry`). Returns inbound `references`, `implements`, and `inherits` edges. |
 | `graph_dependents` | `symbolId`, `depth` (default 3) | Transitively walk inbound `depends_on`, `references`, `implements`, and `inherits` edges up to `depth` hops (max 10). Shows every node that directly or indirectly depends on the target. |
 

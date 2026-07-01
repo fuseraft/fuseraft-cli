@@ -49,7 +49,7 @@ Agents use the `decision_search`, `decision_read`, `decision_create`, and `decis
 
 ### Repository Semantic Graph
 
-A structural index of every file, namespace, type, interface, method, property, and field in the project, plus ADR nodes linked via `adr_governs` edges. Persisted as a single JSON file at `.fuseraft/state/repository.graph`.
+A structural index of every file, namespace/package, type, interface, method, property, and field in the project, plus ADR nodes linked via `adr_governs` edges. Persisted as a single JSON file at `.fuseraft/state/repository.graph`. Scanning is per-language via a pluggable `IRepositoryGraphStrategy` — C#, Go, and Python are supported out of the box, and a repo can mix all three.
 
 Build the graph with:
 
@@ -64,12 +64,15 @@ The harness rebuilds affected nodes incrementally after every `FileWrite` tool c
 | Prefix | Example |
 |--------|---------|
 | `file:` | `file:src/Core/Models/AdrEntry.cs` |
-| `namespace:` | `namespace:fuseraft.Core.Models` |
+| `namespace:` | `namespace:fuseraft.Core.Models` (C#) |
+| `package:` | `package:mathutil` (Go package) · `package:app.models` (Python module) |
 | `type:` | `type:fuseraft.Core.Models.AdrEntry` |
 | `interface:` | `interface:fuseraft.Core.IKnowledgeLayer` |
 | `method:` | `method:fuseraft.Core.Models.AdrEntry.SomeMethod` |
 | `property:` | `property:fuseraft.Core.Models.AdrEntry.Title` |
 | `adr:` | `adr:ADR-0042` |
+
+Go and Python have no formal interface keyword: Go embedding resolves to `inherits`/`implements` heuristically (checking known nodes first, then an `-er`/`-or` naming convention), while Python emits `inherits` only — every base class, abstract or not.
 
 **Edge types:** `defines`, `imports`, `inherits`, `implements`, `references`, `depends_on`, `adr_governs`.
 
