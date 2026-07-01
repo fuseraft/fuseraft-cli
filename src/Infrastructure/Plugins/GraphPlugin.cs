@@ -22,7 +22,7 @@ public sealed class GraphPlugin
     public async Task<string> SearchAsync(
         [Description("Partial name to match against node names. Leave empty to list all.")]
         string query = "",
-        [Description("Node kind to filter by: File, Namespace, Type, Interface, Method, Property, Field, or Adr.")]
+        [Description("Node kind to filter by: File, Namespace, Package, Type, Interface, Method, Property, Field, or Adr.")]
         string? kind = null,
         [Description("Relative file path to restrict results to a single file.")]
         string? file = null)
