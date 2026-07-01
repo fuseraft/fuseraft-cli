@@ -84,7 +84,8 @@ public sealed class ContextStore
         }
         else
         {
-            foreach (var src in Directory.EnumerateFiles(fullSource, "*", SearchOption.AllDirectories))
+            foreach (var src in Directory.EnumerateFiles(fullSource, "*", SearchOption.AllDirectories)
+                         .Where(f => !DirectoryFilters.IsExcluded(f)))
             {
                 var rel     = Path.GetRelativePath(fullSource, src);
                 var destSub = Path.Combine(destDir, Path.GetDirectoryName(rel) ?? string.Empty);

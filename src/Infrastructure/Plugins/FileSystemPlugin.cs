@@ -955,10 +955,8 @@ public sealed class FileSystemPlugin : ITurnResettable
         }
 
         const int maxFiles = 500;
-        var sep = Path.DirectorySeparatorChar;
-        string[] ignoredDirs = [".git", "node_modules", "bin", "obj", ".vs", ".idea", ".nuget", ".venv", "__pycache__", ".fuseraft"];
         var files = Directory.EnumerateFiles(resolved, pattern, SearchOption.AllDirectories)
-            .Where(f => !ignoredDirs.Any(d => f.Contains($"{sep}{d}{sep}") || f.EndsWith($"{sep}{d}")))
+            .Where(f => !DirectoryFilters.IsExcluded(f))
             .Take(maxFiles + 1)
             .ToList();
 
