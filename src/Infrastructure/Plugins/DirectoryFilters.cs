@@ -9,7 +9,7 @@ namespace fuseraft.Infrastructure.Plugins;
 internal static class DirectoryFilters
 {
     internal static readonly string[] DefaultExcludedDirs =
-        [".git", "node_modules", "bin", "obj", ".vs", ".idea", ".nuget", ".venv", "__pycache__", ".fuseraft"];
+        [".git", "node_modules", "bin", "obj", ".vs", ".idea", ".nuget", ".venv", "__pycache__", ".fuseraft", "vendor"];
 
     internal static bool IsExcluded(string path, string[]? excludedDirs = null)
     {

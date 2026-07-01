@@ -1,4 +1,5 @@
 using fuseraft.Core.Models;
+using fuseraft.Infrastructure.Plugins;
 
 namespace fuseraft.Infrastructure.Repository;
 
@@ -10,7 +11,9 @@ namespace fuseraft.Infrastructure.Repository;
 /// per-file structural parsing (declarations, scoping rules, <c>SymbolId</c> conventions) is
 /// delegated to one or more <see cref="IRepositoryGraphStrategy"/> instances, selected per file
 /// via <see cref="IRepositoryGraphStrategy.CanHandle"/>. Defaults to
-/// <see cref="DotNetRepositoryGraphStrategy"/> when no strategies are supplied. Adding support
+/// <see cref="DotNetRepositoryGraphStrategy"/>, <see cref="GolangRepositoryGraphStrategy"/>, and
+/// <see cref="PythonRepositoryGraphStrategy"/> when no strategies are supplied, so every
+/// supported language family is scanned automatically without caller opt-in. Adding support
 /// for another language means adding a new strategy — this class should not need to change.
 /// </para>
 /// </summary>
@@ -28,7 +31,8 @@ public sealed class RepositoryGraphBuilder
     {
         _store       = store;
         _projectRoot = Path.GetFullPath(projectRoot ?? Directory.GetCurrentDirectory());
-        _strategies  = strategies?.ToList() ?? [new DotNetRepositoryGraphStrategy()];
+        _strategies  = strategies?.ToList() ??
+            [new DotNetRepositoryGraphStrategy(), new GolangRepositoryGraphStrategy(), new PythonRepositoryGraphStrategy()];
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -77,7 +81,7 @@ public sealed class RepositoryGraphBuilder
             {
                 foreach (var f in Directory.GetFiles(root, glob, SearchOption.AllDirectories))
                 {
-                    if (IsBuildArtifact(f)) continue;
+                    if (DirectoryFilters.IsExcluded(f)) continue;
                     if (!seen.Add(f)) continue;
                     files.Add((f, strategy));
                 }
@@ -168,10 +172,4 @@ public sealed class RepositoryGraphBuilder
         var fileId     = $"file:{normalised}";
         return fileId;
     }
-
-    private static bool IsBuildArtifact(string path) =>
-        path.Contains("/obj/", StringComparison.Ordinal) ||
-        path.Contains("\\obj\\", StringComparison.Ordinal) ||
-        path.Contains("/bin/", StringComparison.Ordinal) ||
-        path.Contains("\\bin\\", StringComparison.Ordinal);
 }
