@@ -54,18 +54,21 @@ Other targets:
 
 ### Option A — user config (recommended)
 
-`fuseraft` (or `fuseraft repl`) detects first-time usage and walks you through a short setup wizard before starting the session. It asks for a model ID, provider URL, and API key, then stores them in `~/.fuseraft/config` (without the key) and your OS keychain (for the key):
+`fuseraft` (or `fuseraft repl`) detects first-time usage and walks you through a short setup wizard before starting the session. It asks for a provider URL and API key (leave the key blank for Ollama), tests the endpoint's model listing, and lets you pick a model from the live results — falling back to a free-typed model ID if the endpoint can't be reached. Settings are then stored in `~/.fuseraft/config` (without the key) and your OS keychain (for the key):
 
 ```
 $ fuseraft
 No configuration found at ~/.fuseraft/config
 
 Provider setup
-Configure your default model and API key.
+Configure your provider and API key, then pick a model.
 
-Model ID      [claude-sonnet-4-6]:
-Provider URL  [https://api.anthropic.com/v1]:
-API Key:      ••••••••
+Provider URL  (http://localhost:11434): https://api.anthropic.com/v1
+API Key       (leave blank for Ollama): ••••••••
+
+Model  (2 available from https://api.anthropic.com/v1)
+> claude-sonnet-4-6
+  claude-opus-4-6
 
 >
 ```
@@ -98,7 +101,7 @@ For other providers see [Models & Providers](models.md).
 
 The [fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) stores your API key in VS Code's built-in secure storage (backed by the OS credential store on each platform). When the extension launches a terminal or runs a command, it automatically injects the key as `FUSERAFT_API_KEY` and passes `--vscode` to the CLI. The CLI then reads the key from that environment variable instead of the OS keychain.
 
-You do not need to set anything manually — configure your provider once via **fuseraft: Set Up Provider** in the VS Code command palette and the key is available to all fuseraft commands run through the extension.
+You do not need to set anything manually — configure your provider once via **fuseraft: Configure fuseraft** in the VS Code command palette and the key is available to all fuseraft commands run through the extension.
 
 ## Run your first session
 
