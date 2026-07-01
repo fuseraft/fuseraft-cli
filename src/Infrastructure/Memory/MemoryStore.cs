@@ -250,7 +250,7 @@ public sealed class MemoryStore
         var refsPath    = RefsFilePath(cwd, sessionId);
 
         if (!Directory.Exists(fuseraftDir))
-            return await LoadAllAsync(ct); // not a fuseraft project — load all globals
+            return await LoadFromWorkspaceSessionsAsync(cwd, ct);
 
         if (!File.Exists(refsPath))
             return await LoadFromWorkspaceSessionsAsync(cwd, ct);
