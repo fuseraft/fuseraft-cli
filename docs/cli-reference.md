@@ -316,8 +316,11 @@ Unless `--no-tools` is passed, the REPL gives the model access to:
 | Search | `search_files`, `search_content`, `search_symbol` |
 | Git | `git_status`, `git_diff`, `git_log`, `git_commit`, and more |
 | Http | `http_get`, `http_post` |
+| SubAgent | `sub_agent_explore`, `sub_agent_locate` — the same tools behind `/explore` and `/locate` (see below), now also callable by the model directly mid-turn. |
 | Session | `repl_session_current`, `repl_session_list`, `repl_session_read_event_log`, `repl_session_read_log`, `compact_context`, `get_context_status` |
 | Skills | `load_skill`, `run_skill_script` (only when skills are installed — see [Skills](skills.md)) |
+
+**Forced evidence collection** — when a message looks like an identify/locate/find-style question ("locate X", "where is Y", "which file...", "does Z exist"), the REPL forces at least one tool call before the model may answer, instead of letting it answer from memory. This applies only to that one turn; it does not affect unrelated questions.
 
 When the model invokes tools, the spinner label updates live to show the accumulating chain:
 
@@ -380,7 +383,7 @@ Use `/tools` to see the full list at runtime.
 | `/safe-mode on` | Disable Shell, Git, and Http tool categories to prevent mutations |
 | `/safe-mode off` | Restore tool categories to their state before safe mode was enabled |
 | `/adversarial` | Show adversarial mode status |
-| `/adversarial on` | Enable a critic agent that reviews each `/execute` step after postconditions pass. The critic judges whether the step was completed correctly and halts the plan if it disagrees. |
+| `/adversarial on` | Enable a critic agent that reviews each `/execute` step after postconditions pass, and every free-form response. The critic judges whether the response was correct, grounded in actual tool output, and complete — halting the plan on a step rejection, or injecting one correction turn on a free-form rejection. |
 | `/adversarial off` | Disable the critic agent |
 | `/provider` | Show the current model, endpoint, and API key store |
 | `/provider setup` | Reconfigure provider URL, model ID, and API key; saves immediately |
@@ -624,13 +627,13 @@ Rewound to after turn 4 — 1 turn removed.
 
 **Adversarial mode**
 
-Enable adversarial mode with `/adversarial on` to add a critic agent as an extra gate on each `/execute` step. After the deterministic postcondition check passes (tool called, file created), the critic receives an isolated view of the step — its description, the tools called, and the agent's response — and judges whether the step was actually completed correctly.
+Enable adversarial mode with `/adversarial on` to add a critic agent as an extra gate on both `/execute` steps and ordinary chat turns.
 
-If the critic approves, execution continues. If it rejects, the plan halts just as a postcondition failure would, with the critic's reason stored as a recovery hint. Running `/recover` then injects that reason into the retry prompt so the agent knows exactly what the critic found wrong.
+For `/execute` steps: after the deterministic postcondition check passes (tool called, file created), the critic receives an isolated view of the step — its description, the tools called, and the agent's response — and judges whether the step was actually completed correctly. If it approves, execution continues. If it rejects, the plan halts just as a postcondition failure would, with the critic's reason stored as a recovery hint. Running `/recover` then injects that reason into the retry prompt so the agent knows exactly what the critic found wrong.
 
 ```
 > /adversarial on
-  Adversarial mode on: critic agent will review each /execute step.
+  Adversarial mode on: critic agent will review every /execute step and free-form response.
 
 > /execute
   Executing 4-step plan…
@@ -646,7 +649,17 @@ If the critic approves, execution continues. If it rejects, the plan halts just 
   ✓ Step 2 complete.  2 steps remaining.
 ```
 
-The critic runs in an isolated context with no shared history from the main session — the same sub-agent infrastructure used by `/explore` and `/locate`. It requires tools to be active; `/adversarial on` will warn if `--no-tools` was set at startup. On timeout or error the critic degrades to approved so a transient failure never blocks execution.
+For ordinary chat turns (outside `/execute`): the critic reviews the question, the tools called, and the response after every free-form reply, checking that claims are grounded in actual tool output rather than fabricated. On rejection, fuseraft injects one correction turn telling the agent what the critic found wrong and asking it to verify with a tool call; the correction turn itself is not re-reviewed, so a second rejection just stands.
+
+```
+> Where is the retry limit for streaming errors defined?
+  assistant: It's set to 5 in ReplTurn.cs.
+  ✗ Critic: No tool was called to verify this — MaxStreamRetries is unconfirmed and the value is
+    likely wrong.
+  ↺ (correction turn) assistant: grep_file → MaxStreamRetries = 2 in ReplTurn.cs:20.
+```
+
+The critic runs in an isolated context with no shared history from the main session — the same sub-agent infrastructure used by `/explore` and `/locate`. It requires tools to be active; `/adversarial on` will warn if `--no-tools` was set at startup. On timeout or error the critic degrades to approved so a transient failure never blocks execution. Every free-form turn under adversarial mode costs one extra LLM call for the critic review.
 
 **Getting unstuck with /assist**
 

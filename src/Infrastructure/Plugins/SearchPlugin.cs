@@ -45,6 +45,7 @@ public sealed class SearchPlugin
         {
             var files = Directory
                 .EnumerateFiles(directory, pattern, SearchOption.AllDirectories)
+                .Where(f => !DirectoryFilters.IsExcluded(f))
                 .Take(maxResults)
                 .ToList();
 
@@ -105,7 +106,8 @@ public sealed class SearchPlugin
         int filesWithMatches = 0;
         int skippedFiles = 0;
 
-        foreach (var file in Directory.EnumerateFiles(directory, filePattern, SearchOption.AllDirectories))
+        foreach (var file in Directory.EnumerateFiles(directory, filePattern, SearchOption.AllDirectories)
+                     .Where(f => !DirectoryFilters.IsExcluded(f)))
         {
             if (totalMatches >= maxResults) break;
 
@@ -190,7 +192,8 @@ public sealed class SearchPlugin
         int totalMatches = 0;
         int skippedFiles = 0;
 
-        foreach (var file in Directory.EnumerateFiles(directory, filePattern, SearchOption.AllDirectories))
+        foreach (var file in Directory.EnumerateFiles(directory, filePattern, SearchOption.AllDirectories)
+                     .Where(f => !DirectoryFilters.IsExcluded(f)))
         {
             if (totalMatches >= maxResults) break;
 
@@ -257,7 +260,8 @@ public sealed class SearchPlugin
         int totalMatches = 0;
         int skippedFiles = 0;
 
-        foreach (var file in Directory.EnumerateFiles(directory, filePattern, SearchOption.AllDirectories))
+        foreach (var file in Directory.EnumerateFiles(directory, filePattern, SearchOption.AllDirectories)
+                     .Where(f => !DirectoryFilters.IsExcluded(f)))
         {
             if (totalMatches >= maxResults) break;
 
