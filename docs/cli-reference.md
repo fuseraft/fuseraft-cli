@@ -1164,9 +1164,9 @@ Repository semantic graph — index and query symbols across the codebase.
 
 ### `fuseraft graph build`
 
-Scan all `.cs` source files under the project root and write (or overwrite) the repository semantic graph to `.fuseraft/state/repository.graph`. The graph records every file, namespace, type, interface, method, property, field, and ADR as a node; edges express structural relationships (`defines`, `imports`, `inherits`, `implements`, `references`, `adr_governs`).
+Scan all `.cs`, `.go`, and `.py` source files under the project root and write (or overwrite) the repository semantic graph to `.fuseraft/state/repository.graph`. The graph records every file, namespace/package, type, interface, method, property, field, and ADR as a node; edges express structural relationships (`defines`, `imports`, `inherits`, `implements`, `references`, `adr_governs`).
 
-Agents use the graph via the `graph_search`, `graph_refs`, and `graph_dependents` plugin tools. The graph is also updated incrementally by the harness whenever an agent writes a `.cs` file.
+Agents use the graph via the `graph_search`, `graph_refs`, and `graph_dependents` plugin tools. The graph is also updated incrementally by the harness whenever an agent writes a `.cs`, `.go`, or `.py` file.
 
 ```
 fuseraft graph build [options]
