@@ -72,15 +72,13 @@ Define teams of AI agents in YAML. fuseraft-cli drives them through a coordinate
 === "Linux / macOS"
 
     ```bash
-    git clone https://github.com/fuseraft/fuseraft-cli
-    cd fuseraft-cli
-    ./build.sh
+    curl -fsSL https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.sh | bash
     ```
 
     Then run the setup wizard on first launch:
 
     ```
-    ./bin/fuseraft
+    fuseraft
     ```
 
     ```
@@ -99,22 +97,20 @@ Define teams of AI agents in YAML. fuseraft-cli drives them through a coordinate
 === "Windows"
 
     ```powershell
-    git clone https://github.com/fuseraft/fuseraft-cli
-    cd fuseraft-cli
-    .\build.ps1
+    irm https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.ps1 | iex
     ```
 
     Then run the setup wizard on first launch:
 
     ```
-    .\bin\fuseraft.exe
+    fuseraft
     ```
 
 Generate a team config and run your first task:
 
 ```bash
-./bin/fuseraft init
-./bin/fuseraft run -c .fuseraft/config/orchestration.yaml "Add a hello-world endpoint to this project"
+fuseraft init
+fuseraft run -c .fuseraft/config/orchestration.yaml "Add a hello-world endpoint to this project"
 ```
 
 [:octicons-arrow-right-24: Full installation guide](getting-started.md)
