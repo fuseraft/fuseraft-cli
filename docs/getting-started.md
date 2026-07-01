@@ -2,12 +2,34 @@
 
 ## Prerequisites
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10)
 - An API key for at least one supported LLM provider (see [Models & Providers](models.md))
 - Docker Desktop (only required for the `CodeExecution` plugin)
 - Git (only required for the `Git` plugin)
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10) (only required if building from source)
 
-## Build
+## Install
+
+### Option A — install script (recommended)
+
+=== "Linux / macOS"
+
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.sh | bash
+    ```
+
+    Downloads the latest release binary to `~/.local/bin` and prints a PATH hint if needed. Pass `--system` to install to `/usr/local/bin` instead.
+
+=== "Windows"
+
+    ```powershell
+    irm https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.ps1 | iex
+    ```
+
+    Downloads the latest release binary to `%LOCALAPPDATA%\fuseraft\bin` and adds it to your user `PATH`.
+
+Once installed, `fuseraft` is available on your `PATH` (you may need to restart your terminal on Windows).
+
+### Option B — build from source
 
 ```bash
 git clone <repo-url>
@@ -16,7 +38,7 @@ cd fuseraft-cli
 .\build.ps1         # Windows
 ```
 
-The default target compiles, tests, and publishes a self-contained single-file binary to `bin/fuseraft` (Linux/macOS) or `bin\fuseraft.exe` (Windows).
+The default target compiles, tests, and publishes a self-contained single-file binary to `bin/fuseraft` (Linux/macOS) or `bin\fuseraft.exe` (Windows). Use `./bin/fuseraft` (or `.\bin\fuseraft.exe`) in place of `fuseraft` in the commands below.
 
 Other targets:
 
@@ -85,27 +107,27 @@ You do not need to set anything manually — configure your provider once via **
 The fastest way to get started is `fuseraft init`. It walks you through a short wizard and writes a ready-to-run YAML config:
 
 ```bash
-./bin/fuseraft init
+fuseraft init
 ```
 
 You'll be prompted to pick a team template, confirm a model (auto-detected from your API keys), confirm a provider URL (defaults to the endpoint saved in `~/.fuseraft/config`), and choose an output path. Then:
 
 ```bash
-./bin/fuseraft run -c .fuseraft/config/orchestration.yaml "Add a hello-world endpoint to this project"
+fuseraft run -c .fuseraft/config/orchestration.yaml "Add a hello-world endpoint to this project"
 ```
 
 For non-interactive or CI use:
 
 ```bash
-./bin/fuseraft init --template solo --no-interactive
-./bin/fuseraft run -c .fuseraft/config/orchestration.yaml "Your task here"
+fuseraft init --template solo --no-interactive
+fuseraft run -c .fuseraft/config/orchestration.yaml "Your task here"
 ```
 
 ### Option B — copy an example config
 
 ```bash
 cp config/examples/orchestration.yaml .fuseraft/config/orchestration.yaml
-./bin/fuseraft run -c .fuseraft/config/orchestration.yaml "Add a hello-world endpoint to this project"
+fuseraft run -c .fuseraft/config/orchestration.yaml "Add a hello-world endpoint to this project"
 ```
 
 ---
@@ -113,7 +135,7 @@ cp config/examples/orchestration.yaml .fuseraft/config/orchestration.yaml
 If no task is given you are prompted interactively:
 
 ```bash
-./bin/fuseraft run -c .fuseraft/config/orchestration.yaml
+fuseraft run -c .fuseraft/config/orchestration.yaml
 ```
 
 The orchestrator loads the config, prints a summary of the team, and streams agent responses as they arrive.
@@ -158,7 +180,7 @@ Token counts and estimated cost appear after each turn in `--verbose` mode, and 
 Sessions are checkpointed after every turn. If a run is interrupted (`Ctrl+C`, network error, etc.) resume with:
 
 ```bash
-./bin/fuseraft run --resume
+fuseraft run --resume
 ```
 
 You are shown a list of incomplete sessions; select one and the run picks up exactly where it left off. See [Sessions](sessions.md) for more detail.
@@ -168,7 +190,7 @@ You are shown a list of incomplete sessions; select one and the run picks up exa
 Before running an unfamiliar config:
 
 ```bash
-./bin/fuseraft validate .fuseraft/config/orchestration.yaml
+fuseraft validate .fuseraft/config/orchestration.yaml
 ```
 
 This checks field types, agent names, strategy references, and plugin names without making any API calls.
