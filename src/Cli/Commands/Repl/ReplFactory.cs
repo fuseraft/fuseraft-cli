@@ -75,58 +75,31 @@ internal static class ReplFactory
     // tool-call/result groups in full per inner LLM call within a single REPL turn.
     private const int InTurnToolPairLimit = 12;
 
-    internal static (UserConfig? Config, string? ApiKey) RunSetupWizard(
+    internal static async Task<(UserConfig? Config, string? ApiKey)> RunSetupWizardAsync(
         string? currentModelId, UserConfig? currentCfg)
     {
         AnsiConsole.MarkupLine("[bold]Provider setup[/]");
-        AnsiConsole.MarkupLine("[dim]Configure your default model and API key. " +
+        AnsiConsole.MarkupLine("[dim]Configure your provider and API key, then pick a model. " +
                                "Settings will be saved after the first successful reply.[/]");
         AnsiConsole.WriteLine();
 
-        var defaultModel    = !string.IsNullOrEmpty(currentCfg?.ModelId) ? currentCfg!.ModelId : (currentModelId ?? "claude-sonnet-4-6");
-        var defaultEndpoint = currentCfg?.Endpoint ?? string.Empty;
-
-        if (string.IsNullOrEmpty(defaultEndpoint))
-        {
-            try
-            {
-                using var temp = new ChatClientFactory();
-                defaultEndpoint = temp.Resolve(new ModelConfig { ModelId = defaultModel }).Endpoint;
-            }
-            catch { }
-        }
-
-        var modelIdInput = AnsiConsole.Prompt(
-            new TextPrompt<string>("[dim]Model ID[/]")
-                .DefaultValue(defaultModel)
+        var defaultEndpoint = !string.IsNullOrEmpty(currentCfg?.Endpoint)
+            ? currentCfg.Endpoint
+            : "http://localhost:11434";
+        var endpointInput = AnsiConsole.Prompt(
+            new TextPrompt<string>("[dim]Provider URL[/]")
+                .DefaultValue(defaultEndpoint)
                 .PromptStyle("white"));
+        var endpoint = endpointInput.Trim().TrimEnd('/');
 
-        if (string.IsNullOrWhiteSpace(modelIdInput))
+        if (string.IsNullOrWhiteSpace(endpoint))
         {
-            AnsiConsole.MarkupLine("[red]✗ Model ID is required.[/]");
+            AnsiConsole.MarkupLine("[red]✗ Provider URL is required.[/]");
             return (null, null);
         }
 
-        if (!modelIdInput.Equals(defaultModel, StringComparison.OrdinalIgnoreCase))
-        {
-            defaultEndpoint = string.Empty;
-            try
-            {
-                using var temp = new ChatClientFactory();
-                defaultEndpoint = temp.Resolve(new ModelConfig { ModelId = modelIdInput.Trim() }).Endpoint;
-            }
-            catch { }
-        }
-
-        var endpointPrompt = new TextPrompt<string>("[dim]Provider URL[/]")
-            .AllowEmpty()
-            .PromptStyle("white");
-        if (!string.IsNullOrEmpty(defaultEndpoint))
-            endpointPrompt.DefaultValue(defaultEndpoint);
-        var endpointInput = AnsiConsole.Prompt(endpointPrompt);
-
         bool hasExistingKey = !string.IsNullOrEmpty(currentCfg?.ApiKey);
-        var apiKeyPrompt = new TextPrompt<string>("[dim]API Key[/]")
+        var apiKeyPrompt = new TextPrompt<string>("[dim]API Key (leave blank for Ollama)[/]")
             .Secret('•')
             .AllowEmpty()
             .PromptStyle("white");
@@ -136,21 +109,86 @@ internal static class ReplFactory
 
         var apiKey = string.IsNullOrEmpty(apiKeyInput) || apiKeyInput == new string('•', 8)
             ? (currentCfg?.ApiKey ?? string.Empty)
-            : apiKeyInput;
+            : apiKeyInput.Trim();
 
-        if (string.IsNullOrWhiteSpace(apiKey))
+        AnsiConsole.WriteLine();
+
+        string modelId;
+        string provider;
+
+        var (modelIds, isOllama) = await TryFetchModelsAsync(endpoint, apiKey);
+        if (modelIds is { Count: > 0 })
         {
-            AnsiConsole.MarkupLine("[red]✗ API key is required.[/]");
-            return (null, null);
+            provider = isOllama ? "ollama" : "openai";
+            var defaultModel = !string.IsNullOrEmpty(currentCfg?.ModelId) && modelIds.Contains(currentCfg.ModelId)
+                ? currentCfg.ModelId
+                : modelIds[0];
+
+            modelId = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title($"[dim]Model[/] [dim]({modelIds.Count} available from {Markup.Escape(endpoint)})[/]")
+                    .PageSize(15)
+                    .MoreChoicesText("[dim](Move up/down to see more models)[/]")
+                    .AddChoices(modelIds.OrderBy(m => m == defaultModel ? 0 : 1).ThenBy(m => m)));
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(apiKey) && !endpoint.Contains("localhost", StringComparison.OrdinalIgnoreCase)
+                && !endpoint.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase))
+            {
+                AnsiConsole.MarkupLine("[red]✗ API key is required.[/]");
+                return (null, null);
+            }
+
+            var fallbackDefault = !string.IsNullOrEmpty(currentCfg?.ModelId)
+                ? currentCfg.ModelId
+                : (currentModelId ?? "claude-sonnet-4-6");
+            var modelIdInput = AnsiConsole.Prompt(
+                new TextPrompt<string>("[dim]Model ID[/]")
+                    .DefaultValue(fallbackDefault)
+                    .PromptStyle("white"));
+            if (string.IsNullOrWhiteSpace(modelIdInput))
+            {
+                AnsiConsole.MarkupLine("[red]✗ Model ID is required.[/]");
+                return (null, null);
+            }
+            modelId  = modelIdInput.Trim();
+            provider = string.Empty; // let ChatClientFactory.Resolve auto-detect from the model ID
         }
 
         AnsiConsole.WriteLine();
 
         var config = new UserConfig
         {
-            ModelId  = modelIdInput.Trim(),
-            Endpoint = string.IsNullOrWhiteSpace(endpointInput) ? defaultEndpoint : endpointInput.Trim(),
+            ModelId  = modelId,
+            Endpoint = endpoint,
+            Provider = provider,
         };
-        return (config, apiKey.Trim());
+        return (config, apiKey);
+    }
+
+    // Tries the OpenAI-compatible /models endpoint first, then falls back to Ollama's
+    // /api/tags. Returns a null model list (and prints a warning) when neither responds,
+    // so the caller can fall back to manual model-ID entry.
+    private static async Task<(List<string>? ModelIds, bool IsOllama)> TryFetchModelsAsync(string endpoint, string apiKey)
+    {
+        try
+        {
+            return (await ProviderModelsClient.FetchAsync(endpoint, apiKey, isOllama: false), false);
+        }
+        catch
+        {
+            try
+            {
+                return (await ProviderModelsClient.FetchAsync(endpoint, apiKey, isOllama: true), true);
+            }
+            catch (Exception ex)
+            {
+                AnsiConsole.MarkupLine($"[yellow]⚠ Could not fetch a model list from {Markup.Escape(endpoint)}:[/] [dim]{Markup.Escape(ex.Message)}[/]");
+                AnsiConsole.MarkupLine("[dim]You can enter a model ID manually instead.[/]");
+                AnsiConsole.WriteLine();
+                return (null, false);
+            }
+        }
     }
 }

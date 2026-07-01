@@ -70,15 +70,16 @@ public sealed class ReplNextCommand(ILoggerFactory loggerFactory) : AsyncCommand
         {
             if (jsonMode)
             {
-                ReplJsonBridge.Emit(new { type = "error", text = "fuseraft is not configured. Run 'fuseraft setup' or use the fuseraft: Setup command in VS Code." });
+                ReplJsonBridge.Emit(new { type = "error", text = "fuseraft is not configured. Run 'fuseraft setup' or use the fuseraft: Configure fuseraft command in VS Code." });
                 return 1;
             }
             AnsiConsole.MarkupLine($"[dim]No configuration found at[/] [bold]{Markup.Escape(UserConfigStore.ConfigPath)}[/]");
             AnsiConsole.WriteLine();
             string? wizardKey;
-            (userCfg, wizardKey) = ReplFactory.RunSetupWizard(modelId, userCfg);
+            (userCfg, wizardKey) = await ReplFactory.RunSetupWizardAsync(modelId, userCfg);
             if (userCfg is null || wizardKey is null) return 1;
-            await keyStore.StoreAsync(wizardKey);
+            if (!string.IsNullOrEmpty(wizardKey))
+                await keyStore.StoreAsync(wizardKey);
             userCfg.ApiKey = wizardKey;
             modelId        = userCfg.ModelId;
             pendingSave    = true;
