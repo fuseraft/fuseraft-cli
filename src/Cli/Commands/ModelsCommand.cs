@@ -6,6 +6,7 @@ using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Chat;
 using fuseraft.Infrastructure.KeyStore;
 using fuseraft.Infrastructure.Storage;
+using fuseraft.Cli;
 
 namespace fuseraft.Cli.Commands;
 
@@ -31,6 +32,12 @@ public sealed class ModelsCommand : AsyncCommand
         bool pendingSave = false;
         if (userCfg is null || !userCfg.IsConfigured)
         {
+            bool isInteractive = !Console.IsInputRedirected && !OrchestratorBuilder.VsCodeMode;
+            if (!isInteractive)
+            {
+                AnsiConsole.MarkupLine("[yellow]fuseraft is not configured. Run 'fuseraft setup' to set an API key.[/]");
+                return 1;
+            }
             AnsiConsole.MarkupLine($"[dim]No configuration found at[/] [bold]{Markup.Escape(UserConfigStore.ConfigPath)}[/]");
             AnsiConsole.WriteLine();
             string? wizardKey;
