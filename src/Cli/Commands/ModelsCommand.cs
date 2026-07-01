@@ -41,9 +41,10 @@ public sealed class ModelsCommand : AsyncCommand
             AnsiConsole.MarkupLine($"[dim]No configuration found at[/] [bold]{Markup.Escape(UserConfigStore.ConfigPath)}[/]");
             AnsiConsole.WriteLine();
             string? wizardKey;
-            (userCfg, wizardKey) = ReplFactory.RunSetupWizard(null, userCfg);
+            (userCfg, wizardKey) = await ReplFactory.RunSetupWizardAsync(null, userCfg);
             if (userCfg is null || wizardKey is null) return 1;
-            await keyStore.StoreAsync(wizardKey);
+            if (!string.IsNullOrEmpty(wizardKey))
+                await keyStore.StoreAsync(wizardKey);
             userCfg.ApiKey = wizardKey;
             pendingSave = true;
         }
