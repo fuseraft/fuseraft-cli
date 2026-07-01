@@ -1411,7 +1411,66 @@ Archived ADRs are moved to `.fuseraft/knowledge/decisions/archive/` and remain q
 
 ## `fuseraft memory`
 
-Repository memory — cross-session patterns extracted from the evidence graph after each session closes. Candidates must be approved before they are injected into agent prompts.
+Persistent memory — REPL/agent facts (`list`, `delete`) stored in `~/.fuseraft/memory/`, and repository memory — cross-session patterns extracted from the evidence graph after each session closes (`review`). Repository memory candidates must be approved before they are injected into agent prompts.
+
+### `fuseraft memory list`
+
+List stored REPL or agent memories.
+
+```
+fuseraft memory list [options]
+```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--agent <agent>` | — | Target the named agent's memory store (`~/.fuseraft/memory/agents/<agent>`) instead of the REPL memory store. |
+
+**Examples**
+
+```bash
+# List REPL memories
+fuseraft memory list
+
+# List a specific agent's memories
+fuseraft memory list --agent reviewer
+```
+
+### `fuseraft memory delete`
+
+Delete a stored REPL or agent memory by name, or wipe the entire store.
+
+```
+fuseraft memory delete [name] [options]
+```
+
+**Arguments**
+
+| Argument | Description |
+|----------|-------------|
+| `[name]` | Name of the memory to delete (as shown by `fuseraft memory list` or `/memory` in the REPL). |
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--all` | off | Delete every stored memory instead of a single named entry. |
+| `--agent <agent>` | — | Target the named agent's memory store (`~/.fuseraft/memory/agents/<agent>`) instead of the REPL memory store. |
+| `-y, --yes` | off | Skip the confirmation prompt when using `--all`. |
+
+**Examples**
+
+```bash
+# Delete a single REPL memory by name
+fuseraft memory delete build-command
+
+# Wipe all REPL memories (prompts for confirmation)
+fuseraft memory delete --all
+
+# Wipe all memories for a specific agent, skipping confirmation
+fuseraft memory delete --all --agent reviewer --yes
+```
 
 ### `fuseraft memory review`
 
