@@ -284,9 +284,9 @@ The session ID is shown on every startup so you can note it down for later resum
 
 **First-time setup**
 
-If `~/.fuseraft/config` is missing or incomplete, `fuseraft repl` runs an interactive setup wizard before starting the session. It prompts for a model ID, provider URL, and API key. Settings are saved after the first successful reply — the config file stores model and endpoint only; the API key goes into the OS keychain. Use `/provider setup` to reconfigure at any time.
+If `~/.fuseraft/config` is missing or incomplete, `fuseraft repl` runs an interactive setup wizard before starting the session. It prompts for a provider URL and API key (leave the key blank for Ollama), tests the endpoint's model listing (`GET {endpoint}/models`, falling back to Ollama's `GET {endpoint}/api/tags`), and lets you pick a model from the live results — falling back to a free-typed model ID if neither endpoint responds. Settings are saved after the first successful reply — the config file stores model, endpoint, and provider only; the API key goes into the OS keychain. Use `/provider setup` to reconfigure at any time.
 
-**Custom and enterprise providers** — the wizard accepts any OpenAI-compatible endpoint. Supply the full base URL (e.g. `https://chat.mycompany.com/openai/`) and any model ID recognised by that endpoint, including non-standard formats such as AWS Bedrock deployment IDs (`anthropic.claude-sonnet-4-6-20250929-v1:0`). When both a custom endpoint and an API key are provided, auto-detection is skipped entirely and the endpoint is treated as OpenAI-compatible.
+**Custom and enterprise providers** — the wizard accepts any OpenAI-compatible endpoint. Supply the full base URL (e.g. `https://chat.mycompany.com/openai/`); if the endpoint exposes a models listing you can pick from the live results, otherwise type the model ID manually, including non-standard formats such as AWS Bedrock deployment IDs (`anthropic.claude-sonnet-4-6-20250929-v1:0`). When both a custom endpoint and an API key are provided, auto-detection is skipped entirely and the endpoint is treated as OpenAI-compatible.
 
 See [Getting Started — Set your API key](getting-started.md#set-your-api-key) and [Security — API key storage](security.md#api-key-storage) for more detail.
 
@@ -386,7 +386,7 @@ Use `/tools` to see the full list at runtime.
 | `/adversarial on` | Enable a critic agent that reviews each `/execute` step after postconditions pass, and every free-form response. The critic judges whether the response was correct, grounded in actual tool output, and complete — halting the plan on a step rejection, or injecting one correction turn on a free-form rejection. |
 | `/adversarial off` | Disable the critic agent |
 | `/provider` | Show the current model, endpoint, and API key store |
-| `/provider setup` | Reconfigure provider URL, model ID, and API key; saves immediately |
+| `/provider setup` | Reconfigure provider URL and API key, then pick a model from the live provider list; saves immediately |
 | `/model` | Show current model and reasoning effort |
 | `/model <id>` | Switch to a different model without clearing history |
 | `/model <id> <effort>` | Switch model and set reasoning effort in one step (e.g. `/model grok-4.3 low`) |
@@ -2125,7 +2125,7 @@ fuseraft models
 
 Reads `~/.fuseraft/config` to resolve the provider endpoint and API key, then calls the provider's models listing endpoint (`GET {endpoint}/models` for OpenAI-compatible providers; `GET {endpoint}/api/tags` for Ollama). The currently configured model is highlighted.
 
-If `~/.fuseraft/config` is missing or incomplete, the command runs the same interactive setup wizard as `fuseraft repl` — prompting for a model ID, provider URL, and API key — and saves the result before fetching the model list.
+If `~/.fuseraft/config` is missing or incomplete, the command runs the same interactive setup wizard as `fuseraft repl` — prompting for a provider URL and API key, then a model picked from the live list — and saves the result before fetching the model list.
 
 **Example**
 
