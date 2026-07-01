@@ -75,12 +75,13 @@ internal static class ReplFactory
     // tool-call/result groups in full per inner LLM call within a single REPL turn.
     private const int InTurnToolPairLimit = 12;
 
-    internal static async Task<(UserConfig? Config, string? ApiKey)> RunSetupWizardAsync(
+    internal static async Task<(UserConfig? Config, string? ApiKey, bool SelectedFromList)> RunSetupWizardAsync(
         string? currentModelId, UserConfig? currentCfg)
     {
         AnsiConsole.MarkupLine("[bold]Provider setup[/]");
         AnsiConsole.MarkupLine("[dim]Configure your provider and API key, then pick a model. " +
-                               "Settings will be saved after the first successful reply.[/]");
+                               "Picking from a live model list saves immediately; a manually typed " +
+                               "model ID is saved after your first successful reply.[/]");
         AnsiConsole.WriteLine();
 
         var defaultEndpoint = !string.IsNullOrEmpty(currentCfg?.Endpoint)
@@ -95,7 +96,7 @@ internal static class ReplFactory
         if (string.IsNullOrWhiteSpace(endpoint))
         {
             AnsiConsole.MarkupLine("[red]✗ Provider URL is required.[/]");
-            return (null, null);
+            return (null, null, false);
         }
 
         bool hasExistingKey = !string.IsNullOrEmpty(currentCfg?.ApiKey);
@@ -115,6 +116,7 @@ internal static class ReplFactory
 
         string modelId;
         string provider;
+        bool selectedFromList;
 
         var (modelIds, isOllama) = await TryFetchModelsAsync(endpoint, apiKey);
         if (modelIds is { Count: > 0 })
@@ -130,6 +132,7 @@ internal static class ReplFactory
                     .PageSize(15)
                     .MoreChoicesText("[dim](Move up/down to see more models)[/]")
                     .AddChoices(modelIds.OrderBy(m => m == defaultModel ? 0 : 1).ThenBy(m => m)));
+            selectedFromList = true;
         }
         else
         {
@@ -137,7 +140,7 @@ internal static class ReplFactory
                 && !endpoint.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase))
             {
                 AnsiConsole.MarkupLine("[red]✗ API key is required.[/]");
-                return (null, null);
+                return (null, null, false);
             }
 
             var fallbackDefault = !string.IsNullOrEmpty(currentCfg?.ModelId)
@@ -150,10 +153,11 @@ internal static class ReplFactory
             if (string.IsNullOrWhiteSpace(modelIdInput))
             {
                 AnsiConsole.MarkupLine("[red]✗ Model ID is required.[/]");
-                return (null, null);
+                return (null, null, false);
             }
             modelId  = modelIdInput.Trim();
             provider = string.Empty; // let ChatClientFactory.Resolve auto-detect from the model ID
+            selectedFromList = false;
         }
 
         AnsiConsole.WriteLine();
@@ -164,7 +168,7 @@ internal static class ReplFactory
             Endpoint = endpoint,
             Provider = provider,
         };
-        return (config, apiKey);
+        return (config, apiKey, selectedFromList);
     }
 
     // Tries the OpenAI-compatible /models endpoint first, then falls back to Ollama's

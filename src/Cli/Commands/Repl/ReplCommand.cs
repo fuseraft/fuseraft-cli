@@ -118,13 +118,23 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             AnsiConsole.MarkupLine($"[dim]No configuration found at[/] [bold]{Markup.Escape(UserConfigStore.ConfigPath)}[/]");
             AnsiConsole.WriteLine();
             string? wizardKey;
-            (userCfg, wizardKey) = await ReplFactory.RunSetupWizardAsync(modelId, userCfg);
+            bool selectedFromList;
+            (userCfg, wizardKey, selectedFromList) = await ReplFactory.RunSetupWizardAsync(modelId, userCfg);
             if (userCfg is null || wizardKey is null) return 1;
             if (!string.IsNullOrEmpty(wizardKey))
                 await keyStore.StoreAsync(wizardKey);
             userCfg.ApiKey = wizardKey;
             modelId        = userCfg.ModelId;
-            pendingSave    = true;
+            if (selectedFromList)
+            {
+                UserConfigStore.Save(userCfg);
+                AnsiConsole.MarkupLine($"[dim]Settings saved to[/] [bold]{Markup.Escape(UserConfigStore.ConfigPath)}[/]");
+                AnsiConsole.MarkupLine($"[dim]API key stored in[/] [bold]{Markup.Escape(keyStore.StoreName)}[/]");
+            }
+            else
+            {
+                pendingSave = true;
+            }
         }
 
         if (string.IsNullOrEmpty(modelId))
