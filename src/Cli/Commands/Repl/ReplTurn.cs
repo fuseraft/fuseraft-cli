@@ -66,6 +66,14 @@ internal static class ReplTurn
                 e.Cancel = true;
                 c.Cancel();
             }
+            else if (ctx.JsonMode)
+            {
+                // In VS Code mode, never let SIGINT kill the process when there is no
+                // active LLM request. Acknowledge with a cancelled event so the webview
+                // can re-enable the input field.
+                e.Cancel = true;
+                ReplJsonBridge.Emit(new { type = "cancelled" });
+            }
         }
     }
 
@@ -143,6 +151,17 @@ internal static class ReplTurn
             catch (OperationCanceledException) { break; }
 
             if (raw is null) break;
+
+            // Interrupt signal sent via stdin (Windows path: SIGINT can't be used).
+            if (ctx.JsonMode && raw == ReplJsonBridge.InterruptToken)
+            {
+                var c = ctx.ActiveCts;
+                if (c is not null && !c.IsCancellationRequested)
+                    c.Cancel();
+                // If no active request, the signal was stale — silently discard.
+                continue;
+            }
+
             raw = raw.Trim();
             if (string.IsNullOrEmpty(raw)) continue;
 

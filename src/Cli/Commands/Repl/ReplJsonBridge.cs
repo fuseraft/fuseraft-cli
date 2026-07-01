@@ -20,8 +20,17 @@ internal static class ReplJsonBridge
     }
 
     /// <summary>
+    /// Sentinel returned by <see cref="ReadInput"/> when the extension sends an
+    /// <c>{"type":"interrupt"}</c> message (Windows path, where SIGINT cannot be
+    /// delivered to a child process). The loop handles this by cancelling the
+    /// active request and continuing rather than breaking the session.
+    /// </summary>
+    internal const string InterruptToken = "\x01interrupt\x01";
+
+    /// <summary>
     /// Reads one JSON line from stdin and returns the "text" field value.
-    /// Falls back to returning the raw line if it cannot be parsed as JSON.
+    /// Returns <see cref="InterruptToken"/> when a <c>{"type":"interrupt"}</c>
+    /// message is received. Falls back to the raw line for non-JSON input.
     /// Returns null on EOF.
     /// </summary>
     internal static string? ReadInput()
@@ -31,10 +40,14 @@ internal static class ReplJsonBridge
         try
         {
             using var doc = JsonDocument.Parse(line);
+            if (doc.RootElement.TryGetProperty("type", out var typeEl) &&
+                typeEl.GetString() is "interrupt")
+                return InterruptToken;
             if (doc.RootElement.TryGetProperty("text", out var text))
                 return text.GetString();
         }
         catch { }
         return line;
     }
+
 }
