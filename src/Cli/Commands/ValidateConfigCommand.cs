@@ -270,6 +270,12 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                 if (agent.FunctionChoice.ToLowerInvariant() is not ("auto" or "required" or "none"))
                     issues.Add(("error", $"Agent '{agent.Name}': FunctionChoice '{agent.FunctionChoice}' is invalid. Valid values: auto, required, none."));
 
+                if (agent.TrustScore is < 0.0 or > 1.0)
+                    issues.Add(("error", $"Agent '{agent.Name}': TrustScore must be 0.0–1.0 (got {agent.TrustScore})."));
+
+                if (agent.ContextWindow?.ContextCapFraction is < 0.0 or > 1.0)
+                    issues.Add(("error", $"Agent '{agent.Name}': ContextCapFraction must be 0.0–1.0 (got {agent.ContextWindow.ContextCapFraction})."));
+
                 var effort = agent.Model.ReasoningEffort?.ToLowerInvariant();
                 if (effort is not null and not ("none" or "low" or "medium" or "high"))
                     issues.Add(("error", $"Agent '{agent.Name}': Model.ReasoningEffort '{agent.Model.ReasoningEffort}' is invalid. Valid values: none, low, medium, high."));
@@ -310,6 +316,9 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                     "The per-turn warning fires in the same turn as compaction — lower WarnTurnTokens " +
                     "below CutoverAt to get an advance signal."));
         }
+
+        if (config.Compaction?.AntiThrashMinSavingsRatio is < 0.0 or > 1.0)
+            issues.Add(("error", $"Compaction.AntiThrashMinSavingsRatio must be 0.0–1.0 (got {config.Compaction.AntiThrashMinSavingsRatio})."));
     }
 
     private static void ValidateMemoryLayer(
