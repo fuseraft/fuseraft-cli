@@ -31,6 +31,11 @@ internal static class ReplNextTurn
                 e.Cancel = true;
                 c.Cancel();
             }
+            else if (ctx.JsonMode)
+            {
+                e.Cancel = true;
+                ReplJsonBridge.Emit(new { type = "cancelled" });
+            }
         }
     }
 
@@ -78,6 +83,15 @@ internal static class ReplNextTurn
             catch (OperationCanceledException) { break; }
 
             if (raw is null) break;
+
+            if (ctx.JsonMode && raw == ReplJsonBridge.InterruptToken)
+            {
+                var c = ctx.ActiveCts;
+                if (c is not null && !c.IsCancellationRequested)
+                    c.Cancel();
+                continue;
+            }
+
             raw = raw.Trim();
             if (string.IsNullOrEmpty(raw)) continue;
 

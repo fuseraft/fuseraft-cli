@@ -23,6 +23,32 @@ internal static class ReplTurn
     // is retried automatically before surfacing the failure to the user.
     private const int MaxStreamRetries = 2;
 
+    // Matches identify/locate/find-style questions about the codebase so the turn can force a
+    // grounding tool call instead of letting the model answer from (possibly fabricated) memory.
+    // Live-verified on grok-4.3 (2026-06-30): forcing ChatToolMode.RequireAny for a whole turn
+    // does not get the model stuck — it calls a tool once, then still returns normal final text.
+    private static readonly Regex ForceEvidenceQuestionPattern = new(
+        @"\b(locate|identify)\b" +
+        @"|\bwhere\s+(is|are|does|do)\b" +
+        @"|\bwhich\s+file\b" +
+        @"|\bwhat\s+file\b" +
+        @"|\bfind\s+(the|where|which)\b" +
+        @"|\bdoes\s+\S.*\bexist\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // Returns options forcing at least one tool call for this request when the input looks like
+    // an identify/locate-style question and tools are actually available — never mutates the
+    // shared ctx.ChatOptions instance, so the override applies to this turn only.
+    private static ChatOptions? BuildRequestOptions(ChatOptions? baseOptions, string input)
+    {
+        if (baseOptions?.Tools is not { Count: > 0 }) return baseOptions;
+        if (!ForceEvidenceQuestionPattern.IsMatch(input)) return baseOptions;
+
+        var forced = baseOptions.Clone();
+        forced.ToolMode = ChatToolMode.RequireAny;
+        return forced;
+    }
+
     /// <summary>
     /// Returns <c>true</c> when <paramref name="ex"/> (or any inner exception) looks like a
     /// transient mid-stream disconnection that is worth retrying automatically — e.g. the
@@ -65,6 +91,14 @@ internal static class ReplTurn
             {
                 e.Cancel = true;
                 c.Cancel();
+            }
+            else if (ctx.JsonMode)
+            {
+                // In VS Code mode, never let SIGINT kill the process when there is no
+                // active LLM request. Acknowledge with a cancelled event so the webview
+                // can re-enable the input field.
+                e.Cancel = true;
+                ReplJsonBridge.Emit(new { type = "cancelled" });
             }
         }
     }
@@ -143,6 +177,17 @@ internal static class ReplTurn
             catch (OperationCanceledException) { break; }
 
             if (raw is null) break;
+
+            // Interrupt signal sent via stdin (Windows path: SIGINT can't be used).
+            if (ctx.JsonMode && raw == ReplJsonBridge.InterruptToken)
+            {
+                var c = ctx.ActiveCts;
+                if (c is not null && !c.IsCancellationRequested)
+                    c.Cancel();
+                // If no active request, the signal was stale — silently discard.
+                continue;
+            }
+
             raw = raw.Trim();
             if (string.IsNullOrEmpty(raw)) continue;
 
@@ -327,14 +372,15 @@ internal static class ReplTurn
             ClearSpinnerLine();
         }
 
-        var activeClient  = isStepRequest ? ctx.StepClient : ctx.Client;
-        var streamAttempt = 0;
+        var activeClient   = isStepRequest ? ctx.StepClient : ctx.Client;
+        var requestOptions = BuildRequestOptions(ctx.ChatOptions, input);
+        var streamAttempt  = 0;
         while (true) // retry loop for transient streaming errors
         {
         try
         {
             await foreach (var chunk in activeClient.GetStreamingResponseAsync(
-                ctx.History, ctx.ChatOptions, cancellationToken: reqCts.Token))
+                ctx.History, requestOptions, cancellationToken: reqCts.Token))
             {
                 var funcCall = chunk.Contents.OfType<FunctionCallContent>().FirstOrDefault();
                 if (funcCall is not null)
@@ -547,6 +593,32 @@ internal static class ReplTurn
                 if (!ctx.JsonMode)
                     AnsiConsole.MarkupLine(
                         "[yellow]  ⚠ No write tool called after correction — verify the agent did not fabricate this result.[/]");
+            }
+        }
+
+        // Free-form turns under adversarial mode: a critic agent reviews the response for
+        // fabrication/correctness, same infrastructure /execute steps use. Skipped on the
+        // correction turn itself so a rejection can't recurse forever.
+        if (ctx.AdversarialMode && ctx.SubAgent is not null &&
+            !isStepRequest && !capturePlan && !isCorrectionTurn && responseText.Length > 0)
+        {
+            if (!ctx.JsonMode) AnsiConsole.Markup("[dim]  critic reviewing…[/]");
+            var (approved, reason) = await ctx.SubAgent.CriticReviewAsync(
+                input, expectedTool: null, toolCallsThisTurn, responseText, cancellationToken);
+            if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 40)}\r");
+            if (!approved)
+            {
+                await ctx.Emitter.EmitAsync(EventTypes.CorrectionInjected, turn: ctx.TurnIndex, payload: new { reason = "critic_rejected", detail = reason });
+                if (!ctx.JsonMode)
+                    AnsiConsole.MarkupLine($"[yellow]  ✗ Critic: {Markup.Escape(reason ?? "no reason given")}[/]");
+                var correctionMsg =
+                    $"A critic reviewed your last response and rejected it: {reason}\n" +
+                    "Verify the disputed claim with a tool call and correct your answer. " +
+                    "Do not just restate the same claim.";
+                await ExecuteAsync(
+                    ctx, correctionMsg,
+                    isStepRequest: false, capturePlan: false, activeStep: null,
+                    cancellationToken, isCorrectionTurn: true);
             }
         }
 
