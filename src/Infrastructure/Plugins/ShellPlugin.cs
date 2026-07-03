@@ -125,11 +125,12 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
 
     // Core execution
 
-    [Description("Run a shell command and return stdout/stderr.")]
+    [Description("Run a shell command and return stdout/stderr. Pass quiet=true to get 'OK' on success instead of full output — cheaper when you only need to confirm success (e.g. scaffolding, 'dotnet restore', environment setup). Full output and exit code are always returned on failure regardless of quiet.")]
     public async Task<string> RunAsync(
         [Description("Shell command to execute.")] string command,
         [Description("Working directory.")] string? workingDirectory = null,
-        [Description("Timeout in seconds.")] int timeoutSeconds = 60)
+        [Description("Timeout in seconds.")] int timeoutSeconds = 60,
+        [Description("Return 'OK' instead of full output when the command succeeds.")] bool quiet = false)
     {
         // LLM outputs sometimes carry HTML entity encoding (e.g. &amp;&amp; instead of &&).
         // Decode before passing to the shell so commands execute as intended.
@@ -153,6 +154,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         // the loop and keeps the failure in context where the agent can act on it.
         // Any other intervening shell_run clears the cached entry so that file changes
         // made via shell (cat >, tee, heredocs, etc.) are reflected on the next verify run.
+        // Applies regardless of quiet — the loop-detection concern is the same either way.
         var cacheKey = command.Trim() + "\0" + (resolvedDir ?? "(default)");
         if (_lastRunKey == cacheKey)
             return $"[Command already ran this turn — cached output follows]\n\n{_lastRunOutput}";
@@ -178,34 +180,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
             { Timestamp = DateTimeOffset.UtcNow });
         }
 
-        return output;
-    }
-
-    [Description("Run a shell command; returns 'OK' on success or full output+exit code on failure. Use instead of shell_run when successful output is not needed.")]
-    public async Task<string> RunQuietAsync(
-        [Description("Shell command to execute.")] string command,
-        [Description("Working directory.")] string? workingDirectory = null,
-        [Description("Timeout in seconds.")] int timeoutSeconds = 60)
-    {
-        command = System.Net.WebUtility.HtmlDecode(command);
-
-        var sudoDenial = CheckForSudo(command);
-        if (sudoDenial is not null) return sudoDenial;
-
-        var policyDenial = CheckShellPolicy(command);
-        if (policyDenial is not null) return policyDenial;
-
-        if (_approveCommand is not null && !await _approveCommand(command))
-            return PluginResult.Denied("Shell command blocked by user.");
-
-        var denial = ValidateWorkingDirectory(workingDirectory, out var resolvedDir);
-        if (denial is not null) return denial;
-
-        var result = await ProcessHelper.RunAsync(
-            Shell, [ShellFlag, command],
-            resolvedDir, timeoutSeconds);
-
-        return result.Succeeded ? "OK" : result.ToPluginOutput();
+        return quiet && result.Succeeded ? "OK" : output;
     }
 
     private static async Task<string?> TryCaptureCommitHashAsync(string? workingDir)

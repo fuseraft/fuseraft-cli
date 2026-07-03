@@ -642,33 +642,6 @@ public sealed class FileSystemPlugin : ITurnResettable
         return hits;
     }
 
-    [Description("Get file version, size, and last-modified. Cheaper than read_file. Returns VERSION_NOT_TRACKED when the file exists but was not written through write_file.")]
-    public async Task<string> StatFileAsync(
-        [Description("File path.")] string path)
-    {
-        var denial = ResolveSafe(path, out var resolved);
-        if (denial is not null) return denial;
-
-        if (!File.Exists(resolved))
-            return PluginResult.Error($"File not found: {resolved}");
-
-        var info = new FileInfo(resolved);
-        var size = info.Length;
-        var mtime = info.LastWriteTimeUtc;
-
-        if (_versionStore is not null)
-        {
-            var record = await _versionStore.StatAsync(resolved);
-            if (record is not null)
-                return PluginResult.Ok(
-                    $"path={resolved} version={record.Version} " +
-                    $"size={size} modified={mtime:O} hash={record.ContentHash ?? "(none)"}");
-        }
-
-        return PluginResult.Ok(
-            $"path={resolved} version=NOT_TRACKED size={size} modified={mtime:O}");
-    }
-
     [Description("Create or overwrite a file. Prefer patch_file for edits on large files.")]
     public async Task<string> WriteFileAsync(
         [Description("File path.")] string path,
@@ -742,7 +715,7 @@ public sealed class FileSystemPlugin : ITurnResettable
                 return PluginResult.Error(
                     $"VERSION_MISMATCH: '{resolved}' is at version {currentVersion} " +
                     $"but baseVersion={baseVersion} was supplied. " +
-                    $"Call stat_file to read the current version, then reissue the write with the correct baseVersion.");
+                    $"Call get_file_info to read the current version, then reissue the write with the correct baseVersion.");
         }
         return null;
     }
@@ -917,7 +890,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         _writtenThisTurn.Add(resolved);
         _sessionCache?.RecordWrite(resolved, new FileInfo(resolved));
 
-        // Bump the version store so stat_file and future baseVersion checks stay accurate.
+        // Bump the version store so get_file_info and future baseVersion checks stay accurate.
         int? newVersion = null;
         if (_versionStore is not null)
         {
@@ -936,10 +909,15 @@ public sealed class FileSystemPlugin : ITurnResettable
         return PluginResult.Ok($"Written {content.Length} chars to {resolved}{note}{versionNote}");
     }
 
-    [Description("List files recursively (max 500).")]
+    // Absolute ceiling on maxResults regardless of what the caller requests — keeps a single
+    // call from dumping an unbounded listing into context in a very large tree.
+    private const int ListFilesHardCap = 500;
+
+    [Description("List files recursively. Reports when results were truncated so you know to narrow the search — this matters most in large or multi-repo directories, where a flat result cap can silently miss files in a sibling subdirectory that wasn't reached yet.")]
     public string ListFiles(
         [Description("Directory path.")] string directory,
-        [Description("Glob pattern, e.g. '*.cs'.")] string pattern = "*")
+        [Description("Glob pattern, e.g. '*.cs'.")] string pattern = "*",
+        [Description("Max results, clamped to 500. Raise it only if the default cuts off a search you know needs to see more.")] int maxResults = 100)
     {
         var denial = ResolveSafe(directory, out var resolved);
         if (denial is not null) return denial;
@@ -954,7 +932,7 @@ public sealed class FileSystemPlugin : ITurnResettable
             return PluginResult.Error($"Directory not found: {resolved}");
         }
 
-        const int maxFiles = 500;
+        var maxFiles = Math.Clamp(maxResults, 1, ListFilesHardCap);
         var files = Directory.EnumerateFiles(resolved, pattern, SearchOption.AllDirectories)
             .Where(f => !DirectoryFilters.IsExcluded(f))
             .Take(maxFiles + 1)
@@ -968,7 +946,11 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         var result = string.Join("\n", files);
         if (truncated)
-            result += $"\n\n[TRUNCATED — only first {maxFiles} files shown. Use a more specific pattern to narrow results.]";
+            result += $"\n\n[TRUNCATED — showing first {maxFiles} matches; more exist beyond this cap. " +
+                      "They may be concentrated in whichever subdirectory was walked first (e.g. one " +
+                      "repo in a multi-repo working directory) — files elsewhere may not be represented " +
+                      "at all. Narrow with a more specific 'directory' or 'pattern' rather than only " +
+                      "raising maxResults.]";
 
         return result;
     }
@@ -987,8 +969,8 @@ public sealed class FileSystemPlugin : ITurnResettable
         return PluginResult.Ok($"Deleted: {resolved}");
     }
 
-    [Description("Get file/directory metadata (size, timestamps, permissions).")]
-    public string GetFileInfo([Description("File or directory path.")] string path)
+    [Description("Get file/directory metadata: size, timestamps, permissions, and (for files) the write-version counter. Cheaper than read_file when you only need to check existence or staleness. Version is NOT_TRACKED when the file exists but was never written through write_file.")]
+    public async Task<string> GetFileInfoAsync([Description("File or directory path.")] string path)
     {
         var denial = ResolveSafe(path, out var resolved);
         if (denial is not null) return denial;
@@ -1008,6 +990,11 @@ public sealed class FileSystemPlugin : ITurnResettable
             sb.AppendLine($"Size:     {fi.Length:N0} bytes");
             sb.AppendLine($"Created:  {fi.CreationTimeUtc:yyyy-MM-dd HH:mm:ss} UTC");
             sb.AppendLine($"Modified: {fi.LastWriteTimeUtc:yyyy-MM-dd HH:mm:ss} UTC");
+
+            var record = _versionStore is not null ? await _versionStore.StatAsync(resolved) : null;
+            sb.AppendLine(record is not null
+                ? $"Version:  {record.Version} (hash: {record.ContentHash ?? "(none)"})"
+                : "Version:  NOT_TRACKED");
         }
         else
         {
@@ -1250,18 +1237,6 @@ public sealed class FileSystemPlugin : ITurnResettable
         await File.WriteAllTextAsync(summaryPath, summary.Trim());
 
         return PluginResult.Ok($"Summary saved for '{resolved}' → {summaryPath}");
-    }
-
-    [Description("Check if a path exists.")]
-    public string PathExists([Description("Path to check.")] string path)
-    {
-        var denial = ResolveSafe(path, out var resolved);
-        if (denial is not null) return denial;
-
-        bool exists = File.Exists(resolved) || Directory.Exists(resolved);
-        return exists 
-            ? PluginResult.Ok($"Exists: {resolved}")
-            : PluginResult.Info($"Does not exist: {resolved}");
     }
 
     [Description("List files and subdirectories (non-recursive).")]

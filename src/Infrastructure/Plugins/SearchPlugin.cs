@@ -7,9 +7,11 @@ using Microsoft.Extensions.AI;
 namespace fuseraft.Infrastructure.Plugins;
 
 /// <summary>
-/// Gives agents the ability to explore a codebase or directory tree:
-/// find files by name, search file contents by pattern, and locate
-/// symbol definitions (classes, functions, interfaces, etc.).
+/// Gives agents the ability to explore a codebase or directory tree: search file contents
+/// by pattern, and locate symbol definitions and usages (classes, functions, interfaces, etc.).
+/// Finding files by name is <see cref="FileSystemPlugin.ListFiles"/> — kept in FileSystem
+/// rather than duplicated here so it stays covered by <c>SandboxEnforcementFilter</c>'s
+/// path-based sandbox checks and the <c>PluginCapabilityMap</c> entry that already exist for it.
 /// </summary>
 public sealed class SearchPlugin
 {
@@ -29,41 +31,6 @@ public sealed class SearchPlugin
         ("method",    @"(public|private|protected|internal|static|async|override|virtual)[\w\s]*\s+{0}\s*[(<]"),
         ("variable",  @"(var|let|const|val)\s+{0}\s*[=:]"),
     ];
-
-    // File search
-
-    [Description("Find files by name pattern.")]
-    public string SearchFiles(
-        [Description("Filename wildcard, e.g. '*.cs'.")] string pattern,
-        [Description("Root directory.")] string directory = ".",
-        [Description("Max results.")] int maxResults = 100)
-    {
-        if (!Directory.Exists(directory))
-            return PluginResult.Error($"Directory not found: {directory}");
-
-        try
-        {
-            var files = Directory
-                .EnumerateFiles(directory, pattern, SearchOption.AllDirectories)
-                .Where(f => !DirectoryFilters.IsExcluded(f))
-                .Take(maxResults)
-                .ToList();
-
-            if (files.Count == 0)
-                return PluginResult.Info($"No files matched '{pattern}' under {directory}");
-
-            var sb = new StringBuilder();
-            sb.AppendLine($"[RESULTS] {files.Count} file(s) matched '{pattern}':");
-            foreach (var f in files)
-                sb.AppendLine($"  {f}");
-
-            return sb.ToString().TrimEnd();
-        }
-        catch (Exception ex)
-        {
-            return PluginResult.Error(ex.Message);
-        }
-    }
 
     // Content search
 
