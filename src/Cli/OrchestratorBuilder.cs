@@ -578,7 +578,7 @@ public static class OrchestratorBuilder
         }
 
         // File version store: tracks monotonic write counters per file so agents can detect
-        // concurrent-write conflicts via stat_file + write_file(baseVersion: N).
+        // concurrent-write conflicts via get_file_info + write_file(baseVersion: N).
         // Path is derived from the (sandbox-resolved) change-tracking path so the store
         // lands in the same .fuseraft/state directory as changes.json and intents.json.
         var versionStorePath = config.ChangeTracking is { } ct2
@@ -608,7 +608,7 @@ public static class OrchestratorBuilder
         var sessionMetrics = new fuseraft.Cli.Telemetry.SessionMetrics();
 
         // Re-configure the FileSystem plugin with the version store and session read cache
-        // so write_file, stat_file, and read_file participate in version-aware conflict
+        // so write_file, get_file_info, and read_file participate in version-aware conflict
         // detection and cross-turn read deduplication. Thread the cache-hit callback so
         // SessionMetrics can count duplicate reads across the session.
         pluginRegistry.Configure(config.Security ?? new SecurityConfig(), profiles, shellApprover, fileVersionStore, sessionReadCache, onCacheHit: sessionMetrics.RecordCacheHit, eventSink: stateProjector);
@@ -2242,7 +2242,7 @@ public static class OrchestratorBuilder
         {
             Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "skills"),
             Path.Combine(Directory.GetCurrentDirectory(), ".agents",   "skills"),
-            Path.Combine(home, ".fuseraft", "skills"),
+            FuseraftPaths.GlobalSkills,
             Path.Combine(home, ".agents",   "skills"),
             Path.Combine(AppContext.BaseDirectory, "skills"),
         }.Where(Directory.Exists).ToArray();

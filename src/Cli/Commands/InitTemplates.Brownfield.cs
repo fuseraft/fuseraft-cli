@@ -43,7 +43,7 @@ public static partial class InitTemplates
                  "reason" string — e.g. file "internal/legacy/queue.go", reason "no tests, high
                  churn"), test_coverage_gaps (array of files lacking a corresponding test file).
               8. For each significant architectural risk or pattern you uncover, call
-                 record_investigation(summary, conclusion) — these findings survive compaction
+                 investigation_record(summary, conclusion) — these findings survive compaction
                  and will be visible to every subsequent agent without re-reading the codebase.
 
               You are read-only with respect to this project's own files — you have no
@@ -82,7 +82,7 @@ public static partial class InitTemplates
                    - Check the Investigation Log in your context: rejected hypotheses show what
                      the Developer already tried. Do not propose an approach that is already
                      rejected. If you now know definitively why it failed, call
-                     identify_root_cause(cause) before writing the revised brief.
+                     investigation_identify_root_cause(cause) before writing the revised brief.
                    - Revise the brief: call write_file_brief(content: ..., format: "json") with
                      the full updated brief — implementation_hints retargeted at the root cause,
                      plus a new failure_analysis field describing what went wrong.
@@ -149,10 +149,10 @@ public static partial class InitTemplates
               6. Run the build command from the convention profile to confirm compilation.
               7. Run verify_command from the brief to confirm runtime correctness.
                  HYPOTHESIS PROTOCOL — required for every verify_command attempt:
-                 a. Call create_hypothesis(description) naming the specific approach.
-                 b. If it fails: call reject_hypothesis(id, reason, evidence) with the exact
-                    error. Read the failing source before retrying.
-                 c. If it passes: call confirm_hypothesis(id, evidence).
+                 a. Call investigation_create_hypothesis(description) naming the specific approach.
+                 b. If it fails: call investigation_reject_hypothesis(id, reason, evidence) with
+                    the exact error. Read the failing source before retrying.
+                 c. If it passes: call investigation_confirm_hypothesis(id, evidence).
                  You MUST NOT call handoff with any open hypotheses.
               8. Commit with git_add and git_commit.
               9. {ContextWriteStep}

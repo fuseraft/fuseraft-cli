@@ -24,10 +24,9 @@ Read, write, and navigate the local filesystem.
 | `grep_file` | `path`, `pattern`, `contextLines` (default 2), `maxMatches` (default 30) | Case-insensitive text or regex search within a single file. Returns matching lines with surrounding context. |
 | `get_file_summary` | `path` | Return a previously saved structural summary, or a character-count notice when no summary exists. |
 | `save_file_summary` | `path`, `summary` | Persist a structural summary of a file so future agents can retrieve it cheaply via `get_file_summary`. |
-| `list_files` | `directory`, `pattern` (default `"*"`) | List files matching a glob pattern. Returns up to 500 results. |
-| `get_file_info` | `path` | Returns metadata: type (file/directory), size, created/modified timestamps, and Unix permissions (on Unix systems). |
-| `stat_file` | `path` | Return version, size, and last-modified for a file. Version is a monotonic counter incremented on every `write_file` call. Returns `version=NOT_TRACKED` when the file exists but was never written through `write_file`. Cheaper than `read_file` for conflict detection. |
-| `write_file` | `path`, `content`, `raw` (default false), `baseVersion` (default 0) | Create or overwrite a file. Creates parent directories automatically. When `baseVersion > 0`, the write is rejected with `VERSION_MISMATCH` if the current stored version differs — use `stat_file` first to read the version and detect concurrent writes. |
+| `list_files` | `directory`, `pattern` (default `"*"`), `maxResults` (default 100, clamped to 500) | List files recursively matching a glob pattern. Reports when the cap truncated results — in a large or multi-repo directory the matches beyond the cap may be concentrated in whichever subtree was walked first, so narrow with `directory`/`pattern` rather than only raising `maxResults`. |
+| `get_file_info` | `path` | Returns metadata: type (file/directory), size, created/modified timestamps, Unix permissions (on Unix systems), and — for files — the write-version counter (`NOT_TRACKED` if the file exists but was never written through `write_file`). Cheaper than `read_file`, and doubles as an existence check: a "Path not found" result means the path doesn't exist. |
+| `write_file` | `path`, `content`, `raw` (default false), `baseVersion` (default 0) | Create or overwrite a file. Creates parent directories automatically. When `baseVersion > 0`, the write is rejected with `VERSION_MISMATCH` if the current stored version differs — use `get_file_info` first to read the version and detect concurrent writes. |
 | `patch_file` | `path`, `oldText`, `newText` | Replace an exact block of text in a file. Fails with a hint if `oldText` is not found verbatim. |
 | `delete_file` | `path` | Delete a file if it exists. |
 | `set_permissions` | `path`, `mode` | Set Unix file permissions (chmod). Accepts a 3- or 4-digit octal string such as `"755"` or `"0644"`. No-op on Windows. |
@@ -35,7 +34,6 @@ Read, write, and navigate the local filesystem.
 | `delete_directory` | `path`, `recursive` (default false) | Delete a directory. Set `recursive=true` to remove a non-empty directory and all its contents. Refuses to delete the sandbox root. |
 | `copy_file` | `source`, `destination`, `overwrite` (default false) | Copy a file to a new location. Creates the destination directory if needed. |
 | `move_file` | `source`, `destination`, `overwrite` (default false) | Move or rename a file or directory. Creates the destination parent directory if needed. |
-| `path_exists` | `path` | Check whether a file or directory exists at the given path. |
 | `list_directory` | `directory`, `pattern` (default `"*"`) | List files and subdirectories in a single directory (non-recursive). Subdirectories are shown with a trailing `/`. Returns up to 500 entries. |
 
 **Tip:** When `FileSystemSandboxPath` is configured, all paths are resolved to canonical form and rejected if they fall outside the sandbox root. See [Security](security.md).
@@ -48,8 +46,7 @@ Execute shell commands and scripts.
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
-| `shell_run` | `command`, `workingDirectory` (optional), `timeoutSeconds` (default 60) | Run a shell command. Supports pipes, redirects, and chained commands. Captures stdout, stderr, and exit code. |
-| `shell_run_quiet` | `command`, `workingDirectory` (optional), `timeoutSeconds` (default 60) | Run a shell command; returns `OK` on exit 0 or full output + exit code on failure. Use instead of `shell_run` when successful output is not needed (e.g. scaffolding, `dotnet restore`, environment setup). |
+| `shell_run` | `command`, `workingDirectory` (optional), `timeoutSeconds` (default 60), `quiet` (default false) | Run a shell command. Supports pipes, redirects, and chained commands. Captures stdout, stderr, and exit code. Pass `quiet: true` to get `OK` back on success instead of full output (e.g. scaffolding, `dotnet restore`, environment setup) — full output and exit code are still returned on failure regardless of `quiet`. |
 | `shell_run_script` | `script`, `workingDirectory` (optional), `timeoutSeconds` (default 120) | Write a multi-line script to a temp file and execute it. Useful for complex multi-command workflows. |
 | `shell_get_env` | `name` | Return an environment variable value (empty string if not set). |
 | `shell_set_env` | `name`, `value` | Set an environment variable for the current session. Inherited by all subsequent `shell_run` calls. Pass an empty string to clear a variable. |
@@ -65,7 +62,7 @@ The shell used is `/bin/bash` on Unix and `cmd` on Windows. The shell binary is 
 
 **`sudo` protection:** `sudo` is always blocked. Any command or script containing `sudo` (including after pipes, `&&`, `;`, or newlines) is rejected before execution. The denial message instructs the agent to use non-privileged alternatives (`pip install --user`, `pipx`, virtualenvs) or, if elevated access is truly required, to tell the user what to run so they can do it themselves.
 
-**Shell command approval in `--hitl` mode:** When `fuseraft run --hitl` is active, every `shell_run`, `shell_run_quiet`, and `shell_run_script` call pauses and shows the command for approval before executing. See [CLI Reference — Shell command approval](cli-reference.md#human-in-the-loop-controls).
+**Shell command approval in `--hitl` mode:** When `fuseraft run --hitl` is active, every `shell_run` and `shell_run_script` call pauses and shows the command for approval before executing. See [CLI Reference — Shell command approval](cli-reference.md#human-in-the-loop-controls).
 
 **Security note:** When `FileSystemSandboxPath` is set, the `workingDirectory` argument is hard-denied if it falls outside the sandbox. The `command` and `script` arguments are scanned for absolute paths escaping the sandbox; system binary prefixes (`/usr/`, `/bin/`, `/opt/`, `/nix/`, etc.) are exempted. Shell scanning is heuristic — for strict containment use `CodeExecution` (Docker) instead.
 
@@ -168,16 +165,15 @@ Parse, transform, and query JSON data.
 
 ## Search
 
-Search the filesystem by name or content.
+Search file contents and locate symbols. Finding files by name is `list_files` in [FileSystem](#filesystem) — kept there rather than duplicated here since it's the one covered by sandbox path enforcement and the FileSystem capability map.
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
-| `search_files` | `pattern`, `directory` (default `"."`), `maxResults` (default 100) | Find files by wildcard/glob pattern. |
 | `search_content` | `query`, `directory` (default `"."`), `filePattern` (default `"*"`), `maxResults` (default 100), `caseSensitive` (default false) | Search file contents by regex or plain text (like grep). |
 | `search_symbol` | `symbol`, `directory` (default `"."`), `extension` (default `""`), `maxResults` (default 50) | Find symbol definitions (class, function, interface, variable, etc.) using language-agnostic patterns. Results are automatically recorded as `SymbolDefinition` nodes in the evidence graph when `EvidenceStore` is configured. |
 | `search_callers` | `symbol`, `directory` (default `"."`), `extension` (default `""`), `maxResults` (default 100) | Find call sites and usages of a symbol: invocations, constructor calls, type annotations, and inheritance declarations. Excludes definition lines so results contain only references. Results are automatically recorded as `SymbolReference` nodes in the evidence graph when `EvidenceStore` is configured; `TargetFile` is resolved from any existing `SymbolDefinition` nodes for the same symbol. |
 
-**Directory exclusions:** all four functions skip `.git`, `node_modules`, `bin`, `obj`, `.vs`, `.idea`, `.nuget`, `.venv`, `__pycache__`, `.fuseraft`, and `vendor` — the same list `list_files` (FileSystem) uses. This matters most for `search_content`: without it, an unscoped query (`directory: "."`, `filePattern: "*"`) walks into compiled build output and can match inside a `.dll`/`.pdb` read as text, returning megabytes of garbage. Pass a narrower `directory` or `filePattern` (e.g. `*.cs`) to scope a search further.
+**Directory exclusions:** all three functions skip `.git`, `node_modules`, `bin`, `obj`, `.vs`, `.idea`, `.nuget`, `.venv`, `__pycache__`, `.fuseraft`, and `vendor` — the same list `list_files` (FileSystem) uses. This matters most for `search_content`: without it, an unscoped query (`directory: "."`, `filePattern: "*"`) walks into compiled build output and can match inside a `.dll`/`.pdb` read as text, returning megabytes of garbage. Pass a narrower `directory` or `filePattern` (e.g. `*.cs`) to scope a search further.
 
 ---
 
@@ -300,6 +296,32 @@ Each entry shows the agent name, turn index, timestamp, files written/deleted, c
 
 ---
 
+## Investigation
+
+Durable investigation memory: records hypotheses, rejected paths, and confirmed root causes so future agents never re-run the same dead-end investigation. All writes go to `.fuseraft/state/investigation-log.json`. The log survives compaction and is injected into every agent's context via the `investigation_log` context source.
+
+**Availability:** Only registered when `ChangeTracking` is present in the orchestration config — same gate as [Changes](#changes). Used by the `brownfield`, `audit`, and `graph` init templates.
+
+| Function | Parameters | Description |
+|----------|-----------|-------------|
+| `investigation_create_hypothesis` | `hypothesis` | Record a new hypothesis for investigation. Returns an assigned ID (`H-001`, `H-002`, ...). |
+| `investigation_reject_hypothesis` | `id`, `reason`, `evidence` (optional, one item per line) | Mark a hypothesis as rejected with the reason and disproving evidence. Also emits an `AttemptFailedEvent` to the event sink. |
+| `investigation_confirm_hypothesis` | `id`, `evidence` (optional, one item per line) | Mark a hypothesis as confirmed with supporting evidence. |
+| `investigation_record` | `summary`, `conclusion` | Log a completed investigation with its summary and conclusion. |
+| `investigation_identify_root_cause` | `cause` | Append a confirmed root cause to the log. No-ops if the same cause is already recorded. |
+
+**Typical usage:**
+
+```
+Investigate a lead:      investigation_create_hypothesis("Race condition in the cache invalidation path")
+Dead end:                investigation_reject_hypothesis("H-001", "Cache writes are already mutex-guarded", evidence="Checked FileSystemPlugin.cs:120-140")
+Confirmed:               investigation_confirm_hypothesis("H-002", evidence="Reproduced with concurrent write_file calls")
+Wrap up:                 investigation_record("Checked cache invalidation for races", "Not the cause — see H-003")
+Root cause found:        investigation_identify_root_cause("SessionReadCache does not invalidate on write_file with baseVersion=0")
+```
+
+---
+
 ## Session
 
 Gives REPL agents first-class access to their own session metadata, saved-session history, diagnostic log files, and context management. Always available in the REPL when tools are enabled; not applicable to `fuseraft run` orchestrations.
@@ -336,6 +358,19 @@ get_context_status()
 # Free up context when nearing the 80k ceiling
 compact_context(focus="finish fixing the auth middleware")
 ```
+
+---
+
+## Todo
+
+Self-directed todo list the model uses to plan and track its own multi-step work within a single REPL session. In-memory only — scoped to the session, not persisted to disk. Always available in the REPL when tools are enabled (i.e. unless `fuseraft repl --no-tools` is used); not applicable to `fuseraft run` orchestrations and not added via an agent's `Plugins` list.
+
+Unlike [Scratchpad](#scratchpad) (free-form key/value notes), Todo holds one ordered checklist that is always replaced wholesale on write — the model writes the full plan up front, then rewrites the full list after each step to flip statuses, rather than patching individual entries.
+
+| Function | Parameters | Description |
+|----------|-----------|-------------|
+| `todo_write` | `itemsJson` | Replace the current todo list. Pass a JSON array of items, e.g. `[{"content":"Read entry point","status":"completed"},{"content":"Map request flow","status":"in_progress"}]`. `status` is one of `pending`, `in_progress`, `completed`. Always pass the complete list, not just the changed item — this call replaces the whole list. |
+| `todo_read` | — | Read the current todo list. |
 
 ---
 
@@ -397,7 +432,7 @@ Exposes two lightweight sub-agent tools that keep the caller's context window cl
 
 Both tools share the same tool set, timeout (8 minutes), and cancellation behaviour — the parent agent's cancellation token is linked so interrupts propagate immediately. The sub-agent's current working directory is automatically injected into its system prompt so it never wastes a tool call discovering it.
 
-**Default tool set (read-only):** `read_file`, `list_files`, `grep_file`, `get_file_summary`, `get_file_info`, `search_files`, `search_content`, `search_symbol`, `shell_run`, `shell_get_env`, `shell_which`, `git_status`, `git_diff`, `git_log`, `git_show`, `git_branch_list`, `git_stash_list`. The sub-agent is instructed never to implement, edit, delete, commit, or push anything.
+**Default tool set (read-only):** `read_file`, `list_files`, `grep_file`, `get_file_summary`, `get_file_info`, `search_content`, `search_symbol`, `shell_run`, `shell_get_env`, `shell_which`, `git_status`, `git_diff`, `git_log`, `git_show`, `git_branch_list`, `git_stash_list`. The sub-agent is instructed never to implement, edit, delete, commit, or push anything.
 
 ```yaml
 Plugins:
@@ -418,7 +453,7 @@ Plugins:
 
 **Tool selection inside the sub-agent loop (enforced by system prompt):**
 
-> `search_symbol` → `search_files` → `search_content` → `get_file_summary` → `grep_file` → `read_file` → `shell_run`
+> `search_symbol` → `list_files` → `search_content` → `get_file_summary` → `grep_file` → `read_file` → `shell_run`
 
 The model is instructed to prefer earlier options when they suffice, reserving `read_file` for when a summary is insufficient and `shell_run` only for verifying a specific hypothesis (build, test) — not for browsing.
 
@@ -555,6 +590,44 @@ Shared writable context summary for the current orchestration session. Agents wr
 |----------|-----------|-------------|
 | `session_context_read` | — | Read the context summary written by the previous agent. Returns a truncation notice if the file exceeds 8,000 characters. Call this at the start of every turn before reading source files. |
 | `session_context_write` | `summary` | Write or replace the session context summary. Overwrites any previous summary. Call this before every handoff. Bullet-point format works well — include what was accomplished, which files changed, and any open issues the next agent should know about. |
+
+---
+
+## Artifact
+
+Fixed-target-path artifact writers for recon and planning-style agents (e.g. the `brownfield` template's Archaeologist, `greenfield`'s Preflight, `audit`'s Auditor and Prioritizer, `devops`'s OpsPlanner, `research`'s Researcher and Reviewer). Each registered name below is the same underlying class bound at construction to exactly one file path, one required format, and one uniquely-named write tool — there is no path parameter, so a call can never be redirected at the project's own source files the way `write_file`/`patch_file` can. Pair with `Capabilities: { FileSystem: [read] }` so the agent can examine the sandbox but can only persist findings through its one write tool.
+
+Every instance validates `content` against its required format before writing (`json` parses with `System.Text.Json`, `yaml` with YamlDotNet, `md` has no required structure), and creates parent directories automatically.
+
+| Plugin name | Tool | Format | Default path |
+|-------------|------|--------|--------------|
+| `Conventions` | `write_file_conventions` | json | `~/.fuseraft/sessions/{project_slug}/{session_id}/conventions.json` |
+| `DiscoveryBrief` | `write_file_discovery_brief` | json | `~/.fuseraft/sessions/{project_slug}/{session_id}/brief.brownfield.json` |
+| `Preflight` | `write_file_preflight` | json | `~/.fuseraft/sessions/{project_slug}/{session_id}/preflight.json` |
+| `Brief` | `write_file_brief` | json | `~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json` |
+| `BriefReview` | `write_file_brief_review` | json | `~/.fuseraft/sessions/{project_slug}/{session_id}/brief-review.json` |
+| `AuditFindings` | `write_file_audit_findings` | json | `.fuseraft/artifacts/audit-findings.json` (sandbox-relative) |
+| `RemediationPlan` | `write_file_remediation_plan` | json | `.fuseraft/artifacts/remediation-plan.json` (sandbox-relative) |
+| `OpsPlan` | `write_file_ops_plan` | yaml | `.fuseraft/artifacts/ops-plan.yaml` (sandbox-relative) |
+| `ResearchFindings` | `write_file_research_findings` | md | `.fuseraft/docs/research-findings.md` (sandbox-relative) |
+| `ResearchReview` | `write_file_research_review` | json | `.fuseraft/docs/research-review.json` (sandbox-relative) |
+
+Each write tool takes `content` (full file content) and `format` (must be exactly `md`, `json`, or `yaml` — and must match the instance's required format above).
+
+```yaml
+Agents:
+  - Name: Auditor
+    Plugins:
+      - FileSystem
+      - Search
+      - Shell
+      - Investigation
+      - AuditFindings
+    Capabilities:
+      FileSystem: [read]
+```
+
+**Note:** the `Conventions`/`DiscoveryBrief`/`Preflight`/`Brief`/`BriefReview` paths are session-scoped — one file per session, under the global `~/.fuseraft/sessions/` tree. The `AuditFindings`/`RemediationPlan`/`OpsPlan`/`ResearchFindings`/`ResearchReview` paths are fixed relative to the sandbox root (or the current directory when no `FileSystemSandboxPath` is set) — shared across sessions in the same project so a downstream agent's `read_file` call always finds them regardless of which session wrote them.
 
 ---
 

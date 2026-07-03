@@ -408,7 +408,7 @@ public sealed class AgentFactory(
                     // the same path — the earlier write is never observable and is pure noise.
                     messages = DropSupersededWritePairs(messages);
 
-                    // Drop observational calls (read_file, grep_file, list_*, stat_file, etc.)
+                    // Drop observational calls (read_file, grep_file, list_*, get_file_info, etc.)
                     // that are superseded by a later identical call — only the freshest result matters.
                     messages = DropSupersededObservationalPairs(messages);
 
@@ -941,7 +941,7 @@ public sealed class AgentFactory(
     private static readonly HashSet<string> ObservationalTools = new(StringComparer.OrdinalIgnoreCase)
     {
         "read_file", "grep_file", "list_files", "list_directory",
-        "get_file_summary", "stat_file", "session_context_read",
+        "get_file_summary", "get_file_info", "session_context_read",
         "changes_read_latest", "git_status", "git_diff",
     };
 

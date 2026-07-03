@@ -616,13 +616,13 @@ Plugins are `AIFunction`-providing objects registered in `PluginRegistry` and re
 
 | Plugin | Tools |
 |---|---|
-| `FileSystem` | `read_file`, `grep_file`, `stat_file`, `get_file_summary`, `get_file_info`, `save_file_summary`, `list_files`, `list_directory`, `path_exists`, `write_file`, `patch_file`, `create_directory`, `copy_file`, `move_file`, `set_permissions`, `delete_file`, `delete_directory` |
+| `FileSystem` | `read_file`, `grep_file`, `get_file_summary`, `get_file_info`, `save_file_summary`, `list_files`, `list_directory`, `write_file`, `patch_file`, `create_directory`, `copy_file`, `move_file`, `set_permissions`, `delete_file`, `delete_directory` |
 | `Shell` | `shell_run`, `shell_run_script`, `shell_run_background`, `shell_set_env`, `shell_get_env`, `shell_get_job_status`, `shell_get_job_output`, `shell_kill_job`, `shell_which`, `shell_get_working_directory` |
 | `Git` | `git_status`, `git_diff`, `git_log`, `git_show`, `git_branch_list`, `git_stash_list`, `git_add`, `git_commit`, `git_checkout`, `git_create_branch`, `git_init`, `git_push`, `git_pull`, `git_stash`, `git_stash_pop`, `git_reset` |
 | `Http` | `http_get`, `http_head`, `http_post`, `http_put`, `http_patch`, `http_delete` — uses named `ApiProfiles` |
 | `Json` | `json_format`, `json_minify`, `json_get`, `json_keys`, `json_search`, `json_to_text`, `json_validate`, `json_merge` |
 | `Document` | `document_extract_text`, `document_get_info`, `document_list_sheets`, `document_get_sheet` |
-| `Search` | `search_files`, `search_content`, `search_symbol` |
+| `Search` | `search_content`, `search_symbol`, `search_callers` — finding files by name is `list_files` (FileSystem) |
 | `CodeExecution` | `code_execution_check_docker`, `code_execution_sandbox_run`, `code_execution_repl_start`, `code_execution_repl_exec`, `code_execution_repl_reset`, `code_execution_repl_stop` — Docker-sandboxed execution |
 | `Changes` | `changes_read`, `changes_read_latest` — read the JSONL change log for observability by downstream agents |
 | `Probe` | `probe_code`, `probe_assert_output`, `probe_compare_outputs`, `probe_run_hypothesis` — code execution and output verification |
@@ -639,7 +639,7 @@ Plugins are `AIFunction`-providing objects registered in `PluginRegistry` and re
 
 | Plugin | Capabilities |
 |---|---|
-| `FileSystem` | `read` (read_file, grep_file, get_file_summary, get_file_info, list_files) · `write` (write_file, patch_file, save_file_summary, create_directory, copy_file, move_file, set_permissions) · `delete` (delete_file, delete_directory). `stat_file`, `path_exists`, and `list_directory` are not in the capability map and always pass through unfiltered regardless of declared capabilities. |
+| `FileSystem` | `read` (read_file, grep_file, get_file_summary, get_file_info, list_files) · `write` (write_file, patch_file, save_file_summary, create_directory, copy_file, move_file, set_permissions) · `delete` (delete_file, delete_directory). `list_directory` is not in the capability map and always passes through unfiltered regardless of declared capabilities. |
 | `Shell` | `read` (shell_get_env, shell_get_job_status, shell_get_job_output, shell_which, shell_get_working_directory) · `run` (shell_run, shell_run_script, shell_run_background, shell_set_env, shell_kill_job) |
 | `Git` | `read` (git_status, git_diff, git_log, git_show, git_branch_list, git_stash_list) · `write` (git_add, git_commit, git_checkout, git_create_branch, git_init, git_push, git_pull, git_stash, git_stash_pop, git_reset) |
 | `Http` | `get` (http_get, http_head) · `post` · `put` · `patch` · `delete` — `http_head` maps to the `get` capability, not a separate `head` capability |
@@ -709,7 +709,7 @@ Example — a Reviewer that inspects files and git history but cannot write, del
 - `ActiveSessionId`
 - `Entries[]` — `{ IntentId, Timestamp, Agent, TurnIndex, SessionId, Operation: { FunctionName, TargetPath, ArgsSummary }, Status, ErrorMessage, CompletedAt }`
 
-**`FileVersionStore`** (`.fuseraft/state/file_versions.json`): A lightweight per-file version counter, also initialized by `OrchestratorBuilder`. Every successful `write_file` call increments the counter. Agents call `stat_file` to probe the current version and pass `baseVersion` to `write_file` to detect concurrent-write conflicts. If the store file is corrupt or unreadable, the failure is emitted via `ILogger<FileVersionStore>` at Warning level and the counter resets to zero for the session — agents will see all files at version 0 and conflict detection will not fire until files are written again.
+**`FileVersionStore`** (`.fuseraft/state/file_versions.json`): A lightweight per-file version counter, also initialized by `OrchestratorBuilder`. Every successful `write_file` call increments the counter. Agents call `get_file_info` to probe the current version and pass `baseVersion` to `write_file` to detect concurrent-write conflicts. If the store file is corrupt or unreadable, the failure is emitted via `ILogger<FileVersionStore>` at Warning level and the counter resets to zero for the session — agents will see all files at version 0 and conflict detection will not fire until files are written again.
 
 **Downstream use:** The `Changes` plugin exposes `changes_read` and `changes_read_latest` so agents (typically Tester or Reviewer) can read what previous agents actually did rather than inferring it from chat history. `RequireShellPass` and `RequireWriteFile` validators also read this log to verify deterministic pre-conditions before routes fire.
 

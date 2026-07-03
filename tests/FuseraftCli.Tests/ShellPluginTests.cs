@@ -4,6 +4,33 @@ namespace FuseraftCli.Tests;
 
 public sealed class ShellPluginTests
 {
+    // RunAsync — quiet parameter (folded in from the removed shell_run_quiet tool)
+
+    [Fact]
+    public async Task RunAsync_QuietOnSuccess_ReturnsOk()
+    {
+        using var plugin = new ShellPlugin();
+        var result = await plugin.RunAsync("echo hello", quiet: true);
+        Assert.Equal("OK", result);
+    }
+
+    [Fact]
+    public async Task RunAsync_QuietOnFailure_ReturnsFullOutputAndExitCode()
+    {
+        using var plugin = new ShellPlugin();
+        var result = await plugin.RunAsync("exit 3", quiet: true);
+        Assert.NotEqual("OK", result);
+        Assert.Contains("[EXIT 3]", result);
+    }
+
+    [Fact]
+    public async Task RunAsync_NotQuiet_ReturnsFullOutputOnSuccess()
+    {
+        using var plugin = new ShellPlugin();
+        var result = await plugin.RunAsync("echo hello-not-quiet");
+        Assert.Contains("hello-not-quiet", result);
+    }
+
     // GetSessionTempDir
 
     [Fact]

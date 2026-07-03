@@ -40,6 +40,7 @@ public sealed class ReplSettingsPluginsTests
     [InlineData("Chatroom")]
     [InlineData("SessionContext")]
     [InlineData("Scratchpad")]
+    [InlineData("Http")]
     public void EnabledPlugins_SingleKnownPlugin_ContainsThatPlugin(string name)
     {
         Assert.Contains(name, With(name).EnabledPlugins);

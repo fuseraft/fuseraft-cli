@@ -30,7 +30,7 @@ public static partial class InitTemplates
                  - Use grep_file / sub_agent_explore for pattern matching and structural analysis.
                  - Use shell_run for static analysis tools (e.g. semgrep, bandit, eslint, clippy).
                  - Use read_file (with startLine/maxLines) to read relevant code sections in full.
-              3. For each issue found, call record_investigation(summary, conclusion) so your
+              3. For each issue found, call investigation_record(summary, conclusion) so your
                  findings survive compaction and are visible to subsequent agents.
               4. Call write_file_audit_findings(content: ..., format: "json"). content must be a
                  JSON object with a single "findings" array. Each element has these fields:
@@ -102,13 +102,13 @@ public static partial class InitTemplates
               2. Read the Execution State and Investigation Log in your context — do not repeat
                  any approach listed under "Rejected Paths".
               3. For each action item, in priority order:
-                 a. Call create_hypothesis(description) naming the specific fix you are about
-                    to apply (e.g. "Escape output in render() to prevent XSS").
+                 a. Call investigation_create_hypothesis(description) naming the specific fix
+                    you are about to apply (e.g. "Escape output in render() to prevent XSS").
                  b. Apply the fix using patch_file (for existing files) or write_file (for new).
                  c. Run a targeted verification using shell_run (see verify_hint from the plan).
-                 d. If it passes: call confirm_hypothesis(id, evidence).
-                    If it fails: call reject_hypothesis(id, reason, evidence), then diagnose
-                    the failure before attempting a different approach.
+                 d. If it passes: call investigation_confirm_hypothesis(id, evidence).
+                    If it fails: call investigation_reject_hypothesis(id, reason, evidence), then
+                    diagnose the failure before attempting a different approach.
                  e. Do NOT move to the next action item until the current one is confirmed or
                     explicitly deferred with a documented reason.
               4. You MUST NOT call handoff with any open hypotheses.

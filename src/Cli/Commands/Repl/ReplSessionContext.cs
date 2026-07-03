@@ -39,9 +39,27 @@ internal sealed class ReplSessionContext
     public readonly SubAgentPlugin?     SubAgent;
     public readonly bool                Verbose;
     public SkillsPlugin?                SkillsPlugin { get; set; }
+    public TodoPlugin?                  Todo         { get; set; }
 
     // Mutable provider state (may be replaced by /provider setup)
-    public string      ModelId     { get; set; }
+    private string _modelId = string.Empty;
+    public string ModelId
+    {
+        get => _modelId;
+        set
+        {
+            _modelId = value;
+            ContextTokenBudget = ModelContextWindow.GetBudget(value);
+        }
+    }
+
+    // Working token budget for history trimming (TrimHistory) and the /context, /compact,
+    // and context-warning displays — derived from ModelId so a large-context model isn't
+    // held to the same ceiling as a small-context local model. Recomputed automatically
+    // whenever ModelId is (re)assigned, including on /provider setup, /model switch, and
+    // session resume.
+    public int ContextTokenBudget { get; private set; } = ModelContextWindow.DefaultBudget;
+
     public ModelConfig ModelConfig { get; set; }
     public UserConfig? UserCfg     { get; set; }
     public IChatClient Client      { get; set; }
@@ -102,6 +120,11 @@ internal sealed class ReplSessionContext
     public int  TurnIndex              = 0;
     public int  LastExtractedTurnIndex = -1;
     public bool PendingSave;
+
+    // Whether the current API key was actually persisted to an OS keychain (true unless the
+    // wizard ran with no keychain available, in which case the key is memory-only for this
+    // process and ReplTurn's deferred-save message must not claim otherwise).
+    public bool KeyStored = true;
 
     // One-time context-warning flag; reset by /clear and /compact so the hint
     // fires once again if the user compacts and then fills context again.
