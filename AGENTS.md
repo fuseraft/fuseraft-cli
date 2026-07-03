@@ -62,65 +62,6 @@ A turn ends only after the agent produces a final text response. This definition
 
 ---
 
-## Orchestrator selection
-
-`OrchestratorBuilder` picks the orchestrator at startup:
-
-1. `GraphOrchestrator` — when `Selection.Type == "graph"`; drives a declarative directed graph with named nodes, keyword-gated edges, optional parallel fan-out/fan-in via `Parallel: true` nodes, and hierarchical sub-graphs via `SubGraphId` nodes
-2. `WorkflowOrchestrator` — when `Selection.Type == "workflow"`; reuses the same `Selection.Graph` config as `graph`, but compiles the whole graph (cycles included) into a single persistent MAF workflow instead of restarting a phase per back-edge. v1: no `Parallel`/`SubGraphId`/`RequireHumanApproval`/`RecoveryAgent`/unconditional edges — config validation rejects those, pointing at `graph` instead
-3. `MagenticOrchestrator` — when `Selection.Type == "magentic"`
-4. `AdversarialOrchestrator` — when `Selection.Type == "adversarial"`; runs fixed generate→critique→revise stages with a context firewall between generator and critic
-5. `MapReduceOrchestrator` — when `Selection.Type == "mapreduce"`; runs a three-phase split→parallel-map→reduce pipeline
-6. `ScatterGatherOrchestrator` — when `Selection.Type == "scattergather"`; broadcasts the same task to all participants in parallel then synthesises their independent outputs
-7. `AgentOrchestrator` — everything else (`keyword`, `statemachine`, `llm`, `sequential`, `roundrobin`, `structured`); driven by an `IAgentSelector` + `ITerminationCondition`
-
-`SagaOrchestrator` wraps whichever orchestrator is selected when `Saga.Enabled == true`.
-
-`StateMachineSelectionStrategy` runs inside `AgentOrchestrator` for the `statemachine` type.
-
----
-
-## Selection strategies
-
-**`SequentialAgentSelector`** (`sequential` type):
-- Iterates through agents in declaration order, one pass. Returns `null` after the last agent, ending the loop.
-- Distinct from round-robin: sequential is one-pass; round-robin cycles indefinitely.
-
-**`RoundRobinAgentSelector`** (`roundrobin` type):
-- Cycles through agents in declaration order, wrapping after the last. Runs until a `Termination` strategy fires.
-
-**`KeywordSelectionStrategy`** (`keyword` type):
-- Keyword must appear **alone on its own line** — not embedded in a sentence
-- Routes can be restricted to specific source agents via `SourceAgents`
-- Validators run before the route fires; failure injects a correction and re-invokes the source agent
-- `RecoveryAgent` on a route activates an alternate agent when the validator fails repeatedly
-
-**`StateMachineSelectionStrategy`** (`statemachine` type):
-- Tracks an explicit current state; evaluates that state's outgoing transitions after each turn
-- Transitions require signal presence AND all `ContractEngine` predicates to pass
-- `RecoveryAgent` on a `TransitionConfig` works identically to the keyword strategy
-- Uses the same per-line signal matching as the keyword strategy
-
-**`GraphOrchestrator`** (`graph` type — not a selection strategy):
-- Agents are bound to named nodes (`GraphNodeConfig`); directed edges (`GraphEdgeConfig`) carry optional keyword conditions and routing validators
-- Forward edges are wired into a MAF `WorkflowBuilder` phase; back-edges restart the outer phase loop from the target node, enabling cycles
-- Nodes with `Parallel: true` participate in fan-out groups: a source node fans out to all parallel nodes that share the triggering keyword, runs them concurrently with isolated history snapshots, then merges outputs before advancing
-- Nodes with `SubGraphId` run a nested `GraphOrchestrator` (declared in `GraphConfig.SubGraphs`) as a black-box step; the sub-graph's terminal output is injected into the parent's shared history for keyword detection and edge routing
-- Terminal nodes end the session after the agent (or sub-graph) executes once; the node may declare its own `Validators` list
-
-**`WorkflowOrchestrator`** (`workflow` type — not a selection strategy):
-- Same `GraphConfig`/`GraphNodeConfig`/`GraphEdgeConfig` shape as `graph`; same `BuildNodeRouteTables`-style construction, but with no forward/back-edge classification — every edge, cyclic or not, becomes a plain `AgentRouteTable.Routes` entry, and every routing decision is a uniform `SendMessageAsync` to the matched target
-- The whole graph (cycles included) is wired into one `WorkflowBuilder` graph built once per session via plain `AddEdge` calls — no BFS layering, no per-cycle phase rebuild
-- Does not implement `Parallel`, `SubGraphId`, `RequireHumanApproval`, `RecoveryAgent`, or unconditional edges — config validation in `OrchestratorBuilder` rejects configs that use them under `Selection.Type: workflow`
-- Independently implemented from `GraphOrchestrator` (not extracted/shared) — same convention as `StrategyFactory`'s and `GraphOrchestrator`'s separate validator-resolution logic. `KeywordDetector`, `CorrectionEngine`, and `AgentRouteTable` (already `internal`-shared types in `Orchestration/Workflow/`) are reused as-is
-
-**Failure classification** (keyword and statemachine strategies):
-- `FailureType` enum: `MissingEvidence`, `InvalidTransition`, `ConflictingEvidence`, `NoProgress`
-- `FailureAction` enum: `Reinstruct`, `ActivateRecovery`, `EscalateToHuman`, `Abort`
-- Policy is configured per `FailureType` in `FailureHandlingConfig`
-
----
-
 ## Execution order invariant
 
 For every agent turn, control layers are evaluated in the following fixed order:
@@ -137,20 +78,7 @@ For every agent turn, control layers are evaluated in the following fixed order:
 
 ## Routing validators
 
-Validators read disk artifacts or conversation history — they do not call the LLM.
-
-| Validator | Config key | Blocks until |
-|-----------|------------|--------------|
-| `RequireBriefValidator` | `RequireBrief` | `brief.json` exists with non-empty `goal`, `files_to_change`, `acceptance_criteria`, `implementation` |
-| `HandoffToTesterValidator` | `RequireWriteFile` | A `write_file` call appears in the current turn (or a `ShellFallbackPattern` match) |
-| `RequireAllFilesWrittenValidator` | `RequireAllFilesWritten` | Every file in `brief.json`'s `files_to_change` has been written (this turn or recorded in `changes.json`) |
-| `RequireShellPassValidator` | `RequireShellPass` | A shell command exited 0 this turn (optionally matching `RequiredCommandPattern`) |
-| `HandoffToReviewerValidator` | `TestReportValid` | `test-report.json` exists, all results pass, assertion patterns match, commands cross-check with `changes.json` |
-| `RequireReviewJudgementValidator` | `RequireReviewJudgement` | Last reviewer message contains a `{"review": [...]}` JSON block with per-criterion verdicts |
-
-A validator failure injects a `ChatRole.User` correction message and re-invokes the source agent. After the configured `Threshold` consecutive failures, `ValidatorStuckException` is thrown.
-
-### Validator invariants
+Validators read disk artifacts or conversation history — they do not call the LLM. Full list and config keys: `docs/validators.md`.
 
 All validators must be:
 
@@ -159,6 +87,8 @@ All validators must be:
 - **Idempotent** — safe to call multiple times in the same turn
 
 Validators must not call LLMs or external services. Violations collapse the determinism guarantee that makes the entire correction system work.
+
+A validator failure injects a `ChatRole.User` correction message and re-invokes the source agent. After the configured `Threshold` consecutive failures, `ValidatorStuckException` is thrown.
 
 ---
 
@@ -269,7 +199,8 @@ When adding a new `FailureAction` or `FailureType` value, update:
 | How does map-reduce work? | `src/Orchestration/MapReduceOrchestrator.cs`, `src/Core/Models/Orchestration/MapReduceConfig.cs` |
 | How does scatter-gather work? | `src/Orchestration/ScatterGatherOrchestrator.cs`, `src/Core/Models/Orchestration/ScatterGatherConfig.cs` |
 | How does adversarial orchestration work? | `src/Orchestration/AdversarialOrchestrator.cs` |
-| How do validators work? | `src/Orchestration/Validation/` |
+| Which orchestrator/selection strategy to use, and how each one behaves in depth | `docs/strategies.md` |
+| How do validators work? | `src/Orchestration/Validation/`, full list and config keys in `docs/validators.md` |
 | How are contracts evaluated? | `src/Orchestration/Contracts/ContractEngine.cs` |
 | What tools do agents have? | `src/Infrastructure/Plugins/` |
 | How is the config schema defined? | `src/Core/Models/OrchestrationConfig.cs`, `StrategyConfig.cs`, `StateMachineConfig.cs`, `GraphConfig.cs`, `MapReduceConfig.cs`, `ScatterGatherConfig.cs` |
@@ -280,3 +211,4 @@ When adding a new `FailureAction` or `FailureType` value, update:
 | How are tool results trimmed / tombstoned? | `src/Orchestration/ToolResultWindowTrimmer.cs` |
 | Full architecture decisions | `docs/design.md` |
 | Hardening configs against hallucination | `docs/harness-engineering.md` |
+| Why does `fuseraft repl` behave differently from an orchestrated agent? | `fuseraft repl` doesn't run through `OrchestratorBuilder` — no validators, change tracking, or routing corrections. See the scope note at the top of `docs/harness-engineering.md`. |
