@@ -63,9 +63,7 @@ public sealed class ReplSessionPlugin(
     [Description("Get metadata for the current REPL session: ID, model, start time, working dir, snapshot path, and log file locations.")]
     public string Current()
     {
-        var snapshotPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".fuseraft", "repl-sessions", $"repl-{sessionId}.json");
+        var snapshotPath = Path.Combine(FuseraftPaths.GlobalReplSessions, $"repl-{sessionId}.json");
 
         var sb = new StringBuilder();
         sb.AppendLine($"Session ID:   {sessionId}");

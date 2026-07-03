@@ -88,9 +88,7 @@ internal sealed class SystemPromptBuilder
     {
         if (sessionId is not null)
         {
-            var snapshotPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".fuseraft", "repl-sessions", $"repl-{sessionId}.json");
+            var snapshotPath = Path.Combine(FuseraftPaths.GlobalReplSessions, $"repl-{sessionId}.json");
             var sessionStarted = startedAt.HasValue
                 ? startedAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz")
                 : "unknown";

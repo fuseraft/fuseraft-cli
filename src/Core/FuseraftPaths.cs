@@ -10,7 +10,31 @@ public static class FuseraftPaths
     // Global (~/.fuseraft/)
     private static string Home => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-    public static string GlobalRoot       => Path.Combine(Home, ".fuseraft");
+    /// <summary>
+    /// Environment variable that, when set, relocates the global <c>~/.fuseraft</c> root
+    /// (config, sessions, keychain fallback, logs, scratchpad, skills, memory, etc.) to an
+    /// arbitrary directory — e.g. a network share or mapped drive. Useful when the OS home
+    /// directory is not durable across sessions (roaming/ephemeral profiles, RDS/VDI pools
+    /// that assign a random machine per connection). Project-local <c>.fuseraft/</c> paths
+    /// (relative to the current working directory) are unaffected.
+    /// </summary>
+    public const string HomeOverrideEnvVar = "FUSERAFT_HOME";
+
+    public static string GlobalRoot
+    {
+        get
+        {
+            var overridePath = Environment.GetEnvironmentVariable(HomeOverrideEnvVar);
+            if (string.IsNullOrWhiteSpace(overridePath))
+                return Path.Combine(Home, ".fuseraft");
+
+            overridePath = overridePath.Trim();
+            if (overridePath.StartsWith("~/") || overridePath == "~")
+                overridePath = overridePath.Length > 2 ? Path.Combine(Home, overridePath[2..]) : Home;
+            return Path.GetFullPath(overridePath);
+        }
+    }
+
     public static string GlobalConfig     => Path.Combine(GlobalRoot, "config");
     public static string GlobalKeyFile    => Path.Combine(GlobalRoot, ".key");
     public static string GlobalSessions     => Path.Combine(GlobalRoot, "sessions");
@@ -43,6 +67,8 @@ public static class FuseraftPaths
     /// </summary>
     public static string ExpandPath(string path)
     {
+        if (path == "~/.fuseraft" || path.StartsWith("~/.fuseraft/", StringComparison.Ordinal))
+            return Path.GetFullPath(GlobalRoot + path["~/.fuseraft".Length..]);
         if (path.StartsWith("~/") || path == "~")
         {
             var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -204,6 +230,7 @@ public static class FuseraftPaths
         return text
             .Replace("{session_id}",   sessionId,   StringComparison.Ordinal)
             .Replace("{project_slug}", projectSlug, StringComparison.Ordinal)
+            .Replace("~/.fuseraft/",   GlobalRoot + "/", StringComparison.Ordinal)
             .Replace("~/",             home + "/",  StringComparison.Ordinal);
     }
 

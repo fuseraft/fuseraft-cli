@@ -1,3 +1,4 @@
+using fuseraft.Core;
 using fuseraft.Infrastructure.Plugins;
 
 namespace fuseraft.Cli.Commands.Repl;
@@ -21,7 +22,7 @@ internal static class ReplSkillsLoader
         [
             Path.Combine(cwd,  ".fuseraft", "skills"),
             Path.Combine(cwd,  ".agents",   "skills"),
-            Path.Combine(home, ".fuseraft", "skills"),
+            FuseraftPaths.GlobalSkills,
             Path.Combine(home, ".agents",   "skills"),
             Path.Combine(AppContext.BaseDirectory, "skills"),
         ];

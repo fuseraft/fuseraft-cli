@@ -2242,7 +2242,7 @@ public static class OrchestratorBuilder
         {
             Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "skills"),
             Path.Combine(Directory.GetCurrentDirectory(), ".agents",   "skills"),
-            Path.Combine(home, ".fuseraft", "skills"),
+            FuseraftPaths.GlobalSkills,
             Path.Combine(home, ".agents",   "skills"),
             Path.Combine(AppContext.BaseDirectory, "skills"),
         }.Where(Directory.Exists).ToArray();
