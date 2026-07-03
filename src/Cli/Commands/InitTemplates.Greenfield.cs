@@ -34,7 +34,7 @@ public static partial class InitTemplates
               its top-level contents. Note everything present.
 
               STEP 2 — DETECT PROJECT TYPE
-              Call path_exists for each indicator file below:
+              Call get_file_info for each indicator file below:
                 Python: pyproject.toml, setup.py, requirements.txt, setup.cfg
                 Node:   package.json
                 Rust:   Cargo.toml
@@ -288,7 +288,7 @@ public static partial class InitTemplates
                 a. For NEW files (not in SignificantChanges): use write_file.
                 b. For EXISTING files (already in SignificantChanges or on disk):
                    always use patch_file. Never use write_file on an existing file.
-                c. After writing or patching a file, verify it landed: call stat_file
+                c. After writing or patching a file, verify it landed: call get_file_info
                    and confirm the file is present and non-zero in size.
                    If write_file fails because the file already exists, switch to
                    patch_file immediately — do not retry write_file.
