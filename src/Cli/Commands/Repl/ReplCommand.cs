@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using fuseraft.Cli.Commands;
 using fuseraft.Cli.Display;
 using fuseraft.Core;
 using fuseraft.Core.Models;
@@ -28,7 +29,7 @@ public sealed class ReplSettings : CommandSettings
     public bool NoBanner { get; set; }
 
     [CommandOption("--no-tools")]
-    [Description("Disable all built-in tools (FileSystem, Shell, Search, Git, Http).")]
+    [Description("Disable all built-in tools (FileSystem, Shell, Search, Git, and any enabled optional plugins).")]
     public bool NoTools { get; set; }
 
     [CommandOption("--verbose")]
@@ -40,7 +41,7 @@ public sealed class ReplSettings : CommandSettings
     public string? Resume { get; set; }
 
     [CommandOption("--plugins")]
-    [Description("Comma-separated list of optional plugins to enable: Changes, Chatroom, SessionContext, Scratchpad.")]
+    [Description("Comma-separated list of optional plugins to enable: Http, Changes, Chatroom, SessionContext, Scratchpad.")]
     public string? Plugins { get; set; }
 
     [CommandOption("--vscode")]
@@ -95,10 +96,10 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         }
         else if (!string.IsNullOrEmpty(legacyKey))
         {
-            await keyStore.StoreAsync(legacyKey);
             userCfg!.ApiKey = legacyKey;
+            if (await KeyStorePersistence.TryStoreAsync(keyStore, legacyKey))
+                AnsiConsole.MarkupLine($"[dim]API key migrated to {Markup.Escape(keyStore.StoreName)}.[/]");
             UserConfigStore.Save(userCfg);
-            AnsiConsole.MarkupLine($"[dim]API key migrated to {Markup.Escape(keyStore.StoreName)}.[/]");
         }
         else if (userCfg is not null)
         {
@@ -108,6 +109,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         var modelId = ResolveModelId(settings, userCfg);
 
         bool pendingSave = false;
+        bool keyStored   = true;
         if (userCfg == null || !userCfg.IsConfigured)
         {
             if (jsonMode)
@@ -121,15 +123,15 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             bool selectedFromList;
             (userCfg, wizardKey, selectedFromList) = await ReplFactory.RunSetupWizardAsync(modelId, userCfg);
             if (userCfg is null || wizardKey is null) return 1;
-            if (!string.IsNullOrEmpty(wizardKey))
-                await keyStore.StoreAsync(wizardKey);
+            keyStored = string.IsNullOrEmpty(wizardKey) || await KeyStorePersistence.TryStoreAsync(keyStore, wizardKey);
             userCfg.ApiKey = wizardKey;
             modelId        = userCfg.ModelId;
             if (selectedFromList)
             {
                 UserConfigStore.Save(userCfg);
                 AnsiConsole.MarkupLine($"[dim]Settings saved to[/] [bold]{Markup.Escape(UserConfigStore.ConfigPath)}[/]");
-                AnsiConsole.MarkupLine($"[dim]API key stored in[/] [bold]{Markup.Escape(keyStore.StoreName)}[/]");
+                if (keyStored)
+                    AnsiConsole.MarkupLine($"[dim]API key stored in[/] [bold]{Markup.Escape(keyStore.StoreName)}[/]");
             }
             else
             {
@@ -158,13 +160,15 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         SkillsPlugin?   skillsPlugin   = null;
         string?         skillsCatalog  = null;
         List<AIFunction>? explorerTools = null;
+        TodoPlugin?     todoPlugin     = null;
         if (!settings.NoTools)
         {
             toolsByCategory["FileSystem"] = PluginRegistry.GetFunctionsFromObject(new FileSystemPlugin()).ToList();
             toolsByCategory["Shell"]      = PluginRegistry.GetFunctionsFromObject(shellPlugin!).ToList();
             toolsByCategory["Search"]     = PluginRegistry.GetFunctionsFromObject(new SearchPlugin()).ToList();
             toolsByCategory["Git"]        = PluginRegistry.GetFunctionsFromObject(new GitPlugin()).ToList();
-            toolsByCategory["Http"]       = PluginRegistry.GetFunctionsFromObject(new HttpPlugin()).ToList();
+            todoPlugin                    = new TodoPlugin();
+            toolsByCategory["Todo"]       = PluginRegistry.GetFunctionsFromObject(todoPlugin).ToList();
 
             var fsReadOps    = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 { "read_file", "list_files", "grep_file", "get_file_summary", "get_file_info" };
@@ -223,6 +227,9 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
             var enabled = settings.EnabledPlugins;
             var slug    = FuseraftPaths.ProjectSlug(cwd);
+
+            if (enabled.Contains("Http"))
+                toolsByCategory["Http"] = PluginRegistry.GetFunctionsFromObject(new HttpPlugin()).ToList();
 
             if (enabled.Contains("Changes"))
             {
@@ -334,6 +341,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         {
             JsonMode     = jsonMode,
             SkillsPlugin = skillsPlugin,
+            Todo         = todoPlugin,
+            KeyStored    = keyStored,
         };
         if (skillsPlugin is not null)
             ctx.LineReader.SetSkillSlugs([.. skillsPlugin.Slugs]);
@@ -352,7 +361,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                    $"The compact summary is now the active context. Continue the current task from here.";
         });
         replSessionPlugin?.SetStatusDelegate(
-            () => (ctx.EstimateTokens(), ReplTurn.ContextTokenBudget, ctx.TurnIndex));
+            () => (ctx.EstimateTokens(), ctx.ContextTokenBudget, ctx.TurnIndex));
 
         if (snapshot is not null)
         {

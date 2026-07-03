@@ -98,7 +98,7 @@ For every filesystem function call, the three lists are checked in this order:
 | Category | Functions | Notes |
 |----------|-----------|-------|
 | Content-read (Read glob applies) | `read_file`, `grep_file`, `get_file_summary` | Returns file content |
-| Metadata (Deny glob only, exempt from Read) | `list_files`, `list_directory`, `stat_file`, `path_exists`, `get_file_info` | Returns names / timestamps only, not content — use `Deny` to restrict these |
+| Metadata (Deny glob only, exempt from Read) | `list_files`, `list_directory`, `get_file_info` | Returns names / timestamps only, not content — use `Deny` to restrict these |
 | Write ops (Write glob + envelope apply) | `write_file`, `patch_file`, `delete_file`, `create_directory`, `delete_directory`, `set_permissions` | |
 | Mixed read+write (Copy/Move) | `copy_file`, `move_file` | Read glob checked on `source`; Write glob and envelope checked on `destination` |
 
@@ -365,7 +365,8 @@ This means even if a provider error response or debug trace contains an API key,
 | Linux | GNOME Keyring | `secret-tool` CLI (libsecret); service=`fuseraft-cli`, account=`default` |
 | macOS | Keychain | `security` CLI; service=`fuseraft-cli`, account=`default` |
 | Windows | Credential Manager | Win32 `CredRead`/`CredWrite` via P/Invoke; target=`fuseraft-cli/default`. Works in Git Bash and any other shell. |
-| Fallback | `~/.fuseraft/.key` | Plain-text file with Unix mode 0600. Used only when no keychain is available. A warning is shown on first write. |
+
+**No plaintext fallback.** fuseraft never writes API keys to disk in plaintext, on any platform, under any circumstances. If no OS keychain is reachable (e.g. Linux without a running secret service), key storage fails with a clear message and the key is kept in memory for the current process only — you'll need to re-enter it next session, or set a provider environment variable (e.g. `ANTHROPIC_API_KEY`) so you don't have to. On startup, fuseraft also deletes (and, where possible, migrates into the keychain) any leftover `~/.fuseraft/.key` file written by fuseraft versions older than this policy.
 
 `~/.fuseraft/config` stores only the model ID, provider URL, and provider type — no secrets. If you open the file you will see:
 
@@ -377,11 +378,13 @@ This means even if a provider error response or debug trace contains an API key,
 }
 ```
 
-**Migration from older configs.** Configs written before keychain support was added may contain a plain-text `apiKey` field. On the first run after upgrading, fuseraft detects this field, moves the value into the keychain, and rewrites the config without it. No manual action is needed.
+**Migration from older configs.** Configs written before keychain support was added may contain a plain-text `apiKey` field, and versions predating the no-plaintext policy may have left a `~/.fuseraft/.key` file on disk. On the first run after upgrading, fuseraft detects both, attempts to move the value into the OS keychain, and removes the plaintext copies either way — even if no keychain is available to migrate into. No manual action is needed.
 
 **Using an environment variable instead.** Setting a provider env var (e.g. `ANTHROPIC_API_KEY`) always works as a fallback. The env var is used when no `~/.fuseraft/config` exists or when the keychain has no entry for `fuseraft-cli`.
 
 **VS Code extension.** When the fuseraft VS Code extension invokes the CLI it always passes `--vscode`. In this mode the CLI reads the API key from the `FUSERAFT_API_KEY` environment variable rather than the OS keychain. The extension stores the key in VS Code's built-in `SecretStorage` (backed by the OS credential store) and injects it into every terminal it opens. No manual configuration is needed — set your key once via **fuseraft: Configure fuseraft** and it is available to all commands run through the extension.
+
+**Relocating `~/.fuseraft` (`FUSERAFT_HOME`).** Setting `FUSERAFT_HOME` moves the entire global root — config, sessions, logs, scratchpad, skills, memory — to the given directory (see [Getting Started — Relocating `~/.fuseraft`](getting-started.md#relocating-fuseraft)). This never includes the API key: OS keychains are local to the machine they run on and do not follow a redirected `FUSERAFT_HOME` to a network share, and fuseraft will not write the key to the share as a plaintext file instead (see "No plaintext fallback" above). On a machine with no reachable keychain, set a provider environment variable (e.g. `ANTHROPIC_API_KEY`) rather than relying on persisted key storage.
 
 ---
 

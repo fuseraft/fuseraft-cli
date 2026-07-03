@@ -75,16 +75,25 @@ Model  (2 available from https://api.anthropic.com/v1)
 
 The config is saved after the first successful reply. Once saved, subsequent `fuseraft` invocations start immediately using those defaults. Use `/provider setup` inside the REPL to change settings at any time.
 
-The API key is stored in the OS keychain — never in the config file on disk:
+The API key is stored in the OS keychain — never in the config file, and never in plaintext on disk anywhere:
 
 | Platform | Store |
 |----------|-------|
 | Linux | GNOME Keyring (`secret-tool` / libsecret) |
 | macOS | Keychain (`security` CLI) |
 | Windows | Credential Manager (Win32 API, works in Git Bash) |
-| Fallback | `~/.fuseraft/.key` (plain file, mode 600) if no keychain is available |
 
-See [Security — API key storage](security.md#api-key-storage) for details.
+If no keychain is reachable, fuseraft does not fall back to writing the key to disk — it keeps the key in memory for the current session and tells you to set a provider environment variable (e.g. `ANTHROPIC_API_KEY`) instead. See [Security — API key storage](security.md#api-key-storage) for details.
+
+### Relocating `~/.fuseraft`
+
+If the OS home directory isn't durable across sessions — e.g. a roaming or ephemeral profile on an RDS/VDI pool that assigns a different machine per connection — point fuseraft at a persistent location instead, such as a network share or mapped drive, by setting `FUSERAFT_HOME` before running any fuseraft command:
+
+```bash
+export FUSERAFT_HOME=/mnt/shared/fuseraft   # or, on Windows, e.g. Z:\fuseraft
+```
+
+This relocates the entire global root (config, sessions, logs, scratchpad, skills, memory) to the given directory. Project-local `.fuseraft/` directories inside each repo (tracked by git) are unaffected. The API key itself is never part of this — it still only ever lives in the local OS keychain or in memory for the current session; see [Security — API key storage](security.md#api-key-storage).
 
 ### Option B — environment variable
 
