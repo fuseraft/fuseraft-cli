@@ -121,6 +121,11 @@ internal sealed class ReplSessionContext
     public int  LastExtractedTurnIndex = -1;
     public bool PendingSave;
 
+    // Whether the current API key was actually persisted to an OS keychain (true unless the
+    // wizard ran with no keychain available, in which case the key is memory-only for this
+    // process and ReplTurn's deferred-save message must not claim otherwise).
+    public bool KeyStored = true;
+
     // One-time context-warning flag; reset by /clear and /compact so the hint
     // fires once again if the user compacts and then fills context again.
     public bool ContextWarningShown;

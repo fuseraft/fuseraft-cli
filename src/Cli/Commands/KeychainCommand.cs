@@ -35,7 +35,15 @@ public sealed class KeychainCommand : AsyncCommand<KeychainSettings>
                 AnsiConsole.MarkupLine("[red]✗ FUSERAFT_API_KEY environment variable is not set.[/]");
                 return 1;
             }
-            await store.StoreAsync(key.Trim());
+            try
+            {
+                await store.StoreAsync(key.Trim());
+            }
+            catch (KeyStoreUnavailableException ex)
+            {
+                AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(ex.Message)}[/]");
+                return 1;
+            }
             AnsiConsole.MarkupLine($"[dim]API key stored in {Markup.Escape(store.StoreName)}.[/]");
             return 0;
         }
