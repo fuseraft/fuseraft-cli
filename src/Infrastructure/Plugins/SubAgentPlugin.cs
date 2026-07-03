@@ -56,7 +56,7 @@ public sealed class SubAgentPlugin(
     private static readonly (string Name, string Hint)[] ExploreToolPriority =
     [
         ("search_symbol",    "type, method, interface, or class definitions"),
-        ("search_files",     "file discovery by name pattern"),
+        ("list_files",       "file discovery by name pattern"),
         ("search_content",   "content patterns across the codebase"),
         ("get_file_summary", "before read_file on any unconfirmed file"),
         ("grep_file",        "targeted in-file content search"),
@@ -67,7 +67,7 @@ public sealed class SubAgentPlugin(
     private static readonly (string Name, string Hint)[] LocateToolPriority =
     [
         ("search_symbol",  "first choice for types, methods, interfaces, class names"),
-        ("search_files",   "for filenames or path patterns"),
+        ("list_files",     "for filenames or path patterns"),
         ("search_content", "for string patterns when search_symbol is insufficient"),
         ("grep_file",      "for string patterns when search_symbol is insufficient"),
         ("read_file",      "only to confirm the exact line number once the file is known"),

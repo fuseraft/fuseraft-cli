@@ -722,6 +722,70 @@ public sealed class FileSystemPluginTests : IDisposable
         Assert.Contains("No files matched", result);
     }
 
+    [Fact]
+    public async Task ListFiles_MoreMatchesThanMaxResults_TruncatesAndExplainsWhy()
+    {
+        for (var i = 0; i < 5; i++)
+            await File.WriteAllTextAsync(TempPath($"f{i}.kiwi"), "");
+
+        var result = _plugin.ListFiles(_dir, "*.kiwi", maxResults: 3);
+        Assert.Contains("TRUNCATED", result);
+        Assert.Contains("first 3", result);
+        // Guidance should point at narrowing scope, not just raising the cap blindly —
+        // this is the multi-repo/large-tree blind spot the cap can't see past.
+        Assert.Contains("Narrow with", result);
+    }
+
+    [Fact]
+    public async Task ListFiles_MaxResultsAboveHardCap_IsClamped()
+    {
+        await File.WriteAllTextAsync(TempPath("only.kiwi"), "");
+        var result = _plugin.ListFiles(_dir, "*.kiwi", maxResults: 100_000);
+        Assert.Contains("only.kiwi", result);
+        Assert.DoesNotContain("TRUNCATED", result);
+    }
+
+    [Fact]
+    public async Task ListFiles_FewerMatchesThanDefault_NotTruncated()
+    {
+        await File.WriteAllTextAsync(TempPath("a.kiwi"), "");
+        var result = _plugin.ListFiles(_dir, "*.kiwi");
+        Assert.DoesNotContain("TRUNCATED", result);
+    }
+
+    // -----------------------------------------------------------------------
+    // GetFileInfoAsync
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetFileInfo_PathNotFound_ReturnsError()
+    {
+        // No dedicated existence-check tool remains (path_exists was folded in here) —
+        // a not-found result from get_file_info is the way to check existence now.
+        var result = await _plugin.GetFileInfoAsync(TempPath("ghost.txt"));
+        Assert.StartsWith("[ERROR]", result);
+        Assert.Contains("not found", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GetFileInfo_File_ReportsSizeAndUntrackedVersion()
+    {
+        await File.WriteAllTextAsync(TempPath("info.txt"), "hello");
+        var result = await _plugin.GetFileInfoAsync(TempPath("info.txt"));
+        Assert.Contains("Type:     file", result);
+        Assert.Contains("Size:", result);
+        // No version store was passed to this test fixture's plugin instance.
+        Assert.Contains("Version:  NOT_TRACKED", result);
+    }
+
+    [Fact]
+    public async Task GetFileInfo_Directory_HasNoVersionLine()
+    {
+        var result = await _plugin.GetFileInfoAsync(_dir);
+        Assert.Contains("Type:     directory", result);
+        Assert.DoesNotContain("Version:", result);
+    }
+
     // -----------------------------------------------------------------------
     // GetFileSummaryAsync / SaveFileSummaryAsync
     // -----------------------------------------------------------------------

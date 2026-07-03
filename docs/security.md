@@ -98,7 +98,7 @@ For every filesystem function call, the three lists are checked in this order:
 | Category | Functions | Notes |
 |----------|-----------|-------|
 | Content-read (Read glob applies) | `read_file`, `grep_file`, `get_file_summary` | Returns file content |
-| Metadata (Deny glob only, exempt from Read) | `list_files`, `list_directory`, `stat_file`, `path_exists`, `get_file_info` | Returns names / timestamps only, not content — use `Deny` to restrict these |
+| Metadata (Deny glob only, exempt from Read) | `list_files`, `list_directory`, `get_file_info` | Returns names / timestamps only, not content — use `Deny` to restrict these |
 | Write ops (Write glob + envelope apply) | `write_file`, `patch_file`, `delete_file`, `create_directory`, `delete_directory`, `set_permissions` | |
 | Mixed read+write (Copy/Move) | `copy_file`, `move_file` | Read glob checked on `source`; Write glob and envelope checked on `destination` |
 

@@ -110,7 +110,6 @@ internal static class PluginCapabilityMap
         ["document_get_sheet"]             = "read",
 
         // Search (all read-only)
-        ["search_files"]                   = "read",
         ["search_content"]                 = "read",
         ["search_symbol"]                  = "read",
 

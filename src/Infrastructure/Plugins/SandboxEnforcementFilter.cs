@@ -118,7 +118,7 @@ public sealed class SandboxEnforcementFilter
     // but still subject to sandbox boundary and Deny glob checks.
     private static readonly HashSet<string> MetadataFsFunctions = new(StringComparer.OrdinalIgnoreCase)
     {
-        "list_files", "list_directory", "path_exists", "stat_file", "get_file_info",
+        "list_files", "list_directory", "get_file_info",
     };
 
     // Functions that write to user-specified paths.

@@ -52,7 +52,7 @@ Orchestration:
 
         FOLLOW THESE STEPS IN ORDER:
 
-        1. EXPLORE: Use search_files and read_file to understand the existing codebase structure before planning.
+        1. EXPLORE: Use list_files and read_file to understand the existing codebase structure before planning.
 
         2. PRODUCE A PLAN: Write a detailed, step-by-step implementation plan: which files to create or modify,
            what commands to run, what dependencies are needed. Be specific — name exact file paths and commands.

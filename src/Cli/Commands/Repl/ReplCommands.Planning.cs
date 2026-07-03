@@ -37,7 +37,7 @@ internal static partial class ReplCommands
             $"No prose before or after — output ONLY valid JSON starting with '[' and ending with ']'. " +
             $"Each element MUST have: \"step\" (integer), \"description\" (string, the action to take), " +
             $"and \"tool\" (string, the exact name of the tool you will call for this step — e.g. " +
-            $"search_files, read_file, patch_file, shell_run, git_add, git_commit). " +
+            $"list_files, read_file, patch_file, shell_run, git_add, git_commit). " +
             $"Optionally include \"creates\" (path of a file or directory you will create, relative to " +
             $"the working directory). " +
             $"Focus on intentful actions only — no defensive steps like verifying CWD or reading files back." +

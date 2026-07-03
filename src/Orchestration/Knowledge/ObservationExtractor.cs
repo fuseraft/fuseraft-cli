@@ -28,7 +28,7 @@ public static class ObservationExtractor
     private static readonly HashSet<string> DiscoveryTools = new(StringComparer.OrdinalIgnoreCase)
     {
         "read_file", "grep_file", "get_file_summary",
-        "search_content", "search_files",
+        "search_content", "list_files",
     };
 
     // Tools that represent state changes (writes/shells).
@@ -147,7 +147,7 @@ public static class ObservationExtractor
             "grep_file"        => $"Grep match: {text}",
             "get_file_summary" => $"File summary: {text}",
             "search_content"   => $"Search result: {text}",
-            "search_files"     => $"Files found: {text}",
+            "list_files"       => $"Files found: {text}",
             _                  => text,
         };
     }
