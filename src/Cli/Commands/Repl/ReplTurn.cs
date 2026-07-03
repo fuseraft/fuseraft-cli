@@ -757,7 +757,8 @@ internal static class ReplTurn
             if (!ctx.JsonMode)
             {
                 AnsiConsole.MarkupLine($"[dim]Settings saved to[/] [bold]{Markup.Escape(UserConfigStore.ConfigPath)}[/]");
-                AnsiConsole.MarkupLine($"[dim]API key stored in[/] [bold]{Markup.Escape(ctx.KeyStore.StoreName)}[/]");
+                if (ctx.KeyStored)
+                    AnsiConsole.MarkupLine($"[dim]API key stored in[/] [bold]{Markup.Escape(ctx.KeyStore.StoreName)}[/]");
             }
             ctx.PendingSave = false;
         }

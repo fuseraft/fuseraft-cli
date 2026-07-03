@@ -65,7 +65,7 @@ The following areas are in scope for security reports:
 
 | Area | Notes |
 |------|-------|
-| **API key / credential storage** | Keychain integration (`SecretToolKeyStore`, `MacOsKeychainStore`, `WindowsCredentialManagerStore`, `PlainTextFallbackKeyStore`) and `~/.fuseraft/config` handling |
+| **API key / credential storage** | Keychain integration (`SecretToolKeyStore`, `MacOsKeychainStore`, `WindowsCredentialManagerStore`, `UnavailableKeyStore`) and `~/.fuseraft/config` handling. fuseraft never writes API keys to disk in plaintext — a report that it does (or that it can be made to) is in scope. |
 | **Shell plugin** | Command injection, sandbox bypass, `sudo` protection bypass |
 | **FileSystem plugin** | Path traversal, sandbox escape |
 | **HTTP plugin** | SSRF, allowlist bypass, private-IP filter bypass |

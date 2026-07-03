@@ -198,8 +198,7 @@ internal static partial class ReplCommands
         var (newCfg, newKey, _) = await ReplFactory.RunSetupWizardAsync(ctx.ModelId, ctx.UserCfg);
         if (newCfg is null || newKey is null) return CommandResult.Continue;
 
-        if (!string.IsNullOrEmpty(newKey))
-            await ctx.KeyStore.StoreAsync(newKey);
+        ctx.KeyStored = string.IsNullOrEmpty(newKey) || await KeyStorePersistence.TryStoreAsync(ctx.KeyStore, newKey);
         newCfg.ApiKey    = newKey;
         ctx.UserCfg      = newCfg;
         ctx.ModelId      = newCfg.ModelId;
@@ -223,7 +222,8 @@ internal static partial class ReplCommands
         ctx.PendingSave  = false;
         UserConfigStore.Save(ctx.UserCfg);
         AnsiConsole.MarkupLine($"[dim]Settings saved to[/] [bold]{Markup.Escape(UserConfigStore.ConfigPath)}[/]");
-        AnsiConsole.MarkupLine($"[dim]API key stored in[/] [bold]{Markup.Escape(ctx.KeyStore.StoreName)}[/]");
+        if (ctx.KeyStored)
+            AnsiConsole.MarkupLine($"[dim]API key stored in[/] [bold]{Markup.Escape(ctx.KeyStore.StoreName)}[/]");
         AnsiConsole.MarkupLine($"[dim]Model:[/] [bold]{Markup.Escape(ctx.ModelId)}[/]  [dim](history cleared)[/]");
         await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/provider setup", model = ctx.ModelId });
         return CommandResult.Continue;
