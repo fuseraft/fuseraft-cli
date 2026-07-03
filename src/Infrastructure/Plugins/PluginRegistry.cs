@@ -22,14 +22,26 @@ namespace fuseraft.Infrastructure.Plugins;
 ///   <item><term>Http</term><description>HTTP GET/POST/PUT/DELETE to external URLs.</description></item>
 ///   <item><term>Json</term><description>Format, query, merge, and validate JSON data.</description></item>
 ///   <item><term>Search</term><description>Find files by name, grep file contents, and locate symbol definitions.</description></item>
+///   <item><term>Document</term><description>Read-only text extraction from PDF, DOCX, PPTX, and XLSX files.</description></item>
 ///   <item><term>Probe</term><description>Run code snippets, assert outputs with PASS/FAIL verdicts, and test hypotheses using Given/When/Then structure.</description></item>
 ///   <item><term>CodeExecution</term><description>Docker-backed sandboxed execution and persistent REPL sessions for Python and Node.js.</description></item>
 ///   <item><term>Handoff</term><description>Type-safe routing signal. Agents call <c>handoff(route_keyword: "...")</c> to hand off to the next step; the tool loop is terminated immediately so no further tools can be called after the signal.</description></item>
 ///   <item><term>Scratchpad</term><description>Per-agent persistent key-value store that survives across sessions. Registered here with a stub; per-agent instances with real paths are created in <see cref="fuseraft.Infrastructure.Agents.AgentFactory"/>.</description></item>
 ///   <item><term>Chatroom</term><description>Shared append-only JSONL message log for agent-to-agent coordination. Registered here with a stub; per-agent instances with real paths are created in <see cref="fuseraft.Infrastructure.Agents.AgentFactory"/>.</description></item>
 ///   <item><term>Changes</term><description>Read-only view of the session change log. Registered here with a stub; the real instance is registered by OrchestratorBuilder when ChangeTracking is configured.</description></item>
+///   <item><term>Investigation</term><description>Durable hypothesis/root-cause log. Only registered by OrchestratorBuilder when ChangeTracking is configured — no stub here, so it is absent from <c>fuseraft plugins</c> until a session with ChangeTracking creates it.</description></item>
+///   <item><term>Compaction</term><description>On-demand history compaction via <c>compact_conversation</c>; a no-op unless the orchestration config also sets <c>Compaction</c>.</description></item>
+///   <item><term>Decision</term><description>Architecture Decision Registry (ADR) search/read/create/supersede. Registered here with a stub; <see cref="ConfigureKnowledge"/> replaces it with an instance sharing the session's <see cref="IKnowledgeLayer"/>.</description></item>
+///   <item><term>Graph</term><description>Read-only queries over the repository semantic graph. Registered here with a stub; <see cref="ConfigureKnowledge"/> replaces it with the session's shared graph store.</description></item>
+///   <item><term>Objective</term><description>Long-horizon objective tracking across orchestration runs. Registered here with a stub; <see cref="ConfigureKnowledge"/> replaces it with the session's shared objective store.</description></item>
+///   <item><term>SessionContext</term><description>Shared handoff-note summary for the current orchestration session. Registered here with a stub; OrchestratorBuilder replaces it with a session-scoped instance.</description></item>
+///   <item><term>Conventions, DiscoveryBrief, Preflight, Brief, BriefReview, AuditFindings, RemediationPlan, OpsPlan, ResearchFindings, ResearchReview</term><description>Fixed-target-path <see cref="ArtifactPlugin"/> writers for recon/planning-style agents — one class registered many times under different names/paths/tool identities. See <see cref="ArtifactPlugin"/>'s doc comment.</description></item>
 ///   <item><term>Session</term><description>REPL session metadata, saved-session list, and log file access. Registered here with a stub; ReplCommand replaces it with a real instance bound to the live session.</description></item>
 /// </list>
+///
+/// Not listed here because they are never resolved through this registry's <c>Plugins:</c>-name
+/// mechanism: <c>Todo</c> (REPL-only, wired directly by <c>ReplCommand</c>) and <c>Skills</c>
+/// (REPL-only, registered automatically when at least one skill is installed).
 ///
 /// Add custom plugins via <see cref="Register"/> before the DI host is built.
 /// </summary>
