@@ -296,6 +296,32 @@ Each entry shows the agent name, turn index, timestamp, files written/deleted, c
 
 ---
 
+## Investigation
+
+Durable investigation memory: records hypotheses, rejected paths, and confirmed root causes so future agents never re-run the same dead-end investigation. All writes go to `.fuseraft/state/investigation-log.json`. The log survives compaction and is injected into every agent's context via the `investigation_log` context source.
+
+**Availability:** Only registered when `ChangeTracking` is present in the orchestration config — same gate as [Changes](#changes). Used by the `brownfield`, `audit`, and `graph` init templates.
+
+| Function | Parameters | Description |
+|----------|-----------|-------------|
+| `investigation_create_hypothesis` | `hypothesis` | Record a new hypothesis for investigation. Returns an assigned ID (`H-001`, `H-002`, ...). |
+| `investigation_reject_hypothesis` | `id`, `reason`, `evidence` (optional, one item per line) | Mark a hypothesis as rejected with the reason and disproving evidence. Also emits an `AttemptFailedEvent` to the event sink. |
+| `investigation_confirm_hypothesis` | `id`, `evidence` (optional, one item per line) | Mark a hypothesis as confirmed with supporting evidence. |
+| `investigation_record` | `summary`, `conclusion` | Log a completed investigation with its summary and conclusion. |
+| `investigation_identify_root_cause` | `cause` | Append a confirmed root cause to the log. No-ops if the same cause is already recorded. |
+
+**Typical usage:**
+
+```
+Investigate a lead:      investigation_create_hypothesis("Race condition in the cache invalidation path")
+Dead end:                investigation_reject_hypothesis("H-001", "Cache writes are already mutex-guarded", evidence="Checked FileSystemPlugin.cs:120-140")
+Confirmed:               investigation_confirm_hypothesis("H-002", evidence="Reproduced with concurrent write_file calls")
+Wrap up:                 investigation_record("Checked cache invalidation for races", "Not the cause — see H-003")
+Root cause found:        investigation_identify_root_cause("SessionReadCache does not invalidate on write_file with baseVersion=0")
+```
+
+---
+
 ## Session
 
 Gives REPL agents first-class access to their own session metadata, saved-session history, diagnostic log files, and context management. Always available in the REPL when tools are enabled; not applicable to `fuseraft run` orchestrations.
@@ -332,6 +358,19 @@ get_context_status()
 # Free up context when nearing the 80k ceiling
 compact_context(focus="finish fixing the auth middleware")
 ```
+
+---
+
+## Todo
+
+Self-directed todo list the model uses to plan and track its own multi-step work within a single REPL session. In-memory only — scoped to the session, not persisted to disk. Always available in the REPL when tools are enabled (i.e. unless `fuseraft repl --no-tools` is used); not applicable to `fuseraft run` orchestrations and not added via an agent's `Plugins` list.
+
+Unlike [Scratchpad](#scratchpad) (free-form key/value notes), Todo holds one ordered checklist that is always replaced wholesale on write — the model writes the full plan up front, then rewrites the full list after each step to flip statuses, rather than patching individual entries.
+
+| Function | Parameters | Description |
+|----------|-----------|-------------|
+| `todo_write` | `itemsJson` | Replace the current todo list. Pass a JSON array of items, e.g. `[{"content":"Read entry point","status":"completed"},{"content":"Map request flow","status":"in_progress"}]`. `status` is one of `pending`, `in_progress`, `completed`. Always pass the complete list, not just the changed item — this call replaces the whole list. |
+| `todo_read` | — | Read the current todo list. |
 
 ---
 
@@ -551,6 +590,44 @@ Shared writable context summary for the current orchestration session. Agents wr
 |----------|-----------|-------------|
 | `session_context_read` | — | Read the context summary written by the previous agent. Returns a truncation notice if the file exceeds 8,000 characters. Call this at the start of every turn before reading source files. |
 | `session_context_write` | `summary` | Write or replace the session context summary. Overwrites any previous summary. Call this before every handoff. Bullet-point format works well — include what was accomplished, which files changed, and any open issues the next agent should know about. |
+
+---
+
+## Artifact
+
+Fixed-target-path artifact writers for recon and planning-style agents (e.g. the `brownfield` template's Archaeologist, `greenfield`'s Preflight, `audit`'s Auditor and Prioritizer, `devops`'s OpsPlanner, `research`'s Researcher and Reviewer). Each registered name below is the same underlying class bound at construction to exactly one file path, one required format, and one uniquely-named write tool — there is no path parameter, so a call can never be redirected at the project's own source files the way `write_file`/`patch_file` can. Pair with `Capabilities: { FileSystem: [read] }` so the agent can examine the sandbox but can only persist findings through its one write tool.
+
+Every instance validates `content` against its required format before writing (`json` parses with `System.Text.Json`, `yaml` with YamlDotNet, `md` has no required structure), and creates parent directories automatically.
+
+| Plugin name | Tool | Format | Default path |
+|-------------|------|--------|--------------|
+| `Conventions` | `write_file_conventions` | json | `~/.fuseraft/sessions/{project_slug}/{session_id}/conventions.json` |
+| `DiscoveryBrief` | `write_file_discovery_brief` | json | `~/.fuseraft/sessions/{project_slug}/{session_id}/brief.brownfield.json` |
+| `Preflight` | `write_file_preflight` | json | `~/.fuseraft/sessions/{project_slug}/{session_id}/preflight.json` |
+| `Brief` | `write_file_brief` | json | `~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json` |
+| `BriefReview` | `write_file_brief_review` | json | `~/.fuseraft/sessions/{project_slug}/{session_id}/brief-review.json` |
+| `AuditFindings` | `write_file_audit_findings` | json | `.fuseraft/artifacts/audit-findings.json` (sandbox-relative) |
+| `RemediationPlan` | `write_file_remediation_plan` | json | `.fuseraft/artifacts/remediation-plan.json` (sandbox-relative) |
+| `OpsPlan` | `write_file_ops_plan` | yaml | `.fuseraft/artifacts/ops-plan.yaml` (sandbox-relative) |
+| `ResearchFindings` | `write_file_research_findings` | md | `.fuseraft/docs/research-findings.md` (sandbox-relative) |
+| `ResearchReview` | `write_file_research_review` | json | `.fuseraft/docs/research-review.json` (sandbox-relative) |
+
+Each write tool takes `content` (full file content) and `format` (must be exactly `md`, `json`, or `yaml` — and must match the instance's required format above).
+
+```yaml
+Agents:
+  - Name: Auditor
+    Plugins:
+      - FileSystem
+      - Search
+      - Shell
+      - Investigation
+      - AuditFindings
+    Capabilities:
+      FileSystem: [read]
+```
+
+**Note:** the `Conventions`/`DiscoveryBrief`/`Preflight`/`Brief`/`BriefReview` paths are session-scoped — one file per session, under the global `~/.fuseraft/sessions/` tree. The `AuditFindings`/`RemediationPlan`/`OpsPlan`/`ResearchFindings`/`ResearchReview` paths are fixed relative to the sandbox root (or the current directory when no `FileSystemSandboxPath` is set) — shared across sessions in the same project so a downstream agent's `read_file` call always finds them regardless of which session wrote them.
 
 ---
 
