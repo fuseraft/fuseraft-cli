@@ -39,9 +39,27 @@ internal sealed class ReplSessionContext
     public readonly SubAgentPlugin?     SubAgent;
     public readonly bool                Verbose;
     public SkillsPlugin?                SkillsPlugin { get; set; }
+    public TodoPlugin?                  Todo         { get; set; }
 
     // Mutable provider state (may be replaced by /provider setup)
-    public string      ModelId     { get; set; }
+    private string _modelId = string.Empty;
+    public string ModelId
+    {
+        get => _modelId;
+        set
+        {
+            _modelId = value;
+            ContextTokenBudget = ModelContextWindow.GetBudget(value);
+        }
+    }
+
+    // Working token budget for history trimming (TrimHistory) and the /context, /compact,
+    // and context-warning displays — derived from ModelId so a large-context model isn't
+    // held to the same ceiling as a small-context local model. Recomputed automatically
+    // whenever ModelId is (re)assigned, including on /provider setup, /model switch, and
+    // session resume.
+    public int ContextTokenBudget { get; private set; } = ModelContextWindow.DefaultBudget;
+
     public ModelConfig ModelConfig { get; set; }
     public UserConfig? UserCfg     { get; set; }
     public IChatClient Client      { get; set; }

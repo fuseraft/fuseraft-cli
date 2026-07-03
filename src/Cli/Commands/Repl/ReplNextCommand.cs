@@ -286,7 +286,7 @@ public sealed class ReplNextCommand(ILoggerFactory loggerFactory) : AsyncCommand
                    $"The compact summary is now the active context. Continue the current task from here.";
         });
         replSessionPlugin?.SetStatusDelegate(
-            () => (ctx.EstimateTokens(), ReplTurn.ContextTokenBudget, ctx.TurnIndex));
+            () => (ctx.EstimateTokens(), ctx.ContextTokenBudget, ctx.TurnIndex));
 
         if (snapshot is not null)
         {
