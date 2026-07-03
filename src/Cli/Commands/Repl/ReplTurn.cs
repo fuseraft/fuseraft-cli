@@ -1,3 +1,4 @@
+using System.ClientModel;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -6,6 +7,7 @@ using Spectre.Console;
 using fuseraft.Cli.Display;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
+using fuseraft.Infrastructure.Chat;
 using fuseraft.Orchestration;
 
 namespace fuseraft.Cli.Commands.Repl;
@@ -16,7 +18,6 @@ internal static class ReplTurn
         ? ["-", "\\", "|", "/"]
         : ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-    internal const int ContextTokenBudget = 80_000;
     internal const int StepIterationLimit = 5;
 
     // Maximum times a transient streaming error (ResponseEnded, IOException, TimeoutException)
@@ -72,6 +73,41 @@ internal static class ReplTurn
             if (e is IOException or TimeoutException) return true;
         }
         return false;
+    }
+
+    // Minimum active tool count above which a raw, unclassified 400/413 is plausibly a
+    // tool-schema or request-payload rejection rather than a genuine bad request — large
+    // REPL tool surfaces (FileSystem + Shell + Search + Git + Session + SubAgent, ~50+
+    // schemas) are the likeliest trigger on gateways like Bedrock/LiteLLM.
+    private const int LargeToolSurfaceThreshold = 20;
+
+    /// <summary>
+    /// Returns a short, plain-text hint when <paramref name="ex"/> looks like a raw HTTP
+    /// 400/413 that <see cref="ProviderErrorClassifier"/> could not explain (so
+    /// <see cref="FalloverChatClient"/> would not have retried or failed over on it either)
+    /// and the active tool count is large enough that a tool-schema/payload rejection is a
+    /// plausible cause. Returns <see langword="null"/> when no hint applies — this is a
+    /// best-effort diagnostic, not a classification change.
+    /// </summary>
+    private static string? BuildLargeToolSurfaceHint(Exception ex, int activeToolCount)
+    {
+        if (activeToolCount < LargeToolSurfaceThreshold) return null;
+        if (ProviderErrorClassifier.Classify(ex) != FailoverReason.None) return null;
+
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            int? status = e switch
+            {
+                ClientResultException cre => cre.Status,
+                HttpRequestException { StatusCode: { } sc } => (int)sc,
+                _ => null,
+            };
+            if (status is 400 or 413)
+                return $"This may be a tool-schema/payload rejection from the provider — " +
+                       $"{activeToolCount} tools are active this turn. Try /tools disable <category>, " +
+                       $"or restart with --no-tools to isolate.";
+        }
+        return null;
     }
 
     // -------------------------------------------------------------------------
@@ -512,10 +548,19 @@ internal static class ReplTurn
                 final          = true,
             });
 
+            var toolSurfaceHint = BuildLargeToolSurfaceHint(ex, ctx.GetActiveTools().Count);
             if (ctx.JsonMode)
-                ReplJsonBridge.Emit(new { type = "error", text = ex.Message });
+                ReplJsonBridge.Emit(new
+                {
+                    type = "error",
+                    text = toolSurfaceHint is null ? ex.Message : $"{ex.Message}\n{toolSurfaceHint}",
+                });
             else
+            {
                 AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(ex.Message)}[/]");
+                if (toolSurfaceHint is not null)
+                    AnsiConsole.MarkupLine($"[dim]  ↪ {Markup.Escape(toolSurfaceHint)}[/]");
+            }
             if (ctx.History.Count > 0 && ctx.History[^1].Role == ChatRole.User)
                 ctx.History.RemoveAt(ctx.History.Count - 1);
             ctx.ExecutionQueue.Clear();
@@ -642,6 +687,16 @@ internal static class ReplTurn
                 var sigilColor = sigil == 'D' ? "red" : sigil == 'A' ? "green" : "yellow";
                 AnsiConsole.MarkupLine($"  [{sigilColor}]{sigil}[/] [dim]{Markup.Escape(path)}[/]");
             }
+            if (ctx.Todo is not null && toolCallsThisTurn.Contains("todo_write", StringComparer.OrdinalIgnoreCase))
+            {
+                foreach (var item in ctx.Todo.Snapshot())
+                {
+                    var (glyph, color) = item.Status.Equals("completed", StringComparison.OrdinalIgnoreCase) ? ("x", "green")
+                        : item.Status.Equals("in_progress", StringComparison.OrdinalIgnoreCase) ? ("~", "yellow")
+                        : (" ", "dim");
+                    AnsiConsole.MarkupLine($"  [{color}][{glyph}][/] [dim]{Markup.Escape(item.Content)}[/]");
+                }
+            }
         }
 
         // One-time 75 % context warning. Fires on free-form turns only (not
@@ -649,14 +704,14 @@ internal static class ReplTurn
         // Resets after /compact or /clear so it can fire once per "fill cycle".
         if (!ctx.ContextWarningShown && !isStepRequest && !capturePlan && responseText.Length > 0)
         {
-            var pct = (double)postEst / ContextTokenBudget;
+            var pct = (double)postEst / ctx.ContextTokenBudget;
             if (pct >= 0.75)
             {
                 ctx.ContextWarningShown = true;
                 await ctx.Emitter.EmitAsync(EventTypes.ContextWarning, turn: ctx.TurnIndex, payload: new
                 {
                     estimated_tokens = postEst,
-                    budget           = ContextTokenBudget,
+                    budget           = ctx.ContextTokenBudget,
                     pct              = Math.Round(pct, 3),
                 });
                 if (ctx.JsonMode)
@@ -672,7 +727,7 @@ internal static class ReplTurn
             }
         }
 
-        var trimmedCount = TrimHistory(ctx.History);
+        var trimmedCount = TrimHistory(ctx.History, ctx.ContextTokenBudget);
         if (trimmedCount > 0)
         {
             if (!ctx.JsonMode)
@@ -683,7 +738,7 @@ internal static class ReplTurn
 
         if (!ctx.JsonMode && ctx.Verbose)
             AnsiConsole.MarkupLine(
-                $"[dim]  tokens (est.): {postEst:N0} / {ContextTokenBudget:N0}  rounds: {toolRounds}  tool calls: {toolCallsThisTurn.Count}[/]");
+                $"[dim]  tokens (est.): {postEst:N0} / {ctx.ContextTokenBudget:N0}  rounds: {toolRounds}  tool calls: {toolCallsThisTurn.Count}[/]");
 
         await ctx.Emitter.EmitAsync(EventTypes.AssistantResponse, turn: ctx.TurnIndex, payload: new { content = responseText });
         await ctx.Emitter.EmitAsync(EventTypes.TurnEnd, turn: ctx.TurnIndex, payload: new
@@ -910,17 +965,17 @@ internal static class ReplTurn
     // -------------------------------------------------------------------------
 
     // Returns the number of ChatMessage entries removed (0 when no trimming was needed).
-    internal static int TrimHistory(List<ChatMessage> history)
+    internal static int TrimHistory(List<ChatMessage> history, int contextTokenBudget)
     {
         static int EstimateMessage(ChatMessage m) =>
             m.Contents.Sum(AgentFactory.EstimateContentChars) / 4;
 
         var total = history.Sum(EstimateMessage);
-        if (total <= ContextTokenBudget) return 0;
+        if (total <= contextTokenBudget) return 0;
 
         int sysEnd  = history.Count > 0 && history[0].Role == ChatRole.System ? 1 : 0;
         int removed = 0;
-        while (total > ContextTokenBudget)
+        while (total > contextTokenBudget)
         {
             // Evict the oldest complete turn group (User + all following non-User
             // messages). Removing partial groups can leave orphaned FunctionCallContent
@@ -971,9 +1026,9 @@ internal static class ReplTurn
     {
         // FileSystem (no prefix)
         "grep_file", "read_file", "list_directory", "list_files",
-        "get_file_summary", "get_file_info", "stat_file",
+        "get_file_summary", "get_file_info",
         // Search
-        "search_files", "search_content", "search_symbol", "search_callers",
+        "search_content", "search_symbol", "search_callers",
         // Git
         "git_status", "git_log", "git_diff", "git_show", "git_branch_list", "git_stash_list",
         // Shell (shell_ prefix — get_env and which were stale names)

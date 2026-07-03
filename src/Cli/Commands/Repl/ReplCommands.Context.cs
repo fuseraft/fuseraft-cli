@@ -23,7 +23,7 @@ internal static partial class ReplCommands
         var toolResTok  = ctx.History.Where(m => m.Role == ChatRole.Tool).Sum(EstMsg);
         var toolTok     = active.Sum(t => t.JsonSchema.GetRawText().Length / 4);
         var total       = sysTok + userTok + asstTok + toolResTok + toolTok;
-        var pct      = (double)total / ReplTurn.ContextTokenBudget * 100;
+        var pct      = (double)total / ctx.ContextTokenBudget * 100;
 
         if (ctx.JsonMode)
         {
@@ -34,7 +34,7 @@ internal static partial class ReplCommands
                     ? $" *(+{d:N0} since last check)*"
                     : $" *({total - ctx.PrevCtxEstimate:N0} since last check)*")
                 : string.Empty;
-            sb.AppendLine($"**~{total:N0} / {ReplTurn.ContextTokenBudget:N0} tokens** — {pct:F1}%{deltaNote}");
+            sb.AppendLine($"**~{total:N0} / {ctx.ContextTokenBudget:N0} tokens** — {pct:F1}%{deltaNote}");
             sb.AppendLine();
             sb.AppendLine($"**{ctx.TurnIndex} turn{(ctx.TurnIndex != 1 ? "s" : "")}** " +
                 $"({ctx.History.Count} messages — " +
@@ -56,7 +56,7 @@ internal static partial class ReplCommands
                 var avg = (int)Math.Round(ctx.TurnTokenDeltas.Average());
                 if (avg > 0)
                 {
-                    var proj = (ReplTurn.ContextTokenBudget - total) / avg;
+                    var proj = (ctx.ContextTokenBudget - total) / avg;
                     sb.AppendLine();
                     sb.AppendLine($"*~{proj:N0} turns remaining (avg +{avg:N0} tok/turn)*");
                 }
@@ -67,7 +67,7 @@ internal static partial class ReplCommands
             {
                 command = "/context",
                 estimated_tokens = total,
-                token_budget = ReplTurn.ContextTokenBudget,
+                token_budget = ctx.ContextTokenBudget,
                 turns = ctx.TurnIndex,
                 breakdown = new { system = sysTok, tools = toolTok, user = userTok, assistant = asstTok, tool_results = toolResTok }
             });
@@ -82,11 +82,11 @@ internal static partial class ReplCommands
             : string.Empty;
 
         AnsiConsole.MarkupLine(
-            $"  [dim]Tokens (est.):[/] [bold]{total:N0}[/] / {ReplTurn.ContextTokenBudget:N0}  " +
+            $"  [dim]Tokens (est.):[/] [bold]{total:N0}[/] / {ctx.ContextTokenBudget:N0}  " +
             $"[{(pct >= 90 ? "red" : pct >= 70 ? "yellow" : "green")}]{Markup.Escape(bar)}[/]  " +
             $"[dim]{pct:F1}%[/]{deltaStr}");
         AnsiConsole.MarkupLine(
-            $"  [dim]Budget:[/]       [bold]{ReplTurn.ContextTokenBudget:N0}[/]  [dim](context window ceiling)[/]");
+            $"  [dim]Budget:[/]       [bold]{ctx.ContextTokenBudget:N0}[/]  [dim](context window ceiling)[/]");
         AnsiConsole.MarkupLine(
             $"  [dim]Turns:[/]        [bold]{ctx.TurnIndex}[/]  " +
             $"[dim](messages: {ctx.History.Count} — " +
@@ -108,7 +108,7 @@ internal static partial class ReplCommands
             var avg = (int)Math.Round(ctx.TurnTokenDeltas.Average());
             if (avg > 0)
             {
-                var proj = (ReplTurn.ContextTokenBudget - total) / avg;
+                var proj = (ctx.ContextTokenBudget - total) / avg;
                 AnsiConsole.WriteLine();
                 AnsiConsole.MarkupLine($"  [dim]Projected:[/]    ~{proj:N0} turns remaining  [dim](avg +{avg:N0} tok/turn)[/]");
             }
@@ -119,7 +119,7 @@ internal static partial class ReplCommands
         {
             command = "/context",
             estimated_tokens = total,
-            token_budget = ReplTurn.ContextTokenBudget,
+            token_budget = ctx.ContextTokenBudget,
             turns = ctx.TurnIndex,
             breakdown = new { system = sysTok, tools = toolTok, user = userTok, assistant = asstTok }
         });

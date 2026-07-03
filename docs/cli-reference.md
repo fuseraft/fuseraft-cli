@@ -259,7 +259,7 @@ On launch a compact header shows the model name, a single info line listing acti
 
 ```
 ── claude-sonnet-4-6 ─────────────────────────────────────
-  FileSystem  Shell  Search  Git  Http  ·  memory  ·  3 skills  ·  /help
+  FileSystem  Shell  Search  Git  ·  memory  ·  3 skills  ·  /help
   session: a87569bcd7b0
 ```
 
@@ -313,12 +313,14 @@ Unless `--no-tools` is passed, the REPL gives the model access to:
 |--------|-------|
 | FileSystem | `read_file`, `write_file`, `list_files`, `delete_file` |
 | Shell | `shell_run`, `shell_run_script`, `shell_get_env`, `shell_which`, `shell_get_working_directory`, `shell_get_session_temp_dir` |
-| Search | `search_files`, `search_content`, `search_symbol` |
+| Search | `search_content`, `search_symbol`, `search_callers` |
 | Git | `git_status`, `git_diff`, `git_log`, `git_commit`, and more |
-| Http | `http_get`, `http_post` |
+| Todo | `todo_write`, `todo_read` — self-directed checklist the model uses to plan and track multi-step work within the session (in-memory only, not persisted). |
 | SubAgent | `sub_agent_explore`, `sub_agent_locate` — the same tools behind `/explore` and `/locate` (see below), now also callable by the model directly mid-turn. |
 | Session | `repl_session_current`, `repl_session_list`, `repl_session_read_event_log`, `repl_session_read_log`, `compact_context`, `get_context_status` |
 | Skills | `load_skill`, `run_skill_script` (only when skills are installed — see [Skills](skills.md)) |
+
+**Optional plugins** — `Http` (`http_get`, `http_post`, ...), `Changes`, `Chatroom`, `SessionContext`, and `Scratchpad` are not loaded by default; pass `--plugins Http,Changes` (comma-separated) to enable them. Kept opt-in because every registered tool adds its schema to every request — a smaller default tool surface means smaller, faster requests and less chance of tripping a provider's tool-schema limits.
 
 **Forced evidence collection** — when a message looks like an identify/locate/find-style question ("locate X", "where is Y", "which file...", "does Z exist"), the REPL forces at least one tool call before the model may answer, instead of letting it answer from memory. This applies only to that one turn; it does not affect unrelated questions.
 

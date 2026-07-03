@@ -28,7 +28,7 @@ public sealed class ReplSettings : CommandSettings
     public bool NoBanner { get; set; }
 
     [CommandOption("--no-tools")]
-    [Description("Disable all built-in tools (FileSystem, Shell, Search, Git, Http).")]
+    [Description("Disable all built-in tools (FileSystem, Shell, Search, Git, and any enabled optional plugins).")]
     public bool NoTools { get; set; }
 
     [CommandOption("--verbose")]
@@ -40,7 +40,7 @@ public sealed class ReplSettings : CommandSettings
     public string? Resume { get; set; }
 
     [CommandOption("--plugins")]
-    [Description("Comma-separated list of optional plugins to enable: Changes, Chatroom, SessionContext, Scratchpad.")]
+    [Description("Comma-separated list of optional plugins to enable: Http, Changes, Chatroom, SessionContext, Scratchpad.")]
     public string? Plugins { get; set; }
 
     [CommandOption("--vscode")]
@@ -158,13 +158,15 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         SkillsPlugin?   skillsPlugin   = null;
         string?         skillsCatalog  = null;
         List<AIFunction>? explorerTools = null;
+        TodoPlugin?     todoPlugin     = null;
         if (!settings.NoTools)
         {
             toolsByCategory["FileSystem"] = PluginRegistry.GetFunctionsFromObject(new FileSystemPlugin()).ToList();
             toolsByCategory["Shell"]      = PluginRegistry.GetFunctionsFromObject(shellPlugin!).ToList();
             toolsByCategory["Search"]     = PluginRegistry.GetFunctionsFromObject(new SearchPlugin()).ToList();
             toolsByCategory["Git"]        = PluginRegistry.GetFunctionsFromObject(new GitPlugin()).ToList();
-            toolsByCategory["Http"]       = PluginRegistry.GetFunctionsFromObject(new HttpPlugin()).ToList();
+            todoPlugin                    = new TodoPlugin();
+            toolsByCategory["Todo"]       = PluginRegistry.GetFunctionsFromObject(todoPlugin).ToList();
 
             var fsReadOps    = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 { "read_file", "list_files", "grep_file", "get_file_summary", "get_file_info" };
@@ -223,6 +225,9 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
             var enabled = settings.EnabledPlugins;
             var slug    = FuseraftPaths.ProjectSlug(cwd);
+
+            if (enabled.Contains("Http"))
+                toolsByCategory["Http"] = PluginRegistry.GetFunctionsFromObject(new HttpPlugin()).ToList();
 
             if (enabled.Contains("Changes"))
             {
@@ -334,6 +339,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         {
             JsonMode     = jsonMode,
             SkillsPlugin = skillsPlugin,
+            Todo         = todoPlugin,
         };
         if (skillsPlugin is not null)
             ctx.LineReader.SetSkillSlugs([.. skillsPlugin.Slugs]);
@@ -352,7 +358,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                    $"The compact summary is now the active context. Continue the current task from here.";
         });
         replSessionPlugin?.SetStatusDelegate(
-            () => (ctx.EstimateTokens(), ReplTurn.ContextTokenBudget, ctx.TurnIndex));
+            () => (ctx.EstimateTokens(), ctx.ContextTokenBudget, ctx.TurnIndex));
 
         if (snapshot is not null)
         {
