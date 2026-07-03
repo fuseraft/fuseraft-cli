@@ -17,6 +17,8 @@ fuseraft addresses this with four interlocking control layers:
 | **Routing corrections** | Injects error messages and re-invokes the agent when routing signals are wrong or validators fail |
 | **Stagnation detection** | Throws after 3 consecutive bad turns rather than letting an agent loop |
 
+> **Scope note — REPL vs orchestration configs.** Everything below (validators, change tracking, routing corrections, stagnation detection) is orchestrator machinery, wired up by `OrchestratorBuilder` for configs with `Selection`/`Agents`/`Validation` sections. `fuseraft repl` does not run through an orchestrator, so none of these four layers apply there. The REPL's only anti-fabrication check is a single regex in `ReplTurn.ContainsMutationClaim` that catches first-person "I wrote/fixed/updated ..." language unaccompanied by a write-class tool call in the same turn, plus the forced-tool-call behavior for identify/locate-style questions (`ReplTurn.ForceEvidenceQuestionPattern`). For tasks where hallucinated progress is a real risk — long or high-stakes changes, work you can't easily eyeball — prefer an orchestration config (even a single-agent one) so the full validator/change-tracking stack is in effect, rather than relying on the REPL's lighter-weight heuristics.
+
 ---
 
 ## Change tracking
