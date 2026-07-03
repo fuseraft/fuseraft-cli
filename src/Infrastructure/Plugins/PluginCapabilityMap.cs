@@ -25,12 +25,13 @@ namespace fuseraft.Infrastructure.Plugins;
 ///   <item><term>Json</term><description><c>read</c> (format, minify, get, keys, search, to_text, validate) · <c>write</c> (merge)</description></item>
 ///   <item><term>Document</term><description><c>read</c> (extract_text, get_info, list_sheets, get_sheet — all read-only)</description></item>
 ///   <item><term>Search</term><description><c>read</c> (all search operations are read-only)</description></item>
-///   <item><term>Plan</term><description><c>read</c> (plan_get, plan_get_summary) · <c>write</c> (plan_create, plan_update_step, plan_add_step)</description></item>
 ///   <item><term>Changes</term><description><c>read</c> (read, read_latest)</description></item>
 ///   <item><term>Scratchpad</term><description><c>read</c> (read, read_all, search) · <c>write</c> (write, delete)</description></item>
 ///   <item><term>Chatroom</term><description><c>read</c> · <c>write</c> (send)</description></item>
 ///   <item><term>Probe</term><description><c>run</c> (all probe operations execute code)</description></item>
 ///   <item><term>CodeExecution</term><description><c>read</c> (check_docker) · <c>execute</c> (sandbox_run, repl_*)</description></item>
+///   <item><term>Decision</term><description><c>read</c> (search, read) · <c>write</c> (create, supersede)</description></item>
+///   <item><term>Graph</term><description><c>read</c> (search, refs, dependents — all read-only)</description></item>
 /// </list>
 /// </para>
 /// </summary>

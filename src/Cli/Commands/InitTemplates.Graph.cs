@@ -65,10 +65,10 @@ public static partial class InitTemplates
                  failed this session. Do not repeat an approach listed under "Rejected Paths".
               3. Run a build command with shell_run to confirm it compiles.
                  If it fails, record the failed approach before trying another:
-                 a. Call create_hypothesis(description) naming the specific approach.
-                 b. If it fails: call reject_hypothesis(id, reason, evidence) with the exact
-                    error. Read the source of the failure before writing new code.
-                 c. If it passes: call confirm_hypothesis(id, evidence).
+                 a. Call investigation_create_hypothesis(description) naming the specific approach.
+                 b. If it fails: call investigation_reject_hypothesis(id, reason, evidence) with
+                    the exact error. Read the source of the failure before writing new code.
+                 c. If it passes: call investigation_confirm_hypothesis(id, evidence).
                  You MUST NOT call handoff with any open hypotheses.
               4. Commit with git_add and git_commit.
               5. {ContextWriteStep}
@@ -107,7 +107,8 @@ public static partial class InitTemplates
               A PASS result with an empty or missing command field is treated as fabricated and will block handoff.
               Always write the report before routing, even when tests fail.
               If a test failure reveals a clear root cause (wrong return value, missing
-              dependency, incorrect wiring), call identify_root_cause(cause) before routing.
+              dependency, incorrect wiring), call investigation_identify_root_cause(cause) before
+              routing.
               5. {ContextWriteStep}
               If all tests pass, call handoff(route_keyword: "HANDOFF TO REVIEWER").
               If any tests fail, call handoff(route_keyword: "BUGS FOUND").
