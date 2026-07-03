@@ -80,10 +80,7 @@ public sealed class PluginRegistry : IDisposable
         // Stub registrations so `fuseraft plugins` can reflect function names and descriptions.
         // At runtime, AgentFactory replaces Scratchpad, Chatroom, and SubAgent with per-agent
         // instances, and OrchestratorBuilder replaces Changes with a real path-bound instance.
-        var scratchpadBase = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".fuseraft", "scratchpad");
-        Register("Scratchpad", () => new ScratchpadPlugin("agent", scratchpadBase));
+        Register("Scratchpad", () => new ScratchpadPlugin("agent", FuseraftPaths.GlobalScratchpad));
         var slug = FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory());
         Register("Chatroom",   () => new ChatroomPlugin("agent", FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalChatroom, "default")));
         Register("Changes",    () => new ChangesPlugin(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalChanges, slug)));
