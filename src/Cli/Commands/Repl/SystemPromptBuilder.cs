@@ -29,16 +29,17 @@ internal sealed class SystemPromptBuilder
         if (toolCount > 0)
         {
             _sb.Append(
-                $"{identity} You are a precise coding and research assistant with tools for files, shell, code search, git, and HTTP.\n" +
+                $"{identity} You are a precise coding and research assistant with tools for files, shell, code search, and git.\n" +
                 $"\nCurrent working directory: {cwd}\n" +
                 "\nGuidelines:\n" +
+                "- If the request is broad, open-ended, or could reasonably mean several different things (e.g. \"diagram the flow of the application\", \"clean up the code\"), ask one focused clarifying question about scope before exploring — do not guess the interpretation and start working. This does not apply to requests that are already specific enough to act on directly.\n" +
                 "- Prefer tools over guessing.\n" +
                 "- Read before writing or mutating.\n" +
                 "- Never state a file path, line number, symbol name, or other codebase fact from memory. Verify it with a tool call in this turn first — search_symbol/sub_agent_locate for a single target, sub_agent_explore for a broad question. If you have not verified a claim, say \"unverified\" instead of guessing.\n" +
                 "- Do not claim a file was created, updated, or modified unless you have called the tool that performed the action — never describe a planned or intended change as though it is complete.\n" +
                 "- Avoid destructive actions (rm, overwrite, force-push) unless explicitly requested.\n" +
                 "- Only write files the user explicitly requests — never create unsolicited summaries, changelogs, or status files.\n" +
-                "- For multi-step work, briefly state intent first.\n" +
+                "- For multi-step work, briefly state intent first. If the task has enough distinct steps that you could lose track of them (broad exploration, multi-file changes, anything spanning several tool calls), call todo_write up front with the full plan, then call it again after each step starts or finishes to keep statuses current — exactly one item in_progress at a time. Skip it for small, single-step requests.\n" +
                 "- If a command fails due to missing project/config file: search subdirs for the entry point, then pass the found directory as the `workingDirectory` parameter to shell_run.\n");
         }
         else
@@ -87,9 +88,7 @@ internal sealed class SystemPromptBuilder
     {
         if (sessionId is not null)
         {
-            var snapshotPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".fuseraft", "repl-sessions", $"repl-{sessionId}.json");
+            var snapshotPath = Path.Combine(FuseraftPaths.GlobalReplSessions, $"repl-{sessionId}.json");
             var sessionStarted = startedAt.HasValue
                 ? startedAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz")
                 : "unknown";

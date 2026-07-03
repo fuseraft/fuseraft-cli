@@ -17,7 +17,7 @@ namespace fuseraft.Infrastructure.Storage;
 /// </para>
 ///
 /// <para>
-/// Agents use <c>stat_file</c> to probe the current version before issuing writes.
+/// Agents use <c>get_file_info</c> to probe the current version before issuing writes.
 /// Passing <c>baseVersion</c> to <c>write_file</c> causes the plugin to reject the write
 /// with <c>VERSION_MISMATCH</c> when the current version differs, preventing lost updates.
 /// </para>

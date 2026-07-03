@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using fuseraft.Cli.Commands;
 using fuseraft.Cli.Display;
 using fuseraft.Core;
 using fuseraft.Core.Models;
@@ -53,10 +54,10 @@ public sealed class ReplNextCommand(ILoggerFactory loggerFactory) : AsyncCommand
         }
         else if (!string.IsNullOrEmpty(legacyKey))
         {
-            await keyStore.StoreAsync(legacyKey);
             userCfg!.ApiKey = legacyKey;
+            if (await KeyStorePersistence.TryStoreAsync(keyStore, legacyKey))
+                AnsiConsole.MarkupLine($"[dim]API key migrated to {Markup.Escape(keyStore.StoreName)}.[/]");
             UserConfigStore.Save(userCfg);
-            AnsiConsole.MarkupLine($"[dim]API key migrated to {Markup.Escape(keyStore.StoreName)}.[/]");
         }
         else if (userCfg is not null)
         {
@@ -66,6 +67,7 @@ public sealed class ReplNextCommand(ILoggerFactory loggerFactory) : AsyncCommand
         var modelId = ResolveModelId(settings, userCfg);
 
         bool pendingSave = false;
+        bool keyStored   = true;
         if (userCfg == null || !userCfg.IsConfigured)
         {
             if (jsonMode)
@@ -79,15 +81,15 @@ public sealed class ReplNextCommand(ILoggerFactory loggerFactory) : AsyncCommand
             bool selectedFromList;
             (userCfg, wizardKey, selectedFromList) = await ReplFactory.RunSetupWizardAsync(modelId, userCfg);
             if (userCfg is null || wizardKey is null) return 1;
-            if (!string.IsNullOrEmpty(wizardKey))
-                await keyStore.StoreAsync(wizardKey);
+            keyStored = string.IsNullOrEmpty(wizardKey) || await KeyStorePersistence.TryStoreAsync(keyStore, wizardKey);
             userCfg.ApiKey = wizardKey;
             modelId        = userCfg.ModelId;
             if (selectedFromList)
             {
                 UserConfigStore.Save(userCfg);
                 AnsiConsole.MarkupLine($"[dim]Settings saved to[/] [bold]{Markup.Escape(UserConfigStore.ConfigPath)}[/]");
-                AnsiConsole.MarkupLine($"[dim]API key stored in[/] [bold]{Markup.Escape(keyStore.StoreName)}[/]");
+                if (keyStored)
+                    AnsiConsole.MarkupLine($"[dim]API key stored in[/] [bold]{Markup.Escape(keyStore.StoreName)}[/]");
             }
             else
             {
@@ -269,6 +271,7 @@ public sealed class ReplNextCommand(ILoggerFactory loggerFactory) : AsyncCommand
         {
             JsonMode     = jsonMode,
             SkillsPlugin = skillsPlugin,
+            KeyStored    = keyStored,
         };
         if (skillsPlugin is not null)
             ctx.LineReader.SetSkillSlugs([.. skillsPlugin.Slugs]);
@@ -286,7 +289,7 @@ public sealed class ReplNextCommand(ILoggerFactory loggerFactory) : AsyncCommand
                    $"The compact summary is now the active context. Continue the current task from here.";
         });
         replSessionPlugin?.SetStatusDelegate(
-            () => (ctx.EstimateTokens(), ReplTurn.ContextTokenBudget, ctx.TurnIndex));
+            () => (ctx.EstimateTokens(), ctx.ContextTokenBudget, ctx.TurnIndex));
 
         if (snapshot is not null)
         {

@@ -16,6 +16,6 @@ public static class ApiKeyStoreFactory
             if (store.IsAvailable) return store;
         }
 
-        return new PlainTextFallbackKeyStore();
+        return new UnavailableKeyStore();
     }
 }

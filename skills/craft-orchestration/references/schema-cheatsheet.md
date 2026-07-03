@@ -146,10 +146,10 @@ Orchestration:
 
 | Plugin | What it provides |
 |--------|-----------------|
-| `FileSystem` | read_file, write_file, patch_file, list_files, search_files, delete_file, … |
+| `FileSystem` | read_file, write_file, patch_file, list_files, get_file_info, delete_file, … |
 | `Shell` | shell_run, shell_run_script, shell_run_background, shell_get_job_* |
 | `Git` | git_status, git_diff, git_log, git_add, git_commit, git_push, git_pull, … |
-| `Search` | search_files, search_content, search_symbol, search_callers |
+| `Search` | search_content, search_symbol, search_callers |
 | `Http` | http_get, http_post, http_put, http_patch, http_delete |
 | `Json` | json_format, json_get, json_keys, json_merge, json_validate |
 | `Scratchpad` | scratchpad_write, scratchpad_read, scratchpad_read_all, scratchpad_search |
