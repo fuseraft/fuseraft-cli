@@ -15,7 +15,7 @@ fuseraft addresses this with four interlocking control layers:
 | **Validators** | Block routes until a disk artifact or tool-call record proves the claim |
 | **Change tracking** | Records every file write, shell command, and git commit to a JSONL log on disk |
 | **Routing corrections** | Injects error messages and re-invokes the agent when routing signals are wrong or validators fail |
-| **Stagnation detection** | Throws after 3 consecutive bad turns rather than letting an agent loop |
+| **Stagnation detection** | Throws after too many consecutive bad turns rather than letting an agent loop — the exact counter and default depend on `Selection.Type` (see [Routing corrections](#routing-corrections)) |
 
 > **Scope note — REPL vs orchestration configs.** Everything below (validators, change tracking, routing corrections, stagnation detection) is orchestrator machinery, wired up by `OrchestratorBuilder` for configs with `Selection`/`Agents`/`Validation` sections. `fuseraft repl` does not run through an orchestrator, so none of these four layers apply there. The REPL's only anti-fabrication check is a single regex in `ReplTurn.ContainsMutationClaim` that catches first-person "I wrote/fixed/updated ..." language unaccompanied by a write-class tool call in the same turn, plus the forced-tool-call behavior for identify/locate-style questions (`ReplTurn.ForceEvidenceQuestionPattern`). For tasks where hallucinated progress is a real risk — long or high-stakes changes, work you can't easily eyeball — prefer an orchestration config (even a single-agent one) so the full validator/change-tracking stack is in effect, rather than relying on the REPL's lighter-weight heuristics.
 
@@ -27,7 +27,7 @@ Enable change tracking first — it is the ground-truth record that validators a
 
 ```yaml
 ChangeTracking:
-  Path: .fuseraft/state/changes.json
+  Path: ~/.fuseraft/state/{project_slug}/changes.json
 ```
 
 With this enabled, every `write_file`, `delete_file`, `shell_run`, `shell_run_script`, and `git_commit` call is recorded to `changes.json`. Downstream agents can call `changes_read_latest()` (via the `Changes` plugin) to see what previous agents actually did. Validators that reference `Validation.ChangeLogPath` cross-check their evidence against this log.
@@ -56,6 +56,7 @@ When `ChangeTracking` is configured, fuseraft maintains a second derived artifac
 | `FailedAttempts` | Ring buffer (last 10) of attempts that were recorded as failed this session — description, error summary, and timestamp. |
 | `SignificantChanges` | Ring buffer (last 50) of file writes, patches, copies, and deletes this session — path, operation, and timestamp. |
 | `Build` | Most recent build result — succeeded flag, exit code, command, and errors. |
+| `OpenTasks` | Tasks opened (description, status) but not yet completed this session. |
 
 **Session scoping:**
 
@@ -80,14 +81,21 @@ Validators are deterministic pre-flight checks that run before a keyword route f
 Blocks until `brief.json` exists on disk with non-empty `goal`, `files_to_change`, `acceptance_criteria`, and `implementation`.
 
 ```yaml
-- Keyword: "HANDOFF TO DEVELOPER"
-  Agent: Developer
-  Validator: RequireBrief
-  SourceAgents:
-    - Planner
+Validation:
+  BriefPath: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json
+
+Selection:
+  Routes:
+    - Keyword: "HANDOFF TO DEVELOPER"
+      Agent: Developer
+      Validator: RequireBrief
+      SourceAgents:
+        - Planner
 ```
 
-The Planner must call `write_file` to produce `.fuseraft/artifacts/brief.json` before this route fires. A claimed brief — one described in prose but never written — will not pass.
+The Planner must call `write_file` to produce `brief.json` at `Validation.BriefPath` before this route fires. A claimed brief — one described in prose but never written — will not pass.
+
+> `RequireBrief` reads `Validation.BriefPath`, so the `Validation` section must be present. If it is omitted entirely, `RequireBrief` is silently unavailable — the route fires unconditionally and the "must call `write_file`" guarantee above does not hold. The same applies to `RequireAllFilesWritten` and `TestReportValid` below.
 
 ### RequireWriteFile
 
@@ -216,9 +224,9 @@ Provide file paths used by validators that read disk artifacts:
 
 ```yaml
 Validation:
-  BriefPath: .fuseraft/artifacts/brief.json
+  BriefPath: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json
   TestReportPath: .fuseraft/artifacts/test-report.json
-  ChangeLogPath: .fuseraft/state/changes.json
+  ChangeLogPath: ~/.fuseraft/state/{project_slug}/changes.json
   TestAssertionPatterns:
     - \bassert\b
     - \bexpect\b
@@ -234,9 +242,9 @@ Validation:
 
 When an agent produces no valid routing keyword, an unknown keyword, multiple keywords in the same response, or a keyword that belongs to a different role, fuseraft injects a correction message and re-invokes the agent. The agent does not advance the pipeline — it must produce a valid turn to proceed.
 
-**The counter covers all failure modes together.** A turn with no keyword, then a turn with a wrong-role keyword, then a turn with a validator failure increments the counter to 3 — it does not reset between different failure types.
+**With `Selection.Type: graph`** (`GraphOrchestrator`), one counter covers all failure modes together — a turn with no keyword, then a turn with a wrong-role keyword, then a turn with a validator failure all increment the same counter, which does not reset between different failure types. When it reaches `Selection.Graph.MaxRetries` (default 4), `ValidatorStuckException` is raised and the session stops.
 
-When the counter reaches 3 a `ValidatorStuckException` is raised and the session stops. This prevents an agent from looping indefinitely between different failure modes.
+**With `Selection.Type: keyword` or `statemachine`**, there is no single shared counter. Validator/contract failures escalate per failure-type threshold in `FailureHandlingConfig` (default 3, or 2 for `ConflictingEvidence` — see [Failure handling](configuration.md#failure-handling)); a bare no-keyword/no-signal turn only triggers a periodic warning (every 5 consecutive same-agent turns) and is otherwise bounded by `Termination.MaxIterations` alone. Either way, an agent cannot loop indefinitely without eventually hitting a hard stop or a warning that redirects it.
 
 ---
 
@@ -265,7 +273,7 @@ To ground summaries in the change log, configure both `Compaction` and `ChangeTr
 
 ```yaml
 ChangeTracking:
-  Path: .fuseraft/state/changes.json
+  Path: ~/.fuseraft/state/{project_slug}/changes.json
 
 Compaction:
   TriggerTurnCount: 30
@@ -318,7 +326,7 @@ Security:
   FileSystemSandboxPath: /workspace/project
 ```
 
-All `read_file`, `write_file`, `delete_file`, and shell path arguments are resolved canonically. Any access outside the tree returns `[DENIED: sandbox]`. System binary prefixes (`/usr/`, `/bin/`, `/etc/`) are exempted so agents can run standard tools.
+All `read_file`, `write_file`, `delete_file`, and shell path arguments are resolved canonically. Any access outside the tree returns a `[DENIED] '<path>': <reason>` error. System binary prefixes (`/usr/`, `/bin/`, `/sbin/`, `/lib/`, `/lib64/`, `/opt/`, `/nix/`, `/run/current-system/`, `/snap/`) are exempted so agents can run standard tools — note `/etc/` is *not* exempted. `~/.fuseraft` is always accessible regardless of the sandbox, since agents need to read and write session artifacts (briefs, events, context summaries) even when the project sandbox is locked to the repo root.
 
 For stricter isolation, add `CodeExecution` to the agent's plugins list and configure a Docker sandbox. Commands run inside a container rather than the host shell — they cannot write outside the container filesystem regardless of sandbox config.
 
@@ -333,12 +341,12 @@ Orchestration:
   Name: Software Team
 
   ChangeTracking:
-    Path: .fuseraft/state/changes.json
+    Path: ~/.fuseraft/state/{project_slug}/changes.json
 
   Validation:
-    BriefPath: .fuseraft/artifacts/brief.json
+    BriefPath: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json
     TestReportPath: .fuseraft/artifacts/test-report.json
-    ChangeLogPath: .fuseraft/state/changes.json
+    ChangeLogPath: ~/.fuseraft/state/{project_slug}/changes.json
     TestAssertionPatterns:
       - \bassert\b
       - \bexpect\b
@@ -362,8 +370,8 @@ Orchestration:
     - Name: Planner
       Instructions: >-
         You are a software planner. Read the codebase, identify what needs to change,
-        and write .fuseraft/artifacts/brief.json with goal, files_to_change, and acceptance_criteria.
-        When done, write HANDOFF TO DEVELOPER on its own line.
+        and write ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json with goal,
+        files_to_change, and acceptance_criteria. When done, write HANDOFF TO DEVELOPER on its own line.
       Model: strong
       Plugins: [FileSystem]
       FunctionChoice: auto
@@ -371,7 +379,7 @@ Orchestration:
 
     - Name: Developer
       Instructions: >-
-        You are a software developer. Read .fuseraft/artifacts/brief.json to understand the task.
+        You are a software developer. Read ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json to understand the task.
         Implement every file in files_to_change. Run the build with shell_run to verify
         before handing off. Write HANDOFF TO TESTER on its own line when done.
       Model: strong
@@ -381,7 +389,7 @@ Orchestration:
 
     - Name: Tester
       Instructions: >-
-        You are a software tester. Read .fuseraft/artifacts/brief.json for acceptance criteria.
+        You are a software tester. Read ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json for acceptance criteria.
         Call changes_read_latest() to see what was implemented. Write tests, run them with shell_run,
         and write .fuseraft/artifacts/test-report.json before handing off.
         Write HANDOFF TO REVIEWER on its own line when all tests pass.
@@ -393,7 +401,7 @@ Orchestration:
 
     - Name: Reviewer
       Instructions: >-
-        You are a code reviewer. Read .fuseraft/artifacts/brief.json and .fuseraft/artifacts/test-report.json.
+        You are a code reviewer. Read ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json and .fuseraft/artifacts/test-report.json.
         Verify the implementation against every acceptance criterion. Re-run key commands.
         Emit a JSON review block before your decision keyword.
         Write APPROVED on its own line when satisfied.
@@ -471,7 +479,7 @@ Not every task needs all of these controls. Use this table to decide what to inc
 | Tester writes placeholder tests | `TestReportValid` + `TestAssertionPatterns` |
 | Reviewer gives vague approvals | `RequireReviewJudgement` on the `APPROVED` route |
 | One agent triggers another agent's route | `SourceAgents` on every route |
-| Agent loops between failure modes | Stagnation detection is always on; confirm counter fires at 3 |
+| Agent loops between failure modes | Stagnation detection is always on; tune `Selection.Graph.MaxRetries` (graph) or the relevant `FailureHandling.<Type>.Threshold` (keyword/statemachine) if it fires too early or too late |
 | Compaction loses real state | Increase `TriggerTurnCount`; set `Validation.ChangeLogPath` |
 | Agent escapes expected directory | Set `Security.FileSystemSandboxPath` |
 | Expensive model burning budget mid-loop | Set `MaxTotalTokens`; use a fast model for the brief and compaction |

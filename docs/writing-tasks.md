@@ -50,7 +50,7 @@ The expected output is what the Reviewer needs to verify the feature actually wo
 
 ## Write acceptance criteria that can be run, not read
 
-Acceptance criteria are checked by the Reviewer and (when `expected_output_contains` is set) by the `RequireAcceptanceCriteriaPassedValidator`. Prose criteria can only be "verified" by reading code. Criteria with expected output can be verified by running the program.
+Acceptance criteria are checked by the Reviewer and (when `expected_output_contains` is set) by the `RequireAcceptanceCriteriaPassed` validator. Prose criteria can only be "verified" by reading code. Criteria with expected output can be verified by running the program.
 
 **Prose-only (weak):**
 
@@ -83,7 +83,7 @@ These criteria are checkable by code inspection. A Reviewer can claim PASS on al
 ]
 ```
 
-The `RequireAcceptanceCriteriaPassedValidator` reads `expected_output_contains` from the brief and blocks `APPROVED` if any sentinel was never found in a session command output. The Reviewer is forced to run the program, not just read the code.
+The `RequireAcceptanceCriteriaPassed` validator reads `expected_output_contains` from the brief and blocks `APPROVED` if any sentinel was never found in a session command output. The Reviewer is forced to run the program, not just read the code.
 
 See [Routing Validators — RequireReviewJudgement](validators.md#requirereviewjudgement) for the coverage check that enforces one review entry per criterion.
 
@@ -155,7 +155,7 @@ When the runtime criterion fails, the Reviewer knows exactly which layer is brok
 | Reviewer ran a shell command | `RequireShellPass` |
 | Reviewer produced a per-criterion judgement block | `RequireReviewJudgement` |
 | Reviewer covered every brief criterion | `RequireReviewJudgement` + `Validation.BriefPath` |
-| Testable criteria were run and output matched | `RequireAcceptanceCriteriaPassedValidator` |
+| Testable criteria were run and output matched | `RequireAcceptanceCriteriaPassed` |
 
 `RequireWriteFile` is the cheapest check — use it when any file write is sufficient. `RequireAllFilesWritten` is stricter and requires `Validation.BriefPath` to be set. For the Reviewer, combine `RequireShellPass` and `RequireReviewJudgement` at minimum; add a `BriefPath` to enforce criterion coverage.
 

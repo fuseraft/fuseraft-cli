@@ -324,7 +324,7 @@ Orchestration:
     - Name: ImplementationComplete
       Requires:
         - FilesWritten:
-            Source: .fuseraft/artifacts/brief.json
+            Source: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json
             Field: files_to_change
         - CommandSucceeded:
             PatternField: "verify_command"   # reads the verify command from brief.json
@@ -1266,4 +1266,4 @@ Planner  ──HANDOFF TO DEVELOPER [RequireBrief]──→  Developer
 
 Each arrow is a keyword route. Guards in parentheses are validators that block the route until evidence is present. `SourceAgents` restrictions enforce role boundaries — for example, Developer cannot emit `BUGS FOUND` (only the Tester can), and the Tester cannot emit `REVISION REQUIRED` (only the Reviewer can).
 
-**Stuck detection** is built in: if an agent produces no valid keyword — or a keyword that belongs to a different role — for 3 consecutive turns, a `ValidatorStuckException` is raised and the session stops with a descriptive error. The same counter covers validator failures, missing keywords, and ambiguous multi-keyword responses; the counters do not reset each other, so alternating failure modes are caught at the same threshold.
+**Stuck detection** is built in, but the exact mechanism depends on `Selection.Type`. With `graph`, one counter covers no-keyword, foreign-keyword, multi-keyword, and validator-failure turns together, escalating at `Selection.Graph.MaxRetries` (default 4) — alternating failure modes are caught at the same threshold since the counter doesn't reset between different failure types. With `keyword`/`statemachine`, validator/contract failures escalate independently per failure-type threshold in `FailureHandlingConfig` (default 3, or 2 for `ConflictingEvidence`), while a bare no-keyword/no-signal turn isn't covered by that counter — it gets a periodic warning every 5 consecutive same-agent turns and is otherwise bounded only by `Termination.MaxIterations`. Either way, a `ValidatorStuckException` (or, for keyword/statemachine, the relevant threshold) ends the session with a descriptive error rather than looping forever. See [Validators — Stuck detection](validators.md#stuck-detection) for the full breakdown.

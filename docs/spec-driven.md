@@ -114,7 +114,7 @@ fuseraft's `--spec` flag supports all three levels. The difference is whether yo
 | **Read by** | All agents (via system prompt) | Validators, Reviewer, Compactor |
 | **Format** | Any — prose, Markdown, JSON | Structured JSON |
 | **Scope** | Design intent, user journeys, constraints | Precise file list, testable criteria |
-| **Lives in** | Anywhere on disk | `.fuseraft/artifacts/sessions/<id>/brief.json` |
+| **Lives in** | Anywhere on disk | `~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json` |
 
 With `--spec`, the Planner is instructed to derive `brief.json` from the spec rather than synthesising it from the task prompt. The spec drives the plan; the plan drives the implementation; validators enforce the plan.
 

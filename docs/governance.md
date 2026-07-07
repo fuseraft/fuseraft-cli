@@ -99,11 +99,11 @@ SLO events appear in the governance audit log. They do not currently surface in 
 
 ## Rate limiting
 
-A single failure counter tracks consecutive bad turns per agent. A "bad turn" is any turn that results in a correction being injected: no routing keyword, a keyword that belongs to a different role, multiple keywords in one response, or a keyword whose validator rejected the handoff.
+A failure counter tracks bad turns per agent. A "bad turn" is any turn that results in a correction being injected: no routing keyword, a keyword that belongs to a different role, multiple keywords in one response, or a keyword whose validator rejected the handoff.
 
-When the counter reaches 3, `ValidatorStuckException` is thrown and the session stops with a descriptive error. The checkpoint is saved so the session can be resumed after diagnosing the issue.
+With `Selection.Type: graph`, a single counter covers all of these uniformly and escalates at `Selection.Graph.MaxRetries` (default 4). With `keyword`/`statemachine`, only validator/contract failures are counted this way, classified by type and escalated per `FailureHandling.<Type>.Threshold` (default 3, or 2 for `ConflictingEvidence`); a bare missing-keyword/signal turn is not covered by this counter (see [Validators — Stuck detection](validators.md#stuck-detection) for the full breakdown). Either way, when the threshold is reached, `ValidatorStuckException` is thrown and the session stops with a descriptive error. The checkpoint is saved so the session can be resumed after diagnosing the issue.
 
-The rate limiter enforces the same threshold via a 10-minute window: if 3 or more failures accumulate within that window, escalation fires immediately rather than waiting for the consecutive-turn count.
+`GovernanceKernel`'s rate limiter enforces the same threshold via a 10-minute rolling window alongside the consecutive-turn count: if that many failures accumulate within the window, escalation fires immediately rather than waiting for the consecutive-turn count to catch up.
 
 This prevents infinite correction loops where an agent keeps re-emitting a broken handoff without making progress. The counter does not reset when the failure mode changes — alternating between validator failures and no-keyword turns hits the threshold at the same rate as repeated identical failures.
 

@@ -181,7 +181,7 @@ Approve? (y/N):
 
 **Stuck-agent escalation**
 
-If an agent fails the same validator 3 consecutive times, the session pauses regardless of `--hitl` mode:
+If an agent fails the same validator enough consecutive times — the configured `FailureHandling` threshold for `keyword`/`statemachine` sessions (default 3, or `Selection.Graph.MaxRetries` for `graph` sessions, default 4) — the session pauses regardless of `--hitl` mode:
 
 ```
 ⚠ HITL intervention required.
@@ -684,10 +684,10 @@ When a session has stalled — the agent keeps making the same mistake, misunder
 
 The REPL automatically maintains a persistent memory store at `~/.fuseraft/memory/repl/`. Each entry is identified by a UUID and stored as `memory_{guid}.md`. Memories are **scoped to the working directory** where they were created:
 
-- If the current directory contains a `.fuseraft/` folder, the REPL loads only memories whose GUIDs are listed in `.fuseraft/memory/sessions/{session_id}/memory_refs.json`. Directories with a `.fuseraft/` folder but no refs file start with an empty memory set (no cross-project bleed).
+- If the current directory contains a `.fuseraft/` folder, the REPL loads only memories whose GUIDs are listed in `~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json`. Directories with a `.fuseraft/` folder but no refs file start with an empty memory set (no cross-project bleed).
 - Directories without a `.fuseraft/` folder fall back to loading all global memories (legacy behaviour, useful outside of a project context).
 
-When a memory is saved, the REPL writes the entry to the global store and registers its GUID in `.fuseraft/memory/sessions/{session_id}/memory_refs.json` for the current session. Repeated saves of the same-named memory reuse the existing GUID, so the entry is updated in-place rather than duplicated.
+When a memory is saved, the REPL writes the entry to the global store and registers its GUID in `~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json` for the current session. Repeated saves of the same-named memory reuse the existing GUID, so the entry is updated in-place rather than duplicated.
 
 At session start, scoped memories are injected into the system prompt. When the session ends (via `/exit` or Ctrl+C), the model is prompted to extract key facts and they are saved automatically.
 
@@ -771,7 +771,7 @@ Use `/context` before compacting to see how full the window is. `/compact` is ad
 
 **Event log**
 
-Every session appends structured JSONL events to `.fuseraft/repl_events.jsonl` in the current working directory (created automatically). Each record is tagged with a UTC timestamp, session ID, and turn index. The full set of event types:
+Every session appends structured JSONL events to `~/.fuseraft/logs/{project_slug}/repl_events.jsonl` (created automatically). Each record is tagged with a UTC timestamp, session ID, and turn index. The full set of event types:
 
 | Event type | When emitted |
 |------------|-------------|
@@ -1153,7 +1153,7 @@ Run:      fuseraft run --config .fuseraft/config/orchestration.yaml "Your task"
 | `.fuseraft/architecture.yaml` | Architecture layer manifest for `fuseraft arch check` |
 | `.fuseraft/knowledge/lifecycle.yaml` | Retention policy for `fuseraft knowledge gc` |
 | `.fuseraft/knowledge/decisions/` | Architecture decision records (ADRs) |
-| `.fuseraft/knowledge/repository/` | Cross-session repository memory patterns |
+| `~/.fuseraft/knowledge/{project_slug}/repository/` | Cross-session repository memory patterns |
 | `.fuseraft/knowledge/objectives/` | Long-horizon objective tracking |
 
 These files are skipped if they already exist.
@@ -1166,7 +1166,7 @@ Repository semantic graph — index and query symbols across the codebase.
 
 ### `fuseraft graph build`
 
-Scan all `.cs`, `.go`, and `.py` source files under the project root and write (or overwrite) the repository semantic graph to `.fuseraft/state/repository.graph`. The graph records every file, namespace/package, type, interface, method, property, field, and ADR as a node; edges express structural relationships (`defines`, `imports`, `inherits`, `implements`, `references`, `adr_governs`).
+Scan all `.cs`, `.go`, and `.py` source files under the project root and write (or overwrite) the repository semantic graph to `~/.fuseraft/state/{project_slug}/repository.graph`. The graph records every file, namespace/package, type, interface, method, property, field, and ADR as a node; edges express structural relationships (`defines`, `imports`, `inherits`, `implements`, `references`, `adr_governs`).
 
 Agents use the graph via the `graph_search`, `graph_refs`, and `graph_dependents` plugin tools. The graph is also updated incrementally by the harness whenever an agent writes a `.cs`, `.go`, or `.py` file.
 
@@ -1179,7 +1179,7 @@ fuseraft graph build [options]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-d, --dir <path>` | current directory | Root directory to scan. |
-| `-o, --output <path>` | `.fuseraft/state/repository.graph` | Output path for the graph file. |
+| `-o, --output <path>` | `~/.fuseraft/state/{project_slug}/repository.graph` | Output path for the graph file. |
 
 **Examples**
 
@@ -1378,11 +1378,11 @@ fuseraft knowledge gc [options]
 |------|---------|-------------|
 | `--apply` | off | Commit lifecycle changes to disk. Without this flag the command reports what would change without touching any files. |
 | `-l, --lifecycle <path>` | `.fuseraft/knowledge/lifecycle.yaml` | Path to the lifecycle policy file. |
-| `--graph <path>` | `.fuseraft/state/repository.graph` | Override the repository graph path. |
+| `--graph <path>` | `~/.fuseraft/state/{project_slug}/repository.graph` | Override the repository graph path. |
 
 **`.fuseraftignore` integration**
 
-When `.fuseraft/.fuseraftignore` is present and `--apply` is set, `fuseraft knowledge gc` also deletes ephemeral state files listed in the ignore file (e.g. `state/knowledge_findings.json`). Files produced by gc itself — such as `provenance.archive.json` — are never deleted.
+When `.fuseraft/.fuseraftignore` is present and `--apply` is set, `fuseraft knowledge gc` also deletes ephemeral state files listed in the ignore file (e.g. `knowledge_findings.json` under `~/.fuseraft/state/{project_slug}/`). Files produced by gc itself — such as `provenance.archive.json` — are never deleted.
 
 **Policy fields** (in `lifecycle.yaml`)
 
@@ -1407,7 +1407,7 @@ fuseraft knowledge gc --apply
 fuseraft knowledge gc --apply --lifecycle custom/lifecycle.yaml
 ```
 
-Archived ADRs are moved to `.fuseraft/knowledge/decisions/archive/` and remain queryable via `decision_search`. Archived provenance records are appended to `.fuseraft/state/provenance.archive.json`.
+Archived ADRs are moved to `.fuseraft/knowledge/decisions/archive/` and remain queryable via `decision_search`. Archived provenance records are appended to `~/.fuseraft/state/{project_slug}/provenance.archive.json`.
 
 ---
 
@@ -1486,7 +1486,7 @@ fuseraft memory review [options]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--dir <path>` | `.fuseraft/knowledge/repository` | Repository memory directory. |
+| `--dir <path>` | `~/.fuseraft/knowledge/{project_slug}/repository` | Repository memory directory. |
 | `--all` | off | Show all entries including `Approved` and `Rejected`, not just `Candidate` entries. |
 
 **Examples**
@@ -2069,7 +2069,7 @@ fuseraft log repl [options]
 | `-n, --last <N>` | all | Show only the last N entries. |
 | `--session <id>` | — | Filter by session ID (prefix match). |
 | `--event <type>` | — | Filter by event type (e.g. `command`, `skill_curation_complete`, `assistant_response`). |
-| `--path <path>` | `.fuseraft/logs/repl_events.jsonl` | Override the log file path. |
+| `--path <path>` | `~/.fuseraft/logs/{project_slug}/repl_events.jsonl` | Override the log file path. |
 
 **Examples**
 
@@ -2100,7 +2100,7 @@ fuseraft log app [options]
 |------|---------|-------------|
 | `-n, --last <N>` | `50` | Show the last N lines. |
 | `--level <level>` | — | Filter by Serilog level token: `inf`, `wrn`, `err`, `dbg`. |
-| `--path <path>` | `.fuseraft/logs/app.log` | Override the log file path. |
+| `--path <path>` | `~/.fuseraft/logs/{project_slug}/app.log` | Override the log file path. |
 
 **Examples**
 

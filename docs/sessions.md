@@ -106,14 +106,14 @@ REPL agents can inspect their own session and diagnostic logs using the built-in
 | `get_context_status` | `estimated_tokens`, `budget`, `pct_used`, `tokens_remaining`, and current `turn` index |
 | `compact_context` | Compact history into a summary; optional `focus` hint steers the summary |
 
-**Log files written per working directory:**
+**Log files (global, keyed by `{project_slug}` and — for `events` — `{session_id}`):**
 
 | Log name | Path | Contents |
 |----------|------|----------|
-| `repl_events` | `.fuseraft/logs/repl_events.jsonl` | REPL lifecycle events tagged with session ID and turn index |
-| `events` | `~/.fuseraft/logs/sessions/{project_slug}/{session_id}/events.jsonl` | Orchestration events from `fuseraft run` sessions |
-| `provider_errors` | `.fuseraft/logs/provider_errors.jsonl` | Provider API errors and retry attempts |
-| `app` | `.fuseraft/logs/app.log` | Application diagnostic log |
+| `repl_events` | `~/.fuseraft/logs/{project_slug}/repl_events.jsonl` | REPL lifecycle events tagged with session ID and turn index |
+| `events` | `~/.fuseraft/sessions/{project_slug}/{session_id}/events.jsonl` | Orchestration events from `fuseraft run` sessions |
+| `provider_errors` | `~/.fuseraft/logs/{project_slug}/provider_errors.jsonl` | Provider API errors and retry attempts |
+| `app` | `~/.fuseraft/logs/{project_slug}/app.log` | Application diagnostic log |
 
 **REPL event types** emitted to `repl_events.jsonl`:
 

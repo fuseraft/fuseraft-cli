@@ -49,7 +49,7 @@ Agents use the `decision_search`, `decision_read`, `decision_create`, and `decis
 
 ### Repository Semantic Graph
 
-A structural index of every file, namespace/package, type, interface, method, property, and field in the project, plus ADR nodes linked via `adr_governs` edges. Persisted as a single JSON file at `.fuseraft/state/repository.graph`. Scanning is per-language via a pluggable `IRepositoryGraphStrategy` — C#, Go, and Python are supported out of the box, and a repo can mix all three.
+A structural index of every file, namespace/package, type, interface, method, property, and field in the project, plus ADR nodes linked via `adr_governs` edges. Persisted as a single JSON file at `~/.fuseraft/state/{project_slug}/repository.graph`. Scanning is per-language via a pluggable `IRepositoryGraphStrategy` — C#, Go, and Python are supported out of the box, and a repo can mix all three.
 
 Build the graph with:
 
@@ -80,7 +80,7 @@ Go and Python have no formal interface keyword: Go embedding resolves to `inheri
 
 ### Provenance and Confidence Tracking
 
-Every verifiable claim made during a session can be recorded with supporting evidence in the provenance registry (`.fuseraft/state/provenance.json`). Validators emit `ClaimRecord` entries when they pass; downstream agents and the Context Broker use the registry to determine whether evidence supports a given artifact.
+Every verifiable claim made during a session can be recorded with supporting evidence in the provenance registry (`~/.fuseraft/state/{project_slug}/provenance.json`). Validators emit `ClaimRecord` entries when they pass; downstream agents and the Context Broker use the registry to determine whether evidence supports a given artifact.
 
 **Confidence tiers** are computed mechanically from the evidence composition — never from API response text:
 
@@ -191,7 +191,7 @@ Progress is computed on demand from `CompletedTasks.Count / (CompletedTasks.Coun
 
 ### Session Knowledge Findings Store
 
-Factual discoveries made during agent tool calls are persisted to `.fuseraft/state/knowledge_findings.json` after every turn and surfaced in future sessions without any embedding index.
+Factual discoveries made during agent tool calls are persisted to `~/.fuseraft/state/{project_slug}/knowledge_findings.json` after every turn and surfaced in future sessions without any embedding index.
 
 After each agent turn, `ObservationExtractor` inspects the turn's tool call results and creates an `Observation` for each discovery or state-change tool. The entity is derived from the tool's arguments — the file path for `read_file`, the search pattern for `grep_file`, etc. Observations with a non-null entity are written to `RepositoryKnowledgeStore` as `RepositoryKnowledgeFinding` records.
 
@@ -265,7 +265,7 @@ fuseraft knowledge gc --apply  # applies all policies
 | Demote aged memories | Demotes `Approved` memories not reinforced within the window back to `Candidate` (does not affect `Candidate` entries — their counts accumulate indefinitely until reviewed) |
 | Decay provenance confidence | Downgrades `Verified` claims older than `ConfidenceDecayDays` to `Inferred` |
 | Prune orphaned graph nodes | Removes nodes with no edges and no recent file touch |
-| Compact provenance registry | Archives expired `ClaimRecord` entries to `.fuseraft/state/provenance.archive.json` |
+| Compact provenance registry | Archives expired `ClaimRecord` entries to `~/.fuseraft/state/{project_slug}/provenance.archive.json` |
 | Delete ephemeral state files | When `.fuseraft/.fuseraftignore` is present, deletes state files marked ephemeral (e.g. `knowledge_findings.json`). `provenance.archive.json` is never deleted — gc writes to it. |
 
 Configure retention windows in `.fuseraft/knowledge/lifecycle.yaml` (created by `fuseraft init`).
@@ -274,20 +274,24 @@ Configure retention windows in `.fuseraft/knowledge/lifecycle.yaml` (created by 
 
 ## Directory Layout
 
+Most knowledge artifacts are project-local (`.fuseraft/`), but a few — repository graph, repository memory, provenance, and session knowledge findings — live in the global `~/.fuseraft/` home directory, keyed by `{project_slug}`:
+
 ```
-.fuseraft/
+.fuseraft/                                (project-local)
 ├── architecture.yaml                   ← layer manifest (user-authored)
-├── knowledge/
-│   ├── lifecycle.yaml                  ← lifecycle policy
-│   ├── decisions/
-│   │   ├── ADR-0001.json               ← architecture decision records
-│   │   └── archive/                    ← superseded ADRs (still queryable)
-│   ├── repository/
-│   │   ├── <id>.json                   ← repository memory entries
-│   │   └── MEMORY.md                   ← human-readable index
-│   └── objectives/
-│       └── OBJ-0001.yaml               ← long-horizon objectives
-└── state/
+└── knowledge/
+    ├── lifecycle.yaml                  ← lifecycle policy
+    ├── decisions/
+    │   ├── ADR-0001.json               ← architecture decision records
+    │   └── archive/                    ← superseded ADRs (still queryable)
+    └── objectives/
+        └── OBJ-0001.yaml               ← long-horizon objectives
+
+~/.fuseraft/                             (global, keyed by {project_slug})
+├── knowledge/{project_slug}/repository/
+│   ├── <id>.json                       ← repository memory entries
+│   └── MEMORY.md                       ← human-readable index
+└── state/{project_slug}/
     ├── repository.graph                ← repository semantic graph
     ├── knowledge_findings.json         ← entity-scoped findings from all sessions
     ├── provenance.json                 ← active claim records

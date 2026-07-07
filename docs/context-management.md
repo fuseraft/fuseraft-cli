@@ -115,7 +115,7 @@ directory are loaded. Directories without `.fuseraft/` fall back to all global m
 
 **REPL:** Memory is always active in the REPL — no config flag needed. Memories are extracted
 automatically at the end of each session and scoped to the working directory via
-`.fuseraft/memory/sessions/{session_id}/memory_refs.json`. Use `/memory` commands to inspect or delete them.
+`~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json`. Use `/memory` commands to inspect or delete them.
 
 See [Configuration — Memory](configuration.md#memory) for the full field reference.
 
@@ -653,7 +653,7 @@ Use targeted tools (e.g. read_file with startLine/maxLines, or grep_in_file) for
 
 The stub is actionable: it tells the agent what happened, which tool produced the result, and how to access specific sections without pulling the full payload back into context.
 
-**Storage:** the full content is written to `.fuseraft/artifacts/sessions/{sessionId}/tool-results/{id}.json`. Nothing is lost — the artifact is available for inspection or future retrieval.
+**Storage:** the full content is written to `~/.fuseraft/sessions/{project_slug}/{session_id}/tool-results/{id}.json`. Nothing is lost — the artifact is available for inspection or future retrieval.
 
 **Coverage:** applies to all tools in both `fuseraft run` sessions and `fuseraft repl` sessions. No configuration is required.
 
@@ -822,7 +822,7 @@ Here is the full sequence from session start through a long-running session:
 
 ```yaml
 ChangeTracking:
-  Path: .fuseraft/state/changes.json
+  Path: ~/.fuseraft/state/{project_slug}/changes.json
 
 Compaction:
   TriggerTurnCount: 40

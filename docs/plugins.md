@@ -298,7 +298,7 @@ Each entry shows the agent name, turn index, timestamp, files written/deleted, c
 
 ## Investigation
 
-Durable investigation memory: records hypotheses, rejected paths, and confirmed root causes so future agents never re-run the same dead-end investigation. All writes go to `.fuseraft/state/investigation-log.json`. The log survives compaction and is injected into every agent's context via the `investigation_log` context source.
+Durable investigation memory: records hypotheses, rejected paths, and confirmed root causes so future agents never re-run the same dead-end investigation. All writes go to `~/.fuseraft/state/{project_slug}/investigation-log.json`. The log survives compaction and is injected into every agent's context via the `investigation_log` context source.
 
 **Availability:** Only registered when `ChangeTracking` is present in the orchestration config — same gate as [Changes](#changes). Used by the `brownfield`, `audit`, and `graph` init templates.
 
@@ -584,7 +584,7 @@ Long-horizon objective tracking — record multi-session goals, attach tasks, an
 
 ## SessionContext
 
-Shared writable context summary for the current orchestration session. Agents write a plain-text summary before handing off; the successor reads it to catch up without re-reading every source file. The summary is stored at `.fuseraft/state/sessions/{session_id}/context_summary.md` — each `session_context_write` call replaces the previous content so the file always reflects current state.
+Shared writable context summary for the current orchestration session. Agents write a plain-text summary before handing off; the successor reads it to catch up without re-reading every source file. The summary is stored at `~/.fuseraft/sessions/{project_slug}/{session_id}/context_summary.md` — each `session_context_write` call replaces the previous content so the file always reflects current state.
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
