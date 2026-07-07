@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- An API key for at least one supported LLM provider (see [Models & Providers](models.md))
+- Access to at least one supported model provider (see [Models & Providers](models.md)) — a cloud API key, or a local model via [Ollama](https://ollama.com) (no key required)
 - Docker Desktop (only required for the `CodeExecution` plugin)
 - Git (only required for the `Git` plugin)
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10) (only required if building from source)

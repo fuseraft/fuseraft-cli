@@ -22,11 +22,11 @@ Define teams of AI agents in YAML. fuseraft-cli drives them through a coordinate
 
     [:octicons-arrow-right-24: Configuration](configuration.md)
 
--   :material-swap-horizontal:{ .lg .middle } **LLM-agnostic**
+-   :material-swap-horizontal:{ .lg .middle } **Model-agnostic**
 
     ---
 
-    Mix Anthropic, OpenAI, Google, Mistral, xAI, DeepSeek, and Azure OpenAI per agent in the same team. Rotate API keys automatically on rate limits.
+    Mix frontier LLMs and local SLMs per agent in the same team — Anthropic, OpenAI, Google, Mistral, xAI, DeepSeek, Azure OpenAI, or any model served through Ollama. Rotate API keys automatically on rate limits.
 
     [:octicons-arrow-right-24: Models & Providers](models.md)
 
