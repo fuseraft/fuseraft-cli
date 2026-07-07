@@ -90,6 +90,11 @@ public static partial class InitTemplates
             Capabilities:
               FileSystem: [read]
             FunctionChoice: required
+            Context:
+              - Source: session_context
+              - Source: file:.fuseraft/artifacts/audit-findings.json
+                MaxChars: 6000
+              - Source: own_history:2
             {AgentFileOptions}
             """;
 
@@ -158,6 +163,12 @@ public static partial class InitTemplates
             Capabilities:
               FileSystem: [read]
             FunctionChoice: required
+            Context:
+              - Source: session_context
+              - Source: file:.fuseraft/artifacts/remediation-plan.json
+                MaxChars: 6000
+              - Source: changes_recent:5
+              - Source: own_history:2
             {AgentFileOptions}
             """;
 

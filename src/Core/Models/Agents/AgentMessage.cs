@@ -51,9 +51,7 @@ public record AgentMessage
     public string Role { get; init; } = MessageRole.Assistant;
 
     /// <summary>
-    /// Token usage and estimated cost for this turn. Null for HITL messages.
-    /// For compaction summary messages, <see cref="TokenUsage.CostUsd"/> carries the
-    /// cumulative cost of all compacted turns so budget tracking remains accurate.
+    /// Token usage for this turn. Null for HITL messages.
     /// </summary>
     public TokenUsage? Usage { get; init; }
 

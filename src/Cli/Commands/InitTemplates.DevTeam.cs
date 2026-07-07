@@ -275,6 +275,9 @@ public static partial class InitTemplates
             Capabilities:
               FileSystem: [read]
             FunctionChoice: required
+            Context:
+              - Source: session_context
+              - Source: own_history:2
             {AgentFileOptions}
             """;
 

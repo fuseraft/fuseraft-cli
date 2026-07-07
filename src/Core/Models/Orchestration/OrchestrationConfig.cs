@@ -259,8 +259,7 @@ public record OrchestrationConfig
     /// and injected into the orchestrator's pre- and post-turn hooks: memory is loaded
     /// before each agent turn and appended to the agent's system instructions; the full
     /// turn history is offered to the provider for persistence after each turn.
-    /// Null (default) disables orchestration-level memory (agents that set
-    /// <c>EnableMemory: true</c> still use the static file-backed store at creation time).
+    /// Null (default) disables orchestration-level memory.
     /// </summary>
     public MemoryConfig? Memory { get; init; }
 }

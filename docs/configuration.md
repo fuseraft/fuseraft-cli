@@ -141,7 +141,6 @@ Each entry in `Agents` configures one participant in the group chat.
 | `MaxInTurnToolPairs` | int | `0` | no | Hard sliding-window cap (deterministic) on the number of tool call/result pairs kept in full within a turn. Before every inner LLM call, all but the most-recent N pairs are replaced with placeholders unconditionally — regardless of total token count. `0` means no limit. Recommended: 8–16 for high-volume action agents. |
 | `TrustScore` | number | `0.7` | no | Governance trust score (0.0–1.0) used to assign an execution ring. See [Governance](governance.md#execution-rings). |
 | `ContextWindow` | object | — | no | Filters the conversation history before it reaches this agent. See [ContextWindow](#contextwindow). |
-| `EnableMemory` | bool | `false` | no | When `true`, persistent memories from `~/.fuseraft/memory/agents/{Name}/` are prepended to the agent's instructions at session start. See [Memory](#memory). |
 | `SubAgentModel` | string | — | no | Model ID override for the sub-agent spawned by the `SubAgent` plugin. Defaults to the parent agent's model when unset. Useful for running a cheaper model (e.g. Haiku) for `sub_agent_explore` / `sub_agent_locate` calls. |
 | `SubAgentPlugins` | array | — | no | Explicit list of plugin names to load into the sub-agent. When unset the sub-agent receives the default read-only set: FileSystem read, Search, Shell read, Git read. Unknown names raise an error at session startup. |
 | `SubAgentMaxToolCalls` | int | `0` | no | Maximum tool-call iterations for `sub_agent_explore`. `0` uses the built-in default of 20. `sub_agent_locate` always uses a hard cap of 5 regardless of this setting. |
@@ -229,7 +228,6 @@ Agents:
 | int | inline is non-zero |
 | `TrustScore` | inline differs from `0.7` |
 | `FunctionChoice` | inline differs from `"auto"` |
-| `EnableMemory` | either inline or file is `true` |
 
 This means: to inherit a field from the file, simply omit it in the inline config. To override, set it explicitly.
 
@@ -278,7 +276,7 @@ Delegates an agent slot to a remote process that implements the [A2A protocol](h
 | `Url` | string | — | yes | Base URL of the remote A2A agent. Card is resolved from `{Url}/.well-known/agent.json`. |
 | `TimeoutSeconds` | int | `120` | no | HTTP timeout for card resolution and per-turn calls. |
 
-**Fields that apply when `RemoteAgent` is set:** `Name`, `Instructions`, `TrustScore`, `ContextWindow`, `MaxToolCallsPerTurn`, `EnableMemory`.
+**Fields that apply when `RemoteAgent` is set:** `Name`, `Instructions`, `TrustScore`, `ContextWindow`, `MaxToolCallsPerTurn`.
 
 **Fields that are ignored when `RemoteAgent` is set:** `Model`, `Plugins`, `FunctionChoice`, `Capabilities`, `SubAgentModel`, `SubAgentPlugins` — those are properties of the remote agent.
 
@@ -325,27 +323,14 @@ Filters are applied in order: `TextOnly` / `ExcludeAgents` first, then `MaxTurnA
 
 ## Memory
 
-When `EnableMemory: true` is set on an agent, fuseraft loads that agent's persistent memory store at session start and prepends a structured block to its instructions:
-
-```yaml
-- Name: Developer
-  EnableMemory: true
-  Instructions: You are a software engineer...
-```
+Every agent's persistent memory store is loaded and ranked by relevance before each turn, then
+injected into its system prompt automatically by the context assembly pipeline — no per-agent
+config is required. See [Context Management — Layer 2](context-management.md#layer-2-persistent-memory-pipeline-injected)
+for ranking and injection format details.
 
 **How it works**
 
 Memories are stored as Markdown files with YAML frontmatter in `~/.fuseraft/memory/agents/{Name}/`. An index file (`MEMORY.md`) maintains a one-line-per-entry listing in injection order.
-
-At session start, each memory entry is rendered into the agent's instructions as:
-
-```
-## Persistent Memory
-
-- [memory-name] (type): One-line description of the memory
-```
-
-When `EnableMemory: false` (the default), no memory is loaded and the directory is not read.
 
 **Memory storage location**
 
@@ -371,7 +356,7 @@ When the session ends, the model is asked to extract new memories from the conve
 
 ## Pluggable memory provider
 
-The `Memory` top-level key activates a live memory provider that runs pre- and post-turn hooks around every agent turn. Unlike the static `EnableMemory` flag (which loads once at session start), the pluggable provider fetches fresh context before each turn and can persist the full accumulated history after each turn.
+The `Memory` top-level key activates a live memory provider that runs pre- and post-turn hooks around every agent turn. The provider fetches fresh context before each turn and can persist the full accumulated history after each turn.
 
 ### Providers
 
@@ -415,15 +400,6 @@ Memory:
 | `Headers` | object | `{}` | HTTP headers merged into every request. Values support `${ENV_VAR}` expansion. |
 | `TimeoutSeconds` | int | `10` | Per-request HTTP timeout. |
 | `SaveEveryNTurns` | int | `10` | Save only every Nth turn; 1 = every turn. |
-
-### Relationship to `EnableMemory`
-
-`EnableMemory: true` on an agent and a top-level `Memory:` provider are independent:
-
-- `EnableMemory` loads memories once at agent creation time (synchronous, from disk).
-- `Memory:` loads fresh context before each turn via the provider (async, per-turn).
-
-Both can be active simultaneously. The injected blocks are additive — the `EnableMemory` block is baked into the agent's static instructions; the `Memory:` block is prepended at turn time.
 
 ---
 
@@ -707,6 +683,8 @@ Each line is a JSON object:
 **`validation_fail` payload:** `{ validator, consecutive }` — name of the blocking validator and how many times in a row it has fired for this agent.
 
 **`hitl_escalation` payload:** `{ message }` — the error message surfaced to the user when a validator fires 3 consecutive times and the session stalls.
+
+**`context_assembly` payload:** `{ knowledge_retrieved, knowledge_included, memory_loaded, memory_included, artifacts, context_chars, system_prompt_chars, assembly_ms, context_strategy, declared_sources, empty_sources }` (sequential-agent turns add `context_chars_breakdown`, `tool_count`, `tool_schema_est_tokens`). `context_strategy` is `"artifact_spec"` when the agent's `Context:` block drove assembly or `"shared_history_fallback"` when it fell back to `ContextWindow`-filtered shared history — the field to alert on if you expect every Reviewer/Tester/Critic-style agent to be running isolated and want to catch one that silently isn't. `declared_sources` lists the `Context:` sources requested (empty under the fallback strategy); `empty_sources` is the subset that resolved to no content at assembly time — e.g. a `brief_field:` naming a field the Planner never wrote — distinguishing "the spec omitted a needed source" (visible by reading the config) from "the spec named a source that was never produced" (only visible at runtime, via this field).
 
 **Omit** `Events` if you don't need the event stream.
 

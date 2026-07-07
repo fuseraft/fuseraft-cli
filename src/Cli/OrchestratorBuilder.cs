@@ -2004,13 +2004,10 @@ public static class OrchestratorBuilder
             FunctionChoice         = inline.FunctionChoice != "auto"                    ? inline.FunctionChoice         : baseConfig.FunctionChoice,
             TrustScore             = inline.TrustScore     != 0.7                       ? inline.TrustScore             : baseConfig.TrustScore,
             ContextWindow          = inline.ContextWindow                               ?? baseConfig.ContextWindow,
-            Capabilities           = inline.Capabilities.Count > 0                     ? inline.Capabilities           : baseConfig.Capabilities,
+            Capabilities           = inline.Capabilities.Count > 0                      ? inline.Capabilities           : baseConfig.Capabilities,
             MaxToolCallsPerTurn    = inline.MaxToolCallsPerTurn    != 0                 ? inline.MaxToolCallsPerTurn    : baseConfig.MaxToolCallsPerTurn,
             MaxInTurnContextTokens = inline.MaxInTurnContextTokens != 0                 ? inline.MaxInTurnContextTokens : baseConfig.MaxInTurnContextTokens,
             MaxInTurnToolPairs     = inline.MaxInTurnToolPairs     != 0                 ? inline.MaxInTurnToolPairs     : baseConfig.MaxInTurnToolPairs,
-#pragma warning disable CS0618 // EnableMemory is obsolete but still merged for backward-compat configs
-            EnableMemory           = inline.EnableMemory || baseConfig.EnableMemory,
-#pragma warning restore CS0618
             SubAgentModel          = inline.SubAgentModel                               ?? baseConfig.SubAgentModel,
             SubAgentPlugins        = inline.SubAgentPlugins                             ?? baseConfig.SubAgentPlugins,
             RemoteAgent            = inline.RemoteAgent                                 ?? baseConfig.RemoteAgent,

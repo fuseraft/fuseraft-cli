@@ -207,18 +207,6 @@ public record AgentConfig
     public KnowledgeWeight KnowledgeWeight { get; init; } = KnowledgeWeight.Default;
 
     /// <summary>
-    /// Superseded by <see cref="KnowledgeWeight"/>. Memory is now always injected at
-    /// runtime through <see cref="fuseraft.Orchestration.ContextAssemblyPipeline"/>
-    /// rather than baked into agent instructions at construction time.
-    /// This property is kept for configuration compatibility but has no effect when
-    /// <c>ContextAssemblyPipeline</c> is active (which is always the case for
-    /// <see cref="fuseraft.Orchestration.AgentOrchestrator"/>).
-    /// </summary>
-    [Obsolete("Memory is now always runtime-injected through ContextAssemblyPipeline. " +
-              "Set KnowledgeWeight instead to control retrieval breadth.")]
-    public bool EnableMemory { get; init; } = false;
-
-    /// <summary>
     /// Optional model override for the sub-agent spawned by the <c>SubAgent</c> plugin.
     /// When set, the sub-agent uses this model instead of inheriting the parent agent's model.
     /// Useful for cost control: a parent running on <c>claude-opus-4-7</c> can delegate

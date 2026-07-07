@@ -342,6 +342,8 @@ public static class ContextWindowRenderer
                           if (ca.context_chars   != null) lines.push('  context: ' + ca.context_chars.toLocaleString() + ' chars');
                           if (ca.tool_count      != null) lines.push('  tools: '   + ca.tool_count);
                           if (ca.assembly_ms     != null) lines.push('  assembly: '+ ca.assembly_ms + ' ms');
+                          if (ca.context_strategy != null) lines.push('  strategy: ' + ca.context_strategy);
+                          if (ca.empty_sources && ca.empty_sources.length) lines.push('  ⚠ empty sources: ' + ca.empty_sources.join(', '));
                         }
                         return lines;
                       },

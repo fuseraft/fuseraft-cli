@@ -750,6 +750,11 @@ public sealed class AgentOrchestrator(
                 context_chars            = metrics.TotalContextChars,
                 system_prompt_chars      = metrics.SystemPromptChars,
                 assembly_ms              = (int)metrics.AssemblyDuration.TotalMilliseconds,
+                // Which path built this context, and — for Context: spec agents — which
+                // declared sources resolved vs. which came back empty (missing artifact).
+                context_strategy         = metrics.ContextStrategy,
+                declared_sources         = metrics.DeclaredSources,
+                empty_sources            = metrics.EmptySources,
                 // Per-source char breakdown — shows which source dominates startup context.
                 context_chars_breakdown  = new
                 {
@@ -898,8 +903,8 @@ public sealed class AgentOrchestrator(
             IReadOnlyList<ChatMessage> filtered;
             if (agentCfg?.Context is { Count: > 0 } agentContextSources && contextAssembler is not null)
             {
-                filtered = await contextAssembler.AssembleForAgentAsync(
-                    agentName, task, agentContextSources, history, cancellationToken);
+                filtered = (await contextAssembler.AssembleForAgentAsync(
+                    agentName, task, agentContextSources, history, cancellationToken)).Messages;
             }
             else
             {
