@@ -99,7 +99,7 @@ internal static partial class ReplCommands
 
         try
         {
-            await ctx.SubAgent.ExploreStreamingAsync(arg,
+            var (_, inputTok, outputTok) = await ctx.SubAgent.ExploreStreamingAsync(arg,
                 async chunk =>
                 {
                     if (!headerPrinted)
@@ -111,6 +111,8 @@ internal static partial class ReplCommands
                     await ReplTurn.WriteChunkSmoothAsync(chunk, cancellationToken);
                 },
                 cancellationToken: cancellationToken);
+            ctx.CumulativeInputTokens  += inputTok  ?? 0;
+            ctx.CumulativeOutputTokens += outputTok ?? 0;
 
             await StopSpinner();
             if (headerPrinted) { if (!ctx.JsonMode) AnsiConsole.WriteLine(); }
@@ -168,7 +170,7 @@ internal static partial class ReplCommands
 
         try
         {
-            await ctx.SubAgent.LocateStreamingAsync(arg,
+            var (_, inputTok, outputTok) = await ctx.SubAgent.LocateStreamingAsync(arg,
                 async chunk =>
                 {
                     if (!gotOutput)
@@ -179,6 +181,8 @@ internal static partial class ReplCommands
                     await ReplTurn.WriteChunkSmoothAsync(chunk, cancellationToken);
                 },
                 cancellationToken: cancellationToken);
+            ctx.CumulativeInputTokens  += inputTok  ?? 0;
+            ctx.CumulativeOutputTokens += outputTok ?? 0;
 
             await StopSpinner();
             if (gotOutput) { if (!ctx.JsonMode) AnsiConsole.WriteLine(); }

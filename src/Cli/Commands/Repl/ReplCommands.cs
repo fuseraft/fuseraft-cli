@@ -100,7 +100,7 @@ internal static partial class ReplCommands
             Console.WriteLine("- `/adversarial off` — Disable critic agent\n");
 
             Console.WriteLine("### Context & model");
-            Console.WriteLine("- `/context` — Show estimated context window usage and per-category breakdown");
+            Console.WriteLine("- `/context` — Show context window usage (actual once a turn has run, else estimated), per-category breakdown, and cumulative session token usage");
             Console.WriteLine("- `/compact` — Summarise conversation into a handoff doc and reset history");
             Console.WriteLine("- `/compact <focus>` — Same, but tailor the summary toward the next session's focus");
             Console.WriteLine("- `/model` — Show current model and reasoning effort");
@@ -124,7 +124,7 @@ internal static partial class ReplCommands
             Console.WriteLine("- `/save` — Save transcript to `repl-<id>.md` in the current directory");
             Console.WriteLine("- `/save <file>` — Save transcript to the specified file");
             Console.WriteLine("- `/snapshot` — Write a full debug snapshot (context, tools, history, plan) to a temp file");
-            Console.WriteLine("- `/events` — Show session event stats (turns, tool calls, top tools)");
+            Console.WriteLine("- `/events` — Show session event stats (turns, tool calls, top tools, per-turn actual input/output tokens)");
             Console.WriteLine("- `/explore <query>` — Run a sub-agent exploration loop and return a prose summary");
             Console.WriteLine("- `/locate <symbol>` — Run a sub-agent symbol lookup; returns `path:line` result");
             return;
@@ -193,7 +193,7 @@ internal static partial class ReplCommands
 
         AnsiConsole.MarkupLine("  [dim]Context & model[/]");
         var ctx = MakeGrid();
-        ctx.AddRow("[bold cyan]/context[/]",           "Show estimated context window usage and per-category breakdown");
+        ctx.AddRow("[bold cyan]/context[/]",           "Show context window usage (actual once a turn has run, else estimated), per-category breakdown, and cumulative session token usage");
         ctx.AddRow("[bold cyan]/compact[/]",            "Summarise conversation into a handoff doc and reset history");
         ctx.AddRow("[bold cyan]/compact <focus>[/]",    "Same, but tailor the summary toward the next session's focus");
         ctx.AddRow("[bold cyan]/model[/]",                          "Show current model and reasoning effort");
@@ -225,7 +225,7 @@ internal static partial class ReplCommands
         io.AddRow("[bold cyan]/save[/]",             "Save transcript to repl-<id>.md in the current directory");
         io.AddRow("[bold cyan]/save <file>[/]",      "Save transcript to the specified file");
         io.AddRow("[bold cyan]/snapshot[/]",          "Write a full debug snapshot (context, tools, history, plan) to a temp file");
-        io.AddRow("[bold cyan]/events[/]",           "Show session event stats (turns, tool calls, top tools)");
+        io.AddRow("[bold cyan]/events[/]",           "Show session event stats (turns, tool calls, top tools, per-turn actual input/output tokens)");
         io.AddRow("[bold cyan]/events stats[/]",     "Same as /events");
         io.AddRow("[bold cyan]/explore <query>[/]",  "Run a sub-agent exploration loop and return a prose summary");
         io.AddRow("[bold cyan]/locate <symbol>[/]",  "Run a sub-agent symbol lookup; returns path:line result");
