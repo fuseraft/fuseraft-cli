@@ -87,9 +87,9 @@ The `Validation` section provides file paths and patterns used by the validators
 
 ```yaml
 Validation:
-  BriefPath: .fuseraft/artifacts/brief.json
+  BriefPath: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json
   TestReportPath: .fuseraft/artifacts/test-report.json
-  ChangeLogPath: .fuseraft/state/changes.json
+  ChangeLogPath: ~/.fuseraft/state/{project_slug}/changes.json
   TestAssertionPatterns:
     - tester::assert
     - "if .+ throw"
@@ -105,7 +105,7 @@ The `Validation` section is required when any route uses `TestReportValid`. It i
 
 **Used on:** `HANDOFF TO DEVELOPER` (blocks the Planner from handing off without a written brief)
 
-**What it checks:** Reads `brief.json` from `Validation.BriefPath` (default `.fuseraft/artifacts/brief.json`) and verifies it exists on disk with valid, complete content.
+**What it checks:** Reads `brief.json` from `Validation.BriefPath` (default `~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json`) and verifies it exists on disk with valid, complete content.
 
 **Passes if:** `brief.json` exists, is valid JSON, and contains non-empty `goal`, `files_to_change`, `acceptance_criteria`, and `implementation` fields.
 
@@ -282,7 +282,7 @@ To resolve, either:
 ```yaml
 Orchestration:
   ChangeTracking:
-    Path: .fuseraft/state/changes.json
+    Path: ~/.fuseraft/state/{project_slug}/changes.json
 
   TestSelector:
     FindRelatedCommand: "pytest --collect-only -q {file} 2>/dev/null | grep '::' | head -40"
@@ -512,7 +512,7 @@ to confirm behavioral correctness:
 
 ```yaml
 Validation:
-  BriefPath: .fuseraft/artifacts/brief.json
+  BriefPath: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json
 
 Selection:
   Type: keyword
@@ -534,7 +534,7 @@ Selection:
 
 ---
 
-## RequireAcceptanceCriteriaPassedValidator
+## RequireAcceptanceCriteriaPassed
 
 **Used on:** The `developer → reviewer` handoff edge, and optionally the `reviewer → approved` edge for defence in depth.
 
@@ -587,8 +587,8 @@ Run the indicated command(s), confirm the expected output appears, then retry th
 
 ```yaml
 Validation:
-  BriefPath:     .fuseraft/artifacts/brief.json
-  ChangeLogPath: .fuseraft/state/changes.json
+  BriefPath:     ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json
+  ChangeLogPath: ~/.fuseraft/state/{project_slug}/changes.json
 
 Selection:
   Type: keyword
@@ -597,7 +597,7 @@ Selection:
       Agent: Reviewer
       Validators:
         - RequireAllFilesWritten
-        - RequireAcceptanceCriteriaPassedValidator
+        - RequireAcceptanceCriteriaPassed
       SourceAgents:
         - Developer
     - Keyword: APPROVED
@@ -605,14 +605,14 @@ Selection:
       Validators:
         - RequireShellPass
         - RequireReviewJudgement
-        - RequireAcceptanceCriteriaPassedValidator  # defence in depth
+        - RequireAcceptanceCriteriaPassed  # defence in depth
       SourceAgents:
         - Reviewer
 ```
 
-> **Note:** `RequireAcceptanceCriteriaPassedValidator` requires `Validation.BriefPath` to be set (it reads acceptance criteria from the brief). `Validation.ChangeLogPath` is required to read command outputs from the session history — without it the validator passes immediately (nothing to check against).
+> **Note:** `RequireAcceptanceCriteriaPassed` requires `Validation.BriefPath` to be set (it reads acceptance criteria from the brief). `Validation.ChangeLogPath` is required to read command outputs from the session history — without it the validator passes immediately (nothing to check against).
 
-**Relationship to `RequireReviewJudgement`:** `RequireReviewJudgement` checks that the Reviewer wrote a structured verdict block. `RequireAcceptanceCriteriaPassedValidator` checks that the Developer (or the Reviewer) actually *ran* commands whose output matched the brief's sentinels. Use both together for maximum coverage: the former enforces a structured narrative review; the latter enforces that the feature was mechanically verified.
+**Relationship to `RequireReviewJudgement`:** `RequireReviewJudgement` checks that the Reviewer wrote a structured verdict block. `RequireAcceptanceCriteriaPassed` checks that the Developer (or the Reviewer) actually *ran* commands whose output matched the brief's sentinels. Use both together for maximum coverage: the former enforces a structured narrative review; the latter enforces that the feature was mechanically verified.
 
 ---
 
@@ -706,11 +706,13 @@ Validators are a mechanism-level guarantee — they run in code regardless of wh
 
 ## Stuck detection
 
-When an agent fails to produce a valid routing keyword for 3 consecutive turns, a `ValidatorStuckException` is raised and the session stops with a descriptive error. The threshold covers all failure modes:
+`ValidatorStuckException` is the hard stop that ends a session when an agent cannot get past a route. What counts as "stuck" — and which counter tracks it — depends on `Selection.Type`:
 
 - **No keyword** — the response contains no recognized keyword on its own line.
 - **Foreign keyword** — the response contains a keyword that belongs to a different agent role (e.g. Developer writing `BUGS FOUND`, which is a Tester-only keyword).
 - **Multiple keywords** — the response contains more than one keyword on separate lines (ambiguous).
 - **Validator failure** — the response has a valid keyword but a pre-flight validator (e.g. `RequireShellPass`) rejected the handoff.
 
-A single counter covers all of these. It increments whenever any correction is injected and resets only when the agent produces a clean routed turn. Alternating failure modes (e.g. validator fail one turn, no keyword the next) hit the threshold at the same rate as consecutive identical failures.
+**`Selection.Type: graph`** (`GraphOrchestrator`): a single counter covers all four modes above. It increments whenever any correction is injected and resets only when the agent produces a clean routed turn — alternating failure modes hit the threshold at the same rate as consecutive identical failures. Threshold: `Selection.Graph.MaxRetries` (default 4).
+
+**`Selection.Type: keyword`** (`KeywordSelectionStrategy`) **and `statemachine`** (`StateMachineSelectionStrategy`): validator/contract failures are classified by type (`MissingEvidence`, `InvalidTransition`, `ConflictingEvidence`, `NoProgress`) and escalate independently per `FailureHandling.<Type>.Threshold` (default 3, except `ConflictingEvidence` which defaults to 2) — see [Failure handling](configuration.md#failure-handling). A turn with **no keyword/signal at all** is *not* covered by that counter: it triggers a periodic warning every 5 consecutive same-agent turns and is otherwise bounded only by `Termination.MaxIterations`, unless you explicitly set `FailureHandling.MaxConsecutiveTurnsWithoutSignal` (statemachine only; default `0` = disabled).
