@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 using fuseraft.Core;
 using fuseraft.Core.Models;
+using fuseraft.Core.Models.Context;
 using fuseraft.Infrastructure;
 
 namespace fuseraft.Orchestration.Context;
@@ -141,7 +142,7 @@ public sealed class ContextAssembler
     ///     (session context, change log, brief fields, files).</item>
     /// </list>
     /// </summary>
-    public async Task<IReadOnlyList<ChatMessage>> AssembleForAgentAsync(
+    public async Task<AgentContextAssembly> AssembleForAgentAsync(
         string agentName,
         string task,
         IReadOnlyList<ContextSource> sources,
@@ -149,6 +150,7 @@ public sealed class ContextAssembler
         CancellationToken ct = default)
     {
         var result = new List<ChatMessage>();
+        var emptySources = new List<string>();
 
         // 1. Task message — the agent always needs to know what it's working on.
         result.Add(new ChatMessage(ChatRole.User, task));
@@ -182,6 +184,8 @@ public sealed class ContextAssembler
                 var content = await ResolveArtifactAsync(src, ct);
                 if (!string.IsNullOrWhiteSpace(content))
                     sections.Add((src.Label ?? DefaultLabel(src.Source), content.Trim()));
+                else
+                    emptySources.Add(src.Source);
             }
 
             if (sections.Count > 0)
@@ -214,7 +218,7 @@ public sealed class ContextAssembler
             result.Add(new ChatMessage(ChatRole.User, $"[Task Reminder]\n\n{preview}"));
         }
 
-        return result;
+        return new AgentContextAssembly(result, emptySources);
     }
 
     // ── Shared source resolution ─────────────────────────────────────────────

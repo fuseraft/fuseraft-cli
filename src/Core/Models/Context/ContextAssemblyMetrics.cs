@@ -70,5 +70,33 @@ public sealed record ContextAssemblyMetrics
     /// <summary>Wall-clock time spent inside <c>AssembleAsync</c>.</summary>
     public TimeSpan AssemblyDuration { get; init; }
 
+    /// <summary>
+    /// Which path built this agent's context: <see cref="Strategies.ArtifactSpec"/> when a
+    /// <c>Context:</c> block drove assembly, <see cref="Strategies.SharedHistoryFallback"/>
+    /// when no spec was declared and the shared transcript was filtered instead.
+    /// </summary>
+    public string ContextStrategy { get; init; } = Strategies.SharedHistoryFallback;
+
+    /// <summary>
+    /// Source specs declared on the agent's <c>Context:</c> block (e.g. <c>"brief_field:test_targets"</c>).
+    /// Empty when <see cref="ContextStrategy"/> is <see cref="Strategies.SharedHistoryFallback"/>.
+    /// </summary>
+    public IReadOnlyList<string> DeclaredSources { get; init; } = [];
+
+    /// <summary>
+    /// Subset of <see cref="DeclaredSources"/> that resolved to no content at assembly time —
+    /// e.g. a <c>brief_field:</c> naming a field absent from <c>brief.json</c>. Signals a
+    /// <c>Context:</c> spec that references an artifact which was never produced, as opposed
+    /// to a spec that simply omits a source the agent needed.
+    /// </summary>
+    public IReadOnlyList<string> EmptySources { get; init; } = [];
+
+    /// <summary>String constants for <see cref="ContextStrategy"/>.</summary>
+    public static class Strategies
+    {
+        public const string ArtifactSpec          = "artifact_spec";
+        public const string SharedHistoryFallback = "shared_history_fallback";
+    }
+
     public static readonly ContextAssemblyMetrics Empty = new();
 }
