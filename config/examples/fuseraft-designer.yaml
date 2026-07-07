@@ -43,12 +43,10 @@ Orchestration:
         ContextWindow.TextOnly (strip tool frames from history — useful for review agents),
         MaxToolCallsPerTurn, MaxInTurnContextTokens, MaxInTurnToolPairs (sliding-window cap — deterministic
         alternative to MaxInTurnContextTokens; recommended 8–16 for Developer/Tester/Operator),
-        EnableMemory, SubAgentModel, SubAgentPlugins,
-        RemoteAgent.Url (delegate to remote A2A endpoint — ignores Model/Plugins/FunctionChoice/Capabilities).
+        SubAgentModel, SubAgentPlugins, RemoteAgent.Url (delegate to remote A2A endpoint — ignores Model/Plugins/FunctionChoice/Capabilities).
 
         ROUTING:
-        - statemachine: States with Agent, Transitions (Signal, To, optional Contract for evidence gates).
-          Agents signal transitions with handoff(route_keyword: "SIGNAL") or plain keyword on its own line.
+        - statemachine: States with Agent, Transitions (Signal, To, optional Contract for evidence gates). Agents signal transitions with handoff(route_keyword: "SIGNAL") or plain keyword on its own line.
         - magentic: manager LLM selects participants dynamically each round. No routing keywords needed.
         - roundrobin / sequential: agents take turns in order.
         - keyword: routes on text patterns in responses.
