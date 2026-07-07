@@ -89,13 +89,14 @@ public sealed class SubAgentPlugin(
     // --- Public tools ---
 
     [Description("Broad codebase exploration. Returns a prose summary or file list. Use for multi-hop questions (e.g. 'Which files handle X?', 'What conventions does this repo use?').")]
-    public Task<string> ExploreAsync(
+    public async Task<string> ExploreAsync(
         [Description("Exploration question or task.")]
         string query,
         [Description("Output format: 'prose' (default, narrative summary) or 'file_list' (bulleted list of relevant file paths with one-line roles).")]
         string format = "prose",
         CancellationToken cancellationToken = default)
-        => RunLoopAsync(
+    {
+        var (text, _, _) = await RunLoopAsync(
             BuildExplorePrompt(_tools, _effectiveMaxToolCalls, format, _workspaceRoot),
             query,
             _effectiveMaxToolCalls,
@@ -103,13 +104,16 @@ public sealed class SubAgentPlugin(
             "explore",
             ExploreTimeoutMinutes,
             cancellationToken);
+        return text;
+    }
 
     [Description("Locate where a symbol, type, method, interface, or file is defined. Returns file path and line number. Prefer over explore for single-target lookups.")]
-    public Task<string> LocateAsync(
+    public async Task<string> LocateAsync(
         [Description("Symbol, type, interface, method, or filename to locate (e.g. 'IOrchestrationHook', 'AgentFactory.Create', 'EventEmitter.cs').")]
         string target,
         CancellationToken cancellationToken = default)
-        => RunLoopAsync(
+    {
+        var (text, _, _) = await RunLoopAsync(
             BuildLocatePrompt(_tools, _workspaceRoot),
             $"Locate: {target}",
             LocateMaxToolCalls,
@@ -117,6 +121,8 @@ public sealed class SubAgentPlugin(
             "locate",
             LocateTimeoutMinutes,
             cancellationToken);
+        return text;
+    }
 
     // Single-turn session diagnosis — not a model tool (no [Description]).
     // Reads the REPL conversation history, identifies where things are going wrong, and returns
@@ -236,9 +242,11 @@ public sealed class SubAgentPlugin(
     }
 
     // Streaming variants — not registered as model tools (no [Description]).
-    // onChunk is called for each text token as the final answer arrives.
+    // onChunk is called for each text token as the final answer arrives. Unlike the
+    // model-tool variants above, these return the real token usage alongside the result
+    // text so callers (REPL /explore, /locate) can roll it into session cost tracking.
 
-    public Task<string> ExploreStreamingAsync(
+    public Task<(string Result, int? InputTokens, int? OutputTokens)> ExploreStreamingAsync(
         string query,
         Func<string, Task> onChunk,
         string format = "prose",
@@ -253,7 +261,7 @@ public sealed class SubAgentPlugin(
             cancellationToken,
             onChunk);
 
-    public Task<string> LocateStreamingAsync(
+    public Task<(string Result, int? InputTokens, int? OutputTokens)> LocateStreamingAsync(
         string target,
         Func<string, Task> onChunk,
         CancellationToken cancellationToken = default)
@@ -269,7 +277,7 @@ public sealed class SubAgentPlugin(
 
     // --- Core loop (shared by both tools) ---
 
-    private async Task<string> RunLoopAsync(
+    private async Task<(string Text, int? InputTokens, int? OutputTokens)> RunLoopAsync(
         string systemPrompt,
         string userQuery,
         int maxIterations,
@@ -280,8 +288,8 @@ public sealed class SubAgentPlugin(
         Func<string, Task>? onChunk = null)
     {
         if (chatClient is null)
-            return "[SubAgent] No chat client configured — this is a stub instance. " +
-                   "Ensure AgentFactory created a real SubAgentPlugin for this agent.";
+            return ("[SubAgent] No chat client configured — this is a stub instance. " +
+                    "Ensure AgentFactory created a real SubAgentPlugin for this agent.", null, null);
 
         if (eventEmitter is not null)
             await eventEmitter.EmitAsync(EventTypes.SubAgentStart,
@@ -313,11 +321,21 @@ public sealed class SubAgentPlugin(
         try
         {
             string result;
+            int? inputTok, outputTok;
             if (onChunk is not null)
             {
                 var sb = new StringBuilder();
+                long streamedInputTok = 0, streamedOutputTok = 0;
                 await foreach (var update in loopClient.GetStreamingResponseAsync(messages, options, cts.Token))
                 {
+                    // A usage-only chunk arrives per underlying LLM call — a loop with tool
+                    // round trips produces one per round trip, so sum rather than overwrite.
+                    foreach (var usage in update.Contents.OfType<UsageContent>())
+                    {
+                        streamedInputTok  += usage.Details.InputTokenCount  ?? 0;
+                        streamedOutputTok += usage.Details.OutputTokenCount ?? 0;
+                    }
+
                     var text = update.Text;
                     if (!string.IsNullOrEmpty(text))
                     {
@@ -325,19 +343,21 @@ public sealed class SubAgentPlugin(
                         await onChunk(text);
                     }
                 }
-                result = sb.Length > 0 ? sb.ToString() : "Sub-agent produced no text output.";
+                result    = sb.Length > 0 ? sb.ToString() : "Sub-agent produced no text output.";
+                inputTok  = streamedInputTok  > 0 ? (int)streamedInputTok  : null;
+                outputTok = streamedOutputTok > 0 ? (int)streamedOutputTok : null;
 
-                // Streaming updates don't expose usage; omit token fields rather than emitting nulls.
                 if (eventEmitter is not null)
                     await eventEmitter.EmitAsync(EventTypes.SubAgentEnd,
                         agent:   parentAgentName,
-                        payload: new { outcome, summary_chars = result.Length, mode });
+                        payload: new { outcome, summary_chars = result.Length, mode,
+                                       input_tokens = inputTok, output_tokens = outputTok });
             }
             else
             {
-                var response  = await loopClient.GetResponseAsync(messages, options, cts.Token);
-                var inputTok  = response.Usage?.InputTokenCount;
-                var outputTok = response.Usage?.OutputTokenCount;
+                var response = await loopClient.GetResponseAsync(messages, options, cts.Token);
+                inputTok     = (int?)response.Usage?.InputTokenCount;
+                outputTok    = (int?)response.Usage?.OutputTokenCount;
                 result = string.IsNullOrWhiteSpace(response.Text)
                     ? "Sub-agent produced no text output."
                     : response.Text;
@@ -349,7 +369,7 @@ public sealed class SubAgentPlugin(
                                        input_tokens = inputTok, output_tokens = outputTok });
             }
 
-            return result;
+            return (result, inputTok, outputTok);
         }
         catch (OperationCanceledException)
         {
@@ -358,9 +378,9 @@ public sealed class SubAgentPlugin(
                 try { await eventEmitter.EmitAsync(EventTypes.SubAgentEnd,
                     agent:   parentAgentName,
                     payload: new { outcome, mode }); } catch { }
-            return outcome == "cancelled"
+            return (outcome == "cancelled"
                 ? "Sub-agent was cancelled."
-                : $"Sub-agent timed out after {timeoutMinutes} minutes.";
+                : $"Sub-agent timed out after {timeoutMinutes} minutes.", null, null);
         }
         catch (Exception ex)
         {
@@ -369,7 +389,7 @@ public sealed class SubAgentPlugin(
                 try { await eventEmitter.EmitAsync(EventTypes.SubAgentEnd,
                     agent:   parentAgentName,
                     payload: new { outcome, error = ex.Message, mode }); } catch { }
-            return $"Sub-agent failed: {ex.Message}";
+            return ($"Sub-agent failed: {ex.Message}", null, null);
         }
     }
 

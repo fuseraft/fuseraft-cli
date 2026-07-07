@@ -384,6 +384,9 @@ internal static class ReplTurn
         var fileChangeSeen     = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var toolRounds        = 0;
         var inToolBatch       = false;
+        var turnInputTokens   = 0L;
+        var turnOutputTokens  = 0L;
+        int? turnFirstInputTokens = null;
         // Captured tool outputs for inspect-step history injection (step execution only).
         List<(string ToolName, string Output)>? capturedResults = isStepRequest ? [] : null;
         Dictionary<string, string>? callIdToName = isStepRequest ? [] : null;
@@ -418,6 +421,18 @@ internal static class ReplTurn
             await foreach (var chunk in activeClient.GetStreamingResponseAsync(
                 ctx.History, requestOptions, cancellationToken: reqCts.Token))
             {
+                // Providers emit a trailing usage-only chunk per underlying LLM call — a turn
+                // with tool round trips produces one per round trip, so sum rather than overwrite.
+                // The *first* chunk's input count is kept separately: it reflects the exact size
+                // of everything sent to the model as this turn began, before this turn's own
+                // tool-call round trips inflated the request further.
+                foreach (var usage in chunk.Contents.OfType<UsageContent>())
+                {
+                    turnInputTokens  += usage.Details.InputTokenCount  ?? 0;
+                    turnOutputTokens += usage.Details.OutputTokenCount ?? 0;
+                    turnFirstInputTokens ??= (int?)usage.Details.InputTokenCount;
+                }
+
                 var funcCall = chunk.Contents.OfType<FunctionCallContent>().FirstOrDefault();
                 if (funcCall is not null)
                 {
@@ -526,6 +541,7 @@ internal static class ReplTurn
             fileChanges.Clear(); fileChangeSeen.Clear();
             capturedResults?.Clear(); callIdToName?.Clear();
             toolRounds = 0; inToolBatch = false;
+            turnInputTokens = 0; turnOutputTokens = 0; turnFirstInputTokens = null;
 
             // Restart spinner for the fresh attempt.
             spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
@@ -574,6 +590,10 @@ internal static class ReplTurn
         ctx.ActiveCts = null;
         await StopSpinnerAsync();
         spinCts.Dispose();
+
+        ctx.CumulativeInputTokens  += turnInputTokens;
+        ctx.CumulativeOutputTokens += turnOutputTokens;
+        ctx.LastActualContextTokens = turnFirstInputTokens;
 
         var responseText = sb.ToString();
 
@@ -745,6 +765,8 @@ internal static class ReplTurn
         {
             elapsed_ms       = (int)(DateTime.UtcNow - turnStart).TotalMilliseconds,
             estimated_tokens = postEst,
+            input_tokens     = turnInputTokens  > 0 ? turnInputTokens  : (long?)null,
+            output_tokens    = turnOutputTokens > 0 ? turnOutputTokens : (long?)null,
             tool_rounds      = toolRounds,
             tool_count       = toolCallsThisTurn.Count,
             is_step          = isStepRequest,
