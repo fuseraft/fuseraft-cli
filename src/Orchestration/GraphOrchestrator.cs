@@ -1603,6 +1603,9 @@ public sealed class GraphOrchestrator(
                 context_chars        = metrics.TotalContextChars,
                 system_prompt_chars  = metrics.SystemPromptChars,
                 assembly_ms          = (int)metrics.AssemblyDuration.TotalMilliseconds,
+                context_strategy     = metrics.ContextStrategy,
+                declared_sources     = metrics.DeclaredSources,
+                empty_sources        = metrics.EmptySources,
             });
 
     private static async ValueTask PersistCorrectionsAsync(

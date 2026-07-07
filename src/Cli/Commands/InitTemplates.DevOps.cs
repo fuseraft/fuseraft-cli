@@ -116,6 +116,12 @@ public static partial class InitTemplates
             Capabilities:
               FileSystem: [read]
             FunctionChoice: required
+            Context:
+              - Source: session_context
+              - Source: file:.fuseraft/artifacts/ops-plan.yaml
+                MaxChars: 4000
+              - Source: changes_recent:3
+              - Source: own_history:2
             {AgentFileOptions}
             """;
 

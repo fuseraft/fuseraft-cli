@@ -121,14 +121,21 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
         IReadOnlyList<ChatMessage> historyMessages = [];  // used for breakdown stats below
         int sessionContextChars = 0;
         int historyChars        = 0;
+        var contextStrategy     = ContextAssemblyMetrics.Strategies.SharedHistoryFallback;
+        IReadOnlyList<string> declaredSources = [];
+        IReadOnlyList<string> emptySources    = [];
 
         if (agentCfg?.Context is { Count: > 0 } contextSources && _contextAssembler is not null)
         {
-            baseMessages    = await _contextAssembler.AssembleForAgentAsync(
+            var assembled   = await _contextAssembler.AssembleForAgentAsync(
                 agentName, task, contextSources,
                 history as IList<ChatMessage> ?? new List<ChatMessage>(history), ct);
+            baseMessages    = assembled.Messages;
             historyChars    = baseMessages.Sum(m => m.Text?.Length ?? 0);
             historyMessages = baseMessages;
+            contextStrategy = ContextAssemblyMetrics.Strategies.ArtifactSpec;
+            declaredSources = contextSources.Select(s => s.Source).ToList();
+            emptySources    = assembled.EmptySources;
         }
         else
         {
@@ -215,6 +222,9 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
             HistoryToolCount           = historyToolCount,
             HistoryHasCompactionSummary = historyHasCompaction,
             AssemblyDuration           = sw.Elapsed,
+            ContextStrategy            = contextStrategy,
+            DeclaredSources            = declaredSources,
+            EmptySources               = emptySources,
         };
 
         _logger?.LogDebug(

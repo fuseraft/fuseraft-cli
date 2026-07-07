@@ -205,8 +205,10 @@ public static partial class InitTemplates
             Capabilities:
               FileSystem: [read]
             FunctionChoice: auto
-            ContextWindow:
-              TextOnly: true
+            Context:
+              - Source: session_context
+              - Source: changes_recent:3
+              - Source: own_history:2
             {AgentFileOptions}
             """;
 
