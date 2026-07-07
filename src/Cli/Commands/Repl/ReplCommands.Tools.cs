@@ -305,12 +305,14 @@ internal static partial class ReplCommands
             return;
         }
 
-        var lines       = await File.ReadAllLinesAsync(ctx.EventsPath);
-        var turnSet     = new SortedSet<int>();
-        var toolCounts  = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var toolsByTurn = new SortedDictionary<int, List<string>>();
-        var totalTools  = 0;
-        var totalTurns  = 0;
+        var lines        = await File.ReadAllLinesAsync(ctx.EventsPath);
+        var turnSet      = new SortedSet<int>();
+        var toolCounts   = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var toolsByTurn  = new SortedDictionary<int, List<string>>();
+        var tokensByTurn = new SortedDictionary<int, (long Input, long Output)>();
+        var totalTools   = 0;
+        var totalTurns   = 0;
+        long totalInputTokens = 0, totalOutputTokens = 0;
 
         foreach (var line in lines)
         {
@@ -342,6 +344,20 @@ internal static partial class ReplCommands
                     if (!toolsByTurn.ContainsKey(turnIdx)) toolsByTurn[turnIdx] = [];
                     toolsByTurn[turnIdx].Add(name);
                 }
+
+                if (et == EventTypes.TurnEnd &&
+                    root.TryGetProperty("payload", out var tp) &&
+                    root.TryGetProperty("turn", out var tEl3) && tEl3.ValueKind == JsonValueKind.Number)
+                {
+                    var inTok  = tp.TryGetProperty("input_tokens",  out var itEl) && itEl.ValueKind == JsonValueKind.Number ? itEl.GetInt64() : 0;
+                    var outTok = tp.TryGetProperty("output_tokens", out var otEl) && otEl.ValueKind == JsonValueKind.Number ? otEl.GetInt64() : 0;
+                    if (inTok > 0 || outTok > 0)
+                    {
+                        tokensByTurn[tEl3.GetInt32()] = (inTok, outTok);
+                        totalInputTokens  += inTok;
+                        totalOutputTokens += outTok;
+                    }
+                }
             }
             catch { /* skip malformed lines */ }
         }
@@ -352,6 +368,8 @@ internal static partial class ReplCommands
         AnsiConsole.MarkupLine($"  [dim]Session:[/]     {Markup.Escape(ctx.SessionId)}");
         AnsiConsole.MarkupLine($"  [dim]Turns:[/]       {totalTurns}");
         AnsiConsole.MarkupLine($"  [dim]Tool calls:[/]  {totalTools}");
+        if (totalInputTokens > 0 || totalOutputTokens > 0)
+            AnsiConsole.MarkupLine($"  [dim]Tokens:[/]      {totalInputTokens:N0} in / {totalOutputTokens:N0} out  [dim](actual)[/]");
 
         if (toolsByTurn.Count > 0)
         {
@@ -359,14 +377,17 @@ internal static partial class ReplCommands
             AnsiConsole.MarkupLine("  [dim]Per-turn breakdown:[/]");
             foreach (var (turn, tlist) in toolsByTurn)
             {
-                var label = turn >= 0 ? $"turn {turn}" : "unknown";
+                var label   = turn >= 0 ? $"turn {turn}" : "unknown";
+                var tokSuffix = tokensByTurn.TryGetValue(turn, out var tok)
+                    ? $"  [dim]· {tok.Input:N0} in / {tok.Output:N0} out[/]"
+                    : string.Empty;
                 if (tlist.Count == 0)
                 {
-                    AnsiConsole.MarkupLine($"    [dim]{label}  (no tool calls)[/]");
+                    AnsiConsole.MarkupLine($"    [dim]{label}  (no tool calls)[/]{tokSuffix}");
                 }
                 else
                 {
-                    AnsiConsole.MarkupLine($"    [dim]{label}  ({tlist.Count} call{(tlist.Count == 1 ? "" : "s")}):[/]");
+                    AnsiConsole.MarkupLine($"    [dim]{label}  ({tlist.Count} call{(tlist.Count == 1 ? "" : "s")}):[/]{tokSuffix}");
                     foreach (var t in tlist)
                         AnsiConsole.MarkupLine($"      [dim]·[/] {Markup.Escape(t)}");
                 }

@@ -22,7 +22,14 @@ internal static partial class ReplCommands
         var asstTok     = ctx.History.Where(m => m.Role == ChatRole.Assistant).Sum(EstMsg);
         var toolResTok  = ctx.History.Where(m => m.Role == ChatRole.Tool).Sum(EstMsg);
         var toolTok     = active.Sum(t => t.JsonSchema.GetRawText().Length / 4);
-        var total       = sysTok + userTok + asstTok + toolResTok + toolTok;
+        // estTotal drives the per-category breakdown below (so its rows always sum to ~100%).
+        // The headline number instead prefers the real provider-reported size of the most
+        // recently completed turn's opening request, when available — falling back to the
+        // char-based estimate for a fresh session or a provider that never reports usage.
+        var estTotal    = sysTok + userTok + asstTok + toolResTok + toolTok;
+        var actualTotal = ctx.LastActualContextTokens;
+        var isActual    = actualTotal.HasValue;
+        var total       = actualTotal ?? estTotal;
         var pct      = (double)total / ctx.ContextTokenBudget * 100;
 
         if (ctx.JsonMode)
@@ -34,23 +41,27 @@ internal static partial class ReplCommands
                     ? $" *(+{d:N0} since last check)*"
                     : $" *({total - ctx.PrevCtxEstimate:N0} since last check)*")
                 : string.Empty;
-            sb.AppendLine($"**~{total:N0} / {ctx.ContextTokenBudget:N0} tokens** — {pct:F1}%{deltaNote}");
+            sb.AppendLine($"**~{total:N0} / {ctx.ContextTokenBudget:N0} tokens** " +
+                $"({(isActual ? "actual, as of last turn" : "estimated")}) — {pct:F1}%{deltaNote}");
             sb.AppendLine();
             sb.AppendLine($"**{ctx.TurnIndex} turn{(ctx.TurnIndex != 1 ? "s" : "")}** " +
                 $"({ctx.History.Count} messages — " +
                 $"system: {ctx.History.Count(m => m.Role == ChatRole.System)}, " +
                 $"user: {ctx.History.Count(m => m.Role == ChatRole.User)}, " +
                 $"assistant: {ctx.History.Count(m => m.Role == ChatRole.Assistant)})");
+            if (ctx.CumulativeInputTokens > 0 || ctx.CumulativeOutputTokens > 0)
+                sb.AppendLine($"**Session usage (actual):** {ctx.CumulativeInputTokens:N0} in / " +
+                    $"{ctx.CumulativeOutputTokens:N0} out / {ctx.CumulativeInputTokens + ctx.CumulativeOutputTokens:N0} total tok");
             sb.AppendLine();
-            sb.AppendLine("**Breakdown**");
+            sb.AppendLine("**Breakdown (estimated composition)**");
             if (sysTok > 0)
-                sb.AppendLine($"- System prompt: {sysTok:N0} tok ({(double)sysTok / total * 100:F1}%)");
+                sb.AppendLine($"- System prompt: {sysTok:N0} tok ({(double)sysTok / estTotal * 100:F1}%)");
             if (active.Count > 0)
-                sb.AppendLine($"- Tools ({active.Count}): {toolTok:N0} tok ({(double)toolTok / total * 100:F1}%) *(per request)*");
-            sb.AppendLine($"- User messages: {userTok:N0} tok ({(double)userTok / total * 100:F1}%)");
-            sb.AppendLine($"- Assistant messages: {asstTok:N0} tok ({(double)asstTok / total * 100:F1}%)");
+                sb.AppendLine($"- Tools ({active.Count}): {toolTok:N0} tok ({(double)toolTok / estTotal * 100:F1}%) *(per request)*");
+            sb.AppendLine($"- User messages: {userTok:N0} tok ({(double)userTok / estTotal * 100:F1}%)");
+            sb.AppendLine($"- Assistant messages: {asstTok:N0} tok ({(double)asstTok / estTotal * 100:F1}%)");
             if (toolResTok > 0)
-                sb.AppendLine($"- Tool results: {toolResTok:N0} tok ({(double)toolResTok / total * 100:F1}%)");
+                sb.AppendLine($"- Tool results: {toolResTok:N0} tok ({(double)toolResTok / estTotal * 100:F1}%)");
             if (ctx.TurnTokenDeltas.Count >= 1)
             {
                 var avg = (int)Math.Round(ctx.TurnTokenDeltas.Average());
@@ -66,10 +77,15 @@ internal static partial class ReplCommands
             await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new
             {
                 command = "/context",
-                estimated_tokens = total,
+                estimated_tokens = estTotal,
+                actual_context_tokens = actualTotal,
+                displayed_tokens = total,
+                is_actual = isActual,
                 token_budget = ctx.ContextTokenBudget,
                 turns = ctx.TurnIndex,
-                breakdown = new { system = sysTok, tools = toolTok, user = userTok, assistant = asstTok, tool_results = toolResTok }
+                breakdown = new { system = sysTok, tools = toolTok, user = userTok, assistant = asstTok, tool_results = toolResTok },
+                cumulative_input_tokens = ctx.CumulativeInputTokens,
+                cumulative_output_tokens = ctx.CumulativeOutputTokens,
             });
             return;
         }
@@ -81,10 +97,12 @@ internal static partial class ReplCommands
                 : $"  [dim]({total - ctx.PrevCtxEstimate:N0} since last check)[/]")
             : string.Empty;
 
+        var totalLabel = isActual ? "Tokens (actual):" : "Tokens (est.):";
         AnsiConsole.MarkupLine(
-            $"  [dim]Tokens (est.):[/] [bold]{total:N0}[/] / {ctx.ContextTokenBudget:N0}  " +
+            $"  [dim]{totalLabel}[/] [bold]{total:N0}[/] / {ctx.ContextTokenBudget:N0}  " +
             $"[{(pct >= 90 ? "red" : pct >= 70 ? "yellow" : "green")}]{Markup.Escape(bar)}[/]  " +
-            $"[dim]{pct:F1}%[/]{deltaStr}");
+            $"[dim]{pct:F1}%[/]{deltaStr}" +
+            (isActual ? "  [dim](as of last turn's request)[/]" : string.Empty));
         AnsiConsole.MarkupLine(
             $"  [dim]Budget:[/]       [bold]{ctx.ContextTokenBudget:N0}[/]  [dim](context window ceiling)[/]");
         AnsiConsole.MarkupLine(
@@ -93,15 +111,20 @@ internal static partial class ReplCommands
             $"system: {ctx.History.Count(m => m.Role == ChatRole.System)}, " +
             $"user: {ctx.History.Count(m => m.Role == ChatRole.User)}, " +
             $"assistant: {ctx.History.Count(m => m.Role == ChatRole.Assistant)})[/]");
+        if (ctx.CumulativeInputTokens > 0 || ctx.CumulativeOutputTokens > 0)
+            AnsiConsole.MarkupLine(
+                $"  [dim]Session usage:[/]   [bold]{ctx.CumulativeInputTokens:N0}[/] in / " +
+                $"[bold]{ctx.CumulativeOutputTokens:N0}[/] out  " +
+                $"[dim]({ctx.CumulativeInputTokens + ctx.CumulativeOutputTokens:N0} total tok, actual)[/]");
         AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("  [dim]Breakdown:[/]");
-        PrintContextRow("system prompt",  sysTok,  total);
+        AnsiConsole.MarkupLine("  [dim]Breakdown (estimated composition):[/]");
+        PrintContextRow("system prompt",  sysTok,  estTotal);
         if (active.Count > 0)
-            PrintContextRow($"tools ({active.Count})", toolTok, total, "(per req.)");
-        PrintContextRow("user messages",  userTok, total);
-        PrintContextRow("assistant msgs", asstTok, total);
+            PrintContextRow($"tools ({active.Count})", toolTok, estTotal, "(per req.)");
+        PrintContextRow("user messages",  userTok, estTotal);
+        PrintContextRow("assistant msgs", asstTok, estTotal);
         if (toolResTok > 0)
-            PrintContextRow("tool results",  toolResTok, total);
+            PrintContextRow("tool results",  toolResTok, estTotal);
 
         if (ctx.TurnTokenDeltas.Count >= 1)
         {
@@ -118,10 +141,15 @@ internal static partial class ReplCommands
         await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new
         {
             command = "/context",
-            estimated_tokens = total,
+            estimated_tokens = estTotal,
+            actual_context_tokens = actualTotal,
+            displayed_tokens = total,
+            is_actual = isActual,
             token_budget = ctx.ContextTokenBudget,
             turns = ctx.TurnIndex,
-            breakdown = new { system = sysTok, tools = toolTok, user = userTok, assistant = asstTok }
+            breakdown = new { system = sysTok, tools = toolTok, user = userTok, assistant = asstTok },
+            cumulative_input_tokens = ctx.CumulativeInputTokens,
+            cumulative_output_tokens = ctx.CumulativeOutputTokens,
         });
     }
 

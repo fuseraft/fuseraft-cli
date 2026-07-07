@@ -115,6 +115,20 @@ internal sealed class ReplSessionContext
     public readonly List<int> TurnTokenDeltas = [];
     public int              PrevTurnTokenEstimate;
 
+    // Actual provider-reported token usage, summed across every LLM round trip for the life
+    // of this process (including tool-call continuations within a turn). Reflects real billed
+    // usage, so unlike the estimates above it is never reset by /clear, /rewind, or /compact.
+    public long CumulativeInputTokens;
+    public long CumulativeOutputTokens;
+
+    // Real input-token count reported by the provider for the *first* LLM call of the most
+    // recently completed turn (i.e. before that turn's own tool round trips inflated the
+    // request) — the exact size of everything sent to the model as that turn began. Set to
+    // null whenever a turn completes without any UsageContent (provider doesn't report usage,
+    // e.g. Ollama), so /context falls back cleanly to the char-based estimate rather than
+    // showing a stale number from an earlier turn.
+    public int? LastActualContextTokens;
+
     // Session lifecycle
     public DateTime StartedAt { get; set; }
     public int  TurnIndex              = 0;
