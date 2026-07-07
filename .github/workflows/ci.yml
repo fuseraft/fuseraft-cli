@@ -80,36 +80,23 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Restore
-        run: dotnet restore src/fuseraft.csproj --verbosity quiet
-
-      - name: Publish self-contained binary
-        run: |
-          dotnet publish src/fuseraft.csproj \
-            --configuration Release \
-            --runtime ${{ matrix.rid }} \
-            --self-contained true \
-            -p:PublishSingleFile=true \
-            -p:IncludeNativeLibrariesForSelfExtract=true \
-            -p:EnableCompressionInSingleFile=true \
-            -p:DebugType=none \
-            -p:DebugSymbols=false \
-            -p:Version=${{ steps.ver.outputs.version }} \
-            --output publish/${{ matrix.rid }} \
-            --nologo \
-            --verbosity minimal
+      # Publish is delegated to build.cake — it's the single source of truth for what
+      # ships in a release (e.g. bundling fuseraft-update.exe alongside fuseraft.exe on
+      # Windows). Tests already ran in the build job, so skip re-running them per RID.
+      - name: Publish via build.cake
+        run: ./build.sh --target=Publish --runtime=${{ matrix.rid }} --skipTests=true
 
       - name: Archive (tar)
         if: matrix.archive == 'tar'
         run: |
           tar -czf fuseraft-${{ steps.ver.outputs.version }}-${{ matrix.rid }}.tar.gz \
-            -C publish/${{ matrix.rid }} fuseraft
+            -C bin fuseraft
 
       - name: Archive (zip)
         if: matrix.archive == 'zip'
         run: |
-          cd publish/${{ matrix.rid }}
-          zip ../../fuseraft-${{ steps.ver.outputs.version }}-${{ matrix.rid }}.zip fuseraft.exe
+          cd bin
+          zip ../fuseraft-${{ steps.ver.outputs.version }}-${{ matrix.rid }}.zip fuseraft.exe fuseraft-update.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

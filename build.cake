@@ -247,7 +247,9 @@ Task("Publish")
             settings.MSBuildSettings
                 .WithProperty("PublishSingleFile",                    "true")
                 .WithProperty("IncludeNativeLibrariesForSelfExtract", "true")
-                .WithProperty("EnableCompressionInSingleFile",        "true");
+                .WithProperty("EnableCompressionInSingleFile",        "true")
+                .WithProperty("DebugType",                            "none")
+                .WithProperty("DebugSymbols",                         "false");
 
             Information($"Self-contained single-file publish for: {runtime}");
         }
@@ -273,6 +275,8 @@ Task("Publish")
                     .WithProperty("PublishSingleFile",             "true")
                     .WithProperty("EnableCompressionInSingleFile", "true")
                     .WithProperty("MinVerSkip",                    "true")
+                    .WithProperty("DebugType",                     "none")
+                    .WithProperty("DebugSymbols",                  "false")
             };
             DotNetPublish(updaterProject, updaterSettings);
             Information("fuseraft-update published alongside fuseraft.exe.");
