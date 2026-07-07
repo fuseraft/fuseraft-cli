@@ -93,6 +93,11 @@ public static partial class InitTemplates
             Capabilities:
               FileSystem: [read]
             FunctionChoice: required
+            Context:
+              - Source: session_context
+              - Source: file:.fuseraft/docs/research-findings.md
+                MaxChars: 8000
+              - Source: own_history:2
             {AgentFileOptions}
             """;
 
