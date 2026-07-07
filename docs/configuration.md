@@ -100,7 +100,7 @@ Orchestration:
 | 2 | Agent `Instructions` | Per-agent field in the config |
 | 3 | `.fuseraft/` folder orientation | Auto-injected from `FuseraftPaths.BuildFolderOrientationBlock()` — gives every agent a compact manifest of the runtime directory so they never call `list_files` on `.fuseraft/` to discover it. See [Directory layout](design.md#3-directory-layout). |
 | 4 | Context store summary | Appended when `.fuseraft/context/index.json` has entries (see [Context store](context-store.md)) |
-| 5 | Convention profile | Appended when `.fuseraft/artifacts/conventions.json` exists (Brownfield mode) |
+| 5 | Convention profile | Appended when `Brownfield.ConventionProfilePath` exists (Brownfield mode) |
 | 6 | Test selector hint | Appended when `TestSelector.FindRelatedCommand` is configured |
 
 In **REPL mode** the same folder orientation is injected (blocks 3 onward), but the log-file entries are omitted from the manifest because the session section of the REPL system prompt already lists them and directs the agent to the `repl_session_*` tools for log access.
@@ -165,7 +165,7 @@ Per-plugin tool filter. Keys are plugin names; values are arrays of capability t
 | `FileSystem` | `read` (read_file, grep_file, get_file_summary, get_file_info, list_files) · `write` (write_file, patch_file, save_file_summary, create_directory, copy_file, move_file, set_permissions) · `delete` (delete_file, delete_directory) |
 | `Shell` | `read` (shell_get_env, shell_get_job_status, shell_get_job_output, shell_which, shell_get_working_directory) · `run` (shell_run, shell_run_script, shell_run_background, shell_set_env, shell_kill_job) |
 | `Git` | `read` (git_status, git_diff, git_log, git_show, git_branch_list, git_stash_list) · `write` (git_add, git_commit, git_checkout, git_create_branch, git_init, git_push, git_pull, git_stash, git_stash_pop, git_reset) |
-| `Http` | `get` · `head` · `post` · `put` · `patch` · `delete` — one per HTTP verb |
+| `Http` | `get` (http_get, http_head) · `post` · `put` · `patch` · `delete` — one tag per verb, except `http_head` which shares the `get` tag rather than having its own |
 | `Json` | `read` · `write` (json_merge) |
 | `Document` | `read` (document_extract_text, document_get_info, document_list_sheets, document_get_sheet) |
 | `Search` | `read` |
@@ -174,6 +174,8 @@ Per-plugin tool filter. Keys are plugin names; values are arrays of capability t
 | `Chatroom` | `read` · `write` |
 | `Probe` | `run` |
 | `CodeExecution` | `read` (code_execution_check_docker) · `execute` (sandbox_run, repl_*) |
+| `Decision` | `read` (decision_search, decision_read) · `write` (decision_create, decision_supersede) |
+| `Graph` | `read` (graph_search, graph_refs, graph_dependents — all read-only) |
 
 Tools not in the capability map (e.g. MCP-registered tools) always pass through unfiltered.
 
@@ -345,7 +347,7 @@ The `{AgentName}` component is sanitized so it is safe as a directory name. Agen
 
 The REPL always loads and saves memories automatically — no config flag is needed. Each REPL memory entry is identified by a UUID (stored in the file's frontmatter and used as its filename).
 
-Memories are **scoped to the working directory** where they were created. A file at `.fuseraft/memory/sessions/{session_id}/memory_refs.json` records the GUIDs of memories saved in that session. On session start the REPL loads only the entries listed in that file:
+Memories are **scoped to the working directory** where they were created. A file at `~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json` records the GUIDs of memories saved in that session. On session start the REPL loads only the entries listed in that file:
 
 - Directories with a `.fuseraft/` folder but no refs file start with an empty memory set.
 - Directories without a `.fuseraft/` folder fall back to loading all global memories (useful outside a project context).
@@ -524,7 +526,7 @@ Termination:
 |-------|------|---------|-------------|
 | `Type` | string | `"composite"` | `regex`, `maxiterations`, or `composite`. |
 | `Pattern` | string | — | Required for `regex`. Regex applied to message content. |
-| `MaxIterations` | int | `10` | Hard cap on agent turns (applies to all types as a safety net). |
+| `MaxIterations` | int | `0` (uncapped) | Hard cap on agent turns (applies to all types as a safety net). `0` means no cap — set explicitly, since nothing else stops a session that never emits a terminating keyword. |
 | `AgentNames` | array | all agents | Optional: restrict regex check to these agents only. |
 | `Strategies` | array | — | Required for `composite`. Stops when any child fires. |
 
@@ -626,7 +628,7 @@ ContextBudget:
 
 ```yaml
 ChangeTracking:
-  Path: .fuseraft/state/changes.json
+  Path: ~/.fuseraft/state/{project_slug}/changes.json
 ```
 
 When present, the orchestrator attaches a `ChangeTracker` to every agent's kernel. After each agent text turn it flushes a structured JSON entry recording exactly which tool calls completed: files written or deleted, shell commands run (with pass/fail status), and git commits made.
@@ -636,12 +638,12 @@ The change log is consumed in two ways:
 - **Agents** — add `"Changes"` to a Tester or Reviewer agent's `Plugins` list and call `changes_read_latest` to see what the previous agent did. See [Plugins](plugins.md#changes).
 - **Validators** — set `Validation.ChangeLogPath` to the same path to enable check 8 in `TestReportValid` (cross-referencing report commands against actually-run commands) and to allow `RequireAllFilesWritten` to count files written in prior turns.
 
-**Intent log** — Alongside `changes.json`, the orchestrator also writes `.fuseraft/state/sessions/{session_id}/intents.json`. Unlike the change log (which records what happened *after* a tool call returns), the intent log records what is *about to happen* before the call executes, then updates the entry `APPLIED` or `FAILED` when it completes. On session resume, any `PENDING` entries represent operations that were in-flight at the time of interruption and can be replayed or skipped. The intent log also backs the `"intent"` compaction mode. See [Conversation compaction](#conversation-compaction).
+**Intent log** — Alongside `changes.json`, the orchestrator also writes `~/.fuseraft/sessions/{project_slug}/{session_id}/intents.json`. Unlike the change log (which records what happened *after* a tool call returns), the intent log records what is *about to happen* before the call executes, then updates the entry `APPLIED` or `FAILED` when it completes. On session resume, any `PENDING` entries represent operations that were in-flight at the time of interruption and can be replayed or skipped. The intent log also backs the `"intent"` compaction mode. See [Conversation compaction](#conversation-compaction).
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `Path` | string | `.fuseraft/state/changes.json` | Path to write the change log. Relative paths resolve against the current working directory. |
-| `IntentLogPath` | string | _(derived)_ | Path to write the intent log. When omitted, defaults to `.fuseraft/state/sessions/{session_id}/intents.json` with `{session_id}` expanded at runtime. |
+| `Path` | string | `~/.fuseraft/state/{project_slug}/changes.json` | Path to write the change log. Relative paths resolve against the current working directory. |
+| `IntentLogPath` | string | `~/.fuseraft/sessions/{project_slug}/{session_id}/intents.json` | Path to write the intent log. This is a fixed default independent of `Path` — it is *not* derived from `Path`'s directory. Set explicitly to relocate it. |
 
 **Omit** `ChangeTracking` entirely if you don't need cross-agent observability or the command cross-reference check.
 
@@ -656,7 +658,7 @@ Events:
   Path: ~/.fuseraft/logs/sessions/{project_slug}/{session_id}/events.jsonl
 ```
 
-> **App log** — In addition to this configurable event stream, fuseraft-cli always writes `Warning`-level and higher diagnostic messages to `.fuseraft/logs/app.log` via an always-on Serilog file sink (5 MB per file, 3 retained). This includes store-corruption warnings from `ChangeTracker`, `IntentLog`, `EvidenceStore`, and `FileVersionStore`, as well as structured retry and model-fallover events from the HTTP layer. No configuration needed.
+> **App log** — In addition to this configurable event stream, fuseraft-cli always writes `Warning`-level and higher diagnostic messages to `~/.fuseraft/logs/{project_slug}/app.log` via an always-on Serilog file sink (5 MB per file, 3 retained). This includes store-corruption warnings from `ChangeTracker`, `IntentLog`, `EvidenceStore`, and `FileVersionStore`, as well as structured retry and model-fallover events from the HTTP layer. No configuration needed.
 >
 > **Secret masking** — All log output (console, `app.log`, and debug sidecar) passes through a secret-masking formatter that redacts API key–like values (`sk-…` keys, `Bearer …` tokens, `api_key=…` query strings) before they are written. Secrets are never visible in logs regardless of verbosity level.
 
@@ -682,7 +684,7 @@ Each line is a JSON object:
 
 **`validation_fail` payload:** `{ validator, consecutive }` — name of the blocking validator and how many times in a row it has fired for this agent.
 
-**`hitl_escalation` payload:** `{ message }` — the error message surfaced to the user when a validator fires 3 consecutive times and the session stalls.
+**`hitl_escalation` payload:** `{ message }` — the error message surfaced to the user when the session stalls: with `Selection.Type: graph`, after `Selection.Graph.MaxRetries` (default 4) consecutive failures of any kind; with `keyword`/`statemachine`, after a validator or contract failure reaches its type's `FailureHandling.<Type>.Threshold` (default 3, or 2 for `ConflictingEvidence`). See [Validators — Stuck detection](validators.md#stuck-detection).
 
 **`context_assembly` payload:** `{ knowledge_retrieved, knowledge_included, memory_loaded, memory_included, artifacts, context_chars, system_prompt_chars, assembly_ms, context_strategy, declared_sources, empty_sources }` (sequential-agent turns add `context_chars_breakdown`, `tool_count`, `tool_schema_est_tokens`). `context_strategy` is `"artifact_spec"` when the agent's `Context:` block drove assembly or `"shared_history_fallback"` when it fell back to `ContextWindow`-filtered shared history — the field to alert on if you expect every Reviewer/Tester/Critic-style agent to be running isolated and want to catch one that silently isn't. `declared_sources` lists the `Context:` sources requested (empty under the fallback strategy); `empty_sources` is the subset that resolved to no content at assembly time — e.g. a `brief_field:` naming a field the Planner never wrote — distinguishing "the spec omitted a needed source" (visible by reading the config) from "the spec named a source that was never produced" (only visible at runtime, via this field).
 
@@ -862,7 +864,7 @@ See [Skills](skills.md) for the full `SKILL.md` format reference and the skill i
 
 ```yaml
 Validation:
-  BriefPath: .fuseraft/artifacts/brief.json
+  BriefPath: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json
   TestReportPath: .fuseraft/artifacts/test-report.json
   TestAssertionPatterns:
     - tester::assert
@@ -873,9 +875,9 @@ Validation:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `BriefPath` | string | `.fuseraft/artifacts/brief.json` | Canonical path for the project brief. Required by `RequireBrief` and `TestReportValid`. |
+| `BriefPath` | string | `~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json` | Canonical path for the project brief. Required by `RequireBrief` and `TestReportValid`. |
 | `TestReportPath` | string | `.fuseraft/artifacts/test-report.json` | Canonical path for the test report. Required by `TestReportValid`. |
-| `ChangeLogPath` | string | `.fuseraft/state/changes.json` | Path to `changes.json` produced by `ChangeTracking` (must match `ChangeTracking.Path`). Enables check 8 in `TestReportValid` and prior-turn file detection in `RequireAllFilesWritten`. |
+| `ChangeLogPath` | string | `~/.fuseraft/state/{project_slug}/changes.json` | Path to `changes.json` produced by `ChangeTracking` (must match `ChangeTracking.Path`). Enables check 8 in `TestReportValid` and prior-turn file detection in `RequireAllFilesWritten`. |
 | `TestAssertionPatterns` | array | see above | Regex patterns that identify real assertion calls in test files. |
 
 See [Validators](validators.md) for full detail.
@@ -1027,12 +1029,12 @@ Enables a structured, queryable evidence graph alongside `changes.json`. When co
 
 ```yaml
 EvidenceStore:
-  Path: .fuseraft/state/evidence.json
+  Path: ~/.fuseraft/state/{project_slug}/evidence.json
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `Path` | string | `.fuseraft/state/evidence.json` | File path for the evidence graph JSON. The directory is created automatically. |
+| `Path` | string | `~/.fuseraft/state/{project_slug}/evidence.json` | File path for the evidence graph JSON. The directory is created automatically. |
 
 **Node types recorded:**
 
@@ -1235,16 +1237,16 @@ Brownfield:
   EntryPoints:
     - src/cmd/server/main.go
     - src/internal/billing/charge.go
-  DiscoveryBriefPath: .fuseraft/artifacts/brief.brownfield.json
-  ConventionProfilePath: .fuseraft/artifacts/conventions.json
+  DiscoveryBriefPath: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.brownfield.json
+  ConventionProfilePath: ~/.fuseraft/sessions/{project_slug}/{session_id}/conventions.json
   SeedEnvelopeFromBrief: true
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `EntryPoints` | array | `[]` | Files or directories that seed the Archaeologist agent's dependency walk. Referenced in agent instructions; not automatically injected into prompts. Relative paths resolve against the sandbox root. |
-| `DiscoveryBriefPath` | string | `.fuseraft/artifacts/brief.brownfield.json` | Path where the Archaeologist writes the discovery brief JSON. When `SeedEnvelopeFromBrief` is true and this file exists at startup, its `in_scope_files` list is merged into `Security.ChangeEnvelope`. |
-| `ConventionProfilePath` | string | `.fuseraft/artifacts/conventions.json` | Path where the Archaeologist writes the convention profile JSON. When this file exists at session startup, its contents are formatted and prepended to every agent's system prompt. |
+| `DiscoveryBriefPath` | string | `~/.fuseraft/sessions/{project_slug}/{session_id}/brief.brownfield.json` | Path where the Archaeologist writes the discovery brief JSON. When `SeedEnvelopeFromBrief` is true and this file exists at startup, its `in_scope_files` list is merged into `Security.ChangeEnvelope`. |
+| `ConventionProfilePath` | string | `~/.fuseraft/sessions/{project_slug}/{session_id}/conventions.json` | Path where the Archaeologist writes the convention profile JSON. When this file exists at session startup, its contents are formatted and prepended to every agent's system prompt. |
 | `SeedEnvelopeFromBrief` | bool | `true` | When true and `DiscoveryBriefPath` exists, the `in_scope_files` list from the discovery brief is merged into `Security.ChangeEnvelope` at startup. Requires `Security.FileSystemSandboxPath` to be set for enforcement to take effect. |
 
 ### Brownfield discovery brief

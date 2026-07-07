@@ -93,14 +93,28 @@ All runtime artifacts are written under `.fuseraft/` in the current working dire
 
 **Global (`~/.fuseraft/`)**
 
+A path-refactor (mid-2026) moved nearly all runtime session/state artifacts from project-local `.fuseraft/` into the global `~/.fuseraft/` home directory, keyed by `{project_slug}` (and `{session_id}` for session-scoped files). Only a handful of artifacts remain project-local — see below.
+
 | Path | Contents |
 |------|----------|
 | `~/.fuseraft/config` | Model ID, endpoint URL (no secrets) |
 | `~/.fuseraft/.key` | Plain-text fallback API key (mode 0600; used only when no keychain) |
-| `~/.fuseraft/sessions/` | Session checkpoint files (`<sessionId>.json`, mode 0600) |
+| `~/.fuseraft/sessions/` | Session checkpoint files (`<sessionId>.json`, mode 0600) — flat, not nested by `{project_slug}` |
 | `~/.fuseraft/sessions/index.json` | Lightweight session index (no message history) for fast listing |
-| `~/.fuseraft/logs/sessions/{project_slug}/{session_id}/events.jsonl` | Structured JSONL session events (`EventEmitter`) |
+| `~/.fuseraft/sessions/{project_slug}/{session_id}/events.jsonl` | Structured JSONL session events (`EventEmitter`); matches what every `fuseraft init` template, `fuseraft log events`, and the REPL session manifest actually use. (`EventsConfig.Path`'s raw class default is a different, unreferenced path — `~/.fuseraft/logs/sessions/{project_slug}/{session_id}/events.jsonl` — that no generated config or tool falls back to in practice.) |
 | `~/.fuseraft/logs/sessions/{project_slug}/{session_id}/ctx_snapshots.jsonl` | Per-turn context-window token snapshots |
+| `~/.fuseraft/sessions/{project_slug}/{session_id}/intents.json` | Intent log: pre-execution records updated to APPLIED/FAILED |
+| `~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json` | Planner brief (validator input) |
+| `~/.fuseraft/sessions/{project_slug}/{session_id}/brief.brownfield.json` | Brownfield discovery brief (`in_scope_files` seeds change envelope) |
+| `~/.fuseraft/sessions/{project_slug}/{session_id}/conventions.json` | Brownfield convention profile (auto-injected into agent prompts) |
+| `~/.fuseraft/sessions/{project_slug}/{session_id}/chatroom.jsonl` | Shared agent coordination log |
+| `~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json` | GUIDs of memories scoped to this working directory |
+| `~/.fuseraft/state/{project_slug}/changes.json` | Change tracker: file/shell/git activity per turn |
+| `~/.fuseraft/state/{project_slug}/evidence.json` | Evidence graph: typed nodes for contract evaluation |
+| `~/.fuseraft/state/{project_slug}/file_versions.json` | Per-file monotonic write counters for conflict detection |
+| `~/.fuseraft/logs/{project_slug}/repl_events.jsonl` | REPL session events |
+| `~/.fuseraft/logs/{project_slug}/provider_errors.jsonl` | LLM provider error records |
+| `~/.fuseraft/logs/{project_slug}/app.log` | Warning+ diagnostic log (always-on Serilog file sink, 5 MB rolling, 3 retained) |
 | `~/.fuseraft/crashdump/` | Crash dump JSON files |
 | `~/.fuseraft/scratchpad/` | Default per-agent scratchpad directory |
 | `~/.fuseraft/memory/repl/` | REPL persistent memories |
@@ -110,27 +124,18 @@ All runtime artifacts are written under `.fuseraft/` in the current working dire
 
 **Local (`.fuseraft/` relative to CWD)**
 
+Only a few artifacts remain project-local; everything session- or state-scoped now lives under `~/.fuseraft/` (above).
+
 | Path | Contents |
 |------|----------|
-| `.fuseraft/logs/repl_events.jsonl` | REPL session events |
-| `.fuseraft/logs/provider_errors.jsonl` | LLM provider error records |
-| `.fuseraft/logs/app.log` | Warning+ diagnostic log (always-on Serilog file sink, 5 MB rolling, 3 retained) |
-| `.fuseraft/state/changes.json` | Change tracker: file/shell/git activity per turn |
-| `.fuseraft/state/sessions/{session_id}/intents.json` | Intent log: pre-execution records updated to APPLIED/FAILED |
-| `.fuseraft/state/evidence.json` | Evidence graph: typed nodes for contract evaluation |
-| `.fuseraft/state/file_versions.json` | Per-file monotonic write counters for conflict detection |
-| `.fuseraft/artifacts/sessions/{session_id}/brief.json` | Planner brief (validator input) |
+| `.fuseraft/config/orchestration.yaml` | Orchestration config file (default path passed to `fuseraft run`) |
 | `.fuseraft/artifacts/test-report.json` | Tester report (validator input) |
-| `.fuseraft/comms/sessions/{session_id}/chatroom.jsonl` | Shared agent coordination log |
-| `.fuseraft/artifacts/sessions/{session_id}/conventions.json` | Brownfield convention profile (auto-injected into agent prompts) |
-| `.fuseraft/artifacts/sessions/{session_id}/brief.brownfield.json` | Brownfield discovery brief (`in_scope_files` seeds change envelope) |
-| `.fuseraft/memory/sessions/{session_id}/memory_refs.json` | GUIDs of memories scoped to this working directory |
 | `.fuseraft/context/` | Context store entries and index |
 | `.fuseraft/summaries/` | File summaries written by FileSystem plugin |
 
 All paths are configurable via their corresponding config keys. The table above shows defaults.
 
-**Folder orientation for agents** — `FuseraftPaths.BuildFolderOrientationBlock()` generates a compact manifest of the local `.fuseraft/` directory and is appended to every agent's instructions by `OrchestratorBuilder` at session start. This means agents never need to call `list_files` on `.fuseraft/` to discover its layout — they already have it. In REPL mode the log-file entries are omitted (the session section already covers them; agents are directed to the `repl_session_*` tools). `SubAgentPlugin` prompts receive a one-line skip directive instead of the full manifest to keep their system prompts compact.
+**Folder orientation for agents** — `FuseraftPaths.BuildFolderOrientationBlock()` generates a compact manifest of the runtime directory layout (both the local `.fuseraft/` artifacts and the global `~/.fuseraft/` session/state paths above) and is appended to every agent's instructions by `OrchestratorBuilder` at session start. This means agents never need to call `list_files` on `.fuseraft/` to discover its layout — they already have it. In REPL mode the log-file entries are omitted (the session section already covers them; agents are directed to the `repl_session_*` tools). `SubAgentPlugin` prompts receive a one-line skip directive instead of the full manifest to keep their system prompts compact.
 
 ---
 
@@ -623,6 +628,8 @@ Plugins are `AIFunction`-providing objects registered in `PluginRegistry` and re
 | `Json` | `json_format`, `json_minify`, `json_get`, `json_keys`, `json_search`, `json_to_text`, `json_validate`, `json_merge` |
 | `Document` | `document_extract_text`, `document_get_info`, `document_list_sheets`, `document_get_sheet` |
 | `Search` | `search_content`, `search_symbol`, `search_callers` — finding files by name is `list_files` (FileSystem) |
+| `Decision` | `decision_search`, `decision_read`, `decision_create`, `decision_supersede` — ADR registry |
+| `Graph` | `graph_search`, `graph_refs`, `graph_dependents` — repository semantic graph, all read-only |
 | `CodeExecution` | `code_execution_check_docker`, `code_execution_sandbox_run`, `code_execution_repl_start`, `code_execution_repl_exec`, `code_execution_repl_reset`, `code_execution_repl_stop` — Docker-sandboxed execution |
 | `Changes` | `changes_read`, `changes_read_latest` — read the JSONL change log for observability by downstream agents |
 | `Probe` | `probe_code`, `probe_assert_output`, `probe_compare_outputs`, `probe_run_hypothesis` — code execution and output verification |
@@ -651,6 +658,8 @@ Plugins are `AIFunction`-providing objects registered in `PluginRegistry` and re
 | `Chatroom` | `read` · `write` |
 | `Probe` | `run` (probe_code, probe_assert_output, probe_compare_outputs, probe_run_hypothesis) |
 | `CodeExecution` | `read` (check_docker) · `execute` (sandbox_run, repl_*) |
+| `Decision` | `read` (decision_search, decision_read) · `write` (decision_create, decision_supersede) |
+| `Graph` | `read` (graph_search, graph_refs, graph_dependents — all read-only) |
 
 Example — a Reviewer that inspects files and git history but cannot write, delete, or run commands:
 
@@ -676,7 +685,7 @@ Example — a Reviewer that inspects files and git history but cannot write, del
 | Prompt injection detection | Detects and blocks injection attempts in tool inputs |
 | Rings | Maps `AgentConfig.TrustScore` to execution privilege rings (Ring 1 ≥ 0.80, Ring 2 ≥ 0.60, Ring 3 < 0.60) |
 | Circuit breaker | Wraps `agent.RunAsync` calls; trips after 5 failures, resets after 30s, half-open with 1 probe call |
-| SLO engine | Tracks routing validator compliance rate over a 1-hour rolling window; 95% target; burn-rate alerts at 2× (warning) and 5× (critical) over 600s |
+| SLO engine | Tracks routing validator compliance rate over a 1-hour rolling window; 95% target; burn-rate alerts at 2× (warning, 3600s window) and 5× (critical, 600s window) |
 
 **Policy files:** If `policies/default.yaml` exists in the same directory as the config file (e.g. `.fuseraft/config/policies/default.yaml`), it is loaded as a governance policy and applied to all agents in the session.
 
@@ -696,20 +705,20 @@ Example — a Reviewer that inspects files and git history but cannot write, del
 - `ActiveSessionId` — current session ID
 - `Entries[]` — `{ Agent, TurnIndex, Timestamp, SessionId, FilesWritten[], FilesDeleted[], CommandsRun[], GitCommits[] }`
 
-**Intent log** (`.fuseraft/state/sessions/{session_id}/intents.json`): Alongside the change log, `CapturingMiddleware` also writes to an `IntentLog` — one entry per tracked tool call, written *before* the call executes with `Status: Pending`, then updated to `Applied` or `Failed` once the call returns.
+**Intent log** (`~/.fuseraft/sessions/{project_slug}/{session_id}/intents.json`): Alongside the change log, `CapturingMiddleware` also writes to an `IntentLog` — one entry per tracked tool call, written *before* the call executes with `Status: Pending`, then updated to `Applied` or `Failed` once the call returns.
 
 - `BeginTurn(agentName, turnIndex)` must be called before each `agent.RunAsync` so middleware has the correct turn index. All orchestrators (`AgentOrchestrator`, `MagenticOrchestrator`, `GraphOrchestrator`) call this immediately after `OnAgentTurnStarting()`.
 - On session resume, any `Pending` entries indicate operations that were in-flight at interruption time.
 - The `"intent"` compaction mode reads from this log to produce a deterministic `✓`/`✗` summary — no LLM call required.
 - If the intent log file is corrupt or unreadable on load, the failure is emitted via `ILogger<IntentLog>` at Warning level and the store resets to empty for the session.
 
-**`ChangeLog` load failures** (`.fuseraft/state/changes.json`): Both the session-init path (setting `ActiveSessionId`) and the per-entry flush path read the existing change log before appending. If either read fails, the failure is emitted via `ILogger<ChangeTracker>` at Warning level and the log resets to empty for that operation. `EvidenceStore` and `FileVersionStore` follow the same pattern. All warnings route to `.fuseraft/logs/app.log` via the always-on Serilog file sink so they survive past the terminal session.
+**`ChangeLog` load failures** (`~/.fuseraft/state/{project_slug}/changes.json`): Both the session-init path (setting `ActiveSessionId`) and the per-entry flush path read the existing change log before appending. If either read fails, the failure is emitted via `ILogger<ChangeTracker>` at Warning level and the log resets to empty for that operation. `EvidenceStore` and `FileVersionStore` follow the same pattern. All warnings route to `~/.fuseraft/logs/{project_slug}/app.log` via the always-on Serilog file sink so they survive past the terminal session.
 
-**`IntentStore` schema** (`.fuseraft/state/sessions/{session_id}/intents.json`):
+**`IntentStore` schema** (`~/.fuseraft/sessions/{project_slug}/{session_id}/intents.json`):
 - `ActiveSessionId`
 - `Entries[]` — `{ IntentId, Timestamp, Agent, TurnIndex, SessionId, Operation: { FunctionName, TargetPath, ArgsSummary }, Status, ErrorMessage, CompletedAt }`
 
-**`FileVersionStore`** (`.fuseraft/state/file_versions.json`): A lightweight per-file version counter, also initialized by `OrchestratorBuilder`. Every successful `write_file` call increments the counter. Agents call `get_file_info` to probe the current version and pass `baseVersion` to `write_file` to detect concurrent-write conflicts. If the store file is corrupt or unreadable, the failure is emitted via `ILogger<FileVersionStore>` at Warning level and the counter resets to zero for the session — agents will see all files at version 0 and conflict detection will not fire until files are written again.
+**`FileVersionStore`** (`~/.fuseraft/state/{project_slug}/file_versions.json`): A lightweight per-file version counter, also initialized by `OrchestratorBuilder`. Every successful `write_file` call increments the counter. Agents call `get_file_info` to probe the current version and pass `baseVersion` to `write_file` to detect concurrent-write conflicts. If the store file is corrupt or unreadable, the failure is emitted via `ILogger<FileVersionStore>` at Warning level and the counter resets to zero for the session — agents will see all files at version 0 and conflict detection will not fire until files are written again.
 
 **Downstream use:** The `Changes` plugin exposes `changes_read` and `changes_read_latest` so agents (typically Tester or Reviewer) can read what previous agents actually did rather than inferring it from chat history. `RequireShellPass` and `RequireWriteFile` validators also read this log to verify deterministic pre-conditions before routes fire.
 
