@@ -194,95 +194,42 @@ public sealed class ChangeTracker
         {
             if (records.Count == 0) return;
 
-            var entry = new ChangeEntry
+            // Group by each record's own captured (Agent, TurnIndex) rather than trusting
+            // the flush call's parameters for the whole batch. A record can still be
+            // sitting in the queue from an earlier turn whose flush was skipped (e.g. an
+            // exception mid-flush) — draining it here must not relabel it under whichever
+            // turn happens to call FlushTurnAsync next. In the common case there is exactly
+            // one group and it matches (agentName, turnIndex).
+            var groups = records
+                .GroupBy(r => (r.Agent, r.TurnIndex))
+                .OrderBy(g => g.Key.TurnIndex);
+
+            foreach (var group in groups)
             {
-                Agent     = agentName,
-                TurnIndex = turnIndex,
-                Timestamp = DateTime.UtcNow,
-                SessionId = _sessionId,
+                var groupAgent   = string.IsNullOrEmpty(group.Key.Agent) ? agentName : group.Key.Agent;
+                var groupTurn    = group.Key.TurnIndex >= 0 ? group.Key.TurnIndex : turnIndex;
+                var groupRecords = group.ToList();
 
-                FilesWritten = [.. records
-                    .Where(r => (FunctionNameMatches(r.Name, "write_file") || FunctionNameMatches(r.Name, "patch_file")) && r.Succeeded)
-                    .Select(r => OrchestratorHelpers.GetArg(r.Args, "path"))
-                    .Concat(records
-                        .Where(r => FunctionNameMatches(r.Name, "copy_file") && r.Succeeded)
-                        .Select(r => OrchestratorHelpers.GetArg(r.Args, "destination")))
-                    .Concat(records
-                        .Where(r => FunctionNameMatches(r.Name, "move_file") && r.Succeeded)
-                        .Select(r => OrchestratorHelpers.GetArg(r.Args, "destination")))
-                    .OfType<string>()],
+                var entry = BuildChangeEntry(groupAgent, groupTurn, groupRecords);
 
-                FilesDeleted = [.. records
-                    .Where(r => FunctionNameMatches(r.Name, "delete_file") && r.Succeeded)
-                    .Select(r => OrchestratorHelpers.GetArg(r.Args, "path"))
-                    .Concat(records
-                        .Where(r => FunctionNameMatches(r.Name, "delete_directory") && r.Succeeded)
-                        .Select(r => OrchestratorHelpers.GetArg(r.Args, "path")))
-                    .Concat(records
-                        .Where(r => FunctionNameMatches(r.Name, "move_file") && r.Succeeded)
-                        .Select(r => OrchestratorHelpers.GetArg(r.Args, "source")))
-                    .OfType<string>()],
+                if (!entry.FilesWritten.Any() && !entry.FilesDeleted.Any() &&
+                    !entry.CommandsRun.Any()  && !entry.GitCommits.Any())
+                    continue;
 
-                CommandsRun = [.. records
-                    .Where(r => FunctionNameMatches(r.Name, "shell_run"))
-                    .Select(r => new CommandRecord
-                    {
-                        Command   = OrchestratorHelpers.GetArg(r.Args, "command") ?? OrchestratorHelpers.GetArg(r.Args, "script") ?? "(script)",
-                        Succeeded = r.Succeeded,
-                        Output    = r.Output
-                    })],
+                // Emit typed evidence nodes for the evidence graph (alongside flat changes.json).
+                if (_evidenceStore is not null)
+                    await EmitEvidenceNodesAsync(groupAgent, groupTurn, groupRecords, cancellationToken);
 
-                GitCommits = [.. records
-                    .Where(r => FunctionNameMatches(r.Name, "git_commit") && r.Succeeded)
-                    .Select(r => OrchestratorHelpers.GetArg(r.Args, "message"))
-                    .OfType<string>()]
-            };
-
-            if (!entry.FilesWritten.Any() && !entry.FilesDeleted.Any() &&
-                !entry.CommandsRun.Any()  && !entry.GitCommits.Any())
-                return;
-
-            // Emit typed evidence nodes for the evidence graph (alongside flat changes.json).
-            if (_evidenceStore is not null)
-                await EmitEvidenceNodesAsync(agentName, turnIndex, records, cancellationToken);
-
-            // Emit artifact_deleted for every file removed this turn.
-            if (_eventEmitter is not null)
-            {
-                foreach (var deleted in entry.FilesDeleted)
-                    _ = _eventEmitter.EmitAsync(EventTypes.ArtifactDeleted, agent: agentName, turn: turnIndex,
-                        payload: new { path = deleted });
-            }
-
-            await _fileLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                var dir = Path.GetDirectoryName(Path.GetFullPath(_logPath));
-                if (dir is not null) Directory.CreateDirectory(dir);
-
-                ChangeLog log;
-                if (File.Exists(_logPath))
+                // Emit artifact_deleted for every file removed this turn.
+                if (_eventEmitter is not null)
                 {
-                    try
-                    {
-                        var raw = await File.ReadAllTextAsync(_logPath, cancellationToken);
-                        log = JsonSerializer.Deserialize<ChangeLog>(raw, JsonOpts) ?? new ChangeLog();
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger?.LogWarning(ex, "ChangeTracker: failed to load '{Path}' during flush — change log reset.", _logPath);
-                        log = new ChangeLog();
-                    }
-                }
-                else
-                {
-                    log = new ChangeLog();
+                    foreach (var deleted in entry.FilesDeleted)
+                        _ = _eventEmitter.EmitAsync(EventTypes.ArtifactDeleted, agent: groupAgent, turn: groupTurn,
+                            payload: new { path = deleted });
                 }
 
-                log.Entries.Add(entry);
-                await File.WriteAllTextAsync(_logPath, JsonSerializer.Serialize(log, JsonOpts), cancellationToken);
+                await AppendEntryAsync(entry, cancellationToken);
             }
-            finally { _fileLock.Release(); }
         }
         finally
         {
@@ -292,6 +239,87 @@ public sealed class ChangeTracker
                 catch (Exception ex) { _logger?.LogWarning(ex, "StateProjector.ProjectAsync failed (turn {Turn}).", turnIndex); }
             }
         }
+    }
+
+    // Builds the flat ChangeEntry for one (agent, turn) group of invocation records.
+    private static ChangeEntry BuildChangeEntry(string agent, int turn, List<InvocationRecord> records) => new()
+    {
+        Agent     = agent,
+        TurnIndex = turn,
+        Timestamp = DateTime.UtcNow,
+        SessionId = null, // stamped by caller via AppendEntryAsync's snapshot of _sessionId
+
+        FilesWritten = [.. records
+            .Where(r => (FunctionNameMatches(r.Name, "write_file") || FunctionNameMatches(r.Name, "patch_file")) && r.Succeeded)
+            .Select(r => OrchestratorHelpers.GetArg(r.Args, "path"))
+            .Concat(records
+                .Where(r => FunctionNameMatches(r.Name, "copy_file") && r.Succeeded)
+                .Select(r => OrchestratorHelpers.GetArg(r.Args, "destination")))
+            .Concat(records
+                .Where(r => FunctionNameMatches(r.Name, "move_file") && r.Succeeded)
+                .Select(r => OrchestratorHelpers.GetArg(r.Args, "destination")))
+            .OfType<string>()],
+
+        FilesDeleted = [.. records
+            .Where(r => FunctionNameMatches(r.Name, "delete_file") && r.Succeeded)
+            .Select(r => OrchestratorHelpers.GetArg(r.Args, "path"))
+            .Concat(records
+                .Where(r => FunctionNameMatches(r.Name, "delete_directory") && r.Succeeded)
+                .Select(r => OrchestratorHelpers.GetArg(r.Args, "path")))
+            .Concat(records
+                .Where(r => FunctionNameMatches(r.Name, "move_file") && r.Succeeded)
+                .Select(r => OrchestratorHelpers.GetArg(r.Args, "source")))
+            .OfType<string>()],
+
+        CommandsRun = [.. records
+            .Where(r => FunctionNameMatches(r.Name, "shell_run"))
+            .Select(r => new CommandRecord
+            {
+                Command   = OrchestratorHelpers.GetArg(r.Args, "command") ?? OrchestratorHelpers.GetArg(r.Args, "script") ?? "(script)",
+                Succeeded = r.Succeeded,
+                Output    = r.Output
+            })],
+
+        GitCommits = [.. records
+            .Where(r => FunctionNameMatches(r.Name, "git_commit") && r.Succeeded)
+            .Select(r => OrchestratorHelpers.GetArg(r.Args, "message"))
+            .OfType<string>()]
+    };
+
+    // Appends one ChangeEntry to the on-disk log under the file lock.
+    private async Task AppendEntryAsync(ChangeEntry entry, CancellationToken cancellationToken)
+    {
+        entry = entry with { SessionId = _sessionId };
+
+        await _fileLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var dir = Path.GetDirectoryName(Path.GetFullPath(_logPath));
+            if (dir is not null) Directory.CreateDirectory(dir);
+
+            ChangeLog log;
+            if (File.Exists(_logPath))
+            {
+                try
+                {
+                    var raw = await File.ReadAllTextAsync(_logPath, cancellationToken);
+                    log = JsonSerializer.Deserialize<ChangeLog>(raw, JsonOpts) ?? new ChangeLog();
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "ChangeTracker: failed to load '{Path}' during flush — change log reset.", _logPath);
+                    log = new ChangeLog();
+                }
+            }
+            else
+            {
+                log = new ChangeLog();
+            }
+
+            log.Entries.Add(entry);
+            await File.WriteAllTextAsync(_logPath, JsonSerializer.Serialize(log, JsonOpts), cancellationToken);
+        }
+        finally { _fileLock.Release(); }
     }
 
     // Builds typed EvidenceNode objects from the raw invocation records and persists
@@ -715,7 +743,7 @@ public sealed class ChangeTracker
                 : resultText;
         }
 
-        _pending.Enqueue(new InvocationRecord(name, context.Arguments, succeeded, output));
+        _pending.Enqueue(new InvocationRecord(name, context.Arguments, succeeded, output, agentName, _currentTurnIndex));
         return result;
     }
 
