@@ -642,6 +642,7 @@ public static partial class InitTemplates
                       Transitions:
                         - To: BriefReview
                           Signal: "HANDOFF TO CRITIC"
+                          Contract: BriefExists
 
                     BriefReview:
                       Agent: PlannerCritic
