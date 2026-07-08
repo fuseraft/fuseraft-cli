@@ -370,7 +370,7 @@ internal sealed class CompactionCoordinator(
             foreach (var tc in msg.ToolCalls)
             {
                 if (!tc.Succeeded) continue;
-                if (tc.Name == "write_file" &&
+                if (tc.Name is "write_file" or "patch_file" &&
                     tc.ArgsSummary is { } pa &&
                     pa.StartsWith("path=", StringComparison.Ordinal))
                 {
