@@ -750,9 +750,11 @@ Selection:
 
 Other differences from `graph`, not config-rejected but worth knowing:
 
-- No governance/circuit-breaker integration, no unified context-assembly pipeline (always uses
-  the legacy `ContextWindowFilter`), no `context_window_warn` events, and no
-  repository-knowledge-store observation extraction.
+- Governance (circuit breaker, per-validator-failure audit/rate-limit, SLO recording) and the
+  unified context-assembly pipeline are wired identically to `graph`. There is still no
+  human-approval gate or recovery-agent invocation — those are the config-rejected fields above,
+  so there is nothing to wire. There is also no repository-knowledge-store observation
+  extraction (unlike `graph`/`magentic`).
 - Sessions always start from `EntryNode`; there is no resume-from-the-interrupted-node support
   after compaction (`graph` resumes from wherever it left off — `workflow` restarts the whole
   pipeline). For long, compaction-prone sessions this is a real usability gap to weigh against

@@ -1620,7 +1620,8 @@ public static class OrchestratorBuilder
             var wfLogger = loggerFactory.CreateLogger<WorkflowOrchestrator>();
             orchestrator  = new WorkflowOrchestrator(
                 config, agentFactory, wfLogger,
-                changeTracker, eventEmitter);
+                changeTracker, eventEmitter, governanceKernel,
+                contextPipeline);
         }
         else if (flags.UseAdversarial)
         {
@@ -1635,7 +1636,8 @@ public static class OrchestratorBuilder
             orchestrator  = new MapReduceOrchestrator(
                 config, agentFactory, mrLogger,
                 changeTracker, eventEmitter, governanceKernel,
-                flags.HitlMode ? humanApprovalService : null);
+                flags.HitlMode ? humanApprovalService : null,
+                contextPipeline, knowledgeStore);
         }
         else if (flags.UseScatterGather)
         {
@@ -1643,7 +1645,8 @@ public static class OrchestratorBuilder
             orchestrator  = new ScatterGatherOrchestrator(
                 config, agentFactory, sgLogger,
                 changeTracker, eventEmitter, governanceKernel,
-                flags.HitlMode ? humanApprovalService : null);
+                flags.HitlMode ? humanApprovalService : null,
+                contextPipeline, knowledgeStore);
         }
         else if (flags.UseMagentic)
         {

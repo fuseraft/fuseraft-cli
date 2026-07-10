@@ -337,6 +337,10 @@ This replaced an earlier BFS-shortest-path-layer approximation (assign each node
 - `PhaseBreakValidators` — validators keyed by back-edge keyword
 - `TerminalValidators` — validators on `Terminal: true` nodes (run before keyword detection)
 - `ForeignSendForwardKeywords` — keywords used to re-inject context to the MAF phase's next agent
+- `IsReviewerType` — mirrors `GraphNodeConfig.ReviewerType`; selects `CorrectionEngine`'s
+  reviewer-specialized correction messages (JSON judgement block tolerance, shell_run-before-decision
+  requirement) instead of inferring reviewer behavior from whether `PhaseBreakKeywords` contains
+  the literal string `"APPROVED"`
 - `_unconditionalForwardRoutes` — forward edges with no keyword (fire automatically)
 - `_unconditionalBackEdges` — back-edges with no keyword (fire automatically)
 - `_unconditionalBackEdgeValidators` — validators for unconditional back-edges (stored in a parallel dictionary so they are not silently dropped)
@@ -426,6 +430,8 @@ A three-phase data-parallel orchestrator for `Selection.Type: mapreduce`. No MAF
 
 **Phase 3 — Reduce:** The `Reducer` agent receives the full shared history (task + splitter output + all labeled mapper outputs) plus a synthesise prompt, then produces the terminal message.
 
+Each of the three phases assembles its agent's context via `IContextAssemblyPipeline.AssembleAsync` (memory augmentation, ADR/knowledge retrieval, per-agent `Context:` spec) when a pipeline is wired, falling back to raw instructions+history otherwise — shared with `ScatterGatherOrchestrator` via `FanOutHelpers.AssembleContextAsync`. Per-turn observations are also persisted to `RepositoryKnowledgeStore` when configured, matching `GraphOrchestrator`/`MagenticOrchestrator`.
+
 **Execution model:**
 
 ```
@@ -445,6 +451,8 @@ A two-phase broadcast orchestrator for `Selection.Type: scattergather`. Distinct
 **Phase 1 — Scatter:** All `Participants` are invoked in parallel using `Task.WhenAll`. Each receives an isolated snapshot of the base history with no visibility into other participants' in-progress work. Concurrency is bounded by `MaxConcurrency` when non-zero.
 
 **Phase 2 — Gather:** The `Synthesizer` agent receives the original task history plus every participant's output labeled `[Participant: AgentName]`, then produces the terminal response.
+
+Both phases assemble their agents' context via `IContextAssemblyPipeline.AssembleAsync` when a pipeline is wired (shared with `MapReduceOrchestrator` via `FanOutHelpers.AssembleContextAsync`), and persist per-turn observations to `RepositoryKnowledgeStore` when configured.
 
 **Execution model:**
 
@@ -472,7 +480,7 @@ A directed-graph orchestrator for `Selection.Type: "workflow"` — a cycle-nativ
 
 `WorkflowOrchestrator` deliberately duplicates `GraphOrchestrator`'s per-node retry skeleton (`MaxRetries`/`MaxTotalTurnsMultiplier`-derived turn cap, consecutive-failure counting, `TimeoutException` handling) rather than sharing it, since the two orchestrators' node-execution loops diverge enough (no forward/back distinction here) that a shared implementation would need its own abstraction layer.
 
-**Feature parity gap vs. `GraphOrchestrator`:** `WorkflowOrchestrator` does not wire `governanceKernel`/the governance circuit-breaker or `IContextAssemblyPipeline` into its per-node agent invocations. `docs/strategies.md` frames switching `Selection.Type` from `graph` to `workflow` as close to a drop-in engine swap — that's true for the routing/config surface, but it means a session moved from `graph` to `workflow` silently loses governance protection and the context-assembly pipeline's memory/knowledge injection, not just gains cycle-native routing. Both orchestrators do share the same validator-name→instance resolution surface (`BuildValidatorsFromNames`, including `ArchitectureValidator`), so validator configuration itself transfers correctly between the two.
+`WorkflowOrchestrator` wires `governanceKernel` (circuit breaker around the agent call, plus audit/rate-limit/SLO recording on validator failure — `RecordGovernanceViolation`, independently implemented rather than shared, per the same convention as its validator-resolution logic) and `IContextAssemblyPipeline` (`HandleContextOverflowAsync`, falling back to the legacy `ContextWindowFilter` when no pipeline is configured) identically to `GraphOrchestrator`, so switching `Selection.Type` from `graph` to `workflow` no longer loses governance protection or the context pipeline's memory/knowledge injection. It still has no human-approval gate or recovery-agent invocation — both are rejected at config-validation time for `workflow` (§ workflow v1 limitations in `docs/strategies.md`), so there is nothing to wire — and no repository-knowledge-store observation extraction (`GraphOrchestrator`/`MagenticOrchestrator` persist per-turn findings from tool calls; `WorkflowOrchestrator` does not). Both orchestrators do share the same validator-name→instance resolution surface (`BuildValidatorsFromNames`, including `ArchitectureValidator`), so validator configuration itself transfers correctly between the two.
 
 ---
 

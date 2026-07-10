@@ -2,6 +2,9 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Threading.Channels;
+using AgentGovernance;
+using AgentGovernance.Audit;
+using AgentGovernance.Sre;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using MafWorkflow = Microsoft.Agents.AI.Workflows.Workflow;
@@ -35,10 +38,10 @@ namespace fuseraft.Orchestration;
 /// <b>v1 scope</b>: <c>Parallel: true</c> nodes, <c>SubGraphId</c> nodes,
 /// <c>RequireHumanApproval</c>, <c>RecoveryAgent</c>, and no-keyword (unconditional) edges are
 /// rejected at config-validation time (see <c>OrchestratorBuilder</c>) rather than silently
-/// ignored. Governance/circuit-breaker integration, the unified context-assembly pipeline, and
-/// resume-from-a-specific-node after compaction are not wired up — sessions always start from
-/// <c>EntryNode</c>. See <c>docs/strategies.md</c> for the full list of differences from
-/// <see cref="GraphOrchestrator"/>.
+/// ignored — so, unlike <see cref="GraphOrchestrator"/>, there is no human-approval gate or
+/// recovery-agent invocation to wire here. Resume-from-a-specific-node after compaction is not
+/// wired up — sessions always start from <c>EntryNode</c>. See <c>docs/strategies.md</c> for the
+/// full list of differences from <see cref="GraphOrchestrator"/>.
 /// </para>
 /// </summary>
 public sealed class WorkflowOrchestrator(
@@ -46,7 +49,9 @@ public sealed class WorkflowOrchestrator(
     AgentFactory agentFactory,
     ILogger<WorkflowOrchestrator> logger,
     ChangeTracker? changeTracker = null,
-    EventEmitter? eventEmitter = null) : IOrchestrator
+    EventEmitter? eventEmitter = null,
+    GovernanceKernel? governanceKernel = null,
+    IContextAssemblyPipeline? contextPipeline = null) : IOrchestrator
 {
     // Mirrors GraphOrchestrator.DefaultMaxRetries — CorrectionEngine.InjectValidationError's
     // default parameter references that constant, not this one, so the two are independent
@@ -70,6 +75,7 @@ public sealed class WorkflowOrchestrator(
     {
         _sessionId = sessionId;
         agentFactory.SetSessionId(sessionId);
+        contextPipeline?.SetSessionId(sessionId);
     }
 
     public event Action<string>? AgentStarting;
@@ -476,6 +482,7 @@ public sealed class WorkflowOrchestrator(
                     if (!termOk)
                     {
                         consecutiveFails++;
+                        RecordGovernanceViolation(agentName, termValidator!, consecutiveFails, maxRetries);
 
                         if (consecutiveFails >= maxRetries)
                             throw new ValidatorStuckException(agentName, termValidator!, consecutiveFails, termErr!);
@@ -513,6 +520,9 @@ public sealed class WorkflowOrchestrator(
 
                 if (ok)
                 {
+                    if (route.Validators.Count > 0)
+                        governanceKernel?.SloEngine.Get("policy-compliance")?.Record(1.0);
+
                     consecutiveFails = 0;
                     ctx.LastKeyword  = foundKeyword;
 
@@ -530,6 +540,7 @@ public sealed class WorkflowOrchestrator(
                 }
 
                 consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
+                RecordGovernanceViolation(agentName, validatorName!, consecutiveFails, maxRetries);
 
                 if (consecutiveFails >= maxRetries)
                     throw new ValidatorStuckException(agentName, validatorName!, consecutiveFails, err!);
@@ -590,10 +601,8 @@ public sealed class WorkflowOrchestrator(
             int totalTurns,
             CancellationToken ct)
     {
-        var filtered = ContextWindowFilter.Apply(ctx.History, agentCfg.ContextWindow);
-        IEnumerable<ChatMessage> context = !string.IsNullOrWhiteSpace(instructions)
-            ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
-            : filtered;
+        var context = await HandleContextOverflowAsync(agentName, agentCfg, instructions, ctx, ct)
+            .ConfigureAwait(false);
 
         if (eventEmitter is not null)
         {
@@ -604,7 +613,9 @@ public sealed class WorkflowOrchestrator(
         AgentResponse response;
         try
         {
-            response = await agent.RunAsync(context, null, null, ct).ConfigureAwait(false);
+            response = governanceKernel?.CircuitBreaker is { } cb
+                ? await cb.ExecuteAsync(() => agent.RunAsync(context, null, null, ct)).ConfigureAwait(false)
+                : await agent.RunAsync(context, null, null, ct).ConfigureAwait(false);
         }
         catch (TimeoutException tex)
         {
@@ -718,11 +729,124 @@ public sealed class WorkflowOrchestrator(
     }
 
     // -------------------------------------------------------------------------
-    // Validation-failure helpers — same shape as GraphOrchestrator's, independently
-    // implemented (no shared/extracted helper) per the established codebase convention
-    // of each orchestrator owning its own validator-resolution logic (see also
-    // StrategyFactory.BuildValidators).
+    // Context assembly and governance helpers — same shape as GraphOrchestrator's,
+    // independently implemented (no shared/extracted helper) per the established codebase
+    // convention of each orchestrator owning its own validator-resolution logic (see also
+    // StrategyFactory.BuildValidators). Unlike GraphOrchestrator, there is no recovery-agent
+    // invocation or human-approval gate here — v1 scope rejects RequireHumanApproval and
+    // RecoveryAgent at config-validation time (see the class doc comment), so governance
+    // integration is limited to the circuit breaker and per-validator-failure audit/rate-limit/SLO
+    // recording below.
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Assembles the per-turn message list via the unified context pipeline (when configured)
+    /// or the legacy <see cref="ContextWindowFilter"/>, emitting <c>context_window_warn</c> /
+    /// <c>context_assembly</c> events as appropriate.
+    /// </summary>
+    private async Task<IEnumerable<ChatMessage>> HandleContextOverflowAsync(
+        string agentName,
+        AgentConfig agentCfg,
+        string instructions,
+        AgentContext ctx,
+        CancellationToken ct)
+    {
+        IEnumerable<ChatMessage> context;
+        if (contextPipeline is not null)
+        {
+            var assembled = await contextPipeline.AssembleAsync(
+                new AgentExecutionRequest
+                {
+                    AgentName     = agentName,
+                    Task          = _task,
+                    SharedHistory = ctx.History,
+                    AgentConfig   = agentCfg,
+                    SessionId     = _sessionId,
+                }, ct);
+            context = assembled.Messages;
+            await EmitContextWindowWarnAsync(agentName, agentCfg, assembled.Messages, ctx);
+            if (eventEmitter is not null)
+                await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, ctx.TurnIndex);
+        }
+        else
+        {
+            var filtered = ContextWindowFilter.Apply(ctx.History, agentCfg.ContextWindow);
+            await EmitContextWindowWarnAsync(agentName, agentCfg, filtered, ctx);
+            context = !string.IsNullOrWhiteSpace(instructions)
+                ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
+                : filtered;
+        }
+        return context;
+    }
+
+    private async Task EmitContextWindowWarnAsync(
+        string agentName, AgentConfig agentCfg, IReadOnlyList<ChatMessage> filtered, AgentContext ctx)
+    {
+        if (eventEmitter is null) return;
+        if (agentCfg.ContextWindow is not { ContextCapFraction: > 0, MaxTailMessages: > 0 } cw) return;
+        if (filtered.Count <= (int)(cw.MaxTailMessages * cw.ContextCapFraction)) return;
+
+        await eventEmitter.EmitAsync(EventTypes.ContextWindowWarn,
+            agent: agentName,
+            turn:  ctx.TurnIndex,
+            payload: new
+            {
+                messages  = filtered.Count,
+                cap       = cw.MaxTailMessages,
+                fraction  = cw.ContextCapFraction,
+                threshold = (int)(cw.MaxTailMessages * cw.ContextCapFraction)
+            });
+    }
+
+    private static Task EmitContextAssemblyAsync(
+        EventEmitter emitter,
+        ContextAssemblyMetrics metrics,
+        int turn) =>
+        emitter.EmitAsync(EventTypes.ContextAssembly,
+            agent: metrics.AgentName,
+            turn:  turn,
+            payload: new
+            {
+                knowledge_retrieved  = metrics.KnowledgeItemsRetrieved,
+                knowledge_included   = metrics.KnowledgeItemsIncluded,
+                memory_loaded        = metrics.MemoryEntriesLoaded,
+                memory_included      = metrics.MemoryEntriesIncluded,
+                artifacts            = metrics.ArtifactsAssembled,
+                context_chars        = metrics.TotalContextChars,
+                system_prompt_chars  = metrics.SystemPromptChars,
+                assembly_ms          = (int)metrics.AssemblyDuration.TotalMilliseconds,
+                context_strategy     = metrics.ContextStrategy,
+                declared_sources     = metrics.DeclaredSources,
+                empty_sources        = metrics.EmptySources,
+            });
+
+    private void RecordGovernanceViolation(
+        string agentName,
+        string validatorName,
+        int consecutiveCount,
+        int maxRetries)
+    {
+        if (governanceKernel is null) return;
+
+        var agentDid = agentFactory.GetDid(agentName);
+        governanceKernel.AuditEmitter.Emit(
+            GovernanceEventType.PolicyViolation,
+            agentId:   agentDid,
+            sessionId: _sessionId,
+            data: new Dictionary<string, object>
+            {
+                ["agent_name"]  = agentName,
+                ["validator"]   = validatorName,
+                ["consecutive"] = consecutiveCount,
+            });
+
+        var rlKey = $"{agentDid}:validation:fail";
+        if (!governanceKernel.RateLimiter.TryAcquire(rlKey, maxCalls: maxRetries, window: TimeSpan.FromMinutes(10)))
+            throw new ValidatorStuckException(agentName, validatorName, consecutiveCount,
+                $"Rate limit exceeded for validator failures on agent '{agentName}'.");
+
+        governanceKernel.SloEngine.Get("policy-compliance")?.Record(0.0);
+    }
 
     private async Task EmitAndInjectValidationFailureAsync(
         string agentName,
@@ -833,6 +957,15 @@ public sealed class WorkflowOrchestrator(
                 tables[node.Id] = table = new AgentRouteTable();
 
             table.TerminalValidators = BuildValidatorsFromNames(node.Validators!);
+        }
+
+        // Populate IsReviewerType from the explicit GraphNodeConfig.ReviewerType flag.
+        foreach (var node in wfCfg.Nodes.Where(n => n.ReviewerType))
+        {
+            if (!tables.TryGetValue(node.Id, out var table))
+                tables[node.Id] = table = new AgentRouteTable();
+
+            table.IsReviewerType = true;
         }
 
         // Populate ForeignSendForwardKeywords per node so CorrectionEngine can produce
