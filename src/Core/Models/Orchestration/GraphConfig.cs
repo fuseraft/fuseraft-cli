@@ -117,6 +117,15 @@ public record GraphConfig
     public int MaxRetries { get; init; } = 4;
 
     /// <summary>
+    /// Multiplier applied to <see cref="MaxRetries"/> to derive the hard total-turn cap per
+    /// node (<c>MaxRetries * MaxTotalTurnsMultiplier</c>) — a backstop against a node that
+    /// keeps making some progress (so <see cref="MaxRetries"/>'s consecutive-failure counter
+    /// keeps resetting) without ever completing. Shared by <c>GraphOrchestrator</c> and
+    /// <c>WorkflowOrchestrator</c>. Defaults to 10.
+    /// </summary>
+    public int MaxTotalTurnsMultiplier { get; init; } = 10;
+
+    /// <summary>
     /// Named sub-graph specs referenced by nodes via <see cref="GraphNodeConfig.SubGraphId"/>.
     /// Each spec must set exactly one of <c>Graph</c> (nested <c>GraphOrchestrator</c>) or
     /// <c>MapReduce</c> (nested <c>MapReduceOrchestrator</c>). The sub-orchestrator executes

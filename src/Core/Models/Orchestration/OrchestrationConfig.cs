@@ -304,9 +304,10 @@ public record EventsConfig
     /// <summary>
     /// File path where JSONL events are appended. The directory is created automatically.
     /// Supports <c>{session_id}</c> and <c>{project_slug}</c> — both expanded at runtime.
-    /// Defaults to the global per-project layout under <c>~/.fuseraft/logs/sessions/</c>.
+    /// Defaults to the same global per-project path every init template and tool actually
+    /// uses (<c>~/.fuseraft/sessions/{project_slug}/{session_id}/events.jsonl</c>).
     /// </summary>
-    public string Path { get; init; } = FuseraftPaths.GlobalEventsLogTemplate;
+    public string Path { get; init; } = FuseraftPaths.LocalEventsLog;
 }
 
 /// <summary>
