@@ -293,4 +293,59 @@ public sealed class MagenticOrchestratorTests : IDisposable
         Assert.NotNull(ledger);
         Assert.Equal("Worker", ledger.NextSpeaker);
     }
+
+    // SummarizeParticipantActivityAsync — two-history isolation invariant.
+    //
+    // The manager must never reason over raw participant dialogue directly (only over
+    // "explicit summaries derived from sharedHistory"). BuildLedgerPrompt/BuildReplanPrompt/
+    // BuildFinalAnswerPrompt now take a plain `string historyText` rather than
+    // `IReadOnlyList<ChatMessage> sharedHistory`, so there is no code path left for raw
+    // transcript text to reach those prompts except through this summarization step. These
+    // tests verify the summarization call itself: it sends the raw window to the manager
+    // *client* as an isolated, one-shot request under a neutral summarizer system prompt —
+    // never the manager's own persona (_magConfig.Instructions) — and only the model's
+    // returned summary is ever handed back to the caller.
+
+    [Fact]
+    public async Task SummarizeParticipantActivityAsync_UsesNeutralSummarizerPrompt_NotManagerPersona()
+    {
+        IEnumerable<ChatMessage>? captured = null;
+        _managerClient
+            .Setup(c => c.GetResponseAsync(It.IsAny<IEnumerable<ChatMessage>>(), It.IsAny<ChatOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<ChatMessage>, ChatOptions?, CancellationToken>((msgs, _, _) => captured = msgs)
+            .ReturnsAsync(new ChatResponse(new ChatMessage(ChatRole.Assistant, "- Developer wrote Foo.cs\n- Tests passed")));
+
+        var window = new List<ChatMessage>
+        {
+            new(ChatRole.Assistant, "I'll implement the Foo class now.") { AuthorName = "Developer" },
+            new(ChatRole.Assistant, "Running tests... all green.") { AuthorName = "Tester" },
+        };
+
+        var (summary, _) = await _orchestrator.SummarizeParticipantActivityAsync(window, CancellationToken.None);
+
+        Assert.Equal("- Developer wrote Foo.cs\n- Tests passed", summary);
+
+        var sent = Assert.IsAssignableFrom<IEnumerable<ChatMessage>>(captured).ToList();
+        var systemMessage = Assert.Single(sent, m => m.Role == ChatRole.System);
+        Assert.Contains("neutral progress summarizer", systemMessage.Text, StringComparison.OrdinalIgnoreCase);
+
+        // The raw participant dialogue goes INTO this isolated call (expected — it has to be
+        // summarized from something) but never comes back OUT as the result: the caller only
+        // ever receives the mocked summary text asserted above, not "[Developer]: I'll..." etc.
+        var userMessage = Assert.Single(sent, m => m.Role == ChatRole.User);
+        Assert.Contains("[Developer]: I'll implement the Foo class now.", userMessage.Text);
+        Assert.DoesNotContain("[Developer]", summary);
+    }
+
+    [Fact]
+    public async Task SummarizeParticipantActivityAsync_EmptyWindow_ReturnsEmptyWithoutCallingManager()
+    {
+        var (summary, usage) = await _orchestrator.SummarizeParticipantActivityAsync([], CancellationToken.None);
+
+        Assert.Equal(string.Empty, summary);
+        Assert.Null(usage);
+        _managerClient.Verify(
+            c => c.GetResponseAsync(It.IsAny<IEnumerable<ChatMessage>>(), It.IsAny<ChatOptions>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
 }

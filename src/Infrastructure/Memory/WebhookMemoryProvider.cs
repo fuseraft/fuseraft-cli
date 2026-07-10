@@ -34,32 +34,28 @@ internal sealed class WebhookMemoryProvider : IMemoryProvider, IDisposable
         _resolvedHeaders = ResolveHeaders(cfg.Headers);
     }
 
+    // No try/catch in either method here: MemoryManager.PreTurnAsync/PostTurnAsync already wrap
+    // every provider call in a try/catch that logs via ILogger and swallows non-cancellation
+    // exceptions, so a second, provider-local safety net (previously logging to Console.Error
+    // instead of the shared logger) only duplicated that guarantee inconsistently.
+
     public async Task<string?> LoadAsync(string agentName, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(_cfg.LoadUrl)) return null;
 
-        try
-        {
-            var body    = JsonSerializer.Serialize(new { agent = agentName }, _opts);
-            using var req = BuildRequest(HttpMethod.Post, _cfg.LoadUrl, body);
-            using var res = await _http.SendAsync(req, ct);
-            res.EnsureSuccessStatusCode();
+        var body    = JsonSerializer.Serialize(new { agent = agentName }, _opts);
+        using var req = BuildRequest(HttpMethod.Post, _cfg.LoadUrl, body);
+        using var res = await _http.SendAsync(req, ct);
+        res.EnsureSuccessStatusCode();
 
-            var json = await res.Content.ReadAsStringAsync(ct);
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty("block", out var blockEl))
-            {
-                var block = blockEl.GetString();
-                return string.IsNullOrWhiteSpace(block) ? null : block;
-            }
-            return null;
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
+        var json = await res.Content.ReadAsStringAsync(ct);
+        using var doc = JsonDocument.Parse(json);
+        if (doc.RootElement.TryGetProperty("block", out var blockEl))
         {
-            Console.Error.WriteLine($"[WebhookMemoryProvider] Load failed for '{agentName}': {ex.Message}");
-            return null;
+            var block = blockEl.GetString();
+            return string.IsNullOrWhiteSpace(block) ? null : block;
         }
+        return null;
     }
 
     public async Task SaveAsync(string agentName, IReadOnlyList<ChatMessage> history, CancellationToken ct = default)
@@ -70,23 +66,15 @@ internal sealed class WebhookMemoryProvider : IMemoryProvider, IDisposable
         var every = Math.Max(1, _cfg.SaveEveryNTurns);
         if (n % every != 0) return;
 
-        try
+        var messages = history.Select(m => new
         {
-            var messages = history.Select(m => new
-            {
-                role    = m.Role.Value,
-                content = m.Text ?? string.Empty,
-            });
-            var body = JsonSerializer.Serialize(new { agent = agentName, history = messages }, _opts);
-            using var req = BuildRequest(HttpMethod.Post, _cfg.SaveUrl, body);
-            using var res = await _http.SendAsync(req, ct);
-            res.EnsureSuccessStatusCode();
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[WebhookMemoryProvider] Save failed for '{agentName}': {ex.Message}");
-        }
+            role    = m.Role.Value,
+            content = m.Text ?? string.Empty,
+        });
+        var body = JsonSerializer.Serialize(new { agent = agentName, history = messages }, _opts);
+        using var req = BuildRequest(HttpMethod.Post, _cfg.SaveUrl, body);
+        using var res = await _http.SendAsync(req, ct);
+        res.EnsureSuccessStatusCode();
     }
 
     public void Dispose() => _http.Dispose();

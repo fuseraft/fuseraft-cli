@@ -67,6 +67,12 @@ public sealed class GraphOrchestrator(
     // The outer loop maps this to a null destination (→ break).
     private const string TerminalSentinel = "__GRAPH_TERMINAL__";
 
+    // Per-branch TurnIndex offset applied by ForkContext so concurrent parallel branches
+    // never emit colliding TurnIndex values to the shared MessageSink/event log. Large
+    // enough that no single branch can plausibly take this many turns (bounded by
+    // MaxRetries * MaxTotalTurnsMultiplier, typically well under 100).
+    private const int BranchTurnIndexStride = 100_000;
+
     private readonly IHumanApprovalService? _humanApprovalService = humanApprovalService;
 
     private string _sessionId = string.Empty;
@@ -76,8 +82,10 @@ public sealed class GraphOrchestrator(
     private TaskModel? _structuredTask;
 
     // Computed once per StreamAsync call from the graph config.
-    // Keyed by node ID (case-insensitive).
-    private Dictionary<string, int> _nodeLayers = [];
+    // Edges classified as back-edges by a single DFS from the entry node, keyed by
+    // "{From} {To}" with node IDs upper-invariant to match the case-insensitive
+    // node-ID comparisons used elsewhere in this class.
+    private HashSet<string> _backEdges = [];
     private Dictionary<string, List<GraphEdgeConfig>> _edgesBySource = [];
 
     // Back-edge keyword → target node ID (null = terminal / session ends).
@@ -253,7 +261,7 @@ public sealed class GraphOrchestrator(
             .GroupBy(e => e.From, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
 
-        _nodeLayers = ComputeBfsLayers(entryNodeId);
+        _backEdges = ComputeBackEdges(entryNodeId, _edgesBySource);
 
         _parallelNodeIds = graphCfg.Nodes
             .Where(n => n.Parallel)
@@ -717,7 +725,7 @@ public sealed class GraphOrchestrator(
                 turn:  ctx.TurnIndex);
 
         int maxRetries      = config.Selection.Graph?.MaxRetries ?? DefaultMaxRetries;
-        int maxTotalTurns   = maxRetries * 10;
+        int maxTotalTurns   = maxRetries * (config.Selection.Graph?.MaxTotalTurnsMultiplier ?? 10);
         int consecutiveFails = 0;
         int totalTurns       = 0;
 
@@ -969,7 +977,7 @@ public sealed class GraphOrchestrator(
                         payload: new { keyword = foundKeyword, nodes = parallelGroup.NodeIds, merge_target = parallelGroup.MergeTargetName });
 
                 int forkPoint = ctx.History.Count;
-                var forkPairs = parallelGroup.NodeIds.Select(targetNodeId =>
+                var forkPairs = parallelGroup.NodeIds.Select((targetNodeId, branchIndex) =>
                 {
                     var targetNode      = _nodeById[targetNodeId];
                     var targetAgentName = targetNode.Agent;
@@ -980,7 +988,8 @@ public sealed class GraphOrchestrator(
                         Instructions: agentInstructions.GetValueOrDefault(targetAgentName, string.Empty),
                         AgentCfg:     agentConfigs.GetValueOrDefault(targetAgentName) ?? new AgentConfig(),
                         RouteTable:   _routeTablesByNodeId.GetValueOrDefault(targetNodeId, new AgentRouteTable()),
-                        Fork:         ForkContext(ctx));
+                        BranchIndex:  branchIndex,
+                        Fork:         ForkContext(ctx, branchIndex));
                 }).ToList();
 
                 var parallelTasks = forkPairs
@@ -1014,7 +1023,7 @@ public sealed class GraphOrchestrator(
                 await Task.WhenAll(parallelTasks).ConfigureAwait(false);
 
                 MergeParallelContexts(ctx, forkPoint,
-                    forkPairs.Select(fp => (fp.NodeId, fp.AgentName, fp.Fork)).ToList());
+                    forkPairs.Select(fp => (fp.NodeId, fp.AgentName, fp.Fork, fp.BranchIndex)).ToList());
 
                 consecutiveFails = 0;
                 ctx.LastKeyword  = foundKeyword;
@@ -2067,7 +2076,7 @@ public sealed class GraphOrchestrator(
         agentFactory.OnAgentTurnStarting();
 
         int maxRetries       = config.Selection.Graph?.MaxRetries ?? DefaultMaxRetries;
-        int maxTotalTurns    = maxRetries * 10;
+        int maxTotalTurns    = maxRetries * (config.Selection.Graph?.MaxTotalTurnsMultiplier ?? 10);
         int consecutiveFails = 0;
         int totalTurns       = 0;
 
@@ -2269,12 +2278,12 @@ public sealed class GraphOrchestrator(
     /// but gets its own <see cref="AgentContext.History"/> copy so concurrent workers cannot
     /// corrupt each other's conversation state.
     /// </summary>
-    internal static AgentContext ForkContext(AgentContext parent)
+    internal static AgentContext ForkContext(AgentContext parent, int branchIndex = 0)
     {
         var fork = new AgentContext
         {
             MessageSink      = parent.MessageSink,
-            TurnIndex        = parent.TurnIndex,
+            TurnIndex        = parent.TurnIndex + branchIndex * BranchTurnIndexStride,
             CumulativeTokens = parent.CumulativeTokens,
             CurrentState     = parent.CurrentState,
         };
@@ -2285,20 +2294,26 @@ public sealed class GraphOrchestrator(
     /// <summary>
     /// Merges the post-fork output of each parallel worker back into the parent context.
     /// For each child, a labelled header is injected followed by all messages appended
-    /// after <paramref name="forkPoint"/>. Token counts and turn indices are aggregated.
+    /// after <paramref name="forkPoint"/>. Token counts are summed; the turn count each
+    /// branch actually consumed is recovered by subtracting its <see cref="BranchTurnIndexStride"/>
+    /// offset back out, and the parent's <see cref="AgentContext.TurnIndex"/> advances by
+    /// whichever branch took the most turns — a normal, non-inflated continuation point for
+    /// turns recorded after the merge.
     /// </summary>
     internal static void MergeParallelContexts(
         AgentContext parent,
         int forkPoint,
-        IReadOnlyList<(string NodeId, string AgentName, AgentContext Fork)> children)
+        IReadOnlyList<(string NodeId, string AgentName, AgentContext Fork, int BranchIndex)> children)
     {
-        int maxTurnIndex    = parent.TurnIndex;
+        int startTurnIndex  = parent.TurnIndex;
+        int maxTurnsTaken   = 0;
         int totalTokenDelta = 0;
 
-        foreach (var (nodeId, agentName, fork) in children)
+        foreach (var (nodeId, agentName, fork, branchIndex) in children)
         {
             totalTokenDelta += fork.CumulativeTokens - parent.CumulativeTokens;
-            maxTurnIndex     = Math.Max(maxTurnIndex, fork.TurnIndex);
+            var turnsTaken = fork.TurnIndex - (startTurnIndex + branchIndex * BranchTurnIndexStride);
+            maxTurnsTaken  = Math.Max(maxTurnsTaken, turnsTaken);
 
             parent.History.Add(new ChatMessage(ChatRole.User,
                 $"[fuseraft: parallel result from {agentName} (node: {nodeId})]"));
@@ -2308,7 +2323,7 @@ public sealed class GraphOrchestrator(
         }
 
         parent.CumulativeTokens += Math.Max(0, totalTokenDelta);
-        parent.TurnIndex         = maxTurnIndex;
+        parent.TurnIndex         = startTurnIndex + maxTurnsTaken;
     }
 
     /// <summary>Descriptor for a parallel fan-out group triggered by a single source keyword.</summary>
@@ -2588,6 +2603,8 @@ public sealed class GraphOrchestrator(
                         config.TestSelector,
                         config.Validation?.ChangeLogPath,
                         sandboxRoot);
+            else if (name.Equals(ValidatorNames.ArchitectureValidator, StringComparison.OrdinalIgnoreCase))
+                v = new ArchitectureValidator(projectRoot: sandboxRoot);
 
             if (v is not null)
                 result.Add(v);
@@ -2661,40 +2678,64 @@ public sealed class GraphOrchestrator(
     }
 
     /// <summary>
-    /// Computes BFS layer numbers from the entry node traversing ALL edges (forward and back).
-    /// Each node is assigned the layer of its first BFS encounter. Back-edges are those
-    /// whose target node has a BFS layer ≤ the source node's layer.
+    /// Classifies every edge reachable from the entry node as forward or back via a single
+    /// DFS, using the standard definition: an edge is a back-edge only when its target is
+    /// still on the current DFS stack (a real ancestor of the source) when the edge is
+    /// explored. Everything else — tree edges, forward edges to already-finished
+    /// descendants, and cross edges to already-finished nodes in another branch — is a
+    /// forward edge for fuseraft's purposes (it does not close a cycle).
     /// </summary>
-    private Dictionary<string, int> ComputeBfsLayers(string entryNodeId)
+    /// <remarks>
+    /// This replaces an earlier BFS-shortest-path-layer approximation (assign each node the
+    /// layer of its first BFS encounter, classify an edge as back when target-layer &lt;=
+    /// source-layer). That approximation misclassified a legitimate forward edge as a
+    /// back-edge whenever two forward paths of different lengths converged on the same node
+    /// (a "diamond": A→B→D and A→C→E→D), because the longer path's edge into D always landed
+    /// on a layer &lt;= D's already-assigned (shorter-path) layer. DFS-based classification has
+    /// no such failure mode since it reasons about actual ancestry, not path length.
+    /// </remarks>
+    internal static HashSet<string> ComputeBackEdges(
+        string entryNodeId,
+        Dictionary<string, List<GraphEdgeConfig>> edgesBySource)
     {
-        var layers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var queue  = new Queue<(string NodeId, int Layer)>();
-        queue.Enqueue((entryNodeId, 0));
-        layers[entryNodeId] = 0;
+        var backEdges = new HashSet<string>();
+        var state = new Dictionary<string, byte>(StringComparer.OrdinalIgnoreCase); // 0=unvisited (absent), 1=on-stack, 2=done
 
-        while (queue.Count > 0)
+        void Visit(string nodeId)
         {
-            var (current, layer) = queue.Dequeue();
-            foreach (var edge in _edgesBySource.GetValueOrDefault(current, []))
+            state[nodeId] = 1;
+            foreach (var edge in edgesBySource.GetValueOrDefault(nodeId, []))
             {
-                if (!layers.ContainsKey(edge.To))
+                if (state.TryGetValue(edge.To, out var targetState))
                 {
-                    layers[edge.To] = layer + 1;
-                    queue.Enqueue((edge.To, layer + 1));
+                    if (targetState == 1)
+                        backEdges.Add(EdgeKey(nodeId, edge.To));
+                    // targetState == 2 (done): forward/cross edge — not a back-edge.
+                }
+                else
+                {
+                    Visit(edge.To);
                 }
             }
+            state[nodeId] = 2;
         }
 
-        return layers;
+        Visit(entryNodeId);
+
+        // Nodes unreachable from Entry shouldn't normally occur, but classify their
+        // outgoing edges too so IsBackEdge has a defined answer for every edge in the graph.
+        foreach (var nodeId in edgesBySource.Keys)
+            if (!state.ContainsKey(nodeId))
+                Visit(nodeId);
+
+        return backEdges;
     }
 
-    /// <returns><c>true</c> when the edge from → to is a back-edge (target has lower or equal BFS layer than source).</returns>
-    private bool IsBackEdge(string from, string to)
-    {
-        var fromLayer = _nodeLayers.GetValueOrDefault(from, 0);
-        var toLayer   = _nodeLayers.GetValueOrDefault(to, 0);
-        return toLayer <= fromLayer;
-    }
+    internal static string EdgeKey(string from, string to) =>
+        $"{from.ToUpperInvariant()} {to.ToUpperInvariant()}";
+
+    /// <returns><c>true</c> when the edge from → to is a back-edge.</returns>
+    private bool IsBackEdge(string from, string to) => _backEdges.Contains(EdgeKey(from, to));
 
     // -------------------------------------------------------------------------
     // Start-node resolution

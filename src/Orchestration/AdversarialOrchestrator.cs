@@ -45,14 +45,10 @@ public sealed class AdversarialOrchestrator(
     ILogger<AdversarialOrchestrator> logger,
     ChangeTracker? changeTracker = null,
     EventEmitter? eventEmitter = null,
-    GovernanceKernel? governanceKernel = null,
-    IHumanApprovalService? approvalService = null) : IOrchestrator
+    GovernanceKernel? governanceKernel = null) : IOrchestrator
 {
     private readonly AdversarialConfig _advConfig =
         config.Selection.Adversarial ?? new AdversarialConfig();
-
-    // Reserved for future HITL integration (e.g. require human approval before stage promotion).
-    private readonly IHumanApprovalService? _approvalService = approvalService;
 
     private string _sessionId = string.Empty;
 

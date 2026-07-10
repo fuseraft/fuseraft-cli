@@ -335,6 +335,55 @@ public sealed class GraphOrchestratorParallelTests
         Assert.Empty(fork.History);
     }
 
+    // Regression coverage: concurrent parallel branches used to seed every fork's TurnIndex
+    // at the same value (parent.TurnIndex), so two branches completing after the same number
+    // of turns emitted colliding TurnIndex values into the shared MessageSink/event log.
+    // ForkContext now offsets each branch by branchIndex * a large stride so their ranges
+    // never overlap; MergeParallelContexts recovers the actual turn count taken and
+    // reconciles the parent back to a normal (non-inflated) continuation point.
+
+    [Fact]
+    public void ForkContext_DifferentBranchIndices_ProduceNonCollidingTurnIndexRanges()
+    {
+        var (_, parent) = MakeContext(turnIndex: 5);
+
+        var branch0 = GraphOrchestrator.ForkContext(parent, branchIndex: 0);
+        var branch1 = GraphOrchestrator.ForkContext(parent, branchIndex: 1);
+        var branch2 = GraphOrchestrator.ForkContext(parent, branchIndex: 2);
+
+        // Even before any turns are taken, each branch starts in a disjoint range.
+        Assert.NotEqual(branch0.TurnIndex, branch1.TurnIndex);
+        Assert.NotEqual(branch1.TurnIndex, branch2.TurnIndex);
+        Assert.NotEqual(branch0.TurnIndex, branch2.TurnIndex);
+    }
+
+    [Fact]
+    public void MergeParallelContexts_SameTurnCountAcrossBranches_NoLongerCollides_AndParentAdvancesNormally()
+    {
+        var (_, parent) = MakeContext(turnIndex: 5);
+
+        // Simulate two branches that each independently take exactly 2 turns — the exact
+        // scenario that used to produce identical TurnIndex values in both branches.
+        var branchA = GraphOrchestrator.ForkContext(parent, branchIndex: 0);
+        var turnA1  = branchA.TurnIndex++;
+        var turnA2  = branchA.TurnIndex++;
+
+        var branchB = GraphOrchestrator.ForkContext(parent, branchIndex: 1);
+        var turnB1  = branchB.TurnIndex++;
+        var turnB2  = branchB.TurnIndex++;
+
+        // The bug: without branch offsets, turnA1==turnB1 and turnA2==turnB2.
+        Assert.NotEqual(turnA1, turnB1);
+        Assert.NotEqual(turnA2, turnB2);
+
+        GraphOrchestrator.MergeParallelContexts(parent, forkPoint: 0,
+            [("a", "A", branchA, 0), ("b", "B", branchB, 1)]);
+
+        // Both branches took exactly 2 turns — the parent should advance by 2 from its
+        // pre-fork value (5), not by some inflated branch-offset-laden number.
+        Assert.Equal(7, parent.TurnIndex);
+    }
+
     // -----------------------------------------------------------------------
     // GraphOrchestrator.MergeParallelContexts — history merging
     // -----------------------------------------------------------------------
@@ -350,7 +399,7 @@ public sealed class GraphOrchestratorParallelTests
         child.History.Add(Asst("worker output"));
 
         GraphOrchestrator.MergeParallelContexts(parent, forkPoint,
-            [("worker_a", "WorkerA", child)]);
+            [("worker_a", "WorkerA", child, 0)]);
 
         // parent: original task + header + worker output = 3
         Assert.Equal(3, parent.History.Count);
@@ -371,7 +420,7 @@ public sealed class GraphOrchestratorParallelTests
         child_b.History.Add(Asst("output from B"));
 
         GraphOrchestrator.MergeParallelContexts(parent, forkPoint,
-            [("n_a", "AgentA", child_a), ("n_b", "AgentB", child_b)]);
+            [("n_a", "AgentA", child_a, 0), ("n_b", "AgentB", child_b, 0)]);
 
         // header_a + output_a + header_b + output_b = 4
         Assert.Equal(4, parent.History.Count);
@@ -393,7 +442,7 @@ public sealed class GraphOrchestratorParallelTests
         child.History.Add(Asst("post-fork output"));
 
         GraphOrchestrator.MergeParallelContexts(parent, forkPoint,
-            [("n", "Agent", child)]);
+            [("n", "Agent", child, 0)]);
 
         // parent: pre-fork (1) + header (1) + post-fork output (1) = 3
         Assert.Equal(3, parent.History.Count);
@@ -413,7 +462,7 @@ public sealed class GraphOrchestratorParallelTests
         child_b.TurnIndex = 6;
 
         GraphOrchestrator.MergeParallelContexts(parent, forkPoint,
-            [("a", "A", child_a), ("b", "B", child_b)]);
+            [("a", "A", child_a, 0), ("b", "B", child_b, 0)]);
 
         Assert.Equal(6, parent.TurnIndex);
     }
@@ -427,7 +476,7 @@ public sealed class GraphOrchestratorParallelTests
         var child = MakeForkedChild(parent, forkPoint);
         child.TurnIndex = 3; // lower than parent
 
-        GraphOrchestrator.MergeParallelContexts(parent, forkPoint, [("n", "A", child)]);
+        GraphOrchestrator.MergeParallelContexts(parent, forkPoint, [("n", "A", child, 0)]);
 
         Assert.Equal(10, parent.TurnIndex);
     }
@@ -446,7 +495,7 @@ public sealed class GraphOrchestratorParallelTests
         child_b.CumulativeTokens = 650; // delta = 150
 
         GraphOrchestrator.MergeParallelContexts(parent, forkPoint,
-            [("a", "A", child_a), ("b", "B", child_b)]);
+            [("a", "A", child_a, 0), ("b", "B", child_b, 0)]);
 
         // 500 + 300 + 150 = 950
         Assert.Equal(950, parent.CumulativeTokens);
@@ -463,7 +512,7 @@ public sealed class GraphOrchestratorParallelTests
         var child = MakeForkedChild(parent, forkPoint);
         child.CumulativeTokens = 100; // impossible delta = -400
 
-        GraphOrchestrator.MergeParallelContexts(parent, forkPoint, [("n", "A", child)]);
+        GraphOrchestrator.MergeParallelContexts(parent, forkPoint, [("n", "A", child, 0)]);
 
         // Math.Max(0, -400) = 0 → parent stays at 500
         Assert.Equal(500, parent.CumulativeTokens);
@@ -478,7 +527,7 @@ public sealed class GraphOrchestratorParallelTests
         // child has no messages at all (not even a pre-fork copy)
         var (_, child) = MakeContext();
 
-        GraphOrchestrator.MergeParallelContexts(parent, forkPoint, [("n", "AgentX", child)]);
+        GraphOrchestrator.MergeParallelContexts(parent, forkPoint, [("n", "AgentX", child, 0)]);
 
         // Only the header should be injected; no content messages.
         Assert.Single(parent.History);
@@ -494,7 +543,7 @@ public sealed class GraphOrchestratorParallelTests
         var (_, child) = MakeContext();
 
         GraphOrchestrator.MergeParallelContexts(parent, forkPoint,
-            [("analyzer_a", "AnalyzerAgent", child)]);
+            [("analyzer_a", "AnalyzerAgent", child, 0)]);
 
         var header = TextOf(parent.History[0]);
         Assert.Contains("analyzer_a", header, StringComparison.Ordinal);

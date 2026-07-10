@@ -107,6 +107,15 @@ public static class FuseraftPaths
     // These are templates; expand with ExpandProjectPaths(path, slug) or
     // ExpandSessionPaths(path, sessionId, slug). ExpandSessionId also auto-expands
     // {project_slug} from CWD so existing callers work without change.
+    //
+    // NOTE: every constant below is prefixed "Local" but resolves under the GLOBAL
+    // ~/.fuseraft/ home (see the "~/.fuseraft/..." literal in each value), not the CWD-relative
+    // .fuseraft/ used by the small handful of genuinely project-local constants above this
+    // section (LocalTestReport, LocalContext, etc.). The "Local" prefix here refers to being
+    // scoped to *this* project (via {project_slug}), not to the filesystem location — a name
+    // collision with the other, truly CWD-relative "Local*" constants that predates this
+    // section split. A rename was intentionally not done here (100+ call sites across the
+    // codebase); this note exists so the distinction isn't lost.
 
     // logs/ — project diagnostics (not session-specific)
     public const string LocalLogs                 = "~/.fuseraft/logs/{project_slug}";
@@ -144,16 +153,13 @@ public static class FuseraftPaths
     public const string LocalCtxViz               = "~/.fuseraft/sessions/{project_slug}/{session_id}/ctx_viz.html";
 
     // ── Global session log templates ──────────────────────────────────────────
-    // Session logs (events + ctx_snapshots) live under ~/.fuseraft/logs/sessions/
-    // organised as {project_slug}/{session_id}/ so all projects share one root and
-    // sessions are trivially filterable by project without scanning content.
-
-    /// <summary>
-    /// Template for the per-session event log under the global fuseraft home.
-    /// Call <see cref="ExpandSessionPaths"/> to resolve both tokens.
-    /// </summary>
-    public const string GlobalEventsLogTemplate =
-        "~/.fuseraft/logs/sessions/{project_slug}/{session_id}/events.jsonl";
+    // Session logs (ctx_snapshots) live under ~/.fuseraft/logs/sessions/ organised as
+    // {project_slug}/{session_id}/ so all projects share one root and sessions are
+    // trivially filterable by project without scanning content. (Events used to have a
+    // separate template here too, but every init template and tool always sets
+    // Events.Path explicitly to LocalEventsLog above — that template was never actually
+    // reachable, so EventsConfig.Path's own default now points at LocalEventsLog directly
+    // instead of carrying a second, always-overridden path.)
 
     /// <summary>
     /// Template for the per-session context-window snapshot log under the global fuseraft home.

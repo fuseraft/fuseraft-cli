@@ -99,10 +99,13 @@ public record CompactionConfig
     /// When <c>true</c>, the last <c>handoff(route_keyword=...)</c> signal emitted before
     /// compaction is re-injected at the head of the retained window if it was dropped by
     /// trimming. Prevents <c>keyword_not_found</c> re-invocations on the first turn after
-    /// compaction when the signal fell outside the retained tail.
-    /// Default: <c>false</c>.
+    /// compaction when the signal fell outside the retained tail. Only the single most
+    /// recent routing signal is pinned — a parallel/fan-out transition with multiple
+    /// pending branch signals is not covered.
+    /// Default: <c>true</c> — pure risk reduction with no downside for configs that never
+    /// hit this path.
     /// </summary>
-    public bool PinLastRoutingSignal { get; init; } = false;
+    public bool PinLastRoutingSignal { get; init; } = true;
 
     /// <summary>
     /// Optional custom prompt template for LLM-mode compaction. When set, replaces the
