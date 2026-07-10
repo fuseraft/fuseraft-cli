@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using fuseraft.Core.Models;
+using fuseraft.Infrastructure.Storage;
 using Microsoft.Extensions.Logging;
 
 namespace fuseraft.Orchestration.Knowledge;
@@ -25,9 +26,7 @@ namespace fuseraft.Orchestration.Knowledge;
 /// </summary>
 public sealed class EvidenceStore
 {
-    private readonly string _graphPath;
-    private readonly SemaphoreSlim _lock = new(1, 1);
-    private readonly ILogger<EvidenceStore>? _logger;
+    private readonly JsonFileStore<EvidenceGraph> _store;
     private string? _sessionId;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -38,54 +37,41 @@ public sealed class EvidenceStore
 
     public EvidenceStore(string graphPath, ILogger<EvidenceStore>? logger = null)
     {
-        _graphPath = graphPath;
-        _logger    = logger;
+        _store = new JsonFileStore<EvidenceGraph>(graphPath, JsonOpts, logger, nameof(EvidenceStore));
     }
 
     /// <summary>
     /// Stamps the active session ID so queries can filter to the current session's nodes.
     /// Call once at session startup, after the checkpoint is established.
     /// </summary>
-    public async Task SetSessionIdAsync(string sessionId, CancellationToken ct = default)
+    public Task SetSessionIdAsync(string sessionId, CancellationToken ct = default)
     {
         _sessionId = sessionId;
-
-        await _lock.WaitAsync(ct);
-        try
-        {
-            var graph = await LoadAsync(ct);
-            graph = graph with { ActiveSessionId = sessionId };
-            await SaveAsync(graph, ct);
-        }
-        finally { _lock.Release(); }
+        return _store.WithLockAsync(graph =>
+            Task.FromResult((graph with { ActiveSessionId = sessionId }, true)), ct);
     }
 
     /// <summary>
     /// Appends a batch of evidence nodes (produced from one agent turn) to the graph,
     /// and optionally adds edges between related nodes.
     /// </summary>
-    public async Task RecordAsync(
+    public Task RecordAsync(
         IReadOnlyList<EvidenceNode> nodes,
         IReadOnlyList<EvidenceEdge>? edges = null,
         CancellationToken ct = default)
     {
-        if (nodes.Count == 0) return;
+        if (nodes.Count == 0) return Task.CompletedTask;
 
-        await _lock.WaitAsync(ct);
-        try
+        return _store.WithLockAsync(graph =>
         {
-            var graph = await LoadAsync(ct);
-
             var updatedNodes = new List<EvidenceNode>(graph.Nodes);
             updatedNodes.AddRange(nodes);
 
             var updatedEdges = new List<EvidenceEdge>(graph.Edges);
             if (edges is not null) updatedEdges.AddRange(edges);
 
-            graph = graph with { Nodes = updatedNodes, Edges = updatedEdges };
-            await SaveAsync(graph, ct);
-        }
-        finally { _lock.Release(); }
+            return Task.FromResult((graph with { Nodes = updatedNodes, Edges = updatedEdges }, true));
+        }, ct);
     }
 
     // Query API
@@ -98,7 +84,7 @@ public sealed class EvidenceStore
         Func<EvidenceNode, bool> predicate,
         CancellationToken ct = default)
     {
-        var graph = await LoadAsync(ct);
+        var graph = await _store.LoadAsync(ct);
         var sid = graph.ActiveSessionId;
         var source = sid is not null
             ? graph.Nodes.Where(n => string.Equals(n.SessionId, sid, StringComparison.Ordinal))
@@ -114,7 +100,7 @@ public sealed class EvidenceStore
         string relation,
         CancellationToken ct = default)
     {
-        var graph = await LoadAsync(ct);
+        var graph = await _store.LoadAsync(ct);
         return graph.Edges
             .Where(e => string.Equals(e.Relation, relation, StringComparison.OrdinalIgnoreCase))
             .ToList();
@@ -169,7 +155,7 @@ public sealed class EvidenceStore
         string filePath,
         CancellationToken ct = default)
     {
-        var graph = await LoadAsync(ct);
+        var graph = await _store.LoadAsync(ct);
         return graph.Nodes
             .Where(n =>
                 (string.Equals(n.NodeType, "SymbolDefinition", StringComparison.OrdinalIgnoreCase)
@@ -188,7 +174,7 @@ public sealed class EvidenceStore
         string symbolName,
         CancellationToken ct = default)
     {
-        var graph = await LoadAsync(ct);
+        var graph = await _store.LoadAsync(ct);
         return graph.Nodes
             .Where(n =>
                 string.Equals(n.NodeType, "SymbolDefinition", StringComparison.OrdinalIgnoreCase)
@@ -219,26 +205,4 @@ public sealed class EvidenceStore
         return Convert.ToHexStringLower(bytes)[..16]; // first 16 hex chars is enough
     }
 
-    private async Task<EvidenceGraph> LoadAsync(CancellationToken ct)
-    {
-        if (!System.IO.File.Exists(_graphPath)) return new EvidenceGraph();
-
-        try
-        {
-            var raw = await System.IO.File.ReadAllTextAsync(_graphPath, ct);
-            return JsonSerializer.Deserialize<EvidenceGraph>(raw, JsonOpts) ?? new EvidenceGraph();
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "EvidenceStore: failed to load '{Path}' — evidence graph reset.", _graphPath);
-            return new EvidenceGraph();
-        }
-    }
-
-    private async Task SaveAsync(EvidenceGraph graph, CancellationToken ct)
-    {
-        var dir = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(_graphPath));
-        if (dir is not null) System.IO.Directory.CreateDirectory(dir);
-        await System.IO.File.WriteAllTextAsync(_graphPath, JsonSerializer.Serialize(graph, JsonOpts), ct);
-    }
 }

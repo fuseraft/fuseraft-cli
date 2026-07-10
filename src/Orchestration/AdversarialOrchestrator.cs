@@ -8,6 +8,8 @@ using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 
+using fuseraft.Orchestration.Parallel;
+
 // Disambiguate from Microsoft.Agents.AI.AgentFactory
 using fuseraft.Infrastructure;
 using AgentFactory = fuseraft.Infrastructure.Agents.AgentFactory;
@@ -359,56 +361,30 @@ public sealed class AdversarialOrchestrator(
         return context;
     }
 
-    private async Task<AgentResponse> InvokeAgentAsync(
-        AIAgent agent,
-        IEnumerable<ChatMessage> context,
-        CancellationToken cancellationToken)
-    {
-        return governanceKernel?.CircuitBreaker is { } cb
-            ? await cb.ExecuteAsync(() => agent.RunAsync(context, null, null, cancellationToken))
-            : await agent.RunAsync(context, null, null, cancellationToken);
-    }
+    // Shared with MapReduceOrchestrator/ScatterGatherOrchestrator via FanOutHelpers — see
+    // that class's doc comment for what's shared and why (BuildContext is not, since this
+    // class's generator/critic context assembly is intentionally different).
+    private Task<AgentResponse> InvokeAgentAsync(AIAgent agent, IEnumerable<ChatMessage> context, CancellationToken cancellationToken) =>
+        FanOutHelpers.InvokeAgentAsync(agent, context, governanceKernel, cancellationToken);
 
-    private async Task FlushChangeTrackerAsync(AgentMessage msg)
-    {
-        if (changeTracker is null) return;
-        try
-        {
-            await changeTracker.FlushTurnAsync(msg.AgentName, msg.TurnIndex, CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "ChangeTracker flush failed for turn {Turn} ({Agent}).", msg.TurnIndex, msg.AgentName);
-        }
-    }
+    private Task FlushChangeTrackerAsync(AgentMessage msg) =>
+        FanOutHelpers.FlushChangeTrackerAsync(msg, changeTracker, logger, nameof(AdversarialOrchestrator));
 
     // Pass-keyword detection: the keyword must appear on its own line (case-insensitive).
     private static bool PassKeywordFound(string text, string keyword) =>
         text.Split('\n').Any(line =>
             line.Trim().Equals(keyword, StringComparison.OrdinalIgnoreCase));
 
-    private void FireTokenBudgetWarning(AgentMessage msg)
-    {
-        var threshold = config.WarnTurnTokens;
-        if (threshold > 0 && msg.Usage?.InputTokens is { } inputToks && inputToks > threshold)
-            TokenBudgetWarning?.Invoke(msg.AgentName, inputToks, threshold);
-    }
+    private void FireTokenBudgetWarning(AgentMessage msg) =>
+        FanOutHelpers.FireTokenBudgetWarning(
+            msg, config.WarnTurnTokens, (a, i, t) => TokenBudgetWarning?.Invoke(a, i, t));
 
     private static AgentMessage MakeMessage(
         string agentName,
         string content,
         int turnIndex,
         TokenUsage? usage,
-        IReadOnlyList<ToolCallRecord>? toolCalls = null)
-        => new()
-        {
-            AgentName = agentName,
-            Content   = content,
-            Role      = "assistant",
-            TurnIndex = turnIndex,
-            Usage     = usage,
-            ToolCalls = toolCalls,
-        };
+        IReadOnlyList<ToolCallRecord>? toolCalls = null) =>
+        FanOutHelpers.MakeMessage(agentName, content, turnIndex, usage, toolCalls);
 
 }
