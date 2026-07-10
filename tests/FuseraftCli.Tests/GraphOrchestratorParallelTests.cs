@@ -262,6 +262,46 @@ public sealed class GraphOrchestratorParallelTests
     }
 
     // -----------------------------------------------------------------------
+    // CorrectionEngine.InjectNoKeywordCorrection — AgentRouteTable.IsReviewerType drives
+    // the reviewer-specialized correction message, not a magic "APPROVED" keyword check.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task InjectNoKeywordCorrection_IsReviewerTypeTrue_CustomKeyword_UsesReviewerMessage()
+    {
+        // Phase-break keyword is "SHIP IT", not "APPROVED" — proves the reviewer-specific
+        // message no longer depends on the literal keyword string.
+        var table = new AgentRouteTable { IsReviewerType = true };
+        table.PhaseBreakKeywords.Add("SHIP IT");
+
+        var history = new List<ChatMessage> { User("start"), Asst("Looks good to me.") };
+
+        await CorrectionEngine.InjectNoKeywordCorrection(
+            history, "Looks good to me.", "Reviewer", consecutiveCount: 1, table);
+
+        var injected = TextOf(history[^1]);
+        Assert.Contains("shell_run", injected, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("APPROVED",  injected, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task InjectNoKeywordCorrection_IsReviewerTypeFalse_ApprovedKeyword_UsesGenericMessage()
+    {
+        // Phase-break keyword IS "APPROVED" but IsReviewerType defaults to false — proves the
+        // old inference (routeTable.PhaseBreakKeywords.Contains("APPROVED")) is no longer used.
+        var table = new AgentRouteTable();
+        table.PhaseBreakKeywords.Add("APPROVED");
+
+        var history = new List<ChatMessage> { User("start"), Asst("Looks good to me.") };
+
+        await CorrectionEngine.InjectNoKeywordCorrection(
+            history, "Looks good to me.", "Reviewer", consecutiveCount: 1, table);
+
+        var injected = TextOf(history[^1]);
+        Assert.Contains("NO TOOL CALLS AND NO KEYWORD", injected);
+    }
+
+    // -----------------------------------------------------------------------
     // GraphOrchestrator.ForkContext — isolation and shared sink
     // -----------------------------------------------------------------------
 

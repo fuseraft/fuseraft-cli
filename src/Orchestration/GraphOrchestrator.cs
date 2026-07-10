@@ -2346,6 +2346,7 @@ public sealed class GraphOrchestrator(
     ///   <item>Forward edges → <c>Routes</c> (send-forward, keyword-triggered).</item>
     ///   <item>Back-edges → <c>PhaseBreakKeywords</c> + <c>PhaseBreakValidators</c>.</item>
     ///   <item>Terminal nodes → <c>TerminalValidators</c> from <see cref="GraphNodeConfig.Validators"/>.</item>
+    ///   <item>Nodes with <see cref="GraphNodeConfig.ReviewerType"/> set → <c>IsReviewerType</c>.</item>
     /// </list>
     /// Also populates <see cref="_backEdgeDestinations"/> for the outer phase loop.
     /// </summary>
@@ -2362,8 +2363,8 @@ public sealed class GraphOrchestrator(
     /// <summary>
     /// Per-node route table construction. Iterates all graph edges and populates each
     /// source node's <see cref="AgentRouteTable"/> with forward routes, back-edge
-    /// phase-break entries, parallel fan-out keywords, terminal validators, and
-    /// foreign-keyword sets. Also registers back-edge destinations in
+    /// phase-break entries, parallel fan-out keywords, terminal validators, reviewer-type
+    /// flags, and foreign-keyword sets. Also registers back-edge destinations in
     /// <see cref="_backEdgeDestinations"/> and parallel group membership in
     /// <see cref="_parallelGroups"/>.
     /// </summary>
@@ -2454,6 +2455,15 @@ public sealed class GraphOrchestrator(
                 tables[node.Id] = table = new AgentRouteTable();
 
             table.TerminalValidators = BuildValidatorsFromNames(node.Validators!);
+        }
+
+        // Populate IsReviewerType from the explicit GraphNodeConfig.ReviewerType flag.
+        foreach (var node in graphCfg.Nodes.Where(n => n.ReviewerType))
+        {
+            if (!tables.TryGetValue(node.Id, out var table))
+                tables[node.Id] = table = new AgentRouteTable();
+
+            table.IsReviewerType = true;
         }
 
         // Populate ForeignSendForwardKeywords per node so CorrectionEngine can produce

@@ -54,6 +54,14 @@ internal sealed class AgentRouteTable
     /// <see cref="KeywordDetector.DetectKeywords"/> surface them to agents.
     /// </summary>
     public HashSet<string> ParallelKeywords { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Mirrors <see cref="fuseraft.Core.Models.Orchestration.GraphNodeConfig.ReviewerType"/> for
+    /// this node. Populated by <c>BuildNodeRouteTables</c>/<c>BuildRouteTableForNode</c>. Consumed
+    /// by <see cref="CorrectionEngine.InjectNoKeywordCorrection"/> to select reviewer-specialized
+    /// correction messages instead of inferring reviewer behavior from <see cref="PhaseBreakKeywords"/>.
+    /// </summary>
+    public bool IsReviewerType { get; set; }
 }
 
 /// <summary>Information about a single send-forward route.</summary>

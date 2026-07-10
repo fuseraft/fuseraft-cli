@@ -39,13 +39,16 @@ public sealed class ScatterGatherOrchestrator(
     ChangeTracker? changeTracker = null,
     EventEmitter? eventEmitter = null,
     GovernanceKernel? governanceKernel = null,
-    IHumanApprovalService? humanApprovalService = null) : IOrchestrator
+    IHumanApprovalService? humanApprovalService = null,
+    IContextAssemblyPipeline? contextPipeline = null,
+    RepositoryKnowledgeStore? repositoryKnowledgeStore = null) : IOrchestrator
 {
     private readonly ScatterGatherConfig _sgConfig =
         config.Selection.ScatterGather ?? new ScatterGatherConfig();
     private readonly IHumanApprovalService? _humanApprovalService = humanApprovalService;
 
     private string _sessionId = string.Empty;
+    private string _task = string.Empty;
 
     // IOrchestrator events
 
@@ -57,6 +60,7 @@ public sealed class ScatterGatherOrchestrator(
     {
         _sessionId = sessionId;
         agentFactory.SetSessionId(sessionId);
+        contextPipeline?.SetSessionId(sessionId);
     }
 
     public async Task<OrchestrationResult> RunAsync(
@@ -125,6 +129,8 @@ public sealed class ScatterGatherOrchestrator(
         IReadOnlyList<AgentMessage>? priorHistory = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        _task = task;
+
         // Build all agents once.
         var agents = config.Agents
             .Select(a => agentFactory.Create(a, onToolCalling: (agent, tool, args) => ToolCalling?.Invoke(agent, tool, args)))
@@ -133,6 +139,8 @@ public sealed class ScatterGatherOrchestrator(
         var agentInstructions = config.Agents
             .Where(a => !string.IsNullOrWhiteSpace(a.Instructions))
             .ToDictionary(a => a.Name, a => a.Instructions, StringComparer.OrdinalIgnoreCase);
+
+        var agentConfigs = config.Agents.ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
 
         // Resolve participant agents.
         var participants = new List<(string Name, AIAgent Agent, string? Instructions)>();
@@ -204,7 +212,9 @@ public sealed class ScatterGatherOrchestrator(
 
                 // Each participant gets their own isolated copy of the base history.
                 var participantHistory = new List<ChatMessage>(baseHistory);
-                var context            = BuildContext(p.Instructions, participantHistory);
+                var context = await AssembleContextAsync(
+                    p.Agent.Name ?? p.Name, p.Instructions, participantHistory,
+                    agentConfigs.GetValueOrDefault(p.Name), baseTurn + index, cancellationToken);
 
                 var response = await InvokeAgentAsync(p.Agent, context, cancellationToken);
                 var text     = response.Text ?? string.Empty;
@@ -215,6 +225,8 @@ public sealed class ScatterGatherOrchestrator(
                     baseTurn + index,
                     OrchestratorHelpers.ExtractUsage(response),
                     OrchestratorHelpers.ExtractToolCalls(response.Messages));
+
+                await PersistObservationsAsync(response, p.Agent.Name ?? p.Name, msg.TurnIndex);
 
                 if (eventEmitter is not null)
                     _ = eventEmitter.EmitAsync(EventTypes.ParallelBranchEnd,
@@ -275,7 +287,9 @@ public sealed class ScatterGatherOrchestrator(
         agentFactory.OnAgentTurnStarting();
         changeTracker?.BeginTurn(synthesizer.Name ?? _sgConfig.Synthesizer, turn);
 
-        var gatherContext  = BuildContext(synthInstr, gatherHistory);
+        var gatherContext = await AssembleContextAsync(
+            synthesizer.Name ?? _sgConfig.Synthesizer, synthInstr, gatherHistory,
+            agentConfigs.GetValueOrDefault(_sgConfig.Synthesizer), turn, cancellationToken);
         var gatherResponse = await InvokeAgentAsync(synthesizer, gatherContext, cancellationToken);
         var gatherText     = gatherResponse.Text ?? string.Empty;
 
@@ -293,6 +307,7 @@ public sealed class ScatterGatherOrchestrator(
             throw new BudgetExceededException(cumulativeTokens, cap2);
 
         await FlushChangeTrackerAsync(gatherMsg);
+        await PersistObservationsAsync(gatherResponse, synthesizer.Name ?? _sgConfig.Synthesizer, gatherMsg.TurnIndex);
 
         if (eventEmitter is not null)
             await eventEmitter.EmitAsync(EventTypes.PhaseEnd, payload: new { phase = 2 });
@@ -306,10 +321,16 @@ public sealed class ScatterGatherOrchestrator(
     // Helpers
     // -------------------------------------------------------------------------
 
-    // Shared with MapReduceOrchestrator (and, except BuildContext, AdversarialOrchestrator)
+    // Shared with MapReduceOrchestrator (and, except context assembly, AdversarialOrchestrator)
     // via FanOutHelpers — see that class's doc comment for what's shared and why.
-    private static IEnumerable<ChatMessage> BuildContext(string? instructions, IList<ChatMessage> history) =>
-        FanOutHelpers.BuildContext(instructions, history);
+    private Task<IEnumerable<ChatMessage>> AssembleContextAsync(
+        string agentName, string? instructions, IReadOnlyList<ChatMessage> history,
+        AgentConfig? agentCfg, int turn, CancellationToken ct) =>
+        FanOutHelpers.AssembleContextAsync(
+            contextPipeline, eventEmitter, agentName, _task, instructions, history, agentCfg, _sessionId, turn, ct);
+
+    private Task PersistObservationsAsync(AgentResponse response, string agentName, int turn) =>
+        FanOutHelpers.PersistObservationsAsync(repositoryKnowledgeStore, _sessionId, response, agentName, turn);
 
     private Task<AgentResponse> InvokeAgentAsync(AIAgent agent, IEnumerable<ChatMessage> context, CancellationToken ct) =>
         FanOutHelpers.InvokeAgentAsync(agent, context, governanceKernel, ct);
