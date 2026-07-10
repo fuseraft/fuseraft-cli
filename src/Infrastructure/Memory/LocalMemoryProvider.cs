@@ -11,19 +11,14 @@ namespace fuseraft.Infrastructure.Memory;
 /// </summary>
 internal sealed class LocalMemoryProvider : IMemoryProvider
 {
+    // No try/catch here: MemoryManager.PreTurnAsync already wraps every provider's LoadAsync
+    // call in a try/catch that logs via ILogger and swallows non-cancellation exceptions, so a
+    // second, provider-local safety net (previously logging to Console.Error instead of the
+    // shared logger) only duplicated that guarantee inconsistently.
     public async Task<string?> LoadAsync(string agentName, CancellationToken ct = default)
     {
-        try
-        {
-            var store = MemoryStore.ForAgent(agentName);
-            return await store.BuildPromptBlockAsync(ct);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[LocalMemoryProvider] Load failed for '{agentName}': {ex.Message}");
-            return null;
-        }
+        var store = MemoryStore.ForAgent(agentName);
+        return await store.BuildPromptBlockAsync(ct);
     }
 
     public Task SaveAsync(string agentName, IReadOnlyList<ChatMessage> history, CancellationToken ct = default)

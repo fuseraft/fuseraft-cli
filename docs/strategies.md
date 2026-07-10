@@ -676,7 +676,7 @@ All agents referenced inside any sub-graph must be declared in the top-level `Or
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `From` | string | — | Source node ID. Must match a `GraphNodeConfig.Id`. |
-| `To` | string | — | Target node ID. Must match a `GraphNodeConfig.Id`. Forward vs. back-edge classification is computed automatically from BFS layer topology. |
+| `To` | string | — | Target node ID. Must match a `GraphNodeConfig.Id`. Forward vs. back-edge classification is computed automatically via a DFS from the entry node (an edge is a back-edge only when its target is a real ancestor of the source). |
 | `Keyword` | string | — | Routing keyword. Must appear alone on its own line. When omitted, the edge is *unconditional* — it fires after the agent's turn without keyword scanning. |
 | `Validator` | string | — | Optional single validator. Blocks the edge until validation passes. |
 | `Validators` | array | — | Optional multiple validators (AND semantics). Takes precedence over `Validator` when both are set. |

@@ -629,7 +629,14 @@ public sealed class MagenticOrchestrator(
         int cumulativeTokens,
         CancellationToken cancellationToken)
     {
-        var ledgerPrompt = BuildLedgerPrompt(sharedHistory, currentPlan, currentPlanSteps, completedStepIds, participantNames);
+        var ledgerWindow = sharedHistory
+            .Where(m => !string.IsNullOrEmpty(m.Text))
+            .TakeLast(LedgerConversationWindow)
+            .ToList();
+        var (activitySummary, summaryCost) = await SummarizeParticipantActivityAsync(ledgerWindow, cancellationToken);
+        cumulativeTokens += summaryCost?.TotalTokens ?? 0;
+
+        var ledgerPrompt = BuildLedgerPrompt(activitySummary, currentPlan, currentPlanSteps, completedStepIds, participantNames);
 
         // Evaluate progress — use a windowed snapshot of manager history to prevent long
         // sessions with many replan cycles from overflowing the manager model's context.
@@ -728,7 +735,14 @@ public sealed class MagenticOrchestrator(
         stallCount = 0;
         roundIndex = 0;
 
-        var replanPrompt = BuildReplanPrompt(sharedHistory, currentPlan, currentPlanSteps, completedStepIds);
+        var replanWindow = sharedHistory
+            .Where(m => !string.IsNullOrEmpty(m.Text))
+            .TakeLast(ReplanConversationWindow)
+            .ToList();
+        var (activitySummary, summaryCost) = await SummarizeParticipantActivityAsync(replanWindow, cancellationToken);
+        cumulativeTokens += summaryCost?.TotalTokens ?? 0;
+
+        var replanPrompt = BuildReplanPrompt(activitySummary, currentPlan, currentPlanSteps, completedStepIds);
 
         // Apply the same history window as ledger evaluation so a high MaxResetCount
         // cannot push the replan call past the manager model's context limit.
@@ -740,7 +754,9 @@ public sealed class MagenticOrchestrator(
         var (newPlan, replanCost) = await InvokeManagerAsync(replanContext, cancellationToken);
         currentPlan = newPlan;
         PlanStep.TryParse(currentPlan, out currentPlanSteps);
-        // Record the full exchange in managerHistory for future reference.
+        // Record the full exchange in managerHistory for future reference. Note this is the
+        // *prompt* (which embeds activitySummary, not raw participant text) and the manager's
+        // own plan output — never raw sharedHistory — preserving the two-history invariant.
         managerHistory.Add(new ChatMessage(ChatRole.User, replanPrompt));
         managerHistory.Add(new ChatMessage(ChatRole.Assistant, currentPlan) { AuthorName = ManagerReplanTag });
         cumulativeTokens += replanCost?.TotalTokens ?? 0;
@@ -1001,6 +1017,65 @@ public sealed class MagenticOrchestrator(
         return (text, usage);
     }
 
+    // Neutral, isolated summarization pass over a raw participant-transcript window. This is
+    // deliberately NOT part of managerHistory and does NOT use the manager's own persona
+    // (_magConfig.Instructions) — its only job is to turn raw participant dialogue into the
+    // "explicit summary derived from sharedHistory" that the manager is allowed to see. This is
+    // what makes the two-history isolation invariant (see class doc) actually hold: only the
+    // summary text this method returns ever reaches managerHistory; the manager itself never
+    // receives sharedHistory's raw [AuthorName]: text lines.
+    private const string SummarizerInstructions = """
+        You are a neutral progress summarizer for a multi-agent task. You will be shown a raw
+        conversation excerpt between one or more worker agents. Produce a concise, third-person
+        bullet-point summary (under 250 words) of: what was attempted, what succeeded or failed,
+        and any concrete artifacts (files, commands, test results) produced. Do not quote the
+        agents verbatim and do not editorialize or give instructions — report only what
+        happened.
+        """;
+
+    internal async Task<(string Text, TokenUsage? Usage)> SummarizeParticipantActivityAsync(
+        IReadOnlyList<ChatMessage> historyWindow,
+        CancellationToken cancellationToken)
+    {
+        var transcript = string.Join("\n\n", historyWindow
+            .Where(m => !string.IsNullOrEmpty(m.Text))
+            .Select(m => $"[{m.AuthorName ?? m.Role.Value}]: {m.Text}"));
+
+        if (string.IsNullOrWhiteSpace(transcript))
+            return (string.Empty, null);
+
+        var context = new List<ChatMessage>
+        {
+            new(ChatRole.System, SummarizerInstructions),
+            new(ChatRole.User, transcript),
+        };
+
+        var response = governanceKernel?.CircuitBreaker is { } cb
+            ? await cb.ExecuteAsync(() => managerClient.GetResponseAsync(context, cancellationToken: cancellationToken))
+            : await managerClient.GetResponseAsync(context, cancellationToken: cancellationToken);
+        var text = response.Text?.Trim() ?? string.Empty;
+
+        TokenUsage? usage = null;
+        if (response.Usage is { } u)
+        {
+            var inputTokens  = (int)(u.InputTokenCount  ?? 0L);
+            var outputTokens = (int)(u.OutputTokenCount ?? 0L);
+            if (inputTokens > 0 || outputTokens > 0)
+                usage = new TokenUsage(inputTokens, outputTokens);
+        }
+
+        return (text, usage);
+    }
+
+    private static TokenUsage? CombineUsage(TokenUsage? a, TokenUsage? b) =>
+        (a, b) switch
+        {
+            (null, null) => null,
+            (null, _)    => b,
+            (_, null)    => a,
+            _            => new TokenUsage(a!.InputTokens + b!.InputTokens, a.OutputTokens + b.OutputTokens),
+        };
+
     private async Task<(string Text, TokenUsage? Usage)> SynthesizeFinalAnswerAsync(
         IReadOnlyList<ChatMessage> managerHistory,
         IReadOnlyList<ChatMessage> sharedHistory,
@@ -1012,9 +1087,16 @@ public sealed class MagenticOrchestrator(
             ? managerHistory
             : managerHistory.Take(ManagerHistoryBootstrapMessages).Concat(managerHistory.TakeLast(ManagerHistoryWindow - ManagerHistoryBootstrapMessages));
 
+        var finalWindow = sharedHistory
+            .Where(m => !string.IsNullOrEmpty(m.Text))
+            .TakeLast(FinalAnswerConversationWindow)
+            .ToList();
+        var (activitySummary, summaryCost) = await SummarizeParticipantActivityAsync(finalWindow, cancellationToken);
+
         var summaryContext = new List<ChatMessage>(historyBase);
-        summaryContext.Add(new ChatMessage(ChatRole.User, BuildFinalAnswerPrompt(sharedHistory)));
-        return await InvokeManagerAsync(summaryContext, cancellationToken);
+        summaryContext.Add(new ChatMessage(ChatRole.User, BuildFinalAnswerPrompt(activitySummary)));
+        var (text, finalCost) = await InvokeManagerAsync(summaryContext, cancellationToken);
+        return (text, CombineUsage(summaryCost, finalCost));
     }
 
     // Ledger parsing
@@ -1126,17 +1208,12 @@ public sealed class MagenticOrchestrator(
                 : $"  - {a.Name}"));
 
     private static string BuildLedgerPrompt(
-        IReadOnlyList<ChatMessage> sharedHistory,
+        string historyText,
         string? currentPlan,
         PlanStep[]? currentPlanSteps,
         HashSet<int> completedStepIds,
         string participantNames)
     {
-        var historyText = string.Join("\n\n", sharedHistory
-            .Where(m => !string.IsNullOrEmpty(m.Text))
-            .TakeLast(LedgerConversationWindow)
-            .Select(m => $"[{m.AuthorName ?? m.Role.Value}]: {m.Text}"));
-
         var stepChecklist = BuildStepChecklist(currentPlanSteps, completedStepIds);
 
         return $$"""
@@ -1171,16 +1248,11 @@ public sealed class MagenticOrchestrator(
     }
 
     private static string BuildReplanPrompt(
-        IReadOnlyList<ChatMessage> sharedHistory,
+        string historyText,
         string? oldPlan,
         PlanStep[]? oldPlanSteps,
         HashSet<int> completedStepIds)
     {
-        var historyText = string.Join("\n\n", sharedHistory
-            .Where(m => !string.IsNullOrEmpty(m.Text))
-            .TakeLast(ReplanConversationWindow)
-            .Select(m => $"[{m.AuthorName ?? m.Role.Value}]: {m.Text}"));
-
         var stepChecklist = BuildStepChecklist(oldPlanSteps, completedStepIds);
 
         return $"""
@@ -1218,13 +1290,8 @@ public sealed class MagenticOrchestrator(
         return sb.ToString();
     }
 
-    private static string BuildFinalAnswerPrompt(IReadOnlyList<ChatMessage> sharedHistory)
+    private static string BuildFinalAnswerPrompt(string historyText)
     {
-        var historyText = string.Join("\n\n", sharedHistory
-            .Where(m => !string.IsNullOrEmpty(m.Text))
-            .TakeLast(FinalAnswerConversationWindow)
-            .Select(m => $"[{m.AuthorName ?? m.Role.Value}]: {m.Text}"));
-
         return $"""
             The task has been completed. Synthesize a final, comprehensive answer that covers:
             1. What was accomplished

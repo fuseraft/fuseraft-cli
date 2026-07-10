@@ -47,11 +47,13 @@ Cli/
 Core/
   Interfaces/       — IOrchestrator, ISessionStore, IAgentSelector, ITerminationCondition,
                       IRoutingValidator, IHumanApprovalService, ICompensatingAgent,
-                      IMemoryProvider
+                      IMemoryProvider, IContextAssemblyPipeline, IContextSnapshotter,
+                      IEventSink, IOrchestrationHook, IParallelAgentSelector (not
+                      necessarily exhaustive — this list drifts as interfaces are added)
   Models/           — OrchestrationConfig, AgentConfig, SessionCheckpoint, AgentMessage,
                       AgentState, SagaConfig, TokenUsage, StrategyConfig,
-                      ValidationConfig, MemoryConfig, ...
-  Exceptions/       — BudgetExceededException, ValidatorStuckException
+                      ValidationConfig, MemoryConfig, BudgetExceededException, ...
+  Exceptions/       — ValidatorStuckException, AgentBlockedException
 
 Infrastructure/
   AgentFactory.cs         — Builds MAF AIAgent instances from AgentConfig
@@ -68,7 +70,8 @@ Infrastructure/
 Orchestration/
   AgentOrchestrator.cs       — General-purpose multi-agent loop (any selection strategy)
   MagenticOrchestrator.cs    — Magentic-One style two-level manager/participant loop
-  GraphOrchestrator.cs       — Directed-graph orchestrator; BFS-layer topology, forward-edge phases, back-edge phase restarts
+  GraphOrchestrator.cs       — Directed-graph orchestrator; DFS-based forward/back-edge classification, forward-edge phases, back-edge phase restarts
+  WorkflowOrchestrator.cs    — Cycle-native sibling of GraphOrchestrator for Selection.Type: "workflow" (see §6.8); every edge is a plain route, no forward/back distinction
   AdversarialOrchestrator.cs — GAN-style adversarial loop; paired generator/critic stages; context firewall isolates the critic
   ContextAssemblyPipeline.cs — Unified context assembly: intent → memory → knowledge → history → prompt; single entry point for all agent invocations
   ConversationCompactor.cs   — LLM-based history summarization; injects tool-call trace into summary prompt
@@ -180,7 +183,7 @@ Every session is driven by a single JSON or YAML file under the top-level `Orche
 | `ContextWindow` | Optional per-agent history filter (strips tool noise, limits tail length). Ignored when `Context` is set. |
 | `Context` | Optional artifact-first context spec. When declared, replaces history replay entirely — context is assembled from disk sources (`session_context`, `changes_recent`, `brief_field`, `file`, `own_history`) rather than filtering the shared transcript. |
 
-**Environment variable expansion** for `Security.HttpAllowedHosts` and all `ApiProfiles` header values is performed at startup via `${ENV_VAR}` tokens. Credentials never appear in agent instructions or conversation history.
+**Environment variable expansion** for `Security.HttpAllowedHosts`, `ApiProfiles[*].BaseUrl`, and all `ApiProfiles` header values is performed at startup via `${ENV_VAR}` tokens. Credentials never appear in agent instructions or conversation history.
 
 **Config formats:** Both JSON (`.json`) and YAML (`.yaml` / `.yml`) are supported. YAML is parsed via `YamlConfigLoader` and converted to `IConfiguration` for the same `BindConfig` path.
 
@@ -192,7 +195,7 @@ Every session is driven by a single JSON or YAML file under the top-level `Orche
 
 **Steps:**
 
-0. **Remote agent short-circuit** — When `AgentConfig.RemoteAgent` is set, `AgentFactory` resolves the remote agent card from `{Url}/.well-known/agent.json` via `A2ACardResolver`, wraps it as an `AIAgent`, and returns immediately. Steps 1–5 below are skipped; `Model`, `Plugins`, `FunctionChoice`, and `Capabilities` are ignored. `Instructions`, `TrustScore`, `ContextWindow`, and `ChangeTracker` wrapping all continue to apply. `GetAIAgentAsync` is dispatched via `Task.Run` so the blocking `.GetAwaiter().GetResult()` call runs on the thread pool rather than the caller's `SynchronizationContext`, avoiding potential deadlocks in hosted environments.
+0. **Remote agent short-circuit** — When `AgentConfig.RemoteAgent` is set, `AgentFactory` resolves the remote agent card from `{Url}/.well-known/agent.json` via `A2ACardResolver`, wraps it as an `AIAgent`, and returns immediately. Steps 1–5 below are skipped; `Model`, `Plugins`, `FunctionChoice`, and `Capabilities` are ignored. `Instructions`, `ContextWindow`, and `ChangeTracker` wrapping all continue to apply. `TrustScore` is recorded in the governance audit-emit call for observability, but does **not** govern an execution ring for remote agents — `BuildGovernanceMiddleware` (the only code path that computes a ring via `ComputeRing`) is never reached from this short-circuit, since `SandboxEnforcementFilter` has no local tool surface to enforce against for a remote agent's tool calls (those happen inside the remote A2A service, invisible to this process). `GetAIAgentAsync` is dispatched via `Task.Run` so the blocking `.GetAwaiter().GetResult()` call runs on the thread pool rather than the caller's `SynchronizationContext`, avoiding potential deadlocks in hosted environments.
 
 1. **Identity** — An `AgentIdentity` (DID: `did:fuseraft:<name>`) is created and registered with the `IdentityRegistry`. The governance audit log uses the DID as the actor identifier.
 
@@ -213,21 +216,27 @@ Every session is driven by a single JSON or YAML file under the top-level `Orche
 
 ## 6. Orchestrators
 
-`OrchestratorBuilder` selects among four orchestrators based on the config's `Selection.Type`. The selection order is:
+`OrchestratorBuilder` selects among seven orchestrators based on the config's `Selection.Type`. The selection order is:
 
 1. **`GraphOrchestrator`** — when `Selection.Type == "graph"`
-2. **`AdversarialOrchestrator`** — when `Selection.Type == "adversarial"`
-3. **`MagenticOrchestrator`** — when `Selection.Type == "magentic"`
-4. **`AgentOrchestrator`** — all other cases
+2. **`WorkflowOrchestrator`** — when `Selection.Type == "workflow"` (see §6.8)
+3. **`AdversarialOrchestrator`** — when `Selection.Type == "adversarial"`
+4. **`MapReduceOrchestrator`** — when `Selection.Type == "mapreduce"`
+5. **`ScatterGatherOrchestrator`** — when `Selection.Type == "scattergather"`
+6. **`MagenticOrchestrator`** — when `Selection.Type == "magentic"`
+7. **`AgentOrchestrator`** — all other cases
 
-All three implement `IOrchestrator`:
+All seven implement `IOrchestrator`:
 
 ```csharp
 Task<OrchestrationResult> RunAsync(string task, IReadOnlyList<AgentMessage>? priorHistory, CancellationToken ct)
 IAsyncEnumerable<AgentMessage> StreamAsync(string task, IReadOnlyList<AgentMessage>? priorHistory, CancellationToken ct)
 void SetSessionId(string sessionId)
 void SetResumeExecutorId(string? executorId)   // GraphOrchestrator; consumed once
-void SetResumeStateName(string? stateName)     // AgentOrchestrator + StateMachineSelectionStrategy + GraphOrchestrator; consumed once
+void SetResumeStateName(string? stateName)     // AgentOrchestrator + StateMachineSelectionStrategy; consumed once. GraphOrchestrator does not
+                                                // override this — it falls through to IOrchestrator's no-op default and relies on
+                                                // SetResumeExecutorId alone (CompactionCoordinator calls both unconditionally on every
+                                                // orchestrator, so this is a harmless no-op for Graph sessions, not a bug).
 event Action<string>? AgentStarting
 event Action<string, string, string?>? ToolCalling        // (agentName, toolName, argsSummary)
 event Action<string, int, int>? TokenBudgetWarning        // (agentName, inputTokens, warnThreshold)
@@ -276,14 +285,16 @@ A Magentic-One style two-level orchestrator. A dedicated manager LLM drives a pl
 
 **Two-history model (the core invariant):**
 - `sharedHistory` — what participant agents see: user task + all participant responses
-- `managerHistory` — what the manager sees: fact-gather prompt/response, plan, and JSON ledger evaluations only. The manager **never** sees participant messages directly.
+- `managerHistory` — what the manager sees: fact-gather prompt/response, plan, and JSON ledger evaluations only. The manager **never** sees raw participant messages directly.
+
+**How the invariant is enforced — `SummarizeParticipantActivityAsync`:** Before every ledger evaluation, replan, and final-answer synthesis, `MagenticOrchestrator` takes the relevant `sharedHistory` window and sends it to `managerClient` through a separate, isolated, one-shot call under a neutral third-person summarizer system prompt (*not* the manager's own persona/instructions from `_magConfig.Instructions`). Only that call's output — a short bullet summary of what was attempted/succeeded/failed/produced — is what actually reaches the manager: it's what gets embedded in the ledger/replan/final-answer prompt, and it's what `ReplanAsync` persists into `managerHistory`. Raw `[AuthorName]: text` participant dialogue is never added to `managerHistory` or shown to the manager's own reasoning call. This costs one extra LLM call per ledger round / replan / final answer, which is the deliberate tradeoff for the invariant actually holding rather than being aspirational.
 
 **Phase structure:**
 
 1. **Fact gathering** — Manager summarizes what it knows about the task and available agents
 2. **Planning** — Manager produces a step-by-step plan. Optional HITL review via `IHumanApprovalService.PromptPlanReviewAsync` (feedback loop with revision until approved)
 3. **Inner loop** — For each round:
-   - Manager evaluates a JSON progress ledger (`MagenticProgressLedger`) against the current plan and shared history
+   - Manager evaluates a JSON progress ledger (`MagenticProgressLedger`) against the current plan and a summary of shared-history activity (see above — never the raw history)
    - If `IsRequestSatisfied`: synthesize final answer → done
    - If stalled (`!IsProgressBeingMade || IsInLoop`): increment stall counter
    - Manager selects next participant and generates a targeted instruction
@@ -310,13 +321,15 @@ START
 
 **History isolation invariant:** The manager must not see raw participant messages. The manager may only reason over its own prior outputs, the structured progress ledger, and explicit summaries derived from `sharedHistory`. No implicit leakage from `sharedHistory` to `managerHistory` is permitted. Future changes that "helpfully" pass participant context to the manager violate this invariant and break the two-history model.
 
-**Checkpoint state** (`MagenticCheckpointState`): `CurrentPlan`, `RoundIndex`, `StallCount`, `ResetCount`, `AwaitingPlanReview` — enough to resume the inner loop exactly where it paused. Exposed via `CurrentState` so `SessionRunner` can snapshot it after each yielded message.
+**Checkpoint state** (`MagenticCheckpointState`): `CurrentPlan`, `CurrentPlanSteps`, `RoundIndex`, `StallCount`, `ResetCount`, `AwaitingPlanReview` — enough to resume the inner loop exactly where it paused. Exposed via `CurrentState` so `SessionRunner` can snapshot it after each yielded message.
 
 ### 6.3 GraphOrchestrator
 
 A directed-graph orchestrator for `Selection.Type: graph`. Each node in the config binds an agent to a unique `Id`; edges carry routing keywords and optional validators. The topology drives execution: forward edges advance within a phase; back-edges break the phase and restart from the target node.
 
-**BFS layer assignment:** At startup, `ComputeBfsLayers` assigns an integer layer to every node via BFS from the `Entry` node, following only non-back edges (detected by topological order). An edge from node `A` to node `B` is a *forward edge* when `layer(B) > layer(A)` and a *back-edge* when `layer(B) ≤ layer(A)`. Layer assignment uses the node list position as a proxy when the exact DAG has not yet been resolved — accurate for topologically ordered node lists, documented in code for future improvement.
+**Forward/back-edge classification:** At startup, `ComputeBackEdges` classifies every edge reachable from the `Entry` node via a single DFS with a 3-color node state (unvisited / on-stack / done). An edge is a *back-edge* only when its target is still on the DFS stack (a real ancestor of the source) when the edge is explored; every other edge — tree edges, edges to already-finished descendants, and cross edges to already-finished nodes in another branch — is a *forward edge*. `IsBackEdge(from, to)` looks the classification up directly from the precomputed set.
+
+This replaced an earlier BFS-shortest-path-layer approximation (assign each node the layer of its first BFS encounter, classify an edge as back when `layer(B) ≤ layer(A)`), which had a real bug: it misclassified a legitimate forward edge as a back-edge whenever two forward paths of different lengths converged on the same node (a "diamond" — `A→B→D` and `A→C→E→D`), because the longer path's edge into `D` always landed on a layer ≤ `D`'s already-assigned (shorter-path) layer. DFS-based classification has no such failure mode since it reasons about actual ancestry, not path length.
 
 **Route tables:** `BuildNodeRouteTables` constructs an `AgentRouteTable` for every node. Each table holds:
 - `Routes` — forward-edge routes (keyword → `RouteInfo(targetNodeId, agentName, validators)`)
@@ -337,8 +350,8 @@ A directed-graph orchestrator for `Selection.Type: graph`. Each node in the conf
 2. Scans the response for keywords in the current node's route table only — keywords from other nodes are ignored.
 3. For back-edge matches: validators run; on pass, `YieldOutputAsync` breaks the phase; on fail, a correction is injected and the agent is re-invoked.
 4. For forward-edge matches: validators run; on pass, `SendMessageAsync` advances to the next executor in the phase.
-5. For unconditional edges: `_unconditionalForwardRoutes` / `_unconditionalBackEdges` fire after the agent turn if no keyword matched, optionally running `_unconditionalBackEdgeValidators` before the phase-break.
-6. If no keyword matches and no unconditional edge applies, a correction is injected listing the available keywords.
+5. For unconditional edges: `_unconditionalForwardRoutes` / `_unconditionalBackEdges` fire after the agent turn. Unconditional routing is wired per-node at config-build time by `WireBackEdges` — a node is either fully keyword-routed or fully unconditional, never both, so this is not a runtime fallback for "no keyword matched" on a node that also has keyword routes; it only applies to nodes with zero keyword-based routes at all.
+6. If no keyword matches and the node has no unconditional routing wired, a correction is injected listing the available keywords.
 
 Synthetic keywords (`__UNCOND_BACK:{nodeId}`) are used internally to track unconditional back-edges through the phase-break path. `RunPhasesAsync` translates them to human-readable `(unconditional handoff from {nodeId})` before injecting into agent history and event emission.
 
@@ -451,7 +464,15 @@ A `GraphNodeConfig` with `SubGraphId` set runs a nested sub-orchestrator instead
 - `SubGraphSpec.MapReduce` → spawns a `MapReduceOrchestrator` with `Selection.Type = "mapreduce"` and `Selection.MapReduce = subSpec.MapReduce`
 - `SubGraphSpec.ScatterGather` → spawns a `ScatterGatherOrchestrator` with `Selection.Type = "scattergather"` and `Selection.ScatterGather = subSpec.ScatterGather`
 
-All sub-orchestrators share the parent's services (agentFactory, changeTracker, eventEmitter, governanceKernel). Messages streamed by the sub-orchestrator are forwarded directly to the parent's message sink. The sub-orchestrator's terminal assistant message is injected into the parent's shared history as a synthetic `ChatMessage`, enabling the parent's keyword detection and edge routing to work on the sub-orchestrator's output without any special-casing.
+All sub-orchestrators share the parent's services (agentFactory, changeTracker, eventEmitter, governanceKernel). Messages streamed by the sub-orchestrator are forwarded directly to the parent's message sink. The sub-orchestrator's terminal assistant message is injected into the parent's shared history as a synthetic `ChatMessage`, reusing the parent's route tables for keyword detection — with a text-only fallback: tool-call-based keyword extraction (`ExtractHandoffToolCallKeyword`) isn't available for sub-graph output since raw `ChatMessage`/`FunctionCallContent` isn't exposed across the sub-orchestrator boundary, so `KeywordDetector.DetectKeywords` scans the text instead.
+
+### 6.8 WorkflowOrchestrator
+
+A directed-graph orchestrator for `Selection.Type: "workflow"` — a cycle-native sibling of `GraphOrchestrator`. Where `GraphOrchestrator` distinguishes forward edges from back-edges (§6.3) and implements cycles via an outer phase-restart loop (rebuilding a fresh MAF DAG per phase, since MAF's `WorkflowBuilder` does not support in-graph cycles — see §17), `WorkflowOrchestrator` takes a different approach: every edge, including ones that close a cycle, becomes a plain, uniform route in the node's `AgentRouteTable`. There is no BFS/DFS layer or back-edge classification at all — a route from `tester` back to `developer` is wired identically to any forward route, with no `PhaseBreakKeywords` bucket and no phase-restart mechanism. This makes cycles config-driven and uniform, at the cost of the phase-boundary semantics `GraphOrchestrator` uses for validator gating between phases.
+
+`WorkflowOrchestrator` deliberately duplicates `GraphOrchestrator`'s per-node retry skeleton (`MaxRetries`/`MaxTotalTurnsMultiplier`-derived turn cap, consecutive-failure counting, `TimeoutException` handling) rather than sharing it, since the two orchestrators' node-execution loops diverge enough (no forward/back distinction here) that a shared implementation would need its own abstraction layer.
+
+**Feature parity gap vs. `GraphOrchestrator`:** `WorkflowOrchestrator` does not wire `governanceKernel`/the governance circuit-breaker or `IContextAssemblyPipeline` into its per-node agent invocations. `docs/strategies.md` frames switching `Selection.Type` from `graph` to `workflow` as close to a drop-in engine swap — that's true for the routing/config surface, but it means a session moved from `graph` to `workflow` silently loses governance protection and the context-assembly pipeline's memory/knowledge injection, not just gains cycle-native routing. Both orchestrators do share the same validator-name→instance resolution surface (`BuildValidatorsFromNames`, including `ArchitectureValidator`), so validator configuration itself transfers correctly between the two.
 
 ---
 
@@ -494,11 +515,11 @@ Built and returned by `StrategyFactory.CreateSelection`. All implement `IAgentSe
 **`StateMachineSelectionStrategy`** tracks an explicit current state and evaluates that state's outgoing transitions after each agent turn. Key behaviors:
 - Signal detection reuses the same strict per-line matching as `KeywordSelectionStrategy`; existing agent instructions need minimal changes when migrating
 - Transitions require the signal AND all declared `ContractEngine` predicates to pass (AND semantics); failure injects a typed correction and re-invokes the current state's agent
-- Failure classification and `FailureHandlingConfig` policy apply identically to the keyword strategy — `ActivateRecovery` routes to a `RecoveryAgent` declared on the transition, `EscalateToHuman` throws immediately, `Abort` escalates after the configured threshold
+- Both `KeywordSelectionStrategy` and `StateMachineSelectionStrategy` classify failures via `FailureClassifier`/`FailureHandlingConfig` and share the core `ActivateRecovery`/`EscalateToHuman`/`Abort` semantics, but the two implementations are independent, hand-written copies that have diverged in their extras: only `KeywordSelectionStrategy` has a governance `RateLimiter` 10-minute-window escalation (failures per agent+route within the window trigger immediate escalation once the window fills); only `StateMachineSelectionStrategy` has the `MaxConsecutiveContractFailures` global backstop (below) and verifier-turn scheduling (next bullet). Do not assume a policy change to one strategy's failure handling automatically applies to the other.
 - `SourceAgents` restrictions on transitions prevent ghost signals from other agents bleeding through the lookback window
 - A verifier agent can be scheduled for the next turn on `ConflictingEvidence` or `NoProgress` failures when `VerifierConfig` is configured
 
-**`StructuredSelectionStrategy`** evaluates condition strings (e.g. `"last_agent == 'Tester' && contains(last_message, 'PASS')"`) via `StructuredConditionEvaluator`. Used for configs that need multi-variable routing logic without keyword string matching.
+**`StructuredSelectionStrategy`** evaluates condition strings (e.g. `"last_agent == 'Tester' && contains(last_message, 'PASS')"`) via `StructuredConditionEvaluator`. Used for configs that need multi-variable routing logic without keyword string matching. Parse failures (invalid JSON, or valid JSON matching no route) are classified via `FailureClassifier`/`FailureHandlingConfig` the same way `KeywordSelectionStrategy` and `StateMachineSelectionStrategy` are — `EscalateToHuman` throws immediately, otherwise a correction is injected and the source agent re-invoked until the classified failure type's `Threshold` is reached. There is no `RecoveryAgent` concept for this strategy (`RouteEntry` has no such field), so `ActivateRecovery` falls back to the same threshold-based escalation as `Abort`.
 
 ---
 
@@ -510,15 +531,15 @@ Built and returned by `StrategyFactory.CreateTermination`. All implement `ITermi
 |---|---|
 | `regex` | Terminates when a regex matches the last assistant message (optional agent-name filter) |
 | `maxiterations` | Never terminates via condition — relies on `MaxIterations` hard cap in `AgentOrchestrator` |
-| `composite` | AND of child conditions — all must return true simultaneously |
+| `composite` | OR (ANY) of child conditions — terminates as soon as any one child signals termination. (`CompositeTerminationStrategy`'s own docstring says this explicitly; it is not an AND of all children.) |
 
-Termination strategies can be decorated with routing validators via the `Validators` field. A `ValidatedTerminationStrategy` runs the validators before accepting the termination signal. The `requireCurrentTurn: true` flag prevents a stale change-log entry from satisfying a validator that was satisfied in an earlier turn.
+Termination strategies can be decorated with routing validators via the `Validators` field. A `ValidatedTerminationStrategy` runs the validators before accepting the termination signal. The `requireCurrentTurn: true` flag is specific to `RequireShellPassValidator` (it is a constructor parameter on that validator, not a termination-strategy-wide feature) and prevents a stale change-log entry from satisfying it based on an earlier turn's shell run.
 
 ---
 
 ## 9. Routing Validators
 
-Validators implement `IRoutingValidator` and run synchronously before a route or termination fires. They examine external artifacts (change log, test report, brief file) rather than LLM output.
+Validators implement `IRoutingValidator` and run synchronously before a route or termination fires. Most examine external artifacts (change log, test report, brief file) rather than LLM output — `RequireReviewJudgement` is the one exception, since a review judgement only exists as the reviewer's own message text (see below).
 
 | Validator | What it checks |
 |---|---|
@@ -527,8 +548,13 @@ Validators implement `IRoutingValidator` and run synchronously before a route or
 | `TestReportValid` (`HandoffToReviewerValidator`) | Test report file exists, is non-empty, and all `TestAssertionPatterns` match |
 | `RequireBrief` | Brief file exists and is non-empty |
 | `RequireAllFilesWritten` | All files listed in the brief's deliverables section have been written per the change log |
-| `RequireReviewJudgement` | Last reviewer message contains an explicit APPROVED or REJECTED keyword |
+| `RequireReviewJudgement` | Parses a structured `{"review":[{criterion, verdict, evidence}]}` JSON block from the reviewer's message (not a plain APPROVED/REJECTED keyword scan), enforces per-criterion coverage against `brief.json`, and requires a successful `shell_run` recorded in the current turn's change log to back any PASS verdict |
+| `RequireAcceptanceCriteriaPassed` (`RequireAcceptanceCriteriaPassedValidator`) | Checks the brief's acceptance criteria have all been satisfied per the change log; used directly by `GraphOrchestrator`/`WorkflowOrchestrator` |
+| `BlockOnConsecutiveFail` (`ConsecutiveShellFailValidator`) | Blocks the forward edge and forces a replan when the same shell command has failed repeatedly (default: last 3 turns) — pairs with `RequiredCommandPattern` to target a specific build/test command |
+| `ArchitectureValidator` | Blocks a handoff when architecture layer violations are present in the project source tree, per the manifest at `.fuseraft/architecture.yaml` (or a configured path); passes unconditionally when no manifest exists |
 | `RequireRelatedTestsPass` | Resolves changed files from the change log, discovers related test targets via a configurable `FindRelatedCommand` (with `{file}` substitution), runs them — falling back to `FullSuiteCommand` when discovery returns nothing — and passes only when the test command exits 0 |
+
+This list is not necessarily exhaustive of every `ValidatorNames` constant — it covers the validators reachable by name from `KeywordSelectionStrategy`/`StateMachineSelectionStrategy`/`GraphOrchestrator`/`WorkflowOrchestrator`'s validator-name registries.
 
 When a validator fails, the route is blocked: the source agent is re-invoked with an injected error message tailored to the failure type (`MissingEvidence`, `InvalidTransition`, `ConflictingEvidence`, `NoProgress`). The response policy is controlled by `FailureHandlingConfig` — `Reinstruct` (default) injects a correction and retries; `ActivateRecovery` routes to the route's `RecoveryAgent` on the first request; `EscalateToHuman` throws immediately; `Abort` escalates after the configured per-type `Threshold` consecutive failures. When the threshold is reached, `ValidatorStuckException` is thrown and the session escalates to HITL.
 
@@ -542,7 +568,7 @@ When a validator fails, the route is blocked: the source agent is re-invoked wit
 5. Continue or terminate (ValidatorStuckException)
 ```
 
-No component may bypass this pipeline. Correction messages injected at step 3 are always `ChatRole.User` messages appended to shared history before the source agent is re-invoked.
+No component may bypass this pipeline — `KeywordSelectionStrategy`, `StateMachineSelectionStrategy`, and `StructuredSelectionStrategy` all route failures through it (see §7). Correction messages injected at step 3 are always `ChatRole.User` messages appended to shared history before the source agent is re-invoked.
 
 ---
 
@@ -566,7 +592,7 @@ Every session is backed by a `SessionCheckpoint` persisted after each agent turn
 | `MagenticState` | `MagenticCheckpointState` snapshot for Magentic loop resume |
 | `StateHistory` | Ordered list of `AgentState` snapshots produced during the session; populated by `GraphOrchestrator`; `null` for other orchestrators |
 
-**`AgentMessage` fields:** `AgentName`, `Content`, `Role`, `TurnIndex`, `Timestamp`, `Usage` (tokens + cost), `IsCompactionSummary`, `ToolCalls` (name, args summary, succeeded).
+**`AgentMessage` fields:** `AgentName`, `Content`, `Role`, `TurnIndex`, `Timestamp`, `Usage` (`TokenUsage`: input/output token counts — no cost/pricing is tracked anywhere in this layer), `IsCompactionSummary`, `ToolCalls` (name, args summary, succeeded).
 
 **`SessionIndexEntry` fields:** `SessionId`, `Task` (first non-empty line, ≤120 chars), `WorkingDirectory`, `ConfigPath`, `StartedAt`, `LastUpdatedAt`, `IsComplete`, `TurnCount`. Written to `~/.fuseraft/sessions/index.json` (keyed by session ID) on every `SaveAsync` and `DeleteAsync` so listing never requires opening checkpoint files.
 
@@ -581,11 +607,11 @@ Every session is backed by a `SessionCheckpoint` persisted after each agent turn
 
 **`InMemorySessionStore`**: `ConcurrentDictionary` backed; sessions lost on process exit. Used when `Checkpoint.Mode = "memory"` in config or when no config-level checkpoint path is set and the user explicitly opts in.
 
-**Save points** (in `SessionRunner`): after each agent message, after HITL human redirect, before and after compaction, and at session completion (`IsComplete = true`).
+**Save points:** after each agent message, after HITL human redirect, and before/after compaction — all in `SessionRunner`. The completion save (`IsComplete = true`) is set and persisted by `RunCommand.ExecuteAsync` after `SessionRunner.RunAsync` returns, not by `SessionRunner` itself.
 
 **Resume path** (`RunCommand`): `--resume <sessionId>` loads the checkpoint, validates `IsComplete == false`, rehydrates `priorHistory`, and calls `SetResumeExecutorId` / `SetResumeState` on the orchestrator before the next `StreamAsync` call.
 
-**Why we did not use the MAF framework's checkpointing layer:** The framework's `Checkpoint` type captures MAF workflow execution state — executor queue, edge state, outstanding external requests. Our `SessionCheckpoint` captures conversation semantics — agent messages, token usage, cost, Magentic loop counters. They solve different problems at different levels of abstraction. The framework layer applies only to `GraphOrchestrator` (which uses `InProcessExecution`); `AgentOrchestrator` and `MagenticOrchestrator` are manual loops with no MAF workflow graph. Replacing our layer with the framework's would lose agent identity, role, token usage, cost tracking, and Magentic loop state, while gaining sub-turn recovery that provides no practical benefit given our turns are already fine-grained checkpointed.
+**Why we did not use the MAF framework's checkpointing layer:** The framework's `Checkpoint` type captures MAF workflow execution state — executor queue, edge state, outstanding external requests. Our `SessionCheckpoint` captures conversation semantics — agent messages, token usage, Magentic loop counters. They solve different problems at different levels of abstraction. The framework layer applies only to `GraphOrchestrator` (which uses `InProcessExecution`); `AgentOrchestrator` and `MagenticOrchestrator` are manual loops with no MAF workflow graph. Replacing our layer with the framework's would lose agent identity, role, token usage, and Magentic loop state, while gaining sub-turn recovery that provides no practical benefit given our turns are already fine-grained checkpointed.
 
 ---
 
@@ -605,11 +631,11 @@ Every session is backed by a `SessionCheckpoint` persisted after each agent turn
 
 **Compaction invariants:** Compaction must preserve:
 - the last assistant message (always retained verbatim in the tail)
-- all routing signals that could still be active
+- routing signals that could still be active
 - all validator-relevant artifacts, or replace them with equivalent summaries grounded in the change log
 - turn-boundary markers (`[fuseraft: A → B]`) in the retained tail
 
-Compaction must never cause a previously valid route to become invalid, or a validator to pass or fail differently than it would against the original history.
+Compaction must never cause a previously valid route to become invalid, or a validator to pass or fail differently than it would against the original history. The routing-signal invariant is enforced by `TryPinLastRoutingSignal` (`CompactionCoordinator`), gated behind `CompactionConfig.PinLastRoutingSignal` (default `true`) — when enabled, the single most recent `HandoffPlugin` signal is re-injected at the head of the retained window if trimming would otherwise have dropped it. This covers the common case (one pending signal) but not a parallel/fan-out transition with multiple branches' signals still pending — only the last one is pinned.
 
 ---
 
@@ -622,8 +648,8 @@ Plugins are `AIFunction`-providing objects registered in `PluginRegistry` and re
 | Plugin | Tools |
 |---|---|
 | `FileSystem` | `read_file`, `grep_file`, `get_file_summary`, `get_file_info`, `save_file_summary`, `list_files`, `list_directory`, `write_file`, `patch_file`, `create_directory`, `copy_file`, `move_file`, `set_permissions`, `delete_file`, `delete_directory` |
-| `Shell` | `shell_run`, `shell_run_script`, `shell_run_background`, `shell_set_env`, `shell_get_env`, `shell_get_job_status`, `shell_get_job_output`, `shell_kill_job`, `shell_which`, `shell_get_working_directory` |
-| `Git` | `git_status`, `git_diff`, `git_log`, `git_show`, `git_branch_list`, `git_stash_list`, `git_add`, `git_commit`, `git_checkout`, `git_create_branch`, `git_init`, `git_push`, `git_pull`, `git_stash`, `git_stash_pop`, `git_reset` |
+| `Shell` | `shell_run`, `shell_run_script`, `shell_run_background`, `shell_set_env`, `shell_get_env`, `shell_get_job_status`, `shell_get_job_output`, `shell_kill_job`, `shell_which`, `shell_get_working_directory`, `shell_get_session_temp_dir` |
+| `Git` | `git_status`, `git_diff`, `git_log`, `git_show`, `git_branch_list`, `git_stash_list`, `git_is_inside_work_tree`, `git_add`, `git_commit`, `git_checkout`, `git_create_branch`, `git_init`, `git_push`, `git_pull`, `git_stash`, `git_stash_pop`, `git_reset`, `git_rebase` |
 | `Http` | `http_get`, `http_head`, `http_post`, `http_put`, `http_patch`, `http_delete` — uses named `ApiProfiles` |
 | `Json` | `json_format`, `json_minify`, `json_get`, `json_keys`, `json_search`, `json_to_text`, `json_validate`, `json_merge` |
 | `Document` | `document_extract_text`, `document_get_info`, `document_list_sheets`, `document_get_sheet` |
@@ -636,7 +662,7 @@ Plugins are `AIFunction`-providing objects registered in `PluginRegistry` and re
 | `Scratchpad` | `scratchpad_read`, `scratchpad_read_all`, `scratchpad_search`, `scratchpad_write`, `scratchpad_delete` — per-agent key-value store |
 | `Chatroom` | `chatroom_send`, `chatroom_read` — shared coordination log |
 | `Handoff` | `handoff` — emits a routing keyword to trigger a state machine or keyword route transition |
-| `SubAgent` | `sub_agent_explore` (multi-hop exploration, prose or file-list output, configurable iteration cap) · `sub_agent_locate` (single-target symbol/file lookup, 5-iteration hard cap, path:line output) — both run an isolated tool loop and return a distilled result without filling the caller's context. Working directory is injected automatically; the parent's cancellation token is linked. Model and plugin set are configurable via `SubAgentModel`, `SubAgentMaxToolCalls`, and `SubAgentPlugins`. Default tool set: FileSystem read, Search, Shell read, Git read. |
+| `SubAgent` | `sub_agent_explore` (multi-hop exploration, prose or file-list output, configurable iteration cap) · `sub_agent_locate` (single-target symbol/file lookup, 5-iteration hard cap, path:line output) — both run an isolated tool loop and return a distilled result without filling the caller's context. Working directory is injected automatically; the parent's cancellation token is linked. Model and plugin set are configurable via `SubAgentModel`, `SubAgentMaxToolCalls`, and `SubAgentPlugins`. Default tool set: FileSystem read, Search, Git read, and Shell — **not** read-only: the default Shell allow-list is `shell_run`, `shell_get_env`, `shell_which`, `shell_get_working_directory`, so a sub-agent can execute commands (e.g. builds, tests) by default, subject to the sandbox/ring the parent agent runs under. |
 
 **MCP servers** (`McpSessionManager`): connected at startup via `ModelContextProtocol`. Each server's tools are registered under the server's configured name and are available to any agent that lists that name in `Plugins`. MCP connections are disposed when the session ends.
 
@@ -647,8 +673,8 @@ Plugins are `AIFunction`-providing objects registered in `PluginRegistry` and re
 | Plugin | Capabilities |
 |---|---|
 | `FileSystem` | `read` (read_file, grep_file, get_file_summary, get_file_info, list_files) · `write` (write_file, patch_file, save_file_summary, create_directory, copy_file, move_file, set_permissions) · `delete` (delete_file, delete_directory). `list_directory` is not in the capability map and always passes through unfiltered regardless of declared capabilities. |
-| `Shell` | `read` (shell_get_env, shell_get_job_status, shell_get_job_output, shell_which, shell_get_working_directory) · `run` (shell_run, shell_run_script, shell_run_background, shell_set_env, shell_kill_job) |
-| `Git` | `read` (git_status, git_diff, git_log, git_show, git_branch_list, git_stash_list) · `write` (git_add, git_commit, git_checkout, git_create_branch, git_init, git_push, git_pull, git_stash, git_stash_pop, git_reset) |
+| `Shell` | `read` (shell_get_env, shell_get_job_status, shell_get_job_output, shell_which, shell_get_working_directory, shell_get_session_temp_dir) · `run` (shell_run, shell_run_script, shell_run_background, shell_set_env, shell_kill_job) |
+| `Git` | `read` (git_status, git_diff, git_log, git_show, git_branch_list, git_stash_list, git_is_inside_work_tree) · `write` (git_add, git_commit, git_checkout, git_create_branch, git_init, git_push, git_pull, git_stash, git_stash_pop, git_reset, git_rebase) |
 | `Http` | `get` (http_get, http_head) · `post` · `put` · `patch` · `delete` — `http_head` maps to the `get` capability, not a separate `head` capability |
 | `Json` | `read` · `write` (merge) |
 | `Document` | `read` (document_extract_text, document_get_info, document_list_sheets, document_get_sheet) |
@@ -699,7 +725,7 @@ Example — a Reviewer that inspects files and git history but cannot write, del
 
 `ChangeTracker` wraps every agent with a `CapturingMiddleware` that intercepts tool call results and records structured entries to a JSON change log.
 
-**Tracked functions:** `write_file`, `patch_file`, `delete_file`, `copy_file`, `move_file`, `shell_run`, `shell_run_script`, `shell_run_background`, `git_commit`.
+**Tracked functions:** `write_file`, `patch_file`, `delete_file`, `delete_directory`, `copy_file`, `move_file`, `shell_run`, `shell_run_script`, `shell_run_background`, `git_commit`.
 
 **`ChangeLog` schema** (`changes.json`, one entry per turn):
 - `ActiveSessionId` — current session ID
@@ -841,8 +867,11 @@ Event consumers may inject messages, trigger external systems, or enforce additi
 | Hook | Behavior |
 |---|---|
 | `ValidationDiagnosticHook` | Watches `validation_fail` events; on consecutive ≥ 2, reads the most recent change log entry and injects a diagnostic summary into the shared history. Gives the re-invoked agent ground-truth data (what was actually written/run on disk) rather than only the abstract validator error. |
+| `ReasoningAuditHook` | SHA-256-digests reasoning-token content into the governance audit chain, registered by `OrchestratorBuilder`. |
 
 `AgentOrchestrator` registers `ValidationDiagnosticHook` automatically when both `Events` and `ChangeTracking` are configured. The hook is registered once per orchestrator instance and uses a mutable `_activeHistory` reference so it always targets the current session's history across multiple `StreamAsync` calls.
+
+`EmitAsync` accepts an optional `CancellationToken`, threaded through to every registered hook's `OnEventAsync` call.
 
 ---
 
@@ -854,13 +883,13 @@ Event consumers may inject messages, trigger external systems, or enforce additi
 - `GET /` — self-contained HTML page (inline in `DevUIHtml.cs`)
 - `GET /api/stream` — Server-Sent Events stream of session events
 
-**Event types:** `session_start`, `agent_starting`, `message` (with agent name, content, token usage, cost, elapsed ms), `session_end`.
+**Event types:** `session_start`, `agent_starting`, `message` (with agent name, content, token usage, elapsed ms — no cost/pricing, which isn't tracked anywhere in this layer), `session_end`.
 
 **Full-history replay:** New SSE clients receive the complete event history on connect so page refresh always shows the entire session from the beginning.
 
-**Port:** dynamically assigned via `TcpListener(IPAddress.Loopback, 0)` at startup; printed to the terminal.
+**Port:** dynamically assigned via Kestrel's `UseUrls("http://localhost:0")` at startup (not `TcpListener`), read back from `_app.Urls.First()`, and printed to the terminal.
 
-**Why we did not use the framework's `Microsoft.Agents.AI.DevUI`:** The framework's DevUI is an API playground for hosted agent services — it requires `AddOpenAIResponses()`, `AddOpenAIConversations()`, and ASP.NET Core hosting, and presents a chat interface over those HTTP endpoints. Fuseraft-cli is a console executable with no hosted agent API. Our DevUI visualizes the streaming event flow of a running orchestration session (agent turns, cost, token usage, phase transitions) — a fundamentally different use case that the framework's DevUI does not address.
+**Why we did not use the framework's `Microsoft.Agents.AI.DevUI`:** The framework's DevUI is an API playground for hosted agent services — it requires `AddOpenAIResponses()`, `AddOpenAIConversations()`, and ASP.NET Core hosting, and presents a chat interface over those HTTP endpoints. Fuseraft-cli is a console executable with no hosted agent API. Our DevUI visualizes the streaming event flow of a running orchestration session (agent turns, token usage, phase transitions) — a fundamentally different use case that the framework's DevUI does not address.
 
 ---
 
@@ -874,9 +903,10 @@ Fuseraft-cli is built on MAF (`Microsoft.Agents.AI`, `Microsoft.Agents.AI.Workfl
 |---|---|---|
 | `Azure.AI.OpenAI` | `2.1.0` (stable) | Pinned to the last GA release. The 2.2–2.9 beta series does not have a GA date; the SDK team is steering users toward the base `OpenAI` SDK for non-Azure deployments. `AzureOpenAIClient` from this package is used only for the `provider: azure` case. |
 | `OllamaSharp` | `5.4.25` | Replaces the deprecated `Microsoft.Extensions.AI.Ollama` package (frozen at `9.7.0-preview.1`, no GA planned). `OllamaApiClient` implements `IChatClient` directly — no `.AsIChatClient()` adapter required. |
-| `Microsoft.Agents.AI.Anthropic` | `1.3.0-preview.260423.1` | The Anthropic connector ships in a rolling preview cadence independently of the MAF core (which went GA at 1.0). No stable NuGet release has been announced; the connector is expected to remain preview-versioned. |
 | `A2A` | `1.0.0-preview2` | Google's open A2A protocol client library. Used by `AgentFactory` for remote agent card discovery. |
 | `Microsoft.Agents.AI.A2A` | `1.3.0-preview.260423.1` | MAF bridge that wraps an A2A `AgentCard` as an `AIAgent`. Provides `A2ACardResolver.GetAIAgentAsync()` used in the remote agent short-circuit path. |
+
+There is no dedicated Anthropic connector package. Claude models (`claude-*` model ID prefix) are routed through the generic OpenAI-compatible client path in `ChatClientFactory`, pointed at `https://api.anthropic.com/v1` with the `ANTHROPIC_API_KEY` env var — not a native `Microsoft.Agents.AI.Anthropic` SDK.
 
 **What we use:**
 
@@ -884,14 +914,13 @@ Fuseraft-cli is built on MAF (`Microsoft.Agents.AI`, `Microsoft.Agents.AI.Workfl
 |---|---|
 | `AIAgent` / `ChatClientAgent` | Base agent type; `RunAsync(context, null, null, ct)` drives each LLM turn |
 | `AIAgentExtensions` / `ChatClientFactory` | Agent builder helpers |
-| `AnthropicClientExtensions` | Constructs Anthropic-backed `AIAgent` instances |
 | `A2ACardResolver` | Resolves remote agent cards from `{Url}/.well-known/agent.json` and wraps them as `AIAgent` instances (remote agent short-circuit in `AgentFactory`) |
-| `WorkflowBuilder` | Builds phase workflows for `GraphOrchestrator` |
+| `WorkflowBuilder` | Builds phase workflows for `GraphOrchestrator` and `WorkflowOrchestrator` (§6.8) |
 | `FunctionExecutor<T>` | Wraps per-agent logic in MAF's executor model |
 | `InProcessExecution.RunStreamingAsync` | Drives the workflow graph; returns an async stream of events |
 | `WatchStreamAsync` | Consumes `WorkflowOutputEvent` and `WorkflowErrorEvent` to drive the phase loop |
 | `WorkflowOutputEvent` | Signals a phase-break (agent called `YieldOutputAsync`) |
-| `WithOutputFrom` | Restricts phase-break output to Tester and Reviewer only |
+| `WithOutputFrom` | Restricts phase-break output sources to every node reachable in the current phase graph (not to specific named agents — this entry previously read "Tester and Reviewer only," which was stale documentation from an early example config) |
 | `IWorkflowContext.SendMessageAsync` | Routes `AgentContext` to the next executor (HANDOFF TO X) |
 | `IWorkflowContext.YieldOutputAsync` | Signals phase-break to the outer loop |
 

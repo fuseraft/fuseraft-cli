@@ -39,6 +39,7 @@ public sealed record OrchestratorBuildResult(
     GovernanceKernel             GovernanceKernel,
     SkillCurator?                SkillCurator,
     RepositoryMemoryExtractor?   RepositoryMemoryExtractor,
+    ChatClientFactory            ChatClientFactory,
     fuseraft.Orchestration.DependencyPlanner? DependencyPlanner = null,
     fuseraft.Cli.Telemetry.SessionMetrics?    SessionMetrics    = null);
 
@@ -129,7 +130,7 @@ public static class OrchestratorBuilder
             identityRegistry, infra.ToolArtifactStore,
             out var repoMemoryExtractor);
 
-        return new OrchestratorBuildResult(orchestrator, config, infra.McpManager, compactor, infra.ChangeTracker, infra.EventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, dependencyPlanner, infra.SessionMetrics);
+        return new OrchestratorBuildResult(orchestrator, config, infra.McpManager, compactor, infra.ChangeTracker, infra.EventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, dependencyPlanner, infra.SessionMetrics);
     }
 
     // -------------------------------------------------------------------------
@@ -1621,8 +1622,7 @@ public static class OrchestratorBuilder
             var advLogger = loggerFactory.CreateLogger<AdversarialOrchestrator>();
             orchestrator  = new AdversarialOrchestrator(
                 config, agentFactory, advLogger,
-                changeTracker, eventEmitter, governanceKernel,
-                hitlMode ? humanApprovalService : null);
+                changeTracker, eventEmitter, governanceKernel);
         }
         else if (useMapReduce)
         {

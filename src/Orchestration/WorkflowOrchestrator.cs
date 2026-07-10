@@ -433,7 +433,7 @@ public sealed class WorkflowOrchestrator(
             await eventEmitter.EmitAsync(EventTypes.AgentStart, agent: agentName, turn: ctx.TurnIndex);
 
         int maxRetries       = config.Selection.Graph?.MaxRetries ?? DefaultMaxRetries;
-        int maxTotalTurns    = maxRetries * 10;
+        int maxTotalTurns    = maxRetries * (config.Selection.Graph?.MaxTotalTurnsMultiplier ?? 10);
         int consecutiveFails = 0;
         int totalTurns       = 0;
 
@@ -891,6 +891,8 @@ public sealed class WorkflowOrchestrator(
                         config.TestSelector,
                         config.Validation?.ChangeLogPath,
                         sandboxRoot);
+            else if (name.Equals(ValidatorNames.ArchitectureValidator, StringComparison.OrdinalIgnoreCase))
+                v = new ArchitectureValidator(projectRoot: sandboxRoot);
 
             if (v is not null)
                 result.Add(v);
