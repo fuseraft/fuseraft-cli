@@ -35,6 +35,7 @@ namespace fuseraft.Core.Models.Orchestration;
 ///       - Id: reviewer
 ///         Agent: Reviewer
 ///         Terminal: true
+///         ReviewerType: true
 ///     Edges:
 ///       - From: planner
 ///         To: developer
@@ -223,6 +224,18 @@ public record GraphNodeConfig
     /// Ignored when <see cref="Terminal"/> is <c>false</c>.
     /// </summary>
     public List<string>? Validators { get; init; }
+
+    /// <summary>
+    /// When <c>true</c>, this node's agent is a reviewer/decision node: <c>CorrectionEngine</c>
+    /// accepts a JSON judgement code block immediately preceding the decision keyword instead of
+    /// flagging it as "code not written to disk", and its no-tool-calls correction requires a
+    /// <c>shell_run</c> (tests) + <c>read_file</c> pass before the decision keyword rather than the
+    /// generic handoff message. Set this on any node whose agent renders a verdict (e.g. via
+    /// <c>RequireReviewJudgement</c>) rather than writing code. Defaults to <c>false</c>. Previously
+    /// inferred implicitly from the node's phase-break keywords containing the literal string
+    /// <c>"APPROVED"</c> — now explicit so workflow authors can name their decision keyword anything.
+    /// </summary>
+    public bool ReviewerType { get; init; } = false;
 }
 
 /// <summary>

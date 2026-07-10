@@ -174,6 +174,24 @@ public sealed class WorkflowOrchestratorTests : IDisposable
         Assert.Single(tables["approved"].TerminalValidators);
     }
 
+    // ── ReviewerType ──────────────────────────────────────────────────────────
+
+    [Fact]
+    public void BuildNodeRouteTables_ReviewerTypeNode_PopulatesIsReviewerType()
+    {
+        var config = PipelineConfig();
+        var graphCfg = config.Selection.Graph! with
+        {
+            Nodes = config.Selection.Graph!.Nodes
+                .Select(n => n.Id == "reviewer" ? n with { ReviewerType = true } : n)
+                .ToList()
+        };
+        var tables = NewOrchestrator(config).BuildNodeRouteTables(graphCfg, NodeById(graphCfg));
+
+        Assert.True(tables["reviewer"].IsReviewerType);
+        Assert.False(tables["tester"].IsReviewerType);
+    }
+
     // ── SourceAgents restriction ─────────────────────────────────────────────
 
     [Fact]
