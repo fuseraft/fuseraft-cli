@@ -44,6 +44,20 @@ public sealed record OrchestratorBuildResult(
     fuseraft.Cli.Telemetry.SessionMetrics?    SessionMetrics    = null);
 
 /// <summary>
+/// Which orchestrator kind <c>Selection.Type</c> resolved to, bundled so
+/// <c>ValidateAndSelectStrategy</c> and <c>CreateOrchestrator</c> share one instance instead
+/// of each taking the same 6-7 bools as separate positional parameters.
+/// </summary>
+internal sealed record OrchestratorKindFlags(
+    bool HitlMode,
+    bool UseMagentic,
+    bool UseGraph,
+    bool UseWorkflow,
+    bool UseAdversarial,
+    bool UseMapReduce,
+    bool UseScatterGather);
+
+/// <summary>
 /// Builds a ready-to-use <see cref="IOrchestrator"/> directly from a config file path,
 /// without requiring a full DI host. Used by CLI commands that load config at runtime.
 /// </summary>
@@ -110,9 +124,11 @@ public static class OrchestratorBuilder
         bool useAdversarial   = config.Selection.Type.Equals(OrchestratorTypes.Adversarial,   StringComparison.OrdinalIgnoreCase);
         bool useMapReduce     = config.Selection.Type.Equals(OrchestratorTypes.MapReduce,     StringComparison.OrdinalIgnoreCase);
         bool useScatterGather = config.Selection.Type.Equals(OrchestratorTypes.ScatterGather, StringComparison.OrdinalIgnoreCase);
+        var kindFlags = new OrchestratorKindFlags(
+            hitlMode, useMagentic, useGraph, useWorkflow, useAdversarial, useMapReduce, useScatterGather);
 
         var (configAfterStrategy, compactor, skillCurator) = await ValidateAndSelectStrategy(
-            config, loggerFactory, chatClientFactory, useMagentic, useGraph, useWorkflow, useAdversarial, useMapReduce, useScatterGather,
+            config, loggerFactory, chatClientFactory, kindFlags,
             infra.KnowledgeLayer, infra.ObjectiveManager, infra.KnowledgeSandbox, projectSlug,
             infra.IntentLog, infra.EvidenceStore, infra.ExecutionStatePath, infra.InvestigationLogPath,
             sessionId, readCachePath: infra.ReadCachePath, cancellationToken);
@@ -122,7 +138,7 @@ public static class OrchestratorBuilder
 
         var orchestrator = CreateOrchestrator(
             config, loggerFactory, chatClientFactory, pluginRegistry,
-            governanceKernel, humanApprovalService, hitlMode, useMagentic, useGraph, useWorkflow, useAdversarial, useMapReduce, useScatterGather,
+            governanceKernel, humanApprovalService, kindFlags,
             infra.ChangeTracker, infra.EventEmitter, infra.KnowledgeLayer, infra.ObjectiveManager,
             infra.KnowledgeSandbox, projectSlug, sessionId,
             infra.ExecutionStatePath, infra.InvestigationLogPath,
@@ -824,12 +840,7 @@ public static class OrchestratorBuilder
         OrchestrationConfig config,
         ILoggerFactory loggerFactory,
         ChatClientFactory chatClientFactory,
-        bool useMagentic,
-        bool useGraph,
-        bool useWorkflow,
-        bool useAdversarial,
-        bool useMapReduce,
-        bool useScatterGather,
+        OrchestratorKindFlags flags,
         fuseraft.Infrastructure.Knowledge.KnowledgeLayer knowledgeLayer,
         fuseraft.Infrastructure.Objectives.ObjectiveManager objectiveManager,
         string knowledgeSandbox,
@@ -1036,7 +1047,7 @@ public static class OrchestratorBuilder
         }
 
         // Validate map-reduce config at startup when that strategy is selected.
-        if (useMapReduce)
+        if (flags.UseMapReduce)
         {
             if (config.Selection.MapReduce is null)
                 throw new InvalidOperationException(
@@ -1083,7 +1094,7 @@ public static class OrchestratorBuilder
                 "The MapReduce block will be ignored. Set Selection.Type: mapreduce to enable it.",
                 config.Selection.Type);
 
-        if (useScatterGather)
+        if (flags.UseScatterGather)
         {
             if (config.Selection.ScatterGather is null)
                 throw new InvalidOperationException(
@@ -1121,7 +1132,7 @@ public static class OrchestratorBuilder
                 config.Selection.Type);
 
         // Validate graph config at startup when the graph strategy is selected.
-        if (useGraph)
+        if (flags.UseGraph)
         {
             if (config.Selection.Graph is null)
                 throw new InvalidOperationException(
@@ -1291,7 +1302,7 @@ public static class OrchestratorBuilder
         // is a v1 implementation — Parallel, SubGraphId, RequireHumanApproval, RecoveryAgent,
         // and no-keyword (unconditional) edges are rejected here rather than silently ignored.
         // See WorkflowOrchestrator's class doc comment and docs/strategies.md for rationale.
-        if (useWorkflow)
+        if (flags.UseWorkflow)
         {
             if (config.Selection.Graph is null)
                 throw new InvalidOperationException(
@@ -1398,7 +1409,7 @@ public static class OrchestratorBuilder
             var summaryModel = compactionConfig.Model ?? config.Agents[0].Model;
             // Magentic, adversarial, and map-reduce sessions have no brief.json or change log,
             // so the workflow-specific resumption note is suppressed to avoid wasting tokens.
-            bool suppressResumptionNote = useMagentic || useAdversarial || useMapReduce || useScatterGather;
+            bool suppressResumptionNote = flags.UseMagentic || flags.UseAdversarial || flags.UseMapReduce || flags.UseScatterGather;
             var resumptionNote = suppressResumptionNote ? null : ConversationCompactor.WorkflowResumptionNote;
             var changeLogPath  = suppressResumptionNote ? null
                 : (config.Validation?.ChangeLogPath ?? config.ChangeTracking?.Path);
@@ -1509,13 +1520,7 @@ public static class OrchestratorBuilder
         PluginRegistry pluginRegistry,
         GovernanceKernel governanceKernel,
         IHumanApprovalService? humanApprovalService,
-        bool hitlMode,
-        bool useMagentic,
-        bool useGraph,
-        bool useWorkflow,
-        bool useAdversarial,
-        bool useMapReduce,
-        bool useScatterGather,
+        OrchestratorKindFlags flags,
         ChangeTracker? changeTracker,
         EventEmitter? eventEmitter,
         fuseraft.Infrastructure.Knowledge.KnowledgeLayer knowledgeLayer,
@@ -1601,46 +1606,46 @@ public static class OrchestratorBuilder
         // any agent names and any team size.
         IOrchestrator orchestrator;
 
-        if (useGraph)
+        if (flags.UseGraph)
         {
             orchestrator = new GraphOrchestrator(
                 config, agentFactory, goLogger,
                 changeTracker, eventEmitter, governanceKernel,
-                hitlMode ? humanApprovalService : null,
+                flags.HitlMode ? humanApprovalService : null,
                 contextPipeline, knowledgeStore,
                 loggerFactory);
         }
-        else if (useWorkflow)
+        else if (flags.UseWorkflow)
         {
             var wfLogger = loggerFactory.CreateLogger<WorkflowOrchestrator>();
             orchestrator  = new WorkflowOrchestrator(
                 config, agentFactory, wfLogger,
                 changeTracker, eventEmitter);
         }
-        else if (useAdversarial)
+        else if (flags.UseAdversarial)
         {
             var advLogger = loggerFactory.CreateLogger<AdversarialOrchestrator>();
             orchestrator  = new AdversarialOrchestrator(
                 config, agentFactory, advLogger,
                 changeTracker, eventEmitter, governanceKernel);
         }
-        else if (useMapReduce)
+        else if (flags.UseMapReduce)
         {
             var mrLogger = loggerFactory.CreateLogger<MapReduceOrchestrator>();
             orchestrator  = new MapReduceOrchestrator(
                 config, agentFactory, mrLogger,
                 changeTracker, eventEmitter, governanceKernel,
-                hitlMode ? humanApprovalService : null);
+                flags.HitlMode ? humanApprovalService : null);
         }
-        else if (useScatterGather)
+        else if (flags.UseScatterGather)
         {
             var sgLogger = loggerFactory.CreateLogger<ScatterGatherOrchestrator>();
             orchestrator  = new ScatterGatherOrchestrator(
                 config, agentFactory, sgLogger,
                 changeTracker, eventEmitter, governanceKernel,
-                hitlMode ? humanApprovalService : null);
+                flags.HitlMode ? humanApprovalService : null);
         }
-        else if (useMagentic)
+        else if (flags.UseMagentic)
         {
             var magCfg        = config.Selection.Magentic!;           // validated above
             var managerModel  = chatClientFactory.Resolve(magCfg.Model!);
@@ -1649,7 +1654,7 @@ public static class OrchestratorBuilder
 
             orchestrator = new MagenticOrchestrator(
                 config, agentFactory, managerClient, magLogger,
-                hitlMode ? humanApprovalService : null,
+                flags.HitlMode ? humanApprovalService : null,
                 changeTracker, eventEmitter, governanceKernel,
                 contextPipeline, knowledgeStore);
         }

@@ -24,9 +24,7 @@ namespace fuseraft.Infrastructure.Storage;
 /// </summary>
 public sealed class FileVersionStore
 {
-    private readonly string _storePath;
-    private readonly SemaphoreSlim _lock = new(1, 1);
-    private readonly ILogger<FileVersionStore>? _logger;
+    private readonly JsonFileStore<Dictionary<string, FileVersionRecord>> _store;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -36,8 +34,8 @@ public sealed class FileVersionStore
 
     public FileVersionStore(string storePath, ILogger<FileVersionStore>? logger = null)
     {
-        _storePath = storePath;
-        _logger    = logger;
+        _store = new JsonFileStore<Dictionary<string, FileVersionRecord>>(
+            storePath, JsonOpts, logger, nameof(FileVersionStore));
     }
 
     /// <summary>
@@ -53,14 +51,10 @@ public sealed class FileVersionStore
     /// Increments the version for <paramref name="path"/> and records the content hash.
     /// Returns the new version number.
     /// </summary>
-    public async Task<int> BumpVersionAsync(string path, string? contentHash = null, CancellationToken ct = default)
-    {
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
+    public Task<int> BumpVersionAsync(string path, string? contentHash = null, CancellationToken ct = default) =>
+        _store.WithLockAsync(store =>
         {
-            var store = await LoadAsync(ct);
-            var key   = NormalizePath(path);
-
+            var key = NormalizePath(path);
             store.TryGetValue(key, out var existing);
             var next = new FileVersionRecord
             {
@@ -70,42 +64,26 @@ public sealed class FileVersionStore
                 LastModified = DateTime.UtcNow,
             };
             store[key] = next;
-            await SaveAsync(store, ct);
-            return next.Version;
-        }
-        finally { _lock.Release(); }
-    }
+            return Task.FromResult((store, next.Version));
+        }, ct);
 
     /// <summary>
     /// Returns the <see cref="FileVersionRecord"/> for <paramref name="path"/>, or null
     /// when the file has never been written through the version store.
     /// </summary>
-    public async Task<FileVersionRecord?> StatAsync(string path, CancellationToken ct = default)
-    {
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            var store = await LoadAsync(ct);
-            return store.TryGetValue(NormalizePath(path), out var r) ? r : null;
-        }
-        finally { _lock.Release(); }
-    }
+    public Task<FileVersionRecord?> StatAsync(string path, CancellationToken ct = default) =>
+        _store.ReadAsync(store => store.TryGetValue(NormalizePath(path), out var r) ? r : null, ct);
 
     /// <summary>
     /// Removes the version record for <paramref name="path"/> (e.g. after the file is
     /// deleted or moved). No-op when the path was never versioned.
     /// </summary>
-    public async Task RemoveAsync(string path, CancellationToken ct = default)
-    {
-        await _lock.WaitAsync(ct).ConfigureAwait(false);
-        try
+    public Task RemoveAsync(string path, CancellationToken ct = default) =>
+        _store.WithLockAsync(store =>
         {
-            var store = await LoadAsync(ct);
-            if (store.Remove(NormalizePath(path)))
-                await SaveAsync(store, ct);
-        }
-        finally { _lock.Release(); }
-    }
+            store.Remove(NormalizePath(path));
+            return Task.FromResult((store, true));
+        }, ct);
 
     /// <summary>
     /// Computes a SHA-256 hash of <paramref name="content"/> suitable for storing in a
@@ -115,34 +93,6 @@ public sealed class FileVersionStore
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(content));
         return Convert.ToHexString(bytes)[..12].ToLowerInvariant();
-    }
-
-    // Internals
-
-    private async Task<Dictionary<string, FileVersionRecord>> LoadAsync(CancellationToken ct)
-    {
-        if (!File.Exists(_storePath))
-            return new Dictionary<string, FileVersionRecord>(StringComparer.OrdinalIgnoreCase);
-        try
-        {
-            var raw  = await File.ReadAllTextAsync(_storePath, ct);
-            var dict = JsonSerializer.Deserialize<Dictionary<string, FileVersionRecord>>(raw, JsonOpts);
-            return dict is not null
-                ? new Dictionary<string, FileVersionRecord>(dict, StringComparer.OrdinalIgnoreCase)
-                : new Dictionary<string, FileVersionRecord>(StringComparer.OrdinalIgnoreCase);
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "FileVersionStore: failed to load '{Path}' — version history reset.", _storePath);
-            return new Dictionary<string, FileVersionRecord>(StringComparer.OrdinalIgnoreCase);
-        }
-    }
-
-    private async Task SaveAsync(Dictionary<string, FileVersionRecord> store, CancellationToken ct)
-    {
-        var dir = Path.GetDirectoryName(Path.GetFullPath(_storePath));
-        if (dir is not null) Directory.CreateDirectory(dir);
-        await File.WriteAllTextAsync(_storePath, JsonSerializer.Serialize(store, JsonOpts), ct);
     }
 
     private static string NormalizePath(string path) =>

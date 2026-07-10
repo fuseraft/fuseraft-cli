@@ -849,55 +849,12 @@ public sealed class WorkflowOrchestrator(
         return tables;
     }
 
+    // Shared with GraphOrchestrator via ValidatorRegistry — the two orchestrators resolve
+    // per-edge validator names identically; see that class's doc comment for why
+    // StrategyFactory.BuildValidators is not folded into the same helper.
     private IReadOnlyList<IRoutingValidator> BuildValidatorsFromNames(
         IReadOnlyList<string> names,
         string? requiredCommandPattern = null,
-        string? shellFallbackPattern = null)
-    {
-        var result = new List<IRoutingValidator>();
-
-        var sandboxRoot = config.Security?.FileSystemSandboxPath is { Length: > 0 } sbx
-            ? FuseraftPaths.ExpandPath(sbx)
-            : null;
-
-        var briefPath = config.Validation?.BriefPath;
-
-        foreach (var name in names)
-        {
-            IRoutingValidator? v = null;
-
-            if (name.Equals(ValidatorNames.RequireShellPass, StringComparison.OrdinalIgnoreCase))
-                v = new RequireShellPassValidator(requiredCommandPattern, config.Validation?.ChangeLogPath);
-            else if (name.Equals(ValidatorNames.RequireWriteFile, StringComparison.OrdinalIgnoreCase))
-                v = new HandoffToTesterValidator(
-                        shellFallbackPattern: shellFallbackPattern,
-                        changeLogPath:        config.Validation?.ChangeLogPath);
-            else if (name.Equals(ValidatorNames.BlockOnConsecutiveFail, StringComparison.OrdinalIgnoreCase))
-                v = new ConsecutiveShellFailValidator(
-                        commandPattern: requiredCommandPattern,
-                        changeLogPath:  config.Validation?.ChangeLogPath);
-            else if (name.Equals(ValidatorNames.RequireAllFilesWritten, StringComparison.OrdinalIgnoreCase) && briefPath is not null)
-                v = new RequireAllFilesWrittenValidator(briefPath, config.Validation!.ChangeLogPath);
-            else if (name.Equals(ValidatorNames.RequireBrief, StringComparison.OrdinalIgnoreCase) && briefPath is not null)
-                v = new RequireBriefValidator(briefPath);
-            else if (name.Equals(ValidatorNames.TestReportValid, StringComparison.OrdinalIgnoreCase) && config.Validation is not null)
-                v = new HandoffToReviewerValidator(config.Validation);
-            else if (name.Equals(ValidatorNames.RequireReviewJudgement, StringComparison.OrdinalIgnoreCase))
-                v = new RequireReviewJudgementValidator(briefPath);
-            else if (name.Equals(ValidatorNames.RequireAcceptanceCriteriaPassed, StringComparison.OrdinalIgnoreCase) && briefPath is not null)
-                v = new RequireAcceptanceCriteriaPassedValidator(briefPath, config.Validation!.ChangeLogPath);
-            else if (name.Equals(ValidatorNames.RequireRelatedTestsPass, StringComparison.OrdinalIgnoreCase) && config.TestSelector is not null)
-                v = new RequireRelatedTestsPassValidator(
-                        config.TestSelector,
-                        config.Validation?.ChangeLogPath,
-                        sandboxRoot);
-            else if (name.Equals(ValidatorNames.ArchitectureValidator, StringComparison.OrdinalIgnoreCase))
-                v = new ArchitectureValidator(projectRoot: sandboxRoot);
-
-            if (v is not null)
-                result.Add(v);
-        }
-
-        return result;
-    }
+        string? shellFallbackPattern = null) =>
+        ValidatorRegistry.BuildValidatorsFromNames(config, names, requiredCommandPattern, shellFallbackPattern);
 }
