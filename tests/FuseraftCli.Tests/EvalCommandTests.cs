@@ -135,6 +135,53 @@ public sealed class EvalCommandTests
         Assert.Contains("invalid regex pattern", result.FailureReasons[0]);
     }
 
+    // ── Score — handoff-only turns (empty Content, keyword in tool-call args) ──
+
+    [Fact]
+    public void Score_ExpectRegex_MatchesHandoffKeywordWhenContentEmpty()
+    {
+        var result = EvalCommand.Score(
+            new EvalCase { Id = "t1", ExpectRegex = [@"\bAPPROVED\b"] },
+            MakeHandoffOnlyResult("APPROVED"),
+            "sid1");
+
+        Assert.True(result.Passed);
+    }
+
+    [Fact]
+    public void Score_ExpectKeyword_MatchesHandoffKeywordWhenContentEmpty()
+    {
+        var result = EvalCommand.Score(
+            new EvalCase { Id = "t1", ExpectKeywords = ["APPROVED"] },
+            MakeHandoffOnlyResult("APPROVED"),
+            "sid1");
+
+        Assert.True(result.Passed);
+    }
+
+    [Fact]
+    public void Score_IgnoresNonHandoffToolCalls()
+    {
+        var messages = new List<AgentMessage>
+        {
+            new()
+            {
+                AgentName = "Agent",
+                Content   = string.Empty,
+                Role      = "assistant",
+                ToolCalls = [new ToolCallRecord("shell_run", "command=ls", true)],
+            },
+        };
+        var sessionResult = new SessionResult(true, null, messages, TimeSpan.FromMilliseconds(500));
+
+        var result = EvalCommand.Score(
+            new EvalCase { Id = "t1", ExpectRegex = [@"\bAPPROVED\b"] },
+            sessionResult,
+            "sid1");
+
+        Assert.False(result.Passed);
+    }
+
     // ── Score — forbidden_keywords ────────────────────────────────────────────
 
     [Fact]
@@ -390,6 +437,21 @@ public sealed class EvalCommandTests
         }
 
         return new SessionResult(succeeded, errorMessage, messages, TimeSpan.FromMilliseconds(500));
+    }
+
+    private static SessionResult MakeHandoffOnlyResult(string routeKeyword)
+    {
+        var messages = new List<AgentMessage>
+        {
+            new()
+            {
+                AgentName = "Reviewer",
+                Content   = string.Empty,
+                Role      = "assistant",
+                ToolCalls = [new ToolCallRecord("handoff", $"route_keyword={routeKeyword}", true)],
+            },
+        };
+        return new SessionResult(true, null, messages, TimeSpan.FromMilliseconds(500));
     }
 
     private static List<EvalCase> MakeCases(params string[] ids) =>
