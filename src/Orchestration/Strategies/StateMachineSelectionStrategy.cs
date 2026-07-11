@@ -11,7 +11,6 @@ using fuseraft.Infrastructure.Plugins;
 using fuseraft.Orchestration;
 using fuseraft.Orchestration.Contracts;
 using fuseraft.Orchestration.Failure;
-using fuseraft.Orchestration.Parallel;
 
 namespace fuseraft.Orchestration.Strategies;
 
@@ -574,7 +573,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
     // a correction message, and potentially escalates to HITL or routes to a recovery agent.
     // Returns the recovery agent when ActivateRecovery fires; null otherwise (caller re-invokes
     // the current state's agent).
-    private async Task<AIAgent?> HandleTransitionFailureAsync(
+    internal async Task<AIAgent?> HandleTransitionFailureAsync(
         StateConfig state,
         TransitionConfig transition,
         string failingContract,
@@ -690,8 +689,15 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                 transition.RecoveryAgent);
         }
 
-        // Threshold-based abort.
-        if (typeConfig.Action == FailureAction.Abort && newCount >= typeConfig.Threshold)
+        // Threshold-based abort. Reinstruct and Abort both escalate once the classified
+        // failure type's per-type Threshold is reached — matching KeywordSelectionStrategy
+        // (this used to check `Action == Abort` only, which silently made Threshold dead for
+        // every type that defaults to Reinstruct — MissingEvidence, InvalidTransition,
+        // ConflictingEvidence all default to Reinstruct with a non-zero Threshold, so relying
+        // only on the Abort-gated check meant those routes never self-escalated and depended
+        // entirely on the separate MaxConsecutiveContractFailures backstop below, which
+        // defaults to disabled).
+        if (newCount >= typeConfig.Threshold)
         {
             _transitionFailure = null;
             throw new ValidatorStuckException(

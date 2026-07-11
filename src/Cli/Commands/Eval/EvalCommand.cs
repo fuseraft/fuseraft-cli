@@ -108,7 +108,12 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
         }
 
         var results         = new List<EvalCaseResult>();
-        var approvalService = new ConsoleHumanApprovalService();
+        // Eval runs are unattended by definition (no --hitl, often no TTY at all — CI).
+        // ConsoleHumanApprovalService would block on Console.ReadLine() the moment a
+        // validator gets stuck or an agent reports BLOCKED, since SessionRunner escalates
+        // to those prompts regardless of hitlMode. Use the non-interactive service so that
+        // escalation resolves to a deterministic failure instead of a misleading prompt.
+        var approvalService = new NonInteractiveHumanApprovalService();
 
         foreach (var evalCase in cases)
         {
@@ -169,12 +174,13 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
                     hitlMode: false, sessionId: sessionId);
 
                 var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter,
-                     governanceKernel, skillCurator, repoMemoryExtractor, _, sessionMetrics) = built;
+                     governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, _, sessionMetrics) = built;
 
                 await using var _mcp = mcpManager;
                 using  var _gov      = governanceKernel;
+                using  var _ccf      = chatClientFactory;
 
-                await OrchestratorBuilder.ValidateApiKeysAsync(config);
+                await ApiKeyValidator.ValidateApiKeysAsync(config);
 
                 var evalStore  = new InMemorySessionStore();
                 var checkpoint = new SessionCheckpoint
@@ -246,8 +252,17 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
         if (evalCase.MustSucceed && !result.Succeeded)
             failures.Add($"session did not succeed: {result.ErrorMessage ?? "unknown"}");
 
-        var finalContent = result.Messages
-            .LastOrDefault(m => m.Role == MessageRole.Assistant)?.Content ?? string.Empty;
+        var lastAssistant = result.Messages.LastOrDefault(m => m.Role == MessageRole.Assistant);
+        var finalContent  = lastAssistant?.Content ?? string.Empty;
+
+        // A turn that only calls handoff() with no accompanying prose leaves Content empty —
+        // the routing keyword lives in the tool-call argument instead. Fold it in so
+        // keyword/regex checks see the same signal RegexTerminationCondition already used
+        // to decide the session was done.
+        var handoffCall = lastAssistant?.ToolCalls?.LastOrDefault(tc =>
+            string.Equals(tc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase));
+        if (handoffCall?.ArgsSummary is { Length: > 0 } handoffArgs)
+            finalContent = $"{finalContent} {handoffArgs}".Trim();
 
         foreach (var kw in evalCase.ExpectKeywords)
             if (!finalContent.Contains(kw, StringComparison.OrdinalIgnoreCase))

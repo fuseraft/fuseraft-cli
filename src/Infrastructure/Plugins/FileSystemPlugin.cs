@@ -6,7 +6,17 @@ using fuseraft.Infrastructure;
 namespace fuseraft.Infrastructure.Plugins;
 
 /// <summary>
-/// Gives agents read/write access to the local filesystem.
+/// Gives agents read/write access to the local filesystem via the read/patch/write pipeline
+/// (<see cref="ReadFileAsync"/>, <see cref="PatchFileAsync"/>, <see cref="WriteFileAsync"/>).
+/// The directory-management and read-only inspection half of the "FileSystem" tool surface
+/// (list/delete/copy/move/grep/summarize) lives on the sibling <see cref="FileSystemManagementOps"/>,
+/// registered as a second object under the same "FileSystem" name (see
+/// <c>PluginRegistry.RegisterAdditional</c>) — it borrows this class's per-turn
+/// read/write/patch state by reference (<see cref="ReadThisTurnState"/> and friends) so
+/// invalidations on either object stay consistent, and a single
+/// <see cref="ITurnResettable.BeginTurn"/> resets both. Cross-cutting sandbox/cache logic used by both classes lives in the
+/// stateless <see cref="FileSystemSandbox"/>; pure patch/write text-diffing helpers used only
+/// by this class's pipeline live in <see cref="FilePatchDiffing"/>.
 ///
 /// When <paramref name="sandboxRoot"/> is provided (recommended for production), all path
 /// arguments are resolved to their absolute canonical form and rejected if they fall outside
@@ -57,8 +67,9 @@ public sealed class FileSystemPlugin : ITurnResettable
     private readonly int _readBudgetPerTurn;
 
     // Pre-read byte threshold: if the file exceeds this, stream just the first 30 lines +
-    // a line count for the preview instead of allocating a full string array.
-    private const int LargeFileByteThreshold = 25_000;
+    // a line count for the preview instead of allocating a full string array. Internal so
+    // FileSystemManagementOps.GetFileSummaryAsync can apply the same threshold.
+    internal const int LargeFileByteThreshold = 25_000;
     // maxLines values larger than this are treated as cold reads — an agent passing
     // maxLines: 99999 is asking for everything and should be gated the same as omitting it.
     private const int LargeFileColdReadLines  = 500;
@@ -88,13 +99,20 @@ public sealed class FileSystemPlugin : ITurnResettable
         _readBudgetUsed = 0;
     }
 
+    // Exposed so FileSystemManagementOps (registered as "FileSystem"'s second backing object,
+    // see PluginRegistry.RegisterAdditional) shares the exact same per-turn HashSet instances —
+    // InvalidatePathAsync calls from either object must clear entries the other one added.
+    internal HashSet<string> ReadThisTurnState    => _readThisTurn;
+    internal HashSet<string> WrittenThisTurnState => _writtenThisTurn;
+    internal HashSet<string> PatchedThisTurnState => _patchedThisTurn;
+
     [Description("Read text file content. Use startLine+maxLines for large files. Binary files rejected.")]
     public async Task<string> ReadFileAsync(
         [Description("File path.")] string path,
         [Description("1-based start line.")] int startLine = 1,
         [Description("Max lines to return.")] int maxLines = 0)
     {
-        var denial = ResolveSafe(path, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
         if (denial is not null) return denial;
 
         if (!File.Exists(resolved))
@@ -199,7 +217,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         bool isColdRead = maxLines <= 0 || maxLines > LargeFileColdReadLines;
         if (isColdRead && fileInfo.Length > LargeFileByteThreshold)
         {
-            var (coldLines, coldLineCount, coldSizeBytes) = await StreamPreviewLinesAsync(resolved, 30);
+            var (coldLines, coldLineCount, coldSizeBytes) = await FileSystemSandbox.StreamPreviewLinesAsync(resolved, 30);
             var preview = string.Join('\n', coldLines) +
                 $"\n\n[Large file — {coldLineCount:N0} lines ({coldSizeBytes:N0} bytes). " +
                 $"Cold-reading would flood your context. " +
@@ -288,99 +306,6 @@ public sealed class FileSystemPlugin : ITurnResettable
         return content;
     }
 
-    [Description("Search a file (grep). Cheaper than full read_file.")]
-    public async Task<string> GrepFileAsync(
-        [Description("File path.")] string path,
-        [Description("Text or regex pattern.")] string pattern,
-        [Description("Context lines around match.")] int contextLines = 2,
-        [Description("Max matches.")] int maxMatches = 30,
-        CancellationToken cancellationToken = default)
-    {
-        var denial = ResolveSafe(path, out var resolved);
-        if (denial is not null) return denial;
-
-        if (!File.Exists(resolved))
-            return PluginResult.Error($"File not found: {resolved}");
-
-        // Some models HTML-encode characters in tool arguments (e.g. &lt; for <).
-        pattern = System.Net.WebUtility.HtmlDecode(pattern);
-
-        System.Text.RegularExpressions.Regex regex;
-        try
-        {
-            regex = new System.Text.RegularExpressions.Regex(
-                pattern,
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase |
-                System.Text.RegularExpressions.RegexOptions.Multiline,
-                TimeSpan.FromSeconds(5));
-        }
-        catch (ArgumentException ex)
-        {
-            return PluginResult.Error($"Invalid pattern '{pattern}': {ex.Message}");
-        }
-
-        var ctx        = Math.Max(0, contextLines);
-        var sb         = new System.Text.StringBuilder();
-        int matches    = 0;
-        int lineNumber = 0;
-        int lastOutput = -1;
-        int postCtxLeft = 0;
-        var preCtxBuf  = new Queue<(int Num, string Text)>();
-
-        using (var reader = new StreamReader(resolved))
-        {
-            string? line;
-            while ((line = await reader.ReadLineAsync()) is not null)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                lineNumber++;
-
-                if (matches >= maxMatches) continue; // drain to count total lines
-
-                if (regex.IsMatch(line))
-                {
-                    matches++;
-
-                    // Separator if there is a gap before the pre-context window.
-                    var firstPre = preCtxBuf.Count > 0 ? preCtxBuf.Peek().Num : lineNumber;
-                    if (sb.Length > 0 && firstPre > lastOutput + 1)
-                        sb.AppendLine("  ---");
-
-                    foreach (var (n, t) in preCtxBuf)
-                    {
-                        sb.AppendLine($"{n,6}: {t}");
-                        lastOutput = n;
-                    }
-                    preCtxBuf.Clear();
-
-                    sb.AppendLine($"{lineNumber,6}: {line}");
-                    lastOutput  = lineNumber;
-                    postCtxLeft = ctx;
-                }
-                else if (postCtxLeft > 0)
-                {
-                    sb.AppendLine($"{lineNumber,6}: {line}");
-                    lastOutput = lineNumber;
-                    postCtxLeft--;
-                }
-                else
-                {
-                    preCtxBuf.Enqueue((lineNumber, line));
-                    if (preCtxBuf.Count > ctx) preCtxBuf.Dequeue();
-                }
-            }
-        }
-
-        if (matches == 0)
-            return PluginResult.Info($"No matches for '{pattern}' in {resolved}");
-
-        var header = $"[{matches} match(s) in {resolved} ({lineNumber} lines total)]\n";
-        if (matches >= maxMatches)
-            header += $"[Result capped at {maxMatches} matches — use a more specific pattern to narrow results.]\n";
-
-        return header + sb.ToString().TrimEnd();
-    }
-
     [Description("Replace exact oldText with newText. Preferred over write_file for edits.")]
     public async Task<string> PatchFileAsync(
         [Description("File path.")] string path,
@@ -390,7 +315,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (string.IsNullOrEmpty(oldText))
             return PluginResult.Error("oldText must not be empty.");
 
-        var denial = ResolveSafe(path, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
         if (denial is not null) return denial;
 
         if (!File.Exists(resolved))
@@ -403,8 +328,8 @@ public sealed class FileSystemPlugin : ITurnResettable
         // consistent with what was actually written to disk.  Without this, over-escaped
         // quotes (\" instead of ") silently prevent the match even though the file and
         // oldText look identical when printed.
-        oldText = NormalizePatchText(oldText, ext);
-        newText = NormalizePatchText(newText, ext);
+        oldText = FilePatchDiffing.NormalizePatchText(oldText, ext);
+        newText = FilePatchDiffing.NormalizePatchText(newText, ext);
 
         // Normalise line endings in both the file content and the search text so that
         // \r\n / \n mismatches from tool-call JSON serialisation don't cause false misses.
@@ -421,9 +346,9 @@ public sealed class FileSystemPlugin : ITurnResettable
             _patchedThisTurn.Remove(resolved);
 
             // Give the agent enough information to correct itself without a full re-read.
-            var lineHint     = CountLines(normalContent, normalOld);
-            var mismatchHint = FindFirstMismatchingLine(normalContent, normalOld);
-            var excerpt      = ExtractExcerpt(normalContent, normalOld, contextLines: 8);
+            var lineHint     = FilePatchDiffing.CountLines(normalContent, normalOld);
+            var mismatchHint = FilePatchDiffing.FindFirstMismatchingLine(normalContent, normalOld);
+            var excerpt      = FilePatchDiffing.ExtractExcerpt(normalContent, normalOld, contextLines: 8);
             var excerptNote  = excerpt.Length > 0
                 ? $"\nNearest content in file:\n{excerpt}\n"
                 : string.Empty;
@@ -461,7 +386,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         // Invalidate caches — content has changed.
         _readThisTurn.Remove(resolved);
         _sessionCache?.Invalidate(resolved);
-        var patchSp = SummaryPath(resolved);
+        var patchSp = FileSystemSandbox.SummaryPath(resolved, _summaryDir);
         if (File.Exists(patchSp)) File.Delete(patchSp);
 
         // Record that this path was patched so write_file can detect the pattern.
@@ -475,171 +400,11 @@ public sealed class FileSystemPlugin : ITurnResettable
             $"at character offset {idx}.");
     }
 
-    private static string CountLines(string content, string searchText)
-    {
-        // Try to find the first line of the search text in the file for a useful hint.
-        var firstSearchLine = searchText.Split('\n')[0].Trim();
-        if (string.IsNullOrEmpty(firstSearchLine)) return string.Empty;
-
-        var lines = content.Split('\n');
-        for (int i = 0; i < lines.Length; i++)
-        {
-            if (lines[i].Contains(firstSearchLine, StringComparison.Ordinal))
-                return $"The first line of oldText ('{firstSearchLine}') was found near line {i + 1} — " +
-                       $"check surrounding whitespace or indentation. ";
-        }
-        return string.Empty;
-    }
-
-    // Applies the same text normalisations WriteFileAsync applies so that oldText / newText
-    // in a patch call are consistent with what is actually on disk.
-    private static string NormalizePatchText(string text, string ext)
-    {
-        // Quote normalisation: LLMs sometimes over-escape " as \" in tool-call JSON. The
-        // written file has bare ", so oldText must also have bare " or the match fails.
-        if (QuoteNormalizeExtensions.Contains(ext) && text.Contains("\\\""))
-            text = text.Replace("\\\"", "\"");
-
-        // Escape-sequence expansion: only expand when there are no real newlines but
-        // literal \n sequences are present — same heuristic as WriteFileAsync.
-        if (!text.Contains('\n') && !text.Contains('\r') && text.Contains("\\n"))
-            text = text
-                .Replace("\\r\\n", "\r\n")
-                .Replace("\\n",    "\n")
-                .Replace("\\t",    "\t");
-
-        return text;
-    }
-
-    // Returns a context window around the best partial match of searchText in fileContent.
-    // Finds the line in fileContent that best matches the first line of searchText
-    // (by longest common prefix), then returns contextLines lines before and after it.
-    // Returns an empty string when no useful match is found.
-    private static string ExtractExcerpt(string fileContent, string searchText, int contextLines)
-    {
-        var fileLines   = fileContent.Split('\n');
-        var firstSearch = searchText.Split('\n')[0].Trim();
-        if (string.IsNullOrEmpty(firstSearch) || fileLines.Length == 0) return string.Empty;
-
-        // Find the line with the longest common prefix to the first search line.
-        int bestLine = -1;
-        int bestScore = 0;
-        for (int i = 0; i < fileLines.Length; i++)
-        {
-            var fileLine = fileLines[i].Trim();
-            int score = 0;
-            int maxLen = Math.Min(firstSearch.Length, fileLine.Length);
-            while (score < maxLen && firstSearch[score] == fileLine[score]) score++;
-            if (score > bestScore) { bestScore = score; bestLine = i; }
-        }
-
-        if (bestLine < 0 || bestScore < 4) return string.Empty;
-
-        var from = Math.Max(0, bestLine - contextLines);
-        var to   = Math.Min(fileLines.Length - 1, bestLine + contextLines);
-        var sb   = new System.Text.StringBuilder();
-        for (int i = from; i <= to; i++)
-        {
-            var marker = i == bestLine ? ">>>" : "   ";
-            sb.AppendLine($"{marker} {i + 1,4}: {fileLines[i]}");
-        }
-        return sb.ToString().TrimEnd();
-    }
-
-    // When the first line of searchText can be located in fileContent but a subsequent
-    // line diverges, returns a hint identifying the first mismatching line so the agent
-    // can correct oldText without a full re-read.
-    private static string FindFirstMismatchingLine(string fileContent, string searchText)
-    {
-        var searchLines = searchText.Split('\n');
-        var fileLines   = fileContent.Split('\n');
-
-        if (searchLines.Length <= 1) return string.Empty;
-
-        var firstLine = searchLines[0];
-        for (int i = 0; i <= fileLines.Length - searchLines.Length; i++)
-        {
-            if (fileLines[i] != firstLine) continue;
-
-            for (int j = 1; j < searchLines.Length; j++)
-            {
-                if (fileLines[i + j] == searchLines[j]) continue;
-
-                return $"Line {j + 1} of oldText ('{Truncate(searchLines[j])}') " +
-                       $"does not match file line {i + j + 1} ('{Truncate(fileLines[i + j])}'). ";
-            }
-        }
-
-        return string.Empty;
-    }
-
-    private static string Truncate(string s, int max = 60)
-        => s.Length <= max ? s : s[..max] + "…";
-
     private static string FormatTimeAgo(TimeSpan elapsed)
     {
         if (elapsed.TotalSeconds < 60)  return $"{(int)elapsed.TotalSeconds}s";
         if (elapsed.TotalMinutes < 60)  return $"{(int)elapsed.TotalMinutes}m";
         return $"{elapsed.TotalHours:F1}h";
-    }
-
-    // Extensions where a literal \" in the file is almost never intentional.
-    // LLMs frequently over-escape quote characters in these languages (writing \" when
-    // they mean "), producing syntax errors like `\"\"\"docstring\"\"\"` or
-    // `f\"{x}\"`.  Normalising before write prevents the agent needing multiple
-    // correction turns just to fix tooling-layer escaping artifacts.
-    // C / C++ / C# / Rust are intentionally excluded because \" is a valid and common
-    // string-escape sequence in those languages.
-    private static readonly HashSet<string> QuoteNormalizeExtensions =
-        [".py", ".js", ".ts", ".jsx", ".tsx", ".rb", ".sh", ".bash", ".zsh",
-         ".lua", ".pl", ".r", ".swift", ".kt", ".scala", ".ex", ".exs", ".kiwi"];
-
-    // Source-code file extensions for which typographic-character contamination is
-    // checked before writing.  LLMs occasionally substitute Unicode lookalikes for
-    // ASCII punctuation (e.g. em-dash for hyphen-minus, curly quotes for straight
-    // quotes) when generating code, producing syntax errors that are hard to diagnose
-    // because the glyphs look identical in most editors.
-    private static readonly HashSet<string> SourceCodeExtensions =
-        [".cs", ".go", ".py", ".ts", ".tsx", ".js", ".jsx",
-         ".rs", ".java", ".cpp", ".c", ".h", ".hpp", ".cc",
-         ".kt", ".scala", ".swift", ".fs", ".rb", ".php", ".kiwi"];
-
-    // Map of typographic Unicode characters → human-readable names.
-    // These are the characters that most commonly bleed from LLM prose generation
-    // into code strings, causing compile/parse errors.
-    private static readonly Dictionary<char, string> TypographicCharNames = new()
-    {
-        ['—'] = "em-dash",
-        ['–'] = "en-dash",
-        ['“'] = "left double quotation mark",
-        ['”'] = "right double quotation mark",
-        ['‘'] = "left single quotation mark",
-        ['’'] = "right single quotation mark",
-        ['…'] = "ellipsis",
-        [' '] = "non-breaking space",
-        ['·'] = "middle dot",
-    };
-
-    private readonly record struct TypographicHit(char Char, string Name, int Line, string Excerpt);
-
-    // Scans `content` for typographic characters and returns up to `maxHits` findings
-    // with the line number and a short excerpt.  Returns an empty list when clean.
-    private static List<TypographicHit> FindTypographicChars(string content, int maxHits = 10)
-    {
-        var hits = new List<TypographicHit>();
-        var lines = content.Split('\n');
-        for (int i = 0; i < lines.Length && hits.Count < maxHits; i++)
-        {
-            var line = lines[i];
-            foreach (var (ch, name) in TypographicCharNames)
-            {
-                if (!line.Contains(ch)) continue;
-                var excerpt = line.Length > 80 ? line[..80] + "…" : line;
-                hits.Add(new TypographicHit(ch, name, i + 1, excerpt.Trim()));
-                if (hits.Count >= maxHits) break;
-            }
-        }
-        return hits;
     }
 
     [Description("Create or overwrite a file. Prefer patch_file for edits on large files.")]
@@ -659,12 +424,12 @@ public sealed class FileSystemPlugin : ITurnResettable
         var versionDenial = await CheckVersionConflictAsync(resolved!, baseVersion);
         if (versionDenial is not null) return versionDenial;
 
-        var truncationDenial = await EnsureFileExistsAsync(resolved!, content);
+        var truncationDenial = await FilePatchDiffing.EnsureFileExistsAsync(resolved!, content);
         if (truncationDenial is not null) return truncationDenial;
 
         var ext = Path.GetExtension(resolved!).ToLowerInvariant();
 
-        var diffDenial = ComputeAndReportDiff(resolved!, content, ext, raw, out content, out bool normalised);
+        var diffDenial = FilePatchDiffing.ComputeAndReportDiff(resolved!, content, ext, raw, out content, out bool normalised);
         if (diffDenial is not null) return diffDenial;
 
         return await CommitWriteAsync(resolved!, content, normalised);
@@ -687,7 +452,7 @@ public sealed class FileSystemPlugin : ITurnResettable
                 "file path. Did you accidentally include file content in the path? " +
                 "Pass the file path as 'path' and the file text as 'content' separately.");
 
-        var denial = ResolveSafe(path, out var r);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var r);
         if (denial is not null) return denial;
         resolved = r;
 
@@ -720,157 +485,6 @@ public sealed class FileSystemPlugin : ITurnResettable
         return null;
     }
 
-    // Guard against model output truncation on large existing files.
-    // When a model tries to write a file that is substantially larger on disk than the
-    // content it is providing, the content is almost certainly truncated — the model ran
-    // out of output tokens before finishing the file. Writing truncated content silently
-    // would corrupt the file. Instead, return an error so the agent knows to use a
-    // targeted edit tool (sed -i, or shell_run with a patch) rather than a full rewrite.
-    //
-    // Threshold: if the existing file is > 50 lines AND the new content has fewer than
-    // 60 % of the existing line count, reject the write.
-    // Returns an error string when the truncation guard fires, or null to proceed.
-    private static async Task<string?> EnsureFileExistsAsync(string resolved, string content)
-    {
-        if (File.Exists(resolved))
-        {
-            int existingLines = 0;
-            await foreach (var _ in File.ReadLinesAsync(resolved)) existingLines++;
-            var newLines = content.Split('\n').Length;
-            if (existingLines > 50 && newLines < existingLines * 0.6)
-                return PluginResult.Error(
-                    $"WRITE BLOCKED — truncation guard: '{resolved}' currently has {existingLines} lines " +
-                    $"but the content you provided has only {newLines} lines " +
-                    $"({(double)newLines / existingLines:P0} of the original). " +
-                    $"This almost always means your output was truncated before you finished writing the file.\n\n" +
-                    $"DO NOT use write_file to rewrite large files. Instead, make targeted changes:\n" +
-                    $"  • Use patch_file(path, oldText, newText) to replace an exact block — " +
-                    $"this is the preferred approach for source-code edits.\n" +
-                    $"  • Example: patch_file(\"{resolved}\", \"    Include,\\n\", \"    Include,\\n    ModuleIncludeAssign,\\n\")\n" +
-                    $"  • Alternatively: shell_run with sed -i to insert/replace specific lines.\n" +
-                    $"This approach is safer and avoids the token-limit truncation problem.");
-        }
-        return null;
-    }
-
-    // Encoding detection + line ending normalization: applies quote normalization, JSON
-    // artifact stripping, escape-sequence expansion, and the typographic character guard.
-    // Quote normalisation runs unconditionally for known extensions — it corrects a
-    // JSON serialisation artifact (model double-escaping " as \") and must not be
-    // skipped even when raw=true, which only controls escape-sequence expansion.
-    // Returns an error string when typographic characters block the write, or null on success
-    // (normalizedContent and normalised are set via out parameters).
-    private static string? ComputeAndReportDiff(string resolved, string content, string ext, bool raw,
-        out string normalizedContent, out bool normalised)
-    {
-        normalised = false;
-
-        if (QuoteNormalizeExtensions.Contains(ext) && content.Contains("\\\""))
-        {
-            content    = content.Replace("\\\"", "\"");
-            normalised = true;
-        }
-
-        if (!raw)
-        {
-            // For .json files, normalise common LLM wrapping artifacts before writing.
-            if (ext == ".json")
-            {
-                // Guard against blank/whitespace-only content — the model probably forgot
-                // to include the content argument.  Returning an error here is cheaper than
-                // a successful write that immediately fails downstream JSON validation.
-                if (string.IsNullOrWhiteSpace(content))
-                {
-                    normalizedContent = content;
-                    return PluginResult.Error(
-                        "The 'content' argument is empty. Did you forget to include the JSON content? " +
-                        "Pass the full JSON object as the 'content' parameter.");
-                }
-
-                var trimmed = content.TrimStart();
-
-                // Strip markdown code fences (```json ... ``` or ``` ... ```).
-                // A valid JSON file should never start with ``` — strip the fence and trailing
-                // ``` so the file contains only the raw JSON object/array.
-                if (trimmed.StartsWith("```"))
-                {
-                    // Skip the opening fence line (```json, ```, etc.)
-                    var firstNewline = trimmed.IndexOf('\n');
-                    if (firstNewline >= 0)
-                        trimmed = trimmed[(firstNewline + 1)..];
-                    // Strip the closing ```
-                    var lastFence = trimmed.LastIndexOf("```");
-                    if (lastFence >= 0)
-                        trimmed = trimmed[..lastFence];
-                    content    = trimmed.Trim();
-                    normalised = true;
-                }
-                // Strip XML <parameter name="content">…</parameter> wrappers.
-                // Some models emit tool-call XML artifacts as literal content, e.g.:
-                //   <parameter name="content">{"goal": ...}</parameter>
-                // Extract just the inner text so the file contains valid JSON.
-                else if (trimmed.StartsWith("<parameter", StringComparison.OrdinalIgnoreCase))
-                {
-                    var closeTag = trimmed.IndexOf('>');
-                    if (closeTag >= 0)
-                    {
-                        var inner  = trimmed[(closeTag + 1)..];
-                        var endTag = inner.LastIndexOf("</parameter>", StringComparison.OrdinalIgnoreCase);
-                        if (endTag >= 0) inner = inner[..endTag];
-                        content    = inner.Trim();
-                        normalised = true;
-                    }
-                }
-            }
-
-            // Detect double-escaped newlines: when a model constructs the tool-call JSON
-            // argument by hand, it sometimes writes \\n instead of a real newline, so after
-            // JSON deserialization the content string contains literal \n (backslash-n) rather
-            // than actual newline characters. The tell-tale sign is a file with zero real
-            // newlines but multiple literal \n sequences — replace them so the written file has
-            // proper line endings instead of collapsing to a single line of escape sequences.
-            if (!content.Contains('\n') && !content.Contains('\r') && content.Contains("\\n"))
-            {
-                content = content
-                    .Replace("\\r\\n", "\r\n")
-                    .Replace("\\n", "\n")
-                    .Replace("\\t", "\t");
-                normalised = true;
-            }
-
-            // Typographic character guard: source files that contain em-dashes, curly quotes,
-            // non-breaking spaces, or other Unicode lookalikes will fail to compile or parse.
-            // These characters appear when an LLM bleeds prose-generation typography into code.
-            // Block the write and report each offending character so the agent can correct the
-            // content before it reaches disk — preventing the delete/rewrite correction loop
-            // caused by files that are syntactically broken from the moment they are written.
-            if (SourceCodeExtensions.Contains(ext))
-            {
-                var hits = FindTypographicChars(content);
-                if (hits.Count > 0)
-                {
-                    normalizedContent = content;
-                    return PluginResult.Error(
-                        $"WRITE BLOCKED — typographic characters found in source file '{resolved}'.\n" +
-                        $"These are Unicode lookalikes for ASCII punctuation that cause compile/parse errors:\n\n" +
-                        string.Join("\n", hits.Select(h =>
-                            $"  line {h.Line}: U+{(int)h.Char:X4} {h.Name}\n    {h.Excerpt}")) +
-                        $"\n\nReplace each with the correct ASCII character:\n" +
-                        "  — (em-dash)         → - (hyphen-minus)\n" +
-                        "  – (en-dash)         → - (hyphen-minus)\n" +
-                        "  “” (curly dquotes) → \" (straight double quote)\n" +
-                        "  ‘’ (curly squotes) → ' (apostrophe)\n" +
-                        "  … (ellipsis)        → ... (three full stops)\n" +
-                        "    (non-breaking sp) →   (regular space)\n" +
-                        "\nCorrect the content and call write_file again.");
-                }
-            }
-        }
-
-        normalizedContent = content;
-        return null;
-    }
-
     // Writes content to disk, invalidates caches, bumps the version store, and returns the
     // success result string.
     private async Task<string> CommitWriteAsync(string resolved, string content, bool normalised)
@@ -898,7 +512,7 @@ public sealed class FileSystemPlugin : ITurnResettable
             newVersion = await _versionStore.BumpVersionAsync(resolved, hash);
         }
 
-        var writeSp = SummaryPath(resolved);
+        var writeSp = FileSystemSandbox.SummaryPath(resolved, _summaryDir);
         if (File.Exists(writeSp)) File.Delete(writeSp);
 
         var note = normalised
@@ -909,449 +523,4 @@ public sealed class FileSystemPlugin : ITurnResettable
         return PluginResult.Ok($"Written {content.Length} chars to {resolved}{note}{versionNote}");
     }
 
-    // Absolute ceiling on maxResults regardless of what the caller requests — keeps a single
-    // call from dumping an unbounded listing into context in a very large tree.
-    private const int ListFilesHardCap = 500;
-
-    [Description("List files recursively. Reports when results were truncated so you know to narrow the search — this matters most in large or multi-repo directories, where a flat result cap can silently miss files in a sibling subdirectory that wasn't reached yet.")]
-    public string ListFiles(
-        [Description("Directory path.")] string directory,
-        [Description("Glob pattern, e.g. '*.cs'.")] string pattern = "*",
-        [Description("Max results, clamped to 500. Raise it only if the default cuts off a search you know needs to see more.")] int maxResults = 100)
-    {
-        var denial = ResolveSafe(directory, out var resolved);
-        if (denial is not null) return denial;
-
-        if (!Directory.Exists(resolved))
-        {
-            if (File.Exists(resolved))
-                return PluginResult.Error(
-                    $"'{resolved}' is a file, not a directory. " +
-                    $"Use read_file to read its content, or call list_files on its parent: " +
-                    $"'{Path.GetDirectoryName(resolved) ?? resolved}'");
-            return PluginResult.Error($"Directory not found: {resolved}");
-        }
-
-        var maxFiles = Math.Clamp(maxResults, 1, ListFilesHardCap);
-        var files = Directory.EnumerateFiles(resolved, pattern, SearchOption.AllDirectories)
-            .Where(f => !DirectoryFilters.IsExcluded(f))
-            .Take(maxFiles + 1)
-            .ToList();
-
-        if (files.Count == 0)
-            return PluginResult.Info("No files matched.");
-
-        var truncated = files.Count > maxFiles;
-        if (truncated) files.RemoveAt(files.Count - 1);
-
-        var result = string.Join("\n", files);
-        if (truncated)
-            result += $"\n\n[TRUNCATED — showing first {maxFiles} matches; more exist beyond this cap. " +
-                      "They may be concentrated in whichever subdirectory was walked first (e.g. one " +
-                      "repo in a multi-repo working directory) — files elsewhere may not be represented " +
-                      "at all. Narrow with a more specific 'directory' or 'pattern' rather than only " +
-                      "raising maxResults.]";
-
-        return result;
-    }
-
-    [Description("Delete a file.")]
-    public async Task<string> DeleteFileAsync([Description("File path.")] string path)
-    {
-        var denial = ResolveSafe(path, out var resolved);
-        if (denial is not null) return denial;
-
-        if (!File.Exists(resolved))
-            return PluginResult.Info($"File does not exist: {resolved}");
-
-        File.Delete(resolved);
-        await InvalidatePathAsync(resolved);
-        return PluginResult.Ok($"Deleted: {resolved}");
-    }
-
-    [Description("Get file/directory metadata: size, timestamps, permissions, and (for files) the write-version counter. Cheaper than read_file when you only need to check existence or staleness. Version is NOT_TRACKED when the file exists but was never written through write_file.")]
-    public async Task<string> GetFileInfoAsync([Description("File or directory path.")] string path)
-    {
-        var denial = ResolveSafe(path, out var resolved);
-        if (denial is not null) return denial;
-
-        var isFile = File.Exists(resolved);
-        var isDir  = Directory.Exists(resolved);
-        if (!isFile && !isDir)
-            return PluginResult.Error($"Path not found: {resolved}");
-
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Path:     {resolved}");
-        sb.AppendLine($"Type:     {(isDir ? "directory" : "file")}");
-
-        if (isFile)
-        {
-            var fi = new FileInfo(resolved);
-            sb.AppendLine($"Size:     {fi.Length:N0} bytes");
-            sb.AppendLine($"Created:  {fi.CreationTimeUtc:yyyy-MM-dd HH:mm:ss} UTC");
-            sb.AppendLine($"Modified: {fi.LastWriteTimeUtc:yyyy-MM-dd HH:mm:ss} UTC");
-
-            var record = _versionStore is not null ? await _versionStore.StatAsync(resolved) : null;
-            sb.AppendLine(record is not null
-                ? $"Version:  {record.Version} (hash: {record.ContentHash ?? "(none)"})"
-                : "Version:  NOT_TRACKED");
-        }
-        else
-        {
-            var di = new DirectoryInfo(resolved);
-            sb.AppendLine($"Created:  {di.CreationTimeUtc:yyyy-MM-dd HH:mm:ss} UTC");
-            sb.AppendLine($"Modified: {di.LastWriteTimeUtc:yyyy-MM-dd HH:mm:ss} UTC");
-        }
-
-        if (!OperatingSystem.IsWindows())
-        {
-            try
-            {
-                var mode    = File.GetUnixFileMode(resolved);
-                var octal   = Convert.ToString((int)mode & 0777, 8).PadLeft(3, '0');
-                var rwx     = new char[9];
-                rwx[0] = mode.HasFlag(UnixFileMode.UserRead)      ? 'r' : '-';
-                rwx[1] = mode.HasFlag(UnixFileMode.UserWrite)     ? 'w' : '-';
-                rwx[2] = mode.HasFlag(UnixFileMode.UserExecute)   ? 'x' : '-';
-                rwx[3] = mode.HasFlag(UnixFileMode.GroupRead)     ? 'r' : '-';
-                rwx[4] = mode.HasFlag(UnixFileMode.GroupWrite)    ? 'w' : '-';
-                rwx[5] = mode.HasFlag(UnixFileMode.GroupExecute)  ? 'x' : '-';
-                rwx[6] = mode.HasFlag(UnixFileMode.OtherRead)     ? 'r' : '-';
-                rwx[7] = mode.HasFlag(UnixFileMode.OtherWrite)    ? 'w' : '-';
-                rwx[8] = mode.HasFlag(UnixFileMode.OtherExecute)  ? 'x' : '-';
-                sb.AppendLine($"Permissions: {new string(rwx)} ({octal})");
-            }
-            catch { /* best effort — some virtual filesystems don't support GetUnixFileMode */ }
-        }
-
-        return sb.ToString().TrimEnd();
-    }
-
-    [Description("Set Unix file permissions (chmod). No-op on Windows.")]
-    public string SetPermissions(
-        [Description("File or directory path.")] string path,
-        [Description("Octal mode, e.g. '755' or '644'.")] string mode)
-    {
-        if (OperatingSystem.IsWindows())
-            return PluginResult.Info("SetPermissions is not supported on Windows.");
-
-        if (string.IsNullOrWhiteSpace(mode) || !System.Text.RegularExpressions.Regex.IsMatch(mode, @"^[0-7]{3,4}$"))
-            return PluginResult.Error($"Invalid mode '{mode}'. Supply a 3- or 4-digit octal string such as '755' or '0644'.");
-
-        var denial = ResolveSafe(path, out var resolved);
-        if (denial is not null) return denial;
-
-        if (!File.Exists(resolved) && !Directory.Exists(resolved))
-            return PluginResult.Error($"Path not found: {resolved}");
-
-        try
-        {
-            var unixMode = (UnixFileMode)Convert.ToInt32(mode, 8);
-            File.SetUnixFileMode(resolved, unixMode);
-            return PluginResult.Ok($"Permissions set to {mode} on '{resolved}'.");
-        }
-        catch (Exception ex)
-        {
-            return PluginResult.Error($"Failed to set permissions: {ex.Message}");
-        }
-    }
-
-    [Description("Create a directory (including parents).")]
-    public string CreateDirectory([Description("Directory path.")] string path)
-    {
-        var denial = ResolveSafe(path, out var resolved);
-        if (denial is not null) return denial;
-
-        Directory.CreateDirectory(resolved);
-        return PluginResult.Ok($"Directory ready: {resolved}");
-    }
-
-    [Description("Delete a directory.")]
-    public async Task<string> DeleteDirectoryAsync(
-        [Description("Directory path.")] string path,
-        [Description("Delete non-empty directories recursively.")] bool recursive = false)
-    {
-        var denial = ResolveSafe(path, out var resolved);
-        if (denial is not null) return denial;
-
-        if (!Directory.Exists(resolved))
-            return PluginResult.Info($"Directory does not exist: {resolved}");
-
-        // Refuse to delete the sandbox root itself.
-        if (_sandboxRoot is not null)
-        {
-            var comparison    = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-            var sandboxCheck  = _sandboxRoot.TrimEnd(Path.DirectorySeparatorChar);
-            var resolvedCheck = resolved.TrimEnd(Path.DirectorySeparatorChar);
-            if (string.Equals(sandboxCheck, resolvedCheck, comparison))
-                return PluginResult.Denied("Cannot delete the sandbox root directory.");
-        }
-
-        // Enumerate all contained files before deletion so their state can be invalidated
-        // after the directory tree is gone.
-        var files = Directory.EnumerateFiles(resolved, "*", SearchOption.AllDirectories).ToList();
-
-        Directory.Delete(resolved, recursive);
-
-        foreach (var file in files)
-            await InvalidatePathAsync(file);
-
-        return PluginResult.Ok($"Deleted directory: {resolved}");
-    }
-
-    [Description("Copy a file.")]
-    public async Task<string> CopyFileAsync(
-        [Description("Source path.")] string source,
-        [Description("Destination path.")] string destination,
-        [Description("Overwrite if destination exists.")] bool overwrite = false)
-    {
-        var srcDenial = ResolveSafe(source, out var resolvedSrc);
-        if (srcDenial is not null) return srcDenial;
-
-        var dstDenial = ResolveSafe(destination, out var resolvedDst);
-        if (dstDenial is not null) return dstDenial;
-
-        if (!File.Exists(resolvedSrc))
-            return PluginResult.Error($"Source not found: {resolvedSrc}");
-
-        if (!overwrite && File.Exists(resolvedDst))
-            return PluginResult.Error($"Destination already exists: {resolvedDst}. Set overwrite=true to replace it.");
-
-        var dir = Path.GetDirectoryName(resolvedDst);
-        if (!string.IsNullOrEmpty(dir))
-            Directory.CreateDirectory(dir);
-
-        await Task.Run(() => File.Copy(resolvedSrc, resolvedDst, overwrite));
-        await InvalidatePathAsync(resolvedDst);
-        _sessionCache?.RecordWrite(resolvedDst, new FileInfo(resolvedDst));
-        return PluginResult.Ok($"Copied '{resolvedSrc}' → '{resolvedDst}'");
-    }
-
-    [Description("Move or rename a file or directory.")]
-    public async Task<string> MoveFileAsync(
-        [Description("Source path.")] string source,
-        [Description("Destination path.")] string destination,
-        [Description("Overwrite if destination file exists.")] bool overwrite = false)
-    {
-        var srcDenial = ResolveSafe(source, out var resolvedSrc);
-        if (srcDenial is not null) return srcDenial;
-
-        var dstDenial = ResolveSafe(destination, out var resolvedDst);
-        if (dstDenial is not null) return dstDenial;
-
-        if (Directory.Exists(resolvedSrc))
-        {
-            if (Directory.Exists(resolvedDst))
-                return PluginResult.Error($"Destination directory already exists: {resolvedDst}");
-            var dstParent = Path.GetDirectoryName(resolvedDst);
-            if (!string.IsNullOrEmpty(dstParent)) Directory.CreateDirectory(dstParent);
-            // Enumerate files before the move so we have the source paths for invalidation.
-            var movedFiles = Directory.EnumerateFiles(resolvedSrc, "*", SearchOption.AllDirectories).ToList();
-            Directory.Move(resolvedSrc, resolvedDst);
-            foreach (var srcFile in movedFiles)
-            {
-                await InvalidatePathAsync(srcFile);
-                var dstFile = Path.Combine(resolvedDst, Path.GetRelativePath(resolvedSrc, srcFile));
-                await InvalidatePathAsync(dstFile);
-            }
-            return PluginResult.Ok($"Moved directory '{resolvedSrc}' → '{resolvedDst}'");
-        }
-
-        if (File.Exists(resolvedSrc))
-        {
-            if (!overwrite && File.Exists(resolvedDst))
-                return PluginResult.Error($"Destination already exists: {resolvedDst}. Set overwrite=true to replace it.");
-            var dstParent = Path.GetDirectoryName(resolvedDst);
-            if (!string.IsNullOrEmpty(dstParent)) Directory.CreateDirectory(dstParent);
-            File.Move(resolvedSrc, resolvedDst, overwrite);
-            await InvalidatePathAsync(resolvedSrc);
-            await InvalidatePathAsync(resolvedDst);
-            return PluginResult.Ok($"Moved '{resolvedSrc}' → '{resolvedDst}'");
-        }
-
-        return PluginResult.Error($"Source not found: {resolvedSrc}");
-    }
-
-    [Description("Get a cached summary or auto-preview of a file. Use before read_file on large files.")]
-    public async Task<string> GetFileSummaryAsync(
-        [Description("File path.")] string path)
-    {
-        var denial = ResolveSafe(path, out var resolved);
-        if (denial is not null) return denial;
-
-        if (!File.Exists(resolved))
-            return PluginResult.Error($"File not found: {resolved}");
-
-        // Check for a cached summary.
-        var summaryPath = SummaryPath(resolved);
-        if (File.Exists(summaryPath))
-        {
-            var cached = await File.ReadAllTextAsync(summaryPath);
-            return $"[Cached summary for '{resolved}']\n{cached}";
-        }
-
-        // Auto-preview: first 30 lines + stats. For large files, stream rather than
-        // allocating a full string array — same protection as ReadFileAsync's cold-read gate.
-        var fileInfo = new FileInfo(resolved);
-        string preview;
-        string trailer;
-        if (fileInfo.Length > LargeFileByteThreshold)
-        {
-            var (previewLines, totalLines, sizeBytes) = await StreamPreviewLinesAsync(resolved, 30);
-            preview = string.Join('\n', previewLines);
-            trailer = totalLines > 30
-                ? $"\n\n[Auto-preview: showing first 30 of {totalLines:N0} lines ({sizeBytes:N0} bytes). " +
-                  $"Use grep_in_file to locate specific content, or save_file_summary to store a " +
-                  $"human-written summary for future turns.]"
-                : $"\n\n[Full file — {totalLines} lines, {sizeBytes:N0} bytes.]";
-        }
-        else
-        {
-            var allLines  = await File.ReadAllLinesAsync(resolved);
-            int lineCount = allLines.Length;
-            long byteCount = fileInfo.Length;
-            preview = string.Join('\n', allLines.Take(30));
-            trailer = lineCount > 30
-                ? $"\n\n[Auto-preview: showing first 30 of {lineCount} lines ({byteCount:N0} bytes). " +
-                  $"Use grep_in_file to locate specific content, or save_file_summary to store a " +
-                  $"human-written summary for future turns.]"
-                : $"\n\n[Full file — {lineCount} lines, {byteCount:N0} bytes.]";
-        }
-
-        return preview + trailer;
-    }
-
-    [Description("Save a summary for future get_file_summary calls.")]
-    public async Task<string> SaveFileSummaryAsync(
-        [Description("File path.")] string path,
-        [Description("Summary text.")] string summary)
-    {
-        if (string.IsNullOrWhiteSpace(summary))
-            return PluginResult.Error("summary must not be empty.");
-
-        var denial = ResolveSafe(path, out var resolved);
-        if (denial is not null) return denial;
-
-        Directory.CreateDirectory(_summaryDir);
-        var summaryPath = SummaryPath(resolved);
-        await File.WriteAllTextAsync(summaryPath, summary.Trim());
-
-        return PluginResult.Ok($"Summary saved for '{resolved}' → {summaryPath}");
-    }
-
-    [Description("List files and subdirectories (non-recursive).")]
-    public string ListDirectory(
-        [Description("Directory path.")] string directory,
-        [Description("Glob pattern, e.g. '*.cs'.")] string pattern = "*")
-    {
-        var denial = ResolveSafe(directory, out var resolved);
-        if (denial is not null) return denial;
-
-        if (!Directory.Exists(resolved))
-        {
-            if (File.Exists(resolved))
-                return PluginResult.Error(
-                    $"'{resolved}' is a file, not a directory. " +
-                    $"Use read_file to read its content, or call list_directory on its parent: " +
-                    $"'{Path.GetDirectoryName(resolved) ?? resolved}'");
-            return PluginResult.Error($"Directory not found: {resolved}");
-        }
-
-        const int maxEntries = 500;
-
-        var dirs = Directory.EnumerateDirectories(resolved, pattern, SearchOption.TopDirectoryOnly)
-            .OrderBy(d => d, StringComparer.OrdinalIgnoreCase)
-            .Select(d => d + Path.DirectorySeparatorChar);
-
-        var files = Directory.EnumerateFiles(resolved, pattern, SearchOption.TopDirectoryOnly)
-            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase);
-
-        var entries = dirs.Concat(files).Take(maxEntries + 1).ToList();
-
-        if (entries.Count == 0)
-            return PluginResult.Info("No entries matched.");
-
-        var truncated = entries.Count > maxEntries;
-        if (truncated) entries.RemoveAt(entries.Count - 1);
-
-        var result = string.Join("\n", entries);
-        if (truncated)
-            result += $"\n\n[TRUNCATED — only first {maxEntries} entries shown. Use a more specific pattern to narrow results.]";
-
-        return result;
-    }
-
-    // Streams the first `previewCount` lines without allocating the full file into a string
-    // array. Returns the preview lines, total line count, and file size in bytes.
-    private static async Task<(List<string> Lines, int TotalLines, long SizeBytes)>
-        StreamPreviewLinesAsync(string path, int previewCount)
-    {
-        var preview   = new List<string>(previewCount);
-        int lineCount = 0;
-        using var sr  = new StreamReader(path);
-        string? ln;
-        while ((ln = await sr.ReadLineAsync()) is not null)
-        {
-            lineCount++;
-            if (preview.Count < previewCount) preview.Add(ln);
-        }
-        return (preview, lineCount, new FileInfo(path).Length);
-    }
-
-    // Removes a path from every per-turn set, the session cache, the version store, and the
-    // summary cache. Call this on deletion, on the source side of a move, and on the
-    // destination side of a copy/move to clear stale state before priming fresh state.
-    private async Task InvalidatePathAsync(string resolved)
-    {
-        _readThisTurn.Remove(resolved);
-        _writtenThisTurn.Remove(resolved);
-        _patchedThisTurn.Remove(resolved);
-        _sessionCache?.Invalidate(resolved);
-        if (_versionStore is not null)
-            await _versionStore.RemoveAsync(resolved);
-        var sp = SummaryPath(resolved);
-        if (File.Exists(sp)) File.Delete(sp);
-    }
-
-    private string SummaryPath(string resolvedFilePath)
-    {
-        // Derive a stable filename from the resolved path so the same file always maps to
-        // the same summary regardless of how the agent specified it (relative vs absolute).
-        var hash = System.Security.Cryptography.SHA256.HashData(
-            System.Text.Encoding.UTF8.GetBytes(resolvedFilePath));
-        var hex  = Convert.ToHexString(hash)[..16].ToLowerInvariant();
-        return Path.Combine(_summaryDir, $"{hex}.md");
-    }
-
-    // Resolves 'path' to its canonical absolute form and checks it against the sandbox.
-    // Returns a [DENIED] error string when the path escapes the sandbox, null when safe.
-    private string? ResolveSafe(string path, out string resolved)
-    {
-        var expandedPath = ProcessHelper.ExpandHome(path);
-        resolved = _sandboxRoot is not null && !Path.IsPathRooted(expandedPath)
-            ? Path.GetFullPath(expandedPath, _sandboxRoot)
-            : Path.GetFullPath(expandedPath);
-
-        if (_sandboxRoot is null)
-            return null;
-
-        // Append the OS separator so that "/sandbox" is not treated as a prefix of "/sandboxExtra".
-        var sandboxPrefix = _sandboxRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        var resolvedCheck = resolved.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-
-        if (!resolvedCheck.StartsWith(sandboxPrefix, comparison))
-        {
-            // Allow paths explicitly exempted from the sandbox (e.g. fuseraft's own runtime state dir).
-            if (_exemptedPrefixes.Any(ep => resolvedCheck.StartsWith(ep, comparison)))
-                return null;
-
-            return PluginResult.Denied($"Path '{resolved}' is outside the configured sandbox '{_sandboxRoot}'.");
-        }
-
-        return null;
-    }
 }

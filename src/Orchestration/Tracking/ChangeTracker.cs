@@ -6,6 +6,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
+using fuseraft.Infrastructure.Storage;
 
 namespace fuseraft.Orchestration.Tracking;
 
@@ -33,7 +34,7 @@ namespace fuseraft.Orchestration.Tracking;
 /// </summary>
 public sealed class ChangeTracker
 {
-    private readonly string _logPath;
+    private readonly JsonFileStore<ChangeLog> _store;
     private readonly EventEmitter? _eventEmitter;
     private readonly EvidenceStore? _evidenceStore;
     private readonly IntentLog? _intentLog;
@@ -41,7 +42,6 @@ public sealed class ChangeTracker
     private readonly ILogger<ChangeTracker>? _logger;
     private readonly StateProjector? _stateProjector;
     private readonly ConcurrentQueue<InvocationRecord> _pending = new();
-    private readonly SemaphoreSlim _fileLock = new(1, 1);
     private string? _sessionId;
 
     // Current turn index — set by BeginTurn before each agent.RunAsync call so that
@@ -83,7 +83,7 @@ public sealed class ChangeTracker
 
     public ChangeTracker(string logPath, EventEmitter? eventEmitter = null, EvidenceStore? evidenceStore = null, IntentLog? intentLog = null, ILogger<ChangeTracker>? logger = null, RepositoryGraphBuilder? graphBuilder = null, StateProjector? stateProjector = null)
     {
-        _logPath        = logPath;
+        _store          = new JsonFileStore<ChangeLog>(logPath, JsonOpts, logger, nameof(ChangeTracker));
         _eventEmitter   = eventEmitter;
         _evidenceStore  = evidenceStore;
         _intentLog      = intentLog;
@@ -108,35 +108,8 @@ public sealed class ChangeTracker
         _intentLog?.SetSessionId(sessionId);
         _stateProjector?.SetSessionId(sessionId);
 
-        await _fileLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var dir = Path.GetDirectoryName(Path.GetFullPath(_logPath));
-            if (dir is not null) Directory.CreateDirectory(dir);
-
-            ChangeLog log;
-            if (File.Exists(_logPath))
-            {
-                try
-                {
-                    var raw = await File.ReadAllTextAsync(_logPath, cancellationToken);
-                    log = JsonSerializer.Deserialize<ChangeLog>(raw, JsonOpts) ?? new ChangeLog();
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogWarning(ex, "ChangeTracker: failed to load '{Path}' — change log reset.", _logPath);
-                    log = new ChangeLog();
-                }
-            }
-            else
-            {
-                log = new ChangeLog();
-            }
-
-            log = log with { ActiveSessionId = sessionId };
-            await File.WriteAllTextAsync(_logPath, JsonSerializer.Serialize(log, JsonOpts), cancellationToken);
-        }
-        finally { _fileLock.Release(); }
+        await _store.WithLockAsync(log =>
+            Task.FromResult((log with { ActiveSessionId = sessionId }, true)), cancellationToken);
     }
 
     /// <summary>
@@ -286,40 +259,16 @@ public sealed class ChangeTracker
             .OfType<string>()]
     };
 
-    // Appends one ChangeEntry to the on-disk log under the file lock.
-    private async Task AppendEntryAsync(ChangeEntry entry, CancellationToken cancellationToken)
+    // Appends one ChangeEntry to the on-disk log under the store's lock.
+    private Task AppendEntryAsync(ChangeEntry entry, CancellationToken cancellationToken)
     {
         entry = entry with { SessionId = _sessionId };
 
-        await _fileLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+        return _store.WithLockAsync(log =>
         {
-            var dir = Path.GetDirectoryName(Path.GetFullPath(_logPath));
-            if (dir is not null) Directory.CreateDirectory(dir);
-
-            ChangeLog log;
-            if (File.Exists(_logPath))
-            {
-                try
-                {
-                    var raw = await File.ReadAllTextAsync(_logPath, cancellationToken);
-                    log = JsonSerializer.Deserialize<ChangeLog>(raw, JsonOpts) ?? new ChangeLog();
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogWarning(ex, "ChangeTracker: failed to load '{Path}' during flush — change log reset.", _logPath);
-                    log = new ChangeLog();
-                }
-            }
-            else
-            {
-                log = new ChangeLog();
-            }
-
             log.Entries.Add(entry);
-            await File.WriteAllTextAsync(_logPath, JsonSerializer.Serialize(log, JsonOpts), cancellationToken);
-        }
-        finally { _fileLock.Release(); }
+            return Task.FromResult((log, true));
+        }, cancellationToken);
     }
 
     // Builds typed EvidenceNode objects from the raw invocation records and persists

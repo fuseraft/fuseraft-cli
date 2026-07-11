@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 
-namespace fuseraft.Orchestration.Events;
+namespace fuseraft.Core.Events;
 
 /// <summary>
 /// Appends structured JSONL events to a file — one JSON object per line — and dispatches
@@ -78,7 +78,8 @@ public sealed class EventEmitter : IDisposable
         string  eventType,
         string? agent   = null,
         int?    turn    = null,
-        object? payload = null)
+        object? payload = null,
+        CancellationToken cancellationToken = default)
     {
         var timestamp = DateTimeOffset.UtcNow;
 
@@ -118,7 +119,7 @@ public sealed class EventEmitter : IDisposable
 
             foreach (var hook in _hooks)
             {
-                try { await hook.OnEventAsync(evt).ConfigureAwait(false); }
+                try { await hook.OnEventAsync(evt, cancellationToken).ConfigureAwait(false); }
                 catch (Exception ex)
                 {
                     // Best-effort — a misbehaving hook must not kill the session.

@@ -120,17 +120,19 @@ public record AgentConfig
     /// capability strings. The available capabilities depend on the plugin:
     /// <list type="table">
     ///   <item><term>FileSystem</term><description><c>read</c>, <c>write</c>, <c>delete</c></description></item>
-    ///   <item><term>Shell</term><description><c>read</c> (env/which/cwd), <c>run</c> (shell_run, shell_run_script)</description></item>
-    ///   <item><term>Git</term><description><c>read</c> (status/diff/log), <c>write</c> (add/commit/checkout)</description></item>
+    ///   <item><term>Shell</term><description><c>read</c> (env/which/cwd/session-temp-dir), <c>run</c> (shell_run, shell_run_script)</description></item>
+    ///   <item><term>Git</term><description><c>read</c> (status/diff/log/is-inside-work-tree), <c>write</c> (add/commit/checkout/rebase)</description></item>
     ///   <item><term>Http</term><description><c>get</c>, <c>post</c>, <c>put</c>, <c>patch</c>, <c>delete</c></description></item>
     ///   <item><term>Json</term><description><c>read</c>, <c>write</c> (merge)</description></item>
+    ///   <item><term>Document</term><description><c>read</c></description></item>
     ///   <item><term>Search</term><description><c>read</c></description></item>
-    ///   <item><term>Plan</term><description><c>read</c>, <c>write</c></description></item>
     ///   <item><term>Changes</term><description><c>read</c></description></item>
     ///   <item><term>Scratchpad</term><description><c>read</c>, <c>write</c></description></item>
     ///   <item><term>Chatroom</term><description><c>read</c>, <c>write</c></description></item>
     ///   <item><term>Probe</term><description><c>run</c></description></item>
     ///   <item><term>CodeExecution</term><description><c>read</c>, <c>execute</c></description></item>
+    ///   <item><term>Decision</term><description><c>read</c>, <c>write</c></description></item>
+    ///   <item><term>Graph</term><description><c>read</c></description></item>
     /// </list>
     /// </para>
     ///

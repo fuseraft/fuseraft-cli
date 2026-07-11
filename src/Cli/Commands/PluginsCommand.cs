@@ -77,12 +77,14 @@ public sealed class PluginsCommand(PluginRegistry registry) : Command<PluginsSet
             return;
         }
 
-        // Built-in plugin (plain object with [Description] attributes)
-        if (!registry.TryGet(name, out var plugin)) return;
+        // Built-in plugin (plain object(s) with [Description] attributes — usually one, but
+        // "FileSystem" registers a second object for its directory/inspection tools).
+        if (!registry.TryGetAll(name, out var plugins)) return;
 
-        var functions = PluginRegistry.GetFunctionsFromObject(plugin);
+        var functions = plugins.SelectMany(PluginRegistry.GetFunctionsFromObject);
+        var typeNames = string.Join(" + ", plugins.Select(p => p.GetType().Name));
 
-        AnsiConsole.MarkupLine($"[bold cyan]{Markup.Escape(name)}[/]  [dim]{Markup.Escape(plugin.GetType().Name)}[/]");
+        AnsiConsole.MarkupLine($"[bold cyan]{Markup.Escape(name)}[/]  [dim]{Markup.Escape(typeNames)}[/]");
 
         var builtInTable = new Table()
             .Border(TableBorder.Rounded)
@@ -105,7 +107,7 @@ public sealed class PluginsCommand(PluginRegistry registry) : Command<PluginsSet
     {
         if (registry.TryGetAIFunctions(name, out var aiFunctions))
             return aiFunctions.Count;
-        if (!registry.TryGet(name, out var plugin)) return 0;
-        return PluginRegistry.GetFunctionsFromObject(plugin).Count;
+        if (!registry.TryGetAll(name, out var plugins)) return 0;
+        return plugins.Sum(p => PluginRegistry.GetFunctionsFromObject(p).Count);
     }
 }

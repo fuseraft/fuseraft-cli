@@ -1479,6 +1479,59 @@ public class ValidateConfigCommandTests : IDisposable
         Assert.Equal(1, exitCode);
     }
 
+    // Regression coverage: a graph node with SubGraphId set (Agent intentionally left empty)
+    // used to be reported as a false "Agent is required" error, because ValidateGraph had no
+    // SubGraphId branch at all — a config that runs correctly under `fuseraft run` failed
+    // `validate-config`.
+    [Fact]
+    public async Task GraphNode_WithValidSubGraphId_DoesNotReportAgentRequiredError()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [
+              {"Name": "Planner",  "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Splitter", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Mapper",   "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
+              {"Name": "Reducer",  "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
+            ],
+            "Selection": {
+              "Type": "graph",
+              "Graph": {
+                "EntryNode": "plan",
+                "Nodes": [
+                  {"Id": "plan", "Agent": "Planner"},
+                  {"Id": "analyze", "SubGraphId": "parallel_analysis", "Terminal": true}
+                ],
+                "Edges": [
+                  {"From": "plan", "To": "analyze", "Keyword": "READY"}
+                ],
+                "SubGraphs": {
+                  "parallel_analysis": {
+                    "MapReduce": {
+                      "Splitter": "Splitter",
+                      "Mapper": "Mapper",
+                      "Reducer": "Reducer",
+                      "ItemsJsonPath": "tasks"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(0, exitCode);
+    }
+
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------

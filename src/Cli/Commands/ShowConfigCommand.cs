@@ -64,7 +64,7 @@ public sealed class ShowConfigCommand : Command<ShowConfigSettings>
         {
             try
             {
-                var cfg = OrchestratorBuilder.LoadConfig(file);
+                var cfg = OrchestratorConfigLoader.LoadConfig(file);
                 table.AddRow(
                     $"[dim]{Markup.Escape(file)}[/]",
                     Markup.Escape(cfg.Name),
@@ -88,7 +88,7 @@ public sealed class ShowConfigCommand : Command<ShowConfigSettings>
         OrchestrationConfig config;
         try
         {
-            config = OrchestratorBuilder.LoadConfig(path);
+            config = OrchestratorConfigLoader.LoadConfig(path);
         }
         catch (Exception ex)
         {

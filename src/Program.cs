@@ -60,7 +60,7 @@ if (args.Any(a => a is "--version" or "-v"))
 bool verbose   = args.Any(a => a is "--verbose");
 bool vsCodeArg = args.Any(a => a is "--vscode");
 if (vsCodeArg)
-    OrchestratorBuilder.VsCodeMode = true;
+    OrchestratorConfigLoader.VsCodeMode = true;
 string? outputPath = null;
 for (int i = 0; i < args.Length - 1; i++)
     if (args[i] is "-o" or "--output") { outputPath = args[i + 1]; break; }

@@ -12,12 +12,24 @@ using fuseraft.Orchestration;
 
 namespace fuseraft.Cli.Commands.Repl;
 
+/// <summary>
+/// Drives the REPL's input loop (<see cref="RunAsync"/>/<see cref="RunLoopAsync"/>) and turn
+/// execution (<see cref="ExecuteAsync"/>). Every method here is stateless — mutable session
+/// state lives entirely in the explicit <see cref="ReplSessionContext"/> parameter, per that
+/// class's own design note.
+///
+/// <para>
+/// <b>Collaborators</b> (both in <c>fuseraft.Cli.Commands.Repl</c>): terminal-presentation
+/// utilities (spinner, drip-print, ANSI stripping — also reused by sub-agent REPL commands)
+/// are owned by <see cref="ReplConsole"/>. Plan-capture and step-verification processing is
+/// owned by <see cref="ReplTurnOutcome"/>. <see cref="ExecuteAsync"/>'s own retry/streaming
+/// core is <see cref="StreamTurnResponseAsync"/>, a same-class extraction (not a separate
+/// collaborator, since it closes tightly over per-turn accumulator state) mirroring
+/// <c>SessionRunner</c>'s named-exception-handler pattern.
+/// </para>
+/// </summary>
 internal static class ReplTurn
 {
-    internal static readonly string[] SpinnerFrames = OperatingSystem.IsWindows()
-        ? ["-", "\\", "|", "/"]
-        : ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
     internal const int StepIterationLimit = 5;
 
     // Maximum times a transient streaming error (ResponseEnded, IOException, TimeoutException)
@@ -258,7 +270,7 @@ internal static class ReplTurn
                     {
                         Console.SetOut(savedOut);
                         AnsiConsole.Console = savedAnsiConsole;
-                        var captured = StripAnsi(capture.ToString()).Trim();
+                        var captured = ReplConsole.StripAnsi(capture.ToString()).Trim();
                         if (!string.IsNullOrWhiteSpace(captured))
                             ReplJsonBridge.Emit(new { type = "token", text = captured });
                     }
@@ -378,229 +390,22 @@ internal static class ReplTurn
         if (!isStepRequest)
             _ = SaveSnapshotAsync(ctx);
 
-        var sb                = new StringBuilder();
-        var toolCallsThisTurn = new List<string>();
-        var fileChanges        = new List<(char Sigil, string Path)>();
-        var fileChangeSeen     = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var toolRounds        = 0;
-        var inToolBatch       = false;
-        var turnInputTokens   = 0L;
-        var turnOutputTokens  = 0L;
-        int? turnFirstInputTokens = null;
-        // Captured tool outputs for inspect-step history injection (step execution only).
-        List<(string ToolName, string Output)>? capturedResults = isStepRequest ? [] : null;
-        Dictionary<string, string>? callIdToName = isStepRequest ? [] : null;
-
         var turnStart = DateTime.UtcNow;
-        var reqCts    = new CancellationTokenSource();
-        ctx.ActiveCts = reqCts;
-        var spinCts   = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
-        if (!ctx.JsonMode && !isStepRequest) AnsiConsole.WriteLine();
-        var spinTask  = ctx.JsonMode
-            ? Task.CompletedTask
-            : RunSpinnerAsync(capturePlan ? "planning…" : "thinking…", spinCts.Token, turnStart);
-        var spinning  = !ctx.JsonMode;
+        var stream = await StreamTurnResponseAsync(ctx, input, isStepRequest, capturePlan, turnStart, cancellationToken);
+        if (!stream.Success) return false;
 
-        // Cancels and awaits the spinner; caller disposes spinCts.
-        async Task StopSpinnerAsync()
-        {
-            if (!spinning) return;
-            spinning = false;
-            spinCts.Cancel();
-            await spinTask;
-            ClearSpinnerLine();
-        }
-
-        var activeClient   = isStepRequest ? ctx.StepClient : ctx.Client;
-        var requestOptions = BuildRequestOptions(ctx.ChatOptions, input);
-        var streamAttempt  = 0;
-        while (true) // retry loop for transient streaming errors
-        {
-        try
-        {
-            await foreach (var chunk in activeClient.GetStreamingResponseAsync(
-                ctx.History, requestOptions, cancellationToken: reqCts.Token))
-            {
-                // Providers emit a trailing usage-only chunk per underlying LLM call — a turn
-                // with tool round trips produces one per round trip, so sum rather than overwrite.
-                // The *first* chunk's input count is kept separately: it reflects the exact size
-                // of everything sent to the model as this turn began, before this turn's own
-                // tool-call round trips inflated the request further.
-                foreach (var usage in chunk.Contents.OfType<UsageContent>())
-                {
-                    turnInputTokens  += usage.Details.InputTokenCount  ?? 0;
-                    turnOutputTokens += usage.Details.OutputTokenCount ?? 0;
-                    turnFirstInputTokens ??= (int?)usage.Details.InputTokenCount;
-                }
-
-                var funcCall = chunk.Contents.OfType<FunctionCallContent>().FirstOrDefault();
-                if (funcCall is not null)
-                {
-                    if (!inToolBatch) { toolRounds++; inToolBatch = true; }
-                    toolCallsThisTurn.Add(funcCall.Name);
-                    TrackFileChange(funcCall.Name, funcCall.Arguments, fileChanges, fileChangeSeen, ctx.Cwd);
-                    if (callIdToName is not null && funcCall.CallId is not null)
-                        callIdToName[funcCall.CallId] = funcCall.Name;
-
-                    if (ctx.JsonMode)
-                    {
-                        // Include arguments so the webview can show them on hover/expand.
-                        // Values are typically JsonElement from the model's JSON response and
-                        // serialise correctly; null Arguments → omit the field entirely.
-                        var args = funcCall.Arguments is { Count: > 0 }
-                            ? (object)funcCall.Arguments
-                            : null;
-                        ReplJsonBridge.Emit(new { type = "tool_call", name = funcCall.Name, args });
-                    }
-                    else
-                    {
-                        // Update spinner label to show the accumulating tool chain live.
-                        var chain = toolCallsThisTurn.Count <= 4
-                            ? string.Join(" → ", toolCallsThisTurn)
-                            : string.Join(" → ", toolCallsThisTurn.TakeLast(4)) +
-                              $" (+{toolCallsThisTurn.Count - 4})";
-                        spinCts.Cancel();
-                        await spinTask;
-                        spinCts.Dispose();
-                        spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
-                        var verb = toolCallsThisTurn.Count % 2 == 0 ? "fusing" : "rafting";
-                        spinTask = RunSpinnerAsync($"{verb}…  {chain}", spinCts.Token, turnStart);
-                        spinning = true;
-                    }
-                    continue;
-                }
-
-                var funcResult = chunk.Contents.OfType<FunctionResultContent>().FirstOrDefault();
-                if (funcResult is not null && capturedResults is not null)
-                {
-                    var toolName = funcResult.CallId is not null &&
-                                  callIdToName?.TryGetValue(funcResult.CallId, out var n) == true
-                                  ? n : "tool";
-                    capturedResults.Add((toolName, funcResult.Result?.ToString() ?? string.Empty));
-                    continue;
-                }
-
-                var text = chunk.Text;
-                if (string.IsNullOrEmpty(text)) continue;
-                inToolBatch = false;
-                sb.Append(text);
-
-                // Terminal REPL never prints text live — only the spinner/tool chain is
-                // shown while generating; the full response is markdown-rendered once the
-                // turn completes (see below). JSON mode still streams tokens for the
-                // VS Code integration's own renderer.
-                if (!capturePlan && ctx.JsonMode)
-                    ReplJsonBridge.Emit(new { type = "token", text });
-            }
-            break; // streaming succeeded — exit retry loop
-        }
-        catch (OperationCanceledException)
-        {
-            await StopSpinnerAsync();
-            spinCts.Dispose();
-            await ctx.Emitter.EmitAsync(EventTypes.Cancelled, turn: ctx.TurnIndex);
-            if (ctx.JsonMode)
-                ReplJsonBridge.Emit(new { type = "cancelled" });
-            else
-                AnsiConsole.MarkupLine("[dim](cancelled)[/]");
-            if (ctx.History.Count > 0 && ctx.History[^1].Role == ChatRole.User)
-                ctx.History.RemoveAt(ctx.History.Count - 1);
-            ctx.ExecutionQueue.Clear();
-            if (!ctx.JsonMode) AnsiConsole.WriteLine();
-            reqCts.Dispose();
-            ctx.ActiveCts = null;
-            return false;
-        }
-        catch (Exception ex) when (IsTransientStreamError(ex) && streamAttempt < MaxStreamRetries)
-        {
-            // Transient stream disconnection — retry automatically with back-off.
-            streamAttempt++;
-            await StopSpinnerAsync();
-            spinCts.Dispose();
-
-            await ctx.Emitter.EmitAsync(EventTypes.ReplError, turn: ctx.TurnIndex, payload: new
-            {
-                exception_type = ex.GetType().Name,
-                message        = ex.Message,
-                attempt        = streamAttempt,
-                final          = false,
-            });
-
-            if (ctx.JsonMode)
-                ReplJsonBridge.Emit(new { type = "retrying", attempt = streamAttempt, max = MaxStreamRetries });
-            else
-                AnsiConsole.MarkupLine(
-                    $"[dim]  ↺ {Markup.Escape(ex.Message)} — retrying ({streamAttempt}/{MaxStreamRetries})…[/]");
-
-            // Exponential back-off: 2 s, 4 s. Not wired to the cancellation token so the
-            // short sleep is never interrupted — max wasted time is 6 s total.
-            await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, streamAttempt)));
-
-            // Reset per-attempt accumulators before reissuing the request.
-            sb.Clear(); toolCallsThisTurn.Clear();
-            fileChanges.Clear(); fileChangeSeen.Clear();
-            capturedResults?.Clear(); callIdToName?.Clear();
-            toolRounds = 0; inToolBatch = false;
-            turnInputTokens = 0; turnOutputTokens = 0; turnFirstInputTokens = null;
-
-            // Restart spinner for the fresh attempt.
-            spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
-            spinTask = ctx.JsonMode
-                ? Task.CompletedTask
-                : RunSpinnerAsync(capturePlan ? "planning…" : "thinking…", spinCts.Token, turnStart);
-            spinning = !ctx.JsonMode;
-            // continue while-loop → reissue GetStreamingResponseAsync
-        }
-        catch (Exception ex)
-        {
-            await StopSpinnerAsync();
-            spinCts.Dispose();
-
-            await ctx.Emitter.EmitAsync(EventTypes.ReplError, turn: ctx.TurnIndex, payload: new
-            {
-                exception_type = ex.GetType().Name,
-                message        = ex.Message,
-                attempt        = streamAttempt + 1,
-                final          = true,
-            });
-
-            var toolSurfaceHint = BuildLargeToolSurfaceHint(ex, ctx.GetActiveTools().Count);
-            if (ctx.JsonMode)
-                ReplJsonBridge.Emit(new
-                {
-                    type = "error",
-                    text = toolSurfaceHint is null ? ex.Message : $"{ex.Message}\n{toolSurfaceHint}",
-                });
-            else
-            {
-                AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(ex.Message)}[/]");
-                if (toolSurfaceHint is not null)
-                    AnsiConsole.MarkupLine($"[dim]  ↪ {Markup.Escape(toolSurfaceHint)}[/]");
-            }
-            if (ctx.History.Count > 0 && ctx.History[^1].Role == ChatRole.User)
-                ctx.History.RemoveAt(ctx.History.Count - 1);
-            ctx.ExecutionQueue.Clear();
-            reqCts.Dispose();
-            ctx.ActiveCts = null;
-            return false;
-        }
-        } // end while (retry loop)
-
-        reqCts.Dispose();
-        ctx.ActiveCts = null;
-        await StopSpinnerAsync();
-        spinCts.Dispose();
-
-        ctx.CumulativeInputTokens  += turnInputTokens;
-        ctx.CumulativeOutputTokens += turnOutputTokens;
-        ctx.LastActualContextTokens = turnFirstInputTokens;
-
-        var responseText = sb.ToString();
+        var responseText      = stream.ResponseText;
+        var toolCallsThisTurn = stream.ToolCallsThisTurn;
+        var fileChanges       = stream.FileChanges;
+        var toolRounds        = stream.ToolRounds;
+        var capturedResults   = stream.CapturedResults;
+        var turnInputTokens   = stream.TurnInputTokens;
+        var turnOutputTokens  = stream.TurnOutputTokens;
 
         if (!capturePlan && responseText.Length > 0 && !ctx.JsonMode)
         {
             if (!Console.IsOutputRedirected)
-                ClearSpinnerLine();
+                ReplConsole.ClearSpinnerLine();
             AnsiConsole.WriteLine();
             AnsiConsole.MarkupLine("[dim]fuseraft agent:[/]");
             AnsiConsole.Write(MarkdownRenderer.Render(responseText));
@@ -624,68 +429,19 @@ internal static class ReplTurn
         }
 
         if (capturePlan && responseText.Length > 0)
-            HandlePlanCapture(ctx, responseText);
+            ReplTurnOutcome.HandlePlanCapture(ctx, responseText);
 
         bool stepPassed = true;
         if (isStepRequest && activeStep is not null)
-            stepPassed = await HandleStepResult(ctx, activeStep, stepTotal, toolCallsThisTurn,
+            stepPassed = await ReplTurnOutcome.HandleStepResult(ctx, activeStep, stepTotal, toolCallsThisTurn,
                 capturedResults ?? [], hitIterationCap: toolRounds >= StepIterationLimit,
                 responseText, cancellationToken);
 
-        // Free-form turns: if the response claims a mutation but no write tool was called,
-        // auto-inject a correction so the agent is required to actually call the tool.
-        // On the correction turn itself fall back to a warning to avoid infinite recursion.
-        if (!isStepRequest && !capturePlan && responseText.Length > 0 &&
-            !toolCallsThisTurn.Any(t => MutationTools.Contains(t)) &&
-            ContainsMutationClaim(responseText))
-        {
-            if (!isCorrectionTurn)
-            {
-                await ctx.Emitter.EmitAsync(EventTypes.CorrectionInjected, turn: ctx.TurnIndex, payload: new { reason = "mutation_claimed_without_write_tool" });
-                if (!ctx.JsonMode)
-                    AnsiConsole.MarkupLine("[dim]  ↺ mutation claimed without write tool — injecting correction[/]");
-                const string correctionMsg =
-                    "You described changes above but did not call any write tool. " +
-                    "Please call write_file or patch_file now to actually apply the changes. " +
-                    "Do not re-describe the changes — just call the tool.";
-                await ExecuteAsync(
-                    ctx, correctionMsg,
-                    isStepRequest: false, capturePlan: false, activeStep: null,
-                    cancellationToken, isCorrectionTurn: true);
-            }
-            else
-            {
-                if (!ctx.JsonMode)
-                    AnsiConsole.MarkupLine(
-                        "[yellow]  ⚠ No write tool called after correction — verify the agent did not fabricate this result.[/]");
-            }
-        }
+        await TryApplyMutationCorrectionAsync(
+            ctx, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn, cancellationToken);
 
-        // Free-form turns under adversarial mode: a critic agent reviews the response for
-        // fabrication/correctness, same infrastructure /execute steps use. Skipped on the
-        // correction turn itself so a rejection can't recurse forever.
-        if (ctx.AdversarialMode && ctx.SubAgent is not null &&
-            !isStepRequest && !capturePlan && !isCorrectionTurn && responseText.Length > 0)
-        {
-            if (!ctx.JsonMode) AnsiConsole.Markup("[dim]  critic reviewing…[/]");
-            var (approved, reason) = await ctx.SubAgent.CriticReviewAsync(
-                input, expectedTool: null, toolCallsThisTurn, responseText, cancellationToken);
-            if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 40)}\r");
-            if (!approved)
-            {
-                await ctx.Emitter.EmitAsync(EventTypes.CorrectionInjected, turn: ctx.TurnIndex, payload: new { reason = "critic_rejected", detail = reason });
-                if (!ctx.JsonMode)
-                    AnsiConsole.MarkupLine($"[yellow]  ✗ Critic: {Markup.Escape(reason ?? "no reason given")}[/]");
-                var correctionMsg =
-                    $"A critic reviewed your last response and rejected it: {reason}\n" +
-                    "Verify the disputed claim with a tool call and correct your answer. " +
-                    "Do not just restate the same claim.";
-                await ExecuteAsync(
-                    ctx, correctionMsg,
-                    isStepRequest: false, capturePlan: false, activeStep: null,
-                    cancellationToken, isCorrectionTurn: true);
-            }
-        }
+        await TryApplyCriticReviewAsync(
+            ctx, input, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn, cancellationToken);
 
         var postEst = ctx.EstimateTokens();
         if (ctx.PrevTurnTokenEstimate > 0)
@@ -799,161 +555,336 @@ internal static class ReplTurn
         return stepPassed;
     }
 
-    internal static void HandlePlanCapture(ReplSessionContext ctx, string responseText)
+    // Free-form turns: if the response claims a mutation but no write tool was called,
+    // auto-inject a correction so the agent is required to actually call the tool.
+    // On the correction turn itself fall back to a warning to avoid infinite recursion.
+    private static async Task TryApplyMutationCorrectionAsync(
+        ReplSessionContext ctx,
+        string responseText,
+        List<string> toolCallsThisTurn,
+        bool isStepRequest,
+        bool capturePlan,
+        bool isCorrectionTurn,
+        CancellationToken cancellationToken)
     {
-        if (TryParsePlan(responseText, out var steps) && steps.Length > 0)
+        if (!isStepRequest && !capturePlan && responseText.Length > 0 &&
+            !toolCallsThisTurn.Any(t => MutationTools.Contains(t)) &&
+            ContainsMutationClaim(responseText))
         {
-            ctx.CurrentPlan = steps;
-            _ = ctx.Emitter.EmitAsync(EventTypes.PlanCaptured, turn: ctx.TurnIndex, payload: new
+            if (!isCorrectionTurn)
             {
-                step_count = steps.Length,
-                steps = steps.Select(s => new
-                {
-                    step        = s.Step,
-                    description = s.Description,
-                    tool        = s.Tool,
-                    creates     = s.Creates,
-                    verifies    = s.Verifies,
-                    depends_on  = s.DependsOn,
-                }).ToArray(),
-            });
-            if (ctx.JsonMode)
-            {
-                ReplJsonBridge.Emit(new { type = "plan", steps });
+                await ctx.Emitter.EmitAsync(EventTypes.CorrectionInjected, turn: ctx.TurnIndex, payload: new { reason = "mutation_claimed_without_write_tool" });
+                if (!ctx.JsonMode)
+                    AnsiConsole.MarkupLine("[dim]  ↺ mutation claimed without write tool — injecting correction[/]");
+                const string correctionMsg =
+                    "You described changes above but did not call any write tool. " +
+                    "Please call write_file or patch_file now to actually apply the changes. " +
+                    "Do not re-describe the changes — just call the tool.";
+                await ExecuteAsync(
+                    ctx, correctionMsg,
+                    isStepRequest: false, capturePlan: false, activeStep: null,
+                    cancellationToken, isCorrectionTurn: true);
             }
             else
             {
-                AnsiConsole.MarkupLine($"[dim]Plan ({steps.Length} steps). Review, then run[/] [bold]/execute[/][dim].[/]");
-                AnsiConsole.WriteLine();
-                foreach (var ps in steps)
-                {
-                    AnsiConsole.MarkupLine($"  [bold]{ps.Step}.[/] {Markup.Escape(ps.Description)}");
-                    if (ps.Tool    is not null) AnsiConsole.MarkupLine($"       [dim]tool: {Markup.Escape(ps.Tool)}[/]");
-                    if (ps.Creates is not null) AnsiConsole.MarkupLine($"       [dim]creates: {Markup.Escape(ps.Creates)}[/]");
-                }
-                AnsiConsole.WriteLine();
-            }
-        }
-        else
-        {
-            if (ctx.JsonMode)
-                ReplJsonBridge.Emit(new { type = "error", text = "Could not parse plan JSON from response." });
-            else
-            {
-                AnsiConsole.MarkupLine("[yellow]⚠ Could not parse plan JSON. Raw response:[/]");
-                Console.WriteLine(responseText);
-                AnsiConsole.MarkupLine("[dim]Try /plan again.[/]");
-                AnsiConsole.WriteLine();
+                if (!ctx.JsonMode)
+                    AnsiConsole.MarkupLine(
+                        "[yellow]  ⚠ No write tool called after correction — verify the agent did not fabricate this result.[/]");
             }
         }
     }
 
-    internal static async Task<bool> HandleStepResult(
-        ReplSessionContext ctx, PlanStep activeStep, int total, List<string> toolCallsThisTurn,
-        List<(string ToolName, string Output)> capturedResults, bool hitIterationCap,
-        string responseText = "", CancellationToken cancellationToken = default)
+    // Free-form turns under adversarial mode: a critic agent reviews the response for
+    // fabrication/correctness, same infrastructure /execute steps use. Skipped on the
+    // correction turn itself so a rejection can't recurse forever.
+    private static async Task TryApplyCriticReviewAsync(
+        ReplSessionContext ctx,
+        string input,
+        string responseText,
+        List<string> toolCallsThisTurn,
+        bool isStepRequest,
+        bool capturePlan,
+        bool isCorrectionTurn,
+        CancellationToken cancellationToken)
     {
-        var (passed, verifyOutput) = await VerifyStepAsync(activeStep, toolCallsThisTurn, ctx.Cwd, cancellationToken);
-        var stepsLeft = ctx.ExecutionQueue.Count;
-
-        // When deterministic checks pass and adversarial mode is on, ask the critic.
-        if (passed && ctx.AdversarialMode && ctx.SubAgent is not null)
+        if (ctx.AdversarialMode && ctx.SubAgent is not null &&
+            !isStepRequest && !capturePlan && !isCorrectionTurn && responseText.Length > 0)
         {
-            AnsiConsole.Markup("[dim]  critic reviewing…[/]");
+            if (!ctx.JsonMode) AnsiConsole.Markup("[dim]  critic reviewing…[/]");
             var (approved, reason) = await ctx.SubAgent.CriticReviewAsync(
-                activeStep.Description, activeStep.Tool, toolCallsThisTurn, responseText, cancellationToken);
-            Console.Write($"\r{new string(' ', 40)}\r");
+                input, expectedTool: null, toolCallsThisTurn, responseText, cancellationToken);
+            if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 40)}\r");
             if (!approved)
             {
-                passed = false;
-                ctx.RecoveryHint = $"[Critic] Step {activeStep.Step} rejected: {reason}";
-                AnsiConsole.MarkupLine(
-                    $"[yellow]  ✗ Critic rejected step {activeStep.Step}: {Markup.Escape(reason ?? "no reason given")}[/]");
+                await ctx.Emitter.EmitAsync(EventTypes.CorrectionInjected, turn: ctx.TurnIndex, payload: new { reason = "critic_rejected", detail = reason });
+                if (!ctx.JsonMode)
+                    AnsiConsole.MarkupLine($"[yellow]  ✗ Critic: {Markup.Escape(reason ?? "no reason given")}[/]");
+                var correctionMsg =
+                    $"A critic reviewed your last response and rejected it: {reason}\n" +
+                    "Verify the disputed claim with a tool call and correct your answer. " +
+                    "Do not just restate the same claim.";
+                await ExecuteAsync(
+                    ctx, correctionMsg,
+                    isStepRequest: false, capturePlan: false, activeStep: null,
+                    cancellationToken, isCorrectionTurn: true);
             }
         }
-        if (passed)
+    }
+
+    // Carrier for the outcome of streaming one turn's response, retrying on transient
+    // stream disconnections. Mirrors SessionRunner.HandlerOutcome's shape — avoids the ~10
+    // mutable accumulator locals (sb, toolCallsThisTurn, fileChanges, token counters, etc.)
+    // that used to be threaded through the rest of ExecuteAsync after this method returns.
+    private readonly record struct TurnStreamResult(
+        bool Success,
+        string ResponseText,
+        List<string> ToolCallsThisTurn,
+        List<(char Sigil, string Path)> FileChanges,
+        int ToolRounds,
+        List<(string ToolName, string Output)>? CapturedResults,
+        long TurnInputTokens,
+        long TurnOutputTokens,
+        int? TurnFirstInputTokens)
+    {
+        internal static TurnStreamResult Failed => new(false, "", [], [], 0, null, 0, 0, null);
+    }
+
+    /// <summary>
+    /// Streams one turn's response from <paramref name="ctx"/>'s active client, retrying
+    /// automatically on transient mid-stream disconnections (up to <see cref="MaxStreamRetries"/>
+    /// times). Owns the spinner lifecycle and the in-flight request's <see cref="CancellationTokenSource"/>
+    /// entirely — nothing about it leaks into the caller. Returns <see cref="TurnStreamResult.Success"/>
+    /// <see langword="false"/> on cancellation or a non-retryable/exhausted-retry failure, in which
+    /// case the caller must stop processing this turn (the error has already been surfaced to the
+    /// user and the trailing user message rolled back).
+    /// </summary>
+    private static async Task<TurnStreamResult> StreamTurnResponseAsync(
+        ReplSessionContext ctx,
+        string input,
+        bool isStepRequest,
+        bool capturePlan,
+        DateTime turnStart,
+        CancellationToken cancellationToken)
+    {
+        var sb                = new StringBuilder();
+        var toolCallsThisTurn = new List<string>();
+        var fileChanges        = new List<(char Sigil, string Path)>();
+        var fileChangeSeen     = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var toolRounds        = 0;
+        var inToolBatch       = false;
+        var turnInputTokens   = 0L;
+        var turnOutputTokens  = 0L;
+        int? turnFirstInputTokens = null;
+        // Captured tool outputs for inspect-step history injection (step execution only).
+        List<(string ToolName, string Output)>? capturedResults = isStepRequest ? [] : null;
+        Dictionary<string, string>? callIdToName = isStepRequest ? [] : null;
+
+        var reqCts    = new CancellationTokenSource();
+        ctx.ActiveCts = reqCts;
+        var spinCts   = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
+        if (!ctx.JsonMode && !isStepRequest) AnsiConsole.WriteLine();
+        var spinTask  = ctx.JsonMode
+            ? Task.CompletedTask
+            : ReplConsole.RunSpinnerAsync(capturePlan ? "planning…" : "thinking…", spinCts.Token, turnStart);
+        var spinning  = !ctx.JsonMode;
+
+        // Cancels and awaits the spinner; caller disposes spinCts.
+        async Task StopSpinnerAsync()
         {
-            var zeroCallSkip  = activeStep.Tool is not null && toolCallsThisTurn.Count == 0;
-            var inspectSkip   = activeStep.Tool is not null && toolCallsThisTurn.Count > 0 &&
-                                toolCallsThisTurn.All(t => InspectTools.Contains(t));
-            var skipped       = zeroCallSkip || inspectSkip;
-            // Broader than inspectSkip: preserve history whenever only read-only tools were
-            // called, even if the step had no expected tool declared.
-            ctx.LastStepWasInspectOnly = toolCallsThisTurn.Count > 0 &&
-                                        toolCallsThisTurn.All(t => InspectTools.Contains(t));
-            ctx.LastStepInspectResults = ctx.LastStepWasInspectOnly && capturedResults.Count > 0
-                ? capturedResults : null;
-            await ctx.Emitter.EmitAsync(EventTypes.StepComplete, turn: ctx.TurnIndex, payload: new
-            {
-                step       = activeStep.Step,
-                total,
-                skipped,
-                steps_left = stepsLeft,
-                hit_iteration_cap = hitIterationCap,
-                verify_output     = verifyOutput,
-            });
-            if (ctx.JsonMode)
-            {
-                ReplJsonBridge.Emit(new { type = "step_status", step = activeStep.Step, total, status = skipped ? "skipped" : "complete", stepsLeft });
-            }
-            else
-            {
-                var icon  = skipped ? "↷" : "✓";
-                var label = skipped ? "skipped" : "complete";
-                AnsiConsole.MarkupLine(stepsLeft > 0
-                    ? $"[dim]  {icon} Step {activeStep.Step} {label}.  {stepsLeft} step{(stepsLeft == 1 ? "" : "s")} remaining.[/]"
-                    : $"[dim]  {icon} Step {activeStep.Step} {label}.  Plan finished.[/]");
-                if (hitIterationCap)
-                    AnsiConsole.MarkupLine(
-                        $"[dim]  ↯ Step {activeStep.Step} reached the {StepIterationLimit}-round limit; later calls in this step may have been cut short.[/]");
-                if (zeroCallSkip && activeStep.Tool is not null && !InspectTools.Contains(activeStep.Tool))
-                    AnsiConsole.MarkupLine(
-                        $"[yellow]  ⚠ Step {activeStep.Step}: '{Markup.Escape(activeStep.Tool)}' was not called — verify the agent did not fabricate this result.[/]");
-            }
+            if (!spinning) return;
+            spinning = false;
+            spinCts.Cancel();
+            await spinTask;
+            ReplConsole.ClearSpinnerLine();
         }
-        else
+
+        var activeClient   = isStepRequest ? ctx.StepClient : ctx.Client;
+        var requestOptions = BuildRequestOptions(ctx.ChatOptions, input);
+        var streamAttempt  = 0;
+        while (true) // retry loop for transient streaming errors
         {
-            await ctx.Emitter.EmitAsync(EventTypes.StepHalted, turn: ctx.TurnIndex, payload: new
+        try
+        {
+            await foreach (var chunk in activeClient.GetStreamingResponseAsync(
+                ctx.History, requestOptions, cancellationToken: reqCts.Token))
             {
-                step              = activeStep.Step,
-                total,
-                expected_tool     = activeStep.Tool,
-                expected_creates  = activeStep.Creates,
-                hit_iteration_cap = hitIterationCap,
-                tool_calls        = toolCallsThisTurn.ToArray(),
-                verify_output     = verifyOutput,
-            });
-            if (!ctx.JsonMode)
-            {
-                if (activeStep.Tool is not null &&
-                    !toolCallsThisTurn.Any(t => t.Equals(activeStep.Tool, StringComparison.OrdinalIgnoreCase)))
+                // Providers emit a trailing usage-only chunk per underlying LLM call — a turn
+                // with tool round trips produces one per round trip, so sum rather than overwrite.
+                // The *first* chunk's input count is kept separately: it reflects the exact size
+                // of everything sent to the model as this turn began, before this turn's own
+                // tool-call round trips inflated the request further.
+                foreach (var usage in chunk.Contents.OfType<UsageContent>())
                 {
-                    if (hitIterationCap)
-                        AnsiConsole.MarkupLine(
-                            $"[yellow]  ⚠ Step {activeStep.Step}: hit the {StepIterationLimit}-round limit before " +
-                            $"'{Markup.Escape(activeStep.Tool)}' was called — step may be too broad, consider splitting it.[/]");
-                    else
-                        AnsiConsole.MarkupLine(
-                            $"[yellow]  ⚠ Step {activeStep.Step}: expected tool '{Markup.Escape(activeStep.Tool)}' was not called.[/]");
+                    turnInputTokens  += usage.Details.InputTokenCount  ?? 0;
+                    turnOutputTokens += usage.Details.OutputTokenCount ?? 0;
+                    turnFirstInputTokens ??= (int?)usage.Details.InputTokenCount;
                 }
-                if (activeStep.Creates is not null &&
-                    !File.Exists(Path.Combine(ctx.Cwd, activeStep.Creates)) &&
-                    !Directory.Exists(Path.Combine(ctx.Cwd, activeStep.Creates)))
-                    AnsiConsole.MarkupLine(
-                        $"[yellow]  ⚠ Step {activeStep.Step}: expected '{Markup.Escape(activeStep.Creates)}' was not created.[/]");
+
+                var funcCall = chunk.Contents.OfType<FunctionCallContent>().FirstOrDefault();
+                if (funcCall is not null)
+                {
+                    if (!inToolBatch) { toolRounds++; inToolBatch = true; }
+                    toolCallsThisTurn.Add(funcCall.Name);
+                    TrackFileChange(funcCall.Name, funcCall.Arguments, fileChanges, fileChangeSeen, ctx.Cwd);
+                    if (callIdToName is not null && funcCall.CallId is not null)
+                        callIdToName[funcCall.CallId] = funcCall.Name;
+
+                    if (ctx.JsonMode)
+                    {
+                        // Include arguments so the webview can show them on hover/expand.
+                        // Values are typically JsonElement from the model's JSON response and
+                        // serialise correctly; null Arguments → omit the field entirely.
+                        var args = funcCall.Arguments is { Count: > 0 }
+                            ? (object)funcCall.Arguments
+                            : null;
+                        ReplJsonBridge.Emit(new { type = "tool_call", name = funcCall.Name, args });
+                    }
+                    else
+                    {
+                        // Update spinner label to show the accumulating tool chain live.
+                        var chain = toolCallsThisTurn.Count <= 4
+                            ? string.Join(" → ", toolCallsThisTurn)
+                            : string.Join(" → ", toolCallsThisTurn.TakeLast(4)) +
+                              $" (+{toolCallsThisTurn.Count - 4})";
+                        spinCts.Cancel();
+                        await spinTask;
+                        spinCts.Dispose();
+                        spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
+                        var verb = toolCallsThisTurn.Count % 2 == 0 ? "fusing" : "rafting";
+                        spinTask = ReplConsole.RunSpinnerAsync($"{verb}…  {chain}", spinCts.Token, turnStart);
+                        spinning = true;
+                    }
+                    continue;
+                }
+
+                var funcResult = chunk.Contents.OfType<FunctionResultContent>().FirstOrDefault();
+                if (funcResult is not null && capturedResults is not null)
+                {
+                    var toolName = funcResult.CallId is not null &&
+                                  callIdToName?.TryGetValue(funcResult.CallId, out var n) == true
+                                  ? n : "tool";
+                    capturedResults.Add((toolName, funcResult.Result?.ToString() ?? string.Empty));
+                    continue;
+                }
+
+                var text = chunk.Text;
+                if (string.IsNullOrEmpty(text)) continue;
+                inToolBatch = false;
+                sb.Append(text);
+
+                // Terminal REPL never prints text live — only the spinner/tool chain is
+                // shown while generating; the full response is markdown-rendered once the
+                // turn completes (see below). JSON mode still streams tokens for the
+                // VS Code integration's own renderer.
+                if (!capturePlan && ctx.JsonMode)
+                    ReplJsonBridge.Emit(new { type = "token", text });
             }
-            ctx.HaltedAt = (activeStep, total);
-            ctx.HaltedRemaining.Clear();
-            foreach (var item in ctx.ExecutionQueue) ctx.HaltedRemaining.Enqueue(item);
-            ctx.HaltedToolCalls = [.. toolCallsThisTurn];
-            ctx.ExecutionQueue.Clear();
-            if (ctx.JsonMode)
-                ReplJsonBridge.Emit(new { type = "step_status", step = activeStep.Step, total, status = "halted", stepsLeft = 0 });
-            else
-                AnsiConsole.MarkupLine("[yellow]  Plan halted. Run /recover to let the agent diagnose and retry, or /resume to retry directly.[/]");
+            break; // streaming succeeded — exit retry loop
         }
-        if (!ctx.JsonMode) AnsiConsole.WriteLine();
-        return passed;
+        catch (OperationCanceledException)
+        {
+            await StopSpinnerAsync();
+            spinCts.Dispose();
+            await ctx.Emitter.EmitAsync(EventTypes.Cancelled, turn: ctx.TurnIndex);
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new { type = "cancelled" });
+            else
+                AnsiConsole.MarkupLine("[dim](cancelled)[/]");
+            if (ctx.History.Count > 0 && ctx.History[^1].Role == ChatRole.User)
+                ctx.History.RemoveAt(ctx.History.Count - 1);
+            ctx.ExecutionQueue.Clear();
+            if (!ctx.JsonMode) AnsiConsole.WriteLine();
+            reqCts.Dispose();
+            ctx.ActiveCts = null;
+            return TurnStreamResult.Failed;
+        }
+        catch (Exception ex) when (IsTransientStreamError(ex) && streamAttempt < MaxStreamRetries)
+        {
+            // Transient stream disconnection — retry automatically with back-off.
+            streamAttempt++;
+            await StopSpinnerAsync();
+            spinCts.Dispose();
+
+            await ctx.Emitter.EmitAsync(EventTypes.ReplError, turn: ctx.TurnIndex, payload: new
+            {
+                exception_type = ex.GetType().Name,
+                message        = ex.Message,
+                attempt        = streamAttempt,
+                final          = false,
+            });
+
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new { type = "retrying", attempt = streamAttempt, max = MaxStreamRetries });
+            else
+                AnsiConsole.MarkupLine(
+                    $"[dim]  ↺ {Markup.Escape(ex.Message)} — retrying ({streamAttempt}/{MaxStreamRetries})…[/]");
+
+            // Exponential back-off: 2 s, 4 s. Not wired to the cancellation token so the
+            // short sleep is never interrupted — max wasted time is 6 s total.
+            await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, streamAttempt)));
+
+            // Reset per-attempt accumulators before reissuing the request.
+            sb.Clear(); toolCallsThisTurn.Clear();
+            fileChanges.Clear(); fileChangeSeen.Clear();
+            capturedResults?.Clear(); callIdToName?.Clear();
+            toolRounds = 0; inToolBatch = false;
+            turnInputTokens = 0; turnOutputTokens = 0; turnFirstInputTokens = null;
+
+            // Restart spinner for the fresh attempt.
+            spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
+            spinTask = ctx.JsonMode
+                ? Task.CompletedTask
+                : ReplConsole.RunSpinnerAsync(capturePlan ? "planning…" : "thinking…", spinCts.Token, turnStart);
+            spinning = !ctx.JsonMode;
+            // continue while-loop → reissue GetStreamingResponseAsync
+        }
+        catch (Exception ex)
+        {
+            await StopSpinnerAsync();
+            spinCts.Dispose();
+
+            await ctx.Emitter.EmitAsync(EventTypes.ReplError, turn: ctx.TurnIndex, payload: new
+            {
+                exception_type = ex.GetType().Name,
+                message        = ex.Message,
+                attempt        = streamAttempt + 1,
+                final          = true,
+            });
+
+            var toolSurfaceHint = BuildLargeToolSurfaceHint(ex, ctx.GetActiveTools().Count);
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new
+                {
+                    type = "error",
+                    text = toolSurfaceHint is null ? ex.Message : $"{ex.Message}\n{toolSurfaceHint}",
+                });
+            else
+            {
+                AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(ex.Message)}[/]");
+                if (toolSurfaceHint is not null)
+                    AnsiConsole.MarkupLine($"[dim]  ↪ {Markup.Escape(toolSurfaceHint)}[/]");
+            }
+            if (ctx.History.Count > 0 && ctx.History[^1].Role == ChatRole.User)
+                ctx.History.RemoveAt(ctx.History.Count - 1);
+            ctx.ExecutionQueue.Clear();
+            reqCts.Dispose();
+            ctx.ActiveCts = null;
+            return TurnStreamResult.Failed;
+        }
+        } // end while (retry loop)
+
+        reqCts.Dispose();
+        ctx.ActiveCts = null;
+        await StopSpinnerAsync();
+        spinCts.Dispose();
+
+        ctx.CumulativeInputTokens  += turnInputTokens;
+        ctx.CumulativeOutputTokens += turnOutputTokens;
+        ctx.LastActualContextTokens = turnFirstInputTokens;
+
+        return new TurnStreamResult(
+            true, sb.ToString(), toolCallsThisTurn, fileChanges, toolRounds, capturedResults,
+            turnInputTokens, turnOutputTokens, turnFirstInputTokens);
     }
 
     internal static async Task ExtractMemoriesOnExitAsync(ReplSessionContext ctx)
@@ -991,7 +922,7 @@ internal static class ReplTurn
     internal static int TrimHistory(List<ChatMessage> history, int contextTokenBudget)
     {
         static int EstimateMessage(ChatMessage m) =>
-            m.Contents.Sum(AgentFactory.EstimateContentChars) / 4;
+            m.Contents.Sum(AgentContextCompactionFilters.EstimateContentChars) / 4;
 
         var total = history.Sum(EstimateMessage);
         if (total <= contextTokenBudget) return 0;
@@ -1042,22 +973,6 @@ internal static class ReplTurn
         return sb.ToString();
     }
 
-    // Read/inspect tools that do not mutate state. When only these are called during a step
-    // whose expected tool is a write operation, the agent verified the precondition and
-    // determined no action was needed — treat as a conditional skip rather than a failure.
-    private static readonly HashSet<string> InspectTools = new(StringComparer.OrdinalIgnoreCase)
-    {
-        // FileSystem (no prefix)
-        "grep_file", "read_file", "list_directory", "list_files",
-        "get_file_summary", "get_file_info",
-        // Search
-        "search_content", "search_symbol", "search_callers",
-        // Git
-        "git_status", "git_log", "git_diff", "git_show", "git_branch_list", "git_stash_list",
-        // Shell (shell_ prefix — get_env and which were stale names)
-        "shell_get_env", "shell_which",
-    };
-
     // Write-class tools whose presence confirms the agent actually mutated state.
     // When none appear in a turn that contains mutation-claim language the agent may
     // have fabricated output — see the post-turn check in ExecuteAsync.
@@ -1091,53 +1006,6 @@ internal static class ReplTurn
                lower.Contains(".h")   || lower.Contains(".html") || lower.Contains(".css") ||
                lower.Contains(".vue") || lower.Contains(".kt")   || lower.Contains(".swift");
     }
-
-    // Returns (Passed, VerifyOutput) where VerifyOutput is the trimmed command output when
-    // a verify command ran, or null when the check was purely structural (tool/file presence).
-    internal static async Task<(bool Passed, string? VerifyOutput)> VerifyStepAsync(
-        PlanStep step, List<string> toolCalls, string cwd,
-        CancellationToken cancellationToken = default)
-    {
-        // No tool calls at all = agent determined nothing needed to be done (conditional skip).
-        // Only read/inspect tools called without the expected write tool = agent verified the
-        // precondition and determined the action was already done (also a conditional skip).
-        // A wrong write tool was called is still a failure.
-        var toolOk = step.Tool is null ||
-                     toolCalls.Count == 0 ||
-                     toolCalls.Any(t => t.Equals(step.Tool, StringComparison.OrdinalIgnoreCase)) ||
-                     toolCalls.All(t => InspectTools.Contains(t));
-        var fileOk = step.Creates is null ||
-                     File.Exists(Path.Combine(cwd, step.Creates)) ||
-                     Directory.Exists(Path.Combine(cwd, step.Creates));
-
-        if (!toolOk || !fileOk) return (false, null);
-        if (step.Verifies is null)  return (true, null);
-
-        return await RunVerifyCommandAsync(step.Verifies, cwd, cancellationToken);
-    }
-
-    private static async Task<(bool Succeeded, string? Output)> RunVerifyCommandAsync(
-        string command, string cwd, CancellationToken cancellationToken)
-    {
-        const int MaxVerifyOutputChars = 300;
-        try
-        {
-            var result = await (OperatingSystem.IsWindows()
-                ? fuseraft.Infrastructure.Plugins.ProcessHelper.RunAsync(
-                    "cmd.exe",   ["/c", command], workingDirectory: cwd, timeoutSeconds: 10, cancellationToken: cancellationToken)
-                : fuseraft.Infrastructure.Plugins.ProcessHelper.RunAsync(
-                    "/bin/bash", ["-c", command], workingDirectory: cwd, timeoutSeconds: 10, cancellationToken: cancellationToken));
-            var raw = result.ToPluginOutput();
-            var output = raw.Length > MaxVerifyOutputChars
-                ? raw[..MaxVerifyOutputChars] + $"…[{raw.Length - MaxVerifyOutputChars} chars truncated]"
-                : raw;
-            return (result.Succeeded, string.IsNullOrWhiteSpace(output) ? null : output);
-        }
-        catch (Exception ex) { return (false, ex.Message); }
-    }
-
-    internal static bool TryParsePlan(string text, out PlanStep[] steps) =>
-        PlanStep.TryParse(text, out steps);
 
     private static void TrackFileChange(
         string toolName,
@@ -1188,68 +1056,4 @@ internal static class ReplTurn
         catch { return path; }
     }
 
-    // Drip-prints text character by character so large chunks don't pop in all at once.
-    // Skips the delay when output is redirected (e.g. piped to a file).
-    internal static async Task WriteChunkSmoothAsync(string text, CancellationToken ct)
-    {
-        if (Console.IsOutputRedirected || text.Length == 0)
-        {
-            Console.Write(text);
-            return;
-        }
-        foreach (var ch in text)
-        {
-            Console.Write(ch);
-            await Task.Delay(2, ct);
-        }
-    }
-
-    internal static async Task RunSpinnerAsync(string label, CancellationToken ct, DateTime? startedAt = null)
-    {
-        var i = 0;
-        try
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                var elapsed = startedAt.HasValue
-                    ? $" ({(int)(DateTime.UtcNow - startedAt.Value).TotalSeconds}s)"
-                    : string.Empty;
-                var frame = SpinnerFrames[i % SpinnerFrames.Length];
-                var text  = $"{frame} {label}{elapsed}";
-
-                // Clamp to one terminal line so the text never wraps. When a line wraps,
-                // the subsequent \r\x1b[2K only clears the continuation line and leaves
-                // the first visual line as a ghost — producing the multi-line cascade.
-                // Guard against Console.WindowWidth failing on non-interactive consoles.
-                if (!Console.IsOutputRedirected)
-                {
-                    var width = 0;
-                    try { width = Console.WindowWidth; } catch { }
-                    if (width > 4 && text.Length > width - 1)
-                        text = text[..(width - 2)] + "…";
-                }
-
-                // \r   — move to column 0
-                // \x1b[2K — erase entire line (prevents leftover chars when label shrinks)
-                Console.Write($"\r\x1b[2K\x1b[2m{text}\x1b[0m");
-                i++;
-                await Task.Delay(80, ct);
-            }
-        }
-        catch (OperationCanceledException) { }
-    }
-
-    internal static void ClearSpinnerLine()
-    {
-        Console.Write("\r\x1b[2K");
-    }
-
-    // Strips ANSI escape sequences (CSI colour codes, OSC sequences, etc.)
-    // from text captured while AnsiConsole runs in no-colour mode.  The
-    // pattern is intentionally broad so residual escape bytes do not leak
-    // into the JSON token emitted to the webview.
-    private static readonly Regex _ansiPattern =
-        new(@"\x1b(?:\[[^m]*m|\][^\x07]*\x07|[()][AB012]|[=>])", RegexOptions.Compiled);
-
-    internal static string StripAnsi(string text) => _ansiPattern.Replace(text, string.Empty);
 }

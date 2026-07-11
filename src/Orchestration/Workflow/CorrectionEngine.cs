@@ -46,7 +46,7 @@ internal static class CorrectionEngine
         IReadOnlyList<ToolCallRecord>? turnToolCalls = null)
     {
         var validKeywordList = BuildValidKeywordList(routeTable);
-        bool isReviewerType  = routeTable.PhaseBreakKeywords.Contains("APPROVED");
+        bool isReviewerType  = routeTable.IsReviewerType;
 
         if (TryInjectForeignKeywordCorrection(history, responseText, routeTable, agentName, validKeywordList)) return;
         if (TryInjectCodeBlockCorrection(history, responseText, isReviewerType, validKeywordList)) return;
@@ -253,7 +253,7 @@ internal static class CorrectionEngine
     }
 
     // Returns true and injects a code-block correction when the response contains ``` or
-    // tool-refusal phrases. Reviewer-type agents (those that can emit APPROVED) get a
+    // tool-refusal phrases. Reviewer-type agents (GraphNodeConfig.ReviewerType) get a
     // specialized message because their ```json judgement block is intentional.
     private static bool TryInjectCodeBlockCorrection(
         List<ChatMessage> history,

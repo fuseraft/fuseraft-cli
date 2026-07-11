@@ -51,15 +51,18 @@ public static class MergeEngine
             MergeStrategy.Vote         => Vote(results, logger),
             MergeStrategy.Ranked       => await RankedAsync(results, agentRunner, logger, cancellationToken),
             MergeStrategy.SemanticDiff => await SemanticDiffAsync(results, agentRunner, logger, cancellationToken),
-            MergeStrategy.Benchmark    => FallbackToUnion(MergeStrategy.Benchmark, results, logger),
+            MergeStrategy.Benchmark    => throw NotImplemented(MergeStrategy.Benchmark),
             _                          => Union(results),
         };
     }
 
     /// <summary>
     /// Synchronous merge for strategies that do not require an agent call
-    /// (Union, Consensus, Vote). For Ranked/SemanticDiff/Benchmark, prefer
-    /// <see cref="MergeAsync"/>.
+    /// (Union, Consensus, Vote). Ranked, SemanticDiff, and Benchmark all require
+    /// <see cref="MergeAsync"/> — Ranked/SemanticDiff need an agent call, and Benchmark
+    /// is not implemented at all. Calling this overload for any of the three throws rather
+    /// than silently substituting Union, so a misconfigured merge strategy fails loudly at
+    /// the call site instead of quietly changing what gets merged.
     /// </summary>
     public static IReadOnlyList<ChatMessage> Merge(
         MergeConfig config,
@@ -74,15 +77,21 @@ public static class MergeEngine
 
         return config.Strategy switch
         {
-            MergeStrategy.Union      => Union(results),
-            MergeStrategy.Consensus  => Consensus(results, logger),
-            MergeStrategy.Vote       => Vote(results, logger),
-            MergeStrategy.Ranked     => FallbackToUnion(MergeStrategy.Ranked,      results, logger),
-            MergeStrategy.SemanticDiff => FallbackToUnion(MergeStrategy.SemanticDiff, results, logger),
-            MergeStrategy.Benchmark  => FallbackToUnion(MergeStrategy.Benchmark,   results, logger),
-            _                        => Union(results),
+            MergeStrategy.Union        => Union(results),
+            MergeStrategy.Consensus    => Consensus(results, logger),
+            MergeStrategy.Vote         => Vote(results, logger),
+            MergeStrategy.Ranked       => throw new InvalidOperationException(
+                $"MergeStrategy.Ranked requires an agent call — use {nameof(MergeAsync)} instead of {nameof(Merge)}."),
+            MergeStrategy.SemanticDiff => throw new InvalidOperationException(
+                $"MergeStrategy.SemanticDiff requires an agent call — use {nameof(MergeAsync)} instead of {nameof(Merge)}."),
+            MergeStrategy.Benchmark    => throw NotImplemented(MergeStrategy.Benchmark),
+            _                          => Union(results),
         };
     }
+
+    private static NotSupportedException NotImplemented(MergeStrategy strategy) => new(
+        $"MergeStrategy.{strategy} is not implemented. Configure a different Merge.Strategy " +
+        $"(Union, Consensus, Vote, Ranked, or SemanticDiff).");
 
     // Union ────────────────────────────────────────────────────────────────────
 
@@ -249,17 +258,6 @@ public static class MergeEngine
     }
 
     // Helpers ──────────────────────────────────────────────────────────────────
-
-    private static IReadOnlyList<ChatMessage> FallbackToUnion(
-        MergeStrategy requested,
-        IReadOnlyList<(string AgentName, string Output)> results,
-        ILogger? logger)
-    {
-        logger?.LogWarning(
-            "[MergeEngine] Strategy '{Strategy}' is not implemented — falling back to union.",
-            requested);
-        return Union(results);
-    }
 
     private static string BuildBranchBlock(IReadOnlyList<(string AgentName, string Output)> results)
     {

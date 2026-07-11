@@ -54,12 +54,15 @@ public sealed class PluginRegistry : IDisposable
         _loggerFactory = loggerFactory;
     }
 
-    private readonly Dictionary<string, Func<object>> _factories =
+    // Each plugin name maps to a list of factories — almost always one, except "FileSystem",
+    // which registers a second object (FileSystemManagementOps) sharing its per-turn state.
+    // See RegisterAdditional/TryGetAll.
+    private readonly Dictionary<string, List<Func<object>>> _factories =
         new(StringComparer.OrdinalIgnoreCase);
 
     // Cached instances — plugins are created once and reused across agents in the same
     // session. The cache is invalidated when a factory is re-registered (e.g. after Configure()).
-    private readonly Dictionary<string, object> _instances =
+    private readonly Dictionary<string, List<object>> _instances =
         new(StringComparer.OrdinalIgnoreCase);
 
     // Pre-built AIFunction lists from MCP servers (or other pre-built sources).
@@ -78,7 +81,12 @@ public sealed class PluginRegistry : IDisposable
     /// </summary>
     public PluginRegistry RegisterDefaults()
     {
-        Register("FileSystem", () => new FileSystemPlugin());
+        // Constructed eagerly (not inside the factory lambda) so both registrations under
+        // "FileSystem" close over the same instance — FileSystemManagementOps borrows its
+        // per-turn HashSets by reference. See PluginRegistry's multi-object-per-name support.
+        var fsPlugin = new FileSystemPlugin();
+        Register("FileSystem", () => fsPlugin);
+        RegisterAdditional("FileSystem", () => new FileSystemManagementOps(fsPlugin));
         Register("Shell",      () => new ShellPlugin());
         Register("Git",        () => new GitPlugin());
         Register("Http",       () => new HttpPlugin(_sharedHttpClient, logger: _loggerFactory?.CreateLogger<HttpPlugin>()));
@@ -200,7 +208,13 @@ public sealed class PluginRegistry : IDisposable
         // Both are registered as singletons — the factory lambda returns the same instance.
         var shellInstance = new ShellPlugin(sandboxRoot, shellCommandApprover, security.ShellPolicy, eventSink);
         Register("Shell",      () => shellInstance);
-        Register("FileSystem", () => new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore, sessionCache: sessionReadCache, onWrite: shellInstance.InvalidateRunCache, onCacheHit: onCacheHit, exemptedPaths: ["~/.fuseraft/"]));
+
+        // Same eager-construction-plus-shared-closure pattern as RegisterDefaults — both
+        // "FileSystem" registrations must share one FileSystemPlugin instance's per-turn state.
+        var fsPlugin = new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore, sessionCache: sessionReadCache, onWrite: shellInstance.InvalidateRunCache, onCacheHit: onCacheHit, exemptedPaths: ["~/.fuseraft/"]);
+        Register("FileSystem", () => fsPlugin);
+        RegisterAdditional("FileSystem", () => new FileSystemManagementOps(
+            fsPlugin, sandboxRoot, sessionCache: sessionReadCache, versionStore: fileVersionStore, exemptedPaths: ["~/.fuseraft/"]));
         Register("Http",       () => new HttpPlugin(_sharedHttpClient, allowedHosts, apiProfiles, allowPrivateHosts, _loggerFactory?.CreateLogger<HttpPlugin>()));
         Register("Document",   () => new DocumentPlugin(sandboxRoot));
 
@@ -229,16 +243,47 @@ public sealed class PluginRegistry : IDisposable
     }
 
     /// <summary>
-    /// Registers a named plugin factory.
+    /// Registers a named plugin factory, replacing any existing registration(s) under
+    /// <paramref name="name"/> (disposing their cached instances). Use
+    /// <see cref="RegisterAdditional"/> to add a second object under an existing name instead
+    /// of replacing it.
     /// </summary>
     public PluginRegistry Register(string name, Func<object> factory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(factory);
-        _factories[name] = factory;
-        if (_instances.Remove(name, out var old) && old is IDisposable d)
-            try { d.Dispose(); } catch { /* best effort */ }
+        _factories[name] = [factory];
+        DisposeCached(name);
         return this;
+    }
+
+    /// <summary>
+    /// Registers an additional plugin factory under an existing name, without replacing what's
+    /// already registered. <see cref="GetFunctionsFromObject"/> is applied to every object
+    /// registered under a name and the results concatenated — used to split "FileSystem"'s
+    /// tool surface across <see cref="FileSystemPlugin"/> and
+    /// <see cref="FileSystemManagementOps"/> while keeping one registered name.
+    /// </summary>
+    public PluginRegistry RegisterAdditional(string name, Func<object> factory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(factory);
+        if (!_factories.TryGetValue(name, out var list))
+        {
+            list = [];
+            _factories[name] = list;
+        }
+        list.Add(factory);
+        DisposeCached(name);
+        return this;
+    }
+
+    private void DisposeCached(string name)
+    {
+        if (_instances.Remove(name, out var old))
+            foreach (var o in old)
+                if (o is IDisposable d)
+                    try { d.Dispose(); } catch { /* best effort */ }
     }
 
     /// <summary>
@@ -262,20 +307,39 @@ public sealed class PluginRegistry : IDisposable
         _aiFunctionSets.TryGetValue(name, out functions);
 
     /// <summary>
-    /// Tries to resolve a plugin instance by name.
+    /// Tries to resolve a plugin instance by name. When multiple objects are registered under
+    /// <paramref name="name"/> (see <see cref="RegisterAdditional"/>), returns the first one —
+    /// callers that need every object's tool surface should use <see cref="TryGetAll"/> instead.
     /// </summary>
     public bool TryGet(string name, [NotNullWhen(true)] out object? plugin)
     {
-        if (_factories.TryGetValue(name, out var factory))
+        if (TryGetAll(name, out var all) && all.Count > 0)
         {
-            if (!_instances.TryGetValue(name, out plugin))
-            {
-                plugin = factory();
-                _instances[name] = plugin;
-            }
+            plugin = all[0];
             return true;
         }
         plugin = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Tries to resolve every plugin instance registered under <paramref name="name"/> — a
+    /// list of one for every plugin except "FileSystem", which registers a second object
+    /// (see <see cref="RegisterAdditional"/>).
+    /// </summary>
+    public bool TryGetAll(string name, [NotNullWhen(true)] out IReadOnlyList<object>? plugins)
+    {
+        if (_factories.TryGetValue(name, out var factories))
+        {
+            if (!_instances.TryGetValue(name, out var built))
+            {
+                built = factories.Select(f => f()).ToList();
+                _instances[name] = built;
+            }
+            plugins = built;
+            return true;
+        }
+        plugins = null;
         return false;
     }
 
@@ -289,7 +353,8 @@ public sealed class PluginRegistry : IDisposable
     // names are already self-describing (e.g. ReadFile, WriteFile). Adding "file_system_"
     // would break all existing tool references in agent instructions.
     private static readonly HashSet<string> NoPrefixPlugins =
-        new(StringComparer.OrdinalIgnoreCase) { "FileSystem", "Handoff", "Skills", "Compaction" };
+        new(StringComparer.OrdinalIgnoreCase)
+            { "FileSystem", "FileSystemManagementOps", "Handoff", "Skills", "Compaction" };
 
     /// <summary>
     /// Builds <see cref="AIFunction"/> instances from a plugin object by reflecting over
@@ -347,9 +412,10 @@ public sealed class PluginRegistry : IDisposable
     public void Dispose()
     {
         _sharedHttpClient.Dispose();
-        foreach (var instance in _instances.Values)
-            if (instance is IDisposable d)
-                try { d.Dispose(); } catch { /* best effort */ }
+        foreach (var list in _instances.Values)
+            foreach (var instance in list)
+                if (instance is IDisposable d)
+                    try { d.Dispose(); } catch { /* best effort */ }
         _instances.Clear();
     }
 

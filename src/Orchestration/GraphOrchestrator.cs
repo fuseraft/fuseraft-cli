@@ -15,6 +15,7 @@ using fuseraft.Core;
 using fuseraft.Core.Exceptions;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
+using fuseraft.Orchestration.Graph;
 using fuseraft.Orchestration.Validation;
 using fuseraft.Orchestration.Workflow;
 
@@ -46,6 +47,20 @@ namespace fuseraft.Orchestration;
 /// (ContextWindow filter, ChangeTracker, GovernanceKernel, SLO recording, EventEmitter)
 /// is applied identically across orchestrators.
 /// </para>
+///
+/// <para>
+/// <b>Collaborators</b> (all in <see cref="fuseraft.Orchestration.Graph"/>): topology
+/// computation — back-edge classification, route tables, unconditional routing, parallel
+/// group membership — is owned by <see cref="fuseraft.Orchestration.Graph.GraphTopology"/>,
+/// computed once per <see cref="StreamAsync"/> call. Sub-graph (<c>SubGraphId</c>) nodes are
+/// driven by <see cref="fuseraft.Orchestration.Graph.SubGraphExecutor"/>. Parallel fan-out is
+/// driven by <see cref="fuseraft.Orchestration.Graph.ParallelFanOutExecutor"/>. Both share
+/// response-recording, validator-execution, HITL-gating, and recovery-agent logic with this
+/// class's own sequential back-edge/forward-edge turn loop via the explicit-parameter
+/// <see cref="fuseraft.Orchestration.Graph.TurnExecutionHelpers"/> static class, bundled
+/// behind one <see cref="fuseraft.Orchestration.Graph.TurnServices"/> record built from this
+/// instance's constructor parameters.
+/// </para>
 /// </summary>
 public sealed class GraphOrchestrator(
     OrchestrationConfig config,
@@ -64,10 +79,38 @@ public sealed class GraphOrchestrator(
     internal const int DefaultMaxRetries = 4;
 
     // Sentinel keyword written to AgentContext.LastKeyword when a terminal node completes.
-    // The outer loop maps this to a null destination (→ break).
-    private const string TerminalSentinel = "__GRAPH_TERMINAL__";
+    // The outer loop maps this to a null destination (→ break). Internal (not private) so
+    // GraphTopology/SubGraphExecutor/ParallelFanOutExecutor can reference the same constant
+    // instead of redeclaring it — mirrors how CorrectionEngine already reaches into
+    // DefaultMaxRetries below.
+    internal const string TerminalSentinel = "__GRAPH_TERMINAL__";
 
-    private readonly IHumanApprovalService? _humanApprovalService = humanApprovalService;
+    // Per-branch TurnIndex offset applied by ForkContext so concurrent parallel branches
+    // never emit colliding TurnIndex values to the shared MessageSink/event log. Large
+    // enough that no single branch can plausibly take this many turns (bounded by
+    // MaxRetries * MaxTotalTurnsMultiplier, typically well under 100). Internal so
+    // ParallelFanOutExecutor (which owns ForkContext/MergeParallelContexts) can reference it.
+    internal const int BranchTurnIndexStride = 100_000;
+
+    // Collaborators fixed for this instance's lifetime, bundled for TurnExecutionHelpers /
+    // SubGraphExecutor / ParallelFanOutExecutor — see TurnServices' doc comment for why
+    // SessionId/Task are intentionally excluded (they mutate post-construction). Lazily built
+    // (not a field initializer) because the callbacks below reference AgentStarting/
+    // TokenBudgetWarning, and field initializers cannot reference other instance members
+    // (CS0236) — a property getter runs after construction completes, so it's unrestricted.
+    private TurnServices? _servicesLazy;
+    private TurnServices _services => _servicesLazy ??= new(
+        config, agentFactory, logger, eventEmitter, governanceKernel, contextPipeline,
+        changeTracker, repositoryKnowledgeStore, humanApprovalService,
+        OnAgentStarting: name => AgentStarting?.Invoke(name),
+        OnTokenBudgetWarning: (name, input, warn) => TokenBudgetWarning?.Invoke(name, input, warn));
+
+    // Same lazy-property reasoning as _services (CS0236 — depends on the _services property).
+    private SubGraphExecutor? _subGraphExecutorLazy;
+    private SubGraphExecutor _subGraphExecutor => _subGraphExecutorLazy ??= new(_services, loggerFactory);
+
+    private ParallelFanOutExecutor? _parallelFanOutLazy;
+    private ParallelFanOutExecutor _parallelFanOut => _parallelFanOutLazy ??= new(_services);
 
     private string _sessionId = string.Empty;
     private string? _resumeNodeId;
@@ -75,40 +118,17 @@ public sealed class GraphOrchestrator(
     private string _task = string.Empty;
     private TaskModel? _structuredTask;
 
-    // Computed once per StreamAsync call from the graph config.
-    // Keyed by node ID (case-insensitive).
-    private Dictionary<string, int> _nodeLayers = [];
-    private Dictionary<string, List<GraphEdgeConfig>> _edgesBySource = [];
-
-    // Back-edge keyword → target node ID (null = terminal / session ends).
-    // Populated by BuildNodeRouteTables; reset at the start of each StreamAsync call.
-    private Dictionary<string, string?> _backEdgeDestinations =
-        new(StringComparer.OrdinalIgnoreCase);
-
-    // Unconditional (no-keyword) routing — wired for nodes whose only outgoing edge(s)
-    // carry no keyword. Populated by BuildNodeRouteTables alongside _backEdgeDestinations.
-    // Keyed by node ID (case-insensitive).
-    private Dictionary<string, RouteInfo>                       _unconditionalForwardRoutes      = [];
-    private Dictionary<string, string?>                         _unconditionalBackEdges          = [];
-    private Dictionary<string, IReadOnlyList<IRoutingValidator>> _unconditionalBackEdgeValidators = [];
+    // Computed once per StreamAsync call by GraphTopology.Build — back-edge classification,
+    // per-node route tables, unconditional (no-keyword) routing, and parallel fan-out group
+    // membership. Read-only for the rest of the session once assigned.
+    private GraphTopology _topology = null!;
 
     // Per-session recovery tracking — keyed by "{nodeId}::{keyword}" (forward) or
     // "{nodeId}::{keyword}::back" (back-edge). Each edge activates recovery at most once.
-    // ConcurrentDictionary because parallel workers may check/set it simultaneously.
+    // ConcurrentDictionary because parallel workers may check/set it simultaneously. Reset at
+    // the start of each StreamAsync call; passed by reference into ParallelFanOutExecutor so
+    // parallel-branch and sequential back/forward-edge recovery tracking share one dedupe space.
     private ConcurrentDictionary<string, bool> _recoveryActivated = new(StringComparer.OrdinalIgnoreCase);
-
-    // Set of parallel node IDs — populated at the start of each StreamAsync call.
-    // Parallel nodes are excluded from the MAF DAG; they are driven by fan-out in RunNodeExecutorAsync.
-    private HashSet<string> _parallelNodeIds = new(StringComparer.OrdinalIgnoreCase);
-
-    // Parallel group map: "{sourceNodeId}::{keyword}" → descriptor for the fan-out group.
-    // Populated by BuildNodeRouteTables; reset at the start of each StreamAsync call.
-    private Dictionary<string, ParallelGroup> _parallelGroups = new(StringComparer.OrdinalIgnoreCase);
-
-    // Per-call caches so RunNodeExecutorAsync can look up node config and route tables
-    // for parallel workers without threading the whole graph through parameter lists.
-    private Dictionary<string, GraphNodeConfig>   _nodeById            = new(StringComparer.OrdinalIgnoreCase);
-    private Dictionary<string, AgentRouteTable>   _routeTablesByNodeId = new(StringComparer.OrdinalIgnoreCase);
 
     // State history accumulated across all phases of the session.
     private readonly List<AgentState> _stateHistory = [];
@@ -249,35 +269,12 @@ public sealed class GraphOrchestrator(
             ? graphCfg.EntryNode
             : graphCfg.Nodes[0].Id;
 
-        _edgesBySource = graphCfg.Edges
-            .GroupBy(e => e.From, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
-
-        _nodeLayers = ComputeBfsLayers(entryNodeId);
-
-        _parallelNodeIds = graphCfg.Nodes
-            .Where(n => n.Parallel)
-            .Select(n => n.Id)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        _nodeById = nodeById;
-
-        // Build per-node route tables (also populates _backEdgeDestinations, unconditional route maps,
-        // and _parallelGroups).
-        _backEdgeDestinations            = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase) { [TerminalSentinel] = null };
-        _unconditionalForwardRoutes      = new Dictionary<string, RouteInfo>(StringComparer.OrdinalIgnoreCase);
-        _unconditionalBackEdges          = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        _unconditionalBackEdgeValidators = new Dictionary<string, IReadOnlyList<IRoutingValidator>>(StringComparer.OrdinalIgnoreCase);
-        _parallelGroups                  = new Dictionary<string, ParallelGroup>(StringComparer.OrdinalIgnoreCase);
-        _recoveryActivated               = new ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-        var routeTables = BuildNodeRouteTables(graphCfg, nodeById);
-        _routeTablesByNodeId = routeTables;
-
-        ValidateParallelConfig(graphCfg, nodeById);
+        _topology = GraphTopology.Build(graphCfg, config, nodeById, entryNodeId, logger);
+        _recoveryActivated = new ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 
         // Build MAF executor bindings (reused across all phases).
         var bindings = BuildExecutorBindings(
-            agents, agentInstructions, agentConfigs, routeTables, nodeById);
+            agents, agentInstructions, agentConfigs, _topology.RouteTablesByNodeId, nodeById);
 
         // Shared agent context.
         int seedTurn   = priorHistory is { Count: > 0 } ? priorHistory[^1].TurnIndex + 1 : 0;
@@ -311,7 +308,7 @@ public sealed class GraphOrchestrator(
         // Determine the starting node (consume resume hint, then fall back to heuristics).
         var resumeHint = _resumeNodeId;
         _resumeNodeId  = null;
-        string startNodeId = DetermineStartNodeId(priorHistory, resumeHint, entryNodeId, graphCfg, nodeById);
+        string startNodeId = _topology.DetermineStartNodeId(priorHistory, resumeHint, entryNodeId, graphCfg, nodeById);
 
         // Inner CTS so the background RunPhasesAsync is always cancelled when the consumer
         // abandons the IAsyncEnumerable (e.g. RunCommand breaks early for compaction).
@@ -442,7 +439,7 @@ public sealed class GraphOrchestrator(
                     break; // No keyword — stop to avoid infinite loop.
                 }
 
-                if (!_backEdgeDestinations.TryGetValue(lastKeyword, out var nextStart))
+                if (!_topology.BackEdgeDestinations.TryGetValue(lastKeyword, out var nextStart))
                 {
                     naturallyTerminated = true;
                     break; // Unknown keyword — stop.
@@ -552,18 +549,18 @@ public sealed class GraphOrchestrator(
         while (queue.Count > 0)
         {
             var current = queue.Dequeue();
-            foreach (var edge in _edgesBySource.GetValueOrDefault(current, []))
+            foreach (var edge in _topology.EdgesBySource.GetValueOrDefault(current, []))
             {
-                if (IsBackEdge(current, edge.To)) continue;
+                if (_topology.IsBackEdge(current, edge.To)) continue;
 
-                if (_parallelNodeIds.Contains(edge.To))
+                if (_topology.ParallelNodeIds.Contains(edge.To))
                 {
                     // Parallel nodes are excluded from the MAF DAG. Bridge the gap by
                     // adding a virtual edge from the source directly to the merge target,
                     // so the merge-target executor is registered in the workflow and
                     // reachable when the fan-out calls wfCtx.SendMessageAsync.
                     var parallelKey = $"{current}::{edge.Keyword ?? string.Empty}";
-                    if (_parallelGroups.TryGetValue(parallelKey, out var pg)
+                    if (_topology.ParallelGroups.TryGetValue(parallelKey, out var pg)
                         && !string.IsNullOrEmpty(pg.MergeTargetId)
                         && !visited.Contains(pg.MergeTargetId))
                     {
@@ -635,8 +632,9 @@ public sealed class GraphOrchestrator(
 
                 Func<AgentContext, IWorkflowContext, CancellationToken, ValueTask> subHandler =
                     async (ctx, wfCtx, ct) =>
-                        await RunSubGraphNodeAsync(
-                            node.Id, subGraphId, isTerminal, routeTable, ctx, wfCtx, ct)
+                        await _subGraphExecutor.RunSubGraphNodeAsync(
+                            node.Id, subGraphId, isTerminal, routeTable, ctx, wfCtx,
+                            _topology, _sessionId, _task, RecordNodeState, ct)
                         .ConfigureAwait(false);
 
                 var subExecutor = new FunctionExecutor<AgentContext>(
@@ -717,7 +715,7 @@ public sealed class GraphOrchestrator(
                 turn:  ctx.TurnIndex);
 
         int maxRetries      = config.Selection.Graph?.MaxRetries ?? DefaultMaxRetries;
-        int maxTotalTurns   = maxRetries * 10;
+        int maxTotalTurns   = maxRetries * (config.Selection.Graph?.MaxTotalTurnsMultiplier ?? 10);
         int consecutiveFails = 0;
         int totalTurns       = 0;
 
@@ -755,19 +753,19 @@ public sealed class GraphOrchestrator(
             {
                 if (routeTable.TerminalValidators.Count > 0)
                 {
-                    var (termOk, termErr, termValidator) = await RunValidatorsAsync(
+                    var (termOk, termErr, termValidator) = await TurnExecutionHelpers.RunValidatorsAsync(
                         routeTable.TerminalValidators, ctx.History, ct).ConfigureAwait(false);
 
                     if (!termOk)
                     {
                         consecutiveFails++;
-                        RecordGovernanceViolation(agentName, termValidator!, consecutiveFails, maxRetries);
+                        TurnExecutionHelpers.RecordGovernanceViolation(agentName, termValidator!, consecutiveFails, maxRetries, _sessionId, _services);
 
                         if (consecutiveFails >= maxRetries)
                             throw new ValidatorStuckException(agentName, termValidator!, consecutiveFails, termErr!);
 
-                        await EmitAndInjectValidationFailureAsync(
-                            agentName, "(terminal)", termValidator!, termErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
+                        await TurnExecutionHelpers.EmitAndInjectValidationFailureAsync(
+                            agentName, "(terminal)", termValidator!, termErr!, responseText, consecutiveFails, maxRetries, ctx, ct, _services);
                         continue;
                     }
                 }
@@ -794,89 +792,11 @@ public sealed class GraphOrchestrator(
 
             if (!hasKeywordRoutes)
             {
-                if (_unconditionalForwardRoutes.TryGetValue(nodeId, out var autoFwdRoute))
-                {
-                    var (autoOk, autoErr, autoValidator) = await RunValidatorsAsync(
-                        autoFwdRoute.Validators, ctx.History, ct).ConfigureAwait(false);
-
-                    if (autoOk)
-                    {
-                        if (autoFwdRoute.Validators.Count > 0)
-                            governanceKernel?.SloEngine.Get("policy-compliance")?.Record(1.0);
-
-                        consecutiveFails = 0;
-                        ctx.LastKeyword  = null;
-
-                        if (eventEmitter is not null)
-                            await eventEmitter.EmitAsync(EventTypes.AgentRouted,
-                                agent:   agentName,
-                                turn:    agentMsg!.TurnIndex,
-                                payload: new { keyword = "(unconditional)", to = autoFwdRoute.NextExecutorName });
-
-                        RecordNodeState(ctx, autoFwdRoute.NextExecutorName);
-
-                        ctx.History.Add(new ChatMessage(ChatRole.User,
-                            $"[fuseraft: {agentName} → {autoFwdRoute.NextExecutorName}]"));
-
-                        await wfCtx.SendMessageAsync(ctx, autoFwdRoute.NextExecutorId, ct).ConfigureAwait(false);
-                        return;
-                    }
-
-                    consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-                    RecordGovernanceViolation(agentName, autoValidator!, consecutiveFails, maxRetries);
-
-                    if (consecutiveFails >= maxRetries)
-                        throw new ValidatorStuckException(agentName, autoValidator!, consecutiveFails, autoErr!);
-
-                    await EmitAndInjectValidationFailureAsync(
-                        agentName, "(unconditional)", autoValidator!, autoErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
-                    continue;
-                }
-
-                if (_unconditionalBackEdges.TryGetValue(nodeId, out var autoBackDest))
-                {
-                    if (_unconditionalBackEdgeValidators.TryGetValue(nodeId, out var uncBackValidators)
-                        && uncBackValidators.Count > 0)
-                    {
-                        var (ubOk, ubErr, ubValidator) = await RunValidatorsAsync(
-                            uncBackValidators, ctx.History, ct).ConfigureAwait(false);
-
-                        if (!ubOk)
-                        {
-                            consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-                            RecordGovernanceViolation(agentName, ubValidator!, consecutiveFails, maxRetries);
-
-                            if (consecutiveFails >= maxRetries)
-                                throw new ValidatorStuckException(agentName, ubValidator!, consecutiveFails, ubErr!);
-
-                            await EmitAndInjectValidationFailureAsync(
-                                agentName, "(unconditional-back)", ubValidator!, ubErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
-                            continue;
-                        }
-                    }
-
-                    consecutiveFails = 0;
-                    // Use a synthetic keyword so the outer phase loop can look up the destination.
-                    ctx.LastKeyword  = $"__UNCOND_BACK:{nodeId.ToLowerInvariant()}";
-
-                    RecordNodeState(ctx, autoBackDest ?? agentName);
-
-                    if (eventEmitter is not null)
-                        await eventEmitter.EmitAsync(EventTypes.StateAdvanced,
-                            agent: agentName,
-                            turn:  agentMsg!.TurnIndex,
-                            payload: new { version = ctx.CurrentState.Version, phase_break = "(unconditional)", next = autoBackDest ?? "(terminal)" });
-
-                    await wfCtx.YieldOutputAsync(ctx, ct).ConfigureAwait(false);
-                    return;
-                }
-
-                // Node has no keyword edges and no unconditional route wired — config gap.
-                // Log and fall through to the correction path so HITL escalation fires normally.
-                logger.LogError(
-                    "[GraphOrchestrator] Node '{NodeId}' (agent '{Agent}') has no keyword edges " +
-                    "and no unconditional route — it can never route. Check the graph config.",
-                    nodeId, agentName);
+                var (uncHandled, uncShouldReturn, uncFails) = await HandleUnconditionalRoutingAsync(
+                    nodeId, agentName, responseText, consecutiveFails, maxRetries, ctx, agentMsg!, wfCtx, ct);
+                consecutiveFails = uncFails;
+                if (uncShouldReturn) return;
+                if (uncHandled) continue;
             }
 
             // Keyword detection
@@ -934,110 +854,15 @@ public sealed class GraphOrchestrator(
             // Parallel fan-out keyword
 
             var pgKey = $"{nodeId}::{foundKeyword}";
-            if (foundKeyword is not null && _parallelGroups.TryGetValue(pgKey, out var parallelGroup))
+            if (foundKeyword is not null && _topology.ParallelGroups.TryGetValue(pgKey, out var parallelGroup))
             {
-                var (pgOk, pgErr, pgValidator) = await RunValidatorsAsync(
-                    parallelGroup.Validators, ctx.History, ct).ConfigureAwait(false);
-
-                if (!pgOk)
-                {
-                    consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-                    RecordGovernanceViolation(agentName, pgValidator!, consecutiveFails, maxRetries);
-
-                    if (consecutiveFails >= maxRetries)
-                        throw new ValidatorStuckException(agentName, pgValidator!, consecutiveFails, pgErr!);
-
-                    await EmitAndInjectValidationFailureAsync(
-                        agentName, foundKeyword, pgValidator!, pgErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
-                    continue;
-                }
-
-                if (parallelGroup.RequireHumanApproval && _humanApprovalService is not null)
-                {
-                    var (pgApproved, pgApprovedFails) = await ApplyHumanApprovalGateAsync(
-                        foundKeyword, agentName, parallelGroup.MergeTargetName,
-                        $"Parallel dispatch to [{string.Join(", ", parallelGroup.NodeIds)}] was blocked by the operator. " +
-                        $"Continue your work or await further instructions.",
-                        consecutiveFails, ctx, ct);
-                    consecutiveFails = pgApprovedFails;
-                    if (!pgApproved) continue;
-                }
-
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync(EventTypes.ParallelStart,
-                        agent:   agentName,
-                        payload: new { keyword = foundKeyword, nodes = parallelGroup.NodeIds, merge_target = parallelGroup.MergeTargetName });
-
-                int forkPoint = ctx.History.Count;
-                var forkPairs = parallelGroup.NodeIds.Select(targetNodeId =>
-                {
-                    var targetNode      = _nodeById[targetNodeId];
-                    var targetAgentName = targetNode.Agent;
-                    return (
-                        NodeId:       targetNodeId,
-                        AgentName:    targetAgentName,
-                        Agent:        agents[targetAgentName],
-                        Instructions: agentInstructions.GetValueOrDefault(targetAgentName, string.Empty),
-                        AgentCfg:     agentConfigs.GetValueOrDefault(targetAgentName) ?? new AgentConfig(),
-                        RouteTable:   _routeTablesByNodeId.GetValueOrDefault(targetNodeId, new AgentRouteTable()),
-                        Fork:         ForkContext(ctx));
-                }).ToList();
-
-                var parallelTasks = forkPairs
-                    .Select(async fp =>
-                    {
-                        if (eventEmitter is not null)
-                            await eventEmitter.EmitAsync(EventTypes.ParallelBranchStart,
-                                agent:   fp.AgentName,
-                                payload: new { node = fp.NodeId });
-                        try
-                        {
-                            await RunParallelNodeAsync(
-                                fp.NodeId, fp.AgentName, fp.Agent, fp.Instructions, fp.AgentCfg,
-                                fp.RouteTable, fp.Fork, ct, agents, agentInstructions, agentConfigs);
-                            if (eventEmitter is not null)
-                                _ = eventEmitter.EmitAsync(EventTypes.ParallelBranchEnd,
-                                    agent:   fp.AgentName,
-                                    payload: new { node = fp.NodeId });
-                        }
-                        catch (Exception branchEx)
-                        {
-                            if (eventEmitter is not null)
-                                _ = eventEmitter.EmitAsync(EventTypes.ParallelBranchError,
-                                    agent:   fp.AgentName,
-                                    payload: new { node = fp.NodeId, error = branchEx.Message });
-                            throw;
-                        }
-                    })
-                    .ToArray();
-
-                await Task.WhenAll(parallelTasks).ConfigureAwait(false);
-
-                MergeParallelContexts(ctx, forkPoint,
-                    forkPairs.Select(fp => (fp.NodeId, fp.AgentName, fp.Fork)).ToList());
-
-                consecutiveFails = 0;
-                ctx.LastKeyword  = foundKeyword;
-
-                RecordNodeState(ctx, parallelGroup.MergeTargetName);
-
-                if (eventEmitter is not null)
-                {
-                    await eventEmitter.EmitAsync(EventTypes.ParallelMerge,
-                        agent:   agentName,
-                        payload: new { keyword = foundKeyword, to = parallelGroup.MergeTargetName });
-
-                    await eventEmitter.EmitAsync(EventTypes.StateAdvanced,
-                        agent: agentName,
-                        turn:  agentMsg!.TurnIndex,
-                        payload: new { version = ctx.CurrentState.Version, parallel_merge = true, to = parallelGroup.MergeTargetName });
-                }
-
-                ctx.History.Add(new ChatMessage(ChatRole.User,
-                    $"[fuseraft: parallel workers complete → {parallelGroup.MergeTargetName}]"));
-
-                await wfCtx.SendMessageAsync(ctx, parallelGroup.MergeTargetId, ct).ConfigureAwait(false);
-                return;
+                var (pgShouldReturn, pgFails) = await _parallelFanOut.RunFanOutAsync(
+                    nodeId, agentName, foundKeyword, parallelGroup, responseText, ctx, wfCtx,
+                    agents, agentInstructions, agentConfigs, _topology, _recoveryActivated,
+                    _sessionId, _task, RecordNodeState, consecutiveFails, maxRetries, agentMsg!, ct);
+                consecutiveFails = pgFails;
+                if (pgShouldReturn) return;
+                continue;
             }
 
             // Forward-edge keyword: validate and route.
@@ -1071,7 +896,7 @@ public sealed class GraphOrchestrator(
             await CorrectionEngine.InjectNoKeywordCorrection(
                 ctx.History, responseText, agentName, consecutiveFails, routeTable, eventEmitter,
                 agentMsg!.ToolCalls);
-            await PersistCorrectionsAsync(ctx, histBefore2, ct).ConfigureAwait(false);
+            await TurnExecutionHelpers.PersistCorrectionsAsync(ctx, histBefore2, ct).ConfigureAwait(false);
 
             if (consecutiveFails >= maxRetries)
             {
@@ -1097,7 +922,7 @@ public sealed class GraphOrchestrator(
     /// Single agent turn and stream collection. Assembles context via
     /// <see cref="HandleContextOverflowAsync"/>, emits <c>turn_start</c>, runs the agent,
     /// handles timeout by injecting a correction and signalling retry, then records and
-    /// emits the response via <see cref="RecordAndEmitAsync"/>.
+    /// emits the response via <see cref="fuseraft.Orchestration.Graph.TurnExecutionHelpers.RecordAndEmitAsync"/>.
     /// </summary>
     /// <returns>
     /// A tuple of (<see cref="AgentResponse"/>, <see cref="AgentMessage"/>,
@@ -1173,7 +998,7 @@ public sealed class GraphOrchestrator(
             agentName, nodeId, totalTurns,
             StringHelpers.Truncate((response.Text ?? "").Replace('\n', ' '), 200));
 
-        var agentMsg = await RecordAndEmitAsync(response, agentName, ctx, ct);
+        var agentMsg = await TurnExecutionHelpers.RecordAndEmitAsync(response, agentName, ctx, ct, _sessionId, _services);
         return (response, agentMsg, consecutiveFails, false);
     }
 
@@ -1205,14 +1030,14 @@ public sealed class GraphOrchestrator(
                     SessionId     = _sessionId,
                 }, ct);
             context = assembled.Messages;
-            await EmitContextWindowWarnAsync(agentName, agentCfg, assembled.Messages, ctx);
+            await TurnExecutionHelpers.EmitContextWindowWarnAsync(agentName, agentCfg, assembled.Messages, ctx, _services);
             if (eventEmitter is not null)
-                await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, ctx.TurnIndex);
+                await TurnExecutionHelpers.EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, ctx.TurnIndex);
         }
         else
         {
             var filtered = ContextWindowFilter.Apply(ctx.History, agentCfg.ContextWindow);
-            await EmitContextWindowWarnAsync(agentName, agentCfg, filtered, ctx);
+            await TurnExecutionHelpers.EmitContextWindowWarnAsync(agentName, agentCfg, filtered, ctx, _services);
             context = !string.IsNullOrWhiteSpace(instructions)
                 ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
                 : filtered;
@@ -1252,13 +1077,13 @@ public sealed class GraphOrchestrator(
         if (routeTable.PhaseBreakValidators.TryGetValue(foundKeyword, out var pbValidators)
             && pbValidators.Count > 0)
         {
-            var (pbOk, pbErr, pbValidator) = await RunValidatorsAsync(
+            var (pbOk, pbErr, pbValidator) = await TurnExecutionHelpers.RunValidatorsAsync(
                 pbValidators, ctx.History, ct).ConfigureAwait(false);
 
             if (!pbOk)
             {
                 consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-                RecordGovernanceViolation(agentName, pbValidator!, consecutiveFails, maxRetries);
+                TurnExecutionHelpers.RecordGovernanceViolation(agentName, pbValidator!, consecutiveFails, maxRetries, _sessionId, _services);
 
                 if (consecutiveFails >= maxRetries)
                     throw new ValidatorStuckException(agentName, pbValidator!, consecutiveFails, pbErr!);
@@ -1271,33 +1096,33 @@ public sealed class GraphOrchestrator(
                     && agents.TryGetValue(backRecoveryName, out var backRecoveryAgt))
                 {
                     _recoveryActivated.TryAdd(backEdgeKey, true);
-                    await InvokeRecoveryAgentAsync(
+                    await TurnExecutionHelpers.InvokeRecoveryAgentAsync(
                         backRecoveryName, backRecoveryAgt,
                         agentInstructions, agentConfigs,
                         $"'{pbValidator}' failed {consecutiveFails}× on back-edge '{foundKeyword}'",
-                        pbErr!, foundKeyword, ctx, ct);
+                        pbErr!, foundKeyword, ctx, ct, _sessionId, _task, _services);
                     consecutiveFails = 0;
                     return (true, false, consecutiveFails);
                 }
 
-                await EmitAndInjectValidationFailureAsync(
-                    agentName, foundKeyword, pbValidator!, pbErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
+                await TurnExecutionHelpers.EmitAndInjectValidationFailureAsync(
+                    agentName, foundKeyword, pbValidator!, pbErr!, responseText, consecutiveFails, maxRetries, ctx, ct, _services);
                 return (true, false, consecutiveFails);
             }
         }
 
         // Human approval gate for back-edges.
         if (routeTable.PhaseBreakRequireHumanApproval.Contains(foundKeyword)
-            && _humanApprovalService is not null)
+            && _services.HumanApprovalService is not null)
         {
-            var backTarget = _backEdgeDestinations.TryGetValue(foundKeyword, out var pbd0)
+            var backTarget = _topology.BackEdgeDestinations.TryGetValue(foundKeyword, out var pbd0)
                 ? pbd0 ?? "(terminal)"
                 : "(terminal)";
-            var (approved, approvedFails) = await ApplyHumanApprovalGateAsync(
+            var (approved, approvedFails) = await TurnExecutionHelpers.ApplyHumanApprovalGateAsync(
                 foundKeyword, agentName, backTarget,
                 $"Phase-break to '{backTarget}' was blocked by the operator. " +
                 $"Continue your work or await further instructions.",
-                consecutiveFails, ctx, ct);
+                consecutiveFails, ctx, ct, _services);
             consecutiveFails = approvedFails;
             if (!approved) return (true, false, consecutiveFails);
         }
@@ -1305,7 +1130,7 @@ public sealed class GraphOrchestrator(
         consecutiveFails = 0;
         ctx.LastKeyword  = foundKeyword;
 
-        var backEdgeDest = _backEdgeDestinations.TryGetValue(foundKeyword, out var pbd) ? pbd : null;
+        var backEdgeDest = _topology.BackEdgeDestinations.TryGetValue(foundKeyword, out var pbd) ? pbd : null;
         RecordNodeState(ctx, backEdgeDest ?? agentName);
 
         if (eventEmitter is not null)
@@ -1319,39 +1144,114 @@ public sealed class GraphOrchestrator(
     }
 
     /// <summary>
-    /// HITL approval prompt and approval branching. When the human-approval service
-    /// rejects the route, injects a blocked-route message into history, persists it to
-    /// the message sink, and resets <paramref name="consecutiveFails"/> to zero.
+    /// Unconditional (no-keyword) routing for nodes whose only outgoing edge(s) carry no
+    /// keyword — routes automatically without requiring the agent to emit a handoff keyword.
+    /// Checks a forward route first, then a back-edge; logs a config-gap error and falls
+    /// through (<c>Handled=false</c>) when the node has neither wired.
     /// </summary>
     /// <returns>
-    /// A tuple of (approved, updated consecutiveFails). When <c>approved</c> is
-    /// <c>false</c> the caller must <c>continue</c> the turn loop.
+    /// A tuple of (handled, shouldReturn, consecutiveFails).
+    /// <c>handled=false</c> means no unconditional route is wired for this node — the caller
+    /// must fall through to keyword detection. <c>handled=true, shouldReturn=true</c> means
+    /// the route fired and the caller must <c>return</c>. <c>handled=true, shouldReturn=false</c>
+    /// means validation failed and the caller must <c>continue</c>.
     /// </returns>
-    private async Task<(bool Approved, int ConsecutiveFails)> ApplyHumanApprovalGateAsync(
-        string keyword,
+    private async Task<(bool Handled, bool ShouldReturn, int ConsecutiveFails)> HandleUnconditionalRoutingAsync(
+        string nodeId,
         string agentName,
-        string targetName,
-        string blockedMessage,
+        string responseText,
         int consecutiveFails,
+        int maxRetries,
         AgentContext ctx,
+        AgentMessage agentMsg,
+        IWorkflowContext wfCtx,
         CancellationToken ct)
     {
-        var approved = await _humanApprovalService!.PromptRouteApprovalAsync(
-            keyword, agentName, targetName);
-
-        if (eventEmitter is not null)
-            _ = eventEmitter.EmitAsync(approved ? EventTypes.HitlApproved : EventTypes.HitlRejected,
-                agent:   agentName,
-                payload: new { keyword, target = targetName });
-
-        if (!approved)
+        if (_topology.UnconditionalForwardRoutes.TryGetValue(nodeId, out var autoFwdRoute))
         {
-            ctx.History.Add(new ChatMessage(ChatRole.User, blockedMessage));
-            consecutiveFails = 0;
-            int histBeforeBlocked = ctx.History.Count - 1;
-            await PersistCorrectionsAsync(ctx, histBeforeBlocked, ct).ConfigureAwait(false);
+            var (autoOk, autoErr, autoValidator) = await TurnExecutionHelpers.RunValidatorsAsync(
+                autoFwdRoute.Validators, ctx.History, ct).ConfigureAwait(false);
+
+            if (autoOk)
+            {
+                if (autoFwdRoute.Validators.Count > 0)
+                    governanceKernel?.SloEngine.Get("policy-compliance")?.Record(1.0);
+
+                consecutiveFails = 0;
+                ctx.LastKeyword  = null;
+
+                if (eventEmitter is not null)
+                    await eventEmitter.EmitAsync(EventTypes.AgentRouted,
+                        agent:   agentName,
+                        turn:    agentMsg.TurnIndex,
+                        payload: new { keyword = "(unconditional)", to = autoFwdRoute.NextExecutorName });
+
+                RecordNodeState(ctx, autoFwdRoute.NextExecutorName);
+
+                ctx.History.Add(new ChatMessage(ChatRole.User,
+                    $"[fuseraft: {agentName} → {autoFwdRoute.NextExecutorName}]"));
+
+                await wfCtx.SendMessageAsync(ctx, autoFwdRoute.NextExecutorId, ct).ConfigureAwait(false);
+                return (true, true, consecutiveFails);
+            }
+
+            consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
+            TurnExecutionHelpers.RecordGovernanceViolation(agentName, autoValidator!, consecutiveFails, maxRetries, _sessionId, _services);
+
+            if (consecutiveFails >= maxRetries)
+                throw new ValidatorStuckException(agentName, autoValidator!, consecutiveFails, autoErr!);
+
+            await TurnExecutionHelpers.EmitAndInjectValidationFailureAsync(
+                agentName, "(unconditional)", autoValidator!, autoErr!, responseText, consecutiveFails, maxRetries, ctx, ct, _services);
+            return (true, false, consecutiveFails);
         }
-        return (approved, consecutiveFails);
+
+        if (_topology.UnconditionalBackEdges.TryGetValue(nodeId, out var autoBackDest))
+        {
+            if (_topology.UnconditionalBackEdgeValidators.TryGetValue(nodeId, out var uncBackValidators)
+                && uncBackValidators.Count > 0)
+            {
+                var (ubOk, ubErr, ubValidator) = await TurnExecutionHelpers.RunValidatorsAsync(
+                    uncBackValidators, ctx.History, ct).ConfigureAwait(false);
+
+                if (!ubOk)
+                {
+                    consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
+                    TurnExecutionHelpers.RecordGovernanceViolation(agentName, ubValidator!, consecutiveFails, maxRetries, _sessionId, _services);
+
+                    if (consecutiveFails >= maxRetries)
+                        throw new ValidatorStuckException(agentName, ubValidator!, consecutiveFails, ubErr!);
+
+                    await TurnExecutionHelpers.EmitAndInjectValidationFailureAsync(
+                        agentName, "(unconditional-back)", ubValidator!, ubErr!, responseText, consecutiveFails, maxRetries, ctx, ct, _services);
+                    return (true, false, consecutiveFails);
+                }
+            }
+
+            consecutiveFails = 0;
+            // Use a synthetic keyword so the outer phase loop can look up the destination.
+            ctx.LastKeyword  = $"__UNCOND_BACK:{nodeId.ToLowerInvariant()}";
+
+            RecordNodeState(ctx, autoBackDest ?? agentName);
+
+            if (eventEmitter is not null)
+                await eventEmitter.EmitAsync(EventTypes.StateAdvanced,
+                    agent: agentName,
+                    turn:  agentMsg.TurnIndex,
+                    payload: new { version = ctx.CurrentState.Version, phase_break = "(unconditional)", next = autoBackDest ?? "(terminal)" });
+
+            await wfCtx.YieldOutputAsync(ctx, ct).ConfigureAwait(false);
+            return (true, true, consecutiveFails);
+        }
+
+        // Node has no keyword edges and no unconditional route wired — config gap.
+        // Log and fall through to the correction path so HITL escalation fires normally.
+        logger.LogError(
+            "[GraphOrchestrator] Node '{NodeId}' (agent '{Agent}') has no keyword edges " +
+            "and no unconditional route — it can never route. Check the graph config.",
+            nodeId, agentName);
+
+        return (false, false, consecutiveFails);
     }
 
     /// <summary>
@@ -1382,7 +1282,7 @@ public sealed class GraphOrchestrator(
         Dictionary<string, AgentConfig> agentConfigs,
         CancellationToken ct)
     {
-        var (ok, errMsg, failingValidator) = await RunValidatorsAsync(
+        var (ok, errMsg, failingValidator) = await TurnExecutionHelpers.RunValidatorsAsync(
             route.Validators, ctx.History, ct).ConfigureAwait(false);
 
         if (ok)
@@ -1391,13 +1291,13 @@ public sealed class GraphOrchestrator(
                 governanceKernel?.SloEngine.Get("policy-compliance")?.Record(1.0);
 
             // Human approval gate: prompt before the route fires.
-            if (route.RequireHumanApproval && _humanApprovalService is not null)
+            if (route.RequireHumanApproval && _services.HumanApprovalService is not null)
             {
-                var (approved, approvedFails) = await ApplyHumanApprovalGateAsync(
+                var (approved, approvedFails) = await TurnExecutionHelpers.ApplyHumanApprovalGateAsync(
                     foundKeyword, agentName, route.NextExecutorName,
                     $"Route to {route.NextExecutorName} was blocked by the operator. " +
                     $"Continue your work or await further instructions.",
-                    consecutiveFails, ctx, ct);
+                    consecutiveFails, ctx, ct, _services);
                 consecutiveFails = approvedFails;
                 if (!approved) return (true, false, consecutiveFails);
             }
@@ -1428,7 +1328,7 @@ public sealed class GraphOrchestrator(
         // Validator failed — clamp to maxRetries-1 so a single keyword find is not
         // penalised as heavily as a missing keyword before injecting correction.
         consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-        RecordGovernanceViolation(agentName, failingValidator!, consecutiveFails, maxRetries);
+        TurnExecutionHelpers.RecordGovernanceViolation(agentName, failingValidator!, consecutiveFails, maxRetries, _sessionId, _services);
 
         if (consecutiveFails >= maxRetries)
             throw new ValidatorStuckException(agentName, failingValidator!, consecutiveFails, errMsg!);
@@ -1441,17 +1341,17 @@ public sealed class GraphOrchestrator(
             && agents.TryGetValue(route.RecoveryAgent, out var fwdRecoveryAgt))
         {
             _recoveryActivated.TryAdd(fwdEdgeKey, true);
-            await InvokeRecoveryAgentAsync(
+            await TurnExecutionHelpers.InvokeRecoveryAgentAsync(
                 route.RecoveryAgent, fwdRecoveryAgt,
                 agentInstructions, agentConfigs,
                 $"'{failingValidator}' failed {consecutiveFails}× on edge '{foundKeyword}'",
-                errMsg!, foundKeyword, ctx, ct);
+                errMsg!, foundKeyword, ctx, ct, _sessionId, _task, _services);
             consecutiveFails = 0;
             return (true, false, consecutiveFails);
         }
 
-        await EmitAndInjectValidationFailureAsync(
-            agentName, foundKeyword, failingValidator!, errMsg!, responseText, consecutiveFails, maxRetries, ctx, ct);
+        await TurnExecutionHelpers.EmitAndInjectValidationFailureAsync(
+            agentName, foundKeyword, failingValidator!, errMsg!, responseText, consecutiveFails, maxRetries, ctx, ct, _services);
         return (true, false, consecutiveFails);
     }
 
@@ -1464,1339 +1364,6 @@ public sealed class GraphOrchestrator(
     {
         ctx.CurrentState = StateHandoff.Advance(ctx.CurrentState, nextNodeName);
         lock (_stateHistoryLock) _stateHistory.Add(ctx.CurrentState);
-    }
-
-    // -------------------------------------------------------------------------
-    // Shared per-turn helpers
-    // -------------------------------------------------------------------------
-
-    private async Task<AgentMessage> RecordAndEmitAsync(
-        AgentResponse response,
-        string agentName,
-        AgentContext ctx,
-        CancellationToken ct)
-    {
-        foreach (var msg in response.Messages)
-        {
-            if (msg.Role == ChatRole.Assistant && string.IsNullOrEmpty(msg.AuthorName))
-                msg.AuthorName = agentName;
-            ctx.History.Add(msg);
-        }
-
-        var agentMsg = new AgentMessage
-        {
-            AgentName = agentName,
-            Content   = response.Text ?? string.Empty,
-            Role      = "assistant",
-            TurnIndex = ctx.TurnIndex++,
-            Usage     = OrchestratorHelpers.ExtractUsage(response),
-            ToolCalls = OrchestratorHelpers.ExtractToolCalls(response.Messages)
-        };
-
-        ctx.CumulativeTokens += agentMsg.Usage?.TotalTokens ?? 0;
-
-        var warnThreshold = config.WarnTurnTokens;
-        if (warnThreshold > 0 && agentMsg.Usage?.InputTokens is { } inputToks && inputToks > warnThreshold)
-            TokenBudgetWarning?.Invoke(agentName, inputToks, warnThreshold);
-
-        // Stream before budget check — work was done and tokens already consumed.
-        await ctx.MessageSink.WriteAsync(agentMsg, ct).ConfigureAwait(false);
-
-        if (config.MaxTotalTokens is { } limit && ctx.CumulativeTokens > limit)
-            throw new BudgetExceededException(ctx.CumulativeTokens, limit);
-
-        if (eventEmitter is not null)
-        {
-            await eventEmitter.EmitAsync(EventTypes.TurnEnd,
-                agent: agentName,
-                turn:  agentMsg.TurnIndex,
-                payload: new
-                {
-                    input_tokens  = agentMsg.Usage?.InputTokens,
-                    output_tokens = agentMsg.Usage?.OutputTokens,
-                }).ConfigureAwait(false);
-
-            await eventEmitter.EmitAsync(EventTypes.AgentEnd,
-                agent: agentName,
-                turn:  agentMsg.TurnIndex,
-                payload: new
-                {
-                    input_tokens  = agentMsg.Usage?.InputTokens,
-                    output_tokens = agentMsg.Usage?.OutputTokens,
-                }).ConfigureAwait(false);
-        }
-
-        // Emit reasoning content when the model produced any.
-        if (eventEmitter is not null)
-        {
-            const int MaxReasoningChars = 8_000;
-            var reasoningText = string.Concat(
-                response.Messages
-                    .SelectMany(m => m.Contents.OfType<TextReasoningContent>())
-                    .Select(r => r.Text));
-            if (!string.IsNullOrWhiteSpace(reasoningText))
-            {
-                var truncated = reasoningText.Length > MaxReasoningChars
-                    ? reasoningText[..MaxReasoningChars] + $"\n[TRUNCATED — {reasoningText.Length:N0} chars total]"
-                    : reasoningText;
-                await eventEmitter.EmitAsync(EventTypes.Reasoning,
-                    agent:   agentName,
-                    turn:    agentMsg.TurnIndex,
-                    payload: new { text = truncated }).ConfigureAwait(false);
-            }
-        }
-
-        if (changeTracker is not null)
-        {
-            try { await changeTracker.FlushTurnAsync(agentName, agentMsg.TurnIndex, CancellationToken.None).ConfigureAwait(false); }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex,
-                    "ChangeTracker flush failed for turn {Turn} ({Agent})",
-                    agentMsg.TurnIndex, agentName);
-            }
-        }
-
-        // Persist entity-scoped findings from tool calls for future session retrieval.
-        if (repositoryKnowledgeStore is not null && !string.IsNullOrEmpty(_sessionId))
-        {
-            try
-            {
-                var observations = ObservationExtractor.Extract(
-                    (IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>)response.Messages,
-                    agentName, agentMsg.TurnIndex);
-                foreach (var obs in observations)
-                {
-                    if (string.IsNullOrWhiteSpace(obs.Entity)) continue;
-                    await repositoryKnowledgeStore.AddAsync(new RepositoryKnowledgeFinding
-                    {
-                        Entity     = obs.Entity!,
-                        Finding    = obs.Finding,
-                        Source     = _sessionId,
-                        Confidence = obs.Confidence,
-                        AgentName  = obs.AgentName,
-                        Kind       = obs.Source is "write_file" or "patch_file" or "delete_file"
-                                     ? "change" : "observation",
-                    }, CancellationToken.None).ConfigureAwait(false);
-                }
-            }
-            catch { /* best-effort */ }
-        }
-
-        return agentMsg;
-    }
-
-    private static Task EmitContextAssemblyAsync(
-        EventEmitter emitter,
-        ContextAssemblyMetrics metrics,
-        int turn) =>
-        emitter.EmitAsync(EventTypes.ContextAssembly,
-            agent: metrics.AgentName,
-            turn:  turn,
-            payload: new
-            {
-                knowledge_retrieved  = metrics.KnowledgeItemsRetrieved,
-                knowledge_included   = metrics.KnowledgeItemsIncluded,
-                memory_loaded        = metrics.MemoryEntriesLoaded,
-                memory_included      = metrics.MemoryEntriesIncluded,
-                artifacts            = metrics.ArtifactsAssembled,
-                context_chars        = metrics.TotalContextChars,
-                system_prompt_chars  = metrics.SystemPromptChars,
-                assembly_ms          = (int)metrics.AssemblyDuration.TotalMilliseconds,
-                context_strategy     = metrics.ContextStrategy,
-                declared_sources     = metrics.DeclaredSources,
-                empty_sources        = metrics.EmptySources,
-            });
-
-    private static async ValueTask PersistCorrectionsAsync(
-        AgentContext ctx,
-        int historyCountBefore,
-        CancellationToken ct)
-    {
-        for (int i = historyCountBefore; i < ctx.History.Count; i++)
-        {
-            var injected = ctx.History[i];
-            if (injected.Role != ChatRole.User) continue;
-
-            var correctionText = string.Concat(injected.Contents.OfType<TextContent>().Select(t => t.Text));
-            if (string.IsNullOrWhiteSpace(correctionText)) continue;
-
-            await ctx.MessageSink.WriteAsync(new AgentMessage
-            {
-                AgentName = AgentNames.Orchestrator,
-                Content   = correctionText,
-                Role      = "user",
-                TurnIndex = Math.Max(0, ctx.TurnIndex - 1),
-            }, ct).ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a recovery agent for one intervention turn and appends its response to
-    /// shared history. Best-effort — exceptions are swallowed so the caller's retry loop
-    /// continues normally even when the recovery agent itself fails.
-    /// </summary>
-    private async Task InvokeRecoveryAgentAsync(
-        string recoveryAgentName,
-        AIAgent recoveryAgent,
-        Dictionary<string, string> agentInstructions,
-        Dictionary<string, AgentConfig> agentConfigs,
-        string reason,
-        string validatorError,
-        string triggeringKeyword,
-        AgentContext ctx,
-        CancellationToken ct)
-    {
-        var recoveryCfg = agentConfigs.GetValueOrDefault(recoveryAgentName) ?? new AgentConfig();
-        var recoveryInstructions = agentInstructions.GetValueOrDefault(recoveryAgentName, string.Empty);
-
-        ctx.History.Add(new ChatMessage(ChatRole.User,
-            $"RECOVERY ACTIVATED: '{recoveryAgentName}' called in — {reason}.\n\n" +
-            $"  1. changes_read_latest — review what was attempted.\n" +
-            $"  2. Fix the problem described below.\n" +
-            $"  3. The pipeline will retry '{triggeringKeyword}' after this turn.\n\n" +
-            $"Failure: {validatorError}"));
-
-        if (eventEmitter is not null)
-            await eventEmitter.EmitAsync(EventTypes.RecoveryActivated,
-                agent: recoveryAgentName,
-                payload: new { reason, keyword = triggeringKeyword });
-
-        try
-        {
-            IEnumerable<ChatMessage> context;
-            if (contextPipeline is not null)
-            {
-                var assembled = await contextPipeline.AssembleAsync(
-                    new AgentExecutionRequest
-                    {
-                        AgentName     = recoveryAgentName,
-                        Task          = _task,
-                        SharedHistory = ctx.History,
-                        AgentConfig   = recoveryCfg,
-                        SessionId     = _sessionId,
-                    }, ct);
-                context = assembled.Messages;
-                if (eventEmitter is not null)
-                    await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, ctx.TurnIndex);
-            }
-            else
-            {
-                var filtered = ContextWindowFilter.Apply(ctx.History, recoveryCfg.ContextWindow);
-                context = !string.IsNullOrWhiteSpace(recoveryInstructions)
-                    ? [new ChatMessage(ChatRole.System, recoveryInstructions), .. filtered]
-                    : filtered;
-            }
-
-            var response = governanceKernel?.CircuitBreaker is { } cb
-                ? await cb.ExecuteAsync(() => recoveryAgent.RunAsync(context, null, null, ct)).ConfigureAwait(false)
-                : await recoveryAgent.RunAsync(context, null, null, ct).ConfigureAwait(false);
-
-            await RecordAndEmitAsync(response, recoveryAgentName, ctx, ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "[GraphOrchestrator] Recovery agent '{Agent}' failed — continuing normal pipeline.",
-                recoveryAgentName);
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Validation-failure helpers (shared by RunNodeExecutorAsync / RunParallelNodeAsync)
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Emits a <c>context_window_warn</c> event when the filtered message count is
-    /// approaching the configured context-cap fraction. No-ops when
-    /// <paramref name="eventEmitter"/> is null or the context window is not configured.
-    /// </summary>
-    private async Task EmitContextWindowWarnAsync(
-        string agentName, AgentConfig agentCfg, IReadOnlyList<ChatMessage> filtered, AgentContext ctx)
-    {
-        if (eventEmitter is null) return;
-        if (agentCfg.ContextWindow is not { ContextCapFraction: > 0, MaxTailMessages: > 0 } cw) return;
-        if (filtered.Count <= (int)(cw.MaxTailMessages * cw.ContextCapFraction)) return;
-
-        await eventEmitter.EmitAsync(EventTypes.ContextWindowWarn,
-            agent: agentName,
-            turn:  ctx.TurnIndex,
-            payload: new
-            {
-                messages  = filtered.Count,
-                cap       = cw.MaxTailMessages,
-                fraction  = cw.ContextCapFraction,
-                threshold = (int)(cw.MaxTailMessages * cw.ContextCapFraction)
-            });
-    }
-
-    /// <summary>
-    /// Emits a <c>validation_fail</c> event, injects a correction message into history via
-    /// <see cref="CorrectionEngine.InjectValidationError"/>, and persists the injected message
-    /// to the message sink. Called from every validation-failure path in the turn loop.
-    /// </summary>
-    private async Task EmitAndInjectValidationFailureAsync(
-        string agentName,
-        string keyword,
-        string validatorName,
-        string errMsg,
-        string responseText,
-        int consecutiveFails,
-        int maxRetries,
-        AgentContext ctx,
-        CancellationToken ct)
-    {
-        if (eventEmitter is not null)
-            await eventEmitter.EmitAsync(EventTypes.ValidationFail,
-                agent:   agentName,
-                payload: new
-                {
-                    validator   = validatorName,
-                    keyword,
-                    consecutive = consecutiveFails,
-                    message     = errMsg,
-                });
-
-        int histBefore = ctx.History.Count;
-        await CorrectionEngine.InjectValidationError(ctx.History, errMsg, consecutiveFails, responseText, keyword, eventEmitter, maxRetries);
-        await PersistCorrectionsAsync(ctx, histBefore, ct).ConfigureAwait(false);
-    }
-
-    private static async Task<(bool ok, string? error, string? validatorName)> RunValidatorsAsync(
-        IReadOnlyList<IRoutingValidator> validators,
-        IList<ChatMessage> history,
-        CancellationToken ct)
-    {
-        for (int i = 0; i < validators.Count; i++)
-        {
-            var result = await validators[i].ValidateAsync(history, ct).ConfigureAwait(false);
-            if (!result.IsValid)
-                return (false, result.ErrorMessage, validators[i].GetType().Name);
-        }
-        return (true, null, null);
-    }
-
-    private void RecordGovernanceViolation(
-        string agentName,
-        string validatorName,
-        int consecutiveCount,
-        int maxRetries)
-    {
-        if (governanceKernel is null) return;
-
-        var agentDid = agentFactory.GetDid(agentName);
-        governanceKernel.AuditEmitter.Emit(
-            GovernanceEventType.PolicyViolation,
-            agentId:   agentDid,
-            sessionId: _sessionId,
-            data: new Dictionary<string, object>
-            {
-                ["agent_name"]  = agentName,
-                ["validator"]   = validatorName,
-                ["consecutive"] = consecutiveCount,
-            });
-
-        var rlKey = $"{agentDid}:validation:fail";
-        if (!governanceKernel.RateLimiter.TryAcquire(rlKey, maxCalls: maxRetries, window: TimeSpan.FromMinutes(10)))
-            throw new ValidatorStuckException(agentName, validatorName, consecutiveCount,
-                $"Rate limit exceeded for validator failures on agent '{agentName}'.");
-
-        governanceKernel.SloEngine.Get("policy-compliance")?.Record(0.0);
-    }
-
-    // -------------------------------------------------------------------------
-    // Sub-graph node executor
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Executes a nested <c>GraphOrchestrator</c> for a sub-graph node. The sub-orchestrator
-    /// runs with a synthetic config whose <c>Selection.Graph</c> is the sub-graph referenced
-    /// by <paramref name="subGraphId"/>. All shared services (agentFactory, changeTracker, etc.)
-    /// are forwarded from the parent so governance, audit, and context pipelines remain unified.
-    ///
-    /// <para>
-    /// Messages emitted by the sub-orchestrator are forwarded to <c>ctx.MessageSink</c> so they
-    /// appear in the parent session transcript. The sub-orchestrator's final assistant message is
-    /// injected into <c>ctx.History</c> so the parent's keyword detector can route normally.
-    /// </para>
-    /// </summary>
-    private async Task RunSubGraphNodeAsync(
-        string nodeId,
-        string subGraphId,
-        bool isTerminal,
-        AgentRouteTable routeTable,
-        AgentContext ctx,
-        IWorkflowContext wfCtx,
-        CancellationToken ct)
-    {
-        var graphCfg = config.Selection.Graph!;
-        var subSpec  = graphCfg.SubGraphs![subGraphId];
-
-        logger.LogInformation(
-            "[GraphOrchestrator] Node '{NodeId}' executing sub-graph '{SubGraphId}' (type: {Type}).",
-            nodeId, subGraphId,
-            subSpec.IsMapReduce ? OrchestratorTypes.MapReduce
-                : subSpec.IsScatterGather ? OrchestratorTypes.ScatterGather
-                : OrchestratorTypes.Graph);
-
-        if (eventEmitter is not null)
-            await eventEmitter.EmitAsync(EventTypes.AgentStart,
-                agent: $"[SubGraph:{subGraphId}]",
-                turn:  ctx.TurnIndex);
-
-        IOrchestrator subOrchestrator;
-
-        if (subSpec.IsMapReduce)
-        {
-            var subConfig = config with
-            {
-                Selection = config.Selection with
-                {
-                    Type      = OrchestratorTypes.MapReduce,
-                    Graph     = null,
-                    MapReduce = subSpec.MapReduce,
-                }
-            };
-            var mrLogger = loggerFactory?.CreateLogger<MapReduceOrchestrator>()
-                ?? (ILogger<MapReduceOrchestrator>)Microsoft.Extensions.Logging.Abstractions.NullLogger<MapReduceOrchestrator>.Instance;
-            subOrchestrator = new MapReduceOrchestrator(
-                subConfig, agentFactory, mrLogger,
-                changeTracker, eventEmitter, governanceKernel);
-        }
-        else if (subSpec.IsScatterGather)
-        {
-            var subConfig = config with
-            {
-                Selection = config.Selection with
-                {
-                    Type          = OrchestratorTypes.ScatterGather,
-                    Graph         = null,
-                    ScatterGather = subSpec.ScatterGather,
-                }
-            };
-            var sgLogger = loggerFactory?.CreateLogger<ScatterGatherOrchestrator>()
-                ?? (ILogger<ScatterGatherOrchestrator>)Microsoft.Extensions.Logging.Abstractions.NullLogger<ScatterGatherOrchestrator>.Instance;
-            subOrchestrator = new ScatterGatherOrchestrator(
-                subConfig, agentFactory, sgLogger,
-                changeTracker, eventEmitter, governanceKernel);
-        }
-        else
-        {
-            var subConfig = config with
-            {
-                Selection = config.Selection with
-                {
-                    Type  = OrchestratorTypes.Graph,
-                    Graph = subSpec.Graph,
-                }
-            };
-            subOrchestrator = new GraphOrchestrator(
-                subConfig, agentFactory, logger,
-                changeTracker, eventEmitter, governanceKernel,
-                _humanApprovalService, contextPipeline, repositoryKnowledgeStore);
-        }
-
-        subOrchestrator.SetSessionId(_sessionId);
-
-        // Reconstruct the task text from the head of the shared history.
-        int firstUserIdx = ctx.History.FindIndex(m => m.Role == ChatRole.User);
-        var subTask = firstUserIdx >= 0
-            ? ctx.History[firstUserIdx].Contents.OfType<TextContent>().FirstOrDefault()?.Text ?? _task
-            : _task;
-
-        // Pass parent context accumulated after the original task so sub-graph agents
-        // can see prior phase outputs, handoff notes, and tool results.
-        IReadOnlyList<AgentMessage>? subPriorHistory = null;
-        if (firstUserIdx >= 0 && firstUserIdx + 1 < ctx.History.Count)
-        {
-            subPriorHistory = ctx.History
-                .Skip(firstUserIdx + 1)
-                .Select((m, i) => new AgentMessage
-                {
-                    Role      = m.Role == ChatRole.User ? "user" : "assistant",
-                    Content   = string.Concat(m.Contents.OfType<TextContent>().Select(t => t.Text)),
-                    AgentName = m.AuthorName ?? string.Empty,
-                    TurnIndex = i,
-                })
-                .ToList();
-        }
-
-        // Stream the sub-orchestrator and collect messages.
-        var subMessages   = new List<AgentMessage>();
-        string? lastText  = null;
-        string? lastAgent = null;
-
-        await foreach (var msg in subOrchestrator.StreamAsync(subTask, subPriorHistory, ct).ConfigureAwait(false))
-        {
-            await ctx.MessageSink.WriteAsync(msg, ct).ConfigureAwait(false);
-            subMessages.Add(msg);
-
-            if (string.Equals(msg.Role, "assistant", StringComparison.OrdinalIgnoreCase))
-            {
-                lastText  = msg.Content;
-                lastAgent = msg.AgentName;
-            }
-
-            ctx.TurnIndex        = Math.Max(ctx.TurnIndex, msg.TurnIndex + 1);
-            ctx.CumulativeTokens += msg.Usage?.TotalTokens ?? 0;
-        }
-
-        if (lastText is null)
-        {
-            logger.LogWarning(
-                "[GraphOrchestrator] Sub-graph '{SubGraphId}' produced no assistant messages.",
-                subGraphId);
-        }
-
-        // Inject the sub-graph's terminal output into the parent history so the parent
-        // orchestrator can detect routing keywords from it.
-        var syntheticContent = lastText ?? $"[sub-graph '{subGraphId}' completed with no output]";
-        var syntheticMsg     = new ChatMessage(ChatRole.Assistant, syntheticContent)
-        {
-            AuthorName = lastAgent ?? $"SubGraph:{subGraphId}"
-        };
-        ctx.History.Add(syntheticMsg);
-
-        if (eventEmitter is not null)
-            await eventEmitter.EmitAsync(EventTypes.AgentEnd,
-                agent: $"[SubGraph:{subGraphId}]",
-                turn:  ctx.TurnIndex);
-
-        // Terminal sub-graph node: end the session.
-        if (isTerminal)
-        {
-            ctx.LastKeyword = TerminalSentinel;
-            RecordNodeState(ctx, nodeId);
-            await wfCtx.YieldOutputAsync(ctx, ct).ConfigureAwait(false);
-            return;
-        }
-
-        // Keyword detection on the sub-graph's final output for forward-edge routing.
-        // Tool-call keyword detection requires raw ChatMessages which the sub-orchestrator
-        // does not expose; fall back to text-based detection on the terminal output.
-        var allKeywords = KeywordDetector.DetectKeywords(syntheticContent, routeTable);
-
-        string? foundKeyword = allKeywords.Count == 1 ? allKeywords[0] : null;
-
-        // Back-edge keyword.
-        if (foundKeyword is not null && routeTable.PhaseBreakKeywords.Contains(foundKeyword))
-        {
-            ctx.LastKeyword = foundKeyword;
-            RecordNodeState(ctx, _backEdgeDestinations.TryGetValue(foundKeyword, out var bd) ? bd ?? nodeId : nodeId);
-
-            if (eventEmitter is not null)
-                await eventEmitter.EmitAsync(EventTypes.StateAdvanced,
-                    agent: $"[SubGraph:{subGraphId}]",
-                    turn:  ctx.TurnIndex,
-                    payload: new { version = ctx.CurrentState.Version, phase_break = foundKeyword });
-
-            await wfCtx.YieldOutputAsync(ctx, ct).ConfigureAwait(false);
-            return;
-        }
-
-        // Forward-edge keyword.
-        if (foundKeyword is not null && routeTable.Routes.TryGetValue(foundKeyword, out var route))
-        {
-            ctx.LastKeyword = foundKeyword;
-            RecordNodeState(ctx, route.NextExecutorName);
-
-            if (eventEmitter is not null)
-                await eventEmitter.EmitAsync(EventTypes.AgentRouted,
-                    agent:   $"[SubGraph:{subGraphId}]",
-                    turn:    ctx.TurnIndex,
-                    payload: new { keyword = foundKeyword, to = route.NextExecutorName });
-
-            ctx.History.Add(new ChatMessage(ChatRole.User,
-                $"[fuseraft: SubGraph:{subGraphId} → {route.NextExecutorName}]"));
-
-            await wfCtx.SendMessageAsync(ctx, route.NextExecutorId, ct).ConfigureAwait(false);
-            return;
-        }
-
-        // No keyword — if there are no keyword routes at all, treat as unconditional.
-        bool hasKeywordRoutes = routeTable.Routes.Count > 0 || routeTable.PhaseBreakKeywords.Count > 0;
-        if (!hasKeywordRoutes)
-        {
-            if (_unconditionalForwardRoutes.TryGetValue(nodeId, out var autoRoute))
-            {
-                ctx.LastKeyword = null;
-                RecordNodeState(ctx, autoRoute.NextExecutorName);
-                ctx.History.Add(new ChatMessage(ChatRole.User,
-                    $"[fuseraft: SubGraph:{subGraphId} → {autoRoute.NextExecutorName}]"));
-                await wfCtx.SendMessageAsync(ctx, autoRoute.NextExecutorId, ct).ConfigureAwait(false);
-                return;
-            }
-        }
-
-        // Sub-graph produced no recognisable keyword — log and terminate the node gracefully.
-        logger.LogWarning(
-            "[GraphOrchestrator] Sub-graph node '{NodeId}' produced no routing keyword. " +
-            "Treating as terminal. Ensure the sub-graph's terminal agent emits a valid keyword.",
-            nodeId);
-
-        ctx.LastKeyword = TerminalSentinel;
-        RecordNodeState(ctx, nodeId);
-        await wfCtx.YieldOutputAsync(ctx, ct).ConfigureAwait(false);
-    }
-
-    // -------------------------------------------------------------------------
-    // Parallel fan-out helpers
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Executes a single parallel node's agent retry loop against an isolated fork of the
-    /// shared <see cref="AgentContext"/>. Unlike <see cref="RunNodeExecutorAsync"/>, this
-    /// method does not call <c>wfCtx.SendMessageAsync</c> or <c>YieldOutputAsync</c> —
-    /// it simply returns when the agent emits a valid forward-edge keyword, leaving the
-    /// routing decision to the parent fan-out that called it.
-    /// </summary>
-    private async Task RunParallelNodeAsync(
-        string nodeId,
-        string agentName,
-        AIAgent agent,
-        string instructions,
-        AgentConfig agentCfg,
-        AgentRouteTable routeTable,
-        AgentContext ctx,
-        CancellationToken ct,
-        Dictionary<string, AIAgent> agents,
-        Dictionary<string, string> agentInstructions,
-        Dictionary<string, AgentConfig> agentConfigs)
-    {
-        AgentStarting?.Invoke(agentName);
-        agentFactory.OnAgentTurnStarting();
-
-        int maxRetries       = config.Selection.Graph?.MaxRetries ?? DefaultMaxRetries;
-        int maxTotalTurns    = maxRetries * 10;
-        int consecutiveFails = 0;
-        int totalTurns       = 0;
-
-        while (true)
-        {
-            if (totalTurns++ >= maxTotalTurns)
-                throw new ValidatorStuckException(agentName, "total-turns", totalTurns,
-                    $"Parallel node '{nodeId}' ({agentName}) exceeded {maxTotalTurns} total turns without completing.");
-
-            IEnumerable<ChatMessage> context;
-            if (contextPipeline is not null)
-            {
-                var assembled = await contextPipeline.AssembleAsync(
-                    new AgentExecutionRequest
-                    {
-                        AgentName     = agentName,
-                        Task          = _task,
-                        SharedHistory = ctx.History,
-                        AgentConfig   = agentCfg,
-                        SessionId     = _sessionId,
-                    }, ct);
-                context = assembled.Messages;
-                await EmitContextWindowWarnAsync(agentName, agentCfg, assembled.Messages, ctx);
-                if (eventEmitter is not null)
-                    await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, ctx.TurnIndex);
-            }
-            else
-            {
-                var filtered = ContextWindowFilter.Apply(ctx.History, agentCfg.ContextWindow);
-                await EmitContextWindowWarnAsync(agentName, agentCfg, filtered, ctx);
-                context = !string.IsNullOrWhiteSpace(instructions)
-                    ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
-                    : filtered;
-            }
-
-            if (eventEmitter is not null)
-                await eventEmitter.EmitAsync(EventTypes.TurnStart, agent: agentName, turn: ctx.TurnIndex);
-
-            AgentResponse response;
-            try
-            {
-                response = governanceKernel?.CircuitBreaker is { } cb
-                    ? await cb.ExecuteAsync(() => agent.RunAsync(context, null, null, ct)).ConfigureAwait(false)
-                    : await agent.RunAsync(context, null, null, ct).ConfigureAwait(false);
-            }
-            catch (TimeoutException tex)
-            {
-                consecutiveFails++;
-
-                if (eventEmitter is not null)
-                {
-                    await eventEmitter.EmitAsync(EventTypes.ModelTimeout,
-                        agent:   agentName,
-                        payload: new { message = tex.Message, consecutive = consecutiveFails });
-                    await eventEmitter.EmitAsync(EventTypes.TurnTimeout,
-                        agent:   agentName,
-                        payload: new { message = tex.Message, consecutive = consecutiveFails });
-                }
-
-                if (consecutiveFails >= maxRetries)
-                    throw new ValidatorStuckException(agentName, "streaming-timeout",
-                        consecutiveFails, tex.Message);
-
-                ctx.History.Add(new ChatMessage(ChatRole.User,
-                    "TIMEOUT: Response timed out. Resume from where you left off — prior tool results are in context. " +
-                    "Do not re-research. Call write_file or shell_run now, or emit the handoff keyword if all work is complete.\n\n" +
-                    $"Valid keywords: {CorrectionEngine.BuildValidKeywordList(routeTable)}"));
-                continue;
-            }
-
-            logger.LogDebug(
-                "[{Agent}] Parallel node '{NodeId}' turn {Turn} — response: {Preview}",
-                agentName, nodeId, totalTurns,
-                StringHelpers.Truncate((response.Text ?? "").Replace('\n', ' '), 200));
-
-            var agentMsg    = await RecordAndEmitAsync(response, agentName, ctx, ct);
-            var responseText = response.Text ?? string.Empty;
-
-            var handoffArgKeyword = KeywordDetector.ExtractHandoffToolCallKeyword(response.Messages, routeTable);
-            var allKeywords       = handoffArgKeyword is not null
-                ? (IReadOnlyList<string>)[handoffArgKeyword]
-                : KeywordDetector.DetectKeywords(responseText, routeTable);
-
-            if (allKeywords.Count > 1)
-            {
-                consecutiveFails++;
-
-                if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync(EventTypes.MultiKeyword,
-                        agent:   agentName,
-                        turn:    agentMsg.TurnIndex,
-                        payload: new { keywords = allKeywords, consecutive = consecutiveFails });
-
-                if (consecutiveFails >= maxRetries)
-                    throw new ValidatorStuckException(agentName, "multi-keyword", consecutiveFails,
-                        $"Parallel node '{nodeId}' emitted multiple routing keywords " +
-                        $"({string.Join(", ", allKeywords.Select(k => $"'{k}'"))}) " +
-                        $"for {consecutiveFails} consecutive turns.");
-
-                var listed = string.Join(", ", allKeywords.Select(k => $"'{k}'"));
-                ctx.History.Add(new ChatMessage(ChatRole.User,
-                    $"MULTI-KEYWORD: Response contained {allKeywords.Count} routing keywords: {listed}. " +
-                    $"Emit exactly one — remove the others.\n\nValid keywords: {CorrectionEngine.BuildValidKeywordList(routeTable)}"));
-                continue;
-            }
-
-            string? foundKeyword = allKeywords.Count == 1 ? allKeywords[0] : null;
-
-            if (foundKeyword is not null && eventEmitter is not null)
-                await eventEmitter.EmitAsync(EventTypes.KeywordDetected,
-                    agent:   agentName,
-                    turn:    agentMsg.TurnIndex,
-                    payload: new { keyword = foundKeyword, parallel = true });
-
-            // Back-edge keywords from parallel nodes are a config error — treat as no keyword.
-            if (foundKeyword is not null && routeTable.PhaseBreakKeywords.Contains(foundKeyword))
-            {
-                logger.LogError(
-                    "[GraphOrchestrator] Parallel node '{NodeId}' emitted back-edge keyword '{Kw}' — " +
-                    "back-edges from parallel nodes are not supported. Treating as no-keyword.",
-                    nodeId, foundKeyword);
-                foundKeyword = null;
-            }
-
-            if (foundKeyword is not null && routeTable.Routes.TryGetValue(foundKeyword, out var route))
-            {
-                var (ok, errMsg, failingValidator) = await RunValidatorsAsync(
-                    route.Validators, ctx.History, ct).ConfigureAwait(false);
-
-                if (ok)
-                {
-                    if (route.Validators.Count > 0)
-                        governanceKernel?.SloEngine.Get("policy-compliance")?.Record(1.0);
-
-                    consecutiveFails = 0;
-                    ctx.LastKeyword  = foundKeyword;
-
-                    if (eventEmitter is not null)
-                        await eventEmitter.EmitAsync(EventTypes.AgentRouted,
-                            agent:   agentName,
-                            turn:    agentMsg.TurnIndex,
-                            payload: new { keyword = foundKeyword, to = route.NextExecutorName, parallel = true });
-
-                    return; // fan-out complete for this worker; parent merges results
-                }
-
-                consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-                RecordGovernanceViolation(agentName, failingValidator!, consecutiveFails, maxRetries);
-
-                if (consecutiveFails >= maxRetries)
-                    throw new ValidatorStuckException(agentName, failingValidator!, consecutiveFails, errMsg!);
-
-                var fwdEdgeKey = $"{nodeId}::{foundKeyword}::parallel";
-                if (consecutiveFails >= 2
-                    && route.RecoveryAgent is not null
-                    && !_recoveryActivated.ContainsKey(fwdEdgeKey)
-                    && agents.TryGetValue(route.RecoveryAgent, out var fwdRecoveryAgt))
-                {
-                    _recoveryActivated.TryAdd(fwdEdgeKey, true);
-                    await InvokeRecoveryAgentAsync(
-                        route.RecoveryAgent, fwdRecoveryAgt,
-                        agentInstructions, agentConfigs,
-                        $"'{failingValidator}' failed {consecutiveFails}× on edge '{foundKeyword}'",
-                        errMsg!, foundKeyword, ctx, ct);
-                    consecutiveFails = 0;
-                    continue;
-                }
-
-                await EmitAndInjectValidationFailureAsync(
-                    agentName, foundKeyword, failingValidator!, errMsg!, responseText, consecutiveFails, maxRetries, ctx, ct);
-                continue;
-            }
-
-            // No keyword matched.
-            consecutiveFails++;
-
-            if (eventEmitter is not null)
-                await eventEmitter.EmitAsync(EventTypes.KeywordNotFound,
-                    agent:   agentName,
-                    turn:    agentMsg.TurnIndex,
-                    payload: new { consecutive = consecutiveFails, source = "graph_orchestrator" });
-
-            int histBefore2 = ctx.History.Count;
-            await CorrectionEngine.InjectNoKeywordCorrection(
-                ctx.History, responseText, agentName, consecutiveFails, routeTable, eventEmitter,
-                agentMsg.ToolCalls);
-            await PersistCorrectionsAsync(ctx, histBefore2, ct).ConfigureAwait(false);
-
-            if (consecutiveFails >= maxRetries)
-                throw new ValidatorStuckException(agentName, "no-keyword", consecutiveFails,
-                    $"Parallel node '{nodeId}' ({agentName}) emitted no routing keyword " +
-                    $"for {consecutiveFails} consecutive turns.");
-        }
-    }
-
-    /// <summary>
-    /// Creates an isolated <see cref="AgentContext"/> snapshot for a parallel worker.
-    /// The fork shares the same <see cref="AgentContext.MessageSink"/> (already thread-safe)
-    /// but gets its own <see cref="AgentContext.History"/> copy so concurrent workers cannot
-    /// corrupt each other's conversation state.
-    /// </summary>
-    internal static AgentContext ForkContext(AgentContext parent)
-    {
-        var fork = new AgentContext
-        {
-            MessageSink      = parent.MessageSink,
-            TurnIndex        = parent.TurnIndex,
-            CumulativeTokens = parent.CumulativeTokens,
-            CurrentState     = parent.CurrentState,
-        };
-        fork.History.AddRange(parent.History);
-        return fork;
-    }
-
-    /// <summary>
-    /// Merges the post-fork output of each parallel worker back into the parent context.
-    /// For each child, a labelled header is injected followed by all messages appended
-    /// after <paramref name="forkPoint"/>. Token counts and turn indices are aggregated.
-    /// </summary>
-    internal static void MergeParallelContexts(
-        AgentContext parent,
-        int forkPoint,
-        IReadOnlyList<(string NodeId, string AgentName, AgentContext Fork)> children)
-    {
-        int maxTurnIndex    = parent.TurnIndex;
-        int totalTokenDelta = 0;
-
-        foreach (var (nodeId, agentName, fork) in children)
-        {
-            totalTokenDelta += fork.CumulativeTokens - parent.CumulativeTokens;
-            maxTurnIndex     = Math.Max(maxTurnIndex, fork.TurnIndex);
-
-            parent.History.Add(new ChatMessage(ChatRole.User,
-                $"[fuseraft: parallel result from {agentName} (node: {nodeId})]"));
-
-            for (int i = forkPoint; i < fork.History.Count; i++)
-                parent.History.Add(fork.History[i]);
-        }
-
-        parent.CumulativeTokens += Math.Max(0, totalTokenDelta);
-        parent.TurnIndex         = maxTurnIndex;
-    }
-
-    /// <summary>Descriptor for a parallel fan-out group triggered by a single source keyword.</summary>
-    private sealed class ParallelGroup
-    {
-        public List<string>                    NodeIds              { get; }       = new();
-        public string                          MergeTargetId        { get; set; }  = string.Empty;
-        public string                          MergeTargetName      { get; set; }  = string.Empty;
-        public IReadOnlyList<IRoutingValidator> Validators          { get; set; }  = [];
-        public bool                            RequireHumanApproval { get; set; }
-    }
-
-    // -------------------------------------------------------------------------
-    // Route table construction
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Builds per-node <see cref="AgentRouteTable"/> instances from the graph edge and node config.
-    /// <list type="bullet">
-    ///   <item>Forward edges → <c>Routes</c> (send-forward, keyword-triggered).</item>
-    ///   <item>Back-edges → <c>PhaseBreakKeywords</c> + <c>PhaseBreakValidators</c>.</item>
-    ///   <item>Terminal nodes → <c>TerminalValidators</c> from <see cref="GraphNodeConfig.Validators"/>.</item>
-    /// </list>
-    /// Also populates <see cref="_backEdgeDestinations"/> for the outer phase loop.
-    /// </summary>
-    private Dictionary<string, AgentRouteTable> BuildNodeRouteTables(
-        GraphConfig graphCfg,
-        Dictionary<string, GraphNodeConfig> nodeById)
-    {
-        var tables = BuildRouteTableForNode(graphCfg, nodeById);
-        AssignParallelGroups(tables);
-        WireBackEdges(graphCfg, nodeById, tables);
-        return tables;
-    }
-
-    /// <summary>
-    /// Per-node route table construction. Iterates all graph edges and populates each
-    /// source node's <see cref="AgentRouteTable"/> with forward routes, back-edge
-    /// phase-break entries, parallel fan-out keywords, terminal validators, and
-    /// foreign-keyword sets. Also registers back-edge destinations in
-    /// <see cref="_backEdgeDestinations"/> and parallel group membership in
-    /// <see cref="_parallelGroups"/>.
-    /// </summary>
-    private Dictionary<string, AgentRouteTable> BuildRouteTableForNode(
-        GraphConfig graphCfg,
-        Dictionary<string, GraphNodeConfig> nodeById)
-    {
-        var tables = new Dictionary<string, AgentRouteTable>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var edge in graphCfg.Edges)
-        {
-            if (!tables.TryGetValue(edge.From, out var table))
-                tables[edge.From] = table = new AgentRouteTable();
-
-            var validators = BuildValidatorsFromNames(
-                edge.AllValidators,
-                edge.RequiredCommandPattern,
-                edge.ShellFallbackPattern);
-
-            // SourceAgents: skip this entry if the source node's agent is not in the allowed list.
-            var sourceNode = nodeById.GetValueOrDefault(edge.From);
-            if (edge.SourceAgents is { Count: > 0 } && sourceNode is not null
-                && !edge.SourceAgents.Contains(sourceNode.Agent, StringComparer.OrdinalIgnoreCase))
-                continue;
-
-            if (IsBackEdge(edge.From, edge.To))
-            {
-                // Back-edge: fires as a phase-break via YieldOutputAsync.
-                if (edge.Keyword is { Length: > 0 })
-                {
-                    table.PhaseBreakKeywords.Add(edge.Keyword);
-
-                    if (validators.Count > 0)
-                        table.PhaseBreakValidators[edge.Keyword] = validators;
-
-                    if (edge.RequireHumanApproval)
-                        table.PhaseBreakRequireHumanApproval.Add(edge.Keyword);
-
-                    if (edge.RecoveryAgent is not null)
-                        table.PhaseBreakRecoveryAgents[edge.Keyword] = edge.RecoveryAgent;
-
-                    // Register destination for the outer phase loop (first-registered wins
-                    // when multiple back-edges share the same keyword to different targets).
-                    if (!_backEdgeDestinations.ContainsKey(edge.Keyword))
-                        _backEdgeDestinations[edge.Keyword] = edge.To.ToLowerInvariant();
-                }
-            }
-            else
-            {
-                // Forward edge: fires via SendMessageAsync(ctx, targetNodeId).
-                if (edge.Keyword is { Length: > 0 })
-                {
-                    var targetNode = nodeById.GetValueOrDefault(edge.To);
-
-                    if (targetNode?.Parallel == true)
-                    {
-                        // Parallel fan-out: accumulate this target into the group for
-                        // (source, keyword). Multiple edges with the same keyword and
-                        // Parallel targets form one concurrent group.
-                        var groupKey = $"{edge.From}::{edge.Keyword}";
-                        if (!_parallelGroups.TryGetValue(groupKey, out var pg))
-                            _parallelGroups[groupKey] = pg = new ParallelGroup
-                            {
-                                Validators           = validators,
-                                RequireHumanApproval = edge.RequireHumanApproval,
-                            };
-                        pg.NodeIds.Add(edge.To.ToLowerInvariant());
-                        table.ParallelKeywords.Add(edge.Keyword);
-                    }
-                    else
-                    {
-                        var nextAgentName = targetNode?.Agent ?? edge.To;
-                        table.Routes[edge.Keyword] = new RouteInfo(
-                            edge.To.ToLowerInvariant(),
-                            nextAgentName,
-                            validators,
-                            edge.RequireHumanApproval,
-                            edge.RecoveryAgent);
-                    }
-                }
-            }
-        }
-
-        // Populate TerminalValidators for terminal nodes from GraphNodeConfig.Validators.
-        foreach (var node in graphCfg.Nodes.Where(n => n.Terminal && n.Validators is { Count: > 0 }))
-        {
-            if (!tables.TryGetValue(node.Id, out var table))
-                tables[node.Id] = table = new AgentRouteTable();
-
-            table.TerminalValidators = BuildValidatorsFromNames(node.Validators!);
-        }
-
-        // Populate ForeignSendForwardKeywords per node so CorrectionEngine can produce
-        // targeted "wrong keyword" messages when an agent emits another node's keyword.
-        // Includes both forward-route keywords AND back-edge phase-break keywords so agents
-        // emitting a foreign phase-break keyword get a targeted correction, not just "no keyword".
-        var allRouteKeywords = tables.Values
-            .SelectMany(t => t.Routes.Keys.Concat(t.PhaseBreakKeywords))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var (_, table) in tables)
-            foreach (var kw in allRouteKeywords)
-                if (!table.Routes.ContainsKey(kw) && !table.PhaseBreakKeywords.Contains(kw))
-                    table.ForeignSendForwardKeywords.Add(kw);
-
-        return tables;
-    }
-
-    /// <summary>
-    /// Back-edge destination resolution. Populates unconditional routing maps
-    /// (<see cref="_unconditionalForwardRoutes"/>, <see cref="_unconditionalBackEdges"/>,
-    /// <see cref="_unconditionalBackEdgeValidators"/>) and registers synthetic back-edge
-    /// keywords in <see cref="_backEdgeDestinations"/> for nodes whose ALL outgoing edges
-    /// carry no keyword.
-    /// </summary>
-    private void WireBackEdges(
-        GraphConfig graphCfg,
-        Dictionary<string, GraphNodeConfig> nodeById,
-        Dictionary<string, AgentRouteTable> tables)
-    {
-        // Populate unconditional routing for nodes whose ALL outgoing edges carry no keyword.
-        // A node qualifies when it has exactly one no-keyword edge and zero keyword-based edges.
-        foreach (var node in graphCfg.Nodes)
-        {
-            var outgoing = _edgesBySource.GetValueOrDefault(node.Id, []);
-            if (outgoing.Count == 0) continue;
-
-            // Disqualify if this node already has keyword-driven routes.
-            if (tables.TryGetValue(node.Id, out var existingTable)
-                && (existingTable.Routes.Count > 0 || existingTable.PhaseBreakKeywords.Count > 0))
-                continue;
-
-            var noKeywordEdges = outgoing.Where(e => string.IsNullOrEmpty(e.Keyword)).ToList();
-            if (noKeywordEdges.Count != 1) continue; // ambiguous (>1) or none — skip
-
-            var uncEdge = noKeywordEdges[0];
-
-            // SourceAgents: skip if this node's agent is not in the allowed list.
-            if (uncEdge.SourceAgents is { Count: > 0 }
-                && !uncEdge.SourceAgents.Contains(node.Agent, StringComparer.OrdinalIgnoreCase))
-                continue;
-
-            var uncValidators = BuildValidatorsFromNames(
-                uncEdge.AllValidators,
-                uncEdge.RequiredCommandPattern,
-                uncEdge.ShellFallbackPattern);
-
-            if (IsBackEdge(node.Id, uncEdge.To))
-            {
-                var syntheticKw = $"__UNCOND_BACK:{node.Id.ToLowerInvariant()}";
-                _backEdgeDestinations[syntheticKw] = uncEdge.To.ToLowerInvariant();
-                _unconditionalBackEdges[node.Id]   = uncEdge.To.ToLowerInvariant();
-                if (uncValidators.Count > 0)
-                    _unconditionalBackEdgeValidators[node.Id] = uncValidators;
-            }
-            else
-            {
-                var targetNode    = nodeById.GetValueOrDefault(uncEdge.To);
-                var nextAgentName = targetNode?.Agent ?? uncEdge.To;
-                _unconditionalForwardRoutes[node.Id] = new RouteInfo(
-                    uncEdge.To.ToLowerInvariant(),
-                    nextAgentName,
-                    uncValidators);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Parallel group membership assignment. Resolves the merge target for each parallel
-    /// fan-out group by scanning the group's nodes' own forward routes, then logs a warning
-    /// for any group whose merge target could not be determined.
-    /// </summary>
-    private void AssignParallelGroups(Dictionary<string, AgentRouteTable> tables)
-    {
-        // Resolve merge targets for parallel groups from the parallel nodes' own route tables.
-        // The merge target is the first forward-route destination found in any of the group's nodes.
-        foreach (var (groupKey, pg) in _parallelGroups)
-        {
-            foreach (var pNodeId in pg.NodeIds)
-            {
-                if (!tables.TryGetValue(pNodeId, out var pTable)) continue;
-                var firstFwdRoute = pTable.Routes.Values.FirstOrDefault();
-                if (firstFwdRoute is null) continue;
-                pg.MergeTargetId   = firstFwdRoute.NextExecutorId;
-                pg.MergeTargetName = firstFwdRoute.NextExecutorName;
-                break;
-            }
-
-            if (string.IsNullOrEmpty(pg.MergeTargetId))
-                logger.LogWarning(
-                    "[GraphOrchestrator] Parallel group '{Key}' has no merge target — " +
-                    "each parallel node must have at least one forward edge to the merge-target node.",
-                    groupKey);
-        }
-    }
-
-    private IReadOnlyList<IRoutingValidator> BuildValidatorsFromNames(
-        IReadOnlyList<string> names,
-        string? requiredCommandPattern = null,
-        string? shellFallbackPattern = null)
-    {
-        var result = new List<IRoutingValidator>();
-
-        // Resolve sandbox root the same way OrchestratorBuilder does.
-        var sandboxRoot = config.Security?.FileSystemSandboxPath is { Length: > 0 } sbx
-            ? FuseraftPaths.ExpandPath(sbx)
-            : null;
-
-        var briefPath = config.Validation?.BriefPath;
-
-        foreach (var name in names)
-        {
-            IRoutingValidator? v = null;
-
-            if (name.Equals(ValidatorNames.RequireShellPass, StringComparison.OrdinalIgnoreCase))
-                v = new RequireShellPassValidator(requiredCommandPattern, config.Validation?.ChangeLogPath);
-            else if (name.Equals(ValidatorNames.RequireWriteFile, StringComparison.OrdinalIgnoreCase))
-                v = new HandoffToTesterValidator(
-                        shellFallbackPattern: shellFallbackPattern,
-                        changeLogPath:        config.Validation?.ChangeLogPath);
-            else if (name.Equals(ValidatorNames.BlockOnConsecutiveFail, StringComparison.OrdinalIgnoreCase))
-                v = new ConsecutiveShellFailValidator(
-                        commandPattern: requiredCommandPattern,
-                        changeLogPath:  config.Validation?.ChangeLogPath);
-            else if (name.Equals(ValidatorNames.RequireAllFilesWritten, StringComparison.OrdinalIgnoreCase) && briefPath is not null)
-                v = new RequireAllFilesWrittenValidator(briefPath, config.Validation!.ChangeLogPath);
-            else if (name.Equals(ValidatorNames.RequireBrief, StringComparison.OrdinalIgnoreCase) && briefPath is not null)
-                v = new RequireBriefValidator(briefPath);
-            else if (name.Equals(ValidatorNames.TestReportValid, StringComparison.OrdinalIgnoreCase) && config.Validation is not null)
-                v = new HandoffToReviewerValidator(config.Validation);
-            else if (name.Equals(ValidatorNames.RequireReviewJudgement, StringComparison.OrdinalIgnoreCase))
-                v = new RequireReviewJudgementValidator(briefPath);
-            else if (name.Equals(ValidatorNames.RequireAcceptanceCriteriaPassed, StringComparison.OrdinalIgnoreCase) && briefPath is not null)
-                v = new RequireAcceptanceCriteriaPassedValidator(briefPath, config.Validation!.ChangeLogPath);
-            else if (name.Equals(ValidatorNames.RequireRelatedTestsPass, StringComparison.OrdinalIgnoreCase) && config.TestSelector is not null)
-                v = new RequireRelatedTestsPassValidator(
-                        config.TestSelector,
-                        config.Validation?.ChangeLogPath,
-                        sandboxRoot);
-
-            if (v is not null)
-                result.Add(v);
-        }
-
-        return result;
-    }
-
-    // -------------------------------------------------------------------------
-    // Topology helpers
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Validates parallel-group configuration after route tables and groups have been built.
-    /// Logs warnings for each invalid condition rather than throwing — misconfigured groups
-    /// are surfaced immediately so the operator sees them before any agent runs.
-    /// </summary>
-    private void ValidateParallelConfig(
-        GraphConfig graphCfg,
-        Dictionary<string, GraphNodeConfig> nodeById)
-    {
-        foreach (var node in graphCfg.Nodes.Where(n => n.Parallel))
-        {
-            // Parallel nodes cannot be terminal — they have no MAF workflow role and
-            // would be silently skipped since terminal logic lives in RunNodeExecutorAsync.
-            if (node.Terminal)
-                logger.LogWarning(
-                    "[GraphOrchestrator] Node '{NodeId}' is both Parallel and Terminal. " +
-                    "Terminal is ignored on parallel nodes — they complete when they emit a forward-edge keyword.",
-                    node.Id);
-
-            // Parallel nodes that have no forward edges can never signal completion.
-            var outgoing = _edgesBySource.GetValueOrDefault(node.Id, []);
-            var fwdEdges = outgoing.Where(e => !IsBackEdge(node.Id, e.To)).ToList();
-            if (fwdEdges.Count == 0)
-                logger.LogWarning(
-                    "[GraphOrchestrator] Parallel node '{NodeId}' has no forward edges — " +
-                    "it can never signal completion to its merge target. Add an outgoing edge to the merge-target node.",
-                    node.Id);
-
-            // All forward edges from a parallel node must point to the same merge target.
-            var mergeTargets = fwdEdges
-                .Select(e => e.To.ToLowerInvariant())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            if (mergeTargets.Count > 1)
-                logger.LogWarning(
-                    "[GraphOrchestrator] Parallel node '{NodeId}' has forward edges to multiple targets " +
-                    "({Targets}). All parallel nodes in a group must converge on a single merge-target node.",
-                    node.Id, string.Join(", ", mergeTargets));
-
-            // The merge target of a parallel node must not itself be Parallel.
-            foreach (var targetId in mergeTargets)
-            {
-                if (nodeById.TryGetValue(targetId, out var targetNode) && targetNode.Parallel)
-                    logger.LogWarning(
-                        "[GraphOrchestrator] Parallel node '{NodeId}' routes to '{TargetId}' which is also " +
-                        "Parallel. Nested parallel fan-out is not supported — the merge target must be a normal node.",
-                        node.Id, targetId);
-            }
-        }
-
-        // Each parallel group that has no merge target resolved means the parallel nodes
-        // had no route tables (missing agent or no forward edges). Already warned above;
-        // log here for the group-level perspective.
-        foreach (var (groupKey, pg) in _parallelGroups.Where(kv => string.IsNullOrEmpty(kv.Value.MergeTargetId)))
-            logger.LogWarning(
-                "[GraphOrchestrator] Parallel group '{Key}' could not resolve a merge target. " +
-                "The fan-out keyword will be treated as unroutable at runtime.",
-                groupKey);
-    }
-
-    /// <summary>
-    /// Computes BFS layer numbers from the entry node traversing ALL edges (forward and back).
-    /// Each node is assigned the layer of its first BFS encounter. Back-edges are those
-    /// whose target node has a BFS layer ≤ the source node's layer.
-    /// </summary>
-    private Dictionary<string, int> ComputeBfsLayers(string entryNodeId)
-    {
-        var layers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var queue  = new Queue<(string NodeId, int Layer)>();
-        queue.Enqueue((entryNodeId, 0));
-        layers[entryNodeId] = 0;
-
-        while (queue.Count > 0)
-        {
-            var (current, layer) = queue.Dequeue();
-            foreach (var edge in _edgesBySource.GetValueOrDefault(current, []))
-            {
-                if (!layers.ContainsKey(edge.To))
-                {
-                    layers[edge.To] = layer + 1;
-                    queue.Enqueue((edge.To, layer + 1));
-                }
-            }
-        }
-
-        return layers;
-    }
-
-    /// <returns><c>true</c> when the edge from → to is a back-edge (target has lower or equal BFS layer than source).</returns>
-    private bool IsBackEdge(string from, string to)
-    {
-        var fromLayer = _nodeLayers.GetValueOrDefault(from, 0);
-        var toLayer   = _nodeLayers.GetValueOrDefault(to, 0);
-        return toLayer <= fromLayer;
-    }
-
-    // -------------------------------------------------------------------------
-    // Start-node resolution
-    // -------------------------------------------------------------------------
-
-    private string DetermineStartNodeId(
-        IReadOnlyList<AgentMessage>? priorHistory,
-        string? resumeHint,
-        string defaultEntryNode,
-        GraphConfig graphCfg,
-        Dictionary<string, GraphNodeConfig> nodeById)
-    {
-        // Priority 1: explicit hint from SetResumeExecutorId (most accurate — set by
-        // the CLI after checkpoint restore or compaction).
-        if (!string.IsNullOrWhiteSpace(resumeHint))
-        {
-            // Try hint as node ID first — GraphOrchestrator uses node IDs as executor IDs.
-            if (nodeById.ContainsKey(resumeHint))
-            {
-                logger.LogDebug(
-                    "[GraphOrchestrator] DetermineStartNodeId: hint matches node Id '{Hint}'",
-                    resumeHint);
-                return resumeHint.ToLowerInvariant();
-            }
-
-            // SessionRunner.ApplyCompactionAsync stores msg.AgentName as ResumeExecutorId, so
-            // the hint may be an agent name rather than a node ID — scan for the first match.
-            var hintNode = graphCfg.Nodes.FirstOrDefault(n =>
-                string.Equals(n.Agent, resumeHint, StringComparison.OrdinalIgnoreCase));
-            if (hintNode is not null)
-            {
-                logger.LogDebug(
-                    "[GraphOrchestrator] DetermineStartNodeId: hint '{Hint}' is agent name → node '{NodeId}'",
-                    resumeHint, hintNode.Id);
-                return hintNode.Id.ToLowerInvariant();
-            }
-
-            logger.LogWarning(
-                "[GraphOrchestrator] DetermineStartNodeId: hint '{Hint}' does not match any node Id " +
-                "or agent name — ignoring and falling back to history heuristics.",
-                resumeHint);
-        }
-
-        if (priorHistory is not { Count: > 0 })
-            return defaultEntryNode;
-
-        // Priority 2: scan back-edge keywords in prior history (newest-first).
-        for (int i = priorHistory.Count - 1; i >= 0; i--)
-        {
-            var msg = priorHistory[i];
-            if (msg.Role != "assistant" || string.IsNullOrEmpty(msg.Content)) continue;
-
-            foreach (var kw in _backEdgeDestinations.Keys)
-            {
-                if (kw == TerminalSentinel) continue;
-                if (KeywordDetector.IsKeywordOnOwnLineStrict(msg.Content, kw) &&
-                    _backEdgeDestinations.TryGetValue(kw, out var nextNode) &&
-                    nextNode is not null)
-                {
-                    logger.LogDebug(
-                        "[GraphOrchestrator] DetermineStartNodeId: back-edge keyword '{Kw}' → '{Next}'",
-                        kw, nextNode);
-                    return nextNode;
-                }
-            }
-
-            // Also check forward-edge keywords — when a handoff keyword was the last thing in
-            // history, resume from the TARGET node rather than resetting to the entry.
-            foreach (var edge in graphCfg.Edges)
-            {
-                if (!IsBackEdge(edge.From, edge.To) &&
-                    edge.Keyword is { Length: > 0 } &&
-                    KeywordDetector.IsKeywordOnOwnLineStrict(msg.Content, edge.Keyword))
-                {
-                    logger.LogDebug(
-                        "[GraphOrchestrator] DetermineStartNodeId: forward-edge keyword '{Kw}' → '{Next}'",
-                        edge.Keyword, edge.To);
-                    return edge.To.ToLowerInvariant();
-                }
-            }
-        }
-
-        // Priority 3: last active agent name → find its node.
-        for (int i = priorHistory.Count - 1; i >= 0; i--)
-        {
-            var msg = priorHistory[i];
-            if (msg.Role != "assistant" || string.IsNullOrWhiteSpace(msg.AgentName)) continue;
-
-            var node = graphCfg.Nodes.FirstOrDefault(n =>
-                string.Equals(n.Agent, msg.AgentName, StringComparison.OrdinalIgnoreCase));
-
-            if (node is not null)
-            {
-                logger.LogDebug(
-                    "[GraphOrchestrator] DetermineStartNodeId: agent-name fallback → node '{NodeId}' (agent '{Agent}')",
-                    node.Id, node.Agent);
-                return node.Id.ToLowerInvariant();
-            }
-        }
-
-        // Priority 4: configured entry node.
-        return defaultEntryNode;
     }
 
     // -------------------------------------------------------------------------
