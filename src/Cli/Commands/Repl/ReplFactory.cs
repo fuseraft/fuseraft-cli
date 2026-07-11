@@ -41,11 +41,11 @@ internal static class ReplFactory
                 .Use(
                     getResponseFunc: async (messages, options, inner, ct) =>
                     {
-                        messages = AgentFactory.DropSupersededWritePairs(messages);
-                        messages = AgentFactory.DropSupersededObservationalPairs(messages);
-                        messages = AgentFactory.CompressSupersededShellPairs(messages);
-                        messages = AgentFactory.TruncateIntermediateAssistantReasoning(messages);
-                        messages = await AgentFactory.KeepLastToolPairs(messages, InTurnToolPairLimit, ct);
+                        messages = AgentContextCompactionFilters.DropSupersededWritePairs(messages);
+                        messages = AgentContextCompactionFilters.DropSupersededObservationalPairs(messages);
+                        messages = AgentContextCompactionFilters.CompressSupersededShellPairs(messages);
+                        messages = AgentContextCompactionFilters.TruncateIntermediateAssistantReasoning(messages);
+                        messages = await AgentContextCompactionFilters.KeepLastToolPairs(messages, InTurnToolPairLimit, ct);
                         return await inner.GetResponseAsync(messages, options, ct);
                     },
                     getStreamingResponseFunc: (messages, options, inner, ct) =>
@@ -61,11 +61,11 @@ internal static class ReplFactory
             IChatClient inner,
             [EnumeratorCancellation] CancellationToken ct)
         {
-            messages = AgentFactory.DropSupersededWritePairs(messages);
-            messages = AgentFactory.DropSupersededObservationalPairs(messages);
-            messages = AgentFactory.CompressSupersededShellPairs(messages);
-            messages = AgentFactory.TruncateIntermediateAssistantReasoning(messages);
-            messages = await AgentFactory.KeepLastToolPairs(messages, InTurnToolPairLimit, ct);
+            messages = AgentContextCompactionFilters.DropSupersededWritePairs(messages);
+            messages = AgentContextCompactionFilters.DropSupersededObservationalPairs(messages);
+            messages = AgentContextCompactionFilters.CompressSupersededShellPairs(messages);
+            messages = AgentContextCompactionFilters.TruncateIntermediateAssistantReasoning(messages);
+            messages = await AgentContextCompactionFilters.KeepLastToolPairs(messages, InTurnToolPairLimit, ct);
             await foreach (var update in inner.GetStreamingResponseAsync(messages, options, ct))
                 yield return update;
         }

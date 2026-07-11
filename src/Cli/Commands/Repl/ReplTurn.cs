@@ -991,7 +991,7 @@ internal static class ReplTurn
     internal static int TrimHistory(List<ChatMessage> history, int contextTokenBudget)
     {
         static int EstimateMessage(ChatMessage m) =>
-            m.Contents.Sum(AgentFactory.EstimateContentChars) / 4;
+            m.Contents.Sum(AgentContextCompactionFilters.EstimateContentChars) / 4;
 
         var total = history.Sum(EstimateMessage);
         if (total <= contextTokenBudget) return 0;

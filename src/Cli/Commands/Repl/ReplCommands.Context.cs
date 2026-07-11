@@ -14,7 +14,7 @@ internal static partial class ReplCommands
 
     private static async Task CmdContextAsync(ReplSessionContext ctx)
     {
-        static int EstMsg(ChatMessage m) => m.Contents.Sum(AgentFactory.EstimateContentChars) / 4;
+        static int EstMsg(ChatMessage m) => m.Contents.Sum(AgentContextCompactionFilters.EstimateContentChars) / 4;
 
         var active      = ctx.GetActiveTools();
         var sysTok      = ctx.History.Where(m => m.Role == ChatRole.System).Sum(EstMsg);
