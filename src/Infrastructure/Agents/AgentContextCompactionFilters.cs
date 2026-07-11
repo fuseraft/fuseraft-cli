@@ -572,6 +572,34 @@ internal static class AgentContextCompactionFilters
         return result;
     }
 
+    /// <summary>
+    /// Composes the full in-turn filter sequence in the order every call site applies it:
+    /// drop superseded writes, drop superseded observational reads, compress superseded
+    /// shell reruns, truncate intermediate reasoning, then optionally cap the tool-pair
+    /// window and char budget. <paramref name="maxInTurnToolPairs"/>/
+    /// <paramref name="maxInTurnChars"/> of 0 skip that step, matching the
+    /// <c>if (max... &gt; 0)</c> convention each caller used before this was consolidated.
+    /// </summary>
+    internal static async Task<IEnumerable<ChatMessage>> ApplyInTurnFilters(
+        IEnumerable<ChatMessage> messages,
+        int maxInTurnToolPairs,
+        int maxInTurnChars,
+        CancellationToken cancellationToken = default)
+    {
+        messages = DropSupersededWritePairs(messages);
+        messages = DropSupersededObservationalPairs(messages);
+        messages = CompressSupersededShellPairs(messages);
+        messages = TruncateIntermediateAssistantReasoning(messages);
+
+        if (maxInTurnToolPairs > 0)
+            messages = await KeepLastToolPairs(messages, maxInTurnToolPairs, cancellationToken);
+
+        if (maxInTurnChars > 0)
+            messages = TrimInTurnContext(messages, maxInTurnChars);
+
+        return messages;
+    }
+
     internal static int EstimateContentChars(AIContent content) => content switch
     {
         TextContent t           => t.Text?.Length ?? 0,
