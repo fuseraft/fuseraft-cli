@@ -48,10 +48,12 @@ public sealed class KnowledgeGcCommand : AsyncCommand<KnowledgeGcSettings>
             AnsiConsole.MarkupLine("[bold yellow]Dry-run mode[/] — pass [bold]--apply[/] to commit changes.\n");
         }
 
-        // Capture ephemeral state files before gc runs so we don't delete gc's own outputs.
-        var ignoreRules        = FuseraftIgnoreRules.Load();
-        var ephemeralStatePaths = settings.Apply && ignoreRules.HasRules
+        // Capture ephemeral state/log files before gc runs so we don't delete gc's own outputs.
+        var ignoreRules   = FuseraftIgnoreRules.Load();
+        var ephemeralPaths = settings.Apply && ignoreRules.HasRules
             ? CollectEphemeralStateFiles(slug, ignoreRules)
+                .Concat(CollectEphemeralLogFiles(slug, ignoreRules))
+                .ToList()
             : [];
 
         GcReport report;
@@ -70,13 +72,13 @@ public sealed class KnowledgeGcCommand : AsyncCommand<KnowledgeGcSettings>
 
         PrintReport(report, settings.Apply);
 
-        if (settings.Apply && ephemeralStatePaths.Count > 0)
+        if (settings.Apply && ephemeralPaths.Count > 0)
         {
-            var deleted = ephemeralStatePaths.Where(File.Exists).ToList();
+            var deleted = ephemeralPaths.Where(File.Exists).ToList();
             foreach (var f in deleted) File.Delete(f);
             if (deleted.Count > 0)
                 AnsiConsole.MarkupLine(
-                    $"[dim]Deleted {deleted.Count} ephemeral state file(s) per .fuseraftignore.[/]");
+                    $"[dim]Deleted {deleted.Count} ephemeral state/log file(s) per .fuseraftignore.[/]");
         }
 
         return 0;
@@ -100,6 +102,21 @@ public sealed class KnowledgeGcCommand : AsyncCommand<KnowledgeGcSettings>
                     return false;
                 return rules.IsEphemeral("state/" + name);
             })
+            .ToList();
+    }
+
+    /// <summary>
+    /// Returns log files that exist on disk and are marked ephemeral by <paramref name="rules"/>.
+    /// Scans the project's diagnostics directory (<see cref="FuseraftPaths.LocalLogs"/>) — not the
+    /// per-session ctx-snapshot logs, which are pruned by <c>fuseraft sessions --cleanup</c> instead.
+    /// </summary>
+    private static List<string> CollectEphemeralLogFiles(string slug, FuseraftIgnoreRules rules)
+    {
+        var logDir = FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalLogs, slug);
+        if (!Directory.Exists(logDir)) return [];
+
+        return Directory.EnumerateFiles(logDir)
+            .Where(f => rules.IsEphemeral("logs/" + Path.GetFileName(f)))
             .ToList();
     }
 

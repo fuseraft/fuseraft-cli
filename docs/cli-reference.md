@@ -1060,6 +1060,7 @@ fuseraft init [output] [options]
 | `-m, --model <id>` | auto-detected | Model ID to use for all agents. Auto-detected from your API keys if omitted. |
 | `-e, --endpoint <url>` | `~/.fuseraft/config` | Provider API endpoint URL. Defaults to the endpoint saved in `~/.fuseraft/config` if present. At run time, agents without an explicit `Endpoint` also inherit this value automatically. |
 | `--no-interactive` | off | Skip all prompts and generate with the supplied options and defaults. |
+| `--no-boilerplate` | off | Skip `architecture.yaml` and `knowledge/lifecycle.yaml` — for small or single-purpose projects that won't use `fuseraft arch check` or `fuseraft knowledge gc`. |
 
 **Templates**
 
@@ -1382,7 +1383,7 @@ fuseraft knowledge gc [options]
 
 **`.fuseraftignore` integration**
 
-When `.fuseraft/.fuseraftignore` is present and `--apply` is set, `fuseraft knowledge gc` also deletes ephemeral state files listed in the ignore file (e.g. `knowledge_findings.json` under `~/.fuseraft/state/{project_slug}/`). Files produced by gc itself — such as `provenance.archive.json` — are never deleted.
+When `.fuseraft/.fuseraftignore` is present and `--apply` is set, `fuseraft knowledge gc` also deletes ephemeral state and log files listed in the ignore file (e.g. `knowledge_findings.json` under `~/.fuseraft/state/{project_slug}/`, and `app.log`/`repl_events.jsonl` under `~/.fuseraft/logs/{project_slug}/`). Files produced by gc itself — such as `provenance.archive.json` — are never deleted.
 
 **Policy fields** (in `lifecycle.yaml`)
 
