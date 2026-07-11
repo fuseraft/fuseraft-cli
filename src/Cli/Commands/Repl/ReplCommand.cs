@@ -73,12 +73,12 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
     {
         // JSON bridge mode: active when launched from the VS Code webview panel
         // (--vscode + stdin redirected from the extension's child process).
-        bool jsonMode = OrchestratorBuilder.VsCodeMode && Console.IsInputRedirected;
+        bool jsonMode = OrchestratorConfigLoader.VsCodeMode && Console.IsInputRedirected;
 
         var keyStore = ApiKeyStoreFactory.Create();
         var (userCfg, legacyKey) = UserConfigStore.Load();
 
-        if (OrchestratorBuilder.VsCodeMode)
+        if (OrchestratorConfigLoader.VsCodeMode)
         {
             // Running from VS Code. Prefer an API key explicitly injected by the
             // extension (FUSERAFT_API_KEY), then fall back to any legacy plaintext
@@ -441,7 +441,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
     // -------------------------------------------------------------------------
 
     // Loads ShellPolicy from the default orchestration config in the working directory, if one exists.
-    // Uses OrchestratorBuilder.LoadSecurityConfig which binds only Orchestration.Security and does
+    // Uses OrchestratorConfigLoader.LoadSecurityConfig which binds only Orchestration.Security and does
     // NOT run ResolveAgentFiles — a missing agent file therefore cannot silently drop the policy.
     private ShellPolicy? TryLoadDefaultShellPolicy()
     {
@@ -456,7 +456,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             if (!File.Exists(path)) continue;
             try
             {
-                var security = OrchestratorBuilder.LoadSecurityConfig(path);
+                var security = OrchestratorConfigLoader.LoadSecurityConfig(path);
                 if (security?.ShellPolicy is { } policy)
                     return policy;
             }

@@ -32,7 +32,7 @@ public sealed class ModelsCommand : AsyncCommand
         bool pendingSave = false;
         if (userCfg is null || !userCfg.IsConfigured)
         {
-            bool isInteractive = !Console.IsInputRedirected && !OrchestratorBuilder.VsCodeMode;
+            bool isInteractive = !Console.IsInputRedirected && !OrchestratorConfigLoader.VsCodeMode;
             if (!isInteractive)
             {
                 AnsiConsole.MarkupLine("[yellow]fuseraft is not configured. Run 'fuseraft setup' to set an API key.[/]");

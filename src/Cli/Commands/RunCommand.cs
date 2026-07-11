@@ -716,7 +716,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         CheckpointConfig? checkpointConfig = null;
         if (File.Exists(configPath))
         {
-            try { checkpointConfig = OrchestratorBuilder.LoadConfig(configPath).Checkpoint; }
+            try { checkpointConfig = OrchestratorConfigLoader.LoadConfig(configPath).Checkpoint; }
             catch (Exception ex) { loggerFactory.CreateLogger<RunCommand>().LogWarning(ex, "[BuildActiveStore] {Message}", ex.Message); }
         }
 
@@ -920,7 +920,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         {
             try
             {
-                var sandboxPath = OrchestratorBuilder.LoadConfig(absoluteConfigPath).Security?.FileSystemSandboxPath;
+                var sandboxPath = OrchestratorConfigLoader.LoadConfig(absoluteConfigPath).Security?.FileSystemSandboxPath;
                 if (!string.IsNullOrWhiteSpace(sandboxPath))
                     return FuseraftPaths.ExpandPath(sandboxPath);
             }

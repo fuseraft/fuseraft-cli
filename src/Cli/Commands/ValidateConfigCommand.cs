@@ -97,7 +97,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
         OrchestrationConfig config;
         try
         {
-            config = OrchestratorBuilder.LoadConfig(settings.Path);
+            config = OrchestratorConfigLoader.LoadConfig(settings.Path);
         }
         catch (Exception ex)
         {
@@ -1139,7 +1139,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
         var cwd        = Directory.GetCurrentDirectory();
         var slug       = fuseraft.Core.FuseraftPaths.ProjectSlug(cwd);
         var sessionId  = sessionIdOverride ?? "{session_id}";
-        var expanded   = OrchestratorBuilder.InterpolateSessionId(raw, sessionId, slug);
+        var expanded   = OrchestratorConfigLoader.InterpolateSessionId(raw, sessionId, slug);
 
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine($"[bold]Interpolated paths[/]  [dim]project_slug={Markup.Escape(slug)}  session_id={Markup.Escape(sessionId)}[/]");
