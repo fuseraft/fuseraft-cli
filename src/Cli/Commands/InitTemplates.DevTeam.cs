@@ -375,6 +375,7 @@ public static partial class InitTemplates
                      PASS: name, status, exit_code, command (exact shell_run command — required)
                      FAIL: name, status, exit_code, command, output (relevant stderr/stdout from the failure — required)
               A PASS result with an empty or missing command field is treated as fabricated and will block handoff.
+              {TestReportCommandFieldRule}
               Always write the report before routing, even when tests fail.
               5. {ContextWriteStep}
               If all pass, call handoff(route_keyword: "HANDOFF TO REVIEWER").
