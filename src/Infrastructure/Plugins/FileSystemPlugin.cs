@@ -6,7 +6,17 @@ using fuseraft.Infrastructure;
 namespace fuseraft.Infrastructure.Plugins;
 
 /// <summary>
-/// Gives agents read/write access to the local filesystem.
+/// Gives agents read/write access to the local filesystem via the read/patch/write pipeline
+/// (<see cref="ReadFileAsync"/>, <see cref="PatchFileAsync"/>, <see cref="WriteFileAsync"/>).
+/// The directory-management and read-only inspection half of the "FileSystem" tool surface
+/// (list/delete/copy/move/grep/summarize) lives on the sibling <see cref="FileSystemManagementOps"/>,
+/// registered as a second object under the same "FileSystem" name (see
+/// <c>PluginRegistry.RegisterAdditional</c>) — it borrows this class's per-turn
+/// read/write/patch state by reference (<see cref="ReadThisTurnState"/> and friends) so
+/// invalidations on either object stay consistent, and a single
+/// <see cref="ITurnResettable.BeginTurn"/> resets both. Cross-cutting sandbox/cache logic used by both classes lives in the
+/// stateless <see cref="FileSystemSandbox"/>; pure patch/write text-diffing helpers used only
+/// by this class's pipeline live in <see cref="FilePatchDiffing"/>.
 ///
 /// When <paramref name="sandboxRoot"/> is provided (recommended for production), all path
 /// arguments are resolved to their absolute canonical form and rejected if they fall outside
