@@ -1,4 +1,4 @@
-namespace fuseraft.Orchestration.Events;
+namespace fuseraft.Core.Events;
 
 /// <summary>
 /// Canonical string constants for all orchestration event types written to events.jsonl.

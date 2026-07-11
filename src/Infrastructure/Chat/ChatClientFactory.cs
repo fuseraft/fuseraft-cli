@@ -10,7 +10,6 @@ using Microsoft.Extensions.Logging;
 using OllamaSharp;
 using OpenAI;
 using fuseraft.Core.Models;
-using fuseraft.Orchestration;
 
 namespace fuseraft.Infrastructure.Chat;
 
