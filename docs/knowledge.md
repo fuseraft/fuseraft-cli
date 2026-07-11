@@ -267,6 +267,7 @@ fuseraft knowledge gc --apply  # applies all policies
 | Prune orphaned graph nodes | Removes nodes with no edges and no recent file touch |
 | Compact provenance registry | Archives expired `ClaimRecord` entries to `~/.fuseraft/state/{project_slug}/provenance.archive.json` |
 | Delete ephemeral state files | When `.fuseraft/.fuseraftignore` is present, deletes state files marked ephemeral (e.g. `knowledge_findings.json`). `provenance.archive.json` is never deleted — gc writes to it. |
+| Delete ephemeral log files | When `.fuseraft/.fuseraftignore` is present, deletes files under `~/.fuseraft/logs/{project_slug}/` marked ephemeral (e.g. `app.log`, `repl_events.jsonl`). |
 
 Configure retention windows in `.fuseraft/knowledge/lifecycle.yaml` (created by `fuseraft init`).
 

@@ -26,6 +26,10 @@ public sealed class InitSettings : CommandSettings
     [CommandOption("--no-interactive")]
     [Description("Skip prompts and generate with the supplied options and defaults.")]
     public bool NoInteractive { get; set; }
+
+    [CommandOption("--no-boilerplate")]
+    [Description("Skip architecture.yaml and knowledge/lifecycle.yaml — for small or single-purpose projects that won't use `fuseraft arch check` or `fuseraft knowledge gc`.")]
+    public bool NoBoilerplate { get; set; }
 }
 
 /// <summary>
@@ -114,7 +118,7 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
         }
 
         await EnsureGitignoreEntryAsync(cancellationToken);
-        var knowledgeScaffold = await ScaffoldKnowledgeAsync(cancellationToken);
+        var knowledgeScaffold = await ScaffoldKnowledgeAsync(settings.NoBoilerplate, cancellationToken);
 
         var selected        = Array.Find(Templates, t => t.Key == templateKey)!;
         var endpointDisplay = string.IsNullOrWhiteSpace(endpoint) ? "[dim](default)[/]" : Markup.Escape(endpoint);
@@ -211,11 +215,12 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
     }
 
     private static async Task<IReadOnlyList<(string Path, bool Created)>> ScaffoldKnowledgeAsync(
-        CancellationToken cancellationToken)
+        bool noBoilerplate, CancellationToken cancellationToken)
     {
         var result = new List<(string, bool)>();
 
-        // Directories — always created (idempotent).
+        // Directories — always created (idempotent). Decision/Objective plugins
+        // write into these and don't create them on demand.
         var dirs = new[]
         {
             ".fuseraft/knowledge/decisions/archive",
@@ -225,28 +230,31 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
         foreach (var d in dirs)
             Directory.CreateDirectory(d);
 
-        // architecture.yaml — only if absent.
-        const string archPath = ".fuseraft/architecture.yaml";
-        if (!File.Exists(archPath))
+        if (!noBoilerplate)
         {
-            await File.WriteAllTextAsync(archPath, DefaultArchitectureYaml, cancellationToken);
-            result.Add((archPath, true));
-        }
-        else
-        {
-            result.Add((archPath, false));
-        }
+            // architecture.yaml — only if absent.
+            const string archPath = ".fuseraft/architecture.yaml";
+            if (!File.Exists(archPath))
+            {
+                await File.WriteAllTextAsync(archPath, DefaultArchitectureYaml, cancellationToken);
+                result.Add((archPath, true));
+            }
+            else
+            {
+                result.Add((archPath, false));
+            }
 
-        // lifecycle.yaml — only if absent.
-        const string lcPath = ".fuseraft/knowledge/lifecycle.yaml";
-        if (!File.Exists(lcPath))
-        {
-            await File.WriteAllTextAsync(lcPath, DefaultLifecycleYaml, cancellationToken);
-            result.Add((lcPath, true));
-        }
-        else
-        {
-            result.Add((lcPath, false));
+            // lifecycle.yaml — only if absent.
+            const string lcPath = ".fuseraft/knowledge/lifecycle.yaml";
+            if (!File.Exists(lcPath))
+            {
+                await File.WriteAllTextAsync(lcPath, DefaultLifecycleYaml, cancellationToken);
+                result.Add((lcPath, true));
+            }
+            else
+            {
+                result.Add((lcPath, false));
+            }
         }
 
         // .fuseraftignore — only if absent.
@@ -356,11 +364,12 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
         # .fuseraftignore — marks which .fuseraft/ files fuseraft tooling treats as ephemeral.
         # Paths are relative to .fuseraft/. Syntax is gitignore-style; prefix ! to un-ignore.
         #
-        # Respected by: fuseraft cleanup, fuseraft gc, fuseraft archive-session
+        # Respected by: fuseraft sessions --cleanup, fuseraft knowledge gc --apply
         # Does not affect .gitignore — git tracking is controlled by your project's .gitignore.
 
         # ── Ephemeral session data ──────────────────────────────────────────────────
         # Large, agent-internal files that are reproducible and not useful to retain.
+        # Pruned by: fuseraft sessions --cleanup
         sessions/**/read_cache.json
         sessions/**/tool-results/
         sessions/**/ctx_viz.html
@@ -368,9 +377,11 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
         sessions/**/brief-review.json
 
         # ── Logs ───────────────────────────────────────────────────────────────────
+        # Pruned by: fuseraft knowledge gc --apply
         logs/**
 
         # ── State ──────────────────────────────────────────────────────────────────
+        # Pruned by: fuseraft knowledge gc --apply
         state/knowledge_findings.json
         state/provenance.archive.json
 
