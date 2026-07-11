@@ -80,6 +80,19 @@ public sealed class GraphOrchestrator(
 
     private readonly IHumanApprovalService? _humanApprovalService = humanApprovalService;
 
+    // Collaborators fixed for this instance's lifetime, bundled for TurnExecutionHelpers /
+    // SubGraphExecutor / ParallelFanOutExecutor — see TurnServices' doc comment for why
+    // SessionId/Task are intentionally excluded (they mutate post-construction). Lazily built
+    // (not a field initializer) because the callbacks below reference AgentStarting/
+    // TokenBudgetWarning, and field initializers cannot reference other instance members
+    // (CS0236) — a property getter runs after construction completes, so it's unrestricted.
+    private TurnServices? _servicesLazy;
+    private TurnServices _services => _servicesLazy ??= new(
+        config, agentFactory, logger, eventEmitter, governanceKernel, contextPipeline,
+        changeTracker, repositoryKnowledgeStore, humanApprovalService,
+        OnAgentStarting: name => AgentStarting?.Invoke(name),
+        OnTokenBudgetWarning: (name, input, warn) => TokenBudgetWarning?.Invoke(name, input, warn));
+
     private string _sessionId = string.Empty;
     private string? _resumeNodeId;
     // Captured from StreamAsync for use in per-node executor helpers.
@@ -720,19 +733,19 @@ public sealed class GraphOrchestrator(
             {
                 if (routeTable.TerminalValidators.Count > 0)
                 {
-                    var (termOk, termErr, termValidator) = await RunValidatorsAsync(
+                    var (termOk, termErr, termValidator) = await TurnExecutionHelpers.RunValidatorsAsync(
                         routeTable.TerminalValidators, ctx.History, ct).ConfigureAwait(false);
 
                     if (!termOk)
                     {
                         consecutiveFails++;
-                        RecordGovernanceViolation(agentName, termValidator!, consecutiveFails, maxRetries);
+                        TurnExecutionHelpers.RecordGovernanceViolation(agentName, termValidator!, consecutiveFails, maxRetries, _sessionId, _services);
 
                         if (consecutiveFails >= maxRetries)
                             throw new ValidatorStuckException(agentName, termValidator!, consecutiveFails, termErr!);
 
-                        await EmitAndInjectValidationFailureAsync(
-                            agentName, "(terminal)", termValidator!, termErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
+                        await TurnExecutionHelpers.EmitAndInjectValidationFailureAsync(
+                            agentName, "(terminal)", termValidator!, termErr!, responseText, consecutiveFails, maxRetries, ctx, ct, _services);
                         continue;
                     }
                 }
@@ -761,7 +774,7 @@ public sealed class GraphOrchestrator(
             {
                 if (_topology.UnconditionalForwardRoutes.TryGetValue(nodeId, out var autoFwdRoute))
                 {
-                    var (autoOk, autoErr, autoValidator) = await RunValidatorsAsync(
+                    var (autoOk, autoErr, autoValidator) = await TurnExecutionHelpers.RunValidatorsAsync(
                         autoFwdRoute.Validators, ctx.History, ct).ConfigureAwait(false);
 
                     if (autoOk)
@@ -788,13 +801,13 @@ public sealed class GraphOrchestrator(
                     }
 
                     consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-                    RecordGovernanceViolation(agentName, autoValidator!, consecutiveFails, maxRetries);
+                    TurnExecutionHelpers.RecordGovernanceViolation(agentName, autoValidator!, consecutiveFails, maxRetries, _sessionId, _services);
 
                     if (consecutiveFails >= maxRetries)
                         throw new ValidatorStuckException(agentName, autoValidator!, consecutiveFails, autoErr!);
 
-                    await EmitAndInjectValidationFailureAsync(
-                        agentName, "(unconditional)", autoValidator!, autoErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
+                    await TurnExecutionHelpers.EmitAndInjectValidationFailureAsync(
+                        agentName, "(unconditional)", autoValidator!, autoErr!, responseText, consecutiveFails, maxRetries, ctx, ct, _services);
                     continue;
                 }
 
@@ -803,19 +816,19 @@ public sealed class GraphOrchestrator(
                     if (_topology.UnconditionalBackEdgeValidators.TryGetValue(nodeId, out var uncBackValidators)
                         && uncBackValidators.Count > 0)
                     {
-                        var (ubOk, ubErr, ubValidator) = await RunValidatorsAsync(
+                        var (ubOk, ubErr, ubValidator) = await TurnExecutionHelpers.RunValidatorsAsync(
                             uncBackValidators, ctx.History, ct).ConfigureAwait(false);
 
                         if (!ubOk)
                         {
                             consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-                            RecordGovernanceViolation(agentName, ubValidator!, consecutiveFails, maxRetries);
+                            TurnExecutionHelpers.RecordGovernanceViolation(agentName, ubValidator!, consecutiveFails, maxRetries, _sessionId, _services);
 
                             if (consecutiveFails >= maxRetries)
                                 throw new ValidatorStuckException(agentName, ubValidator!, consecutiveFails, ubErr!);
 
-                            await EmitAndInjectValidationFailureAsync(
-                                agentName, "(unconditional-back)", ubValidator!, ubErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
+                            await TurnExecutionHelpers.EmitAndInjectValidationFailureAsync(
+                                agentName, "(unconditional-back)", ubValidator!, ubErr!, responseText, consecutiveFails, maxRetries, ctx, ct, _services);
                             continue;
                         }
                     }
@@ -901,29 +914,29 @@ public sealed class GraphOrchestrator(
             var pgKey = $"{nodeId}::{foundKeyword}";
             if (foundKeyword is not null && _topology.ParallelGroups.TryGetValue(pgKey, out var parallelGroup))
             {
-                var (pgOk, pgErr, pgValidator) = await RunValidatorsAsync(
+                var (pgOk, pgErr, pgValidator) = await TurnExecutionHelpers.RunValidatorsAsync(
                     parallelGroup.Validators, ctx.History, ct).ConfigureAwait(false);
 
                 if (!pgOk)
                 {
                     consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-                    RecordGovernanceViolation(agentName, pgValidator!, consecutiveFails, maxRetries);
+                    TurnExecutionHelpers.RecordGovernanceViolation(agentName, pgValidator!, consecutiveFails, maxRetries, _sessionId, _services);
 
                     if (consecutiveFails >= maxRetries)
                         throw new ValidatorStuckException(agentName, pgValidator!, consecutiveFails, pgErr!);
 
-                    await EmitAndInjectValidationFailureAsync(
-                        agentName, foundKeyword, pgValidator!, pgErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
+                    await TurnExecutionHelpers.EmitAndInjectValidationFailureAsync(
+                        agentName, foundKeyword, pgValidator!, pgErr!, responseText, consecutiveFails, maxRetries, ctx, ct, _services);
                     continue;
                 }
 
                 if (parallelGroup.RequireHumanApproval && _humanApprovalService is not null)
                 {
-                    var (pgApproved, pgApprovedFails) = await ApplyHumanApprovalGateAsync(
+                    var (pgApproved, pgApprovedFails) = await TurnExecutionHelpers.ApplyHumanApprovalGateAsync(
                         foundKeyword, agentName, parallelGroup.MergeTargetName,
                         $"Parallel dispatch to [{string.Join(", ", parallelGroup.NodeIds)}] was blocked by the operator. " +
                         $"Continue your work or await further instructions.",
-                        consecutiveFails, ctx, ct);
+                        consecutiveFails, ctx, ct, _services);
                     consecutiveFails = pgApprovedFails;
                     if (!pgApproved) continue;
                 }
@@ -1037,7 +1050,7 @@ public sealed class GraphOrchestrator(
             await CorrectionEngine.InjectNoKeywordCorrection(
                 ctx.History, responseText, agentName, consecutiveFails, routeTable, eventEmitter,
                 agentMsg!.ToolCalls);
-            await PersistCorrectionsAsync(ctx, histBefore2, ct).ConfigureAwait(false);
+            await TurnExecutionHelpers.PersistCorrectionsAsync(ctx, histBefore2, ct).ConfigureAwait(false);
 
             if (consecutiveFails >= maxRetries)
             {
@@ -1139,7 +1152,7 @@ public sealed class GraphOrchestrator(
             agentName, nodeId, totalTurns,
             StringHelpers.Truncate((response.Text ?? "").Replace('\n', ' '), 200));
 
-        var agentMsg = await RecordAndEmitAsync(response, agentName, ctx, ct);
+        var agentMsg = await TurnExecutionHelpers.RecordAndEmitAsync(response, agentName, ctx, ct, _sessionId, _services);
         return (response, agentMsg, consecutiveFails, false);
     }
 
@@ -1171,14 +1184,14 @@ public sealed class GraphOrchestrator(
                     SessionId     = _sessionId,
                 }, ct);
             context = assembled.Messages;
-            await EmitContextWindowWarnAsync(agentName, agentCfg, assembled.Messages, ctx);
+            await TurnExecutionHelpers.EmitContextWindowWarnAsync(agentName, agentCfg, assembled.Messages, ctx, _services);
             if (eventEmitter is not null)
-                await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, ctx.TurnIndex);
+                await TurnExecutionHelpers.EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, ctx.TurnIndex);
         }
         else
         {
             var filtered = ContextWindowFilter.Apply(ctx.History, agentCfg.ContextWindow);
-            await EmitContextWindowWarnAsync(agentName, agentCfg, filtered, ctx);
+            await TurnExecutionHelpers.EmitContextWindowWarnAsync(agentName, agentCfg, filtered, ctx, _services);
             context = !string.IsNullOrWhiteSpace(instructions)
                 ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
                 : filtered;
@@ -1218,13 +1231,13 @@ public sealed class GraphOrchestrator(
         if (routeTable.PhaseBreakValidators.TryGetValue(foundKeyword, out var pbValidators)
             && pbValidators.Count > 0)
         {
-            var (pbOk, pbErr, pbValidator) = await RunValidatorsAsync(
+            var (pbOk, pbErr, pbValidator) = await TurnExecutionHelpers.RunValidatorsAsync(
                 pbValidators, ctx.History, ct).ConfigureAwait(false);
 
             if (!pbOk)
             {
                 consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-                RecordGovernanceViolation(agentName, pbValidator!, consecutiveFails, maxRetries);
+                TurnExecutionHelpers.RecordGovernanceViolation(agentName, pbValidator!, consecutiveFails, maxRetries, _sessionId, _services);
 
                 if (consecutiveFails >= maxRetries)
                     throw new ValidatorStuckException(agentName, pbValidator!, consecutiveFails, pbErr!);
@@ -1237,17 +1250,17 @@ public sealed class GraphOrchestrator(
                     && agents.TryGetValue(backRecoveryName, out var backRecoveryAgt))
                 {
                     _recoveryActivated.TryAdd(backEdgeKey, true);
-                    await InvokeRecoveryAgentAsync(
+                    await TurnExecutionHelpers.InvokeRecoveryAgentAsync(
                         backRecoveryName, backRecoveryAgt,
                         agentInstructions, agentConfigs,
                         $"'{pbValidator}' failed {consecutiveFails}× on back-edge '{foundKeyword}'",
-                        pbErr!, foundKeyword, ctx, ct);
+                        pbErr!, foundKeyword, ctx, ct, _sessionId, _task, _services);
                     consecutiveFails = 0;
                     return (true, false, consecutiveFails);
                 }
 
-                await EmitAndInjectValidationFailureAsync(
-                    agentName, foundKeyword, pbValidator!, pbErr!, responseText, consecutiveFails, maxRetries, ctx, ct);
+                await TurnExecutionHelpers.EmitAndInjectValidationFailureAsync(
+                    agentName, foundKeyword, pbValidator!, pbErr!, responseText, consecutiveFails, maxRetries, ctx, ct, _services);
                 return (true, false, consecutiveFails);
             }
         }
@@ -1259,11 +1272,11 @@ public sealed class GraphOrchestrator(
             var backTarget = _topology.BackEdgeDestinations.TryGetValue(foundKeyword, out var pbd0)
                 ? pbd0 ?? "(terminal)"
                 : "(terminal)";
-            var (approved, approvedFails) = await ApplyHumanApprovalGateAsync(
+            var (approved, approvedFails) = await TurnExecutionHelpers.ApplyHumanApprovalGateAsync(
                 foundKeyword, agentName, backTarget,
                 $"Phase-break to '{backTarget}' was blocked by the operator. " +
                 $"Continue your work or await further instructions.",
-                consecutiveFails, ctx, ct);
+                consecutiveFails, ctx, ct, _services);
             consecutiveFails = approvedFails;
             if (!approved) return (true, false, consecutiveFails);
         }
@@ -1282,42 +1295,6 @@ public sealed class GraphOrchestrator(
 
         await wfCtx.YieldOutputAsync(ctx, ct).ConfigureAwait(false);
         return (true, true, consecutiveFails);
-    }
-
-    /// <summary>
-    /// HITL approval prompt and approval branching. When the human-approval service
-    /// rejects the route, injects a blocked-route message into history, persists it to
-    /// the message sink, and resets <paramref name="consecutiveFails"/> to zero.
-    /// </summary>
-    /// <returns>
-    /// A tuple of (approved, updated consecutiveFails). When <c>approved</c> is
-    /// <c>false</c> the caller must <c>continue</c> the turn loop.
-    /// </returns>
-    private async Task<(bool Approved, int ConsecutiveFails)> ApplyHumanApprovalGateAsync(
-        string keyword,
-        string agentName,
-        string targetName,
-        string blockedMessage,
-        int consecutiveFails,
-        AgentContext ctx,
-        CancellationToken ct)
-    {
-        var approved = await _humanApprovalService!.PromptRouteApprovalAsync(
-            keyword, agentName, targetName);
-
-        if (eventEmitter is not null)
-            _ = eventEmitter.EmitAsync(approved ? EventTypes.HitlApproved : EventTypes.HitlRejected,
-                agent:   agentName,
-                payload: new { keyword, target = targetName });
-
-        if (!approved)
-        {
-            ctx.History.Add(new ChatMessage(ChatRole.User, blockedMessage));
-            consecutiveFails = 0;
-            int histBeforeBlocked = ctx.History.Count - 1;
-            await PersistCorrectionsAsync(ctx, histBeforeBlocked, ct).ConfigureAwait(false);
-        }
-        return (approved, consecutiveFails);
     }
 
     /// <summary>
@@ -1348,7 +1325,7 @@ public sealed class GraphOrchestrator(
         Dictionary<string, AgentConfig> agentConfigs,
         CancellationToken ct)
     {
-        var (ok, errMsg, failingValidator) = await RunValidatorsAsync(
+        var (ok, errMsg, failingValidator) = await TurnExecutionHelpers.RunValidatorsAsync(
             route.Validators, ctx.History, ct).ConfigureAwait(false);
 
         if (ok)
@@ -1359,11 +1336,11 @@ public sealed class GraphOrchestrator(
             // Human approval gate: prompt before the route fires.
             if (route.RequireHumanApproval && _humanApprovalService is not null)
             {
-                var (approved, approvedFails) = await ApplyHumanApprovalGateAsync(
+                var (approved, approvedFails) = await TurnExecutionHelpers.ApplyHumanApprovalGateAsync(
                     foundKeyword, agentName, route.NextExecutorName,
                     $"Route to {route.NextExecutorName} was blocked by the operator. " +
                     $"Continue your work or await further instructions.",
-                    consecutiveFails, ctx, ct);
+                    consecutiveFails, ctx, ct, _services);
                 consecutiveFails = approvedFails;
                 if (!approved) return (true, false, consecutiveFails);
             }
@@ -1394,7 +1371,7 @@ public sealed class GraphOrchestrator(
         // Validator failed — clamp to maxRetries-1 so a single keyword find is not
         // penalised as heavily as a missing keyword before injecting correction.
         consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-        RecordGovernanceViolation(agentName, failingValidator!, consecutiveFails, maxRetries);
+        TurnExecutionHelpers.RecordGovernanceViolation(agentName, failingValidator!, consecutiveFails, maxRetries, _sessionId, _services);
 
         if (consecutiveFails >= maxRetries)
             throw new ValidatorStuckException(agentName, failingValidator!, consecutiveFails, errMsg!);
@@ -1407,17 +1384,17 @@ public sealed class GraphOrchestrator(
             && agents.TryGetValue(route.RecoveryAgent, out var fwdRecoveryAgt))
         {
             _recoveryActivated.TryAdd(fwdEdgeKey, true);
-            await InvokeRecoveryAgentAsync(
+            await TurnExecutionHelpers.InvokeRecoveryAgentAsync(
                 route.RecoveryAgent, fwdRecoveryAgt,
                 agentInstructions, agentConfigs,
                 $"'{failingValidator}' failed {consecutiveFails}× on edge '{foundKeyword}'",
-                errMsg!, foundKeyword, ctx, ct);
+                errMsg!, foundKeyword, ctx, ct, _sessionId, _task, _services);
             consecutiveFails = 0;
             return (true, false, consecutiveFails);
         }
 
-        await EmitAndInjectValidationFailureAsync(
-            agentName, foundKeyword, failingValidator!, errMsg!, responseText, consecutiveFails, maxRetries, ctx, ct);
+        await TurnExecutionHelpers.EmitAndInjectValidationFailureAsync(
+            agentName, foundKeyword, failingValidator!, errMsg!, responseText, consecutiveFails, maxRetries, ctx, ct, _services);
         return (true, false, consecutiveFails);
     }
 
@@ -1430,344 +1407,6 @@ public sealed class GraphOrchestrator(
     {
         ctx.CurrentState = StateHandoff.Advance(ctx.CurrentState, nextNodeName);
         lock (_stateHistoryLock) _stateHistory.Add(ctx.CurrentState);
-    }
-
-    // -------------------------------------------------------------------------
-    // Shared per-turn helpers
-    // -------------------------------------------------------------------------
-
-    private async Task<AgentMessage> RecordAndEmitAsync(
-        AgentResponse response,
-        string agentName,
-        AgentContext ctx,
-        CancellationToken ct)
-    {
-        foreach (var msg in response.Messages)
-        {
-            if (msg.Role == ChatRole.Assistant && string.IsNullOrEmpty(msg.AuthorName))
-                msg.AuthorName = agentName;
-            ctx.History.Add(msg);
-        }
-
-        var agentMsg = new AgentMessage
-        {
-            AgentName = agentName,
-            Content   = response.Text ?? string.Empty,
-            Role      = "assistant",
-            TurnIndex = ctx.TurnIndex++,
-            Usage     = OrchestratorHelpers.ExtractUsage(response),
-            ToolCalls = OrchestratorHelpers.ExtractToolCalls(response.Messages)
-        };
-
-        ctx.CumulativeTokens += agentMsg.Usage?.TotalTokens ?? 0;
-
-        var warnThreshold = config.WarnTurnTokens;
-        if (warnThreshold > 0 && agentMsg.Usage?.InputTokens is { } inputToks && inputToks > warnThreshold)
-            TokenBudgetWarning?.Invoke(agentName, inputToks, warnThreshold);
-
-        // Stream before budget check — work was done and tokens already consumed.
-        await ctx.MessageSink.WriteAsync(agentMsg, ct).ConfigureAwait(false);
-
-        if (config.MaxTotalTokens is { } limit && ctx.CumulativeTokens > limit)
-            throw new BudgetExceededException(ctx.CumulativeTokens, limit);
-
-        if (eventEmitter is not null)
-        {
-            await eventEmitter.EmitAsync(EventTypes.TurnEnd,
-                agent: agentName,
-                turn:  agentMsg.TurnIndex,
-                payload: new
-                {
-                    input_tokens  = agentMsg.Usage?.InputTokens,
-                    output_tokens = agentMsg.Usage?.OutputTokens,
-                }).ConfigureAwait(false);
-
-            await eventEmitter.EmitAsync(EventTypes.AgentEnd,
-                agent: agentName,
-                turn:  agentMsg.TurnIndex,
-                payload: new
-                {
-                    input_tokens  = agentMsg.Usage?.InputTokens,
-                    output_tokens = agentMsg.Usage?.OutputTokens,
-                }).ConfigureAwait(false);
-        }
-
-        // Emit reasoning content when the model produced any.
-        if (eventEmitter is not null)
-        {
-            const int MaxReasoningChars = 8_000;
-            var reasoningText = string.Concat(
-                response.Messages
-                    .SelectMany(m => m.Contents.OfType<TextReasoningContent>())
-                    .Select(r => r.Text));
-            if (!string.IsNullOrWhiteSpace(reasoningText))
-            {
-                var truncated = reasoningText.Length > MaxReasoningChars
-                    ? reasoningText[..MaxReasoningChars] + $"\n[TRUNCATED — {reasoningText.Length:N0} chars total]"
-                    : reasoningText;
-                await eventEmitter.EmitAsync(EventTypes.Reasoning,
-                    agent:   agentName,
-                    turn:    agentMsg.TurnIndex,
-                    payload: new { text = truncated }).ConfigureAwait(false);
-            }
-        }
-
-        if (changeTracker is not null)
-        {
-            try { await changeTracker.FlushTurnAsync(agentName, agentMsg.TurnIndex, CancellationToken.None).ConfigureAwait(false); }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex,
-                    "ChangeTracker flush failed for turn {Turn} ({Agent})",
-                    agentMsg.TurnIndex, agentName);
-            }
-        }
-
-        // Persist entity-scoped findings from tool calls for future session retrieval.
-        if (repositoryKnowledgeStore is not null && !string.IsNullOrEmpty(_sessionId))
-        {
-            try
-            {
-                var observations = ObservationExtractor.Extract(
-                    (IReadOnlyList<Microsoft.Extensions.AI.ChatMessage>)response.Messages,
-                    agentName, agentMsg.TurnIndex);
-                foreach (var obs in observations)
-                {
-                    if (string.IsNullOrWhiteSpace(obs.Entity)) continue;
-                    await repositoryKnowledgeStore.AddAsync(new RepositoryKnowledgeFinding
-                    {
-                        Entity     = obs.Entity!,
-                        Finding    = obs.Finding,
-                        Source     = _sessionId,
-                        Confidence = obs.Confidence,
-                        AgentName  = obs.AgentName,
-                        Kind       = obs.Source is "write_file" or "patch_file" or "delete_file"
-                                     ? "change" : "observation",
-                    }, CancellationToken.None).ConfigureAwait(false);
-                }
-            }
-            catch { /* best-effort */ }
-        }
-
-        return agentMsg;
-    }
-
-    private static Task EmitContextAssemblyAsync(
-        EventEmitter emitter,
-        ContextAssemblyMetrics metrics,
-        int turn) =>
-        emitter.EmitAsync(EventTypes.ContextAssembly,
-            agent: metrics.AgentName,
-            turn:  turn,
-            payload: new
-            {
-                knowledge_retrieved  = metrics.KnowledgeItemsRetrieved,
-                knowledge_included   = metrics.KnowledgeItemsIncluded,
-                memory_loaded        = metrics.MemoryEntriesLoaded,
-                memory_included      = metrics.MemoryEntriesIncluded,
-                artifacts            = metrics.ArtifactsAssembled,
-                context_chars        = metrics.TotalContextChars,
-                system_prompt_chars  = metrics.SystemPromptChars,
-                assembly_ms          = (int)metrics.AssemblyDuration.TotalMilliseconds,
-                context_strategy     = metrics.ContextStrategy,
-                declared_sources     = metrics.DeclaredSources,
-                empty_sources        = metrics.EmptySources,
-            });
-
-    private static async ValueTask PersistCorrectionsAsync(
-        AgentContext ctx,
-        int historyCountBefore,
-        CancellationToken ct)
-    {
-        for (int i = historyCountBefore; i < ctx.History.Count; i++)
-        {
-            var injected = ctx.History[i];
-            if (injected.Role != ChatRole.User) continue;
-
-            var correctionText = string.Concat(injected.Contents.OfType<TextContent>().Select(t => t.Text));
-            if (string.IsNullOrWhiteSpace(correctionText)) continue;
-
-            await ctx.MessageSink.WriteAsync(new AgentMessage
-            {
-                AgentName = AgentNames.Orchestrator,
-                Content   = correctionText,
-                Role      = "user",
-                TurnIndex = Math.Max(0, ctx.TurnIndex - 1),
-            }, ct).ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a recovery agent for one intervention turn and appends its response to
-    /// shared history. Best-effort — exceptions are swallowed so the caller's retry loop
-    /// continues normally even when the recovery agent itself fails.
-    /// </summary>
-    private async Task InvokeRecoveryAgentAsync(
-        string recoveryAgentName,
-        AIAgent recoveryAgent,
-        Dictionary<string, string> agentInstructions,
-        Dictionary<string, AgentConfig> agentConfigs,
-        string reason,
-        string validatorError,
-        string triggeringKeyword,
-        AgentContext ctx,
-        CancellationToken ct)
-    {
-        var recoveryCfg = agentConfigs.GetValueOrDefault(recoveryAgentName) ?? new AgentConfig();
-        var recoveryInstructions = agentInstructions.GetValueOrDefault(recoveryAgentName, string.Empty);
-
-        ctx.History.Add(new ChatMessage(ChatRole.User,
-            $"RECOVERY ACTIVATED: '{recoveryAgentName}' called in — {reason}.\n\n" +
-            $"  1. changes_read_latest — review what was attempted.\n" +
-            $"  2. Fix the problem described below.\n" +
-            $"  3. The pipeline will retry '{triggeringKeyword}' after this turn.\n\n" +
-            $"Failure: {validatorError}"));
-
-        if (eventEmitter is not null)
-            await eventEmitter.EmitAsync(EventTypes.RecoveryActivated,
-                agent: recoveryAgentName,
-                payload: new { reason, keyword = triggeringKeyword });
-
-        try
-        {
-            IEnumerable<ChatMessage> context;
-            if (contextPipeline is not null)
-            {
-                var assembled = await contextPipeline.AssembleAsync(
-                    new AgentExecutionRequest
-                    {
-                        AgentName     = recoveryAgentName,
-                        Task          = _task,
-                        SharedHistory = ctx.History,
-                        AgentConfig   = recoveryCfg,
-                        SessionId     = _sessionId,
-                    }, ct);
-                context = assembled.Messages;
-                if (eventEmitter is not null)
-                    await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, ctx.TurnIndex);
-            }
-            else
-            {
-                var filtered = ContextWindowFilter.Apply(ctx.History, recoveryCfg.ContextWindow);
-                context = !string.IsNullOrWhiteSpace(recoveryInstructions)
-                    ? [new ChatMessage(ChatRole.System, recoveryInstructions), .. filtered]
-                    : filtered;
-            }
-
-            var response = governanceKernel?.CircuitBreaker is { } cb
-                ? await cb.ExecuteAsync(() => recoveryAgent.RunAsync(context, null, null, ct)).ConfigureAwait(false)
-                : await recoveryAgent.RunAsync(context, null, null, ct).ConfigureAwait(false);
-
-            await RecordAndEmitAsync(response, recoveryAgentName, ctx, ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "[GraphOrchestrator] Recovery agent '{Agent}' failed — continuing normal pipeline.",
-                recoveryAgentName);
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Validation-failure helpers (shared by RunNodeExecutorAsync / RunParallelNodeAsync)
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Emits a <c>context_window_warn</c> event when the filtered message count is
-    /// approaching the configured context-cap fraction. No-ops when
-    /// <paramref name="eventEmitter"/> is null or the context window is not configured.
-    /// </summary>
-    private async Task EmitContextWindowWarnAsync(
-        string agentName, AgentConfig agentCfg, IReadOnlyList<ChatMessage> filtered, AgentContext ctx)
-    {
-        if (eventEmitter is null) return;
-        if (agentCfg.ContextWindow is not { ContextCapFraction: > 0, MaxTailMessages: > 0 } cw) return;
-        if (filtered.Count <= (int)(cw.MaxTailMessages * cw.ContextCapFraction)) return;
-
-        await eventEmitter.EmitAsync(EventTypes.ContextWindowWarn,
-            agent: agentName,
-            turn:  ctx.TurnIndex,
-            payload: new
-            {
-                messages  = filtered.Count,
-                cap       = cw.MaxTailMessages,
-                fraction  = cw.ContextCapFraction,
-                threshold = (int)(cw.MaxTailMessages * cw.ContextCapFraction)
-            });
-    }
-
-    /// <summary>
-    /// Emits a <c>validation_fail</c> event, injects a correction message into history via
-    /// <see cref="CorrectionEngine.InjectValidationError"/>, and persists the injected message
-    /// to the message sink. Called from every validation-failure path in the turn loop.
-    /// </summary>
-    private async Task EmitAndInjectValidationFailureAsync(
-        string agentName,
-        string keyword,
-        string validatorName,
-        string errMsg,
-        string responseText,
-        int consecutiveFails,
-        int maxRetries,
-        AgentContext ctx,
-        CancellationToken ct)
-    {
-        if (eventEmitter is not null)
-            await eventEmitter.EmitAsync(EventTypes.ValidationFail,
-                agent:   agentName,
-                payload: new
-                {
-                    validator   = validatorName,
-                    keyword,
-                    consecutive = consecutiveFails,
-                    message     = errMsg,
-                });
-
-        int histBefore = ctx.History.Count;
-        await CorrectionEngine.InjectValidationError(ctx.History, errMsg, consecutiveFails, responseText, keyword, eventEmitter, maxRetries);
-        await PersistCorrectionsAsync(ctx, histBefore, ct).ConfigureAwait(false);
-    }
-
-    private static async Task<(bool ok, string? error, string? validatorName)> RunValidatorsAsync(
-        IReadOnlyList<IRoutingValidator> validators,
-        IList<ChatMessage> history,
-        CancellationToken ct)
-    {
-        for (int i = 0; i < validators.Count; i++)
-        {
-            var result = await validators[i].ValidateAsync(history, ct).ConfigureAwait(false);
-            if (!result.IsValid)
-                return (false, result.ErrorMessage, validators[i].GetType().Name);
-        }
-        return (true, null, null);
-    }
-
-    private void RecordGovernanceViolation(
-        string agentName,
-        string validatorName,
-        int consecutiveCount,
-        int maxRetries)
-    {
-        if (governanceKernel is null) return;
-
-        var agentDid = agentFactory.GetDid(agentName);
-        governanceKernel.AuditEmitter.Emit(
-            GovernanceEventType.PolicyViolation,
-            agentId:   agentDid,
-            sessionId: _sessionId,
-            data: new Dictionary<string, object>
-            {
-                ["agent_name"]  = agentName,
-                ["validator"]   = validatorName,
-                ["consecutive"] = consecutiveCount,
-            });
-
-        var rlKey = $"{agentDid}:validation:fail";
-        if (!governanceKernel.RateLimiter.TryAcquire(rlKey, maxCalls: maxRetries, window: TimeSpan.FromMinutes(10)))
-            throw new ValidatorStuckException(agentName, validatorName, consecutiveCount,
-                $"Rate limit exceeded for validator failures on agent '{agentName}'.");
-
-        governanceKernel.SloEngine.Get("policy-compliance")?.Record(0.0);
     }
 
     // -------------------------------------------------------------------------
@@ -2056,14 +1695,14 @@ public sealed class GraphOrchestrator(
                         SessionId     = _sessionId,
                     }, ct);
                 context = assembled.Messages;
-                await EmitContextWindowWarnAsync(agentName, agentCfg, assembled.Messages, ctx);
+                await TurnExecutionHelpers.EmitContextWindowWarnAsync(agentName, agentCfg, assembled.Messages, ctx, _services);
                 if (eventEmitter is not null)
-                    await EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, ctx.TurnIndex);
+                    await TurnExecutionHelpers.EmitContextAssemblyAsync(eventEmitter, assembled.Metrics, ctx.TurnIndex);
             }
             else
             {
                 var filtered = ContextWindowFilter.Apply(ctx.History, agentCfg.ContextWindow);
-                await EmitContextWindowWarnAsync(agentName, agentCfg, filtered, ctx);
+                await TurnExecutionHelpers.EmitContextWindowWarnAsync(agentName, agentCfg, filtered, ctx, _services);
                 context = !string.IsNullOrWhiteSpace(instructions)
                     ? [new ChatMessage(ChatRole.System, instructions), .. filtered]
                     : filtered;
@@ -2109,7 +1748,7 @@ public sealed class GraphOrchestrator(
                 agentName, nodeId, totalTurns,
                 StringHelpers.Truncate((response.Text ?? "").Replace('\n', ' '), 200));
 
-            var agentMsg    = await RecordAndEmitAsync(response, agentName, ctx, ct);
+            var agentMsg    = await TurnExecutionHelpers.RecordAndEmitAsync(response, agentName, ctx, ct, _sessionId, _services);
             var responseText = response.Text ?? string.Empty;
 
             var handoffArgKeyword = KeywordDetector.ExtractHandoffToolCallKeyword(response.Messages, routeTable);
@@ -2160,7 +1799,7 @@ public sealed class GraphOrchestrator(
 
             if (foundKeyword is not null && routeTable.Routes.TryGetValue(foundKeyword, out var route))
             {
-                var (ok, errMsg, failingValidator) = await RunValidatorsAsync(
+                var (ok, errMsg, failingValidator) = await TurnExecutionHelpers.RunValidatorsAsync(
                     route.Validators, ctx.History, ct).ConfigureAwait(false);
 
                 if (ok)
@@ -2181,7 +1820,7 @@ public sealed class GraphOrchestrator(
                 }
 
                 consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-                RecordGovernanceViolation(agentName, failingValidator!, consecutiveFails, maxRetries);
+                TurnExecutionHelpers.RecordGovernanceViolation(agentName, failingValidator!, consecutiveFails, maxRetries, _sessionId, _services);
 
                 if (consecutiveFails >= maxRetries)
                     throw new ValidatorStuckException(agentName, failingValidator!, consecutiveFails, errMsg!);
@@ -2193,17 +1832,17 @@ public sealed class GraphOrchestrator(
                     && agents.TryGetValue(route.RecoveryAgent, out var fwdRecoveryAgt))
                 {
                     _recoveryActivated.TryAdd(fwdEdgeKey, true);
-                    await InvokeRecoveryAgentAsync(
+                    await TurnExecutionHelpers.InvokeRecoveryAgentAsync(
                         route.RecoveryAgent, fwdRecoveryAgt,
                         agentInstructions, agentConfigs,
                         $"'{failingValidator}' failed {consecutiveFails}× on edge '{foundKeyword}'",
-                        errMsg!, foundKeyword, ctx, ct);
+                        errMsg!, foundKeyword, ctx, ct, _sessionId, _task, _services);
                     consecutiveFails = 0;
                     continue;
                 }
 
-                await EmitAndInjectValidationFailureAsync(
-                    agentName, foundKeyword, failingValidator!, errMsg!, responseText, consecutiveFails, maxRetries, ctx, ct);
+                await TurnExecutionHelpers.EmitAndInjectValidationFailureAsync(
+                    agentName, foundKeyword, failingValidator!, errMsg!, responseText, consecutiveFails, maxRetries, ctx, ct, _services);
                 continue;
             }
 
@@ -2220,7 +1859,7 @@ public sealed class GraphOrchestrator(
             await CorrectionEngine.InjectNoKeywordCorrection(
                 ctx.History, responseText, agentName, consecutiveFails, routeTable, eventEmitter,
                 agentMsg.ToolCalls);
-            await PersistCorrectionsAsync(ctx, histBefore2, ct).ConfigureAwait(false);
+            await TurnExecutionHelpers.PersistCorrectionsAsync(ctx, histBefore2, ct).ConfigureAwait(false);
 
             if (consecutiveFails >= maxRetries)
                 throw new ValidatorStuckException(agentName, "no-keyword", consecutiveFails,
