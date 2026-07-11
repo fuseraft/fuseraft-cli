@@ -175,7 +175,7 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
                 using  var _gov      = governanceKernel;
                 using  var _ccf      = chatClientFactory;
 
-                await OrchestratorBuilder.ValidateApiKeysAsync(config);
+                await ApiKeyValidator.ValidateApiKeysAsync(config);
 
                 var evalStore  = new InMemorySessionStore();
                 var checkpoint = new SessionCheckpoint

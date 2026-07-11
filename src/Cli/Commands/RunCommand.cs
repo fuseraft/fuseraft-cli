@@ -229,7 +229,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         // Validate API keys early so a bad/missing key surfaces before the session starts.
         try
         {
-            await OrchestratorBuilder.ValidateApiKeysAsync(config);
+            await ApiKeyValidator.ValidateApiKeysAsync(config);
         }
         catch (Exception ex)
         {
