@@ -1061,6 +1061,11 @@ fuseraft init [output] [options]
 | `-e, --endpoint <url>` | `~/.fuseraft/config` | Provider API endpoint URL. Defaults to the endpoint saved in `~/.fuseraft/config` if present. At run time, agents without an explicit `Endpoint` also inherit this value automatically. |
 | `--no-interactive` | off | Skip all prompts and generate with the supplied options and defaults. |
 | `--no-boilerplate` | off | Skip `architecture.yaml` and `knowledge/lifecycle.yaml` — for small or single-purpose projects that won't use `fuseraft arch check` or `fuseraft knowledge gc`. |
+| `-f, --force` | off | Overwrite the config and all agent files without prompting, even if they already exist. |
+
+**Overwrite behavior**
+
+Before writing anything, `init` checks whether the config file or any of its agent files (`agents/*.yaml`) already exist. If any do, it lists every conflicting path and asks for confirmation — declining, or passing `--no-interactive` without `--force`, aborts with no files written. Pass `--force` to skip the check and overwrite everything unconditionally, including any hand-edited agent files.
 
 **Templates**
 
@@ -1137,6 +1142,9 @@ fuseraft init .fuseraft/config/magentic-team.yaml --template magentic --model gp
 
 # CI / scripted usage
 fuseraft init .fuseraft/config/ci-team.yaml --template swe --model gpt-4o --no-interactive
+
+# Regenerate an existing config and agent files without prompting
+fuseraft init --template swe --model claude-sonnet-4-6 --no-interactive --force
 ```
 
 After generating, `init` prints the next steps:
