@@ -374,224 +374,17 @@ internal static class ReplTurn
         if (!isStepRequest)
             _ = SaveSnapshotAsync(ctx);
 
-        var sb                = new StringBuilder();
-        var toolCallsThisTurn = new List<string>();
-        var fileChanges        = new List<(char Sigil, string Path)>();
-        var fileChangeSeen     = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var toolRounds        = 0;
-        var inToolBatch       = false;
-        var turnInputTokens   = 0L;
-        var turnOutputTokens  = 0L;
-        int? turnFirstInputTokens = null;
-        // Captured tool outputs for inspect-step history injection (step execution only).
-        List<(string ToolName, string Output)>? capturedResults = isStepRequest ? [] : null;
-        Dictionary<string, string>? callIdToName = isStepRequest ? [] : null;
-
         var turnStart = DateTime.UtcNow;
-        var reqCts    = new CancellationTokenSource();
-        ctx.ActiveCts = reqCts;
-        var spinCts   = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
-        if (!ctx.JsonMode && !isStepRequest) AnsiConsole.WriteLine();
-        var spinTask  = ctx.JsonMode
-            ? Task.CompletedTask
-            : ReplConsole.RunSpinnerAsync(capturePlan ? "planning…" : "thinking…", spinCts.Token, turnStart);
-        var spinning  = !ctx.JsonMode;
+        var stream = await StreamTurnResponseAsync(ctx, input, isStepRequest, capturePlan, turnStart, cancellationToken);
+        if (!stream.Success) return false;
 
-        // Cancels and awaits the spinner; caller disposes spinCts.
-        async Task StopSpinnerAsync()
-        {
-            if (!spinning) return;
-            spinning = false;
-            spinCts.Cancel();
-            await spinTask;
-            ReplConsole.ClearSpinnerLine();
-        }
-
-        var activeClient   = isStepRequest ? ctx.StepClient : ctx.Client;
-        var requestOptions = BuildRequestOptions(ctx.ChatOptions, input);
-        var streamAttempt  = 0;
-        while (true) // retry loop for transient streaming errors
-        {
-        try
-        {
-            await foreach (var chunk in activeClient.GetStreamingResponseAsync(
-                ctx.History, requestOptions, cancellationToken: reqCts.Token))
-            {
-                // Providers emit a trailing usage-only chunk per underlying LLM call — a turn
-                // with tool round trips produces one per round trip, so sum rather than overwrite.
-                // The *first* chunk's input count is kept separately: it reflects the exact size
-                // of everything sent to the model as this turn began, before this turn's own
-                // tool-call round trips inflated the request further.
-                foreach (var usage in chunk.Contents.OfType<UsageContent>())
-                {
-                    turnInputTokens  += usage.Details.InputTokenCount  ?? 0;
-                    turnOutputTokens += usage.Details.OutputTokenCount ?? 0;
-                    turnFirstInputTokens ??= (int?)usage.Details.InputTokenCount;
-                }
-
-                var funcCall = chunk.Contents.OfType<FunctionCallContent>().FirstOrDefault();
-                if (funcCall is not null)
-                {
-                    if (!inToolBatch) { toolRounds++; inToolBatch = true; }
-                    toolCallsThisTurn.Add(funcCall.Name);
-                    TrackFileChange(funcCall.Name, funcCall.Arguments, fileChanges, fileChangeSeen, ctx.Cwd);
-                    if (callIdToName is not null && funcCall.CallId is not null)
-                        callIdToName[funcCall.CallId] = funcCall.Name;
-
-                    if (ctx.JsonMode)
-                    {
-                        // Include arguments so the webview can show them on hover/expand.
-                        // Values are typically JsonElement from the model's JSON response and
-                        // serialise correctly; null Arguments → omit the field entirely.
-                        var args = funcCall.Arguments is { Count: > 0 }
-                            ? (object)funcCall.Arguments
-                            : null;
-                        ReplJsonBridge.Emit(new { type = "tool_call", name = funcCall.Name, args });
-                    }
-                    else
-                    {
-                        // Update spinner label to show the accumulating tool chain live.
-                        var chain = toolCallsThisTurn.Count <= 4
-                            ? string.Join(" → ", toolCallsThisTurn)
-                            : string.Join(" → ", toolCallsThisTurn.TakeLast(4)) +
-                              $" (+{toolCallsThisTurn.Count - 4})";
-                        spinCts.Cancel();
-                        await spinTask;
-                        spinCts.Dispose();
-                        spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
-                        var verb = toolCallsThisTurn.Count % 2 == 0 ? "fusing" : "rafting";
-                        spinTask = ReplConsole.RunSpinnerAsync($"{verb}…  {chain}", spinCts.Token, turnStart);
-                        spinning = true;
-                    }
-                    continue;
-                }
-
-                var funcResult = chunk.Contents.OfType<FunctionResultContent>().FirstOrDefault();
-                if (funcResult is not null && capturedResults is not null)
-                {
-                    var toolName = funcResult.CallId is not null &&
-                                  callIdToName?.TryGetValue(funcResult.CallId, out var n) == true
-                                  ? n : "tool";
-                    capturedResults.Add((toolName, funcResult.Result?.ToString() ?? string.Empty));
-                    continue;
-                }
-
-                var text = chunk.Text;
-                if (string.IsNullOrEmpty(text)) continue;
-                inToolBatch = false;
-                sb.Append(text);
-
-                // Terminal REPL never prints text live — only the spinner/tool chain is
-                // shown while generating; the full response is markdown-rendered once the
-                // turn completes (see below). JSON mode still streams tokens for the
-                // VS Code integration's own renderer.
-                if (!capturePlan && ctx.JsonMode)
-                    ReplJsonBridge.Emit(new { type = "token", text });
-            }
-            break; // streaming succeeded — exit retry loop
-        }
-        catch (OperationCanceledException)
-        {
-            await StopSpinnerAsync();
-            spinCts.Dispose();
-            await ctx.Emitter.EmitAsync(EventTypes.Cancelled, turn: ctx.TurnIndex);
-            if (ctx.JsonMode)
-                ReplJsonBridge.Emit(new { type = "cancelled" });
-            else
-                AnsiConsole.MarkupLine("[dim](cancelled)[/]");
-            if (ctx.History.Count > 0 && ctx.History[^1].Role == ChatRole.User)
-                ctx.History.RemoveAt(ctx.History.Count - 1);
-            ctx.ExecutionQueue.Clear();
-            if (!ctx.JsonMode) AnsiConsole.WriteLine();
-            reqCts.Dispose();
-            ctx.ActiveCts = null;
-            return false;
-        }
-        catch (Exception ex) when (IsTransientStreamError(ex) && streamAttempt < MaxStreamRetries)
-        {
-            // Transient stream disconnection — retry automatically with back-off.
-            streamAttempt++;
-            await StopSpinnerAsync();
-            spinCts.Dispose();
-
-            await ctx.Emitter.EmitAsync(EventTypes.ReplError, turn: ctx.TurnIndex, payload: new
-            {
-                exception_type = ex.GetType().Name,
-                message        = ex.Message,
-                attempt        = streamAttempt,
-                final          = false,
-            });
-
-            if (ctx.JsonMode)
-                ReplJsonBridge.Emit(new { type = "retrying", attempt = streamAttempt, max = MaxStreamRetries });
-            else
-                AnsiConsole.MarkupLine(
-                    $"[dim]  ↺ {Markup.Escape(ex.Message)} — retrying ({streamAttempt}/{MaxStreamRetries})…[/]");
-
-            // Exponential back-off: 2 s, 4 s. Not wired to the cancellation token so the
-            // short sleep is never interrupted — max wasted time is 6 s total.
-            await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, streamAttempt)));
-
-            // Reset per-attempt accumulators before reissuing the request.
-            sb.Clear(); toolCallsThisTurn.Clear();
-            fileChanges.Clear(); fileChangeSeen.Clear();
-            capturedResults?.Clear(); callIdToName?.Clear();
-            toolRounds = 0; inToolBatch = false;
-            turnInputTokens = 0; turnOutputTokens = 0; turnFirstInputTokens = null;
-
-            // Restart spinner for the fresh attempt.
-            spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
-            spinTask = ctx.JsonMode
-                ? Task.CompletedTask
-                : ReplConsole.RunSpinnerAsync(capturePlan ? "planning…" : "thinking…", spinCts.Token, turnStart);
-            spinning = !ctx.JsonMode;
-            // continue while-loop → reissue GetStreamingResponseAsync
-        }
-        catch (Exception ex)
-        {
-            await StopSpinnerAsync();
-            spinCts.Dispose();
-
-            await ctx.Emitter.EmitAsync(EventTypes.ReplError, turn: ctx.TurnIndex, payload: new
-            {
-                exception_type = ex.GetType().Name,
-                message        = ex.Message,
-                attempt        = streamAttempt + 1,
-                final          = true,
-            });
-
-            var toolSurfaceHint = BuildLargeToolSurfaceHint(ex, ctx.GetActiveTools().Count);
-            if (ctx.JsonMode)
-                ReplJsonBridge.Emit(new
-                {
-                    type = "error",
-                    text = toolSurfaceHint is null ? ex.Message : $"{ex.Message}\n{toolSurfaceHint}",
-                });
-            else
-            {
-                AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(ex.Message)}[/]");
-                if (toolSurfaceHint is not null)
-                    AnsiConsole.MarkupLine($"[dim]  ↪ {Markup.Escape(toolSurfaceHint)}[/]");
-            }
-            if (ctx.History.Count > 0 && ctx.History[^1].Role == ChatRole.User)
-                ctx.History.RemoveAt(ctx.History.Count - 1);
-            ctx.ExecutionQueue.Clear();
-            reqCts.Dispose();
-            ctx.ActiveCts = null;
-            return false;
-        }
-        } // end while (retry loop)
-
-        reqCts.Dispose();
-        ctx.ActiveCts = null;
-        await StopSpinnerAsync();
-        spinCts.Dispose();
-
-        ctx.CumulativeInputTokens  += turnInputTokens;
-        ctx.CumulativeOutputTokens += turnOutputTokens;
-        ctx.LastActualContextTokens = turnFirstInputTokens;
-
-        var responseText = sb.ToString();
+        var responseText      = stream.ResponseText;
+        var toolCallsThisTurn = stream.ToolCallsThisTurn;
+        var fileChanges       = stream.FileChanges;
+        var toolRounds        = stream.ToolRounds;
+        var capturedResults   = stream.CapturedResults;
+        var turnInputTokens   = stream.TurnInputTokens;
+        var turnOutputTokens  = stream.TurnOutputTokens;
 
         if (!capturePlan && responseText.Length > 0 && !ctx.JsonMode)
         {
@@ -793,6 +586,262 @@ internal static class ReplTurn
 
         ctx.TurnIndex++;
         return stepPassed;
+    }
+
+    // Carrier for the outcome of streaming one turn's response, retrying on transient
+    // stream disconnections. Mirrors SessionRunner.HandlerOutcome's shape — avoids the ~10
+    // mutable accumulator locals (sb, toolCallsThisTurn, fileChanges, token counters, etc.)
+    // that used to be threaded through the rest of ExecuteAsync after this method returns.
+    private readonly record struct TurnStreamResult(
+        bool Success,
+        string ResponseText,
+        List<string> ToolCallsThisTurn,
+        List<(char Sigil, string Path)> FileChanges,
+        int ToolRounds,
+        List<(string ToolName, string Output)>? CapturedResults,
+        long TurnInputTokens,
+        long TurnOutputTokens,
+        int? TurnFirstInputTokens)
+    {
+        internal static TurnStreamResult Failed => new(false, "", [], [], 0, null, 0, 0, null);
+    }
+
+    /// <summary>
+    /// Streams one turn's response from <paramref name="ctx"/>'s active client, retrying
+    /// automatically on transient mid-stream disconnections (up to <see cref="MaxStreamRetries"/>
+    /// times). Owns the spinner lifecycle and the in-flight request's <see cref="CancellationTokenSource"/>
+    /// entirely — nothing about it leaks into the caller. Returns <see cref="TurnStreamResult.Success"/>
+    /// <see langword="false"/> on cancellation or a non-retryable/exhausted-retry failure, in which
+    /// case the caller must stop processing this turn (the error has already been surfaced to the
+    /// user and the trailing user message rolled back).
+    /// </summary>
+    private static async Task<TurnStreamResult> StreamTurnResponseAsync(
+        ReplSessionContext ctx,
+        string input,
+        bool isStepRequest,
+        bool capturePlan,
+        DateTime turnStart,
+        CancellationToken cancellationToken)
+    {
+        var sb                = new StringBuilder();
+        var toolCallsThisTurn = new List<string>();
+        var fileChanges        = new List<(char Sigil, string Path)>();
+        var fileChangeSeen     = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var toolRounds        = 0;
+        var inToolBatch       = false;
+        var turnInputTokens   = 0L;
+        var turnOutputTokens  = 0L;
+        int? turnFirstInputTokens = null;
+        // Captured tool outputs for inspect-step history injection (step execution only).
+        List<(string ToolName, string Output)>? capturedResults = isStepRequest ? [] : null;
+        Dictionary<string, string>? callIdToName = isStepRequest ? [] : null;
+
+        var reqCts    = new CancellationTokenSource();
+        ctx.ActiveCts = reqCts;
+        var spinCts   = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
+        if (!ctx.JsonMode && !isStepRequest) AnsiConsole.WriteLine();
+        var spinTask  = ctx.JsonMode
+            ? Task.CompletedTask
+            : ReplConsole.RunSpinnerAsync(capturePlan ? "planning…" : "thinking…", spinCts.Token, turnStart);
+        var spinning  = !ctx.JsonMode;
+
+        // Cancels and awaits the spinner; caller disposes spinCts.
+        async Task StopSpinnerAsync()
+        {
+            if (!spinning) return;
+            spinning = false;
+            spinCts.Cancel();
+            await spinTask;
+            ReplConsole.ClearSpinnerLine();
+        }
+
+        var activeClient   = isStepRequest ? ctx.StepClient : ctx.Client;
+        var requestOptions = BuildRequestOptions(ctx.ChatOptions, input);
+        var streamAttempt  = 0;
+        while (true) // retry loop for transient streaming errors
+        {
+        try
+        {
+            await foreach (var chunk in activeClient.GetStreamingResponseAsync(
+                ctx.History, requestOptions, cancellationToken: reqCts.Token))
+            {
+                // Providers emit a trailing usage-only chunk per underlying LLM call — a turn
+                // with tool round trips produces one per round trip, so sum rather than overwrite.
+                // The *first* chunk's input count is kept separately: it reflects the exact size
+                // of everything sent to the model as this turn began, before this turn's own
+                // tool-call round trips inflated the request further.
+                foreach (var usage in chunk.Contents.OfType<UsageContent>())
+                {
+                    turnInputTokens  += usage.Details.InputTokenCount  ?? 0;
+                    turnOutputTokens += usage.Details.OutputTokenCount ?? 0;
+                    turnFirstInputTokens ??= (int?)usage.Details.InputTokenCount;
+                }
+
+                var funcCall = chunk.Contents.OfType<FunctionCallContent>().FirstOrDefault();
+                if (funcCall is not null)
+                {
+                    if (!inToolBatch) { toolRounds++; inToolBatch = true; }
+                    toolCallsThisTurn.Add(funcCall.Name);
+                    TrackFileChange(funcCall.Name, funcCall.Arguments, fileChanges, fileChangeSeen, ctx.Cwd);
+                    if (callIdToName is not null && funcCall.CallId is not null)
+                        callIdToName[funcCall.CallId] = funcCall.Name;
+
+                    if (ctx.JsonMode)
+                    {
+                        // Include arguments so the webview can show them on hover/expand.
+                        // Values are typically JsonElement from the model's JSON response and
+                        // serialise correctly; null Arguments → omit the field entirely.
+                        var args = funcCall.Arguments is { Count: > 0 }
+                            ? (object)funcCall.Arguments
+                            : null;
+                        ReplJsonBridge.Emit(new { type = "tool_call", name = funcCall.Name, args });
+                    }
+                    else
+                    {
+                        // Update spinner label to show the accumulating tool chain live.
+                        var chain = toolCallsThisTurn.Count <= 4
+                            ? string.Join(" → ", toolCallsThisTurn)
+                            : string.Join(" → ", toolCallsThisTurn.TakeLast(4)) +
+                              $" (+{toolCallsThisTurn.Count - 4})";
+                        spinCts.Cancel();
+                        await spinTask;
+                        spinCts.Dispose();
+                        spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
+                        var verb = toolCallsThisTurn.Count % 2 == 0 ? "fusing" : "rafting";
+                        spinTask = ReplConsole.RunSpinnerAsync($"{verb}…  {chain}", spinCts.Token, turnStart);
+                        spinning = true;
+                    }
+                    continue;
+                }
+
+                var funcResult = chunk.Contents.OfType<FunctionResultContent>().FirstOrDefault();
+                if (funcResult is not null && capturedResults is not null)
+                {
+                    var toolName = funcResult.CallId is not null &&
+                                  callIdToName?.TryGetValue(funcResult.CallId, out var n) == true
+                                  ? n : "tool";
+                    capturedResults.Add((toolName, funcResult.Result?.ToString() ?? string.Empty));
+                    continue;
+                }
+
+                var text = chunk.Text;
+                if (string.IsNullOrEmpty(text)) continue;
+                inToolBatch = false;
+                sb.Append(text);
+
+                // Terminal REPL never prints text live — only the spinner/tool chain is
+                // shown while generating; the full response is markdown-rendered once the
+                // turn completes (see below). JSON mode still streams tokens for the
+                // VS Code integration's own renderer.
+                if (!capturePlan && ctx.JsonMode)
+                    ReplJsonBridge.Emit(new { type = "token", text });
+            }
+            break; // streaming succeeded — exit retry loop
+        }
+        catch (OperationCanceledException)
+        {
+            await StopSpinnerAsync();
+            spinCts.Dispose();
+            await ctx.Emitter.EmitAsync(EventTypes.Cancelled, turn: ctx.TurnIndex);
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new { type = "cancelled" });
+            else
+                AnsiConsole.MarkupLine("[dim](cancelled)[/]");
+            if (ctx.History.Count > 0 && ctx.History[^1].Role == ChatRole.User)
+                ctx.History.RemoveAt(ctx.History.Count - 1);
+            ctx.ExecutionQueue.Clear();
+            if (!ctx.JsonMode) AnsiConsole.WriteLine();
+            reqCts.Dispose();
+            ctx.ActiveCts = null;
+            return TurnStreamResult.Failed;
+        }
+        catch (Exception ex) when (IsTransientStreamError(ex) && streamAttempt < MaxStreamRetries)
+        {
+            // Transient stream disconnection — retry automatically with back-off.
+            streamAttempt++;
+            await StopSpinnerAsync();
+            spinCts.Dispose();
+
+            await ctx.Emitter.EmitAsync(EventTypes.ReplError, turn: ctx.TurnIndex, payload: new
+            {
+                exception_type = ex.GetType().Name,
+                message        = ex.Message,
+                attempt        = streamAttempt,
+                final          = false,
+            });
+
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new { type = "retrying", attempt = streamAttempt, max = MaxStreamRetries });
+            else
+                AnsiConsole.MarkupLine(
+                    $"[dim]  ↺ {Markup.Escape(ex.Message)} — retrying ({streamAttempt}/{MaxStreamRetries})…[/]");
+
+            // Exponential back-off: 2 s, 4 s. Not wired to the cancellation token so the
+            // short sleep is never interrupted — max wasted time is 6 s total.
+            await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, streamAttempt)));
+
+            // Reset per-attempt accumulators before reissuing the request.
+            sb.Clear(); toolCallsThisTurn.Clear();
+            fileChanges.Clear(); fileChangeSeen.Clear();
+            capturedResults?.Clear(); callIdToName?.Clear();
+            toolRounds = 0; inToolBatch = false;
+            turnInputTokens = 0; turnOutputTokens = 0; turnFirstInputTokens = null;
+
+            // Restart spinner for the fresh attempt.
+            spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
+            spinTask = ctx.JsonMode
+                ? Task.CompletedTask
+                : ReplConsole.RunSpinnerAsync(capturePlan ? "planning…" : "thinking…", spinCts.Token, turnStart);
+            spinning = !ctx.JsonMode;
+            // continue while-loop → reissue GetStreamingResponseAsync
+        }
+        catch (Exception ex)
+        {
+            await StopSpinnerAsync();
+            spinCts.Dispose();
+
+            await ctx.Emitter.EmitAsync(EventTypes.ReplError, turn: ctx.TurnIndex, payload: new
+            {
+                exception_type = ex.GetType().Name,
+                message        = ex.Message,
+                attempt        = streamAttempt + 1,
+                final          = true,
+            });
+
+            var toolSurfaceHint = BuildLargeToolSurfaceHint(ex, ctx.GetActiveTools().Count);
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new
+                {
+                    type = "error",
+                    text = toolSurfaceHint is null ? ex.Message : $"{ex.Message}\n{toolSurfaceHint}",
+                });
+            else
+            {
+                AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(ex.Message)}[/]");
+                if (toolSurfaceHint is not null)
+                    AnsiConsole.MarkupLine($"[dim]  ↪ {Markup.Escape(toolSurfaceHint)}[/]");
+            }
+            if (ctx.History.Count > 0 && ctx.History[^1].Role == ChatRole.User)
+                ctx.History.RemoveAt(ctx.History.Count - 1);
+            ctx.ExecutionQueue.Clear();
+            reqCts.Dispose();
+            ctx.ActiveCts = null;
+            return TurnStreamResult.Failed;
+        }
+        } // end while (retry loop)
+
+        reqCts.Dispose();
+        ctx.ActiveCts = null;
+        await StopSpinnerAsync();
+        spinCts.Dispose();
+
+        ctx.CumulativeInputTokens  += turnInputTokens;
+        ctx.CumulativeOutputTokens += turnOutputTokens;
+        ctx.LastActualContextTokens = turnFirstInputTokens;
+
+        return new TurnStreamResult(
+            true, sb.ToString(), toolCallsThisTurn, fileChanges, toolRounds, capturedResults,
+            turnInputTokens, turnOutputTokens, turnFirstInputTokens);
     }
 
     internal static async Task ExtractMemoriesOnExitAsync(ReplSessionContext ctx)
