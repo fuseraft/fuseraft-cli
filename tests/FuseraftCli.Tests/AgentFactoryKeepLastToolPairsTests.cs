@@ -4,7 +4,7 @@ using fuseraft.Infrastructure.Agents;
 namespace FuseraftCli.Tests;
 
 /// <summary>
-/// Behavioral contract for <see cref="AgentFactory.KeepLastToolPairs"/> — the deterministic
+/// Behavioral contract for <see cref="AgentContextCompactionFilters.KeepLastToolPairs"/> — the deterministic
 /// in-turn sliding-window cap on tool call/result pairs. Written against the original
 /// hand-rolled implementation and re-verified unchanged after swapping the internals to
 /// MAF's <c>ToolResultCompactionStrategy</c>, so the cases below describe the contract both
@@ -39,7 +39,7 @@ public sealed class AgentFactoryKeepLastToolPairsTests
     {
         var messages = ToolRounds(3);
 
-        var result = (await AgentFactory.KeepLastToolPairs(messages, maxPairs: 5)).ToList();
+        var result = (await AgentContextCompactionFilters.KeepLastToolPairs(messages, maxPairs: 5)).ToList();
 
         Assert.Equal(messages.Count, result.Count);
         for (int i = 0; i < messages.Count; i++)
@@ -51,7 +51,7 @@ public sealed class AgentFactoryKeepLastToolPairsTests
     {
         var messages = ToolRounds(5);
 
-        var result = (await AgentFactory.KeepLastToolPairs(messages, maxPairs: 5)).ToList();
+        var result = (await AgentContextCompactionFilters.KeepLastToolPairs(messages, maxPairs: 5)).ToList();
 
         for (int i = 0; i < messages.Count; i++)
             Assert.Same(messages[i], result[i]);
@@ -64,7 +64,7 @@ public sealed class AgentFactoryKeepLastToolPairsTests
     {
         var messages = ToolRounds(5); // c0..c4, 5 rounds, keep last 2 (c3, c4)
 
-        var result = (await AgentFactory.KeepLastToolPairs(messages, maxPairs: 2)).ToList();
+        var result = (await AgentContextCompactionFilters.KeepLastToolPairs(messages, maxPairs: 2)).ToList();
 
         // The two most recent tool results must be byte-for-byte unchanged.
         var newest = result
@@ -92,7 +92,7 @@ public sealed class AgentFactoryKeepLastToolPairsTests
     {
         var messages = ToolRounds(8);
 
-        var result = (await AgentFactory.KeepLastToolPairs(messages, maxPairs: 3)).ToList();
+        var result = (await AgentContextCompactionFilters.KeepLastToolPairs(messages, maxPairs: 3)).ToList();
 
         var callIds = result
             .SelectMany(m => m.Contents.OfType<FunctionCallContent>())
@@ -123,7 +123,7 @@ public sealed class AgentFactoryKeepLastToolPairsTests
         // wiping all tool context.
         var messages = ToolRounds(10);
 
-        var result = (await AgentFactory.KeepLastToolPairs(messages, maxPairs: 0)).ToList();
+        var result = (await AgentContextCompactionFilters.KeepLastToolPairs(messages, maxPairs: 0)).ToList();
 
         var survivingResults = result.SelectMany(m => m.Contents.OfType<FunctionResultContent>());
         foreach (var r in survivingResults)
@@ -142,7 +142,7 @@ public sealed class AgentFactoryKeepLastToolPairsTests
         // wiring bug that happens to leave old content untouched.
         var messages = ToolRounds(5);
 
-        var result = (await AgentFactory.KeepLastToolPairs(messages, maxPairs: 2)).ToList();
+        var result = (await AgentContextCompactionFilters.KeepLastToolPairs(messages, maxPairs: 2)).ToList();
 
         // 3 oldest rounds (6 messages) collapse into fewer messages than they started as.
         Assert.True(result.Count < messages.Count,
