@@ -12,6 +12,22 @@ using fuseraft.Orchestration;
 
 namespace fuseraft.Cli.Commands.Repl;
 
+/// <summary>
+/// Drives the REPL's input loop (<see cref="RunAsync"/>/<see cref="RunLoopAsync"/>) and turn
+/// execution (<see cref="ExecuteAsync"/>). Every method here is stateless — mutable session
+/// state lives entirely in the explicit <see cref="ReplSessionContext"/> parameter, per that
+/// class's own design note.
+///
+/// <para>
+/// <b>Collaborators</b> (both in <c>fuseraft.Cli.Commands.Repl</c>): terminal-presentation
+/// utilities (spinner, drip-print, ANSI stripping — also reused by sub-agent REPL commands)
+/// are owned by <see cref="ReplConsole"/>. Plan-capture and step-verification processing is
+/// owned by <see cref="ReplTurnOutcome"/>. <see cref="ExecuteAsync"/>'s own retry/streaming
+/// core is <see cref="StreamTurnResponseAsync"/>, a same-class extraction (not a separate
+/// collaborator, since it closes tightly over per-turn accumulator state) mirroring
+/// <c>SessionRunner</c>'s named-exception-handler pattern.
+/// </para>
+/// </summary>
 internal static class ReplTurn
 {
     internal const int StepIterationLimit = 5;
