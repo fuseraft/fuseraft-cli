@@ -67,6 +67,7 @@ internal static class PluginCapabilityMap
         ["shell_kill_job"]                 = "run",
         ["shell_which"]                    = "read",
         ["shell_get_working_directory"]    = "read",
+        ["shell_get_session_temp_dir"]     = "read",
 
         // Git
         ["git_status"]                     = "read",
@@ -75,6 +76,7 @@ internal static class PluginCapabilityMap
         ["git_show"]                       = "read",
         ["git_branch_list"]                = "read",
         ["git_stash_list"]                 = "read",
+        ["git_is_inside_work_tree"]        = "read",
         ["git_add"]                        = "write",
         ["git_commit"]                     = "write",
         ["git_checkout"]                   = "write",
@@ -85,6 +87,7 @@ internal static class PluginCapabilityMap
         ["git_stash"]                      = "write",
         ["git_stash_pop"]                  = "write",
         ["git_reset"]                      = "write",
+        ["git_rebase"]                     = "write",
 
         // Http (one capability per HTTP verb for fine-grained control)
         ["http_get"]                       = "get",
@@ -113,6 +116,7 @@ internal static class PluginCapabilityMap
         // Search (all read-only)
         ["search_content"]                 = "read",
         ["search_symbol"]                  = "read",
+        ["search_callers"]                 = "read",
 
         // Changes (read-only consumer of the change log)
         ["changes_read"]                   = "read",
@@ -171,4 +175,14 @@ internal static class PluginCapabilityMap
 
         return allowedCapabilities.Any(c => c.Equals(required, StringComparison.OrdinalIgnoreCase));
     }
+
+    /// <summary>
+    /// Test-only accessor: <see langword="true"/> when <paramref name="toolName"/> has an
+    /// explicit capability entry. Used by a coverage test asserting every built-in plugin
+    /// tool is mapped, so a newly added tool can't silently bypass capability filtering by
+    /// being absent from <see cref="ToolCapabilities"/> (unmapped tools are always-allowed
+    /// by <see cref="IsAllowed"/>, which is the correct default for MCP tools but a silent
+    /// gap for a forgotten built-in one).
+    /// </summary>
+    internal static bool HasCapabilityEntry(string toolName) => ToolCapabilities.ContainsKey(toolName);
 }

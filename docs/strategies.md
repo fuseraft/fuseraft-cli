@@ -676,7 +676,7 @@ All agents referenced inside any sub-graph must be declared in the top-level `Or
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `From` | string | — | Source node ID. Must match a `GraphNodeConfig.Id`. |
-| `To` | string | — | Target node ID. Must match a `GraphNodeConfig.Id`. Forward vs. back-edge classification is computed automatically from BFS layer topology. |
+| `To` | string | — | Target node ID. Must match a `GraphNodeConfig.Id`. Forward vs. back-edge classification is computed automatically via a DFS from the entry node (an edge is a back-edge only when its target is a real ancestor of the source). |
 | `Keyword` | string | — | Routing keyword. Must appear alone on its own line. When omitted, the edge is *unconditional* — it fires after the agent's turn without keyword scanning. |
 | `Validator` | string | — | Optional single validator. Blocks the edge until validation passes. |
 | `Validators` | array | — | Optional multiple validators (AND semantics). Takes precedence over `Validator` when both are set. |
@@ -750,9 +750,11 @@ Selection:
 
 Other differences from `graph`, not config-rejected but worth knowing:
 
-- No governance/circuit-breaker integration, no unified context-assembly pipeline (always uses
-  the legacy `ContextWindowFilter`), no `context_window_warn` events, and no
-  repository-knowledge-store observation extraction.
+- Governance (circuit breaker, per-validator-failure audit/rate-limit, SLO recording) and the
+  unified context-assembly pipeline are wired identically to `graph`. There is still no
+  human-approval gate or recovery-agent invocation — those are the config-rejected fields above,
+  so there is nothing to wire. There is also no repository-knowledge-store observation
+  extraction (unlike `graph`/`magentic`).
 - Sessions always start from `EntryNode`; there is no resume-from-the-interrupted-node support
   after compaction (`graph` resumes from wherever it left off — `workflow` restarts the whole
   pipeline). For long, compaction-prone sessions this is a real usability gap to weigh against

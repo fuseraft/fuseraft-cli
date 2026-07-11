@@ -39,26 +39,81 @@ public sealed record OrchestratorBuildResult(
     GovernanceKernel             GovernanceKernel,
     SkillCurator?                SkillCurator,
     RepositoryMemoryExtractor?   RepositoryMemoryExtractor,
+    ChatClientFactory            ChatClientFactory,
     fuseraft.Orchestration.DependencyPlanner? DependencyPlanner = null,
     fuseraft.Cli.Telemetry.SessionMetrics?    SessionMetrics    = null);
 
 /// <summary>
+/// Which orchestrator kind <c>Selection.Type</c> resolved to, bundled so
+/// <c>ValidateAndSelectStrategy</c> and <c>CreateOrchestrator</c> share one instance instead
+/// of each taking the same 6-7 bools as separate positional parameters.
+/// </summary>
+internal sealed record OrchestratorKindFlags(
+    bool HitlMode,
+    bool UseMagentic,
+    bool UseGraph,
+    bool UseWorkflow,
+    bool UseAdversarial,
+    bool UseMapReduce,
+    bool UseScatterGather);
+
+/// <summary>
+/// Shared infrastructure collaborators <c>CreateOrchestrator</c> threads into
+/// <c>AgentFactory</c>/<c>StrategyFactory</c> and nearly every orchestrator kind's
+/// constructor. Bundled for the same reason as <see cref="OrchestratorKindFlags"/> — these
+/// were 8 separate positional parameters.
+/// </summary>
+internal sealed record OrchestratorInfraServices(
+    ILoggerFactory LoggerFactory,
+    ChatClientFactory ChatClientFactory,
+    PluginRegistry PluginRegistry,
+    GovernanceKernel GovernanceKernel,
+    ChangeTracker? ChangeTracker,
+    EventEmitter? EventEmitter,
+    IdentityRegistry IdentityRegistry,
+    fuseraft.Infrastructure.Tools.ToolResultArtifactStore ToolArtifactStore);
+
+/// <summary>
+/// Knowledge/memory/evidence collaborators that feed <c>ContextBroker</c>/
+/// <c>ContextAssembler</c>/<c>ContextAssemblyPipeline</c> construction and the default
+/// <c>AgentOrchestrator</c> branch in <c>CreateOrchestrator</c>.
+/// </summary>
+internal sealed record OrchestratorKnowledgeServices(
+    fuseraft.Infrastructure.Knowledge.KnowledgeLayer KnowledgeLayer,
+    fuseraft.Infrastructure.Objectives.ObjectiveManager ObjectiveManager,
+    EvidenceStore? EvidenceStore,
+    fuseraft.Orchestration.DependencyPlanner? DependencyPlanner,
+    MemoryManager? MemoryManager);
+
+/// <summary>
+/// Session/path identity inputs to <c>ContextAssembler</c> and the repository-memory store
+/// paths in <c>CreateOrchestrator</c>.
+/// </summary>
+internal sealed record OrchestratorSessionPaths(
+    string ProjectSlug,
+    string? SessionId,
+    string? ExecutionStatePath,
+    string? InvestigationLogPath);
+
+/// <summary>
 /// Builds a ready-to-use <see cref="IOrchestrator"/> directly from a config file path,
 /// without requiring a full DI host. Used by CLI commands that load config at runtime.
+///
+/// <para>
+/// <b>Collaborators</b> (all in <c>fuseraft.Cli</c>): config loading, binding, and
+/// pre-processing is owned by <see cref="OrchestratorConfigLoader"/>. System-prompt assembly
+/// is owned by <see cref="SystemPromptBuilder"/>. Provider API-key connectivity probing is
+/// owned by <see cref="ApiKeyValidator"/>. This class retains the construction pipeline itself
+/// (<see cref="BuildAsync"/> and its named steps) plus the skills-provider wiring
+/// (<c>BuildSkillsProvider</c>/<c>RunSkillScriptAsync</c>, too small a pair to warrant their
+/// own file).
+/// </para>
 /// </summary>
 public static class OrchestratorBuilder
 {
-    /// <summary>
-    /// Set to <c>true</c> by <c>--vscode</c> flag. When true, <c>FUSERAFT_API_KEY</c>
-    /// (injected by the VS Code extension) is preferred over the OS keychain for API
-    /// key resolution. If the env var is absent the keychain is used as a fallback.
-    /// </summary>
-    public static bool VsCodeMode { get; set; }
-
-    // Shared client for API-key validation probes — created once, never disposed.
-    private static readonly HttpClient _validationHttp = new() { Timeout = TimeSpan.FromSeconds(10) };
-
-    private static readonly JsonSerializerOptions BrownfieldJsonOpts = new()
+    // Internal (not private) — shared with SystemPromptBuilder and OrchestratorConfigLoader,
+    // which also deserialize brownfield JSON (ConventionProfile / agent files).
+    internal static readonly JsonSerializerOptions BrownfieldJsonOpts = new()
     {
         PropertyNameCaseInsensitive = true,
         DefaultIgnoreCondition      = JsonIgnoreCondition.WhenWritingNull,
@@ -83,14 +138,14 @@ public static class OrchestratorBuilder
         if (!File.Exists(configPath))
             throw new FileNotFoundException($"Config file not found: {configPath}");
 
-        var (config, projectSlug) = await LoadAndExpandConfig(
+        var (config, projectSlug) = await OrchestratorConfigLoader.LoadAndExpandConfig(
             configPath, loggerFactory, sessionId, noReplan, cancellationToken);
 
         var (configAfterSecurity, profiles, shellApprover) = ResolveSecurityConfig(
             config, pluginRegistry, hitlMode, humanApprovalService, loggerFactory);
         config = configAfterSecurity;
 
-        config = await BuildSystemPrompt(
+        config = await SystemPromptBuilder.BuildSystemPrompt(
             config, configPath, sessionId, specContent, loggerFactory, cancellationToken);
 
         var infra = await InitInfrastructure(
@@ -109,9 +164,11 @@ public static class OrchestratorBuilder
         bool useAdversarial   = config.Selection.Type.Equals(OrchestratorTypes.Adversarial,   StringComparison.OrdinalIgnoreCase);
         bool useMapReduce     = config.Selection.Type.Equals(OrchestratorTypes.MapReduce,     StringComparison.OrdinalIgnoreCase);
         bool useScatterGather = config.Selection.Type.Equals(OrchestratorTypes.ScatterGather, StringComparison.OrdinalIgnoreCase);
+        var kindFlags = new OrchestratorKindFlags(
+            hitlMode, useMagentic, useGraph, useWorkflow, useAdversarial, useMapReduce, useScatterGather);
 
         var (configAfterStrategy, compactor, skillCurator) = await ValidateAndSelectStrategy(
-            config, loggerFactory, chatClientFactory, useMagentic, useGraph, useWorkflow, useAdversarial, useMapReduce, useScatterGather,
+            config, loggerFactory, chatClientFactory, kindFlags,
             infra.KnowledgeLayer, infra.ObjectiveManager, infra.KnowledgeSandbox, projectSlug,
             infra.IntentLog, infra.EvidenceStore, infra.ExecutionStatePath, infra.InvestigationLogPath,
             sessionId, readCachePath: infra.ReadCachePath, cancellationToken);
@@ -119,86 +176,19 @@ public static class OrchestratorBuilder
 
         WireSkillsAndVerifier(config, chatClientFactory, loggerFactory, compactor);
 
-        var orchestrator = CreateOrchestrator(
-            config, loggerFactory, chatClientFactory, pluginRegistry,
-            governanceKernel, humanApprovalService, hitlMode, useMagentic, useGraph, useWorkflow, useAdversarial, useMapReduce, useScatterGather,
-            infra.ChangeTracker, infra.EventEmitter, infra.KnowledgeLayer, infra.ObjectiveManager,
-            infra.KnowledgeSandbox, projectSlug, sessionId,
-            infra.ExecutionStatePath, infra.InvestigationLogPath,
-            infra.EvidenceStore, dependencyPlanner, MemoryManager.FromConfig(config.Memory),
-            identityRegistry, infra.ToolArtifactStore,
-            out var repoMemoryExtractor);
+        var infraServices = new OrchestratorInfraServices(
+            loggerFactory, chatClientFactory, pluginRegistry, governanceKernel,
+            infra.ChangeTracker, infra.EventEmitter, identityRegistry, infra.ToolArtifactStore);
+        var knowledgeServices = new OrchestratorKnowledgeServices(
+            infra.KnowledgeLayer, infra.ObjectiveManager, infra.EvidenceStore,
+            dependencyPlanner, MemoryManager.FromConfig(config.Memory));
+        var sessionPaths = new OrchestratorSessionPaths(
+            projectSlug, sessionId, infra.ExecutionStatePath, infra.InvestigationLogPath);
 
-        return new OrchestratorBuildResult(orchestrator, config, infra.McpManager, compactor, infra.ChangeTracker, infra.EventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, dependencyPlanner, infra.SessionMetrics);
-    }
+        var (orchestrator, repoMemoryExtractor) = CreateOrchestrator(
+            config, kindFlags, infraServices, knowledgeServices, sessionPaths, humanApprovalService);
 
-    // -------------------------------------------------------------------------
-    // LoadAndExpandConfig
-    // -------------------------------------------------------------------------
-
-    private static async Task<(OrchestrationConfig Config, string ProjectSlug)> LoadAndExpandConfig(
-        string configPath,
-        ILoggerFactory loggerFactory,
-        string? sessionId,
-        bool noReplan,
-        CancellationToken cancellationToken)
-    {
-        var configuration = YamlConfigLoader.IsYamlPath(configPath)
-            ? YamlConfigLoader.LoadAsConfiguration(configPath)
-            : new ConfigurationBuilder()
-                .AddJsonFile(Path.GetFullPath(configPath), optional: false)
-                .Build();
-
-        var config = BindConfig(configPath, configuration);
-
-        ValidateSchemaVersion(config, loggerFactory);
-
-        if (config.Agents.Count == 0)
-            throw new InvalidOperationException("Config must define at least one agent.");
-
-        // Expand ${ENV_VAR} tokens in security and API profile config before use.
-        config = ExpandEnvVars(config);
-
-        var projectSlug = FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory());
-
-        // Expand {session_id} across all path-bearing and instruction fields so every
-        // downstream consumer receives pre-interpolated values without needing to know
-        // about the token.
-        if (sessionId is { Length: > 0 })
-            config = InterpolateSessionId(config, sessionId, projectSlug);
-
-        // --no-replan: strip all state-machine transitions whose Signal contains "REPLAN"
-        // so the session never routes back to the planning phase. Useful in CI or when the
-        // developer agent has already planned and a replan loop would just burn tokens.
-        if (noReplan && config.Selection.StateMachine is { } smForReplan)
-        {
-            var prunedStates = smForReplan.States.ToDictionary(
-                kv => kv.Key,
-                kv => kv.Value with
-                {
-                    Transitions = kv.Value.Transitions
-                        .Where(t => t.Signal is null ||
-                                    !t.Signal.Contains("REPLAN", StringComparison.OrdinalIgnoreCase))
-                        .ToList()
-                });
-            config = config with
-            {
-                Selection = config.Selection with
-                {
-                    StateMachine = smForReplan with { States = prunedStates }
-                }
-            };
-        }
-
-        // Fill in Endpoint and ApiKeyEnvVar from ~/.fuseraft/config for any agent
-        // model that doesn't declare them explicitly.
-        config = ApplyGlobalDefaults(config);
-
-        // For models still missing both ApiKey and ApiKeyEnvVar, inject the key
-        // stored in the OS keychain so users don't have to set an env var at all.
-        config = await ApplyKeychainKeyAsync(config, cancellationToken);
-
-        return (config, projectSlug);
+        return new OrchestratorBuildResult(orchestrator, config, infra.McpManager, compactor, infra.ChangeTracker, infra.EventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, dependencyPlanner, infra.SessionMetrics);
     }
 
     // -------------------------------------------------------------------------
@@ -235,16 +225,16 @@ public static class OrchestratorBuilder
                 {
                     Validation = v with
                     {
-                        BriefPath      = ResolveSandboxPath(v.BriefPath,      sandboxRoot),
-                        TestReportPath = ResolveSandboxPath(v.TestReportPath, sandboxRoot),
-                        ChangeLogPath  = v.ChangeLogPath is not null ? ResolveSandboxPath(v.ChangeLogPath, sandboxRoot) : null,
+                        BriefPath      = OrchestratorConfigLoader.ResolveSandboxPath(v.BriefPath,      sandboxRoot),
+                        TestReportPath = OrchestratorConfigLoader.ResolveSandboxPath(v.TestReportPath, sandboxRoot),
+                        ChangeLogPath  = v.ChangeLogPath is not null ? OrchestratorConfigLoader.ResolveSandboxPath(v.ChangeLogPath, sandboxRoot) : null,
                     }
                 };
 
             if (config.ChangeTracking is { } ct)
                 config = config with
                 {
-                    ChangeTracking = ct with { Path = ResolveSandboxPath(ct.Path, sandboxRoot) }
+                    ChangeTracking = ct with { Path = OrchestratorConfigLoader.ResolveSandboxPath(ct.Path, sandboxRoot) }
                 };
         }
 
@@ -258,8 +248,8 @@ public static class OrchestratorBuilder
             {
                 Brownfield = bf with
                 {
-                    DiscoveryBriefPath    = ResolveSandboxPath(bf.DiscoveryBriefPath,    bfRoot),
-                    ConventionProfilePath = ResolveSandboxPath(bf.ConventionProfilePath, bfRoot),
+                    DiscoveryBriefPath    = OrchestratorConfigLoader.ResolveSandboxPath(bf.DiscoveryBriefPath,    bfRoot),
+                    ConventionProfilePath = OrchestratorConfigLoader.ResolveSandboxPath(bf.ConventionProfilePath, bfRoot),
                 }
             };
         }
@@ -285,201 +275,6 @@ public static class OrchestratorBuilder
         }
 
         return (config, profiles, shellApprover);
-    }
-
-    // -------------------------------------------------------------------------
-    // BuildSystemPrompt
-    // -------------------------------------------------------------------------
-
-    private static async Task<OrchestrationConfig> BuildSystemPrompt(
-        OrchestrationConfig config,
-        string configPath,
-        string? sessionId,
-        string? specContent,
-        ILoggerFactory loggerFactory,
-        CancellationToken cancellationToken)
-    {
-        // Prepend the base system prompt to every agent's instructions.
-        // Source priority: SystemPromptPath > SystemPrompt > embedded FUSERAFT.md.
-        var basePrompt = ResolveBasePrompt(config, configPath);
-        if (basePrompt is not null)
-        {
-            config = config with
-            {
-                Agents = config.Agents
-                    .Select(a => a with
-                    {
-                        Instructions = basePrompt + "\n\n" + a.Instructions.TrimStart()
-                    })
-                    .ToList()
-            };
-        }
-
-        // Inject the user-supplied spec into every agent's system prompt so all agents
-        // remain anchored to it even after context compaction (spec-anchored SDD).
-        if (!string.IsNullOrWhiteSpace(specContent))
-        {
-            var specBlock =
-                "## Project Spec (authoritative)\n\n" +
-                "The following specification is the single source of truth for this session. " +
-                "All plans, brief.json, and implementation decisions must conform to it.\n\n" +
-                specContent.Trim();
-            config = config with
-            {
-                Agents = config.Agents
-                    .Select(a => a with
-                    {
-                        Instructions = a.Instructions.TrimEnd() + "\n\n" + specBlock
-                    })
-                    .ToList()
-            };
-        }
-
-        // Orient every agent to the local .fuseraft/ folder layout so they never
-        // scan it with list_files to discover what is there — they already know.
-        // Each agent only sees artifact paths for the plugins it actually has.
-        config = config with
-        {
-            Agents = config.Agents
-                .Select(a =>
-                {
-                    var artifacts = BuildPluginArtifacts(a.Plugins, config, sessionId);
-                    var block = FuseraftPaths.BuildFolderOrientationBlock(sessionId ?? "default", pluginArtifacts: artifacts);
-                    return a with { Instructions = a.Instructions.TrimEnd() + "\n\n" + block };
-                })
-                .ToList()
-        };
-
-        // Inject OS and recommended shell so agents never have to guess.
-        var osBlock = FuseraftPaths.BuildOsEnvironmentBlock();
-        config = config with
-        {
-            Agents = config.Agents
-                .Select(a => a with
-                {
-                    Instructions = a.Instructions.TrimEnd() + "\n\n" + osBlock
-                })
-                .ToList()
-        };
-
-        // Inject .gitignore so agents know which paths to avoid writing to.
-        var gitIgnoreBlock = BuildGitIgnoreBlock();
-        if (gitIgnoreBlock is not null)
-        {
-            config = config with
-            {
-                Agents = config.Agents
-                    .Select(a => a with
-                    {
-                        Instructions = a.Instructions.TrimEnd() + "\n\n" + gitIgnoreBlock
-                    })
-                    .ToList()
-            };
-        }
-
-        // Project root orientation: when a sandbox root is configured, inject a prompt block
-        // telling agents the canonical root path and warning against double-nested paths.
-        // This is the primary prompt-level defence against the vsl/vsl/… path confusion
-        // pattern observed in long sessions.
-        if (config.Security?.FileSystemSandboxPath is { Length: > 0 } sbxForBlock)
-        {
-            var sandboxExpanded = FuseraftPaths.ExpandPath(sbxForBlock);
-            var projectRootBlock = BuildProjectRootBlock(sandboxExpanded);
-            config = config with
-            {
-                Agents = config.Agents
-                    .Select(a => a with
-                    {
-                        Instructions = a.Instructions.TrimEnd() + "\n\n" + projectRootBlock
-                    })
-                    .ToList()
-            };
-        }
-
-        // Inject context items into every agent's system prompt so agents know what
-        // reference material is available without burning a tool call on discovery.
-        var contextStore = new fuseraft.Infrastructure.Context.ContextStore();
-        var contextSummary = await contextStore.BuildPromptSummaryAsync(cancellationToken);
-        if (contextSummary is not null)
-        {
-            config = config with
-            {
-                Agents = config.Agents
-                    .Select(a => a with
-                    {
-                        Instructions = a.Instructions.TrimEnd() + "\n\n" + contextSummary
-                    })
-                    .ToList()
-            };
-        }
-
-        // Brownfield: when a convention profile exists on disk, inject its contents into
-        // every agent's system prompt so agents follow project conventions automatically.
-        if (config.Brownfield is { ConventionProfilePath: { } conventionPath }
-            && File.Exists(conventionPath))
-        {
-            try
-            {
-                var profileJson    = await File.ReadAllTextAsync(conventionPath, cancellationToken);
-                var profile        = JsonSerializer.Deserialize<ConventionProfile>(profileJson, BrownfieldJsonOpts);
-                var conventionBlock = BuildConventionBlock(profile);
-                if (conventionBlock is not null)
-                {
-                    config = config with
-                    {
-                        Agents = config.Agents
-                            .Select(a => a with
-                            {
-                                Instructions = a.Instructions.TrimEnd() + "\n\n" + conventionBlock
-                            })
-                            .ToList()
-                    };
-                }
-            }
-            catch (Exception ex)
-            {
-                loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
-                    "Could not load convention profile from '{Path}': {Message}",
-                    conventionPath, ex.Message);
-            }
-        }
-
-        // Brownfield: when TestSelector is configured, inject the discovery command template into
-        // every agent's system prompt so agents run targeted tests without a tool call to find them.
-        if (config.TestSelector is { FindRelatedCommand.Length: > 0 } tsCfg)
-        {
-            var tsBlock = BuildTestSelectorBlock(tsCfg);
-            config = config with
-            {
-                Agents = config.Agents
-                    .Select(a => a with
-                    {
-                        Instructions = a.Instructions.TrimEnd() + "\n\n" + tsBlock
-                    })
-                    .ToList()
-            };
-        }
-
-        // Also emit a startup warning when a change envelope is declared without a sandbox —
-        // the envelope is enforced by SandboxEnforcementFilter which requires a sandbox root.
-        if (config.Security?.ChangeEnvelope is { Count: > 0 }
-            && string.IsNullOrEmpty(config.Security.FileSystemSandboxPath))
-        {
-            loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
-                "Security.ChangeEnvelope is configured but Security.FileSystemSandboxPath is not set. " +
-                "The change envelope will not be enforced. Add a FileSystemSandboxPath to enable it.");
-        }
-
-        // Warn when FileSystemPermissions is configured without a sandbox root.
-        if (config.Security?.FileSystemPermissions is not null
-            && string.IsNullOrEmpty(config.Security.FileSystemSandboxPath))
-        {
-            loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
-                "Security.FileSystemPermissions is configured but Security.FileSystemSandboxPath is not set. " +
-                "Filesystem permission globs will not be enforced. Add a FileSystemSandboxPath to enable them.");
-        }
-
-        return config;
     }
 
     // -------------------------------------------------------------------------
@@ -823,12 +618,7 @@ public static class OrchestratorBuilder
         OrchestrationConfig config,
         ILoggerFactory loggerFactory,
         ChatClientFactory chatClientFactory,
-        bool useMagentic,
-        bool useGraph,
-        bool useWorkflow,
-        bool useAdversarial,
-        bool useMapReduce,
-        bool useScatterGather,
+        OrchestratorKindFlags flags,
         fuseraft.Infrastructure.Knowledge.KnowledgeLayer knowledgeLayer,
         fuseraft.Infrastructure.Objectives.ObjectiveManager objectiveManager,
         string knowledgeSandbox,
@@ -1035,7 +825,7 @@ public static class OrchestratorBuilder
         }
 
         // Validate map-reduce config at startup when that strategy is selected.
-        if (useMapReduce)
+        if (flags.UseMapReduce)
         {
             if (config.Selection.MapReduce is null)
                 throw new InvalidOperationException(
@@ -1082,7 +872,7 @@ public static class OrchestratorBuilder
                 "The MapReduce block will be ignored. Set Selection.Type: mapreduce to enable it.",
                 config.Selection.Type);
 
-        if (useScatterGather)
+        if (flags.UseScatterGather)
         {
             if (config.Selection.ScatterGather is null)
                 throw new InvalidOperationException(
@@ -1120,7 +910,7 @@ public static class OrchestratorBuilder
                 config.Selection.Type);
 
         // Validate graph config at startup when the graph strategy is selected.
-        if (useGraph)
+        if (flags.UseGraph)
         {
             if (config.Selection.Graph is null)
                 throw new InvalidOperationException(
@@ -1290,7 +1080,7 @@ public static class OrchestratorBuilder
         // is a v1 implementation — Parallel, SubGraphId, RequireHumanApproval, RecoveryAgent,
         // and no-keyword (unconditional) edges are rejected here rather than silently ignored.
         // See WorkflowOrchestrator's class doc comment and docs/strategies.md for rationale.
-        if (useWorkflow)
+        if (flags.UseWorkflow)
         {
             if (config.Selection.Graph is null)
                 throw new InvalidOperationException(
@@ -1397,7 +1187,7 @@ public static class OrchestratorBuilder
             var summaryModel = compactionConfig.Model ?? config.Agents[0].Model;
             // Magentic, adversarial, and map-reduce sessions have no brief.json or change log,
             // so the workflow-specific resumption note is suppressed to avoid wasting tokens.
-            bool suppressResumptionNote = useMagentic || useAdversarial || useMapReduce || useScatterGather;
+            bool suppressResumptionNote = flags.UseMagentic || flags.UseAdversarial || flags.UseMapReduce || flags.UseScatterGather;
             var resumptionNote = suppressResumptionNote ? null : ConversationCompactor.WorkflowResumptionNote;
             var changeLogPath  = suppressResumptionNote ? null
                 : (config.Validation?.ChangeLogPath ?? config.ChangeTracking?.Path);
@@ -1501,36 +1291,29 @@ public static class OrchestratorBuilder
     // CreateOrchestrator
     // -------------------------------------------------------------------------
 
-    private static IOrchestrator CreateOrchestrator(
+    private static (IOrchestrator Orchestrator, fuseraft.Infrastructure.Repository.RepositoryMemoryExtractor? RepoMemoryExtractor) CreateOrchestrator(
         OrchestrationConfig config,
-        ILoggerFactory loggerFactory,
-        ChatClientFactory chatClientFactory,
-        PluginRegistry pluginRegistry,
-        GovernanceKernel governanceKernel,
-        IHumanApprovalService? humanApprovalService,
-        bool hitlMode,
-        bool useMagentic,
-        bool useGraph,
-        bool useWorkflow,
-        bool useAdversarial,
-        bool useMapReduce,
-        bool useScatterGather,
-        ChangeTracker? changeTracker,
-        EventEmitter? eventEmitter,
-        fuseraft.Infrastructure.Knowledge.KnowledgeLayer knowledgeLayer,
-        fuseraft.Infrastructure.Objectives.ObjectiveManager objectiveManager,
-        string knowledgeSandbox,
-        string projectSlug,
-        string? sessionId,
-        string? executionStatePath,
-        string? investigationLogPath,
-        EvidenceStore? evidenceStore,
-        fuseraft.Orchestration.DependencyPlanner? dependencyPlanner,
-        MemoryManager? memoryManager,
-        IdentityRegistry identityRegistry,
-        fuseraft.Infrastructure.Tools.ToolResultArtifactStore toolArtifactStore,
-        out fuseraft.Infrastructure.Repository.RepositoryMemoryExtractor? repoMemoryExtractor)
+        OrchestratorKindFlags flags,
+        OrchestratorInfraServices infra,
+        OrchestratorKnowledgeServices knowledge,
+        OrchestratorSessionPaths sessionPaths,
+        IHumanApprovalService? humanApprovalService)
     {
+        var loggerFactory        = infra.LoggerFactory;
+        var chatClientFactory    = infra.ChatClientFactory;
+        var governanceKernel     = infra.GovernanceKernel;
+        var changeTracker        = infra.ChangeTracker;
+        var eventEmitter         = infra.EventEmitter;
+        var knowledgeLayer       = knowledge.KnowledgeLayer;
+        var objectiveManager     = knowledge.ObjectiveManager;
+        var evidenceStore        = knowledge.EvidenceStore;
+        var dependencyPlanner    = knowledge.DependencyPlanner;
+        var memoryManager        = knowledge.MemoryManager;
+        var projectSlug          = sessionPaths.ProjectSlug;
+        var sessionId            = sessionPaths.SessionId;
+        var executionStatePath   = sessionPaths.ExecutionStatePath;
+        var investigationLogPath = sessionPaths.InvestigationLogPath;
+
         var aoLogger = loggerFactory.CreateLogger<AgentOrchestrator>();
         var goLogger = loggerFactory.CreateLogger<GraphOrchestrator>();
 
@@ -1563,7 +1346,7 @@ public static class OrchestratorBuilder
 
         var strategyFactory = new StrategyFactory(chatClientFactory.Create, eventEmitter, loggerFactory, governanceKernel, humanApprovalService, evidenceStore, knowledgeLayer.ProvenanceRegistry, config.TestSelector, resolvedSandbox, contextAssembler);
 
-        var agentFactory = new AgentFactory(chatClientFactory, pluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, identityRegistry, eventEmitter, loggerFactory, BuildSkillsProvider(), toolArtifactStore);
+        var agentFactory = new AgentFactory(chatClientFactory, infra.PluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, infra.IdentityRegistry, eventEmitter, loggerFactory, BuildSkillsProvider(), infra.ToolArtifactStore);
 
         // Unified context assembly pipeline — shared across all orchestrator types.
         // Provides always-on knowledge retrieval, relevance-ranked memory, and metrics
@@ -1600,47 +1383,49 @@ public static class OrchestratorBuilder
         // any agent names and any team size.
         IOrchestrator orchestrator;
 
-        if (useGraph)
+        if (flags.UseGraph)
         {
             orchestrator = new GraphOrchestrator(
                 config, agentFactory, goLogger,
                 changeTracker, eventEmitter, governanceKernel,
-                hitlMode ? humanApprovalService : null,
+                flags.HitlMode ? humanApprovalService : null,
                 contextPipeline, knowledgeStore,
                 loggerFactory);
         }
-        else if (useWorkflow)
+        else if (flags.UseWorkflow)
         {
             var wfLogger = loggerFactory.CreateLogger<WorkflowOrchestrator>();
             orchestrator  = new WorkflowOrchestrator(
                 config, agentFactory, wfLogger,
-                changeTracker, eventEmitter);
+                changeTracker, eventEmitter, governanceKernel,
+                contextPipeline);
         }
-        else if (useAdversarial)
+        else if (flags.UseAdversarial)
         {
             var advLogger = loggerFactory.CreateLogger<AdversarialOrchestrator>();
             orchestrator  = new AdversarialOrchestrator(
                 config, agentFactory, advLogger,
-                changeTracker, eventEmitter, governanceKernel,
-                hitlMode ? humanApprovalService : null);
+                changeTracker, eventEmitter, governanceKernel);
         }
-        else if (useMapReduce)
+        else if (flags.UseMapReduce)
         {
             var mrLogger = loggerFactory.CreateLogger<MapReduceOrchestrator>();
             orchestrator  = new MapReduceOrchestrator(
                 config, agentFactory, mrLogger,
                 changeTracker, eventEmitter, governanceKernel,
-                hitlMode ? humanApprovalService : null);
+                flags.HitlMode ? humanApprovalService : null,
+                contextPipeline, knowledgeStore);
         }
-        else if (useScatterGather)
+        else if (flags.UseScatterGather)
         {
             var sgLogger = loggerFactory.CreateLogger<ScatterGatherOrchestrator>();
             orchestrator  = new ScatterGatherOrchestrator(
                 config, agentFactory, sgLogger,
                 changeTracker, eventEmitter, governanceKernel,
-                hitlMode ? humanApprovalService : null);
+                flags.HitlMode ? humanApprovalService : null,
+                contextPipeline, knowledgeStore);
         }
-        else if (useMagentic)
+        else if (flags.UseMagentic)
         {
             var magCfg        = config.Selection.Magentic!;           // validated above
             var managerModel  = chatClientFactory.Resolve(magCfg.Model!);
@@ -1649,7 +1434,7 @@ public static class OrchestratorBuilder
 
             orchestrator = new MagenticOrchestrator(
                 config, agentFactory, managerClient, magLogger,
-                hitlMode ? humanApprovalService : null,
+                flags.HitlMode ? humanApprovalService : null,
                 changeTracker, eventEmitter, governanceKernel,
                 contextPipeline, knowledgeStore);
         }
@@ -1660,7 +1445,7 @@ public static class OrchestratorBuilder
 
         // Repository memory extractor — runs after the session to generate candidates.
         // Requires an evidence store to query; skipped when evidence tracking is disabled.
-        repoMemoryExtractor = null;
+        fuseraft.Infrastructure.Repository.RepositoryMemoryExtractor? repoMemoryExtractor = null;
         if (evidenceStore is not null)
         {
             var extractorStore = new fuseraft.Infrastructure.Repository.RepositoryMemoryStore(
@@ -1675,560 +1460,7 @@ public static class OrchestratorBuilder
         if (config.Saga?.Enabled == true)
             orchestrator = new SagaOrchestrator(orchestrator, config.Saga, compensators: null, eventEmitter);
 
-        return orchestrator;
-    }
-
-    /// <summary>
-    /// Makes a lightweight <c>GET /models</c> call to each unique API endpoint in
-    /// <paramref name="config"/> to verify the keys are valid before the session starts.
-    /// Throws <see cref="InvalidOperationException"/> if any key is missing or rejected.
-    /// </summary>
-    public static async Task ValidateApiKeysAsync(
-        OrchestrationConfig config,
-        CancellationToken cancellationToken = default)
-    {
-        // Collect all ModelConfigs: one per agent + optional selection-strategy model
-        // + optional Magentic manager model.
-        // Resolve aliases against the Models registry first so agents that reference
-        // a named alias (e.g. "fast") get the endpoint and API key from the alias.
-        var models = config.Agents.Select(a => ResolveAlias(a.Model, config.Models))
-            .Concat(config.Selection.Model is not null
-                ? [ResolveAlias(config.Selection.Model, config.Models)]
-                : Array.Empty<ModelConfig>())
-            .Concat(config.Selection.Magentic?.Model is not null
-                ? [ResolveAlias(config.Selection.Magentic.Model, config.Models)]
-                : Array.Empty<ModelConfig>())
-            .Where(m => !string.IsNullOrWhiteSpace(m.ApiKeyEnvVar))  // skip Ollama (no key)
-            .GroupBy(m => m.ApiKeyEnvVar)   // deduplicate: only probe each key once
-            .Select(g => g.First())
-            .ToList();
-
-        var http = _validationHttp;
-
-        foreach (var model in models)
-        {
-            var apiKey = Environment.GetEnvironmentVariable(model.ApiKeyEnvVar);
-            if (string.IsNullOrWhiteSpace(apiKey))
-                throw new InvalidOperationException(
-                    $"API key variable '{model.ApiKeyEnvVar}' is not set.");
-
-            // Strip /chat/completions (or any path) to get the provider base URL.
-            var uri    = new Uri(model.Endpoint.TrimEnd('/'));
-            var baseUrl = $"{uri.Scheme}://{uri.Host}{(uri.IsDefaultPort ? string.Empty : $":{uri.Port}")}";
-
-            // Use a per-request message so keys from different providers don't bleed
-            // across iterations via DefaultRequestHeaders.
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/v1/models");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-
-            HttpResponseMessage response;
-            try
-            {
-                response = await http.SendAsync(request, cancellationToken);
-            }
-            catch (HttpRequestException ex)
-            {
-                throw new InvalidOperationException(
-                    $"Could not reach API endpoint '{baseUrl}': {ex.Message}", ex);
-            }
-
-            if (response.StatusCode == HttpStatusCode.Unauthorized)
-                throw new InvalidOperationException(
-                    $"API key from '{model.ApiKeyEnvVar}' was rejected by the provider (HTTP 401). " +
-                    $"Verify the key is current and has the correct permissions.");
-        }
-    }
-
-    /// <summary>
-    /// Reads only the <c>Orchestration.Security</c> section from <paramref name="configPath"/>
-    /// without binding or resolving agents. Used by lightweight callers (e.g. the REPL) that
-    /// need security settings without paying the cost of full config loading.
-    /// Returns <c>null</c> when the file does not exist or has no Security section.
-    /// </summary>
-    public static SecurityConfig? LoadSecurityConfig(string configPath)
-    {
-        if (!File.Exists(configPath)) return null;
-
-        var configuration = YamlConfigLoader.IsYamlPath(configPath)
-            ? YamlConfigLoader.LoadAsConfiguration(configPath)
-            : new ConfigurationBuilder()
-                .AddJsonFile(Path.GetFullPath(configPath), optional: false)
-                .Build();
-
-        return configuration.GetSection("Orchestration:Security").Get<SecurityConfig>();
-    }
-
-    /// <summary>
-    /// Tries to load <paramref name="configPath"/> without constructing full services.
-    /// Returns the parsed <see cref="OrchestrationConfig"/> for display purposes.
-    /// </summary>
-    public static OrchestrationConfig LoadConfig(string configPath)
-    {
-        if (!File.Exists(configPath))
-            throw new FileNotFoundException($"Config file not found: {configPath}");
-
-        var configuration = YamlConfigLoader.IsYamlPath(configPath)
-            ? YamlConfigLoader.LoadAsConfiguration(configPath)
-            : new ConfigurationBuilder()
-                .AddJsonFile(Path.GetFullPath(configPath), optional: false)
-                .Build();
-
-        return BindConfig(configPath, configuration);
-    }
-
-    // Resolves the base system prompt prepended to every agent.
-    // Priority: SystemPromptPath (file) > SystemPrompt (inline) > embedded FUSERAFT.md.
-    private static string? ResolveBasePrompt(OrchestrationConfig config, string configPath)
-    {
-        if (!string.IsNullOrWhiteSpace(config.SystemPromptPath))
-        {
-            var configDir  = Path.GetDirectoryName(Path.GetFullPath(configPath)) ?? ".";
-            var promptPath = Path.IsPathRooted(config.SystemPromptPath)
-                ? config.SystemPromptPath
-                : Path.GetFullPath(config.SystemPromptPath, configDir);
-            return File.ReadAllText(promptPath).Trim();
-        }
-
-        if (!string.IsNullOrWhiteSpace(config.SystemPrompt))
-            return config.SystemPrompt.Trim();
-
-        // Fall back to the embedded FUSERAFT.md.
-        var asm  = typeof(OrchestratorBuilder).Assembly;
-        var name = asm.GetManifestResourceNames()
-                      .FirstOrDefault(n => n.EndsWith("FUSERAFT.md", StringComparison.OrdinalIgnoreCase));
-        if (name is null) return null;
-
-        using var stream = asm.GetManifestResourceStream(name)!;
-        using var reader = new StreamReader(stream);
-        return reader.ReadToEnd().Trim();
-    }
-
-    // Fills in ModelId, Endpoint, and ApiKeyEnvVar from ~/.fuseraft/config on any model
-    // config that doesn't set them explicitly. This lets the global config act as a
-    // default provider so agent files work without repeating connection details.
-    // Per-agent explicit values always win; only empty fields are filled.
-    private static OrchestrationConfig ApplyGlobalDefaults(OrchestrationConfig config)
-    {
-        var (globalCfg, _) = UserConfigStore.Load();
-        var globalModelId      = globalCfg is not null && !string.IsNullOrWhiteSpace(globalCfg.ModelId)      ? globalCfg.ModelId      : null;
-        var globalEndpoint     = globalCfg is not null && !string.IsNullOrWhiteSpace(globalCfg.Endpoint)     ? globalCfg.Endpoint     : null;
-        var globalApiKeyEnvVar = globalCfg is not null && !string.IsNullOrWhiteSpace(globalCfg.ApiKeyEnvVar) ? globalCfg.ApiKeyEnvVar : null;
-
-        if (globalModelId is null && globalEndpoint is null && globalApiKeyEnvVar is null) return config;
-
-        ModelConfig Fill(ModelConfig m) => m with
-        {
-            ModelId      = string.IsNullOrWhiteSpace(m.ModelId)      && globalModelId      is not null ? globalModelId      : m.ModelId,
-            Endpoint     = string.IsNullOrWhiteSpace(m.Endpoint)     && globalEndpoint     is not null ? globalEndpoint     : m.Endpoint,
-            ApiKeyEnvVar = string.IsNullOrWhiteSpace(m.ApiKeyEnvVar) && globalApiKeyEnvVar is not null ? globalApiKeyEnvVar : m.ApiKeyEnvVar,
-        };
-
-        var agents = config.Agents.Select(a => a with { Model = Fill(a.Model) }).ToList();
-
-        var models = config.Models.ToDictionary(kv => kv.Key, kv => Fill(kv.Value));
-
-        var sel = config.Selection with
-        {
-            Model    = config.Selection.Model    is not null ? Fill(config.Selection.Model)    : null,
-            Magentic = config.Selection.Magentic is not null
-                ? config.Selection.Magentic with { Model = config.Selection.Magentic.Model is not null ? Fill(config.Selection.Magentic.Model) : null }
-                : null,
-        };
-
-        return config with { Agents = agents, Models = models, Selection = sel };
-    }
-
-    // Injects the OS keychain key as a literal ApiKey on every model config that has
-    // neither ApiKey nor ApiKeyEnvVar set. The keychain is read at most once per call.
-    // Models that already have either field set are left untouched.
-    private static async Task<OrchestrationConfig> ApplyKeychainKeyAsync(
-        OrchestrationConfig config,
-        CancellationToken cancellationToken = default)
-    {
-        // Quick check: any model actually needs a key?
-        bool NeedsKey(ModelConfig m) =>
-            string.IsNullOrWhiteSpace(m.ApiKey) && string.IsNullOrWhiteSpace(m.ApiKeyEnvVar);
-
-        bool anyAgentNeedsKey = config.Agents.Any(a => NeedsKey(a.Model))
-            || config.Models.Values.Any(NeedsKey)
-            || (config.Selection.Model    is not null && NeedsKey(config.Selection.Model))
-            || (config.Selection.Magentic?.Model is not null && NeedsKey(config.Selection.Magentic.Model));
-
-        if (!anyAgentNeedsKey) return config;
-
-        // In VS Code mode prefer FUSERAFT_API_KEY (injected by the extension from
-        // ~/.fuseraft/config) but fall back to the OS keychain so that runs stay
-        // functional after a legacy-key migration has removed the plaintext apiKey
-        // field from the config (which causes the extension to stop injecting the
-        // env var).
-        string? keychainKey;
-        if (VsCodeMode)
-        {
-            var envKey = Environment.GetEnvironmentVariable("FUSERAFT_API_KEY");
-            keychainKey = !string.IsNullOrWhiteSpace(envKey)
-                ? envKey
-                : await ApiKeyStoreFactory.Create().RetrieveAsync();
-        }
-        else
-        {
-            keychainKey = await ApiKeyStoreFactory.Create().RetrieveAsync();
-        }
-        if (string.IsNullOrWhiteSpace(keychainKey)) return config;
-
-        ModelConfig Fill(ModelConfig m) =>
-            NeedsKey(m) ? m with { ApiKey = keychainKey } : m;
-
-        var agents = config.Agents.Select(a => a with { Model = Fill(a.Model) }).ToList();
-        var models  = config.Models.ToDictionary(kv => kv.Key, kv => Fill(kv.Value));
-        var sel     = config.Selection with
-        {
-            Model    = config.Selection.Model    is not null ? Fill(config.Selection.Model)    : null,
-            Magentic = config.Selection.Magentic is not null
-                ? config.Selection.Magentic with { Model = config.Selection.Magentic.Model is not null ? Fill(config.Selection.Magentic.Model) : null }
-                : null,
-        };
-
-        return config with { Agents = agents, Models = models, Selection = sel };
-    }
-
-    private static ModelConfig ResolveAlias(
-        ModelConfig model,
-        IReadOnlyDictionary<string, ModelConfig> registry)
-    {
-        if (registry.TryGetValue(model.ModelId, out var alias))
-        {
-            return alias with
-            {
-                Temperature = model.Temperature ?? alias.Temperature,
-                MaxTokens   = model.MaxTokens > 0 ? model.MaxTokens : alias.MaxTokens
-            };
-        }
-        return model;
-    }
-
-    // Separates binding from loading so both BuildAsync and LoadConfig get the same
-    // helpful error message when a field type doesn't match the schema.
-    private static OrchestrationConfig BindConfig(string configPath, IConfiguration configuration)
-    {
-        OrchestrationConfig? config;
-        try
-        {
-            config = configuration.GetSection("Orchestration").Get<OrchestrationConfig>();
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException($"Failed to bind '{configPath}': {ex.Message} Check that all field types match the expected schema.", ex);
-        }
-
-        config = config
-            ?? throw new InvalidOperationException($"File '{configPath}' is missing the top-level 'Orchestration' key.");
-
-        var configDir = Path.GetDirectoryName(Path.GetFullPath(configPath)) ?? ".";
-        return ResolveAgentFiles(config, configDir);
-    }
-
-    // Resolves AgentFile references in the Agents list. For each agent that declares
-    // AgentFile, the referenced YAML is loaded as the base AgentConfig and the inline
-    // fields are merged on top (inline wins for non-default values).
-    private static OrchestrationConfig ResolveAgentFiles(OrchestrationConfig config, string configDir)
-    {
-        if (config.Agents.All(a => a.AgentFile is null)) return config;
-
-        var resolved = config.Agents.Select(agent =>
-        {
-            if (agent.AgentFile is null) return agent;
-
-            var filePath = Path.IsPathRooted(agent.AgentFile)
-                ? agent.AgentFile
-                : Path.GetFullPath(Path.Combine(configDir, agent.AgentFile));
-
-            if (!File.Exists(filePath))
-                throw new FileNotFoundException(
-                    $"AgentFile not found: '{filePath}'" +
-                    (string.IsNullOrEmpty(agent.Name) ? "" : $" (agent '{agent.Name}')"));
-
-            var baseAgent = LoadAgentFile(filePath);
-            return MergeAgentConfig(baseAgent, agent);
-        }).ToList();
-
-        return config with { Agents = resolved };
-    }
-
-    // Loads an agent definition from a YAML file. Supports both bare format (whole
-    // file is the AgentConfig object) and wrapped format (top-level "Agent:" key).
-    private static AgentConfig LoadAgentFile(string path)
-    {
-        string yaml;
-        try { yaml = File.ReadAllText(path); }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException($"Cannot read agent file '{path}': {ex.Message}", ex);
-        }
-
-        string json;
-        try { json = YamlConfigLoader.ConvertYamlToJson(yaml); }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException($"Agent file '{path}' has invalid YAML: {ex.Message}", ex);
-        }
-
-        try
-        {
-            using var doc  = JsonDocument.Parse(json);
-            var root       = doc.RootElement;
-            // Unwrap "Agent:" top-level key if present.
-            var agentEl    = root.TryGetProperty("Agent", out var wrapped) ? wrapped : root;
-            return JsonSerializer.Deserialize<AgentConfig>(agentEl.GetRawText(), BrownfieldJsonOpts)
-                ?? throw new InvalidOperationException($"Agent file '{path}' deserialized to null.");
-        }
-        catch (Exception ex) when (ex is not InvalidOperationException)
-        {
-            throw new InvalidOperationException($"Failed to parse agent file '{path}': {ex.Message}", ex);
-        }
-    }
-
-    // Merges an inline AgentConfig on top of a base loaded from AgentFile.
-    // Inline wins when its value differs from the C# default for that field type
-    // (non-empty string, non-empty collection, non-null, non-zero numeric, true bool).
-    // This lets a shared agent file define defaults while individual configs override only
-    // what differs (e.g. a different Model or an extra Plugin).
-    private static AgentConfig MergeAgentConfig(AgentConfig baseConfig, AgentConfig inline) =>
-        baseConfig with
-        {
-            AgentFile              = null,  // resolved — no file reference on the merged result
-            Name                   = !string.IsNullOrEmpty(inline.Name)                 ? inline.Name                   : baseConfig.Name,
-            Instructions           = !string.IsNullOrEmpty(inline.Instructions)         ? inline.Instructions           : baseConfig.Instructions,
-            Description            = inline.Description                                 ?? baseConfig.Description,
-            Model                  = !string.IsNullOrEmpty(inline.Model?.ModelId)       ? inline.Model                  : baseConfig.Model,
-            Plugins                = inline.Plugins.Count > 0                           ? inline.Plugins                : baseConfig.Plugins,
-            FunctionChoice         = inline.FunctionChoice != "auto"                    ? inline.FunctionChoice         : baseConfig.FunctionChoice,
-            TrustScore             = inline.TrustScore     != 0.7                       ? inline.TrustScore             : baseConfig.TrustScore,
-            ContextWindow          = inline.ContextWindow                               ?? baseConfig.ContextWindow,
-            Capabilities           = inline.Capabilities.Count > 0                      ? inline.Capabilities           : baseConfig.Capabilities,
-            MaxToolCallsPerTurn    = inline.MaxToolCallsPerTurn    != 0                 ? inline.MaxToolCallsPerTurn    : baseConfig.MaxToolCallsPerTurn,
-            MaxInTurnContextTokens = inline.MaxInTurnContextTokens != 0                 ? inline.MaxInTurnContextTokens : baseConfig.MaxInTurnContextTokens,
-            MaxInTurnToolPairs     = inline.MaxInTurnToolPairs     != 0                 ? inline.MaxInTurnToolPairs     : baseConfig.MaxInTurnToolPairs,
-            SubAgentModel          = inline.SubAgentModel                               ?? baseConfig.SubAgentModel,
-            SubAgentPlugins        = inline.SubAgentPlugins                             ?? baseConfig.SubAgentPlugins,
-            RemoteAgent            = inline.RemoteAgent                                 ?? baseConfig.RemoteAgent,
-            SkipExecutionState     = inline.SkipExecutionState || baseConfig.SkipExecutionState,
-            Context                = inline.Context is { Count: > 0 }                  ? inline.Context                : baseConfig.Context,
-        };
-
-    private static string BuildTestSelectorBlock(TestSelectorConfig ts)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine("TEST SELECTOR (incremental test discovery — use this instead of running the full suite):");
-        sb.AppendLine($"  FindRelatedCommand: {ts.FindRelatedCommand}");
-        if (!string.IsNullOrWhiteSpace(ts.FullSuiteCommand))
-            sb.AppendLine($"  FullSuiteCommand:   {ts.FullSuiteCommand}");
-        sb.AppendLine();
-        sb.Append("For each file you changed, substitute its path for {file} in FindRelatedCommand to discover related tests, then run those tests. Fall back to FullSuiteCommand when no related tests are found.");
-        return sb.ToString();
-    }
-
-    private static string BuildProjectRootBlock(string sandboxRoot)
-    {
-        var dirName = Path.GetFileName(sandboxRoot.TrimEnd(Path.DirectorySeparatorChar));
-        var sb = new StringBuilder();
-        sb.AppendLine("## Project Root (Sandbox)");
-        sb.AppendLine($"Sandbox root: {sandboxRoot}");
-        sb.AppendLine("All file paths must be relative to this root or absolute. Never include the project directory name as a prefix in a relative path.");
-        sb.AppendLine($"  Correct:  src/module/file.py  or  {dirName}/src/module/file.py (absolute)");
-        sb.AppendLine($"  Wrong:    {dirName}/{dirName}/src/module/file.py  ← double-nested, file will not exist");
-        sb.Append("Files you have already read this session are cached. If the file is unchanged you will see a hint instead of the full content — use grep_in_file for targeted lookup or pass startLine/maxLines for a specific section.");
-        return sb.ToString();
-    }
-
-    /// <summary>
-    /// Produces artifact path descriptors for the plugins an agent actually has, so the
-    /// folder orientation block injected into that agent's system prompt only references
-    /// paths it can meaningfully use.
-    /// </summary>
-    private static IEnumerable<(string Path, string Label)> BuildPluginArtifacts(
-        List<string> pluginNames,
-        OrchestrationConfig config,
-        string? sessionId)
-    {
-        var sid = sessionId ?? "default";
-        foreach (var name in pluginNames)
-        {
-            if (name.Equals("Changes", StringComparison.OrdinalIgnoreCase))
-            {
-                if (config.ChangeTracking?.Path is { } changesPath)
-                    yield return (changesPath, ChangesPlugin.Label);
-            }
-            else if (name.Equals("SessionContext", StringComparison.OrdinalIgnoreCase))
-            {
-                yield return (FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalSessionContext, sid), SessionContextPlugin.Label);
-            }
-            else if (name.Equals("Chatroom", StringComparison.OrdinalIgnoreCase))
-            {
-                yield return (FuseraftPaths.ExpandSessionId(config.Chatroom?.Path ?? FuseraftPaths.LocalChatroom, sid), ChatroomPlugin.Label);
-            }
-            else if (name.Equals("Scratchpad", StringComparison.OrdinalIgnoreCase))
-            {
-                var scratchPath = sessionId is { Length: > 0 }
-                    ? FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalSessionScratchpad, sessionId)
-                    : FuseraftPaths.ExpandPath(config.Scratchpad?.BasePath ?? FuseraftPaths.GlobalScratchpad);
-                yield return (scratchPath, ScratchpadPlugin.Label);
-            }
-        }
-    }
-
-    private static string? BuildGitIgnoreBlock()
-    {
-        var path = Path.Combine(Directory.GetCurrentDirectory(), ".gitignore");
-        if (!File.Exists(path)) return null;
-
-        const int maxLines = 100;
-        var lines     = File.ReadAllLines(path);
-        var truncated = lines.Length > maxLines;
-        var content   = string.Join('\n', truncated ? lines[..maxLines] : lines);
-
-        var sb = new StringBuilder();
-        sb.AppendLine("## .gitignore");
-        sb.AppendLine("Avoid writing to paths matched by these patterns. Treat matched paths as non-source (generated, vendored, or sensitive) — read them only when the task explicitly requires it.");
-        if (truncated)
-            sb.AppendLine($"(truncated to {maxLines} of {lines.Length} lines)");
-        sb.AppendLine("```");
-        sb.AppendLine(content);
-        sb.Append("```");
-        return sb.ToString();
-    }
-
-    private static string? BuildConventionBlock(ConventionProfile? profile)
-    {
-        if (profile is null) return null;
-
-        var sb = new StringBuilder();
-        sb.AppendLine("PROJECT CONVENTIONS (detected by Archaeologist — follow these in all code you write):");
-
-        if (!string.IsNullOrWhiteSpace(profile.Language))
-            sb.AppendLine($"  Language/ecosystem: {profile.Language}");
-
-        if (!string.IsNullOrWhiteSpace(profile.BuildCommand))
-            sb.AppendLine($"  Build command: {profile.BuildCommand}");
-
-        if (!string.IsNullOrWhiteSpace(profile.TestCommand))
-            sb.AppendLine($"  Test command:  {profile.TestCommand}");
-
-        AppendList(sb, "  Naming:     ", profile.NamingPatterns);
-        AppendList(sb, "  Error handling: ", profile.ErrorHandling);
-        AppendList(sb, "  Forbidden:  ", profile.ForbiddenPatterns);
-        AppendList(sb, "  Tests:      ", profile.TestPatterns);
-        AppendList(sb, "  Structure:  ", profile.StructuralNotes);
-
-        var result = sb.ToString().TrimEnd();
-        return result.Length > "PROJECT CONVENTIONS (detected by Archaeologist — follow these in all code you write):".Length
-            ? result
-            : null;
-    }
-
-    private static void AppendList(StringBuilder sb, string label, IReadOnlyList<string> items)
-    {
-        if (items.Count == 0) return;
-        foreach (var item in items)
-            sb.AppendLine($"{label}{item}");
-    }
-
-    /// <summary>
-    /// Expands <c>${ENV_VAR}</c> tokens in the security and API profile sections of the config.
-    /// Expansion is performed at startup so that secrets stay in environment variables and
-    /// never appear in agent instructions or conversation history.
-    /// </summary>
-    private static OrchestrationConfig ExpandEnvVars(OrchestrationConfig config)
-    {
-        // Expand HttpAllowedHosts so ${SNOW_INSTANCE} style entries work.
-        var expandedHosts = config.Security.HttpAllowedHosts
-            .Select(ProcessHelper.ExpandEnvTokens)
-            .ToList();
-
-        var expandedSecurity = config.Security with { HttpAllowedHosts = expandedHosts };
-
-        // Expand ApiProfiles: BaseUrl and every header value.
-        var expandedProfiles = config.ApiProfiles
-            .ToDictionary(
-                kvp => kvp.Key,
-                kvp => kvp.Value with
-                {
-                    BaseUrl        = ProcessHelper.ExpandEnvTokens(kvp.Value.BaseUrl),
-                    DefaultHeaders = kvp.Value.DefaultHeaders
-                        .ToDictionary(
-                            h => h.Key,
-                            h => ProcessHelper.ExpandEnvTokens(h.Value),
-                            StringComparer.OrdinalIgnoreCase),
-                },
-                StringComparer.OrdinalIgnoreCase);
-
-        return config with
-        {
-            Security    = expandedSecurity,
-            ApiProfiles = expandedProfiles,
-        };
-    }
-
-    internal static OrchestrationConfig InterpolateSessionId(OrchestrationConfig config, string sessionId, string projectSlug)
-    {
-        string  E(string  s) => FuseraftPaths.ExpandSessionPaths(s, sessionId, projectSlug);
-        string? En(string? s) => s is null ? null : E(s);
-        string  Et(string s) => FuseraftPaths.ExpandTextTokens(s, sessionId, projectSlug);
-
-        return config with
-        {
-            Agents = config.Agents
-                .Select(a => a with { Instructions = Et(a.Instructions) })
-                .ToList(),
-
-            Validation = config.Validation is { } v
-                ? v with
-                {
-                    BriefPath      = E(v.BriefPath),
-                    TestReportPath = E(v.TestReportPath),
-                    ChangeLogPath  = En(v.ChangeLogPath),
-                }
-                : null,
-
-            Contracts = config.Contracts is { Count: > 0 } contracts
-                ? contracts
-                    .Select(c => c with
-                    {
-                        Requires = c.Requires
-                            .Select(p => p with
-                            {
-                                Path          = En(p.Path),
-                                Source        = En(p.Source),
-                                PatternSource = En(p.PatternSource),
-                            })
-                            .ToList(),
-                    })
-                    .ToList()
-                : config.Contracts,
-
-            Brownfield = config.Brownfield is { } bf
-                ? bf with
-                {
-                    DiscoveryBriefPath    = E(bf.DiscoveryBriefPath),
-                    ConventionProfilePath = E(bf.ConventionProfilePath),
-                }
-                : null,
-
-            Chatroom = config.Chatroom is { } ch
-                ? ch with { Path = E(ch.Path) }
-                : null,
-
-            ChangeTracking = config.ChangeTracking is { } ct
-                ? ct with { Path = E(ct.Path), IntentLogPath = E(ct.ResolveIntentLogPath()) }
-                : null,
-
-            Events = config.Events is { } ev
-                ? ev with { Path = E(ev.Path) }
-                : null,
-
-            EvidenceStore = config.EvidenceStore is { } es
-                ? es with { Path = E(es.Path) }
-                : null,
-        };
+        return (orchestrator, repoMemoryExtractor);
     }
 
     private static AgentSkillsProvider? BuildSkillsProvider()
@@ -2303,33 +1535,4 @@ public static class OrchestratorBuilder
         return string.IsNullOrWhiteSpace(stderr) ? stdout : $"{stdout}\nstderr: {stderr}";
     }
 
-    /// <summary>
-    /// Resolves <paramref name="path"/> relative to <paramref name="sandboxRoot"/> unless it is
-    /// already absolute. Expands <c>~</c> home-directory tokens before the rooted check.
-    /// Used to normalise validation and change-tracking paths against a configured sandbox root.
-    /// </summary>
-    private static string ResolveSandboxPath(string path, string sandboxRoot) =>
-        Path.IsPathRooted(ProcessHelper.ExpandHome(path))
-            ? path
-            : Path.GetFullPath(ProcessHelper.ExpandHome(path), sandboxRoot);
-
-    // Known config schema versions. Any version not in this set triggers a warning.
-    private static readonly IReadOnlySet<string> KnownSchemaVersions =
-        new HashSet<string>(StringComparer.Ordinal) { "2026-05" };
-
-    private static void ValidateSchemaVersion(OrchestrationConfig config, ILoggerFactory loggerFactory)
-    {
-        if (config.SchemaVersion is null) return;
-
-        var logger = loggerFactory.CreateLogger(nameof(OrchestratorBuilder));
-        if (!KnownSchemaVersions.Contains(config.SchemaVersion))
-            logger.LogWarning(
-                "Config declares schema_version '{SchemaVersion}' which is not recognized by this build of fuseraft-cli. " +
-                "Some fields may be silently ignored or default incorrectly. " +
-                "Known versions: {KnownVersions}",
-                config.SchemaVersion,
-                string.Join(", ", KnownSchemaVersions));
-        else
-            logger.LogDebug("Config schema_version '{SchemaVersion}' is valid.", config.SchemaVersion);
-    }
 }

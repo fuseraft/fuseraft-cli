@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using fuseraft.Core;
 using fuseraft.Core.Models;
+using fuseraft.Infrastructure.Storage;
 using Microsoft.Extensions.Logging;
 
 namespace fuseraft.Orchestration.Knowledge;
@@ -25,7 +26,7 @@ namespace fuseraft.Orchestration.Knowledge;
 public sealed class IntentLog
 {
     private string _logPath;
-    private readonly SemaphoreSlim _fileLock = new(1, 1);
+    private JsonFileStore<IntentStore> _store;
     private readonly ILogger<IntentLog>? _logger;
     private string? _sessionId;
 
@@ -40,12 +41,14 @@ public sealed class IntentLog
     {
         _logPath = logPath;
         _logger  = logger;
+        _store   = new JsonFileStore<IntentStore>(_logPath, JsonOpts, _logger, nameof(IntentLog));
     }
 
     public void SetSessionId(string sessionId)
     {
         _sessionId = sessionId;
         _logPath   = FuseraftPaths.ExpandSessionId(_logPath, sessionId);
+        _store     = new JsonFileStore<IntentStore>(_logPath, JsonOpts, _logger, nameof(IntentLog));
     }
 
     /// <summary>
@@ -90,23 +93,20 @@ public sealed class IntentLog
     /// Updates the status of an existing intent entry to <c>APPLIED</c> or <c>FAILED</c>.
     /// No-ops gracefully when the intent ID is not found (e.g. log was reset).
     /// </summary>
-    public async Task UpdateStatusAsync(
+    public Task UpdateStatusAsync(
         string intentId,
         IntentStatus status,
         string? errorMessage = null,
-        CancellationToken ct = default)
-    {
-        await _fileLock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        CancellationToken ct = default) =>
+        _store.WithLockAsync(store =>
         {
-            var store = await LoadAsync(ct);
             var entry = store.Entries.Find(e => e.IntentId == intentId);
             if (entry is null)
             {
                 _logger?.LogWarning(
                     "IntentLog: intent '{IntentId}' not found — status update to {Status} skipped (log may have been reset).",
                     intentId, status);
-                return;
+                return Task.FromResult((store, false));
             }
 
             _logger?.LogDebug(
@@ -117,75 +117,37 @@ public sealed class IntentLog
             entry.ErrorMessage = errorMessage;
             entry.CompletedAt  = DateTime.UtcNow;
 
-            await SaveAsync(store, ct);
-        }
-        finally { _fileLock.Release(); }
-    }
+            return Task.FromResult((store, true));
+        }, ct);
 
     /// <summary>
     /// Returns all intents whose <c>TurnIndex</c> falls within [firstTurn, lastTurn].
     /// </summary>
-    public async Task<IReadOnlyList<IntentEntry>> GetIntentsForRangeAsync(
+    public Task<IReadOnlyList<IntentEntry>> GetIntentsForRangeAsync(
         int firstTurn,
         int lastTurn,
-        CancellationToken ct = default)
-    {
-        var store = await LoadReadOnlyAsync(ct);
-        return store.Entries
+        CancellationToken ct = default) =>
+        _store.ReadAsync<IReadOnlyList<IntentEntry>>(store => store.Entries
             .Where(e => e.TurnIndex >= firstTurn && e.TurnIndex <= lastTurn)
             .OrderBy(e => e.Timestamp)
-            .ToList();
-    }
+            .ToList(), ct);
 
     /// <summary>Returns all intents in the log, ordered by timestamp.</summary>
-    public async Task<IReadOnlyList<IntentEntry>> GetAllIntentsAsync(CancellationToken ct = default)
-    {
-        var store = await LoadReadOnlyAsync(ct);
-        return [.. store.Entries.OrderBy(e => e.Timestamp)];
-    }
+    public Task<IReadOnlyList<IntentEntry>> GetAllIntentsAsync(CancellationToken ct = default) =>
+        _store.ReadAsync<IReadOnlyList<IntentEntry>>(store => [.. store.Entries.OrderBy(e => e.Timestamp)], ct);
 
     // Internals
 
-    private async Task AppendEntryAsync(IntentEntry entry, CancellationToken ct)
-    {
-        await _fileLock.WaitAsync(ct).ConfigureAwait(false);
-        try
+    private Task AppendEntryAsync(IntentEntry entry, CancellationToken ct) =>
+        _store.WithLockAsync(store =>
         {
-            var store = await LoadAsync(ct);
+            // Stamp ActiveSessionId on first write to a brand-new log — JsonFileStore's
+            // reset-to-empty path can't know _sessionId, so it's set here instead.
+            if (store.ActiveSessionId is null)
+                store = store with { ActiveSessionId = _sessionId };
             store.Entries.Add(entry);
-            await SaveAsync(store, ct);
-        }
-        finally { _fileLock.Release(); }
-    }
-
-    private async Task<IntentStore> LoadAsync(CancellationToken ct)
-    {
-        if (!File.Exists(_logPath)) return new IntentStore { ActiveSessionId = _sessionId };
-        try
-        {
-            var raw = await File.ReadAllTextAsync(_logPath, ct);
-            return JsonSerializer.Deserialize<IntentStore>(raw, JsonOpts) ?? new IntentStore();
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "IntentLog: failed to load '{Path}' — intent history reset.", _logPath);
-            return new IntentStore();
-        }
-    }
-
-    private async Task<IntentStore> LoadReadOnlyAsync(CancellationToken ct)
-    {
-        await _fileLock.WaitAsync(ct).ConfigureAwait(false);
-        try { return await LoadAsync(ct); }
-        finally { _fileLock.Release(); }
-    }
-
-    private async Task SaveAsync(IntentStore store, CancellationToken ct)
-    {
-        var dir = Path.GetDirectoryName(Path.GetFullPath(_logPath));
-        if (dir is not null) Directory.CreateDirectory(dir);
-        await File.WriteAllTextAsync(_logPath, JsonSerializer.Serialize(store, JsonOpts), ct);
-    }
+            return Task.FromResult((store, true));
+        }, ct);
 
     private static Dictionary<string, string?> BuildArgsSummary(IReadOnlyDictionary<string, object?>? args)
     {

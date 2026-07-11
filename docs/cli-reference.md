@@ -1060,6 +1060,12 @@ fuseraft init [output] [options]
 | `-m, --model <id>` | auto-detected | Model ID to use for all agents. Auto-detected from your API keys if omitted. |
 | `-e, --endpoint <url>` | `~/.fuseraft/config` | Provider API endpoint URL. Defaults to the endpoint saved in `~/.fuseraft/config` if present. At run time, agents without an explicit `Endpoint` also inherit this value automatically. |
 | `--no-interactive` | off | Skip all prompts and generate with the supplied options and defaults. |
+| `--no-boilerplate` | off | Skip `architecture.yaml` and `knowledge/lifecycle.yaml` — for small or single-purpose projects that won't use `fuseraft arch check` or `fuseraft knowledge gc`. |
+| `-f, --force` | off | Overwrite the config and all agent files without prompting, even if they already exist. |
+
+**Overwrite behavior**
+
+Before writing anything, `init` checks whether the config file or any of its agent files (`agents/*.yaml`) already exist. If any do, it lists every conflicting path and asks for confirmation — declining, or passing `--no-interactive` without `--force`, aborts with no files written. Pass `--force` to skip the check and overwrite everything unconditionally, including any hand-edited agent files.
 
 **Templates**
 
@@ -1136,6 +1142,9 @@ fuseraft init .fuseraft/config/magentic-team.yaml --template magentic --model gp
 
 # CI / scripted usage
 fuseraft init .fuseraft/config/ci-team.yaml --template swe --model gpt-4o --no-interactive
+
+# Regenerate an existing config and agent files without prompting
+fuseraft init --template swe --model claude-sonnet-4-6 --no-interactive --force
 ```
 
 After generating, `init` prints the next steps:
@@ -1382,7 +1391,7 @@ fuseraft knowledge gc [options]
 
 **`.fuseraftignore` integration**
 
-When `.fuseraft/.fuseraftignore` is present and `--apply` is set, `fuseraft knowledge gc` also deletes ephemeral state files listed in the ignore file (e.g. `knowledge_findings.json` under `~/.fuseraft/state/{project_slug}/`). Files produced by gc itself — such as `provenance.archive.json` — are never deleted.
+When `.fuseraft/.fuseraftignore` is present and `--apply` is set, `fuseraft knowledge gc` also deletes ephemeral state and log files listed in the ignore file (e.g. `knowledge_findings.json` under `~/.fuseraft/state/{project_slug}/`, and `app.log`/`repl_events.jsonl` under `~/.fuseraft/logs/{project_slug}/`). Files produced by gc itself — such as `provenance.archive.json` — are never deleted.
 
 **Policy fields** (in `lifecycle.yaml`)
 

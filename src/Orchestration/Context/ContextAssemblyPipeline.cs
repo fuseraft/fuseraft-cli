@@ -163,12 +163,21 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
             if      (m.Role == ChatRole.User)      historyUserCount++;
             else if (m.Role == ChatRole.Assistant) historyAssistantCount++;
             else if (m.Role == ChatRole.Tool)      historyToolCount++;
-            // Compaction summaries are user-role messages injected by ContextRebuilder.
-            // The IsCompactionSummary flag lives only on AgentMessage and is lost when
-            // replayed into the shared ChatMessage history — detect by the content prefix.
+            // Compaction summaries are user-role messages injected by ConversationCompactor /
+            // ContextRebuilder. The IsCompactionSummary flag lives only on AgentMessage and is
+            // lost when replayed into the shared ChatMessage history — detect by a marker that
+            // is actually present in every summary format (unlike "RESUMPTION NOTE:", which is
+            // an optional trailing footer, not a prefix, and never appears at all for Magentic
+            // sessions or "intent" mode — this check could never fire). The CONVERSATION SUMMARY
+            // header can itself be preceded by a prefix block (reasoning/symbol/objective/brief/
+            // exploration), so these are substring checks, not StartsWith.
             if (!historyHasCompaction
                 && m.Role == ChatRole.User
-                && m.Text?.StartsWith("RESUMPTION NOTE:", StringComparison.Ordinal) == true)
+                && m.Text is { } text
+                && (text.Contains("[CONVERSATION SUMMARY", StringComparison.Ordinal)
+                    || text.Contains("[INTENT-DERIVED RECONSTRUCTION", StringComparison.Ordinal)
+                    || text.Contains("[COMPACTION FAILED", StringComparison.Ordinal)
+                    || text.Contains("[CONTEXT RECONSTRUCTION", StringComparison.Ordinal)))
                 historyHasCompaction = true;
         }
 

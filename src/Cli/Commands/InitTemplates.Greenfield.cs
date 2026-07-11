@@ -40,6 +40,10 @@ public static partial class InitTemplates
                 Rust:   Cargo.toml
                 .NET:   global.json  (also call list_files(".", "*.csproj") — any hit = .NET)
                 Go:     go.mod
+              Also call get_file_info for manifest.yaml — a generic, language-agnostic
+              manifest (fields: name, language, entry, dependencies) some tasks use
+              instead of a language-specific toolchain file. If present, read_file it
+              and use its `language` field as the detected type.
               Record every type whose file is present. If none match, type = "unknown".
 
               STEP 3 — VERIFY RUNTIME(S)
@@ -86,10 +90,12 @@ public static partial class InitTemplates
             Plugins:
               - FileSystem
               - Shell
+              - Git
               - Preflight
               - Handoff
             Capabilities:
               FileSystem: [read]
+              Git: [read]
             FunctionChoice: required
             SkipExecutionState: true
             ContextWindow:
@@ -199,12 +205,15 @@ public static partial class InitTemplates
               STEP 5 — GREENFIELD SELF-CRITIQUE
               Run every check below. Fix any failures before calling handoff.
 
-              a. MANIFEST: does files_to_change include the project manifest?
-                 Python → pyproject.toml or setup.py or requirements.txt
-                 Node   → package.json
-                 Rust   → Cargo.toml
-                 .NET   → *.csproj or global.json
-                 Go     → go.mod
+              a. MANIFEST: does files_to_change include a project manifest?
+                 Python  → pyproject.toml or setup.py or requirements.txt
+                 Node    → package.json
+                 Rust    → Cargo.toml
+                 .NET    → *.csproj or global.json
+                 Go      → go.mod
+                 Generic → manifest.yaml (name/language/entry/dependencies) is also
+                           acceptable when the task calls for a minimal manifest
+                           instead of a full language toolchain file.
                  Add the manifest if absent — without it the runtime cannot install
                  dependencies and the Tester will fail on import errors.
 

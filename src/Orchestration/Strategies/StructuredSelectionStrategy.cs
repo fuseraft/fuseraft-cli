@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 using fuseraft.Orchestration;
+using fuseraft.Orchestration.Failure;
 
 namespace fuseraft.Orchestration.Strategies;
 
@@ -22,9 +23,12 @@ namespace fuseraft.Orchestration.Strategies;
 /// <para>
 /// When the response cannot be parsed as JSON, or when no condition matches, the
 /// strategy re-invokes the last active agent with a correction message instructing it
-/// to return a JSON object with the expected fields.  After
-/// <see cref="MaxParseRetries"/> consecutive failures a
-/// <see cref="ValidatorStuckException"/> is thrown and the session stops.
+/// to return a JSON object with the expected fields. The failure is classified via
+/// <see cref="FailureClassifier"/> and handled through the same <see cref="FailureHandlingConfig"/>
+/// pipeline every other selection strategy uses — after the classified failure type's
+/// configured <see cref="FailureTypeConfig.Threshold"/> consecutive failures, or immediately
+/// for <see cref="FailureAction.EscalateToHuman"/>, a <see cref="ValidatorStuckException"/> is
+/// thrown and the session stops.
 /// </para>
 /// </summary>
 public sealed class StructuredSelectionStrategy : IAgentSelector
@@ -32,9 +36,9 @@ public sealed class StructuredSelectionStrategy : IAgentSelector
     private readonly IReadOnlyList<RouteEntry> _routes;
     private readonly string _defaultAgentName;
     private readonly ILogger<StructuredSelectionStrategy> _logger;
+    private readonly FailureHandlingConfig _failureHandling;
     private IList<ChatMessage>? _history;
 
-    private const int MaxParseRetries = 3;
     private (string? AgentName, int Count)? _parseFailure;
 
     /// <summary>A resolved route entry bundling runtime values.</summary>
@@ -46,13 +50,15 @@ public sealed class StructuredSelectionStrategy : IAgentSelector
     public StructuredSelectionStrategy(
         IReadOnlyList<RouteEntry> routes,
         string defaultAgentName,
-        ILogger<StructuredSelectionStrategy>? logger = null)
+        ILogger<StructuredSelectionStrategy>? logger = null,
+        FailureHandlingConfig? failureHandling = null)
     {
         _routes           = routes;
         _defaultAgentName = defaultAgentName;
         _logger           = logger
             ?? Microsoft.Extensions.Logging.Abstractions
                         .NullLogger<StructuredSelectionStrategy>.Instance;
+        _failureHandling  = failureHandling ?? new FailureHandlingConfig();
     }
 
     /// <summary>
@@ -97,7 +103,7 @@ public sealed class StructuredSelectionStrategy : IAgentSelector
         {
             _logger.LogDebug("[Structured] Response from '{Author}' is not valid JSON — injecting correction",
                 lastAuthor ?? "(unknown)");
-            return Task.FromResult(HandleParseFailure(agents, lastAuthor, isParseFail: true));
+            return Task.FromResult(HandleParseFailure(agents, history, lastAuthor, isParseFail: true));
         }
 
         using (doc)
@@ -152,13 +158,14 @@ public sealed class StructuredSelectionStrategy : IAgentSelector
         // No condition matched.
         _logger.LogDebug("[Structured] No condition matched for response from '{Author}' — injecting correction",
             lastAuthor ?? "(unknown)");
-        return Task.FromResult(HandleParseFailure(agents, lastAuthor, isParseFail: false));
+        return Task.FromResult(HandleParseFailure(agents, history, lastAuthor, isParseFail: false));
     }
 
     // Helpers
 
     private AIAgent? HandleParseFailure(
         IReadOnlyList<AIAgent> agents,
+        IList<ChatMessage> history,
         string? lastAuthor,
         bool isParseFail)
     {
@@ -168,16 +175,52 @@ public sealed class StructuredSelectionStrategy : IAgentSelector
             : 1;
         _parseFailure = (agentKey, newCount);
 
-        if (newCount >= MaxParseRetries)
+        var errorMessage = isParseFail
+            ? "Agent did not return valid JSON."
+            : "Agent returned JSON but no route condition matched.";
+
+        // Detect whether the agent made any tool calls since the last correction — same
+        // heuristic KeywordSelectionStrategy uses: scan back to the last user-role boundary.
+        bool agentMadeToolCalls = true; // first failure — no prior injection to anchor the check
+        if (newCount > 1)
+        {
+            agentMadeToolCalls = false;
+            for (int j = history.Count - 1; j >= 0; j--)
+            {
+                if (history[j].Role == ChatRole.User) break;
+                if (history[j].Role == ChatRole.Tool) { agentMadeToolCalls = true; break; }
+            }
+        }
+
+        var failureType = FailureClassifier.Classify(errorMessage, agentMadeToolCalls, isFirstFailure: newCount == 1);
+        var typeConfig   = _failureHandling.GetConfig(failureType);
+
+        _logger.LogDebug(
+            "[Structured] Failure classified as {FailureType} (consecutive={Count}) → action={Action} threshold={Threshold}",
+            failureType, newCount, typeConfig.Action, typeConfig.Threshold);
+
+        if (typeConfig.Action == FailureAction.EscalateToHuman)
         {
             _parseFailure = null;
             throw new Core.Exceptions.ValidatorStuckException(
                 agentName:           agentKey,
                 validatorName:       ValidatorNames.StructuredRouting,
                 consecutiveFailures: newCount,
-                lastValidatorError:  isParseFail
-                    ? "Agent did not return valid JSON."
-                    : "Agent returned JSON but no route condition matched.");
+                lastValidatorError:  errorMessage);
+        }
+
+        // Reinstruct and Abort both escalate once the type's Threshold is reached.
+        // ActivateRecovery has no equivalent here (RouteEntry has no RecoveryAgent field,
+        // unlike KeywordSelectionStrategy's routes) so it falls back to the same
+        // threshold-based escalation rather than being silently ignored.
+        if (newCount >= typeConfig.Threshold)
+        {
+            _parseFailure = null;
+            throw new Core.Exceptions.ValidatorStuckException(
+                agentName:           agentKey,
+                validatorName:       ValidatorNames.StructuredRouting,
+                consecutiveFailures: newCount,
+                lastValidatorError:  errorMessage);
         }
 
         if (_history is not null)
@@ -188,12 +231,12 @@ public sealed class StructuredSelectionStrategy : IAgentSelector
                 .ToList();
 
             string correction = isParseFail
-                ? $"STRUCTURED ROUTING ERROR ({newCount}/{MaxParseRetries}): " +
+                ? $"STRUCTURED ROUTING ERROR ({newCount}/{typeConfig.Threshold}): " +
                   $"Your last response was not a valid JSON object. " +
                   $"Your entire response must be a single JSON object. " +
                   $"Required field(s): {string.Join(", ", expectedFields)}. " +
                   $"Example: {{{string.Join(", ", expectedFields.Select(f => $"{f}: \"<value>\""))}}}"
-                : $"STRUCTURED ROUTING ERROR ({newCount}/{MaxParseRetries}): " +
+                : $"STRUCTURED ROUTING ERROR ({newCount}/{typeConfig.Threshold}): " +
                   $"Your JSON response did not match any configured route. " +
                   $"Required field(s): {string.Join(", ", expectedFields)}. " +
                   $"Check the allowed values for those field(s) and return a corrected JSON object.";

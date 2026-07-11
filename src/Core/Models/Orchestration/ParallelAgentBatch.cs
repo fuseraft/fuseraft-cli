@@ -1,7 +1,6 @@
 using Microsoft.Agents.AI;
-using fuseraft.Core.Models;
 
-namespace fuseraft.Orchestration.Parallel;
+namespace fuseraft.Core.Models.Orchestration;
 
 /// <summary>
 /// Describes a parallel fan-out: the agents to run concurrently, how to merge
