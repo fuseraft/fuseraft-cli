@@ -52,30 +52,11 @@ internal sealed class AgentMiddlewareBuilder(
             .Use(
                 getResponseFunc: async (messages, options, inner, ct) =>
                 {
-                    // Drop write_file/patch_file pairs superseded by a later write_file to
-                    // the same path — the earlier write is never observable and is pure noise.
-                    messages = AgentContextCompactionFilters.DropSupersededWritePairs(messages);
-
-                    // Drop observational calls (read_file, grep_file, list_*, get_file_info, etc.)
-                    // that are superseded by a later identical call — only the freshest result matters.
-                    messages = AgentContextCompactionFilters.DropSupersededObservationalPairs(messages);
-
-                    // Compress shell_run results that are superseded by a later run of the same
-                    // command to a single-line outcome. Keeps the call visible (showing the
-                    // attempt sequence) while eliminating the verbose output from earlier runs.
-                    messages = AgentContextCompactionFilters.CompressSupersededShellPairs(messages);
-
-                    // Strip verbose reasoning text from ALL intermediate tool-calling assistant
-                    // messages before the window filter — reasoning from prior calls in the
-                    // same turn is never needed again and is the primary cause of the O(N²)
-                    // token growth seen with grok-build and other reasoning-heavy models.
-                    messages = AgentContextCompactionFilters.TruncateIntermediateAssistantReasoning(messages);
-
-                    if (maxInTurnToolPairs > 0)
-                        messages = await AgentContextCompactionFilters.KeepLastToolPairs(messages, maxInTurnToolPairs, ct);
-
-                    if (maxInTurnChars > 0)
-                        messages = AgentContextCompactionFilters.TrimInTurnContext(messages, maxInTurnChars);
+                    // Drop superseded writes/reads/shells, truncate intermediate reasoning, then
+                    // cap the sliding tool-pair window and char budget — see
+                    // AgentContextCompactionFilters.ApplyInTurnFilters for the full rationale.
+                    messages = await AgentContextCompactionFilters.ApplyInTurnFilters(
+                        messages, maxInTurnToolPairs, maxInTurnChars, ct);
 
                     // Stop the FunctionInvokingChatClient loop immediately after handoff —
                     // no follow-up LLM call is made, so the agent cannot call more tools.
@@ -195,16 +176,8 @@ internal sealed class AgentMiddlewareBuilder(
             IChatClient inner,
             [EnumeratorCancellation] CancellationToken ct)
         {
-            messages = AgentContextCompactionFilters.DropSupersededWritePairs(messages);
-            messages = AgentContextCompactionFilters.DropSupersededObservationalPairs(messages);
-            messages = AgentContextCompactionFilters.CompressSupersededShellPairs(messages);
-            messages = AgentContextCompactionFilters.TruncateIntermediateAssistantReasoning(messages);
-
-            if (maxInTurnToolPairs > 0)
-                messages = await AgentContextCompactionFilters.KeepLastToolPairs(messages, maxInTurnToolPairs, ct);
-
-            if (maxInTurnChars > 0)
-                messages = AgentContextCompactionFilters.TrimInTurnContext(messages, maxInTurnChars);
+            messages = await AgentContextCompactionFilters.ApplyInTurnFilters(
+                messages, maxInTurnToolPairs, maxInTurnChars, ct);
             if (hasHandoff && HandoffWasInvoked(messages))
                 yield break;
 
