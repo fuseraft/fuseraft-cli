@@ -97,7 +97,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
         OrchestrationConfig config;
         try
         {
-            config = OrchestratorBuilder.LoadConfig(settings.Path);
+            config = OrchestratorConfigLoader.LoadConfig(settings.Path);
         }
         catch (Exception ex)
         {
@@ -535,7 +535,10 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
         var agentNames = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        // Node IDs must be unique and reference valid agents.
+        // Node IDs must be unique and reference valid agents. Mirrors
+        // OrchestratorBuilder.ValidateAndSelectStrategy's per-node checks, including the
+        // SubGraphId branch — without it, a valid sub-graph node (Agent left empty,
+        // SubGraphId set) was reported as a false "Agent is required" error.
         var nodeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < graph.Nodes.Count; i++)
         {
@@ -547,10 +550,62 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
             else if (!nodeIds.Add(node.Id))
                 issues.Add(("error", $"{prefix}: Duplicate node Id '{node.Id}'."));
 
-            if (string.IsNullOrWhiteSpace(node.Agent))
-                issues.Add(("error", $"{prefix} (id='{node.Id}'): Agent is required."));
-            else if (!agentNames.Contains(node.Agent))
-                issues.Add(("error", $"{prefix} (id='{node.Id}'): Agent '{node.Agent}' is not defined in Agents."));
+            bool isSubGraphNode = !string.IsNullOrWhiteSpace(node.SubGraphId);
+
+            if (isSubGraphNode)
+            {
+                if (!string.IsNullOrWhiteSpace(node.Agent))
+                {
+                    issues.Add(("error", $"{prefix} (id='{node.Id}'): has both 'Agent' and 'SubGraphId' set. " +
+                        "Use one or the other — leave 'Agent' empty when using 'SubGraphId'."));
+                }
+
+                if (graph.SubGraphs is null || !graph.SubGraphs.TryGetValue(node.SubGraphId!, out var subSpec))
+                {
+                    issues.Add(("error", $"{prefix} (id='{node.Id}'): references SubGraphId '{node.SubGraphId}' " +
+                        "which is not defined in 'Selection.Graph.SubGraphs'."));
+                }
+                else if (!subSpec.IsValid)
+                {
+                    issues.Add(("error", $"SubGraph '{node.SubGraphId}' must set exactly one of 'Graph', 'MapReduce', or 'ScatterGather'."));
+                }
+                else if (subSpec.IsMapReduce)
+                {
+                    var mr = subSpec.MapReduce!;
+                    if (string.IsNullOrWhiteSpace(mr.Splitter) || !agentNames.Contains(mr.Splitter))
+                        issues.Add(("error", $"SubGraph '{node.SubGraphId}' MapReduce.Splitter '{mr.Splitter}' is not defined in Agents."));
+                    if (string.IsNullOrWhiteSpace(mr.Mapper) || !agentNames.Contains(mr.Mapper))
+                        issues.Add(("error", $"SubGraph '{node.SubGraphId}' MapReduce.Mapper '{mr.Mapper}' is not defined in Agents."));
+                    if (string.IsNullOrWhiteSpace(mr.Reducer) || !agentNames.Contains(mr.Reducer))
+                        issues.Add(("error", $"SubGraph '{node.SubGraphId}' MapReduce.Reducer '{mr.Reducer}' is not defined in Agents."));
+                    if (mr.MaxConcurrency < 0)
+                        issues.Add(("error", $"SubGraph '{node.SubGraphId}' MapReduce.MaxConcurrency must be >= 0 (got {mr.MaxConcurrency})."));
+                    if (mr.MaxSplitterRetries < 1)
+                        issues.Add(("error", $"SubGraph '{node.SubGraphId}' MapReduce.MaxSplitterRetries must be at least 1 (got {mr.MaxSplitterRetries})."));
+                    if (string.IsNullOrWhiteSpace(mr.ItemsJsonPath))
+                        issues.Add(("error", $"SubGraph '{node.SubGraphId}' MapReduce.ItemsJsonPath must be a non-empty string."));
+                }
+                else if (subSpec.IsScatterGather)
+                {
+                    var sg = subSpec.ScatterGather!;
+                    if (sg.Participants.Count == 0)
+                        issues.Add(("error", $"SubGraph '{node.SubGraphId}' ScatterGather.Participants must contain at least one agent name."));
+                    foreach (var p in sg.Participants)
+                        if (string.IsNullOrWhiteSpace(p) || !agentNames.Contains(p))
+                            issues.Add(("error", $"SubGraph '{node.SubGraphId}' ScatterGather.Participants contains '{p}' which is not defined in Agents."));
+                    if (string.IsNullOrWhiteSpace(sg.Synthesizer) || !agentNames.Contains(sg.Synthesizer))
+                        issues.Add(("error", $"SubGraph '{node.SubGraphId}' ScatterGather.Synthesizer '{sg.Synthesizer}' is not defined in Agents."));
+                    if (sg.MaxConcurrency < 0)
+                        issues.Add(("error", $"SubGraph '{node.SubGraphId}' ScatterGather.MaxConcurrency must be >= 0 (got {sg.MaxConcurrency})."));
+                }
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(node.Agent))
+                    issues.Add(("error", $"{prefix} (id='{node.Id}'): Agent is required."));
+                else if (!agentNames.Contains(node.Agent))
+                    issues.Add(("error", $"{prefix} (id='{node.Id}'): Agent '{node.Agent}' is not defined in Agents."));
+            }
         }
 
         // EntryNode must resolve to a declared node.
@@ -1084,7 +1139,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
         var cwd        = Directory.GetCurrentDirectory();
         var slug       = fuseraft.Core.FuseraftPaths.ProjectSlug(cwd);
         var sessionId  = sessionIdOverride ?? "{session_id}";
-        var expanded   = OrchestratorBuilder.InterpolateSessionId(raw, sessionId, slug);
+        var expanded   = OrchestratorConfigLoader.InterpolateSessionId(raw, sessionId, slug);
 
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine($"[bold]Interpolated paths[/]  [dim]project_slug={Markup.Escape(slug)}  session_id={Markup.Escape(sessionId)}[/]");

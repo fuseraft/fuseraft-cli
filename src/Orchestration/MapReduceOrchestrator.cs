@@ -9,6 +9,8 @@ using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 
+using fuseraft.Orchestration.Parallel;
+
 // Disambiguate from Microsoft.Agents.AI.AgentFactory
 using fuseraft.Infrastructure;
 using AgentFactory = fuseraft.Infrastructure.Agents.AgentFactory;
@@ -44,13 +46,16 @@ public sealed class MapReduceOrchestrator(
     ChangeTracker? changeTracker = null,
     EventEmitter? eventEmitter = null,
     GovernanceKernel? governanceKernel = null,
-    IHumanApprovalService? humanApprovalService = null) : IOrchestrator
+    IHumanApprovalService? humanApprovalService = null,
+    IContextAssemblyPipeline? contextPipeline = null,
+    RepositoryKnowledgeStore? repositoryKnowledgeStore = null) : IOrchestrator
 {
     private readonly MapReduceConfig _mrConfig =
         config.Selection.MapReduce ?? new MapReduceConfig();
     private readonly IHumanApprovalService? _humanApprovalService = humanApprovalService;
 
     private string _sessionId = string.Empty;
+    private string _task = string.Empty;
 
     // IOrchestrator events
 
@@ -62,6 +67,7 @@ public sealed class MapReduceOrchestrator(
     {
         _sessionId = sessionId;
         agentFactory.SetSessionId(sessionId);
+        contextPipeline?.SetSessionId(sessionId);
     }
 
     public async Task<OrchestrationResult> RunAsync(
@@ -130,6 +136,8 @@ public sealed class MapReduceOrchestrator(
         IReadOnlyList<AgentMessage>? priorHistory = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        _task = task;
+
         // Build all agents once.
         var agents = config.Agents
             .Select(a => agentFactory.Create(a, onToolCalling: (agent, tool, args) => ToolCalling?.Invoke(agent, tool, args)))
@@ -138,6 +146,8 @@ public sealed class MapReduceOrchestrator(
         var agentInstructions = config.Agents
             .Where(a => !string.IsNullOrWhiteSpace(a.Instructions))
             .ToDictionary(a => a.Name, a => a.Instructions, StringComparer.OrdinalIgnoreCase);
+
+        var agentConfigs = config.Agents.ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
 
         if (!agents.TryGetValue(_mrConfig.Splitter, out var splitter))
             throw new InvalidOperationException(
@@ -193,7 +203,9 @@ public sealed class MapReduceOrchestrator(
             agentFactory.OnAgentTurnStarting();
             changeTracker?.BeginTurn(splitter.Name ?? _mrConfig.Splitter, turn);
 
-            var splitContext = BuildContext(splitterInstr, history);
+            var splitContext = await AssembleContextAsync(
+                splitter.Name ?? _mrConfig.Splitter, splitterInstr, history,
+                agentConfigs.GetValueOrDefault(_mrConfig.Splitter), turn, cancellationToken);
             var splitResponse = await InvokeAgentAsync(splitter, splitContext, cancellationToken);
             splitterOutput = splitResponse.Text ?? string.Empty;
 
@@ -211,6 +223,7 @@ public sealed class MapReduceOrchestrator(
                 throw new BudgetExceededException(cumulativeTokens, cap);
 
             await FlushChangeTrackerAsync(splitMsg);
+            await PersistObservationsAsync(splitResponse, splitter.Name ?? _mrConfig.Splitter, splitMsg.TurnIndex);
 
             history.Add(new ChatMessage(ChatRole.Assistant, splitterOutput)
                 { AuthorName = splitter.Name ?? _mrConfig.Splitter });
@@ -295,7 +308,9 @@ public sealed class MapReduceOrchestrator(
                             $"Process item {index + 1} of {items.Count}:\n\n{item}")
                     };
 
-                    var mapContext  = BuildContext(mapperInstr, mapHistory);
+                    var mapContext = await AssembleContextAsync(
+                        mapper.Name ?? _mrConfig.Mapper, mapperInstr, mapHistory,
+                        agentConfigs.GetValueOrDefault(_mrConfig.Mapper), baseTurn + index, cancellationToken);
                     var mapResponse = await InvokeAgentAsync(mapper, mapContext, cancellationToken);
                     var mapText     = mapResponse.Text ?? string.Empty;
 
@@ -304,6 +319,8 @@ public sealed class MapReduceOrchestrator(
                         mapText, baseTurn + index,
                         OrchestratorHelpers.ExtractUsage(mapResponse),
                         OrchestratorHelpers.ExtractToolCalls(mapResponse.Messages));
+
+                    await PersistObservationsAsync(mapResponse, mapper.Name ?? _mrConfig.Mapper, mapMsg.TurnIndex);
 
                     if (eventEmitter is not null)
                         _ = eventEmitter.EmitAsync(EventTypes.ParallelBranchEnd,
@@ -361,7 +378,9 @@ public sealed class MapReduceOrchestrator(
         agentFactory.OnAgentTurnStarting();
         changeTracker?.BeginTurn(reducer.Name ?? _mrConfig.Reducer, turn);
 
-        var reduceContext  = BuildContext(reducerInstr, history);
+        var reduceContext = await AssembleContextAsync(
+            reducer.Name ?? _mrConfig.Reducer, reducerInstr, history,
+            agentConfigs.GetValueOrDefault(_mrConfig.Reducer), turn, cancellationToken);
         var reduceResponse = await InvokeAgentAsync(reducer, reduceContext, cancellationToken);
         var reduceText     = reduceResponse.Text ?? string.Empty;
 
@@ -379,6 +398,7 @@ public sealed class MapReduceOrchestrator(
             throw new BudgetExceededException(cumulativeTokens, cap3);
 
         await FlushChangeTrackerAsync(reduceMsg);
+        await PersistObservationsAsync(reduceResponse, reducer.Name ?? _mrConfig.Reducer, reduceMsg.TurnIndex);
 
         if (eventEmitter is not null)
             await eventEmitter.EmitAsync(EventTypes.PhaseEnd, payload: new { phase = 3 });
@@ -392,59 +412,31 @@ public sealed class MapReduceOrchestrator(
     // Helpers
     // -------------------------------------------------------------------------
 
-    private static IEnumerable<ChatMessage> BuildContext(string? instructions, IList<ChatMessage> history)
-    {
-        return !string.IsNullOrWhiteSpace(instructions)
-            ? (IEnumerable<ChatMessage>)[new ChatMessage(ChatRole.System, instructions), .. history]
-            : history;
-    }
+    // Shared with ScatterGatherOrchestrator (and, except context assembly, AdversarialOrchestrator)
+    // via FanOutHelpers — see that class's doc comment for what's shared and why.
+    private Task<IEnumerable<ChatMessage>> AssembleContextAsync(
+        string agentName, string? instructions, IReadOnlyList<ChatMessage> history,
+        AgentConfig? agentCfg, int turn, CancellationToken ct) =>
+        FanOutHelpers.AssembleContextAsync(
+            contextPipeline, eventEmitter, agentName, _task, instructions, history, agentCfg, _sessionId, turn, ct);
 
-    private async Task<AgentResponse> InvokeAgentAsync(
-        AIAgent agent,
-        IEnumerable<ChatMessage> context,
-        CancellationToken ct)
-    {
-        return governanceKernel?.CircuitBreaker is { } cb
-            ? await cb.ExecuteAsync(() => agent.RunAsync(context, null, null, ct)).ConfigureAwait(false)
-            : await agent.RunAsync(context, null, null, ct).ConfigureAwait(false);
-    }
+    private Task PersistObservationsAsync(AgentResponse response, string agentName, int turn) =>
+        FanOutHelpers.PersistObservationsAsync(repositoryKnowledgeStore, _sessionId, response, agentName, turn);
+
+    private Task<AgentResponse> InvokeAgentAsync(AIAgent agent, IEnumerable<ChatMessage> context, CancellationToken ct) =>
+        FanOutHelpers.InvokeAgentAsync(agent, context, governanceKernel, ct);
 
     private static AgentMessage MakeMessage(
         string agentName, string content, int turn,
         TokenUsage? usage, IReadOnlyList<ToolCallRecord>? toolCalls) =>
-        new()
-        {
-            AgentName = agentName,
-            Content   = content,
-            Role      = "assistant",
-            TurnIndex = turn,
-            Usage     = usage,
-            ToolCalls = toolCalls,
-        };
+        FanOutHelpers.MakeMessage(agentName, content, turn, usage, toolCalls);
 
-    private void FireTokenBudgetWarning(AgentMessage msg)
-    {
-        var threshold = config.WarnTurnTokens;
-        if (threshold > 0 && msg.Usage?.InputTokens is { } input && input > threshold)
-            TokenBudgetWarning?.Invoke(msg.AgentName ?? string.Empty, input, threshold);
-    }
+    private void FireTokenBudgetWarning(AgentMessage msg) =>
+        FanOutHelpers.FireTokenBudgetWarning(
+            msg, config.WarnTurnTokens, (a, i, t) => TokenBudgetWarning?.Invoke(a, i, t));
 
-    private async Task FlushChangeTrackerAsync(AgentMessage msg)
-    {
-        if (changeTracker is null) return;
-        try
-        {
-            await changeTracker.FlushTurnAsync(
-                msg.AgentName ?? string.Empty, msg.TurnIndex, CancellationToken.None)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "[MapReduceOrchestrator] ChangeTracker flush failed for turn {Turn} ({Agent}).",
-                msg.TurnIndex, msg.AgentName);
-        }
-    }
+    private Task FlushChangeTrackerAsync(AgentMessage msg) =>
+        FanOutHelpers.FlushChangeTrackerAsync(msg, changeTracker, logger, nameof(MapReduceOrchestrator));
 
     /// <summary>
     /// Searches <paramref name="text"/> for a JSON object containing the array at

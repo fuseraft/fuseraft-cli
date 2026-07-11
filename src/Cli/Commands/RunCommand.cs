@@ -189,10 +189,11 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             return 1;
         }
 
-        var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, _, sessionMetrics) = built;
+        var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, _, sessionMetrics) = built;
 
         await using var _mcp = mcpManager;
         using var _governance = governanceKernel;
+        using var _chatClientFactory = chatClientFactory;
 
         // Build a fast agent→modelId lookup for telemetry tagging.
         var modelIdByAgent = config.Agents
@@ -228,7 +229,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         // Validate API keys early so a bad/missing key surfaces before the session starts.
         try
         {
-            await OrchestratorBuilder.ValidateApiKeysAsync(config);
+            await ApiKeyValidator.ValidateApiKeysAsync(config);
         }
         catch (Exception ex)
         {
@@ -434,10 +435,36 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             checkpoint.StructuredTask ?? TaskModel.FromGoal(task));
 
         // Compact before the stream starts if the existing history is already over the threshold.
-        // This covers the resume case where a prior session accumulated too many turns.
+        // This covers the resume case where a prior session accumulated too many turns. Routed
+        // through the same CompactionCoordinator.TryTriggerCompactionAsync path SessionRunner
+        // uses mid-loop, so a resumed session gets the same TryPinLastRoutingSignal / state
+        // snapshot / CompactionResumeCandidate-event protections as one compacted mid-loop,
+        // rather than a stripped-down duplicate of that logic.
         if (compactor?.ShouldCompact(checkpoint.Messages) == true)
         {
-            checkpoint = await ApplyCompactionAsync(task, checkpoint, compactor, activeStore, orchestrator);
+            var preLoopBudgetManager = new ContextBudgetManager(contextBudget: null, contextWindowRecorder: ctxRecorder, eventEmitter: eventEmitter);
+            var preLoopCoordinator = new CompactionCoordinator(
+                orchestrator, compactor, activeStore, eventEmitter, sessionMetrics, ctxRecorder,
+                sessionId =>
+                {
+                    if (!string.IsNullOrEmpty(configPath))
+                    {
+                        var rel = Path.GetRelativePath(Directory.GetCurrentDirectory(), configPath);
+                        return $"fuseraft run --config {rel} --resume {sessionId}";
+                    }
+                    return $"fuseraft run --resume {sessionId}";
+                });
+
+            var totalAssistantTurnsSoFar = checkpoint.Messages.Count(m => m.Role == MessageRole.Assistant);
+            var (updatedCheckpoint, shouldBreak, _, _) = await preLoopCoordinator.TryTriggerCompactionAsync(
+                task, checkpoint, totalAssistantTurnsSoFar, preLoopBudgetManager, cancellationToken);
+            checkpoint = updatedCheckpoint;
+
+            // TryTriggerCompactionAsync already prints its own cancellation/failure message
+            // (including the resume hint) before returning shouldBreak — nothing more to log here.
+            if (shouldBreak)
+                return 1;
+
             AnsiConsole.MarkupLine("[dim]History compacted before resuming.[/]");
         }
 
@@ -689,7 +716,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         CheckpointConfig? checkpointConfig = null;
         if (File.Exists(configPath))
         {
-            try { checkpointConfig = OrchestratorBuilder.LoadConfig(configPath).Checkpoint; }
+            try { checkpointConfig = OrchestratorConfigLoader.LoadConfig(configPath).Checkpoint; }
             catch (Exception ex) { loggerFactory.CreateLogger<RunCommand>().LogWarning(ex, "[BuildActiveStore] {Message}", ex.Message); }
         }
 
@@ -750,47 +777,6 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             return null;
         }
 
-        return checkpoint;
-    }
-
-    private static async Task<SessionCheckpoint> ApplyCompactionAsync(
-        string task,
-        SessionCheckpoint checkpoint,
-        ConversationCompactor compactor,
-        ISessionStore store,
-        IOrchestrator? orchestrator = null,
-        CancellationToken cancellationToken = default)
-    {
-        // Only set ResumeExecutorId for non-Magentic orchestrators. MagenticOrchestrator
-        // ignores it (SetResumeExecutorId is a no-op), and the last assistant message in a
-        // Magentic session is typically a manager tag like "[MagenticManager:Final]", which
-        // would write a misleading value into the persisted checkpoint.
-        if (orchestrator is not MagenticOrchestrator)
-        {
-            checkpoint.ResumeExecutorId = checkpoint.Messages
-                .LastOrDefault(m => m.Role == MessageRole.Assistant && !string.IsNullOrWhiteSpace(m.AgentName))
-                ?.AgentName
-                ?.ToLowerInvariant();
-        }
-
-        if (compactor.IsWindowMode)
-        {
-            var trimmed = compactor.TrimToWindow(checkpoint.Messages);
-            checkpoint.Messages.Clear();
-            checkpoint.Messages.AddRange(trimmed);
-            checkpoint.LastUpdatedAt = DateTime.UtcNow;
-            await store.SaveAsync(checkpoint, cancellationToken);
-            return checkpoint;
-        }
-
-        var (summary, retained) = await compactor.CompactAsync(task, checkpoint.Messages, cancellationToken);
-
-        checkpoint.Messages.Clear();
-        checkpoint.Messages.Add(summary);
-        checkpoint.Messages.AddRange(retained);
-        checkpoint.LastUpdatedAt = DateTime.UtcNow;
-
-        await store.SaveAsync(checkpoint, cancellationToken);
         return checkpoint;
     }
 
@@ -934,7 +920,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         {
             try
             {
-                var sandboxPath = OrchestratorBuilder.LoadConfig(absoluteConfigPath).Security?.FileSystemSandboxPath;
+                var sandboxPath = OrchestratorConfigLoader.LoadConfig(absoluteConfigPath).Security?.FileSystemSandboxPath;
                 if (!string.IsNullOrWhiteSpace(sandboxPath))
                     return FuseraftPaths.ExpandPath(sandboxPath);
             }

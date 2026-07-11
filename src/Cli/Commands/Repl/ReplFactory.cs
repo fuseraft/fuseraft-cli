@@ -41,11 +41,8 @@ internal static class ReplFactory
                 .Use(
                     getResponseFunc: async (messages, options, inner, ct) =>
                     {
-                        messages = AgentFactory.DropSupersededWritePairs(messages);
-                        messages = AgentFactory.DropSupersededObservationalPairs(messages);
-                        messages = AgentFactory.CompressSupersededShellPairs(messages);
-                        messages = AgentFactory.TruncateIntermediateAssistantReasoning(messages);
-                        messages = await AgentFactory.KeepLastToolPairs(messages, InTurnToolPairLimit, ct);
+                        messages = await AgentContextCompactionFilters.ApplyInTurnFilters(
+                            messages, InTurnToolPairLimit, maxInTurnChars: 0, ct);
                         return await inner.GetResponseAsync(messages, options, ct);
                     },
                     getStreamingResponseFunc: (messages, options, inner, ct) =>
@@ -61,11 +58,8 @@ internal static class ReplFactory
             IChatClient inner,
             [EnumeratorCancellation] CancellationToken ct)
         {
-            messages = AgentFactory.DropSupersededWritePairs(messages);
-            messages = AgentFactory.DropSupersededObservationalPairs(messages);
-            messages = AgentFactory.CompressSupersededShellPairs(messages);
-            messages = AgentFactory.TruncateIntermediateAssistantReasoning(messages);
-            messages = await AgentFactory.KeepLastToolPairs(messages, InTurnToolPairLimit, ct);
+            messages = await AgentContextCompactionFilters.ApplyInTurnFilters(
+                messages, InTurnToolPairLimit, maxInTurnChars: 0, ct);
             await foreach (var update in inner.GetStreamingResponseAsync(messages, options, ct))
                 yield return update;
         }

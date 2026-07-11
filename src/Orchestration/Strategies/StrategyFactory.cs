@@ -50,7 +50,7 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
             OrchestratorTypes.RoundRobin  => new RoundRobinAgentSelector(),
             OrchestratorTypes.Llm         => CreateLLMSelection(config, agents),
             OrchestratorTypes.Keyword     => CreateKeywordSelection(config, agents, validationConfig, failureHandling, contracts),
-            OrchestratorTypes.Structured  => CreateStructuredSelection(config, agents),
+            OrchestratorTypes.Structured  => CreateStructuredSelection(config, agents, failureHandling),
             OrchestratorTypes.StateMachine => CreateStateMachineSelection(config, validationConfig, failureHandling, contracts, verifier),
             OrchestratorTypes.Magentic    => throw new InvalidOperationException(
                 "The 'magentic' selection type is handled by MagenticOrchestrator and should " +
@@ -162,7 +162,8 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
 
     private StructuredSelectionStrategy CreateStructuredSelection(
         SelectionStrategyConfig config,
-        IReadOnlyList<AIAgent> agents)
+        IReadOnlyList<AIAgent> agents,
+        FailureHandlingConfig? failureHandling)
     {
         if (config.StructuredRoutes is not { Count: > 0 })
             throw new InvalidOperationException(
@@ -179,7 +180,7 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
             ?? (agents.Count > 0 ? agents[0].Name! : throw new InvalidOperationException("No agents defined."));
 
         var strategyLogger = loggerFactory?.CreateLogger<StructuredSelectionStrategy>();
-        return new StructuredSelectionStrategy(routes, defaultAgent, strategyLogger);
+        return new StructuredSelectionStrategy(routes, defaultAgent, strategyLogger, failureHandling);
     }
 
     private StateMachineSelectionStrategy CreateStateMachineSelection(

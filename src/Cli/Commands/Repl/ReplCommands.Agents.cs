@@ -25,12 +25,12 @@ internal static partial class ReplCommands
         // Spinner pollutes the captured JSON-mode output — skip it entirely there.
         var spinCts  = ctx.JsonMode ? null : new CancellationTokenSource();
         var spinTask = spinCts is not null
-            ? ReplTurn.RunSpinnerAsync("diagnosing…", spinCts.Token)
+            ? ReplConsole.RunSpinnerAsync("diagnosing…", spinCts.Token)
             : Task.CompletedTask;
         try
         {
             var correction = await ctx.SubAgent.DiagnoseAsync(ctx.History, cancellationToken);
-            if (spinCts is not null) { spinCts.Cancel(); await spinTask; ReplTurn.ClearSpinnerLine(); }
+            if (spinCts is not null) { spinCts.Cancel(); await spinTask; ReplConsole.ClearSpinnerLine(); }
 
             if (correction is null)
             {
@@ -51,13 +51,13 @@ internal static partial class ReplCommands
         }
         catch (OperationCanceledException)
         {
-            if (spinCts is not null) { spinCts.Cancel(); await spinTask; ReplTurn.ClearSpinnerLine(); }
+            if (spinCts is not null) { spinCts.Cancel(); await spinTask; ReplConsole.ClearSpinnerLine(); }
             AnsiConsole.MarkupLine("[dim](cancelled)[/]");
             return CommandResult.Continue;
         }
         catch (Exception ex)
         {
-            if (spinCts is not null) { spinCts.Cancel(); await spinTask; ReplTurn.ClearSpinnerLine(); }
+            if (spinCts is not null) { spinCts.Cancel(); await spinTask; ReplConsole.ClearSpinnerLine(); }
             AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(ex.Message)}[/]");
             return CommandResult.Continue;
         }
@@ -83,7 +83,7 @@ internal static partial class ReplCommands
 
         var spinCts       = ctx.JsonMode ? null : new CancellationTokenSource();
         var spinTask      = spinCts is not null
-            ? ReplTurn.RunSpinnerAsync("exploring…", spinCts.Token)
+            ? ReplConsole.RunSpinnerAsync("exploring…", spinCts.Token)
             : Task.CompletedTask;
         bool spinStopped  = false;
         bool headerPrinted = false;
@@ -94,7 +94,7 @@ internal static partial class ReplCommands
             spinStopped = true;
             spinCts.Cancel();
             await spinTask;
-            ReplTurn.ClearSpinnerLine();
+            ReplConsole.ClearSpinnerLine();
         }
 
         try
@@ -108,7 +108,7 @@ internal static partial class ReplCommands
                         await StopSpinner();
                         if (!ctx.JsonMode) AnsiConsole.MarkupLine("[dim]assistant:[/]");
                     }
-                    await ReplTurn.WriteChunkSmoothAsync(chunk, cancellationToken);
+                    await ReplConsole.WriteChunkSmoothAsync(chunk, cancellationToken);
                 },
                 cancellationToken: cancellationToken);
             ctx.CumulativeInputTokens  += inputTok  ?? 0;
@@ -154,7 +154,7 @@ internal static partial class ReplCommands
 
         var spinCts      = ctx.JsonMode ? null : new CancellationTokenSource();
         var spinTask     = spinCts is not null
-            ? ReplTurn.RunSpinnerAsync("locating…", spinCts.Token)
+            ? ReplConsole.RunSpinnerAsync("locating…", spinCts.Token)
             : Task.CompletedTask;
         bool spinStopped = false;
         bool gotOutput   = false;
@@ -165,7 +165,7 @@ internal static partial class ReplCommands
             spinStopped = true;
             spinCts.Cancel();
             await spinTask;
-            ReplTurn.ClearSpinnerLine();
+            ReplConsole.ClearSpinnerLine();
         }
 
         try
@@ -178,7 +178,7 @@ internal static partial class ReplCommands
                         gotOutput = true;
                         await StopSpinner();
                     }
-                    await ReplTurn.WriteChunkSmoothAsync(chunk, cancellationToken);
+                    await ReplConsole.WriteChunkSmoothAsync(chunk, cancellationToken);
                 },
                 cancellationToken: cancellationToken);
             ctx.CumulativeInputTokens  += inputTok  ?? 0;
