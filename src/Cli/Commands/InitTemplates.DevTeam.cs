@@ -33,6 +33,10 @@ public static partial class InitTemplates
                 Rust:   Cargo.toml
                 .NET:   global.json  (also call list_files(".", "*.csproj") — any hit = .NET)
                 Go:     go.mod
+              Also call get_file_info for manifest.yaml — a generic, language-agnostic
+              manifest (fields: name, language, entry, dependencies) some tasks use
+              instead of a language-specific toolchain file. If present, read_file it
+              and use its `language` field as the detected type.
               Record every type whose file is present. If none match, type = "unknown".
 
               STEP 3 — VERIFY RUNTIME(S)
@@ -86,10 +90,12 @@ public static partial class InitTemplates
             Plugins:
               - FileSystem
               - Shell
+              - Git
               - Preflight
               - Handoff
             Capabilities:
               FileSystem: [read]
+              Git: [read]
             FunctionChoice: required
             SkipExecutionState: true
             ContextWindow:
