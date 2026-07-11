@@ -1,7 +1,7 @@
 using System.Threading.Channels;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure.Plugins;
-using fuseraft.Orchestration;
+using fuseraft.Orchestration.Graph;
 using fuseraft.Orchestration.Workflow;
 using Microsoft.Extensions.AI;
 
@@ -11,8 +11,8 @@ namespace FuseraftCli.Tests;
 /// Unit tests for the parallel fan-out/fan-in additions:
 /// <see cref="AgentRouteTable.ParallelKeywords"/>,
 /// <see cref="KeywordDetector"/>, <see cref="CorrectionEngine"/>,
-/// <see cref="GraphOrchestrator.ForkContext"/>, and
-/// <see cref="GraphOrchestrator.MergeParallelContexts"/>.
+/// <see cref="ParallelFanOutExecutor.ForkContext"/>, and
+/// <see cref="ParallelFanOutExecutor.MergeParallelContexts"/>.
 /// </summary>
 public sealed class GraphOrchestratorParallelTests
 {
@@ -302,7 +302,7 @@ public sealed class GraphOrchestratorParallelTests
     }
 
     // -----------------------------------------------------------------------
-    // GraphOrchestrator.ForkContext — isolation and shared sink
+    // ParallelFanOutExecutor.ForkContext — isolation and shared sink
     // -----------------------------------------------------------------------
 
     [Fact]
@@ -312,7 +312,7 @@ public sealed class GraphOrchestratorParallelTests
         parent.History.Add(User("task"));
         parent.History.Add(Asst("response"));
 
-        var fork = GraphOrchestrator.ForkContext(parent);
+        var fork = ParallelFanOutExecutor.ForkContext(parent);
 
         Assert.Equal(2, fork.History.Count);
         Assert.Equal("task",     TextOf(fork.History[0]));
@@ -325,7 +325,7 @@ public sealed class GraphOrchestratorParallelTests
         var (_, parent) = MakeContext();
         parent.History.Add(User("task"));
 
-        var fork = GraphOrchestrator.ForkContext(parent);
+        var fork = ParallelFanOutExecutor.ForkContext(parent);
         fork.History.Add(Asst("fork-only"));
 
         Assert.Single(parent.History);
@@ -338,7 +338,7 @@ public sealed class GraphOrchestratorParallelTests
         var (_, parent) = MakeContext();
         parent.History.Add(User("task"));
 
-        var fork = GraphOrchestrator.ForkContext(parent);
+        var fork = ParallelFanOutExecutor.ForkContext(parent);
         parent.History.Add(User("added after fork"));
 
         Assert.Single(fork.History); // fork is unaffected
@@ -349,7 +349,7 @@ public sealed class GraphOrchestratorParallelTests
     {
         var (sink, parent) = MakeContext();
 
-        var fork = GraphOrchestrator.ForkContext(parent);
+        var fork = ParallelFanOutExecutor.ForkContext(parent);
 
         Assert.Same(sink, fork.MessageSink);
     }
@@ -359,7 +359,7 @@ public sealed class GraphOrchestratorParallelTests
     {
         var (_, parent) = MakeContext(turnIndex: 7, tokens: 1500);
 
-        var fork = GraphOrchestrator.ForkContext(parent);
+        var fork = ParallelFanOutExecutor.ForkContext(parent);
 
         Assert.Equal(7,    fork.TurnIndex);
         Assert.Equal(1500, fork.CumulativeTokens);
@@ -370,7 +370,7 @@ public sealed class GraphOrchestratorParallelTests
     {
         var (_, parent) = MakeContext();
 
-        var fork = GraphOrchestrator.ForkContext(parent);
+        var fork = ParallelFanOutExecutor.ForkContext(parent);
 
         Assert.Empty(fork.History);
     }
@@ -387,9 +387,9 @@ public sealed class GraphOrchestratorParallelTests
     {
         var (_, parent) = MakeContext(turnIndex: 5);
 
-        var branch0 = GraphOrchestrator.ForkContext(parent, branchIndex: 0);
-        var branch1 = GraphOrchestrator.ForkContext(parent, branchIndex: 1);
-        var branch2 = GraphOrchestrator.ForkContext(parent, branchIndex: 2);
+        var branch0 = ParallelFanOutExecutor.ForkContext(parent, branchIndex: 0);
+        var branch1 = ParallelFanOutExecutor.ForkContext(parent, branchIndex: 1);
+        var branch2 = ParallelFanOutExecutor.ForkContext(parent, branchIndex: 2);
 
         // Even before any turns are taken, each branch starts in a disjoint range.
         Assert.NotEqual(branch0.TurnIndex, branch1.TurnIndex);
@@ -404,11 +404,11 @@ public sealed class GraphOrchestratorParallelTests
 
         // Simulate two branches that each independently take exactly 2 turns — the exact
         // scenario that used to produce identical TurnIndex values in both branches.
-        var branchA = GraphOrchestrator.ForkContext(parent, branchIndex: 0);
+        var branchA = ParallelFanOutExecutor.ForkContext(parent, branchIndex: 0);
         var turnA1  = branchA.TurnIndex++;
         var turnA2  = branchA.TurnIndex++;
 
-        var branchB = GraphOrchestrator.ForkContext(parent, branchIndex: 1);
+        var branchB = ParallelFanOutExecutor.ForkContext(parent, branchIndex: 1);
         var turnB1  = branchB.TurnIndex++;
         var turnB2  = branchB.TurnIndex++;
 
@@ -416,7 +416,7 @@ public sealed class GraphOrchestratorParallelTests
         Assert.NotEqual(turnA1, turnB1);
         Assert.NotEqual(turnA2, turnB2);
 
-        GraphOrchestrator.MergeParallelContexts(parent, forkPoint: 0,
+        ParallelFanOutExecutor.MergeParallelContexts(parent, forkPoint: 0,
             [("a", "A", branchA, 0), ("b", "B", branchB, 1)]);
 
         // Both branches took exactly 2 turns — the parent should advance by 2 from its
@@ -425,7 +425,7 @@ public sealed class GraphOrchestratorParallelTests
     }
 
     // -----------------------------------------------------------------------
-    // GraphOrchestrator.MergeParallelContexts — history merging
+    // ParallelFanOutExecutor.MergeParallelContexts — history merging
     // -----------------------------------------------------------------------
 
     [Fact]
@@ -438,7 +438,7 @@ public sealed class GraphOrchestratorParallelTests
         var child = MakeForkedChild(parent, forkPoint);
         child.History.Add(Asst("worker output"));
 
-        GraphOrchestrator.MergeParallelContexts(parent, forkPoint,
+        ParallelFanOutExecutor.MergeParallelContexts(parent, forkPoint,
             [("worker_a", "WorkerA", child, 0)]);
 
         // parent: original task + header + worker output = 3
@@ -459,7 +459,7 @@ public sealed class GraphOrchestratorParallelTests
         var child_b = MakeForkedChild(parent, forkPoint);
         child_b.History.Add(Asst("output from B"));
 
-        GraphOrchestrator.MergeParallelContexts(parent, forkPoint,
+        ParallelFanOutExecutor.MergeParallelContexts(parent, forkPoint,
             [("n_a", "AgentA", child_a, 0), ("n_b", "AgentB", child_b, 0)]);
 
         // header_a + output_a + header_b + output_b = 4
@@ -481,7 +481,7 @@ public sealed class GraphOrchestratorParallelTests
         // child.History[0] is the pre-fork copy; add a post-fork message at index 1
         child.History.Add(Asst("post-fork output"));
 
-        GraphOrchestrator.MergeParallelContexts(parent, forkPoint,
+        ParallelFanOutExecutor.MergeParallelContexts(parent, forkPoint,
             [("n", "Agent", child, 0)]);
 
         // parent: pre-fork (1) + header (1) + post-fork output (1) = 3
@@ -501,7 +501,7 @@ public sealed class GraphOrchestratorParallelTests
         var child_b = MakeForkedChild(parent, forkPoint);
         child_b.TurnIndex = 6;
 
-        GraphOrchestrator.MergeParallelContexts(parent, forkPoint,
+        ParallelFanOutExecutor.MergeParallelContexts(parent, forkPoint,
             [("a", "A", child_a, 0), ("b", "B", child_b, 0)]);
 
         Assert.Equal(6, parent.TurnIndex);
@@ -516,7 +516,7 @@ public sealed class GraphOrchestratorParallelTests
         var child = MakeForkedChild(parent, forkPoint);
         child.TurnIndex = 3; // lower than parent
 
-        GraphOrchestrator.MergeParallelContexts(parent, forkPoint, [("n", "A", child, 0)]);
+        ParallelFanOutExecutor.MergeParallelContexts(parent, forkPoint, [("n", "A", child, 0)]);
 
         Assert.Equal(10, parent.TurnIndex);
     }
@@ -534,7 +534,7 @@ public sealed class GraphOrchestratorParallelTests
         var child_b = MakeForkedChild(parent, forkPoint);
         child_b.CumulativeTokens = 650; // delta = 150
 
-        GraphOrchestrator.MergeParallelContexts(parent, forkPoint,
+        ParallelFanOutExecutor.MergeParallelContexts(parent, forkPoint,
             [("a", "A", child_a, 0), ("b", "B", child_b, 0)]);
 
         // 500 + 300 + 150 = 950
@@ -552,7 +552,7 @@ public sealed class GraphOrchestratorParallelTests
         var child = MakeForkedChild(parent, forkPoint);
         child.CumulativeTokens = 100; // impossible delta = -400
 
-        GraphOrchestrator.MergeParallelContexts(parent, forkPoint, [("n", "A", child, 0)]);
+        ParallelFanOutExecutor.MergeParallelContexts(parent, forkPoint, [("n", "A", child, 0)]);
 
         // Math.Max(0, -400) = 0 → parent stays at 500
         Assert.Equal(500, parent.CumulativeTokens);
@@ -567,7 +567,7 @@ public sealed class GraphOrchestratorParallelTests
         // child has no messages at all (not even a pre-fork copy)
         var (_, child) = MakeContext();
 
-        GraphOrchestrator.MergeParallelContexts(parent, forkPoint, [("n", "AgentX", child, 0)]);
+        ParallelFanOutExecutor.MergeParallelContexts(parent, forkPoint, [("n", "AgentX", child, 0)]);
 
         // Only the header should be injected; no content messages.
         Assert.Single(parent.History);
@@ -582,7 +582,7 @@ public sealed class GraphOrchestratorParallelTests
 
         var (_, child) = MakeContext();
 
-        GraphOrchestrator.MergeParallelContexts(parent, forkPoint,
+        ParallelFanOutExecutor.MergeParallelContexts(parent, forkPoint,
             [("analyzer_a", "AnalyzerAgent", child, 0)]);
 
         var header = TextOf(parent.History[0]);
@@ -608,7 +608,7 @@ public sealed class GraphOrchestratorParallelTests
 
     /// <summary>
     /// Creates a child context that mirrors the parent's pre-fork state, replicating
-    /// exactly what <see cref="GraphOrchestrator.ForkContext"/> does.
+    /// exactly what <see cref="ParallelFanOutExecutor.ForkContext"/> does.
     /// </summary>
     private static AgentContext MakeForkedChild(AgentContext parent, int forkPoint)
     {
