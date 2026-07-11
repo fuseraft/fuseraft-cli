@@ -247,8 +247,17 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
         if (evalCase.MustSucceed && !result.Succeeded)
             failures.Add($"session did not succeed: {result.ErrorMessage ?? "unknown"}");
 
-        var finalContent = result.Messages
-            .LastOrDefault(m => m.Role == MessageRole.Assistant)?.Content ?? string.Empty;
+        var lastAssistant = result.Messages.LastOrDefault(m => m.Role == MessageRole.Assistant);
+        var finalContent  = lastAssistant?.Content ?? string.Empty;
+
+        // A turn that only calls handoff() with no accompanying prose leaves Content empty —
+        // the routing keyword lives in the tool-call argument instead. Fold it in so
+        // keyword/regex checks see the same signal RegexTerminationCondition already used
+        // to decide the session was done.
+        var handoffCall = lastAssistant?.ToolCalls?.LastOrDefault(tc =>
+            string.Equals(tc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase));
+        if (handoffCall?.ArgsSummary is { Length: > 0 } handoffArgs)
+            finalContent = $"{finalContent} {handoffArgs}".Trim();
 
         foreach (var kw in evalCase.ExpectKeywords)
             if (!finalContent.Contains(kw, StringComparison.OrdinalIgnoreCase))
