@@ -20,6 +20,18 @@ namespace fuseraft.Infrastructure.Agents;
 /// <summary>
 /// Assembles <see cref="AIAgent"/> instances from <see cref="AgentConfig"/>,
 /// injecting per-agent chat clients, tools, and optional middleware.
+///
+/// <para>
+/// <b>Collaborators</b> (all in <c>fuseraft.Infrastructure.Agents</c>): plugin/tool
+/// resolution is owned by <see cref="AgentToolResolver"/>. Chat-client middleware
+/// composition (context-trim, adaptive retry, budget/payload enforcement, governance
+/// wrapping) is owned by <see cref="AgentMiddlewareBuilder"/>, built on top of the always-on
+/// per-turn filter pipeline in <see cref="AgentContextCompactionFilters"/> (also
+/// independently consumed by <c>src/Cli/Commands/Repl/ReplFactory.cs</c>). This class
+/// retains the small per-session/telemetry surface
+/// (<see cref="SetSessionId"/>/<see cref="GetToolCount"/>/<see cref="OnAgentTurnStarting"/>/
+/// <see cref="GetDid"/>) and <see cref="Create"/>'s conductor body.
+/// </para>
 /// </summary>
 public sealed class AgentFactory(
     ChatClientFactory chatClientFactory,
