@@ -94,7 +94,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         [Description("1-based start line.")] int startLine = 1,
         [Description("Max lines to return.")] int maxLines = 0)
     {
-        var denial = ResolveSafe(path, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
         if (denial is not null) return denial;
 
         if (!File.Exists(resolved))
@@ -199,7 +199,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         bool isColdRead = maxLines <= 0 || maxLines > LargeFileColdReadLines;
         if (isColdRead && fileInfo.Length > LargeFileByteThreshold)
         {
-            var (coldLines, coldLineCount, coldSizeBytes) = await StreamPreviewLinesAsync(resolved, 30);
+            var (coldLines, coldLineCount, coldSizeBytes) = await FileSystemSandbox.StreamPreviewLinesAsync(resolved, 30);
             var preview = string.Join('\n', coldLines) +
                 $"\n\n[Large file — {coldLineCount:N0} lines ({coldSizeBytes:N0} bytes). " +
                 $"Cold-reading would flood your context. " +
@@ -296,7 +296,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         [Description("Max matches.")] int maxMatches = 30,
         CancellationToken cancellationToken = default)
     {
-        var denial = ResolveSafe(path, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
         if (denial is not null) return denial;
 
         if (!File.Exists(resolved))
@@ -390,7 +390,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (string.IsNullOrEmpty(oldText))
             return PluginResult.Error("oldText must not be empty.");
 
-        var denial = ResolveSafe(path, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
         if (denial is not null) return denial;
 
         if (!File.Exists(resolved))
@@ -461,7 +461,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         // Invalidate caches — content has changed.
         _readThisTurn.Remove(resolved);
         _sessionCache?.Invalidate(resolved);
-        var patchSp = SummaryPath(resolved);
+        var patchSp = FileSystemSandbox.SummaryPath(resolved, _summaryDir);
         if (File.Exists(patchSp)) File.Delete(patchSp);
 
         // Record that this path was patched so write_file can detect the pattern.
@@ -687,7 +687,7 @@ public sealed class FileSystemPlugin : ITurnResettable
                 "file path. Did you accidentally include file content in the path? " +
                 "Pass the file path as 'path' and the file text as 'content' separately.");
 
-        var denial = ResolveSafe(path, out var r);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var r);
         if (denial is not null) return denial;
         resolved = r;
 
@@ -898,7 +898,7 @@ public sealed class FileSystemPlugin : ITurnResettable
             newVersion = await _versionStore.BumpVersionAsync(resolved, hash);
         }
 
-        var writeSp = SummaryPath(resolved);
+        var writeSp = FileSystemSandbox.SummaryPath(resolved, _summaryDir);
         if (File.Exists(writeSp)) File.Delete(writeSp);
 
         var note = normalised
@@ -919,7 +919,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         [Description("Glob pattern, e.g. '*.cs'.")] string pattern = "*",
         [Description("Max results, clamped to 500. Raise it only if the default cuts off a search you know needs to see more.")] int maxResults = 100)
     {
-        var denial = ResolveSafe(directory, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(directory, _sandboxRoot, _exemptedPrefixes, out var resolved);
         if (denial is not null) return denial;
 
         if (!Directory.Exists(resolved))
@@ -958,21 +958,22 @@ public sealed class FileSystemPlugin : ITurnResettable
     [Description("Delete a file.")]
     public async Task<string> DeleteFileAsync([Description("File path.")] string path)
     {
-        var denial = ResolveSafe(path, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
         if (denial is not null) return denial;
 
         if (!File.Exists(resolved))
             return PluginResult.Info($"File does not exist: {resolved}");
 
         File.Delete(resolved);
-        await InvalidatePathAsync(resolved);
+        await FileSystemSandbox.InvalidatePathAsync(
+            resolved, _summaryDir, _readThisTurn, _writtenThisTurn, _patchedThisTurn, _sessionCache, _versionStore);
         return PluginResult.Ok($"Deleted: {resolved}");
     }
 
     [Description("Get file/directory metadata: size, timestamps, permissions, and (for files) the write-version counter. Cheaper than read_file when you only need to check existence or staleness. Version is NOT_TRACKED when the file exists but was never written through write_file.")]
     public async Task<string> GetFileInfoAsync([Description("File or directory path.")] string path)
     {
-        var denial = ResolveSafe(path, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
         if (denial is not null) return denial;
 
         var isFile = File.Exists(resolved);
@@ -1038,7 +1039,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (string.IsNullOrWhiteSpace(mode) || !System.Text.RegularExpressions.Regex.IsMatch(mode, @"^[0-7]{3,4}$"))
             return PluginResult.Error($"Invalid mode '{mode}'. Supply a 3- or 4-digit octal string such as '755' or '0644'.");
 
-        var denial = ResolveSafe(path, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
         if (denial is not null) return denial;
 
         if (!File.Exists(resolved) && !Directory.Exists(resolved))
@@ -1059,7 +1060,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     [Description("Create a directory (including parents).")]
     public string CreateDirectory([Description("Directory path.")] string path)
     {
-        var denial = ResolveSafe(path, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
         if (denial is not null) return denial;
 
         Directory.CreateDirectory(resolved);
@@ -1071,7 +1072,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         [Description("Directory path.")] string path,
         [Description("Delete non-empty directories recursively.")] bool recursive = false)
     {
-        var denial = ResolveSafe(path, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
         if (denial is not null) return denial;
 
         if (!Directory.Exists(resolved))
@@ -1094,7 +1095,8 @@ public sealed class FileSystemPlugin : ITurnResettable
         Directory.Delete(resolved, recursive);
 
         foreach (var file in files)
-            await InvalidatePathAsync(file);
+            await FileSystemSandbox.InvalidatePathAsync(
+                file, _summaryDir, _readThisTurn, _writtenThisTurn, _patchedThisTurn, _sessionCache, _versionStore);
 
         return PluginResult.Ok($"Deleted directory: {resolved}");
     }
@@ -1105,10 +1107,10 @@ public sealed class FileSystemPlugin : ITurnResettable
         [Description("Destination path.")] string destination,
         [Description("Overwrite if destination exists.")] bool overwrite = false)
     {
-        var srcDenial = ResolveSafe(source, out var resolvedSrc);
+        var srcDenial = FileSystemSandbox.ResolveSafe(source, _sandboxRoot, _exemptedPrefixes, out var resolvedSrc);
         if (srcDenial is not null) return srcDenial;
 
-        var dstDenial = ResolveSafe(destination, out var resolvedDst);
+        var dstDenial = FileSystemSandbox.ResolveSafe(destination, _sandboxRoot, _exemptedPrefixes, out var resolvedDst);
         if (dstDenial is not null) return dstDenial;
 
         if (!File.Exists(resolvedSrc))
@@ -1122,7 +1124,8 @@ public sealed class FileSystemPlugin : ITurnResettable
             Directory.CreateDirectory(dir);
 
         await Task.Run(() => File.Copy(resolvedSrc, resolvedDst, overwrite));
-        await InvalidatePathAsync(resolvedDst);
+        await FileSystemSandbox.InvalidatePathAsync(
+            resolvedDst, _summaryDir, _readThisTurn, _writtenThisTurn, _patchedThisTurn, _sessionCache, _versionStore);
         _sessionCache?.RecordWrite(resolvedDst, new FileInfo(resolvedDst));
         return PluginResult.Ok($"Copied '{resolvedSrc}' → '{resolvedDst}'");
     }
@@ -1133,10 +1136,10 @@ public sealed class FileSystemPlugin : ITurnResettable
         [Description("Destination path.")] string destination,
         [Description("Overwrite if destination file exists.")] bool overwrite = false)
     {
-        var srcDenial = ResolveSafe(source, out var resolvedSrc);
+        var srcDenial = FileSystemSandbox.ResolveSafe(source, _sandboxRoot, _exemptedPrefixes, out var resolvedSrc);
         if (srcDenial is not null) return srcDenial;
 
-        var dstDenial = ResolveSafe(destination, out var resolvedDst);
+        var dstDenial = FileSystemSandbox.ResolveSafe(destination, _sandboxRoot, _exemptedPrefixes, out var resolvedDst);
         if (dstDenial is not null) return dstDenial;
 
         if (Directory.Exists(resolvedSrc))
@@ -1150,9 +1153,11 @@ public sealed class FileSystemPlugin : ITurnResettable
             Directory.Move(resolvedSrc, resolvedDst);
             foreach (var srcFile in movedFiles)
             {
-                await InvalidatePathAsync(srcFile);
+                await FileSystemSandbox.InvalidatePathAsync(
+                    srcFile, _summaryDir, _readThisTurn, _writtenThisTurn, _patchedThisTurn, _sessionCache, _versionStore);
                 var dstFile = Path.Combine(resolvedDst, Path.GetRelativePath(resolvedSrc, srcFile));
-                await InvalidatePathAsync(dstFile);
+                await FileSystemSandbox.InvalidatePathAsync(
+                    dstFile, _summaryDir, _readThisTurn, _writtenThisTurn, _patchedThisTurn, _sessionCache, _versionStore);
             }
             return PluginResult.Ok($"Moved directory '{resolvedSrc}' → '{resolvedDst}'");
         }
@@ -1164,8 +1169,10 @@ public sealed class FileSystemPlugin : ITurnResettable
             var dstParent = Path.GetDirectoryName(resolvedDst);
             if (!string.IsNullOrEmpty(dstParent)) Directory.CreateDirectory(dstParent);
             File.Move(resolvedSrc, resolvedDst, overwrite);
-            await InvalidatePathAsync(resolvedSrc);
-            await InvalidatePathAsync(resolvedDst);
+            await FileSystemSandbox.InvalidatePathAsync(
+                resolvedSrc, _summaryDir, _readThisTurn, _writtenThisTurn, _patchedThisTurn, _sessionCache, _versionStore);
+            await FileSystemSandbox.InvalidatePathAsync(
+                resolvedDst, _summaryDir, _readThisTurn, _writtenThisTurn, _patchedThisTurn, _sessionCache, _versionStore);
             return PluginResult.Ok($"Moved '{resolvedSrc}' → '{resolvedDst}'");
         }
 
@@ -1176,14 +1183,14 @@ public sealed class FileSystemPlugin : ITurnResettable
     public async Task<string> GetFileSummaryAsync(
         [Description("File path.")] string path)
     {
-        var denial = ResolveSafe(path, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
         if (denial is not null) return denial;
 
         if (!File.Exists(resolved))
             return PluginResult.Error($"File not found: {resolved}");
 
         // Check for a cached summary.
-        var summaryPath = SummaryPath(resolved);
+        var summaryPath = FileSystemSandbox.SummaryPath(resolved, _summaryDir);
         if (File.Exists(summaryPath))
         {
             var cached = await File.ReadAllTextAsync(summaryPath);
@@ -1197,7 +1204,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         string trailer;
         if (fileInfo.Length > LargeFileByteThreshold)
         {
-            var (previewLines, totalLines, sizeBytes) = await StreamPreviewLinesAsync(resolved, 30);
+            var (previewLines, totalLines, sizeBytes) = await FileSystemSandbox.StreamPreviewLinesAsync(resolved, 30);
             preview = string.Join('\n', previewLines);
             trailer = totalLines > 30
                 ? $"\n\n[Auto-preview: showing first 30 of {totalLines:N0} lines ({sizeBytes:N0} bytes). " +
@@ -1229,11 +1236,11 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (string.IsNullOrWhiteSpace(summary))
             return PluginResult.Error("summary must not be empty.");
 
-        var denial = ResolveSafe(path, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
         if (denial is not null) return denial;
 
         Directory.CreateDirectory(_summaryDir);
-        var summaryPath = SummaryPath(resolved);
+        var summaryPath = FileSystemSandbox.SummaryPath(resolved, _summaryDir);
         await File.WriteAllTextAsync(summaryPath, summary.Trim());
 
         return PluginResult.Ok($"Summary saved for '{resolved}' → {summaryPath}");
@@ -1244,7 +1251,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         [Description("Directory path.")] string directory,
         [Description("Glob pattern, e.g. '*.cs'.")] string pattern = "*")
     {
-        var denial = ResolveSafe(directory, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(directory, _sandboxRoot, _exemptedPrefixes, out var resolved);
         if (denial is not null) return denial;
 
         if (!Directory.Exists(resolved))
@@ -1281,77 +1288,4 @@ public sealed class FileSystemPlugin : ITurnResettable
         return result;
     }
 
-    // Streams the first `previewCount` lines without allocating the full file into a string
-    // array. Returns the preview lines, total line count, and file size in bytes.
-    private static async Task<(List<string> Lines, int TotalLines, long SizeBytes)>
-        StreamPreviewLinesAsync(string path, int previewCount)
-    {
-        var preview   = new List<string>(previewCount);
-        int lineCount = 0;
-        using var sr  = new StreamReader(path);
-        string? ln;
-        while ((ln = await sr.ReadLineAsync()) is not null)
-        {
-            lineCount++;
-            if (preview.Count < previewCount) preview.Add(ln);
-        }
-        return (preview, lineCount, new FileInfo(path).Length);
-    }
-
-    // Removes a path from every per-turn set, the session cache, the version store, and the
-    // summary cache. Call this on deletion, on the source side of a move, and on the
-    // destination side of a copy/move to clear stale state before priming fresh state.
-    private async Task InvalidatePathAsync(string resolved)
-    {
-        _readThisTurn.Remove(resolved);
-        _writtenThisTurn.Remove(resolved);
-        _patchedThisTurn.Remove(resolved);
-        _sessionCache?.Invalidate(resolved);
-        if (_versionStore is not null)
-            await _versionStore.RemoveAsync(resolved);
-        var sp = SummaryPath(resolved);
-        if (File.Exists(sp)) File.Delete(sp);
-    }
-
-    private string SummaryPath(string resolvedFilePath)
-    {
-        // Derive a stable filename from the resolved path so the same file always maps to
-        // the same summary regardless of how the agent specified it (relative vs absolute).
-        var hash = System.Security.Cryptography.SHA256.HashData(
-            System.Text.Encoding.UTF8.GetBytes(resolvedFilePath));
-        var hex  = Convert.ToHexString(hash)[..16].ToLowerInvariant();
-        return Path.Combine(_summaryDir, $"{hex}.md");
-    }
-
-    // Resolves 'path' to its canonical absolute form and checks it against the sandbox.
-    // Returns a [DENIED] error string when the path escapes the sandbox, null when safe.
-    private string? ResolveSafe(string path, out string resolved)
-    {
-        var expandedPath = ProcessHelper.ExpandHome(path);
-        resolved = _sandboxRoot is not null && !Path.IsPathRooted(expandedPath)
-            ? Path.GetFullPath(expandedPath, _sandboxRoot)
-            : Path.GetFullPath(expandedPath);
-
-        if (_sandboxRoot is null)
-            return null;
-
-        // Append the OS separator so that "/sandbox" is not treated as a prefix of "/sandboxExtra".
-        var sandboxPrefix = _sandboxRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        var resolvedCheck = resolved.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-
-        if (!resolvedCheck.StartsWith(sandboxPrefix, comparison))
-        {
-            // Allow paths explicitly exempted from the sandbox (e.g. fuseraft's own runtime state dir).
-            if (_exemptedPrefixes.Any(ep => resolvedCheck.StartsWith(ep, comparison)))
-                return null;
-
-            return PluginResult.Denied($"Path '{resolved}' is outside the configured sandbox '{_sandboxRoot}'.");
-        }
-
-        return null;
-    }
 }
