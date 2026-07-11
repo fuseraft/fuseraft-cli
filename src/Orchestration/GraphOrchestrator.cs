@@ -780,89 +780,11 @@ public sealed class GraphOrchestrator(
 
             if (!hasKeywordRoutes)
             {
-                if (_topology.UnconditionalForwardRoutes.TryGetValue(nodeId, out var autoFwdRoute))
-                {
-                    var (autoOk, autoErr, autoValidator) = await TurnExecutionHelpers.RunValidatorsAsync(
-                        autoFwdRoute.Validators, ctx.History, ct).ConfigureAwait(false);
-
-                    if (autoOk)
-                    {
-                        if (autoFwdRoute.Validators.Count > 0)
-                            governanceKernel?.SloEngine.Get("policy-compliance")?.Record(1.0);
-
-                        consecutiveFails = 0;
-                        ctx.LastKeyword  = null;
-
-                        if (eventEmitter is not null)
-                            await eventEmitter.EmitAsync(EventTypes.AgentRouted,
-                                agent:   agentName,
-                                turn:    agentMsg!.TurnIndex,
-                                payload: new { keyword = "(unconditional)", to = autoFwdRoute.NextExecutorName });
-
-                        RecordNodeState(ctx, autoFwdRoute.NextExecutorName);
-
-                        ctx.History.Add(new ChatMessage(ChatRole.User,
-                            $"[fuseraft: {agentName} → {autoFwdRoute.NextExecutorName}]"));
-
-                        await wfCtx.SendMessageAsync(ctx, autoFwdRoute.NextExecutorId, ct).ConfigureAwait(false);
-                        return;
-                    }
-
-                    consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-                    TurnExecutionHelpers.RecordGovernanceViolation(agentName, autoValidator!, consecutiveFails, maxRetries, _sessionId, _services);
-
-                    if (consecutiveFails >= maxRetries)
-                        throw new ValidatorStuckException(agentName, autoValidator!, consecutiveFails, autoErr!);
-
-                    await TurnExecutionHelpers.EmitAndInjectValidationFailureAsync(
-                        agentName, "(unconditional)", autoValidator!, autoErr!, responseText, consecutiveFails, maxRetries, ctx, ct, _services);
-                    continue;
-                }
-
-                if (_topology.UnconditionalBackEdges.TryGetValue(nodeId, out var autoBackDest))
-                {
-                    if (_topology.UnconditionalBackEdgeValidators.TryGetValue(nodeId, out var uncBackValidators)
-                        && uncBackValidators.Count > 0)
-                    {
-                        var (ubOk, ubErr, ubValidator) = await TurnExecutionHelpers.RunValidatorsAsync(
-                            uncBackValidators, ctx.History, ct).ConfigureAwait(false);
-
-                        if (!ubOk)
-                        {
-                            consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-                            TurnExecutionHelpers.RecordGovernanceViolation(agentName, ubValidator!, consecutiveFails, maxRetries, _sessionId, _services);
-
-                            if (consecutiveFails >= maxRetries)
-                                throw new ValidatorStuckException(agentName, ubValidator!, consecutiveFails, ubErr!);
-
-                            await TurnExecutionHelpers.EmitAndInjectValidationFailureAsync(
-                                agentName, "(unconditional-back)", ubValidator!, ubErr!, responseText, consecutiveFails, maxRetries, ctx, ct, _services);
-                            continue;
-                        }
-                    }
-
-                    consecutiveFails = 0;
-                    // Use a synthetic keyword so the outer phase loop can look up the destination.
-                    ctx.LastKeyword  = $"__UNCOND_BACK:{nodeId.ToLowerInvariant()}";
-
-                    RecordNodeState(ctx, autoBackDest ?? agentName);
-
-                    if (eventEmitter is not null)
-                        await eventEmitter.EmitAsync(EventTypes.StateAdvanced,
-                            agent: agentName,
-                            turn:  agentMsg!.TurnIndex,
-                            payload: new { version = ctx.CurrentState.Version, phase_break = "(unconditional)", next = autoBackDest ?? "(terminal)" });
-
-                    await wfCtx.YieldOutputAsync(ctx, ct).ConfigureAwait(false);
-                    return;
-                }
-
-                // Node has no keyword edges and no unconditional route wired — config gap.
-                // Log and fall through to the correction path so HITL escalation fires normally.
-                logger.LogError(
-                    "[GraphOrchestrator] Node '{NodeId}' (agent '{Agent}') has no keyword edges " +
-                    "and no unconditional route — it can never route. Check the graph config.",
-                    nodeId, agentName);
+                var (uncHandled, uncShouldReturn, uncFails) = await HandleUnconditionalRoutingAsync(
+                    nodeId, agentName, responseText, consecutiveFails, maxRetries, ctx, agentMsg!, wfCtx, ct);
+                consecutiveFails = uncFails;
+                if (uncShouldReturn) return;
+                if (uncHandled) continue;
             }
 
             // Keyword detection
@@ -1207,6 +1129,117 @@ public sealed class GraphOrchestrator(
 
         await wfCtx.YieldOutputAsync(ctx, ct).ConfigureAwait(false);
         return (true, true, consecutiveFails);
+    }
+
+    /// <summary>
+    /// Unconditional (no-keyword) routing for nodes whose only outgoing edge(s) carry no
+    /// keyword — routes automatically without requiring the agent to emit a handoff keyword.
+    /// Checks a forward route first, then a back-edge; logs a config-gap error and falls
+    /// through (<c>Handled=false</c>) when the node has neither wired.
+    /// </summary>
+    /// <returns>
+    /// A tuple of (handled, shouldReturn, consecutiveFails).
+    /// <c>handled=false</c> means no unconditional route is wired for this node — the caller
+    /// must fall through to keyword detection. <c>handled=true, shouldReturn=true</c> means
+    /// the route fired and the caller must <c>return</c>. <c>handled=true, shouldReturn=false</c>
+    /// means validation failed and the caller must <c>continue</c>.
+    /// </returns>
+    private async Task<(bool Handled, bool ShouldReturn, int ConsecutiveFails)> HandleUnconditionalRoutingAsync(
+        string nodeId,
+        string agentName,
+        string responseText,
+        int consecutiveFails,
+        int maxRetries,
+        AgentContext ctx,
+        AgentMessage agentMsg,
+        IWorkflowContext wfCtx,
+        CancellationToken ct)
+    {
+        if (_topology.UnconditionalForwardRoutes.TryGetValue(nodeId, out var autoFwdRoute))
+        {
+            var (autoOk, autoErr, autoValidator) = await TurnExecutionHelpers.RunValidatorsAsync(
+                autoFwdRoute.Validators, ctx.History, ct).ConfigureAwait(false);
+
+            if (autoOk)
+            {
+                if (autoFwdRoute.Validators.Count > 0)
+                    governanceKernel?.SloEngine.Get("policy-compliance")?.Record(1.0);
+
+                consecutiveFails = 0;
+                ctx.LastKeyword  = null;
+
+                if (eventEmitter is not null)
+                    await eventEmitter.EmitAsync(EventTypes.AgentRouted,
+                        agent:   agentName,
+                        turn:    agentMsg.TurnIndex,
+                        payload: new { keyword = "(unconditional)", to = autoFwdRoute.NextExecutorName });
+
+                RecordNodeState(ctx, autoFwdRoute.NextExecutorName);
+
+                ctx.History.Add(new ChatMessage(ChatRole.User,
+                    $"[fuseraft: {agentName} → {autoFwdRoute.NextExecutorName}]"));
+
+                await wfCtx.SendMessageAsync(ctx, autoFwdRoute.NextExecutorId, ct).ConfigureAwait(false);
+                return (true, true, consecutiveFails);
+            }
+
+            consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
+            TurnExecutionHelpers.RecordGovernanceViolation(agentName, autoValidator!, consecutiveFails, maxRetries, _sessionId, _services);
+
+            if (consecutiveFails >= maxRetries)
+                throw new ValidatorStuckException(agentName, autoValidator!, consecutiveFails, autoErr!);
+
+            await TurnExecutionHelpers.EmitAndInjectValidationFailureAsync(
+                agentName, "(unconditional)", autoValidator!, autoErr!, responseText, consecutiveFails, maxRetries, ctx, ct, _services);
+            return (true, false, consecutiveFails);
+        }
+
+        if (_topology.UnconditionalBackEdges.TryGetValue(nodeId, out var autoBackDest))
+        {
+            if (_topology.UnconditionalBackEdgeValidators.TryGetValue(nodeId, out var uncBackValidators)
+                && uncBackValidators.Count > 0)
+            {
+                var (ubOk, ubErr, ubValidator) = await TurnExecutionHelpers.RunValidatorsAsync(
+                    uncBackValidators, ctx.History, ct).ConfigureAwait(false);
+
+                if (!ubOk)
+                {
+                    consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
+                    TurnExecutionHelpers.RecordGovernanceViolation(agentName, ubValidator!, consecutiveFails, maxRetries, _sessionId, _services);
+
+                    if (consecutiveFails >= maxRetries)
+                        throw new ValidatorStuckException(agentName, ubValidator!, consecutiveFails, ubErr!);
+
+                    await TurnExecutionHelpers.EmitAndInjectValidationFailureAsync(
+                        agentName, "(unconditional-back)", ubValidator!, ubErr!, responseText, consecutiveFails, maxRetries, ctx, ct, _services);
+                    return (true, false, consecutiveFails);
+                }
+            }
+
+            consecutiveFails = 0;
+            // Use a synthetic keyword so the outer phase loop can look up the destination.
+            ctx.LastKeyword  = $"__UNCOND_BACK:{nodeId.ToLowerInvariant()}";
+
+            RecordNodeState(ctx, autoBackDest ?? agentName);
+
+            if (eventEmitter is not null)
+                await eventEmitter.EmitAsync(EventTypes.StateAdvanced,
+                    agent: agentName,
+                    turn:  agentMsg.TurnIndex,
+                    payload: new { version = ctx.CurrentState.Version, phase_break = "(unconditional)", next = autoBackDest ?? "(terminal)" });
+
+            await wfCtx.YieldOutputAsync(ctx, ct).ConfigureAwait(false);
+            return (true, true, consecutiveFails);
+        }
+
+        // Node has no keyword edges and no unconditional route wired — config gap.
+        // Log and fall through to the correction path so HITL escalation fires normally.
+        logger.LogError(
+            "[GraphOrchestrator] Node '{NodeId}' (agent '{Agent}') has no keyword edges " +
+            "and no unconditional route — it can never route. Check the graph config.",
+            nodeId, agentName);
+
+        return (false, false, consecutiveFails);
     }
 
     /// <summary>
