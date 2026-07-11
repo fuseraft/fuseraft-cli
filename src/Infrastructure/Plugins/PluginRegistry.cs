@@ -81,7 +81,12 @@ public sealed class PluginRegistry : IDisposable
     /// </summary>
     public PluginRegistry RegisterDefaults()
     {
-        Register("FileSystem", () => new FileSystemPlugin());
+        // Constructed eagerly (not inside the factory lambda) so both registrations under
+        // "FileSystem" close over the same instance — FileSystemManagementOps borrows its
+        // per-turn HashSets by reference. See PluginRegistry's multi-object-per-name support.
+        var fsPlugin = new FileSystemPlugin();
+        Register("FileSystem", () => fsPlugin);
+        RegisterAdditional("FileSystem", () => new FileSystemManagementOps(fsPlugin));
         Register("Shell",      () => new ShellPlugin());
         Register("Git",        () => new GitPlugin());
         Register("Http",       () => new HttpPlugin(_sharedHttpClient, logger: _loggerFactory?.CreateLogger<HttpPlugin>()));
@@ -203,7 +208,13 @@ public sealed class PluginRegistry : IDisposable
         // Both are registered as singletons — the factory lambda returns the same instance.
         var shellInstance = new ShellPlugin(sandboxRoot, shellCommandApprover, security.ShellPolicy, eventSink);
         Register("Shell",      () => shellInstance);
-        Register("FileSystem", () => new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore, sessionCache: sessionReadCache, onWrite: shellInstance.InvalidateRunCache, onCacheHit: onCacheHit, exemptedPaths: ["~/.fuseraft/"]));
+
+        // Same eager-construction-plus-shared-closure pattern as RegisterDefaults — both
+        // "FileSystem" registrations must share one FileSystemPlugin instance's per-turn state.
+        var fsPlugin = new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore, sessionCache: sessionReadCache, onWrite: shellInstance.InvalidateRunCache, onCacheHit: onCacheHit, exemptedPaths: ["~/.fuseraft/"]);
+        Register("FileSystem", () => fsPlugin);
+        RegisterAdditional("FileSystem", () => new FileSystemManagementOps(
+            fsPlugin, sandboxRoot, sessionCache: sessionReadCache, versionStore: fileVersionStore, exemptedPaths: ["~/.fuseraft/"]));
         Register("Http",       () => new HttpPlugin(_sharedHttpClient, allowedHosts, apiProfiles, allowPrivateHosts, _loggerFactory?.CreateLogger<HttpPlugin>()));
         Register("Document",   () => new DocumentPlugin(sandboxRoot));
 

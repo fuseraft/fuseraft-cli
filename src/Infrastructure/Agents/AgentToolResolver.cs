@@ -85,9 +85,9 @@ internal sealed class AgentToolResolver(
             {
                 functions = aiFunctions;
             }
-            else if (pluginRegistry.TryGet(pluginName, out var plugin))
+            else if (pluginRegistry.TryGetAll(pluginName, out var plugins))
             {
-                functions = PluginRegistry.GetFunctionsFromObject(plugin);
+                functions = plugins.SelectMany(PluginRegistry.GetFunctionsFromObject);
             }
             else if (pluginName.Equals("Investigation", StringComparison.OrdinalIgnoreCase))
             {
@@ -181,8 +181,8 @@ internal sealed class AgentToolResolver(
                 IEnumerable<AIFunction> fns;
                 if (pluginRegistry.TryGetAIFunctions(name, out var aiFns))
                     fns = aiFns;
-                else if (pluginRegistry.TryGet(name, out var p))
-                    fns = PluginRegistry.GetFunctionsFromObject(p);
+                else if (pluginRegistry.TryGetAll(name, out var ps))
+                    fns = ps.SelectMany(PluginRegistry.GetFunctionsFromObject);
                 else
                     throw new InvalidOperationException(
                         $"Agent '{config.Name}' references unknown sub-agent plugin '{name}'. " +
@@ -198,10 +198,12 @@ internal sealed class AgentToolResolver(
 
         // Default: expanded read-oriented set. FileSystem (sandboxed, read ops only).
         var fsPlugin = new FileSystemPlugin(securityConfig?.FileSystemSandboxPath, exemptedPaths: ["~/.fuseraft/"]);
+        var fsOps     = new FileSystemManagementOps(fsPlugin, securityConfig?.FileSystemSandboxPath, exemptedPaths: ["~/.fuseraft/"]);
         var fsReadTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             { "read_file", "list_files", "grep_file", "get_file_summary", "get_file_info" };
         tools.AddRange(
             PluginRegistry.GetFunctionsFromObject(fsPlugin)
+                          .Concat(PluginRegistry.GetFunctionsFromObject(fsOps))
                           .Where(f => fsReadTools.Contains(f.Name)));
 
         // Search: all tools.
