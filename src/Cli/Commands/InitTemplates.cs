@@ -91,6 +91,26 @@ public static partial class InitTemplates
         "call APPROVED — fix the command and retry once, or call handoff(route_keyword: " +
         "\"REVISION REQUIRED\") noting that verification could not be completed.";
 
+    // Exact schema RequireReviewJudgementValidator parses deterministically (graph edges
+    // gated with [RequireReviewJudgement]). The validator requires a fenced ```json block
+    // with a top-level "review" array, one entry per acceptance criterion in the brief, and
+    // — when any verdict is PASS — a shell_run that succeeded THIS turn. Looser prose here
+    // ("emit a JSON review block...") lets the model drift from the schema and get stuck
+    // failing the same gate on every retry until the graph aborts.
+    private const string ReviewerJudgementBlockRule =
+        "Before writing your routing keyword, emit a fenced ```json block (not prose) with " +
+        "this exact shape: {\"review\": [{\"criterion\": \"...\", \"verdict\": \"PASS\", " +
+        "\"evidence\": \"...\"}, ...]}. The validator checks this mechanically: " +
+        "(a) one review entry per acceptance criterion in the brief — fewer entries than " +
+        "criteria blocks the handoff; " +
+        "(b) every entry needs non-empty criterion, verdict (exactly PASS or FAIL), and " +
+        "evidence naming what you actually ran or inspected; " +
+        "(c) if any verdict is PASS, a shell_run you executed THIS turn must have succeeded — " +
+        "a non-zero exit, timeout, denial, or a result from an earlier turn does not count. " +
+        "If any criterion is FAIL, do not write APPROVED — route REVISION REQUIRED (or " +
+        "REPLAN REQUIRED) instead. Write the ```json block first, then the routing keyword " +
+        "on its own line.";
+
     // Session context handoff protocol — read on entry, write before routing.
     // These steps prevent agents from re-reading files that previous agents already
     // summarised, and give successor agents a current-state snapshot without needing
