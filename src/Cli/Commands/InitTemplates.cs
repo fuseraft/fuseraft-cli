@@ -111,6 +111,21 @@ public static partial class InitTemplates
         "REPLAN REQUIRED) instead. Write the ```json block first, then the routing keyword " +
         "on its own line.";
 
+    // The HasAssertions contract check (ContractEngine.EvaluateTestReportAsync) verifies each
+    // test-report result's claimed command is a literal substring of a command that actually
+    // succeeded in the change log. A Tester that runs one combined command (e.g. the whole test
+    // directory at once) but then writes a narrower per-test command on each result row (e.g.
+    // adding a pytest node-id selector it never actually invoked) trips the fabrication guard on
+    // every row and can loop until the contract-failure threshold aborts the session.
+    private const string TestReportCommandFieldRule =
+        "The command field must be the EXACT shell_run command you actually executed for that " +
+        "result — copy it verbatim, do not paraphrase or narrow it. If one shell_run verified " +
+        "several test cases at once (e.g. running a whole test file or directory), reuse that " +
+        "same exact command string for every result row it covers — do NOT invent a more " +
+        "specific per-test command (e.g. adding a test node-id selector or extra flags) that " +
+        "you never actually ran; the contract engine checks each claimed command against the " +
+        "commands that really ran and treats an unmatched, narrower claim as fabricated.";
+
     // Session context handoff protocol — read on entry, write before routing.
     // These steps prevent agents from re-reading files that previous agents already
     // summarised, and give successor agents a current-state snapshot without needing
