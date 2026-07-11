@@ -388,7 +388,8 @@ public static partial class InitTemplates
                   PASS: name, status, exit_code, command (exact shell_run command — required)
                   FAIL: name, status, exit_code, command, output (relevant stderr/stdout)
               A PASS result with an empty or missing command field is treated as fabricated
-              and will block handoff. Always write the report before routing.
+              and will block handoff. {TestReportCommandFieldRule}
+              Always write the report before routing.
 
               STEP 6 — WRITE CONTEXT AND ROUTE
               {ContextWriteStep}
