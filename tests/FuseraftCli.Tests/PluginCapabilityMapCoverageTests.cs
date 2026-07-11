@@ -31,7 +31,8 @@ public sealed class PluginCapabilityMapCoverageTests : IDisposable
 
     public static IEnumerable<object[]> CapabilityMappedPlugins()
     {
-        yield return new object[] { "FileSystem", new FileSystemPlugin() };
+        // FileSystem is covered separately (FileSystemPlugin_EveryTool_HasACapabilityEntry)
+        // since it's registered as two objects — see FileSystemManagementOps.
         yield return new object[] { "Shell",      new ShellPlugin() };
         yield return new object[] { "Git",        new GitPlugin() };
         yield return new object[] { "Http",        new HttpPlugin(new HttpClient()) };
@@ -49,6 +50,16 @@ public sealed class PluginCapabilityMapCoverageTests : IDisposable
 
     // Path-constructed plugins are covered separately since they need per-test temp storage
     // rather than the parameterless constructors above.
+
+    [Fact]
+    public void FileSystemPlugin_EveryTool_HasACapabilityEntry()
+    {
+        // FileSystem's tool surface spans two objects (see FileSystemManagementOps) —
+        // both need to be passed so every reflected tool name is checked.
+        var fsPlugin = new FileSystemPlugin();
+        var fsOps    = new FileSystemManagementOps(fsPlugin);
+        AssertAllCovered("FileSystem", fsPlugin, fsOps);
+    }
 
     [Fact]
     public void ChangesPlugin_EveryTool_HasACapabilityEntry()
@@ -87,9 +98,9 @@ public sealed class PluginCapabilityMapCoverageTests : IDisposable
         AssertAllCovered("Graph", plugin);
     }
 
-    private static void AssertAllCovered(string pluginName, object plugin)
+    private static void AssertAllCovered(string pluginName, params object[] plugins)
     {
-        var functions = PluginRegistry.GetFunctionsFromObject(plugin);
+        var functions = plugins.SelectMany(PluginRegistry.GetFunctionsFromObject).ToList();
         Assert.NotEmpty(functions);
 
         var uncovered = functions
