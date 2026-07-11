@@ -494,11 +494,13 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 Arguments              = "rev-parse --abbrev-ref HEAD",
                 WorkingDirectory       = cwd,
                 RedirectStandardOutput = true,
+                RedirectStandardError  = true,
                 UseShellExecute        = false,
                 CreateNoWindow         = true,
             });
             if (proc is null) return null;
             var output = proc.StandardOutput.ReadToEnd().Trim();
+            proc.StandardError.ReadToEnd();
             proc.WaitForExit(1000);
             return proc.ExitCode == 0 && !string.IsNullOrEmpty(output) && output != "HEAD" ? output : null;
         }
