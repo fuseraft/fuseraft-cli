@@ -47,6 +47,20 @@ namespace fuseraft.Orchestration;
 /// (ContextWindow filter, ChangeTracker, GovernanceKernel, SLO recording, EventEmitter)
 /// is applied identically across orchestrators.
 /// </para>
+///
+/// <para>
+/// <b>Collaborators</b> (all in <see cref="fuseraft.Orchestration.Graph"/>): topology
+/// computation — back-edge classification, route tables, unconditional routing, parallel
+/// group membership — is owned by <see cref="fuseraft.Orchestration.Graph.GraphTopology"/>,
+/// computed once per <see cref="StreamAsync"/> call. Sub-graph (<c>SubGraphId</c>) nodes are
+/// driven by <see cref="fuseraft.Orchestration.Graph.SubGraphExecutor"/>. Parallel fan-out is
+/// driven by <see cref="fuseraft.Orchestration.Graph.ParallelFanOutExecutor"/>. Both share
+/// response-recording, validator-execution, HITL-gating, and recovery-agent logic with this
+/// class's own sequential back-edge/forward-edge turn loop via the explicit-parameter
+/// <see cref="fuseraft.Orchestration.Graph.TurnExecutionHelpers"/> static class, bundled
+/// behind one <see cref="fuseraft.Orchestration.Graph.TurnServices"/> record built from this
+/// instance's constructor parameters.
+/// </para>
 /// </summary>
 public sealed class GraphOrchestrator(
     OrchestrationConfig config,
@@ -77,8 +91,6 @@ public sealed class GraphOrchestrator(
     // MaxRetries * MaxTotalTurnsMultiplier, typically well under 100). Internal so
     // ParallelFanOutExecutor (which owns ForkContext/MergeParallelContexts) can reference it.
     internal const int BranchTurnIndexStride = 100_000;
-
-    private readonly IHumanApprovalService? _humanApprovalService = humanApprovalService;
 
     // Collaborators fixed for this instance's lifetime, bundled for TurnExecutionHelpers /
     // SubGraphExecutor / ParallelFanOutExecutor — see TurnServices' doc comment for why
@@ -910,7 +922,7 @@ public sealed class GraphOrchestrator(
     /// Single agent turn and stream collection. Assembles context via
     /// <see cref="HandleContextOverflowAsync"/>, emits <c>turn_start</c>, runs the agent,
     /// handles timeout by injecting a correction and signalling retry, then records and
-    /// emits the response via <see cref="RecordAndEmitAsync"/>.
+    /// emits the response via <see cref="fuseraft.Orchestration.Graph.TurnExecutionHelpers.RecordAndEmitAsync"/>.
     /// </summary>
     /// <returns>
     /// A tuple of (<see cref="AgentResponse"/>, <see cref="AgentMessage"/>,
@@ -1101,7 +1113,7 @@ public sealed class GraphOrchestrator(
 
         // Human approval gate for back-edges.
         if (routeTable.PhaseBreakRequireHumanApproval.Contains(foundKeyword)
-            && _humanApprovalService is not null)
+            && _services.HumanApprovalService is not null)
         {
             var backTarget = _topology.BackEdgeDestinations.TryGetValue(foundKeyword, out var pbd0)
                 ? pbd0 ?? "(terminal)"
@@ -1279,7 +1291,7 @@ public sealed class GraphOrchestrator(
                 governanceKernel?.SloEngine.Get("policy-compliance")?.Record(1.0);
 
             // Human approval gate: prompt before the route fires.
-            if (route.RequireHumanApproval && _humanApprovalService is not null)
+            if (route.RequireHumanApproval && _services.HumanApprovalService is not null)
             {
                 var (approved, approvedFails) = await TurnExecutionHelpers.ApplyHumanApprovalGateAsync(
                     foundKeyword, agentName, route.NextExecutorName,
