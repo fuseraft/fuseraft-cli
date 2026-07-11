@@ -163,7 +163,10 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         TodoPlugin?     todoPlugin     = null;
         if (!settings.NoTools)
         {
-            toolsByCategory["FileSystem"] = PluginRegistry.GetFunctionsFromObject(new FileSystemPlugin()).ToList();
+            var fsPluginForCategory = new FileSystemPlugin();
+            toolsByCategory["FileSystem"] = PluginRegistry.GetFunctionsFromObject(fsPluginForCategory)
+                .Concat(PluginRegistry.GetFunctionsFromObject(new FileSystemManagementOps(fsPluginForCategory)))
+                .ToList();
             toolsByCategory["Shell"]      = PluginRegistry.GetFunctionsFromObject(shellPlugin!).ToList();
             toolsByCategory["Search"]     = PluginRegistry.GetFunctionsFromObject(new SearchPlugin()).ToList();
             toolsByCategory["Git"]        = PluginRegistry.GetFunctionsFromObject(new GitPlugin()).ToList();
