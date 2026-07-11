@@ -18,7 +18,7 @@ internal sealed class AgentRouteTable
 
     /// <summary>
     /// Per-keyword validators for phase-break (back-edge) keywords.
-    /// Populated by <c>GraphOrchestrator.BuildNodeRouteTables</c> when a back-edge declares
+    /// Populated by <c>GraphTopology.Build</c> when a back-edge declares
     /// validators. All validators for the keyword must pass before the phase-break fires.
     /// </summary>
     public Dictionary<string, IReadOnlyList<IRoutingValidator>> PhaseBreakValidators { get; } =
@@ -26,7 +26,7 @@ internal sealed class AgentRouteTable
 
     /// <summary>
     /// Back-edge keywords that require human approval before the phase-break fires.
-    /// Populated by <c>GraphOrchestrator.BuildNodeRouteTables</c>.
+    /// Populated by <c>GraphTopology.Build</c>.
     /// </summary>
     public HashSet<string> PhaseBreakRequireHumanApproval { get; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -39,7 +39,7 @@ internal sealed class AgentRouteTable
 
     /// <summary>
     /// Send-forward keywords that belong to OTHER agents' route tables.
-    /// Populated by <c>GraphOrchestrator.BuildNodeRouteTables</c> so that
+    /// Populated by <c>GraphTopology.Build</c> so that
     /// <see cref="CorrectionEngine.InjectNoKeywordCorrection"/> can produce a specific
     /// "wrong keyword" error instead of a generic "no keyword" correction when an agent
     /// emits a keyword that belongs to a different node.

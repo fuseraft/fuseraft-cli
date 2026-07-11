@@ -1,10 +1,10 @@
 using fuseraft.Core.Models.Orchestration;
-using fuseraft.Orchestration;
+using fuseraft.Orchestration.Graph;
 
 namespace FuseraftCli.Tests;
 
 /// <summary>
-/// Regression coverage for <see cref="GraphOrchestrator.ComputeBackEdges"/> — the DFS-based
+/// Regression coverage for <see cref="GraphTopology.ComputeBackEdges"/> — the DFS-based
 /// forward/back edge classification that replaced an earlier BFS-shortest-path-layer
 /// approximation. The approximation misclassified a legitimate forward edge as a back-edge
 /// whenever two forward paths of different lengths converged on the same node.
@@ -30,7 +30,7 @@ public sealed class GraphOrchestratorBackEdgeTests
             ("A", "B"), ("B", "D"),
             ("A", "C"), ("C", "E"), ("E", "D"));
 
-        var backEdges = GraphOrchestrator.ComputeBackEdges("A", edges);
+        var backEdges = GraphTopology.ComputeBackEdges("A", edges);
 
         Assert.Empty(backEdges);
     }
@@ -41,11 +41,11 @@ public sealed class GraphOrchestratorBackEdgeTests
         // A -> B -> D -> A is a real cycle; D->A must still be a back-edge.
         var edges = EdgesBySource(("A", "B"), ("B", "D"), ("D", "A"));
 
-        var backEdges = GraphOrchestrator.ComputeBackEdges("A", edges);
+        var backEdges = GraphTopology.ComputeBackEdges("A", edges);
 
-        Assert.Contains(GraphOrchestrator.EdgeKey("D", "A"), backEdges);
-        Assert.DoesNotContain(GraphOrchestrator.EdgeKey("A", "B"), backEdges);
-        Assert.DoesNotContain(GraphOrchestrator.EdgeKey("B", "D"), backEdges);
+        Assert.Contains(GraphTopology.EdgeKey("D", "A"), backEdges);
+        Assert.DoesNotContain(GraphTopology.EdgeKey("A", "B"), backEdges);
+        Assert.DoesNotContain(GraphTopology.EdgeKey("B", "D"), backEdges);
     }
 
     [Fact]
@@ -57,10 +57,10 @@ public sealed class GraphOrchestratorBackEdgeTests
             ("A", "C"), ("C", "E"), ("E", "D"),
             ("D", "A"));
 
-        var backEdges = GraphOrchestrator.ComputeBackEdges("A", edges);
+        var backEdges = GraphTopology.ComputeBackEdges("A", edges);
 
-        Assert.Contains(GraphOrchestrator.EdgeKey("D", "A"), backEdges);
-        Assert.DoesNotContain(GraphOrchestrator.EdgeKey("E", "D"), backEdges);
-        Assert.DoesNotContain(GraphOrchestrator.EdgeKey("B", "D"), backEdges);
+        Assert.Contains(GraphTopology.EdgeKey("D", "A"), backEdges);
+        Assert.DoesNotContain(GraphTopology.EdgeKey("E", "D"), backEdges);
+        Assert.DoesNotContain(GraphTopology.EdgeKey("B", "D"), backEdges);
     }
 }
