@@ -58,6 +58,44 @@ internal sealed record OrchestratorKindFlags(
     bool UseScatterGather);
 
 /// <summary>
+/// Shared infrastructure collaborators <c>CreateOrchestrator</c> threads into
+/// <c>AgentFactory</c>/<c>StrategyFactory</c> and nearly every orchestrator kind's
+/// constructor. Bundled for the same reason as <see cref="OrchestratorKindFlags"/> — these
+/// were 8 separate positional parameters.
+/// </summary>
+internal sealed record OrchestratorInfraServices(
+    ILoggerFactory LoggerFactory,
+    ChatClientFactory ChatClientFactory,
+    PluginRegistry PluginRegistry,
+    GovernanceKernel GovernanceKernel,
+    ChangeTracker? ChangeTracker,
+    EventEmitter? EventEmitter,
+    IdentityRegistry IdentityRegistry,
+    fuseraft.Infrastructure.Tools.ToolResultArtifactStore ToolArtifactStore);
+
+/// <summary>
+/// Knowledge/memory/evidence collaborators that feed <c>ContextBroker</c>/
+/// <c>ContextAssembler</c>/<c>ContextAssemblyPipeline</c> construction and the default
+/// <c>AgentOrchestrator</c> branch in <c>CreateOrchestrator</c>.
+/// </summary>
+internal sealed record OrchestratorKnowledgeServices(
+    fuseraft.Infrastructure.Knowledge.KnowledgeLayer KnowledgeLayer,
+    fuseraft.Infrastructure.Objectives.ObjectiveManager ObjectiveManager,
+    EvidenceStore? EvidenceStore,
+    fuseraft.Orchestration.DependencyPlanner? DependencyPlanner,
+    MemoryManager? MemoryManager);
+
+/// <summary>
+/// Session/path identity inputs to <c>ContextAssembler</c> and the repository-memory store
+/// paths in <c>CreateOrchestrator</c>.
+/// </summary>
+internal sealed record OrchestratorSessionPaths(
+    string ProjectSlug,
+    string? SessionId,
+    string? ExecutionStatePath,
+    string? InvestigationLogPath);
+
+/// <summary>
 /// Builds a ready-to-use <see cref="IOrchestrator"/> directly from a config file path,
 /// without requiring a full DI host. Used by CLI commands that load config at runtime.
 /// </summary>
@@ -136,15 +174,17 @@ public static class OrchestratorBuilder
 
         WireSkillsAndVerifier(config, chatClientFactory, loggerFactory, compactor);
 
-        var orchestrator = CreateOrchestrator(
-            config, loggerFactory, chatClientFactory, pluginRegistry,
-            governanceKernel, humanApprovalService, kindFlags,
-            infra.ChangeTracker, infra.EventEmitter, infra.KnowledgeLayer, infra.ObjectiveManager,
-            infra.KnowledgeSandbox, projectSlug, sessionId,
-            infra.ExecutionStatePath, infra.InvestigationLogPath,
-            infra.EvidenceStore, dependencyPlanner, MemoryManager.FromConfig(config.Memory),
-            identityRegistry, infra.ToolArtifactStore,
-            out var repoMemoryExtractor);
+        var infraServices = new OrchestratorInfraServices(
+            loggerFactory, chatClientFactory, pluginRegistry, governanceKernel,
+            infra.ChangeTracker, infra.EventEmitter, identityRegistry, infra.ToolArtifactStore);
+        var knowledgeServices = new OrchestratorKnowledgeServices(
+            infra.KnowledgeLayer, infra.ObjectiveManager, infra.EvidenceStore,
+            dependencyPlanner, MemoryManager.FromConfig(config.Memory));
+        var sessionPaths = new OrchestratorSessionPaths(
+            projectSlug, sessionId, infra.ExecutionStatePath, infra.InvestigationLogPath);
+
+        var (orchestrator, repoMemoryExtractor) = CreateOrchestrator(
+            config, kindFlags, infraServices, knowledgeServices, sessionPaths, humanApprovalService);
 
         return new OrchestratorBuildResult(orchestrator, config, infra.McpManager, compactor, infra.ChangeTracker, infra.EventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, dependencyPlanner, infra.SessionMetrics);
     }
@@ -1513,30 +1553,29 @@ public static class OrchestratorBuilder
     // CreateOrchestrator
     // -------------------------------------------------------------------------
 
-    private static IOrchestrator CreateOrchestrator(
+    private static (IOrchestrator Orchestrator, fuseraft.Infrastructure.Repository.RepositoryMemoryExtractor? RepoMemoryExtractor) CreateOrchestrator(
         OrchestrationConfig config,
-        ILoggerFactory loggerFactory,
-        ChatClientFactory chatClientFactory,
-        PluginRegistry pluginRegistry,
-        GovernanceKernel governanceKernel,
-        IHumanApprovalService? humanApprovalService,
         OrchestratorKindFlags flags,
-        ChangeTracker? changeTracker,
-        EventEmitter? eventEmitter,
-        fuseraft.Infrastructure.Knowledge.KnowledgeLayer knowledgeLayer,
-        fuseraft.Infrastructure.Objectives.ObjectiveManager objectiveManager,
-        string knowledgeSandbox,
-        string projectSlug,
-        string? sessionId,
-        string? executionStatePath,
-        string? investigationLogPath,
-        EvidenceStore? evidenceStore,
-        fuseraft.Orchestration.DependencyPlanner? dependencyPlanner,
-        MemoryManager? memoryManager,
-        IdentityRegistry identityRegistry,
-        fuseraft.Infrastructure.Tools.ToolResultArtifactStore toolArtifactStore,
-        out fuseraft.Infrastructure.Repository.RepositoryMemoryExtractor? repoMemoryExtractor)
+        OrchestratorInfraServices infra,
+        OrchestratorKnowledgeServices knowledge,
+        OrchestratorSessionPaths sessionPaths,
+        IHumanApprovalService? humanApprovalService)
     {
+        var loggerFactory        = infra.LoggerFactory;
+        var chatClientFactory    = infra.ChatClientFactory;
+        var governanceKernel     = infra.GovernanceKernel;
+        var changeTracker        = infra.ChangeTracker;
+        var eventEmitter         = infra.EventEmitter;
+        var knowledgeLayer       = knowledge.KnowledgeLayer;
+        var objectiveManager     = knowledge.ObjectiveManager;
+        var evidenceStore        = knowledge.EvidenceStore;
+        var dependencyPlanner    = knowledge.DependencyPlanner;
+        var memoryManager        = knowledge.MemoryManager;
+        var projectSlug          = sessionPaths.ProjectSlug;
+        var sessionId            = sessionPaths.SessionId;
+        var executionStatePath   = sessionPaths.ExecutionStatePath;
+        var investigationLogPath = sessionPaths.InvestigationLogPath;
+
         var aoLogger = loggerFactory.CreateLogger<AgentOrchestrator>();
         var goLogger = loggerFactory.CreateLogger<GraphOrchestrator>();
 
@@ -1569,7 +1608,7 @@ public static class OrchestratorBuilder
 
         var strategyFactory = new StrategyFactory(chatClientFactory.Create, eventEmitter, loggerFactory, governanceKernel, humanApprovalService, evidenceStore, knowledgeLayer.ProvenanceRegistry, config.TestSelector, resolvedSandbox, contextAssembler);
 
-        var agentFactory = new AgentFactory(chatClientFactory, pluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, identityRegistry, eventEmitter, loggerFactory, BuildSkillsProvider(), toolArtifactStore);
+        var agentFactory = new AgentFactory(chatClientFactory, infra.PluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, infra.IdentityRegistry, eventEmitter, loggerFactory, BuildSkillsProvider(), infra.ToolArtifactStore);
 
         // Unified context assembly pipeline — shared across all orchestrator types.
         // Provides always-on knowledge retrieval, relevance-ranked memory, and metrics
@@ -1668,7 +1707,7 @@ public static class OrchestratorBuilder
 
         // Repository memory extractor — runs after the session to generate candidates.
         // Requires an evidence store to query; skipped when evidence tracking is disabled.
-        repoMemoryExtractor = null;
+        fuseraft.Infrastructure.Repository.RepositoryMemoryExtractor? repoMemoryExtractor = null;
         if (evidenceStore is not null)
         {
             var extractorStore = new fuseraft.Infrastructure.Repository.RepositoryMemoryStore(
@@ -1683,7 +1722,7 @@ public static class OrchestratorBuilder
         if (config.Saga?.Enabled == true)
             orchestrator = new SagaOrchestrator(orchestrator, config.Saga, compensators: null, eventEmitter);
 
-        return orchestrator;
+        return (orchestrator, repoMemoryExtractor);
     }
 
     /// <summary>
