@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 
-namespace fuseraft.Orchestration.Events;
+namespace fuseraft.Core.Events;
 
 /// <summary>
 /// Appends structured JSONL events to a file — one JSON object per line — and dispatches
