@@ -195,6 +195,16 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
                 eventEmitter?.SetSessionId(sessionId);
                 orchestrator.SetSessionId(sessionId);
                 compactor?.SetSessionId(sessionId);
+                // Without this, ActiveSessionId stays null on the change log and evidence
+                // graph, so EvidenceStore.QueryNodes and the changes.json fallback path both
+                // skip session filtering entirely — every contract check (FilesWritten,
+                // CommandSucceeded, TestReport.HasAssertions) sees commands and writes from
+                // every past eval run against this project, not just the current one. See
+                // ChangeTracker.SetSessionIdAsync's doc comment: "so check 8 in TestReportValid
+                // filters to only commands recorded in this session, preventing prior-session
+                // contamination" — that guarantee silently doesn't hold for `eval run`.
+                if (changeTracker is not null)
+                    await changeTracker.SetSessionIdAsync(sessionId, caseToken);
                 orchestrator.SetStructuredTask(TaskModel.FromGoal(task));
 
                 var runner = new SessionRunner(
