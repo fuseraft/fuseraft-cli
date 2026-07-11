@@ -13,7 +13,6 @@ using Microsoft.Extensions.Logging;
 using fuseraft.Core;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure.Plugins;
-using fuseraft.Orchestration;
 
 namespace fuseraft.Infrastructure.Agents;
 
