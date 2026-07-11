@@ -24,7 +24,7 @@ namespace fuseraft.Orchestration.Graph;
 internal sealed record TurnServices(
     OrchestrationConfig Config,
     AgentFactory AgentFactory,
-    ILogger Logger,
+    ILogger<GraphOrchestrator> Logger,
     EventEmitter? EventEmitter,
     GovernanceKernel? GovernanceKernel,
     IContextAssemblyPipeline? ContextPipeline,
