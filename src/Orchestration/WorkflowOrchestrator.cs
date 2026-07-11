@@ -918,7 +918,7 @@ public sealed class WorkflowOrchestrator(
 
     /// <summary>
     /// Builds per-node route tables from every edge in <paramref name="wfCfg"/>. Unlike
-    /// <see cref="GraphOrchestrator.BuildNodeRouteTables"/>, there is no back-edge / phase-break
+    /// <see cref="fuseraft.Orchestration.Graph.GraphTopology.Build"/>, there is no back-edge / phase-break
     /// classification — every edge becomes an ordinary entry in <see cref="AgentRouteTable.Routes"/>,
     /// cyclic or not. Config validation (in <c>OrchestratorBuilder</c>) guarantees every edge has
     /// a non-empty <see cref="GraphEdgeConfig.Keyword"/> before this runs.
