@@ -188,8 +188,7 @@ public static partial class InitTemplates
               6. Run the build command from the convention profile to confirm the project compiles.
               7. Run the verify_command from the brief to confirm runtime correctness.
               8. {ReviewerVerificationIntegrityRule}
-              Emit a JSON review block covering every acceptance criterion with verdict (PASS/FAIL)
-              and evidence before your routing keyword.
+              9. {ReviewerJudgementBlockRule}
               If all criteria pass, call handoff(route_keyword: "APPROVED").
               If targeted fixes are needed, call handoff(route_keyword: "REVISION REQUIRED") and
               describe each fix: file, line, current code, exact replacement.
