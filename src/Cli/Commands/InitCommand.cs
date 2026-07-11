@@ -30,6 +30,10 @@ public sealed class InitSettings : CommandSettings
     [CommandOption("--no-boilerplate")]
     [Description("Skip architecture.yaml and knowledge/lifecycle.yaml — for small or single-purpose projects that won't use `fuseraft arch check` or `fuseraft knowledge gc`.")]
     public bool NoBoilerplate { get; set; }
+
+    [CommandOption("-f|--force")]
+    [Description("Overwrite the config and all agent files without prompting, even if they already exist.")]
+    public bool Force { get; set; }
 }
 
 /// <summary>
@@ -93,22 +97,34 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
 
         AnsiConsole.WriteLine();
 
-        if (File.Exists(output))
+        var generated = InitTemplates.Build(templateKey, model, endpoint);
+        var dir       = Path.GetDirectoryName(output) ?? string.Empty;
+        var configDir = string.IsNullOrEmpty(dir) ? "." : dir;
+
+        var targets = new List<string> { output };
+        targets.AddRange(generated.AgentFiles.Select(af => Path.Combine(configDir, af.RelativePath)));
+
+        if (!settings.Force)
         {
-            if (settings.NoInteractive ||
-                !AnsiConsole.Confirm($"[yellow]{Markup.Escape(output)} already exists. Overwrite?[/]"))
+            var existing = targets.Where(File.Exists).ToList();
+            if (existing.Count > 0)
             {
-                AnsiConsole.MarkupLine("[yellow]Aborted.[/]");
-                return 1;
+                AnsiConsole.MarkupLine($"[yellow]{existing.Count} file(s) already exist:[/]");
+                foreach (var f in existing)
+                    AnsiConsole.MarkupLine($"  {Markup.Escape(f)}");
+
+                if (settings.NoInteractive ||
+                    !AnsiConsole.Confirm("[yellow]Overwrite?[/]"))
+                {
+                    AnsiConsole.MarkupLine("[yellow]Aborted.[/] Pass --force to overwrite without prompting.");
+                    return 1;
+                }
             }
         }
 
-        var generated = InitTemplates.Build(templateKey, model, endpoint);
-        var dir       = Path.GetDirectoryName(output) ?? string.Empty;
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
         await File.WriteAllTextAsync(output, generated.MainConfig, cancellationToken);
 
-        var configDir = string.IsNullOrEmpty(dir) ? "." : dir;
         foreach (var (relativePath, content) in generated.AgentFiles)
         {
             var fullPath = Path.Combine(configDir, relativePath);
