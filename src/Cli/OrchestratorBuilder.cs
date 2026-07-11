@@ -98,6 +98,16 @@ internal sealed record OrchestratorSessionPaths(
 /// <summary>
 /// Builds a ready-to-use <see cref="IOrchestrator"/> directly from a config file path,
 /// without requiring a full DI host. Used by CLI commands that load config at runtime.
+///
+/// <para>
+/// <b>Collaborators</b> (all in <c>fuseraft.Cli</c>): config loading, binding, and
+/// pre-processing is owned by <see cref="OrchestratorConfigLoader"/>. System-prompt assembly
+/// is owned by <see cref="SystemPromptBuilder"/>. Provider API-key connectivity probing is
+/// owned by <see cref="ApiKeyValidator"/>. This class retains the construction pipeline itself
+/// (<see cref="BuildAsync"/> and its named steps) plus the skills-provider wiring
+/// (<c>BuildSkillsProvider</c>/<c>RunSkillScriptAsync</c>, too small a pair to warrant their
+/// own file).
+/// </para>
 /// </summary>
 public static class OrchestratorBuilder
 {
