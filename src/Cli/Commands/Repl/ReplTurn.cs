@@ -421,60 +421,11 @@ internal static class ReplTurn
                 capturedResults ?? [], hitIterationCap: toolRounds >= StepIterationLimit,
                 responseText, cancellationToken);
 
-        // Free-form turns: if the response claims a mutation but no write tool was called,
-        // auto-inject a correction so the agent is required to actually call the tool.
-        // On the correction turn itself fall back to a warning to avoid infinite recursion.
-        if (!isStepRequest && !capturePlan && responseText.Length > 0 &&
-            !toolCallsThisTurn.Any(t => MutationTools.Contains(t)) &&
-            ContainsMutationClaim(responseText))
-        {
-            if (!isCorrectionTurn)
-            {
-                await ctx.Emitter.EmitAsync(EventTypes.CorrectionInjected, turn: ctx.TurnIndex, payload: new { reason = "mutation_claimed_without_write_tool" });
-                if (!ctx.JsonMode)
-                    AnsiConsole.MarkupLine("[dim]  ↺ mutation claimed without write tool — injecting correction[/]");
-                const string correctionMsg =
-                    "You described changes above but did not call any write tool. " +
-                    "Please call write_file or patch_file now to actually apply the changes. " +
-                    "Do not re-describe the changes — just call the tool.";
-                await ExecuteAsync(
-                    ctx, correctionMsg,
-                    isStepRequest: false, capturePlan: false, activeStep: null,
-                    cancellationToken, isCorrectionTurn: true);
-            }
-            else
-            {
-                if (!ctx.JsonMode)
-                    AnsiConsole.MarkupLine(
-                        "[yellow]  ⚠ No write tool called after correction — verify the agent did not fabricate this result.[/]");
-            }
-        }
+        await TryApplyMutationCorrectionAsync(
+            ctx, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn, cancellationToken);
 
-        // Free-form turns under adversarial mode: a critic agent reviews the response for
-        // fabrication/correctness, same infrastructure /execute steps use. Skipped on the
-        // correction turn itself so a rejection can't recurse forever.
-        if (ctx.AdversarialMode && ctx.SubAgent is not null &&
-            !isStepRequest && !capturePlan && !isCorrectionTurn && responseText.Length > 0)
-        {
-            if (!ctx.JsonMode) AnsiConsole.Markup("[dim]  critic reviewing…[/]");
-            var (approved, reason) = await ctx.SubAgent.CriticReviewAsync(
-                input, expectedTool: null, toolCallsThisTurn, responseText, cancellationToken);
-            if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 40)}\r");
-            if (!approved)
-            {
-                await ctx.Emitter.EmitAsync(EventTypes.CorrectionInjected, turn: ctx.TurnIndex, payload: new { reason = "critic_rejected", detail = reason });
-                if (!ctx.JsonMode)
-                    AnsiConsole.MarkupLine($"[yellow]  ✗ Critic: {Markup.Escape(reason ?? "no reason given")}[/]");
-                var correctionMsg =
-                    $"A critic reviewed your last response and rejected it: {reason}\n" +
-                    "Verify the disputed claim with a tool call and correct your answer. " +
-                    "Do not just restate the same claim.";
-                await ExecuteAsync(
-                    ctx, correctionMsg,
-                    isStepRequest: false, capturePlan: false, activeStep: null,
-                    cancellationToken, isCorrectionTurn: true);
-            }
-        }
+        await TryApplyCriticReviewAsync(
+            ctx, input, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn, cancellationToken);
 
         var postEst = ctx.EstimateTokens();
         if (ctx.PrevTurnTokenEstimate > 0)
@@ -586,6 +537,82 @@ internal static class ReplTurn
 
         ctx.TurnIndex++;
         return stepPassed;
+    }
+
+    // Free-form turns: if the response claims a mutation but no write tool was called,
+    // auto-inject a correction so the agent is required to actually call the tool.
+    // On the correction turn itself fall back to a warning to avoid infinite recursion.
+    private static async Task TryApplyMutationCorrectionAsync(
+        ReplSessionContext ctx,
+        string responseText,
+        List<string> toolCallsThisTurn,
+        bool isStepRequest,
+        bool capturePlan,
+        bool isCorrectionTurn,
+        CancellationToken cancellationToken)
+    {
+        if (!isStepRequest && !capturePlan && responseText.Length > 0 &&
+            !toolCallsThisTurn.Any(t => MutationTools.Contains(t)) &&
+            ContainsMutationClaim(responseText))
+        {
+            if (!isCorrectionTurn)
+            {
+                await ctx.Emitter.EmitAsync(EventTypes.CorrectionInjected, turn: ctx.TurnIndex, payload: new { reason = "mutation_claimed_without_write_tool" });
+                if (!ctx.JsonMode)
+                    AnsiConsole.MarkupLine("[dim]  ↺ mutation claimed without write tool — injecting correction[/]");
+                const string correctionMsg =
+                    "You described changes above but did not call any write tool. " +
+                    "Please call write_file or patch_file now to actually apply the changes. " +
+                    "Do not re-describe the changes — just call the tool.";
+                await ExecuteAsync(
+                    ctx, correctionMsg,
+                    isStepRequest: false, capturePlan: false, activeStep: null,
+                    cancellationToken, isCorrectionTurn: true);
+            }
+            else
+            {
+                if (!ctx.JsonMode)
+                    AnsiConsole.MarkupLine(
+                        "[yellow]  ⚠ No write tool called after correction — verify the agent did not fabricate this result.[/]");
+            }
+        }
+    }
+
+    // Free-form turns under adversarial mode: a critic agent reviews the response for
+    // fabrication/correctness, same infrastructure /execute steps use. Skipped on the
+    // correction turn itself so a rejection can't recurse forever.
+    private static async Task TryApplyCriticReviewAsync(
+        ReplSessionContext ctx,
+        string input,
+        string responseText,
+        List<string> toolCallsThisTurn,
+        bool isStepRequest,
+        bool capturePlan,
+        bool isCorrectionTurn,
+        CancellationToken cancellationToken)
+    {
+        if (ctx.AdversarialMode && ctx.SubAgent is not null &&
+            !isStepRequest && !capturePlan && !isCorrectionTurn && responseText.Length > 0)
+        {
+            if (!ctx.JsonMode) AnsiConsole.Markup("[dim]  critic reviewing…[/]");
+            var (approved, reason) = await ctx.SubAgent.CriticReviewAsync(
+                input, expectedTool: null, toolCallsThisTurn, responseText, cancellationToken);
+            if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 40)}\r");
+            if (!approved)
+            {
+                await ctx.Emitter.EmitAsync(EventTypes.CorrectionInjected, turn: ctx.TurnIndex, payload: new { reason = "critic_rejected", detail = reason });
+                if (!ctx.JsonMode)
+                    AnsiConsole.MarkupLine($"[yellow]  ✗ Critic: {Markup.Escape(reason ?? "no reason given")}[/]");
+                var correctionMsg =
+                    $"A critic reviewed your last response and rejected it: {reason}\n" +
+                    "Verify the disputed claim with a tool call and correct your answer. " +
+                    "Do not just restate the same claim.";
+                await ExecuteAsync(
+                    ctx, correctionMsg,
+                    isStepRequest: false, capturePlan: false, activeStep: null,
+                    cancellationToken, isCorrectionTurn: true);
+            }
+        }
     }
 
     // Carrier for the outcome of streaming one turn's response, retrying on transient
