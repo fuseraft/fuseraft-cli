@@ -108,7 +108,12 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
         }
 
         var results         = new List<EvalCaseResult>();
-        var approvalService = new ConsoleHumanApprovalService();
+        // Eval runs are unattended by definition (no --hitl, often no TTY at all — CI).
+        // ConsoleHumanApprovalService would block on Console.ReadLine() the moment a
+        // validator gets stuck or an agent reports BLOCKED, since SessionRunner escalates
+        // to those prompts regardless of hitlMode. Use the non-interactive service so that
+        // escalation resolves to a deterministic failure instead of a misleading prompt.
+        var approvalService = new NonInteractiveHumanApprovalService();
 
         foreach (var evalCase in cases)
         {
