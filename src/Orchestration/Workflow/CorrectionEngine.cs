@@ -124,10 +124,15 @@ internal static class CorrectionEngine
             ? $"\n\nThe most recent failed shell command produced this output:\n{failedOutput}"
             : string.Empty;
 
+        // Every branch must start with a prefix ContextWindowFilter.IsCorrectionMessage
+        // recognizes (see CorrectionPrefixes) — agents on the declared-context/artifact_spec
+        // path only see ChatRole.User history that matches one of those prefixes, so an
+        // unprefixed first-occurrence message is silently invisible to them and they repeat
+        // the same mistake next turn with no idea why it was rejected.
         var errorToInject = consecutiveCount > 1
             ? $"RETRY {consecutiveCount}/{maxRetries} — Previous attempt did not resolve this. Do not repeat it.\n\n" +
               errorMessage + buildDetail
-            : errorMessage + buildDetail;
+            : $"VALIDATION FAILED — {errorMessage}" + buildDetail;
 
         history.Add(new ChatMessage(ChatRole.User, errorToInject));
         await (eventEmitter?.EmitAsync(EventTypes.CorrectionInjected,

@@ -354,7 +354,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                         }
 
                         var escalation =
-                            $"You have received the same critique {newVisits} times (limit: {transition.MaxRevisits}). " +
+                            $"CRITIQUE ESCALATION: You have received the same critique {newVisits} times (limit: {transition.MaxRevisits}). " +
                             $"This is escalation attempt {escalationAttempt} of {transition.MaxEscalations} — after which the session will abort.\n\n" +
                             (objections.Length > 0
                                 ? $"Outstanding objections from the last review:\n{objections.Trim()}\n\n"

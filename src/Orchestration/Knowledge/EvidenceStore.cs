@@ -85,7 +85,13 @@ public sealed class EvidenceStore
         CancellationToken ct = default)
     {
         var graph = await _store.LoadAsync(ct);
-        var sid = graph.ActiveSessionId;
+        // Prefer this instance's own stamped session over the shared file's ActiveSessionId:
+        // the file is one on-disk graph shared by every EvidenceStore instance ever pointed at
+        // this path (e.g. successive eval-suite cases against the same project), so its
+        // ActiveSessionId reflects whichever instance most recently called SetSessionIdAsync —
+        // not necessarily this one. Falling back to it only when this instance was never
+        // stamped preserves the original behavior for read-only callers.
+        var sid = _sessionId ?? graph.ActiveSessionId;
         var source = sid is not null
             ? graph.Nodes.Where(n => string.Equals(n.SessionId, sid, StringComparison.Ordinal))
             : (IEnumerable<EvidenceNode>)graph.Nodes;

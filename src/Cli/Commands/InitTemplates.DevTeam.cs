@@ -50,10 +50,15 @@ public static partial class InitTemplates
               Exit 0 = runtime present. Exit 127 or 128 = missing.
 
               STEP 4 — CHECK GIT
-              git_is_inside_work_tree()
-                Returns "true"  → git repo. Also run git_status() and note whether
-                                  the working tree is clean (no lines beyond the branch header).
-                Returns "false" → not a git repo. Record this — agents will skip git steps.
+              git_is_repo_root()
+                Returns "true"  → this directory is itself a git repo root. Also run
+                                  git_status() and note whether the working tree is clean
+                                  (no lines beyond the branch header).
+                Returns "false" → not a git repo of its own — either untracked, or merely nested
+                                  inside some ancestor repo. Record this — agents will skip git
+                                  steps. Do not use git_is_inside_work_tree for this check: it
+                                  returns "true" for any ancestor repo too, which would wrongly
+                                  signal that it is safe to commit here.
 
               STEP 5 — WRITE PREFLIGHT REPORT
               Call write_file_preflight(content: ..., format: "json"). content must be a JSON
@@ -61,7 +66,7 @@ public static partial class InitTemplates
                 project_types    — array of detected types, e.g. ["python"]
                 runtime_versions — array, each entry "runtime: version", e.g. ["python3: 3.12.1"]
                 missing_runtimes — array of runtimes that returned exit 127/128
-                git_repo         — boolean: true if git_is_inside_work_tree() returned "true"
+                git_repo         — boolean: true if git_is_repo_root() returned "true"
                 git_clean        — boolean or null: true if git_status() output has no changed-file lines
                 warnings         — array of non-fatal observations
               You are read-only with respect to this project's own files — you have no
@@ -192,6 +197,18 @@ public static partial class InitTemplates
               6. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO CRITIC").
 
+              IF YOU CANNOT PROCEED
+              Do not call handoff. Do not treat another agent's session_context note about
+              a missing tool or capability as verified fact — a prior agent's turn may
+              itself be mistaken, and a false blocker claim compounds if you repeat it
+              unverified. If a blocker cites a specific tool or capability, call
+              self_has_capability(name: "...") first to check it against your own actual
+              tool list rather than trusting memory or another agent's notes. If the task
+              is genuinely unachievable as specified (not just "the brief needs revision"
+              — write_file_brief handles that), write a clear explanation of exactly what
+              is blocking you, then end your response with the single word BLOCKED on its
+              own line, as literal text — not a tool call.
+
               You are read-only with respect to this project's own files — you have no
               write_file/patch_file access. write_file_brief is the only way to persist this
               brief; implementing the task itself is the Developer's job, not yours.
@@ -206,6 +223,7 @@ public static partial class InitTemplates
               - Objective
               - Brief
               - Handoff
+              - Self
             Capabilities:
               FileSystem: [read]
             FunctionChoice: required
@@ -333,7 +351,9 @@ public static partial class InitTemplates
                  If verify_command FAILS: read the failing source before retrying — understand
                  the new error before writing new code. Do NOT re-run the same command again
                  without first making a change.
-              5. Commit with git_add and git_commit.
+              5. If git_repo is true in {FuseraftPaths.LocalPreflight}, commit with git_add and
+                 git_commit. If git_repo is false or the file is absent, skip — do not attempt
+                 git commands against a directory that is not its own repo.
               6. {ContextWriteStep}
               Before calling handoff(route_keyword: "HANDOFF TO TESTER"):
                 - Call changes_read_latest and confirm every file-write step in
@@ -481,9 +501,10 @@ public static partial class InitTemplates
                  `files_to_change` has been written (i.e., implementation has started): if
                  the change log shows verify_command has not yet run successfully, before
                  running any git command first probe with
-                 git_is_inside_work_tree() — if the result is "false" the sandbox is not a
-                 git repository and you must skip every git command in this step; only
-                 proceed with git operations when the result is "true". Then
+                 git_is_repo_root() — if the result is "false" this directory is not its own
+                 git repository (untracked, or merely nested inside some ancestor repo) and you
+                 must skip every git command in this step; only proceed with git operations when
+                 the result is "true". Then
                  use shell_run to execute the verify_command from {FuseraftPaths.LocalBrief}
                  and record the result. If no files_to_change have been written yet, skip
                  this step — the Developer has not started and a pre-implementation failure
