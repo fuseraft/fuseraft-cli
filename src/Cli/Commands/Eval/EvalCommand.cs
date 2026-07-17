@@ -7,6 +7,7 @@ using Spectre.Console.Cli;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 using fuseraft.Core.Models;
+using fuseraft.Core.Models.Orchestration;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Plugins;
 
@@ -167,6 +168,7 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
             var caseToken = caseCts?.Token ?? cancellationToken;
 
             SessionResult sessionResult;
+            TerminationStrategyConfig? termination = null;
             try
             {
                 var built = await OrchestratorBuilder.BuildAsync(
@@ -175,6 +177,7 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
 
                 var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter,
                      governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, _, sessionMetrics) = built;
+                termination = config.Termination;
 
                 await using var _mcp = mcpManager;
                 using  var _gov      = governanceKernel;
@@ -238,7 +241,7 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
                 continue;
             }
 
-            var caseResult = Score(evalCase, sessionResult, sessionId);
+            var caseResult = Score(evalCase, sessionResult, sessionId, termination);
             results.Add(caseResult);
             PrintCaseResult(caseResult);
         }
@@ -255,14 +258,28 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
     // ── Scoring ─────────────────────────────────────────────────────────────
     // internal so tests can call directly without spinning up an orchestrator.
 
-    internal static EvalCaseResult Score(EvalCase evalCase, SessionResult result, string sessionId)
+    internal static EvalCaseResult Score(
+        EvalCase evalCase, SessionResult result, string sessionId, TerminationStrategyConfig? termination = null)
     {
         var failures = new List<string>();
 
         if (evalCase.MustSucceed && !result.Succeeded)
             failures.Add($"session did not succeed: {result.ErrorMessage ?? "unknown"}");
 
-        var lastAssistant = result.Messages.LastOrDefault(m => m.Role == MessageRole.Assistant);
+        // Prefer the last message from whichever agent the orchestration's own regex
+        // termination condition is scoped to (Termination.AgentNames) — mirrors
+        // RegexTerminationCondition's own agent-filtered backward scan (see its doc
+        // comment). Without this, a periodic/auxiliary agent (e.g. a Verifier) that
+        // speaks *after* the approving agent's turn becomes "the last assistant message"
+        // even though RegexTerminationCondition correctly looked past it and terminated
+        // on the earlier, agent-matched message — scoring the session a false FAIL.
+        var terminationAgentNames = FindRegexTerminationAgentNames(termination);
+        var lastAssistant = terminationAgentNames is { Length: > 0 }
+            ? result.Messages.LastOrDefault(m =>
+                  m.Role == MessageRole.Assistant &&
+                  terminationAgentNames.Any(n => string.Equals(n, m.AgentName, StringComparison.OrdinalIgnoreCase)))
+              ?? result.Messages.LastOrDefault(m => m.Role == MessageRole.Assistant)
+            : result.Messages.LastOrDefault(m => m.Role == MessageRole.Assistant);
         var finalContent  = lastAssistant?.Content ?? string.Empty;
 
         // A turn that only calls handoff() with no accompanying prose leaves Content empty —
@@ -310,6 +327,26 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
             TotalOutputTokens = result.Messages.Sum(m => (long)(m.Usage?.OutputTokens ?? 0)),
             ErrorMessage      = result.ErrorMessage,
         };
+    }
+
+    // Recursively searches a (possibly composite) termination config for a "regex" strategy
+    // with AgentNames set, matching how CompositeTerminationStrategy/RegexTerminationCondition
+    // are actually built from this same config (see StrategyFactory). Returns the first match
+    // depth-first; a config with multiple agent-scoped regex strategies is not expected here.
+    private static string[]? FindRegexTerminationAgentNames(TerminationStrategyConfig? config)
+    {
+        if (config is null) return null;
+
+        if (string.Equals(config.Type, "regex", StringComparison.OrdinalIgnoreCase)
+            && config.AgentNames is { Length: > 0 })
+            return config.AgentNames;
+
+        if (config.Strategies is not null)
+            foreach (var child in config.Strategies)
+                if (FindRegexTerminationAgentNames(child) is { Length: > 0 } found)
+                    return found;
+
+        return null;
     }
 
     internal static EvalSuite LoadSuite(string path)

@@ -120,7 +120,10 @@ public sealed class GitPlugin
         return result.ToPluginOutput();
     }
 
-    [Description("Returns 'true' if the path is inside a git working tree, 'false' otherwise.")]
+    [Description("Returns 'true' if the path is inside a git working tree, 'false' otherwise. " +
+                 "Note: this is also 'true' for a plain subdirectory of some ancestor repo that " +
+                 "has no .git of its own — use is_repo_root instead when the question is whether " +
+                 "it is safe to commit here as this project's own history.")]
     public async Task<string> IsInsideWorkTreeAsync(
         [Description("Repo path to check (defaults to CWD).")] string? repoPath = null)
     {
@@ -128,6 +131,27 @@ public sealed class GitPlugin
         return result.ExitCode is 128 or 129 ? "false"
              : result.Succeeded               ? "true"
              : "false";
+    }
+
+    [Description("Returns 'true' if this exact path is itself the root of a git working tree " +
+                 "(has its own .git), 'false' if it is not a repo at all or is merely nested " +
+                 "inside an ancestor repo's working tree. Prefer this over is_inside_work_tree " +
+                 "before committing: a project directory can be 'inside a work tree' purely by " +
+                 "being nested under some unrelated ancestor repo (e.g. a scratch folder under a " +
+                 "dotfiles-tracked home directory) — committing there would land in that ancestor's " +
+                 "history and be subject to its .gitignore, not this project's own.")]
+    public async Task<string> IsRepoRootAsync(
+        [Description("Directory to check (defaults to CWD).")] string? repoPath = null)
+    {
+        var result = await Git("rev-parse --show-toplevel", repoPath);
+        if (!result.Succeeded) return "false";
+
+        var toplevel = result.Stdout.Trim().TrimEnd('/', '\\');
+        var target   = Path.GetFullPath(string.IsNullOrWhiteSpace(repoPath)
+            ? Directory.GetCurrentDirectory()
+            : ProcessHelper.ExpandHome(repoPath)).TrimEnd('/', '\\');
+
+        return string.Equals(toplevel, target, StringComparison.Ordinal) ? "true" : "false";
     }
 
     [Description("Push commits to a remote.")]

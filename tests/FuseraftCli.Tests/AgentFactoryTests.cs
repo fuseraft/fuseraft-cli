@@ -83,6 +83,30 @@ public sealed class AgentFactoryTests : IDisposable
         Assert.NotNull(agent);
     }
 
+    // "Self" is a declaration-of-intent skipped by AgentToolResolver.ConvertPluginTools
+    // (like "Skills") and instead built by AgentFactory.Create itself, from the complete
+    // resolved tool set — this exercises that end-to-end wiring doesn't throw regardless
+    // of where "Self" appears in the declared plugin order.
+    [Fact]
+    public void Create_Succeeds_WithSelfPluginDeclaredLast()
+    {
+        var config = ValidConfig() with { Plugins = ["Shell", "Self"] };
+
+        var agent = _factory.Create(config);
+
+        Assert.NotNull(agent);
+    }
+
+    [Fact]
+    public void Create_Succeeds_WithSelfPluginDeclaredFirst()
+    {
+        var config = ValidConfig() with { Plugins = ["Self", "Shell"] };
+
+        var agent = _factory.Create(config);
+
+        Assert.NotNull(agent);
+    }
+
     // Helpers
 
     private static AgentConfig ValidConfig() => new()

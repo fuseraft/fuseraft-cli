@@ -53,6 +53,15 @@ public static partial class InitTemplates
 
               When both write_file_conventions and write_file_discovery_brief have been called,
               call handoff(route_keyword: "RECON COMPLETE").
+
+              IF YOU CANNOT PROCEED
+              Do not call handoff. If a blocker cites a specific tool or capability, call
+              self_has_capability(name: "...") first to check it against your own actual
+              tool list rather than trusting memory. If recon is genuinely blocked (e.g.
+              the codebase cannot be read, or a required file is missing with no
+              reasonable way to infer it), write a clear explanation of exactly what is
+              blocking you, then end your response with the single word BLOCKED on its
+              own line, as literal text — not a tool call.
             Model:
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
@@ -63,6 +72,7 @@ public static partial class InitTemplates
               - Conventions
               - DiscoveryBrief
               - Handoff
+              - Self
             Capabilities:
               FileSystem: [read]
             FunctionChoice: required
@@ -111,6 +121,18 @@ public static partial class InitTemplates
               7. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
 
+              IF YOU CANNOT PROCEED
+              Do not call handoff. Do not treat another agent's session_context note about
+              a missing tool or capability as verified fact — a prior agent's turn may
+              itself be mistaken, and a false blocker claim compounds if you repeat it
+              unverified. If a blocker cites a specific tool or capability, call
+              self_has_capability(name: "...") first to check it against your own actual
+              tool list rather than trusting memory or another agent's notes. If the task
+              is genuinely unachievable as specified (not just "the brief needs revision"
+              — write_file_brief handles that), write a clear explanation of exactly what
+              is blocking you, then end your response with the single word BLOCKED on its
+              own line, as literal text — not a tool call.
+
               You are read-only with respect to this project's own files — you have no
               write_file/patch_file access. write_file_brief is the only way to persist this
               brief; implementing the task itself is the Developer's job, not yours.
@@ -123,6 +145,7 @@ public static partial class InitTemplates
               - SubAgent
               - Brief
               - Handoff
+              - Self
             Capabilities:
               FileSystem: [read]
             FunctionChoice: required
@@ -154,7 +177,10 @@ public static partial class InitTemplates
                     the exact error. Read the failing source before retrying.
                  c. If it passes: call investigation_confirm_hypothesis(id, evidence).
                  You MUST NOT call handoff with any open hypotheses.
-              8. Commit with git_add and git_commit.
+              8. Call git_is_repo_root() — if "true", commit with git_add and git_commit. If
+                 "false", this directory is not its own git repo (untracked, or merely nested
+                 inside some ancestor repo), so skip committing rather than risk a failed or
+                 misdirected commit.
               9. {ContextWriteStep}
               When done, call handoff(route_keyword: "HANDOFF TO REVIEWER").
               If the brief is fundamentally unclear, call handoff(route_keyword: "REPLAN REQUIRED").

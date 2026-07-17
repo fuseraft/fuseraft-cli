@@ -1,6 +1,7 @@
 using fuseraft.Cli;
 using fuseraft.Cli.Commands.Eval;
 using fuseraft.Core.Models;
+using fuseraft.Core.Models.Orchestration;
 
 namespace FuseraftCli.Tests;
 
@@ -171,6 +172,57 @@ public sealed class EvalCommandTests
                 Role      = "assistant",
                 ToolCalls = [new ToolCallRecord("shell_run", "command=ls", true)],
             },
+        };
+        var sessionResult = new SessionResult(true, null, messages, TimeSpan.FromMilliseconds(500));
+
+        var result = EvalCommand.Score(
+            new EvalCase { Id = "t1", ExpectRegex = [@"\bAPPROVED\b"] },
+            sessionResult,
+            "sid1");
+
+        Assert.False(result.Passed);
+    }
+
+    // ── Score — termination-agent scoping ─────────────────────────────────────
+    // Regression coverage for: a periodic/auxiliary agent (e.g. a Verifier) speaking
+    // *after* the approving agent's turn must not shadow that agent's actual approval,
+    // matching RegexTerminationCondition's own agent-filtered backward scan.
+
+    [Fact]
+    public void Score_TerminationAgentScoped_FindsApprovalBehindLaterUnrelatedAgent()
+    {
+        var messages = new List<AgentMessage>
+        {
+            new() { AgentName = "Reviewer", Content = "Looks good. APPROVED", Role = "assistant" },
+            new() { AgentName = "Verifier", Content = "Evidence verified — no inconsistencies found.", Role = "assistant" },
+        };
+        var sessionResult = new SessionResult(true, null, messages, TimeSpan.FromMilliseconds(500));
+        var termination = new TerminationStrategyConfig
+        {
+            Type       = "composite",
+            Strategies =
+            [
+                new TerminationStrategyConfig { Type = "regex", Pattern = @"\bAPPROVED\b", AgentNames = ["Reviewer"] },
+                new TerminationStrategyConfig { Type = "maxiterations", MaxIterations = 60 },
+            ],
+        };
+
+        var result = EvalCommand.Score(
+            new EvalCase { Id = "t1", ExpectRegex = [@"\bAPPROVED\b"] },
+            sessionResult,
+            "sid1",
+            termination);
+
+        Assert.True(result.Passed);
+    }
+
+    [Fact]
+    public void Score_NoTerminationConfig_FallsBackToLastAssistantMessage()
+    {
+        var messages = new List<AgentMessage>
+        {
+            new() { AgentName = "Reviewer", Content = "Looks good. APPROVED", Role = "assistant" },
+            new() { AgentName = "Verifier", Content = "Evidence verified — no inconsistencies found.", Role = "assistant" },
         };
         var sessionResult = new SessionResult(true, null, messages, TimeSpan.FromMilliseconds(500));
 

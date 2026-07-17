@@ -181,6 +181,17 @@ public sealed class AgentFactory(
         // notifying proxy when a ToolCalling callback is registered so notifications fire
         // at invocation time (real-time) rather than after the whole batch finishes executing.
         var tools = _toolResolver.ConvertPluginTools(config, resolvedModel, _sessionId, _turnResettables, _resettablesLock);
+
+        // "Self" needs the complete resolved tool-name set as input, so it's built here —
+        // after every other declared plugin has contributed its tools — rather than inside
+        // ConvertPluginTools's loop, where the set wouldn't yet be complete if Self were
+        // declared before other plugins in the agent's Plugins: list.
+        if (config.Plugins.Any(p => p.Equals("Self", StringComparison.OrdinalIgnoreCase)))
+        {
+            var toolNames = tools.Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
+            tools.AddRange(PluginRegistry.GetFunctionsFromObject(new SelfPlugin(toolNames)));
+        }
+
         tools     = AgentToolResolver.BuildCachingMiddleware(tools, toolArtifactStore);
         tools     = AgentToolResolver.WrapWithNotifications(tools, config.Name, onToolCalling, _toolCounts);
 

@@ -20,7 +20,7 @@ namespace fuseraft.Infrastructure.Plugins;
 /// <list type="table">
 ///   <item><term>FileSystem</term><description><c>read</c> (read_file, grep_file, get_file_summary, get_file_info, list_files) · <c>write</c> (write_file, patch_file, save_file_summary, create_directory, copy_file, move_file, set_permissions) · <c>delete</c> (delete_file, delete_directory)</description></item>
 ///   <item><term>Shell</term><description><c>read</c> (get_env, get_job_status, get_job_output, which, working_directory) · <c>run</c> (shell_run, shell_run_script, shell_run_background, shell_set_env, shell_kill_job)</description></item>
-///   <item><term>Git</term><description><c>read</c> (status, diff, log, show, branch_list, stash_list) · <c>write</c> (add, commit, checkout, create_branch, init, push, pull, stash, stash_pop, reset)</description></item>
+///   <item><term>Git</term><description><c>read</c> (status, diff, log, show, branch_list, stash_list, is_inside_work_tree, is_repo_root) · <c>write</c> (add, commit, checkout, create_branch, init, push, pull, stash, stash_pop, reset)</description></item>
 ///   <item><term>Http</term><description><c>get</c> · <c>post</c> · <c>put</c> · <c>patch</c> · <c>delete</c> — one per HTTP verb</description></item>
 ///   <item><term>Json</term><description><c>read</c> (format, minify, get, keys, search, to_text, validate) · <c>write</c> (merge)</description></item>
 ///   <item><term>Document</term><description><c>read</c> (extract_text, get_info, list_sheets, get_sheet — all read-only)</description></item>
@@ -77,6 +77,7 @@ internal static class PluginCapabilityMap
         ["git_branch_list"]                = "read",
         ["git_stash_list"]                 = "read",
         ["git_is_inside_work_tree"]        = "read",
+        ["git_is_repo_root"]               = "read",
         ["git_add"]                        = "write",
         ["git_commit"]                     = "write",
         ["git_checkout"]                   = "write",

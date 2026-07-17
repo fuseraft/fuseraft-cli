@@ -456,9 +456,12 @@ public static class ContextWindowFilter
     private static readonly string[] CorrectionPrefixes =
     [
         "RETRY ",
+        "VALIDATION FAILED",        // CorrectionEngine.InjectValidationError first occurrence
+        "CRITIQUE ESCALATION:",     // back-edge revisit escalation (StateMachineSelectionStrategy)
         "NO TOOL CALLS",
         "CRITICAL:",
         "APPROVED rejected:",
+        "APPROVED blocked:",        // RequireReviewJudgementValidator, KeywordSelectionStrategy
         "WRONG KEYWORD:",
         "JSON block correct",
         "BUILD FAILURE:",
