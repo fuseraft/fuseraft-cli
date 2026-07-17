@@ -470,7 +470,7 @@ internal static class ReplTurn
                     var (glyph, color) = item.Status.Equals("completed", StringComparison.OrdinalIgnoreCase) ? ("x", "green")
                         : item.Status.Equals("in_progress", StringComparison.OrdinalIgnoreCase) ? ("~", "yellow")
                         : (" ", "dim");
-                    AnsiConsole.MarkupLine($"  [{color}][{glyph}][/] [dim]{Markup.Escape(item.Content)}[/]");
+                    AnsiConsole.MarkupLine($"  [{color}]{Markup.Escape($"[{glyph}]")}[/] [dim]{Markup.Escape(item.Content)}[/]");
                 }
             }
         }
