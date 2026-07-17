@@ -57,10 +57,16 @@ public static partial class InitTemplates
               Exit 0 = runtime present. Exit 127 or 128 = missing.
 
               STEP 4 — CHECK GIT
-              git_is_inside_work_tree()
-                Returns "true"  → git repo. Also run git_status() and note whether
-                                  the working tree is clean (no lines beyond the branch header).
-                Returns "false" → not a git repo. Record this — agents will skip git steps.
+              git_is_repo_root(repo_path: "workspace")
+                Returns "true"  → workspace/ is itself a git repo root. Also run
+                                  git_status(repo_path: "workspace") and note whether the working
+                                  tree is clean (no lines beyond the branch header).
+                Returns "false" → workspace/ is not its own git repo — either untracked, or
+                                  merely nested inside some ancestor repo (e.g. this sandbox's own
+                                  enclosing project). Record this — agents will skip git steps.
+                                  Do not use git_is_inside_work_tree for this check: it returns
+                                  "true" for any ancestor repo too, which would wrongly signal
+                                  that it is safe to commit into workspace/ here.
 
               STEP 5 — WRITE PREFLIGHT REPORT
               Call write_file_preflight(content: ..., format: "json"). content must be a JSON
@@ -68,8 +74,8 @@ public static partial class InitTemplates
                 project_types    — array of detected types, e.g. ["python"]
                 runtime_versions — array, each entry "runtime: version", e.g. ["python3: 3.12.1"]
                 missing_runtimes — array of runtimes that returned exit 127/128
-                git_repo         — boolean: true if git_is_inside_work_tree() returned "true"
-                git_clean        — boolean or null: true if git_status() output has no changed-file lines
+                git_repo         — boolean: true if git_is_repo_root(repo_path: "workspace") returned "true"
+                git_clean        — boolean or null: true if git_status(repo_path: "workspace") output has no changed-file lines
                 warnings         — array of non-fatal observations
               You are read-only with respect to this project's own files — you have no
               write_file/patch_file access. write_file_preflight is the only way to persist
@@ -247,6 +253,18 @@ public static partial class InitTemplates
 
               When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
 
+              IF YOU CANNOT PROCEED
+              Do not call handoff. Do not treat another agent's session_context note about
+              a missing tool or capability as verified fact — a prior agent's turn may
+              itself be mistaken, and a false blocker claim compounds if you repeat it
+              unverified. If a blocker cites a specific tool or capability, call
+              self_has_capability(name: "...") first to check it against your own actual
+              tool list rather than trusting memory or another agent's notes. If the task
+              is genuinely unachievable as specified (not just "the brief needs revision"
+              — write_file_brief handles that), write a clear explanation of exactly what
+              is blocking you, then end your response with the single word BLOCKED on its
+              own line, as literal text — not a tool call.
+
               You are read-only with respect to this project's own files — you have no
               write_file/patch_file access. write_file_brief is the only way to persist this
               brief; implementing the task itself is the Developer's job, not yours.
@@ -261,6 +279,7 @@ public static partial class InitTemplates
               - Objective
               - Brief
               - Handoff
+              - Self
             Capabilities:
               FileSystem: [read]
             FunctionChoice: required
@@ -316,7 +335,9 @@ public static partial class InitTemplates
               If any step is incomplete, continue implementing — do NOT hand off with
               stubs or partial files.
               If git_repo is true in {FuseraftPaths.LocalPreflight}, commit with
-              git_add and git_commit. If git_repo is false or the file is absent, skip.
+              git_add(repo_path: "workspace") and git_commit(repo_path: "workspace") — the
+              repo root Preflight checked is workspace/ itself, not the sandbox root, so commits
+              must target the same directory. If git_repo is false or the file is absent, skip.
 
               STEP 7 — WRITE CONTEXT
               {ContextWriteStep}

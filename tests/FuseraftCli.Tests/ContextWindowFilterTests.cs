@@ -527,4 +527,30 @@ public sealed class ContextWindowFilterTests
         Assert.Equal(ChatRole.User, result[0].Role);
     }
 
+    // ── IsCorrectionMessage ─────────────────────────────────────────────────
+    // Regression coverage: agents on the declared-context/artifact_spec path only see
+    // ChatRole.User history that IsCorrectionMessage recognizes (see CorrectionPrefixes) —
+    // a validator error that doesn't match a known prefix is silently invisible to them.
+
+    [Theory]
+    [InlineData("VALIDATION FAILED — Contract 'TestsValid' failed.")]
+    [InlineData("CRITIQUE ESCALATION: You have received the same critique 4 times.")]
+    [InlineData("APPROVED blocked: response has no structured review block.")]
+    [InlineData("APPROVED rejected: no successful shell_run tool call found.")]
+    public void IsCorrectionMessage_RecognizesKnownPrefixes(string text)
+    {
+        Assert.True(ContextWindowFilter.IsCorrectionMessage(User(text)));
+    }
+
+    [Fact]
+    public void IsCorrectionMessage_FalseForUnrelatedUserMessage()
+    {
+        Assert.False(ContextWindowFilter.IsCorrectionMessage(User("Please add a --json flag.")));
+    }
+
+    [Fact]
+    public void IsCorrectionMessage_FalseForAssistantMessage()
+    {
+        Assert.False(ContextWindowFilter.IsCorrectionMessage(Text("Dev", "VALIDATION FAILED — not a correction, wrong role.")));
+    }
 }

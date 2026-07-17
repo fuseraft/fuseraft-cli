@@ -45,6 +45,12 @@ internal sealed class AgentToolResolver(
             // The Plugins entry is a declaration of intent; no registry lookup is needed.
             if (pluginName.Equals("Skills", StringComparison.OrdinalIgnoreCase))
                 continue;
+            // "Self" (SelfPlugin) needs the agent's *complete* resolved tool-name set as
+            // input, which isn't known until every other plugin in this loop has run — so
+            // it's built by AgentFactory.Create right after ConvertPluginTools returns,
+            // not resolved here. The Plugins entry is a declaration of intent, like Skills.
+            else if (pluginName.Equals("Self", StringComparison.OrdinalIgnoreCase))
+                continue;
             // "Scratchpad" is per-agent — each agent gets its own file under the session directory.
             else if (pluginName.Equals("Scratchpad", StringComparison.OrdinalIgnoreCase))
             {
