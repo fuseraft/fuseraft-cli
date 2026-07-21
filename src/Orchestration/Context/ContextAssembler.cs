@@ -521,8 +521,13 @@ public sealed class ContextAssembler
         IList<ChatMessage> history)
     {
         // Collect all text-only turns for this agent, newest last.
+        // Snapshot before iterating: `history` is the orchestrator's shared, still-live turn
+        // list. A periodic agent (e.g. Verifier, EveryNTurns) can append to it concurrently
+        // with the main turn loop's own context assembly, and enumerating the live list
+        // across an await-free but otherwise unsynchronized read throws
+        // InvalidOperationException ("Collection was modified") the instant that race lands.
         var ownTurns = new List<(ChatMessage Msg, int Chars)>();
-        foreach (var msg in history)
+        foreach (var msg in history.ToArray())
         {
             if (msg.Role != ChatRole.Assistant) continue;
             if (!string.Equals(msg.AuthorName, agentName, StringComparison.OrdinalIgnoreCase)) continue;

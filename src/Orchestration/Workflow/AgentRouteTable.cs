@@ -62,6 +62,18 @@ internal sealed class AgentRouteTable
     /// correction messages instead of inferring reviewer behavior from <see cref="PhaseBreakKeywords"/>.
     /// </summary>
     public bool IsReviewerType { get; set; }
+
+    /// <summary>
+    /// True when this node's agent actually has the FileSystem "write" capability
+    /// (write_file/patch_file) — mirrors <c>PluginCapabilityMap.IsAllowed</c>'s gate. Populated
+    /// by <c>GraphTopology.Build</c>. Consumed by <see cref="CorrectionEngine"/> so a stagnation
+    /// correction never tells a structurally read-only agent (Reviewer, Planner, Archaeologist)
+    /// to "write something" — advice it can only satisfy by misusing an unrelated capability
+    /// (e.g. shell_run) to write files outside its role. Defaults to <c>true</c> so an agent
+    /// whose name isn't found in <c>config.Agents</c> (should not happen) fails open rather than
+    /// silently muting a legitimate stagnation correction for a real writer.
+    /// </summary>
+    public bool CanWriteFiles { get; set; } = true;
 }
 
 /// <summary>Information about a single send-forward route.</summary>

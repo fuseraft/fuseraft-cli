@@ -127,8 +127,14 @@ public sealed class RequireReviewJudgementValidator(string? briefPath = null) : 
 
         // No Reviewer message found in history at all.
         return Task.FromResult(RoutingValidationResult.Fail(
-            "APPROVED blocked: no Reviewer message found. " +
-            "Complete your review with a structured judgement block before writing APPROVED."));
+            "APPROVED blocked: your last reply had no text content at all — you called the " +
+            "routing tool without writing anything first. This validator reads your reply's " +
+            "visible text; a tool call alone, with no accompanying text, has nothing for it to " +
+            "check.\n\n" +
+            "Write the ```json review block AND the routing keyword as text in this same reply " +
+            "(before or alongside calling the handoff tool) — do not call handoff with an empty " +
+            "or missing text response, even if you believe you already reviewed everything in an " +
+            "earlier turn."));
     }
 
     // When briefPath is set, loads acceptance_criteria count from brief.json and returns

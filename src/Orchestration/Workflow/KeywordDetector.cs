@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using fuseraft.Core.Models.Agents;
 using fuseraft.Infrastructure.Plugins;
 
 namespace fuseraft.Orchestration.Workflow;
@@ -32,6 +33,41 @@ internal static class KeywordDetector
                     && kwObj?.ToString() is { Length: > 0 } kw
                     && knownKeywords.Contains(kw))
                     return kw;
+
+        return null;
+    }
+
+    /// <summary>
+    /// Scans a <em>persisted</em> <see cref="ToolCallRecord"/> list (checkpoint history — after
+    /// the original <see cref="FunctionCallContent"/> arguments have been reduced to a compact
+    /// <c>key=value</c> <c>ArgsSummary</c> string) for a <c>handoff</c> call whose summarized
+    /// <c>route_keyword</c> matches one of <paramref name="knownKeywords"/>.
+    /// </summary>
+    /// <remarks>
+    /// A handoff turn very often has no keyword echoed in the message's own text — the model
+    /// puts the routing signal solely in the tool-call argument. Callers that need to re-derive
+    /// "what did this past turn route to" from checkpoint/priorHistory (e.g. resume-point
+    /// resolution) must check tool calls too, not just <see cref="IsKeywordOnOwnLineStrict"/>
+    /// against the message text, or they'll silently fall back to the wrong signal.
+    /// </remarks>
+    internal static string? ExtractHandoffKeywordFromToolCalls(
+        IReadOnlyList<ToolCallRecord>? toolCalls,
+        IEnumerable<string> knownKeywords)
+    {
+        if (toolCalls is null) return null;
+
+        var known = new HashSet<string>(knownKeywords, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var tc in toolCalls)
+        {
+            if (!string.Equals(tc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (tc.ArgsSummary is not { Length: > 0 } summary) continue;
+
+            foreach (var kw in known)
+                if (summary.Contains(kw, StringComparison.OrdinalIgnoreCase))
+                    return kw;
+        }
 
         return null;
     }

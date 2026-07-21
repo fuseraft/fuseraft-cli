@@ -64,6 +64,10 @@ public sealed class SagaOrchestrator(
     public void SetResumeExecutorId(string? executorId) => inner.SetResumeExecutorId(executorId);
 
     /// <inheritdoc/>
+    public string? ResolveResumeExecutorId(AgentMessage lastAssistantMessage) =>
+        inner.ResolveResumeExecutorId(lastAssistantMessage);
+
+    /// <inheritdoc/>
     public void SetResumeStateName(string? stateName) => inner.SetResumeStateName(stateName);
 
     /// <inheritdoc/>

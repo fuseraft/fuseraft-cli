@@ -103,11 +103,14 @@ public sealed class HandoffToTesterValidator(
         }
 
         // If the current turn has no write evidence, fall back to the session-scoped change log.
-        // A successful git_commit in any prior turn of this session is accepted — the Tester
-        // is responsible for verifying the work; the Developer shouldn't be blocked just because
-        // the commit happened in a turn before the handoff turn.
+        // A successful git_commit OR a successful write_file/patch_file in any prior turn of this
+        // session is accepted — the Tester is responsible for verifying the work; the Developer
+        // shouldn't be blocked just because the write (or its commit) happened in a turn before
+        // the handoff turn. This matters most in sandboxes where the workspace isn't its own git
+        // repo (commits are skipped entirely by design) — GitCommits alone would never be
+        // satisfiable there, permanently blocking any multi-turn write-then-handoff workflow.
         if (!hasWriteFile && !hasDepShell && !hasGitCommit && changeLogPath is not null)
-            hasGitCommit = await CheckChangeLogForCommitAsync(changeLogPath, cancellationToken);
+            hasGitCommit = await CheckChangeLogForPriorWorkAsync(changeLogPath, cancellationToken);
 
         if (!hasWriteFile && !hasDepShell && !hasGitCommit)
         {
@@ -124,10 +127,10 @@ public sealed class HandoffToTesterValidator(
         return RoutingValidationResult.Pass();
     }
 
-    // Checks the session-scoped change log for any successful git_commit. Used as a fallback
-    // when the current turn has no write evidence — allows handoff after a build-then-commit
-    // workflow that spans multiple turns.
-    private static async Task<bool> CheckChangeLogForCommitAsync(string logPath, CancellationToken ct)
+    // Checks the session-scoped change log for any successful git_commit OR write_file/patch_file.
+    // Used as a fallback when the current turn has no write evidence — allows handoff after a
+    // write-then-verify(-then-commit) workflow that spans multiple turns.
+    private static async Task<bool> CheckChangeLogForPriorWorkAsync(string logPath, CancellationToken ct)
     {
         if (!File.Exists(logPath)) return false;
         try
@@ -139,7 +142,7 @@ public sealed class HandoffToTesterValidator(
             var sessionId = log.ActiveSessionId;
             return log.Entries
                 .Where(e => sessionId is null || e.SessionId == sessionId)
-                .Any(e => e.GitCommits.Count > 0);
+                .Any(e => e.GitCommits.Count > 0 || e.FilesWritten.Count > 0);
         }
         catch
         {
