@@ -113,7 +113,11 @@ The team config used for a case is resolved in this order:
 
 ## JSONL output
 
-When `--output <path>` is given, one JSON object per case is written to that file after the suite completes:
+When `--output <path>` is given, one JSON object per case is appended to that file as soon as
+the case finishes — not batched to the end of the run. A case that finishes early (config not
+found, task not found) is recorded the same way. This means the file is a true partial log:
+if the suite is killed or crashes mid-run (a hung model API call, an operator interrupt), every
+case that had already completed is still on disk, not lost with the in-progress one.
 
 ```json
 {"case_id":"smoke-basic","session_id":"a1b2c3d4","passed":true,"failure_reasons":[],"total_turns":2,"duration_ms":3120,"total_input_tokens":841,"total_output_tokens":53,"error_message":null}
@@ -131,6 +135,20 @@ When `--output <path>` is given, one JSON object per case is written to that fil
 | `total_input_tokens` | Sum of input tokens across all turns |
 | `total_output_tokens` | Sum of output tokens across all turns |
 | `error_message` | Exception message if the orchestrator threw, otherwise `null` |
+
+## Live status
+
+Whenever `--output <path>` is set, `fuseraft eval run` also maintains `<path>.status.json` —
+overwritten (not appended) every time a case starts or finishes, so it's cheap to poll from
+outside the running process without re-reading the growing JSONL:
+
+```json
+{"suite":"Smoke Tests","total":7,"completed":3,"passed":2,"failed":1,"current_case":"code-generation","state":"running","started_at":"2026-07-20T21:08:51Z","updated_at":"2026-07-20T21:11:04Z"}
+```
+
+`state` is `"running"` for the whole suite duration and `"completed"` once every case has
+finished (`current_case` is `null` at that point). Useful for a dashboard, a CI step that wants
+a heartbeat, or just `watch cat results.jsonl.status.json` from a terminal while a long suite runs.
 
 ## CI integration
 
