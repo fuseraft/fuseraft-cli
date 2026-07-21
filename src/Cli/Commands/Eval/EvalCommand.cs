@@ -116,8 +116,61 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
         // escalation resolves to a deterministic failure instead of a misleading prompt.
         var approvalService = new NonInteractiveHumanApprovalService();
 
+        // Live progress reporting, active whenever -o/--output is set (no separate flag —
+        // the same file that already opts in to persisted results is the natural signal
+        // that something wants to observe this run). Two files, updated incrementally
+        // instead of once at the very end:
+        //   <output>          — one JSON line per COMPLETED case, appended+flushed as each
+        //                       case finishes, so `tail -f` (or a crash/hang mid-run) never
+        //                       loses already-completed results the way a single end-of-run
+        //                       batch write would.
+        //   <output>.status.json — small, cheaply-pollable snapshot: which case is running
+        //                       right now, and the pass/fail tally so far. Overwritten (not
+        //                       appended) after every state change.
+        var statusPath  = settings.OutputPath is not null ? settings.OutputPath + ".status.json" : null;
+        var startedAt   = DateTime.UtcNow;
+        StreamWriter? jsonlWriter = null;
+        if (settings.OutputPath is not null)
+        {
+            var dir = Path.GetDirectoryName(settings.OutputPath);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            jsonlWriter = new StreamWriter(settings.OutputPath, append: false) { AutoFlush = true };
+        }
+
+        async Task WriteStatusAsync(string? currentCaseId, string state)
+        {
+            if (statusPath is null) return;
+            var status = new EvalRunStatus(
+                Suite:       suite.Name,
+                Total:       cases.Count,
+                Completed:   results.Count,
+                Passed:      results.Count(r => r.Passed),
+                Failed:      results.Count(r => !r.Passed),
+                CurrentCase: currentCaseId,
+                State:       state,
+                StartedAt:   startedAt,
+                UpdatedAt:   DateTime.UtcNow);
+            try
+            {
+                await File.WriteAllTextAsync(statusPath, JsonSerializer.Serialize(status, JsonWriteOpts));
+            }
+            catch (Exception ex)
+            {
+                AnsiConsole.MarkupLine($"[yellow]⚠ Could not write status: {Markup.Escape(ex.Message)}[/]");
+            }
+        }
+
+        async Task RecordResultAsync(EvalCaseResult result)
+        {
+            results.Add(result);
+            if (jsonlWriter is not null)
+                await jsonlWriter.WriteLineAsync(JsonSerializer.Serialize(result, JsonWriteOpts));
+        }
+
         foreach (var evalCase in cases)
         {
+            await WriteStatusAsync(evalCase.Id, "running");
+
             var configPath = Path.GetFullPath(
                 evalCase.Config
                 ?? settings.ConfigPath
@@ -127,7 +180,7 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
             if (!File.Exists(configPath))
             {
                 AnsiConsole.MarkupLine($"[red]✗[/] {Markup.Escape(evalCase.Id.PadRight(40))}  config not found: {Markup.Escape(configPath)}");
-                results.Add(Failed(evalCase.Id, "—", $"config not found: {configPath}"));
+                await RecordResultAsync(Failed(evalCase.Id, "—", $"config not found: {configPath}"));
                 continue;
             }
 
@@ -140,7 +193,7 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
                 if (!File.Exists(absFile))
                 {
                     AnsiConsole.MarkupLine($"[red]✗[/] {Markup.Escape(evalCase.Id.PadRight(40))}  task_file not found: {Markup.Escape(absFile)}");
-                    results.Add(Failed(evalCase.Id, "—", $"task_file not found: {absFile}"));
+                    await RecordResultAsync(Failed(evalCase.Id, "—", $"task_file not found: {absFile}"));
                     continue;
                 }
                 task = (await File.ReadAllTextAsync(absFile, cancellationToken)).Trim();
@@ -153,7 +206,7 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
             if (string.IsNullOrWhiteSpace(task))
             {
                 AnsiConsole.MarkupLine($"[red]✗[/] {Markup.Escape(evalCase.Id.PadRight(40))}  no task defined");
-                results.Add(Failed(evalCase.Id, "—", "no task defined for this case"));
+                await RecordResultAsync(Failed(evalCase.Id, "—", "no task defined for this case"));
                 continue;
             }
 
@@ -231,26 +284,30 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
             {
                 // Case-level timeout fired; the suite-level token is still live.
                 AnsiConsole.MarkupLine("[yellow]TIMEOUT[/]");
-                results.Add(Failed(evalCase.Id, sessionId, $"timed out after {settings.TimeoutSeconds}s"));
+                await RecordResultAsync(Failed(evalCase.Id, sessionId, $"timed out after {settings.TimeoutSeconds}s"));
                 continue;
             }
             catch (Exception ex)
             {
                 AnsiConsole.MarkupLine("[red]ERROR[/]");
-                results.Add(Failed(evalCase.Id, sessionId, $"orchestrator exception: {ex.Message}", ex.Message));
+                await RecordResultAsync(Failed(evalCase.Id, sessionId, $"orchestrator exception: {ex.Message}", ex.Message));
                 continue;
             }
 
             var caseResult = Score(evalCase, sessionResult, sessionId, termination);
-            results.Add(caseResult);
+            await RecordResultAsync(caseResult);
             PrintCaseResult(caseResult);
         }
+
+        await WriteStatusAsync(null, "completed");
+        if (jsonlWriter is not null)
+            await jsonlWriter.DisposeAsync();
 
         AnsiConsole.WriteLine();
         PrintSummary(results);
 
         if (settings.OutputPath is not null)
-            await WriteJsonlAsync(results, settings.OutputPath);
+            AnsiConsole.MarkupLine($"[dim]Results → {Markup.Escape(settings.OutputPath)}[/]");
 
         return settings.Ci && results.Any(r => !r.Passed) ? 1 : 0;
     }
@@ -406,24 +463,21 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
 
     // ── I/O ──────────────────────────────────────────────────────────────────
 
-    private static async Task WriteJsonlAsync(List<EvalCaseResult> results, string path)
-    {
-        try
-        {
-            var dir = Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-
-            await using var writer = new StreamWriter(path, append: false);
-            foreach (var r in results)
-                await writer.WriteLineAsync(JsonSerializer.Serialize(r, JsonWriteOpts));
-
-            AnsiConsole.MarkupLine($"[dim]Results → {Markup.Escape(path)}[/]");
-        }
-        catch (Exception ex)
-        {
-            AnsiConsole.MarkupLine($"[yellow]⚠ Could not write results: {Markup.Escape(ex.Message)}[/]");
-        }
-    }
+    /// <summary>
+    /// Live progress snapshot written to <c>&lt;output&gt;.status.json</c> and overwritten
+    /// after every state change (case start, case completion, suite completion) — cheap to
+    /// poll from outside the running process without parsing the growing results JSONL.
+    /// </summary>
+    private sealed record EvalRunStatus(
+        string   Suite,
+        int      Total,
+        int      Completed,
+        int      Passed,
+        int      Failed,
+        string?  CurrentCase,
+        string   State,
+        DateTime StartedAt,
+        DateTime UpdatedAt);
 
     private static EvalCaseResult Failed(string caseId, string sessionId, string reason, string? error = null) =>
         new()
