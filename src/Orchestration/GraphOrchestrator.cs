@@ -157,6 +157,17 @@ public sealed class GraphOrchestrator(
     public void SetResumeExecutorId(string? executorId) => _resumeNodeId = executorId;
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// Delegates to <see cref="GraphTopology.ResolveHandoffTarget"/> so
+    /// <c>CompactionCoordinator.ApplyCompactionAsync</c> resumes at the target of a just-completed
+    /// handoff instead of at whoever spoke last. Returns <c>null</c> (falls back to the message's
+    /// own agent) before the topology is built — i.e. before the first <see cref="StreamAsync"/>
+    /// call has run — which cannot happen in practice since compaction only fires mid-session.
+    /// </remarks>
+    public string? ResolveResumeExecutorId(AgentMessage lastAssistantMessage) =>
+        _topology?.ResolveHandoffTarget(lastAssistantMessage);
+
+    /// <inheritdoc/>
     public void SetStructuredTask(TaskModel? model) => _structuredTask = model;
 
     public event Action<string>? AgentStarting;

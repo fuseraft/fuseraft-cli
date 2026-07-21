@@ -72,6 +72,48 @@ internal sealed class GraphTopology
     public bool IsBackEdge(string from, string to) => BackEdges.Contains(EdgeKey(from, to));
 
     /// <summary>
+    /// Resolves the node a single assistant message's handoff routes to — checking both literal
+    /// keyword text (<see cref="KeywordDetector.IsKeywordOnOwnLineStrict"/>) and, since a handoff
+    /// is very often signalled purely via the <c>handoff(route_keyword: ...)</c> tool call with no
+    /// keyword echoed in prose, the message's recorded tool calls
+    /// (<see cref="KeywordDetector.ExtractHandoffKeywordFromToolCalls"/>). Returns the
+    /// lower-invariant target node ID for whichever edge (back or forward) the message's keyword
+    /// matches, or <c>null</c> when the message contains no known routing keyword at all (it
+    /// wasn't a handoff turn).
+    /// </summary>
+    /// <remarks>
+    /// Used both by <see cref="DetermineStartNodeId"/>'s history scan and by
+    /// <c>GraphOrchestrator.ResolveResumeExecutorId</c> (called from
+    /// <c>CompactionCoordinator.ApplyCompactionAsync</c>) so a resume/compaction cycle that lands
+    /// right after a validated forward-edge handoff resumes at the handoff's target — not at the
+    /// speaker of the handoff turn, which is wrong the instant that turn already routed onward.
+    /// </remarks>
+    public string? ResolveHandoffTarget(AgentMessage msg)
+    {
+        if (msg.Role != "assistant") return null;
+        if (string.IsNullOrEmpty(msg.Content) && msg.ToolCalls is not { Count: > 0 }) return null;
+
+        bool HasKeyword(string keyword) =>
+            (!string.IsNullOrEmpty(msg.Content) && KeywordDetector.IsKeywordOnOwnLineStrict(msg.Content, keyword)) ||
+            KeywordDetector.ExtractHandoffKeywordFromToolCalls(msg.ToolCalls, [keyword]) is not null;
+
+        foreach (var (kw, nextNode) in BackEdgeDestinations)
+        {
+            if (kw == TerminalSentinel) continue;
+            if (nextNode is not null && HasKeyword(kw))
+                return nextNode;
+        }
+
+        foreach (var edge in EdgesBySource.Values.SelectMany(edges => edges))
+        {
+            if (!IsBackEdge(edge.From, edge.To) && edge.Keyword is { Length: > 0 } && HasKeyword(edge.Keyword))
+                return edge.To.ToLowerInvariant();
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Computes the full topology for one session: back-edge classification, per-node route
     /// tables (also populating back-edge destinations, unconditional routing, and parallel
     /// groups), then post-hoc parallel-config validation warnings.
@@ -215,6 +257,29 @@ internal sealed class GraphTopology
                 tables[node.Id] = table = new AgentRouteTable();
 
             table.IsReviewerType = true;
+        }
+
+        // Populate CanWriteFiles from the node's agent config: mirrors the same FileSystem
+        // "write" capability gate AgentToolResolver.BuildTools applies when resolving
+        // write_file/patch_file into the agent's actual tool list (PluginCapabilityMap.IsAllowed).
+        // Consumed by CorrectionEngine so stagnation corrections don't tell a read-only agent
+        // (Reviewer, Planner, Archaeologist) to "write something" — advice it can only satisfy
+        // by misusing an unrelated capability (e.g. shell_run) to write files it has no business
+        // touching.
+        var agentsByName = config.Agents.ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (var node in graphCfg.Nodes)
+        {
+            if (!agentsByName.TryGetValue(node.Agent, out var agentConfig)) continue;
+
+            bool canWrite = agentConfig.Plugins.Contains("FileSystem", StringComparer.OrdinalIgnoreCase)
+                && (!agentConfig.Capabilities.TryGetValue("FileSystem", out var fsCaps)
+                    || fsCaps.Count == 0
+                    || fsCaps.Contains("write", StringComparer.OrdinalIgnoreCase));
+
+            if (!tables.TryGetValue(node.Id, out var table))
+                tables[node.Id] = table = new AgentRouteTable();
+
+            table.CanWriteFiles = canWrite;
         }
 
         // Populate ForeignSendForwardKeywords per node so CorrectionEngine can produce
@@ -495,39 +560,17 @@ internal sealed class GraphTopology
         if (priorHistory is not { Count: > 0 })
             return defaultEntryNode;
 
-        // Priority 2: scan back-edge keywords in prior history (newest-first).
+        // Priority 2: scan prior history (newest-first) for a message whose handoff routes
+        // somewhere — either a back edge (resume at its target) or a forward edge (resume at
+        // the target rather than resetting to the entry).
         for (int i = priorHistory.Count - 1; i >= 0; i--)
         {
-            var msg = priorHistory[i];
-            if (msg.Role != "assistant" || string.IsNullOrEmpty(msg.Content)) continue;
-
-            foreach (var kw in BackEdgeDestinations.Keys)
+            var target = ResolveHandoffTarget(priorHistory[i]);
+            if (target is not null)
             {
-                if (kw == TerminalSentinel) continue;
-                if (KeywordDetector.IsKeywordOnOwnLineStrict(msg.Content, kw) &&
-                    BackEdgeDestinations.TryGetValue(kw, out var nextNode) &&
-                    nextNode is not null)
-                {
-                    _logger.LogDebug(
-                        "[GraphOrchestrator] DetermineStartNodeId: back-edge keyword '{Kw}' → '{Next}'",
-                        kw, nextNode);
-                    return nextNode;
-                }
-            }
-
-            // Also check forward-edge keywords — when a handoff keyword was the last thing in
-            // history, resume from the TARGET node rather than resetting to the entry.
-            foreach (var edge in graphCfg.Edges)
-            {
-                if (!IsBackEdge(edge.From, edge.To) &&
-                    edge.Keyword is { Length: > 0 } &&
-                    KeywordDetector.IsKeywordOnOwnLineStrict(msg.Content, edge.Keyword))
-                {
-                    _logger.LogDebug(
-                        "[GraphOrchestrator] DetermineStartNodeId: forward-edge keyword '{Kw}' → '{Next}'",
-                        edge.Keyword, edge.To);
-                    return edge.To.ToLowerInvariant();
-                }
+                _logger.LogDebug(
+                    "[GraphOrchestrator] DetermineStartNodeId: history handoff → '{Next}'", target);
+                return target;
             }
         }
 

@@ -181,10 +181,17 @@ internal sealed class CompactionCoordinator(
         string? lastAssistantAgent = null;
         if (orchestrator is not MagenticOrchestrator)
         {
-            lastAssistantAgent = checkpoint.Messages
-                .LastOrDefault(m => m.Role == MessageRole.Assistant && !string.IsNullOrWhiteSpace(m.AgentName))
-                ?.AgentName
-                ?.ToLowerInvariant();
+            var lastAssistantMsg = checkpoint.Messages
+                .LastOrDefault(m => m.Role == MessageRole.Assistant && !string.IsNullOrWhiteSpace(m.AgentName));
+
+            // If that turn already completed a validated handoff to a different node (e.g. a
+            // Developer turn that ended in a successful "HANDOFF TO REVIEWER"), resume there —
+            // not at the speaker, which is stale the instant its own turn routed onward. See
+            // IOrchestrator.ResolveResumeExecutorId / GraphTopology.ResolveHandoffTarget.
+            lastAssistantAgent = (lastAssistantMsg is not null
+                    ? orchestrator.ResolveResumeExecutorId(lastAssistantMsg)
+                    : null)
+                ?? lastAssistantMsg?.AgentName?.ToLowerInvariant();
 
             checkpoint.ResumeExecutorId = lastAssistantAgent;
         }

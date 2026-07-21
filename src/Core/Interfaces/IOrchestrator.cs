@@ -43,6 +43,18 @@ public interface IOrchestrator
     void SetResumeExecutorId(string? executorId) { }
 
     /// <summary>
+    /// Given the last assistant message retained before a resume/compaction cycle, resolves the
+    /// node/agent that should actually run next when that message already completed a validated
+    /// handoff to a different node (e.g. a Developer turn that ended in a successful
+    /// "HANDOFF TO REVIEWER" route). Returns <c>null</c> when the message wasn't a handoff — the
+    /// caller should fall back to the message's own <c>AgentName</c> — or for orchestrators that
+    /// don't need this at all.
+    /// Defaults to a no-op; overridden by <c>GraphOrchestrator</c>, whose resume point is inferred
+    /// from raw history rather than tracked via an explicit state-machine snapshot.
+    /// </summary>
+    string? ResolveResumeExecutorId(AgentMessage lastAssistantMessage) => null;
+
+    /// <summary>
     /// Provides an explicit state machine state name for the next <see cref="StreamAsync"/> call.
     /// Used after compaction to restore the <c>StateMachineSelectionStrategy</c> to the state
     /// it was in before the history was trimmed, preventing a spurious reset to the initial

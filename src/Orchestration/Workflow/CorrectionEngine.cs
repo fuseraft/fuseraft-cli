@@ -61,7 +61,7 @@ internal static class CorrectionEngine
         }
 
         if (TryInjectBuildRevertCorrection(history, validKeywordList)) return;
-        if (consecutiveCount >= 2 && await TryInjectStagnationCorrection(history, agentName, consecutiveCount, validKeywordList, eventEmitter)) return;
+        if (consecutiveCount >= 2 && await TryInjectStagnationCorrection(history, agentName, consecutiveCount, validKeywordList, routeTable.CanWriteFiles, eventEmitter)) return;
         if (await TryInjectHallucinationCorrection(history, responseText, agentName, consecutiveCount, validKeywordList, eventEmitter)) return;
 
         var failedShellOutput = ScanForFailedShellOutput(history);
@@ -378,8 +378,31 @@ internal static class CorrectionEngine
         string agentName,
         int consecutiveCount,
         string validKeywordList,
+        bool canWriteFiles,
         EventEmitter? eventEmitter)
     {
+        // This correction's remedy ("write something") is only meaningful for an agent that
+        // actually has write_file/patch_file. For a structurally read-only node (Reviewer,
+        // Planner, Archaeologist), the same "N read-only turns" signal instead means "stop
+        // exploring and emit a routing keyword" — telling it to write would either be a no-op
+        // (no write tool to call) or push it to misuse an unrelated capability (e.g. shell_run)
+        // to write files outside its role. Fall through to the generic no-keyword corrections
+        // below, which already ask for a keyword without demanding a write.
+        if (!canWriteFiles)
+        {
+            history.Add(new ChatMessage(ChatRole.User,
+                $"STAGNATION ({consecutiveCount} turns without a routing keyword): you are a read-only " +
+                $"agent — you have no write_file/patch_file access and must not attempt to write files " +
+                $"via any other tool. Stop exploring. Make your judgement now and emit your response as " +
+                $"exactly one of the valid keywords below (with any required write_file_brief/" +
+                $"write_file_review call first, if your role requires one).\n\n" +
+                $"Valid keywords: {validKeywordList}"));
+            await (eventEmitter?.EmitAsync(EventTypes.CorrectionInjected,
+                agent:   agentName,
+                payload: new { type = "stagnation_read_only", consecutive = consecutiveCount }) ?? Task.CompletedTask);
+            return true;
+        }
+
         var callResults = BuildCallSuccessMap(history);
 
         bool hasSuccessfulWriteSideCalls = false;
