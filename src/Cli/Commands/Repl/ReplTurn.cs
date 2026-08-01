@@ -404,6 +404,22 @@ internal static class ReplTurn
         var turnOutputTokens  = stream.TurnOutputTokens;
 
         responseText = SanitizeAssistantResponse(responseText, out var warningMessage);
+        if (!capturePlan && responseText.Length == 0)
+        {
+            if (!isCorrectionTurn)
+            {
+                const string correctionMsg =
+                    "Your last reply was empty or contained internal tool-call text. " +
+                    "Respond to the user with a concise, user-facing answer. " +
+                    "If you need tools, call them first and then provide the answer in the same turn.";
+                return await ExecuteAsync(
+                    ctx, correctionMsg,
+                    isStepRequest: false, capturePlan: false, activeStep: null,
+                    cancellationToken, isCorrectionTurn: true);
+            }
+
+            warningMessage ??= "Model returned an empty response twice. Provide a real user-facing answer next turn.";
+        }
 
         if (!capturePlan && responseText.Length > 0 && !ctx.JsonMode)
         {
@@ -519,7 +535,8 @@ internal static class ReplTurn
             AnsiConsole.MarkupLine(
                 $"[dim]  tokens (est.): {postEst:N0} / {ctx.ContextTokenBudget:N0}  rounds: {toolRounds}  tool calls: {toolCallsThisTurn.Count}[/]");
 
-        await ctx.Emitter.EmitAsync(EventTypes.AssistantResponse, turn: ctx.TurnIndex, payload: new { content = responseText });
+        if (responseText.Length > 0)
+            await ctx.Emitter.EmitAsync(EventTypes.AssistantResponse, turn: ctx.TurnIndex, payload: new { content = responseText });
         await ctx.Emitter.EmitAsync(EventTypes.TurnEnd, turn: ctx.TurnIndex, payload: new
         {
             elapsed_ms       = (int)(DateTime.UtcNow - turnStart).TotalMilliseconds,
