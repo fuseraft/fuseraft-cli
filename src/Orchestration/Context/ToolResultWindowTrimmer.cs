@@ -25,10 +25,11 @@ namespace fuseraft.Orchestration.Context;
 public static class ToolResultWindowTrimmer
 {
     // Characters per token estimate — consistent with the rest of the codebase.
-    private const int CharsPerToken  = 4;
-    // Number of original-content chars to include in a tombstone as a content preview.
-    // Bounded so tombstones stay cheap even for large files (~75 tokens).
-    private const int ExcerptChars   = 300;
+    private const int CharsPerToken = 4;
+    // Keep previews small so many evictions do not create a second token spike.
+    private const int PreviewChars = 160;
+    private const int PreviewToolLimit = 3;
+    private const int MaxManifestEvictedLabels = 5;
 
     internal const string TombstonePrefix = "[tool result — evicted";
 
@@ -63,7 +64,7 @@ public static class ToolResultWindowTrimmer
         var (trimmed, callLabels, evicted) = ApplyCore(context, budget);
         if (!evicted) return (trimmed, null);
 
-        var active     = new List<string>();
+        var activeCount = 0;
         var superseded = new List<string>();
 
         foreach (var msg in trimmed)
@@ -71,35 +72,38 @@ public static class ToolResultWindowTrimmer
             foreach (var fr in msg.Contents.OfType<FunctionResultContent>())
             {
                 var callId = fr.CallId ?? "unknown";
-                var label  = callLabels.GetValueOrDefault(callId, callId);
+                var label = callLabels.GetValueOrDefault(callId, callId);
                 var result = fr.Result?.ToString() ?? "";
 
                 if (result.StartsWith(TombstonePrefix, StringComparison.Ordinal))
-                    superseded.Add(label);
+                {
+                    if (superseded.Count < MaxManifestEvictedLabels)
+                        superseded.Add(label);
+                }
                 else
-                    active.Add(label);
+                {
+                    activeCount++;
+                }
             }
         }
 
-        if (active.Count == 0 && superseded.Count == 0) return (trimmed, null);
+        if (activeCount == 0 && superseded.Count == 0) return (trimmed, null);
 
         var sb = new StringBuilder();
         sb.AppendLine("[Context Manifest]");
-
-        if (active.Count > 0)
-        {
-            sb.AppendLine();
-            sb.AppendLine($"Active tool results ({active.Count}):");
-            foreach (var a in active) sb.AppendLine($"- {a}");
-        }
+        sb.AppendLine();
+        sb.AppendLine($"Tool results retained: {activeCount}");
+        sb.AppendLine($"Older tool results evicted: {trimmed.SelectMany(m => m.Contents.OfType<FunctionResultContent>()).Count(fr => (fr.Result?.ToString() ?? string.Empty).StartsWith(TombstonePrefix, StringComparison.Ordinal))}");
 
         if (superseded.Count > 0)
         {
             sb.AppendLine();
-            sb.AppendLine($"Superseded ({superseded.Count}) — evicted from context. Re-read with targeted ranges if needed:");
+            sb.AppendLine("Most recent evicted:");
             foreach (var s in superseded) sb.AppendLine($"- {s}");
         }
 
+        sb.AppendLine();
+        sb.Append("Re-read targeted ranges if needed.");
         return (trimmed, sb.ToString().TrimEnd());
     }
 
@@ -138,17 +142,24 @@ public static class ToolResultWindowTrimmer
         // Fast path — nothing to trim.
         if (totalEstTokens <= budget.MaxToolResultTokens) return (context, callLabels, false);
 
-        // Determine how many of the oldest results to evict.
+        // Evict only as many oldest results as needed to get back under budget.
         // Always keep at least the last InTurnToolWindow results verbatim.
         int retainCount = Math.Max(0, budget.InTurnToolWindow);
-        int evictUpTo   = Math.Max(0, resultMessages.Count - retainCount);
-        if (evictUpTo == 0) return (context, callLabels, false);
+        int protectedStart = Math.Max(0, resultMessages.Count - retainCount);
 
-        var evictIndices = new HashSet<int>(
-            resultMessages.Take(evictUpTo).Select(r => r.MsgIdx));
+        var evictIndices = new HashSet<int>();
+        int runningTokens = totalEstTokens;
+        for (int i = 0; i < protectedStart && runningTokens > budget.MaxToolResultTokens; i++)
+        {
+            evictIndices.Add(resultMessages[i].MsgIdx);
+            runningTokens -= resultMessages[i].EstTokens;
+        }
+
+        if (evictIndices.Count == 0) return (context, callLabels, false);
 
         // Pass 2: build trimmed list with enriched tombstones.
         var trimmed = new List<ChatMessage>(context.Count);
+        int previewedResults = 0;
         foreach (var msg in context)
         {
             if (evictIndices.Contains(trimmed.Count))
@@ -160,13 +171,11 @@ public static class ToolResultWindowTrimmer
                 {
                     if (item is FunctionResultContent fr)
                     {
-                        var callId  = fr.CallId ?? "unknown";
-                        var label   = callLabels.GetValueOrDefault(callId, callId);
+                        var callId = fr.CallId ?? "unknown";
+                        var label = callLabels.GetValueOrDefault(callId, callId);
                         var content = fr.Result?.ToString() ?? "";
-                        var excerpt = content.Length > 0
-                            ? (content.Length > ExcerptChars
-                                ? content[..ExcerptChars].TrimEnd() + "…"
-                                : content.Trim())
+                        var excerpt = previewedResults < PreviewToolLimit
+                            ? BuildPreview(content)
                             : string.Empty;
 
                         var tombstone = string.IsNullOrEmpty(excerpt)
@@ -174,6 +183,7 @@ public static class ToolResultWindowTrimmer
                             : $"{TombstonePrefix}: {label}. Preview: \"{excerpt}\". Re-read with targeted ranges if needed.]";
 
                         tombstoned.Add(new FunctionResultContent(callId, tombstone));
+                        previewedResults++;
                     }
                     else
                     {
@@ -189,6 +199,16 @@ public static class ToolResultWindowTrimmer
         }
 
         return (trimmed, callLabels, true);
+    }
+
+    private static string BuildPreview(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return string.Empty;
+
+        var normalized = content.Trim();
+        return normalized.Length > PreviewChars
+            ? normalized[..PreviewChars].TrimEnd() + "…"
+            : normalized;
     }
 
     private static string FormatCallLabel(FunctionCallContent call)
