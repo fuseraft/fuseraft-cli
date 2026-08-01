@@ -223,9 +223,24 @@ public sealed class FileSystemPlugin : ITurnResettable
                 $"Cold-reading would flood your context. " +
                 $"Use grep_file to locate the relevant section, then read_file with startLine/maxLines.]";
             if (_readBudgetUsed + preview.Length > _readBudgetPerTurn)
-                return PluginResult.Error(
-                    $"Read budget exhausted ({_readBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars). " +
-                    $"Proceed with context already available — use patch_file or shell_run. Budget resets next turn.");
+            {
+                var remaining = _readBudgetPerTurn - _readBudgetUsed;
+                if (_readBudgetUsed == 0)
+                {
+                    var allowed = Math.Max(1, Math.Min(preview.Length, _readBudgetPerTurn));
+                    preview = preview[..allowed] +
+                              $"\n\n[Truncated to fit per-turn read budget of {_readBudgetPerTurn:N0} chars. " +
+                              $"Use grep_file or read_file with startLine/maxLines for narrower follow-up reads.]";
+                }
+                else
+                {
+                    var allowed = Math.Max(1, Math.Min(preview.Length, Math.Max(remaining, 1)));
+                    preview = $"[Read budget nearly exhausted ({_readBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars used this turn). " +
+                              $"Returning a compact preview instead of failing so you can keep working. " +
+                              $"Use grep_file/get_file_summary or narrow read_file ranges for any follow-up reads in this turn.]\n\n" +
+                              preview[..allowed];
+                }
+            }
             _readBudgetUsed += preview.Length;
             _sessionCache?.RecordRead(resolved, fileInfo);
             return preview;
@@ -266,10 +281,22 @@ public sealed class FileSystemPlugin : ITurnResettable
         // proceed with what it already has in context rather than reading more files.
         if (_readBudgetUsed + built.Length > _readBudgetPerTurn)
         {
-            content = null;
-            return PluginResult.Error(
-                $"Read budget exhausted ({_readBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars). " +
-                $"Proceed with context already available — use patch_file or shell_run. Budget resets next turn.");
+            if (_readBudgetUsed == 0)
+            {
+                var allowed = Math.Max(1, Math.Min(built.Length, _readBudgetPerTurn));
+                built = built[..allowed] +
+                        $"\n\n[Truncated to fit per-turn read budget of {_readBudgetPerTurn:N0} chars. " +
+                        $"Use grep_file/get_file_summary or narrow read_file ranges for follow-up reads.]";
+            }
+            else
+            {
+                var remaining = _readBudgetPerTurn - _readBudgetUsed;
+                var allowed = Math.Max(1, Math.Min(built.Length, Math.Max(remaining, 1)));
+                built = $"[Read budget nearly exhausted ({_readBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars used this turn). " +
+                        $"Returning a compact slice instead of failing so you can keep working. " +
+                        $"Use grep_file/get_file_summary or narrower read_file ranges for any follow-up reads in this turn.]\n\n" +
+                        built[..allowed];
+            }
         }
 
         _readBudgetUsed += built.Length;

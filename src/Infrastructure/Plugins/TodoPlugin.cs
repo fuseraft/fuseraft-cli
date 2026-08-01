@@ -42,14 +42,16 @@ public sealed class TodoPlugin
             "status is one of pending, in_progress, completed. Replaces the entire list.")]
         string itemsJson)
     {
+        var candidateJson = ExtractJsonArray(itemsJson);
+
         List<TodoItem>? parsed;
         try
         {
-            parsed = JsonSerializer.Deserialize<List<TodoItem>>(itemsJson, JsonOpts);
+            parsed = JsonSerializer.Deserialize<List<TodoItem>>(candidateJson, JsonOpts);
         }
         catch (JsonException ex)
         {
-            return $"[ERROR] Could not parse itemsJson as a JSON array: {ex.Message}";
+            return $"[ERROR] Could not parse itemsJson as a JSON array: {ex.Message}. Pass only a JSON array like [{{\"content\":\"Example\",\"status\":\"pending\"}}].";
         }
         if (parsed is null)
             return "[ERROR] itemsJson must be a JSON array of todo items.";
@@ -92,6 +94,56 @@ public sealed class TodoPlugin
             sb.AppendLine($"{box} {item.Content}");
         }
         return sb.ToString().TrimEnd();
+    }
+
+    private static string ExtractJsonArray(string itemsJson)
+    {
+        var trimmed = itemsJson.Trim();
+        if (trimmed.StartsWith("[", StringComparison.Ordinal))
+            return trimmed;
+
+        var start = trimmed.IndexOf('[');
+        if (start < 0)
+            return trimmed;
+
+        var depth = 0;
+        var inString = false;
+        var escaping = false;
+        for (var i = start; i < trimmed.Length; i++)
+        {
+            var ch = trimmed[i];
+            if (escaping)
+            {
+                escaping = false;
+                continue;
+            }
+
+            if (ch == '\\' && inString)
+            {
+                escaping = true;
+                continue;
+            }
+
+            if (ch == '"')
+            {
+                inString = !inString;
+                continue;
+            }
+
+            if (inString)
+                continue;
+
+            if (ch == '[')
+                depth++;
+            else if (ch == ']')
+            {
+                depth--;
+                if (depth == 0)
+                    return trimmed[start..(i + 1)];
+            }
+        }
+
+        return trimmed;
     }
 }
 
