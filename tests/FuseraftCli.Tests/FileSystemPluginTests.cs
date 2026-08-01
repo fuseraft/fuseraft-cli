@@ -488,11 +488,23 @@ public sealed class FileSystemPluginTests : IDisposable
     }
 
     [Fact]
-    public async Task ReadFile_ReadBudgetExhausted_ReturnsError()
+    public async Task ReadFile_FirstReadOverBudget_ReturnsTruncatedContent()
     {
         var plugin = new FileSystemPlugin(sandboxRoot: _dir, readBudgetPerTurn: 10);
         await File.WriteAllTextAsync(TempPath("big.txt"), new string('x', 200));
         var result = await plugin.ReadFileAsync(TempPath("big.txt"));
+        Assert.DoesNotStartWith("[ERROR]", result);
+        Assert.Contains("Truncated to fit per-turn read budget", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ReadFile_SubsequentReadAfterBudgetExhausted_ReturnsError()
+    {
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, readBudgetPerTurn: 10);
+        await File.WriteAllTextAsync(TempPath("big.txt"), new string('x', 200));
+        await File.WriteAllTextAsync(TempPath("small.txt"), "hello");
+        _ = await plugin.ReadFileAsync(TempPath("big.txt"));
+        var result = await plugin.ReadFileAsync(TempPath("small.txt"));
         Assert.StartsWith("[ERROR]", result);
         Assert.Contains("budget", result, StringComparison.OrdinalIgnoreCase);
     }
