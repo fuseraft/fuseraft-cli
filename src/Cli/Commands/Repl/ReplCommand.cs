@@ -155,15 +155,16 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         using var factory = new ChatClientFactory();
 
         var toolsByCategory = new Dictionary<string, List<AIFunction>>(StringComparer.OrdinalIgnoreCase);
-        using ShellPlugin? shellPlugin = settings.NoTools ? null : new ShellPlugin(shellPolicy: TryLoadDefaultShellPolicy());
-        SubAgentPlugin? subAgent = null;
-        SkillsPlugin?   skillsPlugin   = null;
-        string?         skillsCatalog  = null;
+        using ShellPlugin? shellPlugin  = settings.NoTools ? null : new ShellPlugin(shellPolicy: TryLoadDefaultShellPolicy());
+        SubAgentPlugin? subAgent        = null;
+        SkillsPlugin?   skillsPlugin    = null;
+        string?         skillsCatalog   = null;
         List<AIFunction>? explorerTools = null;
-        TodoPlugin?     todoPlugin     = null;
+        TodoPlugin?     todoPlugin      = null;
+        FileSystemPlugin? fsPluginForCategory = null;
         if (!settings.NoTools)
         {
-            var fsPluginForCategory = new FileSystemPlugin();
+            fsPluginForCategory = new FileSystemPlugin();
             toolsByCategory["FileSystem"] = PluginRegistry.GetFunctionsFromObject(fsPluginForCategory)
                 .Concat(PluginRegistry.GetFunctionsFromObject(new FileSystemManagementOps(fsPluginForCategory)))
                 .ToList();
@@ -347,6 +348,23 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             Todo         = todoPlugin,
             KeyStored    = keyStored,
         };
+
+        if (!settings.NoTools)
+        {
+            foreach (var tool in new object?[] { fsPluginForCategory, shellPlugin, todoPlugin })
+            {
+                if (tool is ITurnResettable resettable)
+                    ctx.TurnResettables.Add(resettable);
+            }
+        }
+
+        if (toolsByCategory.TryGetValue("FileSystem", out _))
+        {
+            var fsResettable = toolsByCategory["FileSystem"]
+                .Select(f => f.UnderlyingMethod?.DeclaringType)
+                .FirstOrDefault();
+        }
+        
         if (skillsPlugin is not null)
             ctx.LineReader.SetSkillSlugs([.. skillsPlugin.Slugs]);
 
