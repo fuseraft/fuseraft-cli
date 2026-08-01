@@ -402,6 +402,8 @@ internal static class ReplTurn
         var turnInputTokens   = stream.TurnInputTokens;
         var turnOutputTokens  = stream.TurnOutputTokens;
 
+        responseText = SanitizeAssistantResponse(responseText, out var warningMessage);
+
         if (!capturePlan && responseText.Length > 0 && !ctx.JsonMode)
         {
             if (!Console.IsOutputRedirected)
@@ -415,16 +417,16 @@ internal static class ReplTurn
             ctx.History.Add(new ChatMessage(ChatRole.Assistant, responseText));
         else if (!capturePlan)
         {
-            // The model returned zero content — surface a clear warning so the user
-            // knows to retry rather than wondering why the prompt went quiet.
+            var warningText = warningMessage ?? "Model returned an empty response. Try sending your message again.";
+
             if (ctx.JsonMode)
-                ReplJsonBridge.Emit(new { type = "warning", text = "Model returned an empty response. Try sending your message again." });
+                ReplJsonBridge.Emit(new { type = "warning", text = warningText });
             else
-                AnsiConsole.MarkupLine("[dim]  ↯ empty response — the model returned no content. Try again.[/]");
+                AnsiConsole.MarkupLine($"[dim]  ↯ {Markup.Escape(warningText)}[/]");
 
             await ctx.Emitter.EmitAsync(EventTypes.ReplWarning, turn: ctx.TurnIndex, payload: new
             {
-                message = "empty_response",
+                message = warningMessage is null ? "empty_response" : "invalid_response_content",
             });
         }
 
@@ -553,6 +555,26 @@ internal static class ReplTurn
 
         ctx.TurnIndex++;
         return stepPassed;
+    }
+
+    private static string SanitizeAssistantResponse(string responseText, out string? warningMessage)
+    {
+        var trimmed = responseText.Trim();
+        if (trimmed.Length == 0)
+        {
+            warningMessage = null;
+            return string.Empty;
+        }
+
+        if (trimmed.StartsWith("to=functions.", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Contains("Wait must be valid JSON", StringComparison.OrdinalIgnoreCase))
+        {
+            warningMessage = "Model returned internal tool-call text instead of a user-facing answer. Try again.";
+            return string.Empty;
+        }
+
+        warningMessage = null;
+        return responseText;
     }
 
     // Free-form turns: if the response claims a mutation but no write tool was called,
