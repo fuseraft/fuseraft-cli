@@ -51,7 +51,7 @@ public sealed class TodoPlugin
         }
         catch (JsonException ex)
         {
-            return $"[ERROR] Could not parse itemsJson as a JSON array: {ex.Message}. Pass only a JSON array like [{\"content\":\"Example\",\"status\":\"pending\"}].";
+            return $"[ERROR] Could not parse itemsJson as a JSON array: {ex.Message}. Pass only a JSON array like [{{\"content\":\"Example\",\"status\":\"pending\"}}].";
         }
         if (parsed is null)
             return "[ERROR] itemsJson must be a JSON array of todo items.";
