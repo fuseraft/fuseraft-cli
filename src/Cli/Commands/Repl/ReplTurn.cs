@@ -380,6 +380,7 @@ internal static class ReplTurn
         int stepTotal = 0,
         bool isCorrectionTurn = false)
     {
+        ctx.BeginTurn();
         ctx.Emitter.SetTurn(ctx.TurnIndex);
         await ctx.Emitter.EmitAsync(EventTypes.UserInput, turn: ctx.TurnIndex, payload: new { content = input });
         ctx.History.Add(new ChatMessage(ChatRole.User, input));
