@@ -57,11 +57,34 @@ public sealed class ToolResultWindowTrimmerTests
 
         var result = ToolResultWindowTrimmer.Apply(context, budget);
 
-        var first  = result[1].Contents.OfType<FunctionResultContent>().Single();
+        var first = result[1].Contents.OfType<FunctionResultContent>().Single();
         var second = result[3].Contents.OfType<FunctionResultContent>().Single();
 
         Assert.StartsWith(ToolResultWindowTrimmer.TombstonePrefix, first.Result?.ToString());
         Assert.DoesNotContain(ToolResultWindowTrimmer.TombstonePrefix, second.Result?.ToString() ?? "");
+    }
+
+    [Fact]
+    public void Apply_trims_only_enough_oldest_results_to_fit_budget()
+    {
+        var context = new List<ChatMessage>
+        {
+            ToolCall("c1", "read_file"),
+            ToolResult("c1", new string('a', 1_000)),
+            ToolCall("c2", "read_file"),
+            ToolResult("c2", new string('b', 1_000)),
+            ToolCall("c3", "read_file"),
+            ToolResult("c3", new string('c', 1_000)),
+        };
+
+        var result = ToolResultWindowTrimmer.Apply(context, Budget(maxTokens: 550, window: 1));
+
+        Assert.StartsWith(ToolResultWindowTrimmer.TombstonePrefix,
+            result[1].Contents.OfType<FunctionResultContent>().Single().Result?.ToString());
+        Assert.DoesNotContain(ToolResultWindowTrimmer.TombstonePrefix,
+            result[3].Contents.OfType<FunctionResultContent>().Single().Result?.ToString() ?? string.Empty);
+        Assert.DoesNotContain(ToolResultWindowTrimmer.TombstonePrefix,
+            result[5].Contents.OfType<FunctionResultContent>().Single().Result?.ToString() ?? string.Empty);
     }
 
     // ── Apply — item 3: enriched tombstone includes tool label ────────────────
@@ -123,7 +146,6 @@ public sealed class ToolResultWindowTrimmerTests
     [Fact]
     public void Apply_tombstone_truncates_preview_at_excerpt_limit()
     {
-        // Content is much longer than ExcerptChars — tombstone must end with the ellipsis marker.
         var longContent = new string('z', 2_000);
         var context = new List<ChatMessage>
         {
@@ -138,8 +160,27 @@ public sealed class ToolResultWindowTrimmerTests
         var tombstone = result[1].Contents.OfType<FunctionResultContent>().Single().Result?.ToString();
         Assert.NotNull(tombstone);
         Assert.Contains("…", tombstone);
-        // The full 2 000-char content must NOT appear verbatim in the tombstone.
         Assert.DoesNotContain(longContent, tombstone);
+    }
+
+    [Fact]
+    public void Apply_omits_preview_after_first_few_evictions()
+    {
+        var context = new List<ChatMessage>
+        {
+            ToolCall("c1", "read_file"), ToolResult("c1", new string('a', 1_000)),
+            ToolCall("c2", "read_file"), ToolResult("c2", new string('b', 1_000)),
+            ToolCall("c3", "read_file"), ToolResult("c3", new string('c', 1_000)),
+            ToolCall("c4", "read_file"), ToolResult("c4", new string('d', 1_000)),
+            ToolCall("c5", "read_file"), ToolResult("c5", new string('e', 200)),
+        };
+
+        var result = ToolResultWindowTrimmer.Apply(context, Budget(100, window: 1));
+
+        Assert.Contains("Preview:", result[1].Contents.OfType<FunctionResultContent>().Single().Result?.ToString());
+        Assert.Contains("Preview:", result[3].Contents.OfType<FunctionResultContent>().Single().Result?.ToString());
+        Assert.Contains("Preview:", result[5].Contents.OfType<FunctionResultContent>().Single().Result?.ToString());
+        Assert.DoesNotContain("Preview:", result[7].Contents.OfType<FunctionResultContent>().Single().Result?.ToString() ?? string.Empty);
     }
 
     [Fact]
@@ -222,12 +263,12 @@ public sealed class ToolResultWindowTrimmerTests
 
         var (_, manifest) = ToolResultWindowTrimmer.ApplyWithManifest(context, Budget(300, window: 1));
 
-        Assert.Contains("Superseded", manifest);
+        Assert.Contains("Older tool results evicted", manifest);
         Assert.Contains("read_file", manifest);
     }
 
     [Fact]
-    public void ApplyWithManifest_manifest_lists_active_call()
+    public void ApplyWithManifest_manifest_reports_retained_count()
     {
         var context = new List<ChatMessage>
         {
@@ -239,9 +280,10 @@ public sealed class ToolResultWindowTrimmerTests
 
         var (_, manifest) = ToolResultWindowTrimmer.ApplyWithManifest(context, Budget(300, window: 1));
 
-        Assert.Contains("Active tool results", manifest);
-        Assert.Contains("shell_run", manifest);
+        Assert.Contains("Tool results retained: 1", manifest);
+        Assert.DoesNotContain("Active tool results", manifest);
     }
+
 
     // ── Label formatting ──────────────────────────────────────────────────────
 
@@ -320,7 +362,6 @@ public sealed class ToolResultWindowTrimmerTests
     [Fact]
     public void ApplyWithManifest_manifest_with_all_results_evicted_shows_only_superseded()
     {
-        // window = 0 retains nothing — every result is evicted once budget is exceeded.
         var context = new List<ChatMessage>
         {
             ToolCall("c1", "read_file"),
@@ -332,8 +373,31 @@ public sealed class ToolResultWindowTrimmerTests
         var (_, manifest) = ToolResultWindowTrimmer.ApplyWithManifest(context, Budget(100, window: 0));
 
         Assert.NotNull(manifest);
-        Assert.Contains("Superseded", manifest);
+        Assert.Contains("Older tool results evicted: 2", manifest);
+        Assert.Contains("Tool results retained: 0", manifest);
         Assert.DoesNotContain("Active tool results", manifest);
+    }
+
+    [Fact]
+    public void ApplyWithManifest_caps_evicted_labels_in_manifest()
+    {
+        var context = new List<ChatMessage>
+        {
+            ToolCall("c1", "read_file", new() { ["path"] = "a" }), ToolResult("c1", new string('a', 1_000)),
+            ToolCall("c2", "read_file", new() { ["path"] = "b" }), ToolResult("c2", new string('b', 1_000)),
+            ToolCall("c3", "read_file", new() { ["path"] = "c" }), ToolResult("c3", new string('c', 1_000)),
+            ToolCall("c4", "read_file", new() { ["path"] = "d" }), ToolResult("c4", new string('d', 1_000)),
+            ToolCall("c5", "read_file", new() { ["path"] = "e" }), ToolResult("c5", new string('e', 1_000)),
+            ToolCall("c6", "read_file", new() { ["path"] = "f" }), ToolResult("c6", new string('f', 1_000)),
+            ToolCall("c7", "read_file", new() { ["path"] = "g" }), ToolResult("c7", new string('g', 200)),
+        };
+
+        var (_, manifest) = ToolResultWindowTrimmer.ApplyWithManifest(context, Budget(100, window: 1));
+
+        Assert.NotNull(manifest);
+        Assert.Equal(5, manifest.Split(Environment.NewLine).Count(line => line.StartsWith("- ")));
+        Assert.DoesNotContain("read_file(f)", manifest);
+        Assert.DoesNotContain("read_file(g)", manifest);
     }
 
     // ── Apply — returns same reference when budget disabled ───────────────────
