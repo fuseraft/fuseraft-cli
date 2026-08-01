@@ -149,6 +149,9 @@ internal sealed class ReplSessionContext
 
     // History-aware line reader (shared across turns so history persists)
     public readonly ReplLineReader LineReader = new();
+    
+    // Turn-scoped plugin state that must be cleared before each new REPL turn.
+    public readonly List<ITurnResettable> TurnResettables = [];
 
     public ReplSessionContext(
         string cwd, string sessionId, DateTime startedAt, string modelId, ModelConfig modelConfig,
@@ -192,6 +195,12 @@ internal sealed class ReplSessionContext
     public List<AIFunction> GetActiveTools() => [.. ToolsByCategory
         .Where(kv => !DisabledCategories.Contains(kv.Key))
         .SelectMany(kv => kv.Value)];
+
+    public void BeginTurn()
+    {
+        foreach (var resettable in TurnResettables)
+            resettable.BeginTurn();
+    }
 
     public ChatOptions? BuildChatOptions()
     {
