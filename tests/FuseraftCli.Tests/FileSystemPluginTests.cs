@@ -1,3 +1,4 @@
+using System.Reflection;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Plugins;
 
@@ -498,15 +499,15 @@ public sealed class FileSystemPluginTests : IDisposable
     }
 
     [Fact]
-    public async Task ReadFile_SubsequentReadAfterBudgetExhausted_ReturnsError()
+    public async Task ReadFile_SubsequentReadAfterBudgetExhausted_ReturnsCompactSlice()
     {
         var plugin = new FileSystemPlugin(sandboxRoot: _dir, readBudgetPerTurn: 10);
         await File.WriteAllTextAsync(TempPath("big.txt"), new string('x', 200));
         await File.WriteAllTextAsync(TempPath("small.txt"), "hello");
         _ = await plugin.ReadFileAsync(TempPath("big.txt"));
         var result = await plugin.ReadFileAsync(TempPath("small.txt"));
-        Assert.StartsWith("[ERROR]", result);
-        Assert.Contains("budget", result, StringComparison.OrdinalIgnoreCase);
+        Assert.False(result.StartsWith("[ERROR]"));
+        Assert.Contains("Read budget nearly exhausted", result, StringComparison.OrdinalIgnoreCase);
     }
 
     // -----------------------------------------------------------------------

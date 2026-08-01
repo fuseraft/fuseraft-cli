@@ -234,9 +234,11 @@ public sealed class FileSystemPlugin : ITurnResettable
                 }
                 else
                 {
-                    return PluginResult.Error(
-                        $"Read budget exhausted ({_readBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars). " +
-                        $"Use grep_file/get_file_summary or narrow read_file ranges. Budget resets next turn.");
+                    var allowed = Math.Max(1, Math.Min(preview.Length, Math.Max(remaining, 1)));
+                    preview = $"[Read budget nearly exhausted ({_readBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars used this turn). " +
+                              $"Returning a compact preview instead of failing so you can keep working. " +
+                              $"Use grep_file/get_file_summary or narrow read_file ranges for any follow-up reads in this turn.]\n\n" +
+                              preview[..allowed];
                 }
             }
             _readBudgetUsed += preview.Length;
@@ -288,10 +290,12 @@ public sealed class FileSystemPlugin : ITurnResettable
             }
             else
             {
-                content = null;
-                return PluginResult.Error(
-                    $"Read budget exhausted ({_readBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars). " +
-                    $"Use grep_file/get_file_summary or narrow read_file ranges. Budget resets next turn.");
+                var remaining = _readBudgetPerTurn - _readBudgetUsed;
+                var allowed = Math.Max(1, Math.Min(built.Length, Math.Max(remaining, 1)));
+                built = $"[Read budget nearly exhausted ({_readBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars used this turn). " +
+                        $"Returning a compact slice instead of failing so you can keep working. " +
+                        $"Use grep_file/get_file_summary or narrower read_file ranges for any follow-up reads in this turn.]\n\n" +
+                        built[..allowed];
             }
         }
 
