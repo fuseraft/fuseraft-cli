@@ -493,7 +493,7 @@ public sealed class FileSystemPluginTests : IDisposable
         var plugin = new FileSystemPlugin(sandboxRoot: _dir, readBudgetPerTurn: 10);
         await File.WriteAllTextAsync(TempPath("big.txt"), new string('x', 200));
         var result = await plugin.ReadFileAsync(TempPath("big.txt"));
-        Assert.DoesNotStartWith("[ERROR]", result);
+        Assert.True(!result.StartsWith("[ERROR]"));
         Assert.Contains("Truncated to fit per-turn read budget", result, StringComparison.OrdinalIgnoreCase);
     }
 
