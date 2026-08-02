@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using AgentGovernance.Hypervisor;
 using AgentGovernance.Security;
@@ -30,14 +31,22 @@ namespace fuseraft.Infrastructure.Plugins;
 ///       <c>workingDirectory</c>, then does a best-effort scan of the <c>command</c> /
 ///       <c>script</c> string for absolute paths that escape the sandbox. System binary
 ///       prefixes (<c>/usr/</c>, <c>/bin/</c>, etc.) are exempted so normal tool
-///       invocations like <c>/usr/bin/dotnet</c> are not blocked.</item>
+///       invocations like <c>/usr/bin/dotnet</c> are not blocked. When
+///       <see cref="fuseraft.Core.Models.Config.FileSystemPermissions.Write"/> is
+///       configured, output-redirection targets (<c>&gt;</c> / <c>&gt;&gt;</c>) and
+///       <c>sed</c>/<c>perl</c> <c>-i</c> in-place-edit targets are additionally checked
+///       against the write glob — these are the two idioms agents actually reach for to
+///       mutate a file via shell, and both were observed writing outside
+///       <c>workspace/</c> in production runs (e.g. <c>sed -i 's/$/ /' README.md</c>).</item>
 /// </list>
 /// </para>
 ///
 /// <para>
 /// <b>Limitation:</b> shell command scanning is heuristic — shell escaping, variable
-/// interpolation, and subshells can smuggle paths past regex matching. For hard
-/// containment use the <c>CodeExecution</c> plugin (Docker) instead of <c>Shell</c>.
+/// interpolation, and subshells can smuggle paths past regex matching, and the
+/// redirection/in-place-edit target scan only recognizes those two specific idioms
+/// (e.g. <c>python -c "open('x').write(...)"</c> is not caught). For hard containment
+/// use the <c>CodeExecution</c> plugin (Docker) instead of <c>Shell</c>.
 /// </para>
 /// </summary>
 public sealed class SandboxEnforcementFilter
@@ -76,6 +85,21 @@ public sealed class SandboxEnforcementFilter
     // because the substituted value can reference any path on the filesystem.
     private static readonly Regex SubshellPattern = new(
         @"\$\([^)]*\)|`[^`]*`|\$\{[^}]*\}",
+        RegexOptions.Compiled);
+
+    // Captures the target of an output-redirection (>, >>, &>, &>>). Group 1 is the
+    // path token, stopping at whitespace/pipe/semicolon/redirection-chaining so
+    // "cmd > a.txt && cmd2 > b.txt" yields two separate matches.
+    private static readonly Regex RedirectionTargetPattern = new(
+        @"&?>{1,2}\s*([^\s|;&><]+)",
+        RegexOptions.Compiled);
+
+    // Captures the trailing file argument of a sed/perl in-place edit: `sed -i ... file`
+    // or `perl -i ... -e '...' file`. Best-effort — only the single, common "-i flag then
+    // a trailing bare path" shape is recognized; multiple target files, or the edit script
+    // itself containing something that looks like a path, can evade this.
+    private static readonly Regex InPlaceEditTargetPattern = new(
+        @"\b(?:sed|perl)\s+(?:[^\s|;&]+\s+)*-[a-zA-Z]*i[a-zA-Z0-9]*(?:[^\s|;&]*)\s+(?:[^\s|;&]+\s+)*?([^\s|;&'""]+\.[A-Za-z0-9]+)(?=\s|$|;|&|\|)",
         RegexOptions.Compiled);
 
     private static readonly string[] FileSystemFunctions =
@@ -215,7 +239,8 @@ public sealed class SandboxEnforcementFilter
 
     // Inspection
 
-    private string? Inspect(string functionName, IReadOnlyDictionary<string, object?>? args)
+    // internal so tests can call directly without spinning up an AIAgent/FunctionInvocationContext.
+    internal string? Inspect(string functionName, IReadOnlyDictionary<string, object?>? args)
     {
         // Ring check first — enforces trust-score-based privilege before path inspection.
         var ringDenial = InspectRing(functionName);
@@ -271,7 +296,7 @@ public sealed class SandboxEnforcementFilter
 
         foreach (var argName in (ReadOnlySpan<string>)FsPathArgNames)
         {
-            if (!args.TryGetValue(argName, out var val) || val is not string raw) continue;
+            if (!args.TryGetValue(argName, out var val) || !TryGetArgString(val, out var raw)) continue;
 
             // 1. Sandbox check — deny if outside configured root.
             var sandboxDenial = CheckPath(raw);
@@ -329,7 +354,7 @@ public sealed class SandboxEnforcementFilter
     {
         if (args is null) return null;
 
-        if (args.TryGetValue("workingDirectory", out var wd) && wd is string wdStr)
+        if (args.TryGetValue("workingDirectory", out var wd) && TryGetArgString(wd, out var wdStr))
         {
             var denial = CheckPath(wdStr);
             if (denial is not null) return denial;
@@ -337,7 +362,7 @@ public sealed class SandboxEnforcementFilter
 
         foreach (var argName in (ReadOnlySpan<string>)["command", "script"])
         {
-            if (args.TryGetValue(argName, out var cmd) && cmd is string cmdStr)
+            if (args.TryGetValue(argName, out var cmd) && TryGetArgString(cmd, out var cmdStr))
             {
                 // Deny subshell constructs ($(...), backticks, ${VAR}) — the substituted
                 // value is unknown at static analysis time and can reference any path.
@@ -351,6 +376,12 @@ public sealed class SandboxEnforcementFilter
 
                 var pathDenial = ScanCommandString(cmdStr);
                 if (pathDenial is not null) return pathDenial;
+
+                if (_fsWriteMatcher is not null)
+                {
+                    var writeTargetDenial = ScanWriteTargets(cmdStr);
+                    if (writeTargetDenial is not null) return writeTargetDenial;
+                }
 
                 if (_injectionDetector is not null)
                 {
@@ -367,6 +398,28 @@ public sealed class SandboxEnforcementFilter
     }
 
     // Helpers
+
+    // Tool-call arguments reach this middleware before the function-invocation framework's
+    // per-parameter type coercion runs, so a string-typed argument can still be boxed as a
+    // System.Text.Json.JsonElement here rather than a plain CLR string. Matching only
+    // `is string` silently treated that as "argument absent" via the caller's `continue`,
+    // skipping every sandbox/deny/write check for that path — this normalizes both shapes
+    // so validation actually runs regardless of which one the framework handed us.
+    private static bool TryGetArgString(object? val, out string str)
+    {
+        switch (val)
+        {
+            case string s:
+                str = s;
+                return true;
+            case JsonElement { ValueKind: JsonValueKind.String } je:
+                str = je.GetString() ?? string.Empty;
+                return true;
+            default:
+                str = string.Empty;
+                return false;
+        }
+    }
 
     private string? CheckPath(string rawPath)
     {
@@ -410,6 +463,63 @@ public sealed class SandboxEnforcementFilter
                     $"configured sandbox '{_sandboxRoot}'. Move the file into the sandbox " +
                     $"or remove the reference.");
         }
+
+        return null;
+    }
+
+    // Checks output-redirection (>, >>) and sed/perl -i in-place-edit targets against the
+    // configured write glob. Only called when _fsWriteMatcher is non-null. Narrower than a
+    // general "any relative path mentioned" scan on purpose: shell_run is used for reads far
+    // more often than writes (cat, grep, git diff on files anywhere in the sandbox are all
+    // legitimate), so blanket-matching every path-looking token would false-positive on
+    // routine read commands. These two idioms are unambiguously write targets.
+    private string? ScanWriteTargets(string command)
+    {
+        foreach (Match m in RedirectionTargetPattern.Matches(command))
+        {
+            var denial = CheckShellWriteTarget(m.Groups[1].Value, command);
+            if (denial is not null) return denial;
+        }
+
+        foreach (Match m in InPlaceEditTargetPattern.Matches(command))
+        {
+            var denial = CheckShellWriteTarget(m.Groups[1].Value, command);
+            if (denial is not null) return denial;
+        }
+
+        return null;
+    }
+
+    private string? CheckShellWriteTarget(string candidate, string command)
+    {
+        candidate = candidate.Trim().Trim('\'', '"');
+        if (candidate.Length == 0) return null;
+
+        string resolved;
+        try
+        {
+            var expanded = ProcessHelper.ExpandHome(candidate);
+            resolved = Path.IsPathRooted(expanded)
+                ? Path.GetFullPath(expanded)
+                : Path.GetFullPath(expanded, _sandboxRoot);
+        }
+        catch { return null; }
+
+        // Outside the sandbox root entirely is already caught by ScanCommandString for
+        // absolute paths; for relative paths that resolve outside (e.g. "../secrets"),
+        // let the general boundary check below report it with its own message.
+        if (IsOutsideSandbox(resolved))
+            return PluginResult.Denied(
+                $"Shell command '{command}' writes to '{resolved}' which is outside the " +
+                $"configured sandbox '{_sandboxRoot}'. Move the file into the sandbox " +
+                $"or remove the reference.");
+
+        var relative = Path.GetRelativePath(_sandboxRoot, resolved).Replace('\\', '/');
+        if (!_fsWriteMatcher!.Match(relative).HasMatches)
+            return PluginResult.Denied(
+                $"Shell command '{command}' writes to '{relative}', which is outside " +
+                $"the configured FileSystem write permissions. Use write_file/patch_file for " +
+                $"paths inside the write scope instead.");
 
         return null;
     }
