@@ -27,4 +27,23 @@ internal static class SkillsHelpers
 
     internal static string ToSlug(string name) =>
         Regex.Replace(name.ToLowerInvariant().Trim(), @"[^a-z0-9]+", "-").Trim('-');
+
+    /// <summary>
+    /// Recursively copies every file under <paramref name="sourceDir"/> into
+    /// <paramref name="destDir"/>, preserving relative subdirectory structure and creating
+    /// <paramref name="destDir"/> if needed. Existing files at the destination are overwritten.
+    /// Used by <c>fuseraft skills add</c> so bundled <c>references/</c> and <c>scripts/</c>
+    /// files travel with SKILL.md instead of being silently dropped.
+    /// </summary>
+    internal static void CopySkillDirectory(string sourceDir, string destDir)
+    {
+        Directory.CreateDirectory(destDir);
+        foreach (var filePath in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDir, filePath);
+            var destFile = Path.Combine(destDir, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(destFile)!);
+            File.Copy(filePath, destFile, overwrite: true);
+        }
+    }
 }
