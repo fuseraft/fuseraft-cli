@@ -106,6 +106,72 @@ public sealed class SkillsPluginTests : IDisposable
         Assert.Null(ex);
     }
 
+    // ── ReadSkillResourceAsync ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ReadSkillResource_UnknownSkill_ReturnsNotFound()
+    {
+        var plugin = PluginFor(("real-skill", "body"));
+        var result = await plugin.ReadSkillResourceAsync("ghost", "references/x.md");
+        Assert.StartsWith("[NOT FOUND]", result);
+    }
+
+    [Fact]
+    public async Task ReadSkillResource_EmptyPath_ReturnsError()
+    {
+        var plugin = PluginFor(("my-skill", "body"));
+        var result = await plugin.ReadSkillResourceAsync("my-skill", "");
+        Assert.StartsWith("[ERROR]", result);
+    }
+
+    [Fact]
+    public async Task ReadSkillResource_MissingFile_ReturnsNotFound()
+    {
+        var plugin = PluginFor(("my-skill", "body"));
+        var result = await plugin.ReadSkillResourceAsync("my-skill", "references/missing.md");
+        Assert.StartsWith("[NOT FOUND]", result);
+        Assert.Contains("references/missing.md", result);
+    }
+
+    [Fact]
+    public async Task ReadSkillResource_NestedFile_ReturnsContent()
+    {
+        var dir = MakeSkillDir("my-skill", "body");
+        Directory.CreateDirectory(Path.Combine(dir, "references"));
+        File.WriteAllText(Path.Combine(dir, "references", "style-guide.md"), "# Style Guide\nUse tabs.");
+        var plugin = new SkillsPlugin(new Dictionary<string, string> { ["my-skill"] = dir });
+
+        var result = await plugin.ReadSkillResourceAsync("my-skill", "references/style-guide.md");
+        Assert.Equal("# Style Guide\nUse tabs.", result);
+    }
+
+    [Theory]
+    [InlineData("../secret.txt")]
+    [InlineData("references/../../secret.txt")]
+    public async Task ReadSkillResource_PathTraversal_ReturnsError(string traversalPath)
+    {
+        var dir = MakeSkillDir("my-skill", "body");
+        File.WriteAllText(Path.Combine(_root, "secret.txt"), "top secret");
+        var plugin = new SkillsPlugin(new Dictionary<string, string> { ["my-skill"] = dir });
+
+        var result = await plugin.ReadSkillResourceAsync("my-skill", traversalPath);
+        Assert.StartsWith("[ERROR]", result);
+        Assert.DoesNotContain("top secret", result);
+    }
+
+    [Fact]
+    public async Task ReadSkillResource_AbsolutePathEscape_ReturnsError()
+    {
+        var dir = MakeSkillDir("my-skill", "body");
+        var outsideFile = Path.Combine(_root, "secret.txt");
+        File.WriteAllText(outsideFile, "top secret");
+        var plugin = new SkillsPlugin(new Dictionary<string, string> { ["my-skill"] = dir });
+
+        var result = await plugin.ReadSkillResourceAsync("my-skill", outsideFile);
+        Assert.StartsWith("[ERROR]", result);
+        Assert.DoesNotContain("top secret", result);
+    }
+
     // ── RunSkillScriptAsync ───────────────────────────────────────────────────
 
     [Fact]
@@ -114,6 +180,31 @@ public sealed class SkillsPluginTests : IDisposable
         var plugin = PluginFor(("real-skill", "body"));
         var result = await plugin.RunSkillScriptAsync("ghost", "run.sh");
         Assert.StartsWith("[NOT FOUND]", result);
+    }
+
+    [Fact]
+    public async Task RunSkillScript_PathTraversal_ReturnsError()
+    {
+        var dir = MakeSkillDir("my-skill", "body");
+        var outsideScript = Path.Combine(_root, "evil.sh");
+        File.WriteAllText(outsideScript, "#!/bin/sh\necho pwned\n");
+        var plugin = new SkillsPlugin(new Dictionary<string, string> { ["my-skill"] = dir });
+
+        var result = await plugin.RunSkillScriptAsync("my-skill", "../evil.sh");
+        Assert.StartsWith("[ERROR]", result);
+        Assert.DoesNotContain("pwned", result);
+    }
+
+    [Fact]
+    public async Task RunSkillScript_NestedScriptPath_Runs()
+    {
+        var dir = MakeSkillDir("my-skill", "body");
+        Directory.CreateDirectory(Path.Combine(dir, "scripts"));
+        File.WriteAllText(Path.Combine(dir, "scripts", "hello.sh"), "#!/bin/sh\necho nested-ok\n");
+        var plugin = new SkillsPlugin(new Dictionary<string, string> { ["my-skill"] = dir });
+
+        var result = await plugin.RunSkillScriptAsync("my-skill", "scripts/hello.sh");
+        Assert.Contains("nested-ok", result);
     }
 
     [Fact]

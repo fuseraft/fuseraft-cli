@@ -12,8 +12,10 @@ namespace fuseraft.Infrastructure.Plugins;
 /// injects a catalog of skill names and descriptions into the system prompt so the
 /// model knows what is available.  When the model decides to apply a skill it calls
 /// <c>load_skill</c> to retrieve the full step-by-step SKILL.md body, then follows
-/// those instructions using its other tools.  <c>run_skill_script</c> is available
-/// for skills that ship executable scripts alongside their SKILL.md.
+/// those instructions using its other tools.  <c>read_skill_resource</c> is available
+/// for skills that ship supplementary reference files (e.g. under <c>references/</c>)
+/// alongside their SKILL.md, and <c>run_skill_script</c> for skills that ship
+/// executable scripts.
 /// </para>
 /// </summary>
 public sealed class SkillsPlugin
@@ -57,6 +59,39 @@ public sealed class SkillsPlugin
         }
     }
 
+    [Description("Read a reference/resource file bundled with a skill, e.g. a file under 'references/'.")]
+    public async Task<string> ReadSkillResourceAsync(
+        [Description("Skill slug.")] string skill,
+        [Description("Resource path relative to the skill directory, e.g. 'references/style-guide.md'.")] string resourcePath,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_skillDirs.TryGetValue(skill, out var dir))
+            return PluginResult.NotFound($"No skill '{skill}'.");
+
+        if (string.IsNullOrWhiteSpace(resourcePath))
+            return PluginResult.Error("Resource path must not be empty.");
+
+        // Resolve against the skill directory and confirm the result stays inside it —
+        // resourcePath comes from the model, so an absolute path or "../" sequence must
+        // not be able to escape to arbitrary files on disk.
+        var skillRoot = Path.GetFullPath(dir) + Path.DirectorySeparatorChar;
+        var fullPath  = Path.GetFullPath(Path.Combine(dir, resourcePath));
+        if (!fullPath.StartsWith(skillRoot, StringComparison.Ordinal))
+            return PluginResult.Error($"'{resourcePath}' is outside the skill directory.");
+
+        if (!File.Exists(fullPath))
+            return PluginResult.NotFound($"Resource '{resourcePath}' not found in skill '{skill}'.");
+
+        try
+        {
+            return await File.ReadAllTextAsync(fullPath, cancellationToken);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return PluginResult.Error($"Could not read resource '{resourcePath}': {ex.Message}");
+        }
+    }
+
     [Description("Run a script bundled with a skill.")]
     public async Task<string> RunSkillScriptAsync(
         [Description("Skill slug.")] string skill,
@@ -67,7 +102,13 @@ public sealed class SkillsPlugin
         if (!_skillDirs.TryGetValue(skill, out var dir))
             return PluginResult.NotFound($"No skill '{skill}'.");
 
-        var scriptPath = Path.Combine(dir, script);
+        // Resolve against the skill directory and confirm the result stays inside it — same
+        // containment check as ReadSkillResourceAsync, since 'script' comes from the model.
+        var skillRoot  = Path.GetFullPath(dir) + Path.DirectorySeparatorChar;
+        var scriptPath = Path.GetFullPath(Path.Combine(dir, script));
+        if (!scriptPath.StartsWith(skillRoot, StringComparison.Ordinal))
+            return PluginResult.Error($"'{script}' is outside the skill directory.");
+
         if (!File.Exists(scriptPath))
             return PluginResult.NotFound($"Script '{script}' not found in skill '{skill}'.");
 

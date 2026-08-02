@@ -21,12 +21,17 @@ public sealed class SkillsAddCommand : AsyncCommand<SkillsAddSettings>
     {
         var sourcePath = FuseraftPaths.ExpandPath(settings.Source);
 
-        string skillMdPath;
+        // sourceSkillDir is non-null only when settings.Source names a skill directory
+        // (as opposed to a bare SKILL.md path) — only then do we know every file under it
+        // belongs to the skill and is safe to copy alongside SKILL.md (references/, scripts/).
+        string  skillMdPath;
+        string? sourceSkillDir = null;
         if (File.Exists(sourcePath) && Path.GetFileName(sourcePath).Equals("SKILL.md", StringComparison.OrdinalIgnoreCase))
             skillMdPath = sourcePath;
         else if (Directory.Exists(sourcePath))
         {
-            skillMdPath = Path.Combine(sourcePath, "SKILL.md");
+            skillMdPath    = Path.Combine(sourcePath, "SKILL.md");
+            sourceSkillDir = sourcePath;
             if (!File.Exists(skillMdPath))
             {
                 AnsiConsole.MarkupLine($"[red]✗ No SKILL.md found in {Markup.Escape(sourcePath)}[/]");
@@ -54,7 +59,17 @@ public sealed class SkillsAddCommand : AsyncCommand<SkillsAddSettings>
         var isUpdate = File.Exists(destPath);
 
         Directory.CreateDirectory(destDir);
-        await File.WriteAllTextAsync(destPath, content, cancellationToken);
+        if (sourceSkillDir is not null)
+        {
+            // Copy the whole skill directory (SKILL.md plus references/, scripts/, and any
+            // other bundled files) — copying SKILL.md alone silently strips everything a
+            // skill's own instructions point to (load_skill/read_skill_resource/run_skill_script).
+            SkillsHelpers.CopySkillDirectory(sourceSkillDir, destDir);
+        }
+        else
+        {
+            await File.WriteAllTextAsync(destPath, content, cancellationToken);
+        }
 
         await using var index = new SkillIndex();
         try

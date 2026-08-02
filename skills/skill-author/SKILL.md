@@ -44,7 +44,7 @@ description: <one or two sentences>
 ---
 ```
 
-**`name`:** A short, lowercase kebab-case slug (e.g. `debug-session`, `mcp-setup`). This is used as the install directory name when running `fuseraft skills add`. Keep it to 1–3 words.
+**`name`:** A short, lowercase kebab-case slug (e.g. `debug-session`, `mcp-setup`) — letters, digits, and single hyphens only, no leading/trailing/double hyphens. This is used as the install directory name when running `fuseraft skills add`. Keep it to 1–3 words, and **make it identical to the skill's directory name**: the REPL loader ignores `name:` and uses the directory name as the slug, but `fuseraft run` orchestration sessions use a stricter loader that silently drops the skill from the catalog if `name:` doesn't exactly match the directory name (or isn't valid kebab-case, or `description:` is empty). Matching them keeps the skill working identically in both surfaces.
 
 **`description`:** This is the most important field — fuseraft injects only the name and description into the agent's catalog at session start. The agent reads this to decide whether the skill is relevant. Write it so it covers:
 - What the skill produces or accomplishes
@@ -113,7 +113,7 @@ In `SKILL.md`, tell the agent when to load each reference file:
 Apply these settings. Load `references/field-reference.md` for the full field list if needed.
 ```
 
-The agent calls `load_skill` to get `SKILL.md`, then decides whether to call `read_file` on a reference file. Keep reference files focused — one topic per file.
+The agent calls `load_skill` to get `SKILL.md`, then calls `read_skill_resource("<slug>", "references/<file>.md")` to load a reference file on demand — not `read_file`, which has no way to know where the skill directory lives on disk. Keep reference files focused — one topic per file.
 
 ### Step 5: Add Scripts (If Needed)
 
@@ -177,9 +177,9 @@ fuseraft run --config <path> --max-iterations 1 "List your available skills."
 ```
 
 The agent should name the skill in its response. If it does not appear, check:
-- The directory name matches the slug used to reference it (runtime uses the directory name, not the `name:` frontmatter field)
 - `SKILL.md` is directly inside the skill directory (not nested deeper)
 - The install path is one of the five recognized locations (project `.fuseraft/skills/`, project `.agents/skills/`, user `.fuseraft/skills/`, user `.agents/skills/`, or shipped built-in)
+- **Orchestration-only:** `name:` in the frontmatter exactly matches the directory name (case-sensitive), is valid lowercase kebab-case, and `description:` is non-empty — a mismatch here loads fine in the REPL but is silently dropped by `fuseraft run`'s stricter loader with no error to the user, only a log entry
 
 ### Step 8: Refine the Description
 

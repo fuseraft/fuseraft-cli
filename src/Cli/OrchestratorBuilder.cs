@@ -1346,7 +1346,7 @@ public static class OrchestratorBuilder
 
         var strategyFactory = new StrategyFactory(chatClientFactory.Create, eventEmitter, loggerFactory, governanceKernel, humanApprovalService, evidenceStore, knowledgeLayer.ProvenanceRegistry, config.TestSelector, resolvedSandbox, contextAssembler);
 
-        var agentFactory = new AgentFactory(chatClientFactory, infra.PluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, infra.IdentityRegistry, eventEmitter, loggerFactory, BuildSkillsProvider(), infra.ToolArtifactStore);
+        var agentFactory = new AgentFactory(chatClientFactory, infra.PluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, infra.IdentityRegistry, eventEmitter, loggerFactory, BuildSkillsProvider(loggerFactory), infra.ToolArtifactStore);
 
         // Unified context assembly pipeline — shared across all orchestrator types.
         // Provides always-on knowledge retrieval, relevance-ranked memory, and metrics
@@ -1463,7 +1463,7 @@ public static class OrchestratorBuilder
         return (orchestrator, repoMemoryExtractor);
     }
 
-    private static AgentSkillsProvider? BuildSkillsProvider()
+    private static AgentSkillsProvider? BuildSkillsProvider(ILoggerFactory loggerFactory)
     {
         // Project-native → project cross-client → user-native → user cross-client → built-in.
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -1478,9 +1478,15 @@ public static class OrchestratorBuilder
 
         if (dirs.Length == 0) return null;
 
+        // Without a logger factory, AgentFileSkillsSource discards its diagnostics (invalid
+        // frontmatter, a skill 'name:' that doesn't match its directory name, symlink/path-
+        // traversal rejections, ...) — a skill can silently vanish from the catalog with no
+        // trace anywhere. Wiring the real factory surfaces those through the same logging
+        // pipeline as the rest of the orchestrator.
         return new AgentSkillsProviderBuilder()
             .UseFileSkills(dirs)
             .UseFileScriptRunner(RunSkillScriptAsync)
+            .UseLoggerFactory(loggerFactory)
             .Build();
     }
 
