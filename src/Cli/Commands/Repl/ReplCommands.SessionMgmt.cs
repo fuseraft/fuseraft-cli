@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
@@ -77,10 +78,10 @@ internal static partial class ReplCommands
 
             if (ctx.JsonMode)
             {
-                Console.WriteLine(
+                ReplJsonBridge.Emit(new { type = "text", text =
                     $"## Switched to Fork\n\n" +
                     $"Previous session: **`{prevId}`** (saved)\n\n" +
-                    $"Now running as: **`{forkId}`**");
+                    $"Now running as: **`{forkId}`**" });
             }
             else
             {
@@ -94,11 +95,11 @@ internal static partial class ReplCommands
         {
             if (ctx.JsonMode)
             {
-                Console.WriteLine(
+                ReplJsonBridge.Emit(new { type = "text", text =
                     $"## Session Forked\n\n" +
                     $"New session ID: **`{forkId}`**\n\n" +
                     $"Resume with: `fuseraft repl --resume {forkId}`\n\n" +
-                    $"Or use `/fork switch` to branch and continue as the fork immediately.");
+                    $"Or use `/fork switch` to branch and continue as the fork immediately." });
             }
             else
             {
@@ -213,11 +214,11 @@ internal static partial class ReplCommands
 
         if (ctx.JsonMode)
         {
-            Console.WriteLine(
+            ReplJsonBridge.Emit(new { type = "text", text =
                 $"## Switched Session\n\n" +
                 $"Now running as: **`{snapshot.SessionId}`** (was `{prevId}`)\n\n" +
                 $"Model: {ctx.ModelId} · {snapshot.TurnIndex} turn{(snapshot.TurnIndex == 1 ? "" : "s")} · " +
-                $"started {snapshot.StartedAt.ToLocalTime():yyyy-MM-dd HH:mm}");
+                $"started {snapshot.StartedAt.ToLocalTime():yyyy-MM-dd HH:mm}" });
         }
         else
         {
@@ -269,7 +270,8 @@ internal static partial class ReplCommands
 
         if (jsonMode)
         {
-            Console.WriteLine($"## Saved Sessions ({sessions.Count})\n");
+            var sb = new StringBuilder();
+            sb.AppendLine($"## Saved Sessions ({sessions.Count})\n");
             foreach (var s in sessions)
             {
                 var age   = DateTime.UtcNow - s.LastUpdatedAt;
@@ -277,11 +279,12 @@ internal static partial class ReplCommands
                           : age.TotalHours >= 1 ? $"{(int)age.TotalHours}h ago"
                           : $"{(int)age.TotalMinutes}m ago";
                 var turns = $"{s.TurnIndex} turn{(s.TurnIndex == 1 ? "" : "s")}";
-                Console.WriteLine(
+                sb.AppendLine(
                     $"- **`{s.SessionId}`** — {s.ModelId}, {turns}, {label} *({Path.GetFileName(s.Cwd)})*");
             }
-            Console.WriteLine();
-            Console.WriteLine("Resume a session with `/resume` if it's already loaded, or restart the panel and select the session.");
+            sb.AppendLine();
+            sb.AppendLine("Resume a session with `/resume` if it's already loaded, or restart the panel and select the session.");
+            ReplJsonBridge.Emit(new { type = "text", text = sb.ToString() });
             return;
         }
 

@@ -215,7 +215,17 @@ internal static partial class ReplCommands
                 var all   = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd, ctx.SessionId);
                 var found = all.FirstOrDefault(e => e.Name.Equals(memArg, StringComparison.OrdinalIgnoreCase));
                 if (found is null)
-                    AnsiConsole.MarkupLine($"[yellow]No memory named '{Markup.Escape(memArg)}'.[/]");
+                {
+                    if (ctx.JsonMode)
+                        ReplJsonBridge.Emit(new { type = "text", text = $"No memory named '{memArg}'." });
+                    else
+                        AnsiConsole.MarkupLine($"[yellow]No memory named '{Markup.Escape(memArg)}'.[/]");
+                }
+                else if (ctx.JsonMode)
+                {
+                    ReplJsonBridge.Emit(new { type = "text", text =
+                        $"**{found.Name}** ({found.Type})\n{found.Description}\n\n{found.Body}" });
+                }
                 else
                 {
                     AnsiConsole.MarkupLine($"[bold]{Markup.Escape(found.Name)}[/] [dim]({Markup.Escape(found.Type)})[/]");

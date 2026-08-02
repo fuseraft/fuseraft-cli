@@ -59,74 +59,76 @@ internal static partial class ReplCommands
     {
         if (jsonMode)
         {
-            Console.WriteLine("## REPL Commands\n");
+            ReplJsonBridge.Emit(new { type = "text", text = """
+                ## REPL Commands
 
-            Console.WriteLine("### Session");
-            Console.WriteLine("- `/help` — Show this help");
-            Console.WriteLine("- `/sessions` — List resumable sessions with IDs and turn counts");
-            Console.WriteLine("- `/fork` — Snapshot the current session to a new ID so you can branch from this point");
-            Console.WriteLine("- `/fork switch` — Fork and immediately become the fork (continue under the new ID)");
-            Console.WriteLine("- `/switch <id>` — Save the current session and load another saved session in its place");
-            Console.WriteLine("- `/conversation` — List all turns with numbers so you can pick a rewind point");
-            Console.WriteLine("- `/rewind <n>` — Keep turns 1…n and discard the rest");
-            Console.WriteLine("- `/rewind -<n>` — Step back n turns from the current position");
-            Console.WriteLine("- `/retry` — Resend the last message (useful when the response was poor)");
-            Console.WriteLine("- `/last` — Re-print the last assistant response");
-            Console.WriteLine("- `/clear` — Clear conversation history (keeps system prompt)");
-            Console.WriteLine("- `/history` — Show condensed conversation history");
-            Console.WriteLine("- `/assist` — Diagnose the conversation and inject a corrective message");
-            Console.WriteLine("- `/exit` — Exit the REPL (auto-saves memories)\n");
+                ### Session
+                - `/help` — Show this help
+                - `/sessions` — List resumable sessions with IDs and turn counts
+                - `/fork` — Snapshot the current session to a new ID so you can branch from this point
+                - `/fork switch` — Fork and immediately become the fork (continue under the new ID)
+                - `/switch <id>` — Save the current session and load another saved session in its place
+                - `/conversation` — List all turns with numbers so you can pick a rewind point
+                - `/rewind <n>` — Keep turns 1…n and discard the rest
+                - `/rewind -<n>` — Step back n turns from the current position
+                - `/retry` — Resend the last message (useful when the response was poor)
+                - `/last` — Re-print the last assistant response
+                - `/clear` — Clear conversation history (keeps system prompt)
+                - `/history` — Show condensed conversation history
+                - `/assist` — Diagnose the conversation and inject a corrective message
+                - `/exit` — Exit the REPL (auto-saves memories)
 
-            Console.WriteLine("### Orchestration");
-            Console.WriteLine("- `/run <task>` — Run a task using `fuseraft run` and inject the result as context");
-            Console.WriteLine("- `/run <file>` — Load task from a file and run it (prompts for config if multiple exist)\n");
+                ### Orchestration
+                - `/run <task>` — Run a task using `fuseraft run` and inject the result as context
+                - `/run <file>` — Load task from a file and run it (prompts for config if multiple exist)
 
-            Console.WriteLine("### Planning");
-            Console.WriteLine("- `/plan <task>` — Create a structured plan (JSON steps, no tool calls)");
-            Console.WriteLine("- `/plan` — Show the current stored plan");
-            Console.WriteLine("- `/execute` — Run each plan step sequentially with postcondition checks");
-            Console.WriteLine("- `/resume` — Retry the halted step and continue remaining steps");
-            Console.WriteLine("- `/recover` — Inject failure context and retry the halted step with agent awareness\n");
+                ### Planning
+                - `/plan <task>` — Create a structured plan (JSON steps, no tool calls)
+                - `/plan` — Show the current stored plan
+                - `/execute` — Run each plan step sequentially with postcondition checks
+                - `/resume` — Retry the halted step and continue remaining steps
+                - `/recover` — Inject failure context and retry the halted step with agent awareness
 
-            Console.WriteLine("### Tools & modes");
-            Console.WriteLine("- `/tools` — List active tools by category");
-            Console.WriteLine("- `/tools disable <category>` — Disable a tool category (FileSystem Shell Search Git Http)");
-            Console.WriteLine("- `/tools enable <category>` — Re-enable a disabled tool category");
-            Console.WriteLine("- `/safe-mode` — Show safe mode status");
-            Console.WriteLine("- `/safe-mode on` — Disable Shell, Git, Http tools to prevent mutations");
-            Console.WriteLine("- `/safe-mode off` — Restore tool categories");
-            Console.WriteLine("- `/adversarial` — Show adversarial mode status");
-            Console.WriteLine("- `/adversarial on` — Enable critic agent to review each `/execute` step");
-            Console.WriteLine("- `/adversarial off` — Disable critic agent\n");
+                ### Tools & modes
+                - `/tools` — List active tools by category
+                - `/tools disable <category>` — Disable a tool category (FileSystem Shell Search Git Http)
+                - `/tools enable <category>` — Re-enable a disabled tool category
+                - `/safe-mode` — Show safe mode status
+                - `/safe-mode on` — Disable Shell, Git, Http tools to prevent mutations
+                - `/safe-mode off` — Restore tool categories
+                - `/adversarial` — Show adversarial mode status
+                - `/adversarial on` — Enable critic agent to review each `/execute` step
+                - `/adversarial off` — Disable critic agent
 
-            Console.WriteLine("### Context & model");
-            Console.WriteLine("- `/context` — Show context window usage (actual once a turn has run, else estimated), per-category breakdown, and cumulative session token usage");
-            Console.WriteLine("- `/compact` — Summarise conversation into a handoff doc and reset history");
-            Console.WriteLine("- `/compact <focus>` — Same, but tailor the summary toward the next session's focus");
-            Console.WriteLine("- `/model` — Show current model and reasoning effort");
-            Console.WriteLine("- `/model <id> [effort]` — Switch model; optional effort: none, low, medium, high");
-            Console.WriteLine("- `/models` — List models available from the current provider");
-            Console.WriteLine("- `/reasoning` — Show current reasoning effort");
-            Console.WriteLine("- `/reasoning <none|low|medium|high>` — Set reasoning effort for the current model");
-            Console.WriteLine("- `/max-tokens <n>` — Set max output tokens for each response");
-            Console.WriteLine("- `/max-tokens reset` — Restore provider default max output tokens");
-            Console.WriteLine("- `/system` — Show current system prompt");
-            Console.WriteLine("- `/system <prompt>` — Set a new system prompt");
-            Console.WriteLine("- `/provider` — Show current provider, model, and API key\n");
+                ### Context & model
+                - `/context` — Show context window usage (actual once a turn has run, else estimated), per-category breakdown, and cumulative session token usage
+                - `/compact` — Summarise conversation into a handoff doc and reset history
+                - `/compact <focus>` — Same, but tailor the summary toward the next session's focus
+                - `/model` — Show current model and reasoning effort
+                - `/model <id> [effort]` — Switch model; optional effort: none, low, medium, high
+                - `/models` — List models available from the current provider
+                - `/reasoning` — Show current reasoning effort
+                - `/reasoning <none|low|medium|high>` — Set reasoning effort for the current model
+                - `/max-tokens <n>` — Set max output tokens for each response
+                - `/max-tokens reset` — Restore provider default max output tokens
+                - `/system` — Show current system prompt
+                - `/system <prompt>` — Set a new system prompt
+                - `/provider` — Show current provider, model, and API key
 
-            Console.WriteLine("### Memory");
-            Console.WriteLine("- `/memory` — List all stored memories");
-            Console.WriteLine("- `/memory show <name>` — Show full body of a memory");
-            Console.WriteLine("- `/memory delete <name>` — Delete a stored memory");
-            Console.WriteLine("- `/memory save` — Extract and save memories from the current session now\n");
+                ### Memory
+                - `/memory` — List all stored memories
+                - `/memory show <name>` — Show full body of a memory
+                - `/memory delete <name>` — Delete a stored memory
+                - `/memory save` — Extract and save memories from the current session now
 
-            Console.WriteLine("### I/O & events");
-            Console.WriteLine("- `/save` — Save transcript to `repl-<id>.md` in the current directory");
-            Console.WriteLine("- `/save <file>` — Save transcript to the specified file");
-            Console.WriteLine("- `/snapshot` — Write a full debug snapshot (context, tools, history, plan) to a temp file");
-            Console.WriteLine("- `/events` — Show session event stats (turns, tool calls, top tools, per-turn actual input/output tokens)");
-            Console.WriteLine("- `/explore <query>` — Run a sub-agent exploration loop and return a prose summary");
-            Console.WriteLine("- `/locate <symbol>` — Run a sub-agent symbol lookup; returns `path:line` result");
+                ### I/O & events
+                - `/save` — Save transcript to `repl-<id>.md` in the current directory
+                - `/save <file>` — Save transcript to the specified file
+                - `/snapshot` — Write a full debug snapshot (context, tools, history, plan) to a temp file
+                - `/events` — Show session event stats (turns, tool calls, top tools, per-turn actual input/output tokens)
+                - `/explore <query>` — Run a sub-agent exploration loop and return a prose summary
+                - `/locate <symbol>` — Run a sub-agent symbol lookup; returns `path:line` result
+                """ });
             return;
         }
 
