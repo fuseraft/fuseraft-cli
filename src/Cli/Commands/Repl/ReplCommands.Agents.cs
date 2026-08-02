@@ -108,7 +108,10 @@ internal static partial class ReplCommands
                         await StopSpinner();
                         if (!ctx.JsonMode) AnsiConsole.MarkupLine("[dim]assistant:[/]");
                     }
-                    await ReplConsole.WriteChunkSmoothAsync(chunk, cancellationToken);
+                    if (ctx.JsonMode)
+                        ReplJsonBridge.Emit(new { type = "token", text = chunk });
+                    else
+                        await ReplConsole.WriteChunkSmoothAsync(chunk, cancellationToken);
                 },
                 cancellationToken: cancellationToken);
             ctx.CumulativeInputTokens  += inputTok  ?? 0;
@@ -178,7 +181,10 @@ internal static partial class ReplCommands
                         gotOutput = true;
                         await StopSpinner();
                     }
-                    await ReplConsole.WriteChunkSmoothAsync(chunk, cancellationToken);
+                    if (ctx.JsonMode)
+                        ReplJsonBridge.Emit(new { type = "token", text = chunk });
+                    else
+                        await ReplConsole.WriteChunkSmoothAsync(chunk, cancellationToken);
                 },
                 cancellationToken: cancellationToken);
             ctx.CumulativeInputTokens  += inputTok  ?? 0;
