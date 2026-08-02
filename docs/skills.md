@@ -24,17 +24,21 @@ fuseraft uses a progressive-disclosure pattern to keep context lean:
 
 1. **Catalog injection** — At session start, the names and descriptions of all discovered skills are appended to the system prompt so the model knows what is available without loading every full body.
 2. **On-demand load** — When the model decides a skill is relevant, it calls `load_skill("<slug>")` to retrieve the full `SKILL.md` content, then follows those step-by-step instructions using its other tools.
-3. **Script execution** — If a skill bundles executable scripts alongside its `SKILL.md`, the model can run them with `run_skill_script("<slug>", "<filename>")`.
-4. **Direct invocation** — Type `$<slug>` at the REPL prompt to invoke a skill immediately without describing what you want. The `SKILL.md` content is loaded directly into the turn so the model applies the skill right away. Append arguments after the slug to pass context: `$commit fix typo in readme`. Tab completion cycles through matching skill slugs.
+3. **Resource reading** — If a skill ships supplementary reference material (e.g. under `references/`), the model reads it with `read_skill_resource("<slug>", "<path>")`, e.g. `read_skill_resource("build-docx", "references/python-docx-patterns.md")`.
+4. **Script execution** — If a skill bundles executable scripts alongside its `SKILL.md`, the model can run them with `run_skill_script("<slug>", "<filename>")`.
+5. **Direct invocation** — Type `$<slug>` at the REPL prompt to invoke a skill immediately without describing what you want. The `SKILL.md` content is loaded directly into the turn so the model applies the skill right away. Append arguments after the slug to pass context: `$commit fix typo in readme`. Tab completion cycles through matching skill slugs.
 
 At startup, the skill count appears in the compact info line alongside the active tool categories (e.g. `… · 3 skills · …`). Run `/tools` at any time to list all active tools by category, including the `Skills` category.
 
 | Tool | Description |
 |------|-------------|
 | `load_skill` | Load the full `SKILL.md` for a skill by slug. |
+| `read_skill_resource` | Read a supplementary file bundled with a skill (e.g. a file under `references/`), by path relative to the skill directory. |
 | `run_skill_script` | Run a script bundled with a skill (`.sh`, `.py`, `.js`). |
 
 If `--no-tools` is passed, skills are disabled for that session.
+
+`fuseraft run` orchestration sessions use the same five discovery locations and the same three tools (`load_skill`, `read_skill_resource`, `run_skill_script`), wired onto every agent automatically whenever at least one skill directory exists — there is no need to add `Skills` to an agent's `Plugins:` list, though doing so as a declaration of intent is harmless.
 
 ---
 
@@ -199,11 +203,13 @@ description: What this skill does and when to use it.
 Step-by-step guidance for the agent...
 ```
 
-The `name` field is used by `fuseraft skills add` to derive the destination directory name when installing a skill globally, so keeping it in sync with the directory name is strongly recommended. The runtime loader uses the **directory name** as the slug — the `name:` field in frontmatter is not read at load time. The `description` is what fuseraft uses to decide whether the skill is relevant to the current task — write it so it covers both what the skill does and the kinds of tasks that should trigger it.
+The `name` field is used by `fuseraft skills add` to derive the destination directory name when installing a skill globally, so keeping it in sync with the directory name is strongly recommended. The `description` is what fuseraft uses to decide whether the skill is relevant to the current task — write it so it covers both what the skill does and the kinds of tasks that should trigger it.
 
-If your instructions are long, move reference material into a `references/` subdirectory inside the skill folder. The agent loads those files on demand rather than all at once.
+If your instructions are long, move reference material into a `references/` subdirectory inside the skill folder. The agent loads those files on demand — with `read_skill_resource` — rather than all at once.
 
 **If two installed skills share the same name**, the one in the higher-precedence location wins and a warning is logged.
+
+> **Keep `name:` and the directory name identical.** The REPL loader uses the directory name as the slug and never reads `name:` at load time, so a mismatch is harmless there. `fuseraft run` orchestration sessions use a stricter loader that requires `name:` to match the directory name **exactly** (case-sensitive), to be non-empty lowercase kebab-case (letters, digits, single hyphens — no leading/trailing/double hyphens), and requires a non-empty `description:`. A skill that violates any of these is silently dropped from the orchestration catalog — it works fine in the REPL but an agent in a `fuseraft run` session never sees it. Follow the frontmatter format above exactly and both surfaces will pick up the skill identically.
 
 ---
 
