@@ -61,7 +61,7 @@ internal static partial class ReplCommands
         {
             // Paste mode reads raw stdin lines which would corrupt the JSONL bridge.
             // The VS Code panel textarea already supports Shift+Enter for multi-line input.
-            Console.WriteLine("Paste mode is not available in the VS Code panel.\n\nUse **Shift+Enter** in the input box to enter multi-line messages.");
+            ReplJsonBridge.Emit(new { type = "text", text = "Paste mode is not available in the VS Code panel.\n\nUse **Shift+Enter** in the input box to enter multi-line messages." });
             return CommandResult.Continue;
         }
 
@@ -139,14 +139,16 @@ internal static partial class ReplCommands
 
         if (ctx.JsonMode)
         {
-            Console.WriteLine($"## History ({turns.Count} message{(turns.Count == 1 ? "" : "s")})\n");
+            var sb = new StringBuilder();
+            sb.AppendLine($"## History ({turns.Count} message{(turns.Count == 1 ? "" : "s")})\n");
             foreach (var m in turns)
             {
                 var preview = (m.Text ?? string.Empty).Replace('\n', ' ').Trim();
                 if (preview.Length > 120) preview = preview[..120] + "…";
                 var label = m.Role == ChatRole.User ? "**You**" : "**Assistant**";
-                Console.WriteLine($"- {label}: {preview}");
+                sb.AppendLine($"- {label}: {preview}");
             }
+            ReplJsonBridge.Emit(new { type = "text", text = sb.ToString() });
             return;
         }
 
@@ -182,7 +184,7 @@ internal static partial class ReplCommands
         if (turns.Count == 0)
         {
             if (ctx.JsonMode)
-                Console.WriteLine("No conversation yet.");
+                ReplJsonBridge.Emit(new { type = "text", text = "No conversation yet." });
             else
                 AnsiConsole.MarkupLine("[dim]No conversation yet.[/]");
             return;
@@ -209,7 +211,7 @@ internal static partial class ReplCommands
             }
             sb.AppendLine();
             sb.AppendLine("Use `/rewind <n>` to rewind to after turn n, or `/rewind -<n>` to go back n turns.");
-            Console.Write(sb.ToString());
+            ReplJsonBridge.Emit(new { type = "text", text = sb.ToString() });
             return;
         }
 
@@ -321,9 +323,9 @@ internal static partial class ReplCommands
 
         if (ctx.JsonMode)
         {
-            Console.WriteLine(targetTurn == 0
+            ReplJsonBridge.Emit(new { type = "text", text = targetTurn == 0
                 ? $"## Rewound to Start\n\nAll {removed} turn{(removed == 1 ? "" : "s")} removed."
-                : $"## Rewound\n\nNow at turn {targetTurn}. {removed} turn{(removed == 1 ? "" : "s")} removed.");
+                : $"## Rewound\n\nNow at turn {targetTurn}. {removed} turn{(removed == 1 ? "" : "s")} removed." });
         }
         else
         {
@@ -359,7 +361,7 @@ internal static partial class ReplCommands
         if (ctx.TurnIndex > 0) ctx.TurnIndex--;
 
         if (ctx.JsonMode)
-            Console.WriteLine($"Retrying: {lastUserText.Replace('\n', ' ').Trim()[..Math.Min(80, lastUserText.Length)]}…");
+            ReplJsonBridge.Emit(new { type = "text", text = $"Retrying: {lastUserText.Replace('\n', ' ').Trim()[..Math.Min(80, lastUserText.Length)]}…" });
         else
             AnsiConsole.MarkupLine("[dim]Retrying last message…[/]");
 
@@ -377,7 +379,7 @@ internal static partial class ReplCommands
         if (lastAsst is null)
         {
             if (ctx.JsonMode)
-                Console.WriteLine("No assistant response yet.");
+                ReplJsonBridge.Emit(new { type = "text", text = "No assistant response yet." });
             else
                 AnsiConsole.MarkupLine("[dim]No assistant response yet.[/]");
             return;
@@ -387,7 +389,7 @@ internal static partial class ReplCommands
 
         if (ctx.JsonMode)
         {
-            Console.WriteLine(text);
+            ReplJsonBridge.Emit(new { type = "text", text });
             return;
         }
 

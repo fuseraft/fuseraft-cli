@@ -14,9 +14,16 @@ internal static class ReplJsonBridge
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
+    // Captured once, before any command handler can redirect Console.Out to a
+    // capture buffer (see ReplTurn's slash-command output capture). Emitted
+    // events must always reach the real stdout, never a redirected one, or
+    // they get swallowed into another event's captured text instead of
+    // arriving as their own JSONL line.
+    private static readonly TextWriter _stdout = Console.Out;
+
     internal static void Emit(object payload)
     {
-        Console.WriteLine(JsonSerializer.Serialize(payload, _opts));
+        _stdout.WriteLine(JsonSerializer.Serialize(payload, _opts));
     }
 
     /// <summary>

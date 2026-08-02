@@ -19,7 +19,7 @@ internal static partial class ReplCommands
         {
             if (ctx.JsonMode)
             {
-                Console.WriteLine("Usage: `/run <task>` or `/run <path-to-task-file>`");
+                ReplJsonBridge.Emit(new { type = "text", text = "Usage: `/run <task>` or `/run <path-to-task-file>`" });
                 return CommandResult.Continue;
             }
             AnsiConsole.Markup("[dim]Task (or path to task file): [/]");
@@ -62,7 +62,7 @@ internal static partial class ReplCommands
             var configRel   = Path.GetRelativePath(ctx.Cwd, configPath);
 
             if (ctx.JsonMode)
-                Console.WriteLine($"Running task with config `{configRel}`…\n");
+                ReplJsonBridge.Emit(new { type = "text", text = $"Running task with config `{configRel}`…" });
             else
             {
                 AnsiConsole.MarkupLine($"[dim]Config:[/] {Markup.Escape(configRel)}");
@@ -81,9 +81,9 @@ internal static partial class ReplCommands
 
             if (ctx.JsonMode)
             {
-                Console.WriteLine(succeeded
-                    ? $"\n✓ Run succeeded ({sw.Elapsed.TotalSeconds:F1}s). Ask me what happened."
-                    : $"\n✗ Run {status} ({sw.Elapsed.TotalSeconds:F1}s). Ask me what went wrong.");
+                ReplJsonBridge.Emit(new { type = "text", text = succeeded
+                    ? $"✓ Run succeeded ({sw.Elapsed.TotalSeconds:F1}s). Ask me what happened."
+                    : $"✗ Run {status} ({sw.Elapsed.TotalSeconds:F1}s). Ask me what went wrong." });
             }
             else
             {
@@ -172,8 +172,9 @@ internal static partial class ReplCommands
         if (jsonMode)
         {
             var chosen = configs[0];
-            Console.WriteLine($"Multiple configs found — using `{Path.GetRelativePath(cwd, chosen)}`.");
-            Console.WriteLine("Re-run with `/run --config <path> <task>` to choose a different one.");
+            ReplJsonBridge.Emit(new { type = "text", text =
+                $"Multiple configs found — using `{Path.GetRelativePath(cwd, chosen)}`.\n\n" +
+                "Re-run with `/run --config <path> <task>` to choose a different one." });
             return chosen;
         }
 

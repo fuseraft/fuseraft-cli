@@ -72,7 +72,7 @@ internal static partial class ReplCommands
                     sb.AppendLine($"*~{proj:N0} turns remaining (avg +{avg:N0} tok/turn)*");
                 }
             }
-            Console.Write(sb.ToString());
+            ReplJsonBridge.Emit(new { type = "text", text = sb.ToString() });
             ctx.PrevCtxEstimate = total;
             await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new
             {
@@ -218,7 +218,7 @@ internal static partial class ReplCommands
 
         if (ctx.JsonMode)
         {
-            Console.WriteLine("Provider setup requires an interactive terminal and is not available in the VS Code panel.\n\nRun **`fuseraft repl`** in a terminal to reconfigure your provider, model, and API key.");
+            ReplJsonBridge.Emit(new { type = "text", text = "Provider setup requires an interactive terminal and is not available in the VS Code panel.\n\nRun **`fuseraft repl`** in a terminal to reconfigure your provider, model, and API key." });
             return CommandResult.Continue;
         }
 
@@ -417,9 +417,11 @@ internal static partial class ReplCommands
 
         if (ctx.JsonMode)
         {
-            Console.WriteLine($"## Available Models ({modelIds.Count})\n");
+            var sb = new StringBuilder();
+            sb.AppendLine($"## Available Models ({modelIds.Count})\n");
             foreach (var m in modelIds)
-                Console.WriteLine($"- `{m}`{(m.Equals(ctx.ModelId, StringComparison.OrdinalIgnoreCase) ? " ← current" : "")}");
+                sb.AppendLine($"- `{m}`{(m.Equals(ctx.ModelId, StringComparison.OrdinalIgnoreCase) ? " ← current" : "")}");
+            ReplJsonBridge.Emit(new { type = "text", text = sb.ToString() });
             return CommandResult.Continue;
         }
 
