@@ -26,7 +26,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\fuseraft.csproj" />
-    <PackageReference Include="Microsoft.AgentGovernance" Version="4.0.0" />
+    <PackageReference Include="Microsoft.AgentGovernance" Version="5.0.0" />
   </ItemGroup>
 
 </Project>
