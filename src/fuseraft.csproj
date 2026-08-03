@@ -61,7 +61,7 @@
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
 
     <!-- SQLite — skill index FTS5 -->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
     <!-- Bundle the native e_sqlite3 library inside the single-file executable so
          it can be self-extracted at startup without a sibling .so file on disk. -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
