@@ -62,6 +62,7 @@ YAML is often more readable for configs with long agent instructions (block scal
 | `Verifier` | object | — | Self-verification meta-agent that audits the evidence graph for inconsistencies. See [Verifier](#verifier). |
 | `Brownfield` | object | — | Brownfield-mode settings: recon phase support, change envelope seeding, and convention profile injection. See [Brownfield mode](#brownfield-mode). |
 | `TestSelector` | object | — | Incremental test-selection settings. Exposes a shell command template for finding the minimal test set for a changed file. See [Test selector](#test-selector). |
+| `Output` | object | — | Reporting settings for `fuseraft run`, for scripted/automated invocations. See [Output](#output). |
 
 ---
 
@@ -953,6 +954,25 @@ By default, all sessions land in `~/.fuseraft/sessions/` regardless of which pro
 Use `"Mode": "memory"` for short-lived or automated runs where persistence is not needed (e.g. CI pipelines, integration tests). The session runs normally but leaves no files behind.
 
 **Omit** `Checkpoint` entirely to use the default (`json` mode, global `~/.fuseraft/sessions/` path).
+
+---
+
+## Output
+
+Controls how `fuseraft run` reports results, for orchestrations that are always invoked non-interactively — CI, cron, event-driven scripts — rather than run by hand.
+
+```yaml
+Output:
+  Json: true
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `Json` | bool | `false` | Same effect as passing `--json` on every invocation: suppresses the banner, turn panels, and spinner; sends all human-readable status to stderr; and prints one JSON summary object to stdout when the session ends. The `--json` CLI flag always takes precedence when passed, so this is purely a default for configs that are always run by scripts. |
+
+See [`fuseraft run` → `--json`](cli-reference.md#fuseraft-run) for the summary object's fields and the stdout/stderr contract, and [Scripting & Automation](scripting.md) for a worked event-driven pipeline example.
+
+**Omit** `Output` entirely for normal interactive rendering; pass `--json` per-invocation instead if only some runs of a config need it.
 
 ---
 
