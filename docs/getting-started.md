@@ -135,6 +135,8 @@ fuseraft init --template solo --no-interactive
 fuseraft run -c .fuseraft/config/orchestration.yaml "Your task here"
 ```
 
+To invoke fuseraft from a script or trigger it from an external event (a webhook, a queue, a cron tick), add `--json` for a single machine-parseable result and a clean stdout/stderr split — see [Scripting & Automation](scripting.md).
+
 ### Option B — copy an example config
 
 ```bash
