@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # MinVer needs full history to derive the version from git tags
 
@@ -57,7 +57,7 @@ jobs:
             archive: tar
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # MinVer needs full history to derive the version from git tags
 
@@ -99,7 +99,7 @@ jobs:
           zip ../fuseraft-${{ steps.ver.outputs.version }}-${{ matrix.rid }}.zip fuseraft.exe fuseraft-update.exe
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuseraft-${{ matrix.rid }}
           path: fuseraft-${{ steps.ver.outputs.version }}-${{ matrix.rid }}.*
@@ -118,13 +118,13 @@ jobs:
 
     steps:
       - name: Download all platform artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: artifacts/*
           generate_release_notes: true
