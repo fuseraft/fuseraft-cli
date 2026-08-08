@@ -32,6 +32,7 @@ fuseraft run [task] [options]
 | `--context-file <path>` | — | Attach a file as context. Its content is appended to the task. PDF, DOCX, PPTX, and XLSX files are extracted to plain text automatically; other files are read as UTF-8. Repeatable — specify once per file. Ignored when resuming. |
 | `--spec <path>` | — | Path to a spec file (Markdown, plain text, or JSON) that anchors all agents to an agreed specification. The spec is injected into every agent's system prompt as the authoritative source of truth and appended to the task at turn 0. Ignored when resuming. See [Spec-Driven Development](spec-driven.md). |
 | `--snapshot` | off | Capture per-turn postmortem snapshots to `~/.fuseraft/snapshots/<project>/<session>/`. Writes `turns.jsonl` (one record per agent turn: content, tool calls, token usage) and `manifest.json` (run summary: task, success/failure, elapsed). Useful for debugging and postmortem analysis. |
+| `--json` | off | Suppress the banner, turn panels, and spinner; send all human-readable status to stderr; print one JSON summary object to stdout when the session ends. For scripted/automated invocations. Same effect as `Output.Json: true` in the config (this flag always wins). See [`--json` output](#-json-output) below. |
 | `--vscode` | off | VS Code mode. Reads the API key from the `FUSERAFT_API_KEY` environment variable (injected by the fuseraft VS Code extension) instead of the OS keychain. Automatically passed by the extension — not intended for manual use. |
 
 **Examples**
@@ -92,6 +93,9 @@ fuseraft run --spec spec.json -c swe.yaml
 # Capture postmortem snapshots for debugging or failure analysis
 fuseraft run --snapshot "Refactor the auth module"
 fuseraft run --snapshot -c my-team.yaml "Add integration tests"
+
+# Scripted invocation — stdout is one JSON summary line, everything else is on stderr
+fuseraft run -c pipeline.yaml -f task.md --json --ci --no-banner
 ```
 
 **Task input priority**
@@ -194,6 +198,37 @@ Redirect Developer (Enter to abort session):
 
 - **Any text** — inject a redirect message and restart the stream
 - **Enter** — abort the session (checkpoint is saved for `--resume`)
+
+### `--json` output
+
+For scripts and event-driven invocations that need a structured result instead of parsing the transcript or console output. Enable it per-invocation with `--json`, or set `Output.Json: true` in the config to make it the default for every run of that orchestration (see [Output](configuration.md#output)) — the CLI flag always takes precedence. See [Scripting & Automation](scripting.md) for a full walkthrough with wrapper-script examples.
+
+**Stream contract:** stdout carries *only* the final JSON summary — no banner, no turn panels, no spinner. Every human-readable status line, including setup diagnostics (bad config, missing work dir, spec file not found) is written to stderr instead, regardless of whether JSON mode is even active — this makes `stdout` safe to pipe straight into `jq` or `json.loads()` in every case, never just the happy path.
+
+**Early failures** (before a session starts — bad `--work-dir`, unresolvable `--resume`, missing `--spec` file, or the config itself failing to load) also emit a JSON summary (`succeeded: false`, `error_message` set) whenever `--json` was passed, since the flag makes JSON mode known from the first line of the command. The one case that can't produce a JSON summary: JSON mode enabled *only* via `Output.Json` (not `--json`), failing *before* the config finishes loading — `Output.Json` genuinely cannot be read from a config that hasn't loaded yet. That case still guarantees stdout stays completely empty (never wrong, never mixed with plain text); the failure is reported via exit code and a stderr message only. Scripts should treat "stdout didn't parse as JSON" as its own failure case, not just check the JSON body — pass `--json` explicitly if you want a JSON summary for every outcome, not just successful ones.
+
+**Example:**
+
+```bash
+$ fuseraft run -c pipeline.yaml -f task.md --json --ci --no-banner
+{"session_id":"a3f92c1d","task":"...","config":"/abs/path/pipeline.yaml","succeeded":true,"error_message":null,"exit_code":0,"turns":4,"elapsed_seconds":38.12,"tokens":{"input":41203,"output":1877},"transcript_path":null,"ci":{"passed":true,"skipped":false,"failed_criteria":[]}}
+```
+
+**Summary fields** (snake_case, matching the rest of fuseraft's JSON output — event log, `--snapshot` manifest):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | string | The session's ID — pass to `--resume` if the caller wants to continue it later. |
+| `task` | string | The resolved task text (after `--task-file` / `--context-file` / `--spec` expansion). |
+| `config` | string | Absolute path to the config file used. |
+| `succeeded` | bool | Whether the orchestration session itself completed successfully. |
+| `error_message` | string \| null | Set when `succeeded` is `false`. |
+| `exit_code` | int | The process's own exit code (`0`, `1`, or `2` — same meaning as [`--ci`](#fuseraft-run) and the non-JSON path). Redundant with the shell's `$?`, included so the summary is self-contained when captured by a caller that only sees stdout. |
+| `turns` | int | Number of assistant turns in the session. |
+| `elapsed_seconds` | number | Wall-clock duration of the session. |
+| `tokens.input` / `tokens.output` | int | Summed input/output tokens across all turns. |
+| `transcript_path` | string \| null | Set when `-o/--output` was also passed. |
+| `ci` | object \| null | Present only when `--ci` was passed and the session succeeded. `passed` (bool), `skipped` (bool, true if `test-report.json` was absent or unparseable), `failed_criteria` (array of criterion names with `status: FAIL`). |
 
 ### DevUI
 

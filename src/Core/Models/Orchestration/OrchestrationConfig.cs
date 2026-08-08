@@ -262,6 +262,31 @@ public record OrchestrationConfig
     /// Null (default) disables orchestration-level memory.
     /// </summary>
     public MemoryConfig? Memory { get; init; }
+
+    /// <summary>
+    /// Optional output/reporting settings for <c>fuseraft run</c>, for scripted or automated
+    /// invocations. Null (default) uses standard interactive console rendering.
+    /// </summary>
+    public OutputConfig? Output { get; init; }
+}
+
+/// <summary>
+/// Controls how <c>fuseraft run</c> reports session results. Intended for orchestrations that
+/// are invoked non-interactively (CI, cron, event-driven scripts) rather than from a terminal.
+/// </summary>
+public record OutputConfig
+{
+    /// <summary>
+    /// When <c>true</c>, every session run against this config behaves as if <c>--json</c> was
+    /// passed on the command line: the startup banner, turn panels, and spinner are suppressed,
+    /// all human-readable status text is written to stderr instead of stdout, and a single JSON
+    /// object summarising the session (session ID, success/failure, token usage, elapsed time,
+    /// and CI results when <c>--ci</c> is used) is printed to stdout when the run ends.
+    /// The <c>--json</c> CLI flag always takes precedence when set; this is the config-level
+    /// default for orchestrations that are always run by scripts rather than by hand.
+    /// Defaults to <c>false</c>.
+    /// </summary>
+    public bool Json { get; init; } = false;
 }
 
 /// <summary>

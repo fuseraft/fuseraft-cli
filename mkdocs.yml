@@ -40,6 +40,7 @@ nav:
   - Writing Tasks: writing-tasks.md
   - Spec-Driven Development: spec-driven.md
   - CLI Reference: cli-reference.md
+  - Scripting & Automation: scripting.md
   - Configuration: configuration.md
   - Models & Providers: models.md
   - Plugins: plugins.md

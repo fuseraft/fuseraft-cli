@@ -1,0 +1,100 @@
+## Example: two-agent ETL pipeline for scripted / event-driven invocation.
+## Extractor reads and validates raw input; Transformer normalizes it, writes the
+## result to the output location, and files a machine-checkable test report.
+##
+## Designed to be called from a wrapper script (see scripts/run-pipeline.sh and
+## scripts/run_pipeline.py) in response to an external event — a file landing in
+## a watched directory, a queue message, a webhook, a cron tick — rather than run
+## by hand. Output.Json below means every invocation prints one JSON summary line
+## to stdout and exits 0/1/2; comment it out (or pass --json only when you want it)
+## if you'd rather use this config interactively.
+##
+## Run:      fuseraft run -c config/examples/etl-pipeline.yaml --json --ci -f task.md
+## Validate: fuseraft validate config/examples/etl-pipeline.yaml
+
+Orchestration:
+  Name: EtlPipeline
+  Description: >-
+    Extractor reads and validates raw input; Transformer normalizes it, writes
+    the result to the output path, and reports PASS/FAIL acceptance criteria
+    for --ci. Both agents run at most once each — this is a linear pipeline,
+    not an open-ended chat.
+
+  Models:
+    fast:
+      ModelId: claude-haiku-4-5-20251001
+      ApiKeyEnvVar: ANTHROPIC_API_KEY
+
+  Output:
+    Json: true
+
+  Selection:
+    Type: sequential
+
+  Termination:
+    Type: composite
+    Strategies:
+      - Type: regex
+        Pattern: "PIPELINE_COMPLETE"
+      - Type: maxiterations
+        MaxIterations: 4
+
+  Validation:
+    TestReportPath: .fuseraft/artifacts/test-report.json
+
+  Security:
+    # Set --work-dir at invocation time to the directory that contains both the
+    # input and output paths named in the task — everything below is relative to it.
+    FileSystemSandboxPath: .
+    ChangeEnvelope:
+      - "output/**"
+      - ".fuseraft/artifacts/**"
+
+  Agents:
+    - Name: Extractor
+      Description: Reads and validates the raw input data named in the task.
+      Instructions: |
+        You extract and validate raw pipeline input. You never write files.
+
+        1. Read the task — it names an input path (a file or directory) and the
+           expected record shape.
+        2. Use list_files / read_file to load the input data.
+        3. Validate it: each record must match the expected shape. Note the total
+           record count and list any malformed records you had to skip.
+        4. Report your findings as plain text: record count, inferred schema,
+           any bad records skipped and why. This becomes the Transformer's input
+           on the next turn — be specific enough that it doesn't need to re-derive
+           anything you already figured out.
+
+        Do not attempt to write output. Do not emit PIPELINE_COMPLETE — that is
+        the Transformer's signal, not yours.
+      Model:
+        ModelId: fast
+      Plugins:
+        - FileSystem
+      Capabilities:
+        FileSystem: [read]
+      FunctionChoice: required
+
+    - Name: Transformer
+      Description: Normalizes the extracted data and writes it to the output path.
+      Instructions: |
+        You transform validated pipeline data and write the result. You run
+        immediately after the Extractor and see its findings above.
+
+        1. Re-read the task for the output path and target schema.
+        2. Normalize the Extractor's records into the target schema.
+        3. Write the result with write_file to the output path given in the task.
+        4. Write .fuseraft/artifacts/test-report.json as a JSON object:
+           {"results": [{"criterion": "<what you checked>", "status": "PASS"}]}
+           Use "FAIL" for any criterion that did not hold (e.g. the output file
+           could not be written, or the record count didn't match) and explain
+           why in your final message — --ci reads this file and exits non-zero
+           on any FAIL.
+        5. Finish your final message with PIPELINE_COMPLETE on its own line.
+           This is the only agent that should ever emit that keyword.
+      Model:
+        ModelId: fast
+      Plugins:
+        - FileSystem
+      FunctionChoice: required

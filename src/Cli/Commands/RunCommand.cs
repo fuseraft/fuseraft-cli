@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using AgentGovernance.Audit;
 using AgentGovernance.Security;
 using AgentGovernance.Sre;
@@ -83,6 +85,10 @@ public sealed class RunSettings : CommandSettings
     [CommandOption("--snapshot")]
     [Description("Capture per-turn postmortem snapshots to ~/.fuseraft/snapshots/<project>/<session>/. Writes turns.jsonl (agent messages + tool calls) and manifest.json (run summary).")]
     public bool Snapshot { get; set; }
+
+    [CommandOption("--json")]
+    [Description("Suppress interactive console output (banner, turn panels, spinner) — human-readable status still goes to stderr — and print one JSON summary object to stdout when the session ends. Same effect as Output.Json: true in the config; this flag always wins.")]
+    public bool Json { get; set; }
 }
 
 /// <summary>
@@ -95,6 +101,32 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
 {
     protected override async Task<int> ExecuteAsync(CommandContext context, RunSettings settings, CancellationToken cancellationToken)
     {
+        // --json redirects all human-readable Spectre output to stderr so stdout stays a clean
+        // channel for the single JSON summary object printed at the end of the run. The config
+        // file can also enable this (Output.Json: true), but that isn't known until after the
+        // config loads below.
+        //
+        // Every diagnostic printed before the config loads (work-dir resolution, resume lookup,
+        // spec loading, and a config load failure itself) therefore always renders through
+        // StderrConsole below — never the ambient AnsiConsole.Console — regardless of whether
+        // jsonMode ends up true. That guarantees stdout can never receive stray text ahead of the
+        // JSON summary, in either the --json or the config-only Output.Json case. Additionally,
+        // whenever settings.Json (the CLI flag) is set, jsonMode is already known true up front,
+        // so these early-return paths also emit a minimal JSON error summary via
+        // EmitJsonErrorIfNeeded — a script driving fuseraft with --json gets exactly one JSON
+        // line on stdout even when the run fails before a session ever starts.
+        //
+        // Every early-return path *after* the config loads (API key validation, task-file
+        // resolution, prompt-injection rejection, a failed/cancelled pre-loop compaction) is keyed
+        // on jsonMode instead of settings.Json, since jsonMode is fully resolved by then — so a
+        // config-only Output.Json: true run gets the same one-JSON-line-or-nothing guarantee as
+        // --json for every failure past that point. The one case that can't be closed: config-only
+        // Output.Json with a failure before the config finishes loading — Output.Json genuinely
+        // can't be read from a config that hasn't loaded yet, so that path falls back to
+        // exit-code-only signalling (stdout stays empty, never wrong).
+        if (settings.Json)
+            RedirectAnsiConsoleToStderr();
+
         // Determine the config path early so we can build the right session store before
         // loading the full config. When resuming, checkpoint.ConfigPath will refine this later.
         // Resolve to absolute immediately so it stays valid after a potential CWD change below.
@@ -108,11 +140,12 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         {
             if (!Directory.Exists(workDir))
             {
-                AnsiConsole.MarkupLine($"[red]✗ Work directory not found:[/] {Markup.Escape(workDir)}");
+                StderrConsole.MarkupLine($"[red]✗ Work directory not found:[/] {Markup.Escape(workDir)}");
+                EmitJsonErrorIfNeeded(settings.Json, configPath, $"Work directory not found: {workDir}", 1);
                 return 1;
             }
             Directory.SetCurrentDirectory(workDir);
-            AnsiConsole.MarkupLine($"[dim]Working directory → {Markup.Escape(workDir)}[/]");
+            StderrConsole.MarkupLine($"[dim]Working directory → {Markup.Escape(workDir)}[/]");
         }
 
         // Build the active session store from the checkpoint config in the config file.
@@ -126,7 +159,8 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         {
             if (activeStore is InMemorySessionStore)
             {
-                AnsiConsole.MarkupLine("[yellow]⚠ CheckpointMode is 'memory' — sessions are not persisted and cannot be resumed.[/]");
+                StderrConsole.MarkupLine("[yellow]⚠ CheckpointMode is 'memory' — sessions are not persisted and cannot be resumed.[/]");
+                EmitJsonErrorIfNeeded(settings.Json, configPath, "CheckpointMode is 'memory' — sessions are not persisted and cannot be resumed.", 1);
                 return 1;
             }
 
@@ -135,7 +169,13 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             checkpoint = await ResolveCheckpointAsync(settings.Resume, activeStore);
             if (checkpoint is null && !ReferenceEquals(activeStore, sessionStore))
                 checkpoint = await ResolveCheckpointAsync(settings.Resume, sessionStore);
-            if (checkpoint is null) return 1;
+            if (checkpoint is null)
+            {
+                // ResolveCheckpointAsync already printed the specific reason (not found /
+                // already complete) via StderrConsole.
+                EmitJsonErrorIfNeeded(settings.Json, configPath, $"Could not resolve session to resume: {settings.Resume}", 1);
+                return 1;
+            }
 
             // TurnIndex of the last message equals the highest turn number, accounting for
             // any previous compactions where Messages.Count < total turns elapsed.
@@ -143,8 +183,8 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
                 ? checkpoint.Messages[^1].TurnIndex + 1
                 : 0;
 
-            AnsiConsole.MarkupLine($"[dim]Resuming session [bold]{checkpoint.SessionId}[/] " +
-                                   $"({turnsComplete} turns already complete)[/]");
+            StderrConsole.MarkupLine($"[dim]Resuming session [bold]{checkpoint.SessionId}[/] " +
+                                      $"({turnsComplete} turns already complete)[/]");
         }
 
         // Reconcile config path: an existing checkpoint always knows its own config.
@@ -164,16 +204,18 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
                 : Path.GetFullPath(settings.SpecFile);
             if (!File.Exists(absSpec))
             {
-                AnsiConsole.MarkupLine($"[red]✗ Spec file not found:[/] {Markup.Escape(absSpec)}");
+                StderrConsole.MarkupLine($"[red]✗ Spec file not found:[/] {Markup.Escape(absSpec)}");
+                EmitJsonErrorIfNeeded(settings.Json, configPath, $"Spec file not found: {absSpec}", 1);
                 return 1;
             }
             specContent = (await File.ReadAllTextAsync(absSpec, cancellationToken)).Trim();
             if (string.IsNullOrWhiteSpace(specContent))
             {
-                AnsiConsole.MarkupLine($"[red]✗ Spec file is empty:[/] {Markup.Escape(absSpec)}");
+                StderrConsole.MarkupLine($"[red]✗ Spec file is empty:[/] {Markup.Escape(absSpec)}");
+                EmitJsonErrorIfNeeded(settings.Json, configPath, $"Spec file is empty: {absSpec}", 1);
                 return 1;
             }
-            AnsiConsole.MarkupLine($"[dim]Spec → {Markup.Escape(absSpec)}[/]");
+            StderrConsole.MarkupLine($"[dim]Spec → {Markup.Escape(absSpec)}[/]");
         }
 
         var approvalService = new ConsoleHumanApprovalService();
@@ -185,11 +227,19 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]✗ Config error:[/] {Markup.Escape(ex.Message)}");
+            StderrConsole.MarkupLine($"[red]✗ Config error:[/] {Markup.Escape(ex.Message)}");
+            EmitJsonErrorIfNeeded(settings.Json, configPath, $"Config error: {ex.Message}", 1);
             return 1;
         }
 
         var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, _, sessionMetrics) = built;
+
+        // The config can also request JSON mode (Output.Json: true) for orchestrations that are
+        // always invoked by scripts. Apply the same stderr redirect if the CLI flag didn't
+        // already trigger it above.
+        var jsonMode = settings.Json || config.Output?.Json == true;
+        if (jsonMode && !settings.Json)
+            RedirectAnsiConsoleToStderr();
 
         await using var _mcp = mcpManager;
         using var _governance = governanceKernel;
@@ -204,7 +254,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
 
         using var telemetry = FuseraftTelemetry.Create(config.Telemetry, config.Name);
 
-        if (!settings.NoBanner)
+        if (!settings.NoBanner && !jsonMode)
         {
             var skills      = DiscoverSkills();
             var pluginNames = config.Agents
@@ -234,6 +284,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         catch (Exception ex)
         {
             AnsiConsole.MarkupLine($"[red]✗ API key validation failed:[/] {Markup.Escape(ex.Message)}");
+            EmitJsonErrorIfNeeded(jsonMode, configPath, $"API key validation failed: {ex.Message}", 1);
             return 1;
         }
 
@@ -252,6 +303,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             if (!File.Exists(settings.TaskFile))
             {
                 AnsiConsole.MarkupLine($"[red]✗ Task file not found:[/] {Markup.Escape(settings.TaskFile)}");
+                EmitJsonErrorIfNeeded(jsonMode, configPath, $"Task file not found: {settings.TaskFile}", 1);
                 return 1;
             }
 
@@ -260,6 +312,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             if (string.IsNullOrWhiteSpace(task))
             {
                 AnsiConsole.MarkupLine($"[red]✗ Task file is empty:[/] {Markup.Escape(settings.TaskFile)}");
+                EmitJsonErrorIfNeeded(jsonMode, configPath, $"Task file is empty: {settings.TaskFile}", 1);
                 return 1;
             }
         }
@@ -358,6 +411,8 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
                 AnsiConsole.MarkupLine(
                     $"[red]✗ Task rejected:[/] prompt injection detected " +
                     $"([bold]{detection.InjectionType}[/], confidence {detection.Confidence:P0}).");
+                EmitJsonErrorIfNeeded(jsonMode, configPath,
+                    $"Task rejected: prompt injection detected ({detection.InjectionType}, confidence {detection.Confidence:P0}).", 1);
                 return 1;
             }
         }
@@ -463,7 +518,11 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             // TryTriggerCompactionAsync already prints its own cancellation/failure message
             // (including the resume hint) before returning shouldBreak — nothing more to log here.
             if (shouldBreak)
+            {
+                EmitJsonErrorIfNeeded(jsonMode, configPath,
+                    "Session could not resume: history compaction was cancelled or failed before the run could start.", 1);
                 return 1;
+            }
 
             AnsiConsole.MarkupLine("[dim]History compacted before resuming.[/]");
         }
@@ -522,7 +581,8 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             contextBudget: config.ContextBudget,
             contextWindowRecorder: ctxRecorder,
             sessionMetrics: sessionMetrics,
-            postmortemWriter: snapshotWriter);
+            postmortemWriter: snapshotWriter,
+            quiet: jsonMode);
 
         if (!isNewSession && eventEmitter is not null)
             _ = eventEmitter.EmitAsync(EventTypes.ResumeStarted,
@@ -639,13 +699,128 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             await SaveTranscriptAsync(task, result.Messages, outPath);
 
         // CI mode: exit 2 if any acceptance criterion is FAIL in test-report.json.
+        CiCheckResult? ciCheck = null;
+        var exitCode = result.Succeeded ? 0 : 1;
         if (settings.Ci && result.Succeeded && config.Validation?.TestReportPath is { } reportPath)
         {
-            var ciResult = await CheckCiAsync(reportPath);
-            if (ciResult != 0) return ciResult;
+            ciCheck  = await CheckCiAsync(reportPath);
+            exitCode = ciCheck.ExitCode;
         }
 
-        return result.Succeeded ? 0 : 1;
+        if (jsonMode)
+            EmitJsonSummary(checkpoint.SessionId, task, configPath, result, ciCheck, settings.OutputPath, exitCode);
+
+        return exitCode;
+    }
+
+    /// <summary>
+    /// A standalone Spectre console bound to stderr (independent of the ambient
+    /// <see cref="AnsiConsole.Console"/>). Every diagnostic that can fire before the config —
+    /// and therefore <c>Output.Json</c> — has loaded is written through this instance instead of
+    /// the ambient one, so it is guaranteed to land on stderr regardless of whether JSON mode
+    /// ends up enabled. Markup/coloring still renders normally when stderr is a terminal.
+    /// </summary>
+    private static readonly IAnsiConsole StderrConsole = AnsiConsole.Create(new AnsiConsoleSettings
+    {
+        Out = new AnsiConsoleOutput(Console.Error),
+    });
+
+    /// <summary>
+    /// Points <see cref="AnsiConsole.Console"/> (the ambient console used by the rest of the
+    /// command, once JSON mode is confirmed) at stderr for the remainder of the process. Used by
+    /// <c>--json</c> / <c>Output.Json</c> so stdout stays a clean channel for the single JSON
+    /// summary object printed at the end of the run — <see cref="Console.Out"/> itself is
+    /// untouched, so <see cref="EmitJsonSummary"/> below still lands on the real stdout.
+    /// </summary>
+    private static void RedirectAnsiConsoleToStderr() => AnsiConsole.Console = StderrConsole;
+
+    private static readonly JsonSerializerOptions JsonSummaryOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+    };
+
+    /// <summary>
+    /// Prints a minimal JSON error summary to stdout for a run that never reached a completed
+    /// session — a setup check (work dir, resume, spec, config load, API key validation,
+    /// task-file resolution, prompt-injection rejection, pre-loop compaction) failed. Callers
+    /// before the config loads pass <c>settings.Json</c> (the CLI flag), since that's the one case
+    /// where JSON mode is known for certain that early; callers after the config loads pass the
+    /// fully-resolved <c>jsonMode</c> instead, so a config-only <c>Output.Json: true</c> run gets
+    /// the same guarantee for every failure past that point — see the comment at the top of
+    /// <see cref="ExecuteAsync"/>. Mirrors <see cref="EmitJsonSummary"/>'s field set so callers
+    /// can parse both with the same schema; fields that don't apply yet (no session ever started)
+    /// are zeroed/nulled rather than omitted.
+    /// </summary>
+    private static void EmitJsonErrorSummary(string? configPath, string errorMessage, int exitCode)
+    {
+        var summary = new
+        {
+            session_id      = (string?)null,
+            task            = (string?)null,
+            config          = configPath,
+            succeeded       = false,
+            error_message   = errorMessage,
+            exit_code       = exitCode,
+            turns           = 0,
+            elapsed_seconds = 0.0,
+            tokens          = new { input = 0, output = 0 },
+            transcript_path = (string?)null,
+            ci              = (object?)null,
+        };
+
+        Console.Out.WriteLine(JsonSerializer.Serialize(summary, JsonSummaryOptions));
+    }
+
+    /// <summary>
+    /// Calls <see cref="EmitJsonErrorSummary"/> only when <paramref name="jsonFlag"/> is set.
+    /// Named separately from the unconditional overload so early-return call sites read as a
+    /// single, self-explanatory statement.
+    /// </summary>
+    private static void EmitJsonErrorIfNeeded(bool jsonFlag, string? configPath, string errorMessage, int exitCode)
+    {
+        if (jsonFlag)
+            EmitJsonErrorSummary(configPath, errorMessage, exitCode);
+    }
+
+    /// <summary>
+    /// Prints a single-line JSON object summarising the completed session to stdout, for
+    /// scripts invoked via <c>--json</c> / <c>Output.Json</c> that need a structured result
+    /// instead of parsing the transcript or console output.
+    /// </summary>
+    private static void EmitJsonSummary(
+        string sessionId,
+        string task,
+        string configPath,
+        SessionResult result,
+        CiCheckResult? ciCheck,
+        string? transcriptPath,
+        int exitCode)
+    {
+        var summary = new
+        {
+            session_id      = sessionId,
+            task,
+            config          = configPath,
+            succeeded       = result.Succeeded,
+            error_message   = result.ErrorMessage,
+            exit_code       = exitCode,
+            turns           = result.Messages.Count(m => m.Role == MessageRole.Assistant),
+            elapsed_seconds = Math.Round(result.Elapsed.TotalSeconds, 2),
+            tokens          = new
+            {
+                input  = result.Messages.Sum(m => m.Usage?.InputTokens ?? 0),
+                output = result.Messages.Sum(m => m.Usage?.OutputTokens ?? 0),
+            },
+            transcript_path = transcriptPath,
+            ci = ciCheck is null ? null : new
+            {
+                passed          = ciCheck.Passed,
+                skipped         = ciCheck.Skipped,
+                failed_criteria = ciCheck.FailedCriteria,
+            },
+        };
+
+        Console.Out.WriteLine(JsonSerializer.Serialize(summary, JsonSummaryOptions));
     }
 
     // Helpers
@@ -743,7 +918,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
 
             if (incomplete.Count == 0)
             {
-                AnsiConsole.MarkupLine("[yellow]No incomplete sessions found.[/]");
+                StderrConsole.MarkupLine("[yellow]No incomplete sessions found.[/]");
                 return null;
             }
 
@@ -767,13 +942,13 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
 
         if (checkpoint is null)
         {
-            AnsiConsole.MarkupLine($"[red]✗ Session not found:[/] {Markup.Escape(sessionIdHint)}");
+            StderrConsole.MarkupLine($"[red]✗ Session not found:[/] {Markup.Escape(sessionIdHint)}");
             return null;
         }
 
         if (checkpoint.IsComplete)
         {
-            AnsiConsole.MarkupLine($"[yellow]Session {sessionIdHint} is already complete.[/]");
+            StderrConsole.MarkupLine($"[yellow]Session {sessionIdHint} is already complete.[/]");
             return null;
         }
 
@@ -826,43 +1001,49 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
     }
 
     /// <summary>
-    /// Reads test-report.json and returns 2 if any criterion has status FAIL, 0 otherwise.
+    /// Result of the post-run CI check against <c>test-report.json</c>.
+    /// </summary>
+    private sealed record CiCheckResult(int ExitCode, bool Passed, bool Skipped, List<string> FailedCriteria);
+
+    /// <summary>
+    /// Reads test-report.json and returns exit code 2 if any criterion has status FAIL, 0 otherwise.
     /// Logs a summary to the console so CI output is self-explanatory.
     /// </summary>
-    private static async Task<int> CheckCiAsync(string reportPath)
+    private static async Task<CiCheckResult> CheckCiAsync(string reportPath)
     {
         if (!File.Exists(reportPath))
         {
             AnsiConsole.MarkupLine($"[yellow]⚠ CI check skipped — test-report.json not found at '{Markup.Escape(reportPath)}'.[/]");
-            return 0;
+            return new CiCheckResult(0, Passed: true, Skipped: true, FailedCriteria: []);
         }
 
         try
         {
             var json    = await File.ReadAllTextAsync(reportPath);
-            var report  = System.Text.Json.JsonSerializer.Deserialize<CiTestReport>(json,
-                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            var report  = JsonSerializer.Deserialize<CiTestReport>(json,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
             var fails = report?.Results?
                 .Where(r => string.Equals(r.Status, "FAIL", StringComparison.OrdinalIgnoreCase))
+                .Select(r => r.Criterion ?? "(unknown)")
                 .ToList() ?? [];
 
             if (fails.Count == 0)
             {
                 AnsiConsole.MarkupLine("[green]✓ CI check passed — all acceptance criteria PASS.[/]");
-                return 0;
+                return new CiCheckResult(0, Passed: true, Skipped: false, FailedCriteria: []);
             }
 
             AnsiConsole.MarkupLine($"[red]✗ CI check failed — {fails.Count} criterion/criteria FAIL:[/]");
             foreach (var f in fails)
-                AnsiConsole.MarkupLine($"  [red]FAIL[/] {Markup.Escape(f.Criterion ?? "(unknown)")}");
+                AnsiConsole.MarkupLine($"  [red]FAIL[/] {Markup.Escape(f)}");
 
-            return 2;
+            return new CiCheckResult(2, Passed: false, Skipped: false, FailedCriteria: fails);
         }
         catch (Exception ex)
         {
             AnsiConsole.MarkupLine($"[yellow]⚠ CI check skipped — could not parse test-report.json: {Markup.Escape(ex.Message)}[/]");
-            return 0;
+            return new CiCheckResult(0, Passed: true, Skipped: true, FailedCriteria: []);
         }
     }
 
