@@ -114,10 +114,16 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         // whenever settings.Json (the CLI flag) is set, jsonMode is already known true up front,
         // so these early-return paths also emit a minimal JSON error summary via
         // EmitJsonErrorIfNeeded — a script driving fuseraft with --json gets exactly one JSON
-        // line on stdout even when the run fails before a session ever starts. The one case that
-        // can't be closed: config-only Output.Json with a failure before the config finishes
-        // loading — Output.Json genuinely can't be read from a config that hasn't loaded yet, so
-        // that path falls back to exit-code-only signalling (stdout stays empty, never wrong).
+        // line on stdout even when the run fails before a session ever starts.
+        //
+        // Every early-return path *after* the config loads (API key validation, task-file
+        // resolution, prompt-injection rejection, a failed/cancelled pre-loop compaction) is keyed
+        // on jsonMode instead of settings.Json, since jsonMode is fully resolved by then — so a
+        // config-only Output.Json: true run gets the same one-JSON-line-or-nothing guarantee as
+        // --json for every failure past that point. The one case that can't be closed: config-only
+        // Output.Json with a failure before the config finishes loading — Output.Json genuinely
+        // can't be read from a config that hasn't loaded yet, so that path falls back to
+        // exit-code-only signalling (stdout stays empty, never wrong).
         if (settings.Json)
             RedirectAnsiConsoleToStderr();
 
@@ -278,6 +284,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         catch (Exception ex)
         {
             AnsiConsole.MarkupLine($"[red]✗ API key validation failed:[/] {Markup.Escape(ex.Message)}");
+            EmitJsonErrorIfNeeded(jsonMode, configPath, $"API key validation failed: {ex.Message}", 1);
             return 1;
         }
 
@@ -296,6 +303,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             if (!File.Exists(settings.TaskFile))
             {
                 AnsiConsole.MarkupLine($"[red]✗ Task file not found:[/] {Markup.Escape(settings.TaskFile)}");
+                EmitJsonErrorIfNeeded(jsonMode, configPath, $"Task file not found: {settings.TaskFile}", 1);
                 return 1;
             }
 
@@ -304,6 +312,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             if (string.IsNullOrWhiteSpace(task))
             {
                 AnsiConsole.MarkupLine($"[red]✗ Task file is empty:[/] {Markup.Escape(settings.TaskFile)}");
+                EmitJsonErrorIfNeeded(jsonMode, configPath, $"Task file is empty: {settings.TaskFile}", 1);
                 return 1;
             }
         }
@@ -402,6 +411,8 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
                 AnsiConsole.MarkupLine(
                     $"[red]✗ Task rejected:[/] prompt injection detected " +
                     $"([bold]{detection.InjectionType}[/], confidence {detection.Confidence:P0}).");
+                EmitJsonErrorIfNeeded(jsonMode, configPath,
+                    $"Task rejected: prompt injection detected ({detection.InjectionType}, confidence {detection.Confidence:P0}).", 1);
                 return 1;
             }
         }
@@ -507,7 +518,11 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             // TryTriggerCompactionAsync already prints its own cancellation/failure message
             // (including the resume hint) before returning shouldBreak — nothing more to log here.
             if (shouldBreak)
+            {
+                EmitJsonErrorIfNeeded(jsonMode, configPath,
+                    "Session could not resume: history compaction was cancelled or failed before the run could start.", 1);
                 return 1;
+            }
 
             AnsiConsole.MarkupLine("[dim]History compacted before resuming.[/]");
         }
@@ -725,10 +740,13 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
     };
 
     /// <summary>
-    /// Prints a minimal JSON error summary to stdout for a run that never reached a session —
-    /// i.e. one of the early setup checks (work dir, resume, spec, config load) failed. Only
-    /// called when <c>settings.Json</c> (the CLI flag) is set, since that is the one case where
-    /// JSON mode is known for certain this early — see the comment at the top of
+    /// Prints a minimal JSON error summary to stdout for a run that never reached a completed
+    /// session — a setup check (work dir, resume, spec, config load, API key validation,
+    /// task-file resolution, prompt-injection rejection, pre-loop compaction) failed. Callers
+    /// before the config loads pass <c>settings.Json</c> (the CLI flag), since that's the one case
+    /// where JSON mode is known for certain that early; callers after the config loads pass the
+    /// fully-resolved <c>jsonMode</c> instead, so a config-only <c>Output.Json: true</c> run gets
+    /// the same guarantee for every failure past that point — see the comment at the top of
     /// <see cref="ExecuteAsync"/>. Mirrors <see cref="EmitJsonSummary"/>'s field set so callers
     /// can parse both with the same schema; fields that don't apply yet (no session ever started)
     /// are zeroed/nulled rather than omitted.
