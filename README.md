@@ -126,6 +126,7 @@ The binary lands in `./bin/`.
 |-----|--------|
 | [Getting Started](docs/getting-started.md) | Prerequisites, first run |
 | [CLI Reference](docs/cli-reference.md) | Commands and flags |
+| [Scripting & Automation](docs/scripting.md) | Running fuseraft from bash/Python, `--json` output, event-driven pipelines |
 | [Configuration](docs/configuration.md) | YAML/JSON schema |
 | [Models & Providers](docs/models.md) | Model configuration and provider auto-detection |
 | [Plugins](docs/plugins.md) | All built-in tools agents can call |

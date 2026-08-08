@@ -1106,6 +1106,51 @@ Orchestration:
 
 ---
 
+## Event-driven ETL pipeline
+
+Two agents run at most once each — a linear pipeline, not an open-ended chat. Extractor reads and validates raw input; Transformer normalizes it, writes the result, and files a PASS/FAIL acceptance-criteria report. `Output.Json: true` means every invocation reports a single structured result instead of interactive output, and `ChangeEnvelope` restricts writes to the output directory since this is meant to run unattended, triggered by an external event rather than a person.
+
+```yaml
+Orchestration:
+  Name: EtlPipeline
+
+  Output:
+    Json: true
+
+  Selection:
+    Type: sequential
+
+  Termination:
+    Type: composite
+    Strategies:
+      - Type: regex
+        Pattern: "PIPELINE_COMPLETE"
+      - Type: maxiterations
+        MaxIterations: 4
+
+  Validation:
+    TestReportPath: .fuseraft/artifacts/test-report.json
+
+  Security:
+    FileSystemSandboxPath: .
+    ChangeEnvelope:
+      - "output/**"
+      - ".fuseraft/artifacts/**"
+
+  Agents:
+    - Name: Extractor      # reads + validates input, never writes
+      Plugins: [FileSystem]
+      Capabilities:
+        FileSystem: [read]
+
+    - Name: Transformer     # normalizes, writes output, files the test report
+      Plugins: [FileSystem]
+```
+
+The full config (with complete agent instructions) is at `config/examples/etl-pipeline.yaml`, alongside bash and Python wrapper scripts that build a task from an input/output path pair, invoke `fuseraft run --json --ci`, and exit with fuseraft's own exit code. See [Scripting & Automation](scripting.md) for the full walkthrough — the `--json` contract, wiring this to a webhook/queue/cron trigger, and using the Python wrapper as an importable library function.
+
+---
+
 ## Orchestration designer
 
 A single-agent orchestration that helps you design, write, and validate fuseraft configs interactively. Describe your use case in plain language and the Designer generates a ready-to-run YAML config, writes it to disk, and runs `fuseraft validate` to confirm it is correct.
