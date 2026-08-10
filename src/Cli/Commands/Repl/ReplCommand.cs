@@ -435,6 +435,9 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             ctx.History.AddRange(restored);
             ctx.TurnIndex = snapshot.TurnIndex;
 
+            if (snapshot.TodoItems is { Length: > 0 } restoredTodoItems)
+                todoPlugin?.Restore(restoredTodoItems);
+
             if (!jsonMode)
             {
                 AnsiConsole.MarkupLine(

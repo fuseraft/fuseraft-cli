@@ -365,7 +365,10 @@ internal static class ReplTurn
                 haltedToolCalls: ctx.HaltedToolCalls.Count > 0
                                  ? [.. ctx.HaltedToolCalls]
                                  : null,
-                recoveryHint:    ctx.RecoveryHint);
+                recoveryHint:    ctx.RecoveryHint,
+                todoItems:       ctx.Todo?.Snapshot() is { Count: > 0 } todoItems
+                                 ? [.. todoItems]
+                                 : null);
             await ReplSessionSnapshot.SaveAsync(snap);
         }
         catch { }
