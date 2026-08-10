@@ -101,7 +101,7 @@ The binary lands in `./bin/`.
 - Evidence contracts gate transitions with predicates: `FileExists`, `FilesWritten`, `CommandSucceeded`
 
 **Coordination**
-- Eleven routing modes: sequential (one-pass), round-robin (cycling), keyword, structured, state machine, graph (parallel fan-out + hierarchical sub-graphs), LLM, Magentic, adversarial generate→critique, map-reduce (parallel item processing), scatter-gather (broadcast + synthesize)
+- Twelve routing modes: sequential (one-pass), round-robin (cycling), keyword, structured, state machine, graph (parallel fan-out + hierarchical sub-graphs), workflow (cycle-native graph compiled once per session), LLM, Magentic, adversarial generate→critique, map-reduce (parallel item processing), scatter-gather (broadcast + synthesize)
 - Saga mode adds compensating rollback on failure
 - Inline agents or reusable `AgentFile` YAML; mix providers in one pipeline
 - Federate slots via A2A protocol

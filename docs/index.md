@@ -128,6 +128,7 @@ fuseraft run -c .fuseraft/config/orchestration.yaml "Add a hello-world endpoint 
 | [Writing Effective Tasks](writing-tasks.md) | Task descriptions that produce correct, verifiable results |
 | [Spec-Driven Development](spec-driven.md) | Using `--spec` to anchor agents before implementation begins |
 | [CLI Reference](cli-reference.md) | All commands and flags |
+| [Scripting & Automation](scripting.md) | Running fuseraft from bash/Python, `--json` output, event-driven pipelines |
 | [Configuration](configuration.md) | Full config schema (YAML and JSON) |
 | [Models & Providers](models.md) | Model configuration and auto-detection |
 | [Plugins](plugins.md) | All built-in tools agents can call |
@@ -141,8 +142,10 @@ fuseraft run -c .fuseraft/config/orchestration.yaml "Add a hello-world endpoint 
 | [Sessions](sessions.md) | Resumption, HITL, cost tracking, compaction |
 | [Context Management](context-management.md) | How fuseraft manages context across a long session |
 | [Context Store](context-store.md) | Importing reference material for agents |
+| [Knowledge Layer](knowledge.md) | ADRs, graph, provenance |
 | [Skills](skills.md) | Portable skill packages and cross-session skill index |
 | [Examples](examples.md) | Ready-to-use config examples |
+| [Design](design.md) | Architecture, layer map, MAF usage, and decision log |
 
 ---
 
