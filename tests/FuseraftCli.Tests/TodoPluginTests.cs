@@ -103,4 +103,50 @@ public sealed class TodoPluginTests
         Assert.Equal("A", snapshot[0].Content);
         Assert.Equal("completed", snapshot[0].Status);
     }
+
+    // ── Restore (--resume support) ──────────────────────────────────────────
+
+    [Fact]
+    public void Restore_ThenRead_ReflectsRestoredItems()
+    {
+        var plugin = new TodoPlugin();
+        var items = new[]
+        {
+            new TodoItem { Content = "Read entry point", Status = "completed" },
+            new TodoItem { Content = "Map request flow", Status = "in_progress" },
+        };
+
+        plugin.Restore(items);
+
+        var read = plugin.Read();
+        Assert.Contains("[x] Read entry point", read);
+        Assert.Contains("[~] Map request flow", read);
+    }
+
+    [Fact]
+    public void Restore_ThenSnapshot_MatchesRestoredItems()
+    {
+        var plugin = new TodoPlugin();
+        var items = new[] { new TodoItem { Content = "A", Status = "pending" } };
+
+        plugin.Restore(items);
+
+        var snapshot = plugin.Snapshot();
+        Assert.Single(snapshot);
+        Assert.Equal("A", snapshot[0].Content);
+        Assert.Equal("pending", snapshot[0].Status);
+    }
+
+    [Fact]
+    public void Restore_OverwritesPriorState()
+    {
+        var plugin = new TodoPlugin();
+        plugin.Write("""[{"content":"Stale item","status":"pending"}]""");
+
+        plugin.Restore([new TodoItem { Content = "Fresh item", Status = "completed" }]);
+
+        var read = plugin.Read();
+        Assert.DoesNotContain("Stale item", read);
+        Assert.Contains("Fresh item", read);
+    }
 }

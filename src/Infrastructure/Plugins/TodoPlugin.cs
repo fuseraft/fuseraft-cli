@@ -83,6 +83,14 @@ public sealed class TodoPlugin
         lock (_lock) return [.. _items];
     }
 
+    /// <summary>Restores a previously captured list (used when resuming a REPL session from a
+    /// snapshot). Bypasses the JSON parsing and validation in <see cref="Write"/> since these
+    /// items were already validated when they were originally written.</summary>
+    internal void Restore(IReadOnlyList<TodoItem> items)
+    {
+        lock (_lock) _items = [.. items];
+    }
+
     internal static string Render(IReadOnlyList<TodoItem> items)
     {
         var sb = new StringBuilder();

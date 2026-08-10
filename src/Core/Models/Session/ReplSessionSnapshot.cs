@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
+using fuseraft.Infrastructure.Plugins;
 
 namespace fuseraft.Core.Models.Session;
 
@@ -68,6 +69,10 @@ public sealed record ReplSessionSnapshot
     public string[]?        HaltedToolCalls { get; init; }
     public string?          RecoveryHint    { get; init; }
 
+    // Self-directed todo list state (see TodoPlugin) — persisted so /resume doesn't leave
+    // todo_read contradicting the restored chat history's last todo_write call.
+    public TodoItem[]?      TodoItems       { get; init; }
+
     // -------------------------------------------------------------------------
 
     public static ReplSessionSnapshot Capture(
@@ -78,7 +83,8 @@ public sealed record ReplSessionSnapshot
         PlanStepEntry?   haltedAt        = null,
         PlanStepEntry[]? haltedRemaining = null,
         string[]?        haltedToolCalls = null,
-        string?          recoveryHint    = null) => new()
+        string?          recoveryHint    = null,
+        TodoItem[]?      todoItems       = null) => new()
     {
         SessionId       = sessionId,
         ModelId         = modelId,
@@ -92,6 +98,7 @@ public sealed record ReplSessionSnapshot
         HaltedRemaining = haltedRemaining,
         HaltedToolCalls = haltedToolCalls,
         RecoveryHint    = recoveryHint,
+        TodoItems       = todoItems,
     };
 
     /// <summary>Restores the serialized history as live ChatMessage objects.</summary>
