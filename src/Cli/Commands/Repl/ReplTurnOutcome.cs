@@ -170,6 +170,37 @@ internal static class ReplTurnOutcome
         return passed;
     }
 
+    /// <summary>
+    /// Transitions the plan into the same recoverable halted state as <see cref="HandleStepResult"/>'s
+    /// verify-failure branch, but for a step whose turn never produced a result at all — a
+    /// cancelled or unrecoverable streaming request (see the catch blocks in
+    /// <c>ReplTurn.StreamTurnResponseAsync</c>). Without this, those failures fell through to a
+    /// bare <c>ExecutionQueue.Clear()</c> with <see cref="ReplSessionContext.HaltedAt"/> never
+    /// set, silently discarding the rest of the plan with no way for /resume or /recover to act.
+    /// </summary>
+    internal static void HaltStepOnStreamFailure(
+        ReplSessionContext ctx, PlanStep activeStep, int total, IReadOnlyList<string> toolCallsThisTurn)
+    {
+        ctx.HaltedAt = (activeStep, total);
+        ctx.HaltedRemaining.Clear();
+        foreach (var item in ctx.ExecutionQueue) ctx.HaltedRemaining.Enqueue(item);
+        ctx.HaltedToolCalls = [.. toolCallsThisTurn];
+        ctx.ExecutionQueue.Clear();
+
+        _ = ctx.Emitter.EmitAsync(EventTypes.StepHalted, turn: ctx.TurnIndex, payload: new
+        {
+            step       = activeStep.Step,
+            total,
+            reason     = "stream_failure",
+            tool_calls = toolCallsThisTurn.ToArray(),
+        });
+
+        if (ctx.JsonMode)
+            ReplJsonBridge.Emit(new { type = "step_status", step = activeStep.Step, total, status = "halted", stepsLeft = 0 });
+        else
+            AnsiConsole.MarkupLine("[yellow]  Plan halted. Run /recover to let the agent diagnose and retry, or /resume to retry directly.[/]");
+    }
+
     // Read/inspect tools that do not mutate state. When only these are called during a step
     // whose expected tool is a write operation, the agent verified the precondition and
     // determined no action was needed — treat as a conditional skip rather than a failure.

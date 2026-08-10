@@ -32,6 +32,11 @@ internal static class ReplTurn
 {
     internal const int StepIterationLimit = 5;
 
+    // Tool-call round-trip cap for free-form turns (ctx.Client) — mirrors StepIterationLimit
+    // but far more permissive since a chat turn isn't scoped to one action. Named so
+    // ReplFactory.BuildClient's default and the hit-cap check below can't drift apart.
+    internal const int ChatIterationLimit = 20;
+
     // Maximum times a transient streaming error (ResponseEnded, IOException, TimeoutException)
     // is retried automatically before surfacing the failure to the user.
     private const int MaxStreamRetries = 2;
@@ -393,13 +398,23 @@ internal static class ReplTurn
 
         var turnStart = DateTime.UtcNow;
         var stream = await StreamTurnResponseAsync(ctx, input, isStepRequest, capturePlan, turnStart, cancellationToken);
-        if (!stream.Success) return false;
+        if (!stream.Success)
+        {
+            // A plan step whose turn was cancelled or hit an unrecoverable streaming error
+            // never reaches HandleStepResult below, so without this the queue-drain loop in
+            // RunLoopAsync would just lose the rest of the plan with no HaltedAt set for
+            // /resume or /recover to act on.
+            if (isStepRequest && activeStep is not null)
+                ReplTurnOutcome.HaltStepOnStreamFailure(ctx, activeStep, stepTotal, stream.ToolCallsThisTurn);
+            return false;
+        }
 
         var responseText      = stream.ResponseText;
         var toolCallsThisTurn = stream.ToolCallsThisTurn;
         var fileChanges       = stream.FileChanges;
         var toolRounds        = stream.ToolRounds;
         var capturedResults   = stream.CapturedResults;
+        var rawUpdates        = stream.RawUpdates;
         var turnInputTokens   = stream.TurnInputTokens;
         var turnOutputTokens  = stream.TurnOutputTokens;
 
@@ -431,7 +446,13 @@ internal static class ReplTurn
         }
         if (!ctx.JsonMode) AnsiConsole.WriteLine();
         if (responseText.Length > 0)
-            ctx.History.Add(new ChatMessage(ChatRole.Assistant, responseText));
+        {
+            // Append the full reconstructed transcript (assistant tool calls + tool-role
+            // results, then final text) rather than just the final text — otherwise the
+            // model has no record of what it actually did once this turn scrolls out of
+            // view, and re-does or re-verifies work it already has evidence for.
+            ctx.History.AddMessages(rawUpdates);
+        }
         else if (!capturePlan)
         {
             var warningText = warningMessage ?? "Model returned an empty response. Try sending your message again.";
@@ -450,11 +471,14 @@ internal static class ReplTurn
         if (capturePlan && responseText.Length > 0)
             ReplTurnOutcome.HandlePlanCapture(ctx, responseText);
 
+        // Free-form/plan-capture turns run on ctx.Client (cap ChatIterationLimit); step turns
+        // run on ctx.StepClient (cap StepIterationLimit) — one flag covers whichever applied.
+        var hitIterationCap = toolRounds >= (isStepRequest ? StepIterationLimit : ChatIterationLimit);
+
         bool stepPassed = true;
         if (isStepRequest && activeStep is not null)
             stepPassed = await ReplTurnOutcome.HandleStepResult(ctx, activeStep, stepTotal, toolCallsThisTurn,
-                capturedResults ?? [], hitIterationCap: toolRounds >= StepIterationLimit,
-                responseText, cancellationToken);
+                capturedResults ?? [], hitIterationCap, responseText, cancellationToken);
 
         await TryApplyMutationCorrectionAsync(
             ctx, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn, cancellationToken);
@@ -492,6 +516,26 @@ internal static class ReplTurn
                     AnsiConsole.MarkupLine($"  [{color}]{Markup.Escape($"[{glyph}]")}[/] [dim]{Markup.Escape(item.Content)}[/]");
                 }
             }
+        }
+
+        // Tool-iteration cap warning. Step turns already get an equivalent notice via
+        // HandleStepResult above; free-form and plan-capture turns run on ctx.Client, whose
+        // FunctionInvokingChatClient middleware silently strips tools on the forced last
+        // iteration and returns whatever text the model manages to produce — so without this,
+        // a response cut off mid tool-loop looks like an ordinary complete answer.
+        if (!isStepRequest && hitIterationCap && responseText.Length > 0)
+        {
+            await ctx.Emitter.EmitAsync(EventTypes.ReplWarning, turn: ctx.TurnIndex, payload: new
+            {
+                message     = "hit_iteration_cap",
+                tool_rounds = toolRounds,
+                limit       = ChatIterationLimit,
+            });
+            var capMsg = $"Hit the {ChatIterationLimit}-round tool-call limit — this response may be incomplete or cut short.";
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new { type = "warning", text = capMsg });
+            else
+                AnsiConsole.MarkupLine($"[dim yellow]  ⚠ {capMsg}[/]");
         }
 
         // One-time 75 % context warning. Fires on free-form turns only (not
@@ -539,14 +583,15 @@ internal static class ReplTurn
             await ctx.Emitter.EmitAsync(EventTypes.AssistantResponse, turn: ctx.TurnIndex, payload: new { content = responseText });
         await ctx.Emitter.EmitAsync(EventTypes.TurnEnd, turn: ctx.TurnIndex, payload: new
         {
-            elapsed_ms       = (int)(DateTime.UtcNow - turnStart).TotalMilliseconds,
-            estimated_tokens = postEst,
-            input_tokens     = turnInputTokens  > 0 ? turnInputTokens  : (long?)null,
-            output_tokens    = turnOutputTokens > 0 ? turnOutputTokens : (long?)null,
-            tool_rounds      = toolRounds,
-            tool_count       = toolCallsThisTurn.Count,
-            is_step          = isStepRequest,
-            is_correction    = isCorrectionTurn,
+            elapsed_ms        = (int)(DateTime.UtcNow - turnStart).TotalMilliseconds,
+            estimated_tokens  = postEst,
+            input_tokens      = turnInputTokens  > 0 ? turnInputTokens  : (long?)null,
+            output_tokens     = turnOutputTokens > 0 ? turnOutputTokens : (long?)null,
+            tool_rounds       = toolRounds,
+            tool_count        = toolCallsThisTurn.Count,
+            hit_iteration_cap = hitIterationCap,
+            is_step           = isStepRequest,
+            is_correction     = isCorrectionTurn,
         });
 
         if (ctx.PendingSave && responseText.Length > 0)
@@ -684,9 +729,14 @@ internal static class ReplTurn
         List<(string ToolName, string Output)>? CapturedResults,
         long TurnInputTokens,
         long TurnOutputTokens,
-        int? TurnFirstInputTokens)
+        int? TurnFirstInputTokens,
+        List<ChatResponseUpdate> RawUpdates)
     {
-        internal static TurnStreamResult Failed => new(false, "", [], [], 0, null, 0, 0, null);
+        // toolCallsThisTurn is preserved from the aborted attempt (not always empty) so a
+        // step halted mid-stream can still report which tools it managed to call before
+        // failing — see ReplTurnOutcome.HaltStepOnStreamFailure.
+        internal static TurnStreamResult MakeFailed(List<string> toolCallsThisTurn) =>
+            new(false, "", toolCallsThisTurn, [], 0, null, 0, 0, null, []);
     }
 
     /// <summary>
@@ -707,6 +757,7 @@ internal static class ReplTurn
         CancellationToken cancellationToken)
     {
         var sb                = new StringBuilder();
+        var rawUpdates        = new List<ChatResponseUpdate>();
         var toolCallsThisTurn = new List<string>();
         var fileChanges        = new List<(char Sigil, string Path)>();
         var fileChangeSeen     = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -748,6 +799,11 @@ internal static class ReplTurn
             await foreach (var chunk in activeClient.GetStreamingResponseAsync(
                 ctx.History, requestOptions, cancellationToken: reqCts.Token))
             {
+                // Captured verbatim so a successful turn can reconstruct the full message
+                // transcript (assistant tool calls + tool-role results, not just final text)
+                // via ChatResponseExtensions.AddMessages — see the history-append comment below.
+                rawUpdates.Add(chunk);
+
                 // Providers emit a trailing usage-only chunk per underlying LLM call — a turn
                 // with tool round trips produces one per round trip, so sum rather than overwrite.
                 // The *first* chunk's input count is kept separately: it reflects the exact size
@@ -832,11 +888,10 @@ internal static class ReplTurn
                 AnsiConsole.MarkupLine("[dim](cancelled)[/]");
             if (ctx.History.Count > 0 && ctx.History[^1].Role == ChatRole.User)
                 ctx.History.RemoveAt(ctx.History.Count - 1);
-            ctx.ExecutionQueue.Clear();
             if (!ctx.JsonMode) AnsiConsole.WriteLine();
             reqCts.Dispose();
             ctx.ActiveCts = null;
-            return TurnStreamResult.Failed;
+            return TurnStreamResult.MakeFailed(toolCallsThisTurn);
         }
         catch (Exception ex) when (IsTransientStreamError(ex) && streamAttempt < MaxStreamRetries)
         {
@@ -864,7 +919,7 @@ internal static class ReplTurn
             await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, streamAttempt)));
 
             // Reset per-attempt accumulators before reissuing the request.
-            sb.Clear(); toolCallsThisTurn.Clear();
+            sb.Clear(); rawUpdates.Clear(); toolCallsThisTurn.Clear();
             fileChanges.Clear(); fileChangeSeen.Clear();
             capturedResults?.Clear(); callIdToName?.Clear();
             toolRounds = 0; inToolBatch = false;
@@ -906,10 +961,9 @@ internal static class ReplTurn
             }
             if (ctx.History.Count > 0 && ctx.History[^1].Role == ChatRole.User)
                 ctx.History.RemoveAt(ctx.History.Count - 1);
-            ctx.ExecutionQueue.Clear();
             reqCts.Dispose();
             ctx.ActiveCts = null;
-            return TurnStreamResult.Failed;
+            return TurnStreamResult.MakeFailed(toolCallsThisTurn);
         }
         } // end while (retry loop)
 
@@ -924,7 +978,7 @@ internal static class ReplTurn
 
         return new TurnStreamResult(
             true, sb.ToString(), toolCallsThisTurn, fileChanges, toolRounds, capturedResults,
-            turnInputTokens, turnOutputTokens, turnFirstInputTokens);
+            turnInputTokens, turnOutputTokens, turnFirstInputTokens, rawUpdates);
     }
 
     internal static async Task ExtractMemoriesOnExitAsync(ReplSessionContext ctx)
