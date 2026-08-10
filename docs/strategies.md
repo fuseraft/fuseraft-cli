@@ -1035,6 +1035,51 @@ Termination:
 | `TASK COMPLETE` | Literal substring |
 | `\b(DONE\|COMPLETE\|FINISHED)\b` | Any of three words |
 
+### structured
+
+Stops when the last agent message contains a JSON object satisfying a field condition, instead of requiring a specific keyword in plain text.
+
+```yaml
+Termination:
+  Type: structured
+  Condition:
+    Field: status
+    Is: done
+  AgentNames:
+    - Reviewer
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `Condition` | yes | A `StructuredCondition` block (`Field` plus one of `Is`, `IsNot`, `Contains`, `Exists`) evaluated against the JSON object found in the message — as an object literal, a fenced ```` ```json ```` block, or the first balanced `{...}` substring. |
+| `AgentNames` | no | If set, only messages from these agents are evaluated. |
+
+Shares its condition evaluator with the `structured` selection strategy, so an agent that already emits `{"status": "done"}` for routing can use the same field to end the session — no separate keyword needed.
+
+### tokenbudget
+
+Stops once cumulative session token usage (input + output, summed across every turn) reaches a threshold — a graceful counterpart to the top-level `MaxTotalTokens` setting, which aborts the session outright with a `BudgetExceededException` when exceeded.
+
+```yaml
+MaxTotalTokens: 150000     # hard abort — last resort, throws
+
+Termination:
+  Type: composite
+  Strategies:
+    - Type: regex
+      Pattern: \bAPPROVED\b
+    - Type: tokenbudget
+      MaxTokens: 120000    # graceful stop — well under the hard cap above
+    - Type: maxiterations
+      MaxIterations: 40
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `MaxTokens` | yes | Cumulative token threshold, must be > 0. Give it a value lower than `MaxTotalTokens` so this strategy gets a chance to end the session normally — with the last agent's message standing as the final answer — before the hard abort fires. `fuseraft validate-config` warns if `MaxTokens >= MaxTotalTokens`. |
+
+`AgentNames` has no effect on this type — token usage is tracked across the whole session, not per agent or per message. `Validators`/`Validator` can still be attached, same as `regex` and `structured`.
+
 ### maxiterations
 
 Stops after a fixed number of agent turns, regardless of content.

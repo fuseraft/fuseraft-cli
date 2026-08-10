@@ -373,6 +373,14 @@ public record TerminationStrategyConfig
     /// Strategy type.
     /// <list type="bullet">
     ///   <item><c>regex</c>: stop when a message matches a regex pattern.</item>
+    ///   <item><c>structured</c>: stop when the last agent message contains JSON
+    ///       satisfying a <see cref="StructuredCondition"/> — e.g. <c>{"status": "done"}</c>
+    ///       — instead of requiring a specific keyword.</item>
+    ///   <item><c>tokenbudget</c>: stop once cumulative session token usage reaches
+    ///       <see cref="MaxTokens"/> — a graceful alternative to the hard
+    ///       <see cref="OrchestrationConfig.MaxTotalTokens"/> abort. Give it a lower
+    ///       value than <c>MaxTotalTokens</c> so the session wraps up normally instead
+    ///       of throwing a <c>BudgetExceededException</c>.</item>
     ///   <item><c>maxiterations</c>: stop after N turns regardless.</item>
     ///   <item><c>composite</c>: stop when ANY child strategy fires.</item>
     /// </list>
@@ -385,13 +393,33 @@ public record TerminationStrategyConfig
     public string? Pattern { get; init; }
 
     /// <summary>
+    /// JSON field condition evaluated against the last agent message (required for the
+    /// <c>structured</c> type). The condition is checked against the JSON object found in
+    /// the message text — as an object literal, a fenced ```json code block, or the first
+    /// balanced <c>{...}</c> substring. Example — stop when the agent reports completion:
+    /// <code>
+    /// "Type": "structured",
+    /// "Condition": { "Field": "status", "Is": "done" }
+    /// </code>
+    /// </summary>
+    public StructuredCondition? Condition { get; init; }
+
+    /// <summary>
+    /// Cumulative session token threshold (required, must be &gt; 0, for the
+    /// <c>tokenbudget</c> type). Counts combined input + output tokens across all turns,
+    /// the same accounting <see cref="OrchestrationConfig.MaxTotalTokens"/> uses. Set this
+    /// lower than <c>MaxTotalTokens</c> so the session ends gracefully first.
+    /// </summary>
+    public int MaxTokens { get; init; } = 0;
+
+    /// <summary>
     /// Hard iteration cap. 0 means no cap (default).
     /// </summary>
     public int MaxIterations { get; init; } = 0;
 
     /// <summary>
     /// If set, only messages from these agents are evaluated for termination.
-    /// Applies to <c>regex</c> type.
+    /// Applies to <c>regex</c> and <c>structured</c> types.
     /// </summary>
     public string[]? AgentNames { get; init; }
 
@@ -408,7 +436,7 @@ public record TerminationStrategyConfig
     /// Built-in validators: <c>"RequireShellPass"</c>, <c>"RequireWriteFile"</c>,
     /// <c>"TestReportValid"</c>, <c>"RequireReviewJudgement"</c>, <c>"RequireRelatedTestsPass"</c>.
     /// Only meaningful on
-    /// <c>regex</c> strategies; ignored on <c>maxiterations</c>.
+    /// <c>regex</c> and <c>structured</c> strategies; ignored on <c>maxiterations</c>.
     /// </summary>
     public string? Validator { get; init; }
 

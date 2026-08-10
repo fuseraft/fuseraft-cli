@@ -44,7 +44,7 @@ YAML is often more readable for configs with long agent instructions (block scal
 | `Selection` | object | sequential | Controls which agent speaks next. See [Strategies](strategies.md). |
 | `Termination` | object | 10 iterations | Controls when the run ends. See [Strategies](strategies.md). |
 | `Security` | object | unrestricted | Sandbox constraints for plugins. See [Security](security.md). |
-| `MaxTotalTokens` | integer | — | Token budget (input + output combined). Run stops before the next turn if exceeded. |
+| `MaxTotalTokens` | integer | — | Hard token budget (input + output combined). Aborts with `BudgetExceededException` before the next turn if exceeded. For a graceful stop instead, add a `tokenbudget` termination strategy with a lower `MaxTokens` — see [Termination strategy](#termination-strategy). |
 | `ContextBudget` | object | — | Per-agent cumulative input-token budget. Warns and triggers compaction rather than terminating. Requires `Compaction` when `CutoverAt` is set. See [Context budget](#context-budget). |
 | `McpServers` | array | `[]` | External MCP servers to connect at startup. See [MCP](mcp.md). |
 | `Compaction` | object | — | Automatic history summarization. See [Sessions](sessions.md). |
@@ -525,10 +525,12 @@ Termination:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `Type` | string | `"composite"` | `regex`, `maxiterations`, or `composite`. |
+| `Type` | string | `"composite"` | `regex`, `structured`, `tokenbudget`, `maxiterations`, or `composite`. |
 | `Pattern` | string | — | Required for `regex`. Regex applied to message content. |
+| `Condition` | object | — | Required for `structured`. `StructuredCondition` block (`Field` plus one of `Is`, `IsNot`, `Contains`, `Exists`) evaluated against JSON found in the message. |
+| `MaxTokens` | int | `0` | Required for `tokenbudget`, must be > 0. Cumulative input+output token threshold across the whole session. Set lower than the top-level `MaxTotalTokens` so this ends the session gracefully before that hard cap aborts it. |
 | `MaxIterations` | int | `0` (uncapped) | Hard cap on agent turns (applies to all types as a safety net). `0` means no cap — set explicitly, since nothing else stops a session that never emits a terminating keyword. |
-| `AgentNames` | array | all agents | Optional: restrict regex check to these agents only. |
+| `AgentNames` | array | all agents | Optional: restrict the `regex`/`structured` check to these agents only. Has no effect on `tokenbudget`. |
 | `Strategies` | array | — | Required for `composite`. Stops when any child fires. |
 
 See [Strategies](strategies.md) for full detail.
