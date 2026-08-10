@@ -433,6 +433,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 restored[0] = new ChatMessage(ChatRole.System, systemPrompt);
             ctx.History.Clear();
             ctx.History.AddRange(restored);
+            ReplTurn.RepairDanglingToolCalls(ctx.History);
             ctx.TurnIndex = snapshot.TurnIndex;
 
             if (snapshot.TodoItems is { Length: > 0 } restoredTodoItems)
