@@ -27,7 +27,8 @@ internal static class ReplFactory
     // attached. The actual tool list is supplied via ChatOptions at call time — this flag
     // only decides whether the invocation loop exists at all.
     internal static IChatClient BuildClient(
-        ModelConfig config, ChatClientFactory factory, bool addFunctionInvocation, int maxIterations = 20)
+        ModelConfig config, ChatClientFactory factory, bool addFunctionInvocation,
+        int maxIterations = ReplTurn.ChatIterationLimit)
     {
         var client = factory.Create(config);
         if (addFunctionInvocation)
