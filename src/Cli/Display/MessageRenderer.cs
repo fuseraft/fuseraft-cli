@@ -334,8 +334,20 @@ public static class MessageRenderer
         t.Type.ToLowerInvariant() switch
         {
             "regex"         => $"regex({t.Pattern}) max={t.MaxIterations}",
+            "structured"    => $"structured({DescribeCondition(t.Condition)}) max={t.MaxIterations}",
+            "tokenbudget"   => $"tokenbudget({t.MaxTokens} tokens) max={t.MaxIterations}",
             "maxiterations" => $"max={t.MaxIterations}",
             "composite"     => $"composite/{t.Strategies?.Count ?? 0} rules, max={t.MaxIterations}",
             _               => t.Type
         };
+
+    private static string DescribeCondition(StructuredCondition? c)
+    {
+        if (c is null) return "?";
+        if (c.Is is not null)       return $"{c.Field}=={c.Is}";
+        if (c.IsNot is not null)    return $"{c.Field}!={c.IsNot}";
+        if (c.Contains is not null) return $"{c.Field} contains {c.Contains}";
+        if (c.Exists is not null)   return $"{c.Field} {(c.Exists.Value ? "exists" : "absent")}";
+        return c.Field;
+    }
 }

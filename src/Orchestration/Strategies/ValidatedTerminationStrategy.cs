@@ -29,6 +29,10 @@ public sealed class ValidatedTerminationStrategy : ITerminationCondition
     private string _sessionId = "unknown";
     private Func<string, string>? _didResolver;
 
+    /// <summary>The wrapped condition, exposed so callers can wire state (e.g. a token
+    /// reader) through a validator wrapper down to the condition it decorates.</summary>
+    public ITerminationCondition Inner => _inner;
+
     public ValidatedTerminationStrategy(ITerminationCondition inner, IRoutingValidator validator, GovernanceKernel? governanceKernel = null)
         : this(inner, [validator], governanceKernel) { }
 

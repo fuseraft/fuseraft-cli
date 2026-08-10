@@ -307,10 +307,12 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
         ITerminationCondition condition = config.Type.ToLowerInvariant() switch
         {
             "regex"          => CreateRegex(config, agents),
+            "structured"     => CreateStructuredTermination(config),
+            "tokenbudget"    => CreateTokenBudget(config),
             "maxiterations"  => NeverTerminationCondition.Instance,
             "composite"      => CreateComposite(config, agents, validationConfig),
             _ => throw new NotSupportedException(
-                $"Unknown termination strategy type: '{config.Type}'. Valid: regex, maxiterations, composite.")
+                $"Unknown termination strategy type: '{config.Type}'. Valid: regex, structured, tokenbudget, maxiterations, composite.")
         };
 
         // Wrap in validators if any are declared (maxiterations always terminates unconditionally).
@@ -346,6 +348,30 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
             : null;
 
         return new RegexTerminationCondition(config.Pattern, agentNames);
+    }
+
+    private static StructuredTerminationCondition CreateStructuredTermination(
+        TerminationStrategyConfig config)
+    {
+        if (config.Condition is null)
+            throw new InvalidOperationException(
+                "Structured termination strategy requires a 'Condition' block.");
+
+        IReadOnlyList<string>? agentNames = config.AgentNames is { Length: > 0 }
+            ? config.AgentNames
+            : null;
+
+        return new StructuredTerminationCondition(config.Condition, agentNames);
+    }
+
+    private static TokenBudgetTerminationCondition CreateTokenBudget(
+        TerminationStrategyConfig config)
+    {
+        if (config.MaxTokens <= 0)
+            throw new InvalidOperationException(
+                "Token budget termination strategy requires a positive 'MaxTokens' value.");
+
+        return new TokenBudgetTerminationCondition(config.MaxTokens);
     }
 
     private CompositeTerminationStrategy CreateComposite(

@@ -340,6 +340,11 @@ public sealed class AgentOrchestrator(
         int cumulativeTokens = priorHistory?
             .Sum(m => m.Usage?.TotalTokens ?? 0) ?? 0;
 
+        // ChatMessage carries no per-message usage, so a tokenbudget termination condition
+        // can't compute its own total from history the way regex/structured do — wire in a
+        // live reader over this closure-captured counter instead.
+        WireTokenBudget(termination, () => cumulativeTokens);
+
         while (true)
         {
             // Hard iteration cap — takes effect regardless of the termination strategy.
@@ -819,6 +824,25 @@ public sealed class AgentOrchestrator(
         if (condition is CompositeTerminationStrategy composite)
             foreach (var child in composite.Strategies)
                 WireDidResolver(child, resolver);
+    }
+
+    /// <summary>
+    /// Recursively walks the termination strategy tree and calls
+    /// <see cref="TokenBudgetTerminationCondition.SetTokenReader"/> on each node that needs it.
+    /// </summary>
+    private static void WireTokenBudget(ITerminationCondition condition, Func<int> tokenReader)
+    {
+        if (condition is TokenBudgetTerminationCondition tbc)
+            tbc.SetTokenReader(tokenReader);
+
+        if (condition is CompositeTerminationStrategy composite)
+            foreach (var child in composite.Strategies)
+                WireTokenBudget(child, tokenReader);
+
+        // A tokenbudget node with its own Validators is wrapped in ValidatedTerminationStrategy
+        // (see StrategyFactory.CreateTermination) — unwrap it to reach the decorated condition.
+        if (condition is ValidatedTerminationStrategy vts)
+            WireTokenBudget(vts.Inner, tokenReader);
     }
 
     private IReadOnlyList<ToolCallRecord>? ExtractToolCalls(IList<ChatMessage> messages, string agentName = AgentNames.Unknown)
