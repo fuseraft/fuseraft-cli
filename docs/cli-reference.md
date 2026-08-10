@@ -342,20 +342,30 @@ See [Getting Started — Set your API key](getting-started.md#set-your-api-key) 
 
 **Built-in tools**
 
-Unless `--no-tools` is passed, the REPL gives the model access to:
+Unless `--no-tools` is passed, the REPL gives the model access to a curated core set — the
+common, low-risk operations that cover a typical session (read, edit, search, status, commit):
 
 | Plugin | Tools |
 |--------|-------|
-| FileSystem | `read_file`, `write_file`, `list_files`, `delete_file` |
-| Shell | `shell_run`, `shell_run_script`, `shell_get_env`, `shell_which`, `shell_get_working_directory`, `shell_get_session_temp_dir` |
+| FileSystem | `read_file`, `write_file`, `patch_file`, `list_files`, `grep_file`, `get_file_info`, `create_directory` |
+| Shell | `shell_run`, `shell_run_script`, `shell_get_env`, `shell_set_env`, `shell_which`, `shell_get_working_directory` |
 | Search | `search_content`, `search_symbol`, `search_callers` |
-| Git | `git_status`, `git_diff`, `git_log`, `git_commit`, and more |
+| Git | `git_status`, `git_diff`, `git_log`, `git_show`, `git_branch_list`, `git_add`, `git_commit`, `git_stash_list` |
 | Todo | `todo_write`, `todo_read` — self-directed checklist the model uses to plan and track multi-step work within the session (in-memory only, not persisted). |
-| SubAgent | `sub_agent_explore`, `sub_agent_locate` — the same tools behind `/explore` and `/locate` (see below), now also callable by the model directly mid-turn. |
+| SubAgent | `sub_agent_explore`, `sub_agent_locate` — the same tools behind `/explore` and `/locate` (see below), now also callable by the model directly mid-turn. Built from the full, unfiltered FileSystem/Shell/Git read tools regardless of whether `Extended` is enabled. |
 | Session | `repl_session_current`, `repl_session_list`, `repl_session_read_event_log`, `repl_session_read_log`, `compact_context`, `get_context_status` |
 | Skills | `load_skill`, `run_skill_script` (only when skills are installed — see [Skills](skills.md)) |
 
-**Optional plugins** — `Http` (`http_get`, `http_post`, ...), `Changes`, `Chatroom`, `SessionContext`, and `Scratchpad` are not loaded by default; pass `--plugins Http,Changes` (comma-separated) to enable them. Kept opt-in because every registered tool adds its schema to every request — a smaller default tool surface means smaller, faster requests and less chance of tripping a provider's tool-schema limits.
+**Optional plugins** — not loaded by default; pass `--plugins <name>,<name>` (comma-separated) to enable them. Kept opt-in because every registered tool adds its schema to every request — a smaller default tool surface means smaller, faster requests and less chance of tripping a provider's tool-schema limits.
+
+| Plugin | Tools |
+|--------|-------|
+| `Extended` | The rarer/destructive half of FileSystem, Shell, and Git: `delete_file`, `delete_directory`, `copy_file`, `move_file`, `set_permissions`, `get_file_summary`, `save_file_summary`, `list_directory`; `shell_get_session_temp_dir`, `shell_run_background`, `shell_get_job_status`, `shell_get_job_output`, `shell_kill_job`; `git_checkout`, `git_create_branch`, `git_init`, `git_is_inside_work_tree`, `git_is_repo_root`, `git_push`, `git_pull`, `git_stash`, `git_stash_pop`, `git_reset`, `git_rebase`. |
+| `Http` | `http_get`, `http_post`, ... |
+| `Changes` | `changes_read`, `changes_read_latest` |
+| `Chatroom` | `chatroom_send`, `chatroom_read` |
+| `SessionContext` | `session_context_read`, `session_context_write` |
+| `Scratchpad` | `scratchpad_write`, `scratchpad_read`, `scratchpad_read_all`, `scratchpad_search`, `scratchpad_delete` |
 
 **Forced evidence collection** — when a message looks like an identify/locate/find-style question ("locate X", "where is Y", "which file...", "does Z exist"), the REPL forces at least one tool call before the model may answer, instead of letting it answer from memory. This applies only to that one turn; it does not affect unrelated questions.
 
