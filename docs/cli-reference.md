@@ -970,12 +970,14 @@ fuseraft validate <path> [options]
 7. If LLM selection: `Selection.Model` is configured
 8. If keyword selection: `Routes` array is non-empty
 9. If magentic selection: `Selection.Magentic.Model` is configured; warns if a non-default `Termination` section is present (it is ignored for Magentic)
-10. Termination strategy type is `regex`, `maxiterations`, or `composite`
+10. Termination strategy type is `regex`, `structured`, `tokenbudget`, `maxiterations`, or `composite`
 11. Regex termination: `Pattern` is non-empty
-12. Agent names referenced in termination strategies exist in the agents list
-13. If `Telemetry` is set: `OtlpEndpoint` is a valid absolute URI
-14. With `--strict`: every plugin name in any agent's `Plugins` list is registered
-15. For every `ApiKeyEnvVar` referenced: the environment variable is set in the current shell (warning if missing). Note: agents that rely on the OS keychain rather than an env var skip this check — keychain auth is verified only when `--check-connectivity` is used.
+12. Structured termination: `Condition` is present and its `Field` is non-empty
+13. Token budget termination: `MaxTokens` is positive; warns if it is not lower than the top-level `MaxTotalTokens`
+14. Agent names referenced in termination strategies exist in the agents list
+15. If `Telemetry` is set: `OtlpEndpoint` is a valid absolute URI
+16. With `--strict`: every plugin name in any agent's `Plugins` list is registered
+17. For every `ApiKeyEnvVar` referenced: the environment variable is set in the current shell (warning if missing). Note: agents that rely on the OS keychain rather than an env var skip this check — keychain auth is verified only when `--check-connectivity` is used.
 
 **Exit codes**
 

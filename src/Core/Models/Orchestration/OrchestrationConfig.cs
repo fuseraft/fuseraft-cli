@@ -74,6 +74,13 @@ public record OrchestrationConfig
     /// When the cumulative token count exceeds this value, the orchestration stops before the
     /// next turn and surfaces a <see cref="BudgetExceededException"/>. Null (default) means
     /// no limit is enforced.
+    ///
+    /// <para>
+    /// This is a hard, unconditional abort. For a graceful stop instead — the session ends
+    /// through its normal termination path rather than throwing — add a <c>tokenbudget</c>
+    /// <see cref="TerminationStrategyConfig"/> with a <see cref="TerminationStrategyConfig.MaxTokens"/>
+    /// value lower than this one, so it fires first.
+    /// </para>
     /// </summary>
     public int? MaxTotalTokens { get; init; }
 

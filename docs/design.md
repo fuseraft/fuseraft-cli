@@ -538,10 +538,14 @@ Built and returned by `StrategyFactory.CreateTermination`. All implement `ITermi
 | Type | Behavior |
 |---|---|
 | `regex` | Terminates when a regex matches the last assistant message (optional agent-name filter) |
+| `structured` | Terminates when the last assistant message with text contains JSON satisfying a `StructuredCondition` (optional agent-name filter). Shares `StructuredConditionEvaluator` with `StructuredSelectionStrategy`. |
+| `tokenbudget` | Terminates once cumulative session token usage reaches `MaxTokens`. Graceful counterpart to `OrchestrationConfig.MaxTotalTokens`, which throws `BudgetExceededException`. |
 | `maxiterations` | Never terminates via condition — relies on `MaxIterations` hard cap in `AgentOrchestrator` |
 | `composite` | OR (ANY) of child conditions — terminates as soon as any one child signals termination. (`CompositeTerminationStrategy`'s own docstring says this explicitly; it is not an AND of all children.) |
 
 Termination strategies can be decorated with routing validators via the `Validators` field. A `ValidatedTerminationStrategy` runs the validators before accepting the termination signal. The `requireCurrentTurn: true` flag is specific to `RequireShellPassValidator` (it is a constructor parameter on that validator, not a termination-strategy-wide feature) and prevents a stale change-log entry from satisfying it based on an earlier turn's shell run.
+
+`tokenbudget` is the one type that can't read what it needs from `history` — `Microsoft.Extensions.AI.ChatMessage` carries no per-message usage, so `TokenBudgetTerminationCondition.ShouldTerminateAsync` ignores its `history` parameter entirely and instead reads a `Func<int>` wired in by `AgentOrchestrator.WireTokenBudget`, a closure over the loop's own `cumulativeTokens` counter. `WireTokenBudget` unwraps both `CompositeTerminationStrategy` children and `ValidatedTerminationStrategy.Inner` so the reader reaches a `tokenbudget` node no matter how deeply it's nested or decorated with validators.
 
 ---
 

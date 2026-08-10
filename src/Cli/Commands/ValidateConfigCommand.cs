@@ -200,7 +200,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
         // Termination strategy — only validate when the section was explicitly configured.
         if (config.Termination is not null)
-            ValidateTermination(config.Termination, config.Agents, issues);
+            ValidateTermination(config.Termination, config.Agents, issues, maxTotalTokens: config.MaxTotalTokens);
 
         ValidateCompactionConfig(config, issues);
 
@@ -424,16 +424,30 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
         TerminationStrategyConfig t,
         List<AgentConfig> agents,
         List<(string, string)> issues,
-        int depth = 0)
+        int depth = 0,
+        int? maxTotalTokens = null)
     {
         var prefix = depth > 0 ? "  Nested termination: " : "Termination: ";
         var type = t.Type.ToLowerInvariant();
 
-        if (type is not ("regex" or "maxiterations" or "composite"))
+        if (type is not ("regex" or "structured" or "tokenbudget" or "maxiterations" or "composite"))
             issues.Add(("error", $"{prefix}Unknown type '{t.Type}'."));
 
         if (type == "regex" && string.IsNullOrWhiteSpace(t.Pattern))
             issues.Add(("error", $"{prefix}Regex strategy requires a Pattern."));
+
+        if (type == "structured" && t.Condition is null)
+            issues.Add(("error", $"{prefix}Structured strategy requires a Condition block."));
+        else if (type == "structured" && string.IsNullOrWhiteSpace(t.Condition!.Field))
+            issues.Add(("error", $"{prefix}Structured strategy's Condition requires a Field."));
+
+        if (type == "tokenbudget" && t.MaxTokens <= 0)
+            issues.Add(("error", $"{prefix}Token budget strategy requires a positive MaxTokens value."));
+        else if (type == "tokenbudget" && maxTotalTokens is { } cap && t.MaxTokens >= cap)
+            issues.Add(("warning",
+                $"{prefix}MaxTokens ({t.MaxTokens}) should be lower than the top-level MaxTotalTokens " +
+                $"({cap}), otherwise the hard BudgetExceededException abort fires first and this " +
+                "strategy never gets a chance to end the session gracefully."));
 
         // MaxIterations: warn when explicitly using the maxiterations type with no cap,
         // or at depth 0 for non-composite strategies (composite delegates capping to children).
@@ -454,7 +468,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                 issues.Add(("error", $"{prefix}Composite strategy requires at least one child strategy."));
             else
                 foreach (var child in t.Strategies)
-                    ValidateTermination(child, agents, issues, depth + 1);
+                    ValidateTermination(child, agents, issues, depth + 1, maxTotalTokens);
         }
     }
 

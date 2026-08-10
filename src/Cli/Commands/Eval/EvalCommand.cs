@@ -330,7 +330,7 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
         // speaks *after* the approving agent's turn becomes "the last assistant message"
         // even though RegexTerminationCondition correctly looked past it and terminated
         // on the earlier, agent-matched message — scoring the session a false FAIL.
-        var terminationAgentNames = FindRegexTerminationAgentNames(termination);
+        var terminationAgentNames = FindScopedTerminationAgentNames(termination);
         var lastAssistant = terminationAgentNames is { Length: > 0 }
             ? result.Messages.LastOrDefault(m =>
                   m.Role == MessageRole.Assistant &&
@@ -386,21 +386,23 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
         };
     }
 
-    // Recursively searches a (possibly composite) termination config for a "regex" strategy
-    // with AgentNames set, matching how CompositeTerminationStrategy/RegexTerminationCondition
-    // are actually built from this same config (see StrategyFactory). Returns the first match
-    // depth-first; a config with multiple agent-scoped regex strategies is not expected here.
-    private static string[]? FindRegexTerminationAgentNames(TerminationStrategyConfig? config)
+    // Recursively searches a (possibly composite) termination config for a "regex" or
+    // "structured" strategy with AgentNames set, matching how CompositeTerminationStrategy
+    // /RegexTerminationCondition/StructuredTerminationCondition are actually built from this
+    // same config (see StrategyFactory) — both scan backward with the same agent-filter
+    // semantics. Returns the first match depth-first; a config with multiple agent-scoped
+    // strategies is not expected here.
+    private static string[]? FindScopedTerminationAgentNames(TerminationStrategyConfig? config)
     {
         if (config is null) return null;
 
-        if (string.Equals(config.Type, "regex", StringComparison.OrdinalIgnoreCase)
+        if (config.Type.ToLowerInvariant() is "regex" or "structured"
             && config.AgentNames is { Length: > 0 })
             return config.AgentNames;
 
         if (config.Strategies is not null)
             foreach (var child in config.Strategies)
-                if (FindRegexTerminationAgentNames(child) is { Length: > 0 } found)
+                if (FindScopedTerminationAgentNames(child) is { Length: > 0 } found)
                     return found;
 
         return null;
