@@ -41,6 +41,7 @@ public sealed class ReplSettingsPluginsTests
     [InlineData("SessionContext")]
     [InlineData("Scratchpad")]
     [InlineData("Http")]
+    [InlineData("Extended")]
     public void EnabledPlugins_SingleKnownPlugin_ContainsThatPlugin(string name)
     {
         Assert.Contains(name, With(name).EnabledPlugins);

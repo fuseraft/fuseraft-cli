@@ -41,7 +41,7 @@ public sealed class ReplSettings : CommandSettings
     public string? Resume { get; set; }
 
     [CommandOption("--plugins")]
-    [Description("Comma-separated list of optional plugins to enable: Http, Changes, Chatroom, SessionContext, Scratchpad.")]
+    [Description("Comma-separated list of optional plugins to enable: Http, Changes, Chatroom, SessionContext, Scratchpad, Extended.")]
     public string? Plugins { get; set; }
 
     [CommandOption("--vscode")]
@@ -67,6 +67,31 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         ("MISTRAL_API_KEY",    "mistral-small-latest"),
         ("DEEPSEEK_API_KEY",   "deepseek-chat"),
     ];
+
+    // Curated default tool surface: the common, low-risk subset of FileSystem/Shell/Git
+    // that covers a typical session (read, edit, search, status, commit). Everything else
+    // in those three plugins — destructive ops, remote ops, and background jobs — is still
+    // useful but rarer, so it moves behind the opt-in "Extended" plugin (--plugins Extended)
+    // rather than shipping in every request's tool schema by default. This does not affect
+    // /explore or /locate (SubAgentPlugin's explorerTools), which are built from the full,
+    // unfiltered lists below regardless of whether Extended is enabled.
+    private static readonly HashSet<string> CoreFileSystemTools = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "read_file", "write_file", "patch_file",
+        "list_files", "grep_file", "get_file_info", "create_directory",
+    };
+
+    private static readonly HashSet<string> CoreShellTools = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "shell_run", "shell_run_script", "shell_get_env", "shell_set_env",
+        "shell_which", "shell_get_working_directory",
+    };
+
+    private static readonly HashSet<string> CoreGitTools = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "git_status", "git_diff", "git_log", "git_show", "git_branch_list",
+        "git_add", "git_commit", "git_stash_list",
+    };
 
     protected override async Task<int> ExecuteAsync(
         CommandContext context, ReplSettings settings, CancellationToken cancellationToken)
@@ -162,15 +187,18 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         List<AIFunction>? explorerTools = null;
         TodoPlugin?     todoPlugin      = null;
         FileSystemPlugin? fsPluginForCategory = null;
+        List<AIFunction>? fsFunctions    = null;
+        List<AIFunction>? shellFunctions = null;
+        List<AIFunction>? gitFunctions   = null;
         if (!settings.NoTools)
         {
             fsPluginForCategory = new FileSystemPlugin();
-            toolsByCategory["FileSystem"] = PluginRegistry.GetFunctionsFromObject(fsPluginForCategory)
+            fsFunctions    = PluginRegistry.GetFunctionsFromObject(fsPluginForCategory)
                 .Concat(PluginRegistry.GetFunctionsFromObject(new FileSystemManagementOps(fsPluginForCategory)))
                 .ToList();
-            toolsByCategory["Shell"]      = PluginRegistry.GetFunctionsFromObject(shellPlugin!).ToList();
+            shellFunctions = PluginRegistry.GetFunctionsFromObject(shellPlugin!).ToList();
+            gitFunctions   = PluginRegistry.GetFunctionsFromObject(new GitPlugin()).ToList();
             toolsByCategory["Search"]     = PluginRegistry.GetFunctionsFromObject(new SearchPlugin()).ToList();
-            toolsByCategory["Git"]        = PluginRegistry.GetFunctionsFromObject(new GitPlugin()).ToList();
             todoPlugin                    = new TodoPlugin();
             toolsByCategory["Todo"]       = PluginRegistry.GetFunctionsFromObject(todoPlugin).ToList();
 
@@ -180,11 +208,18 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 { "shell_run", "shell_get_env", "shell_which", "shell_get_working_directory" };
             var gitReadOps   = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 { "git_status", "git_diff", "git_log", "git_show", "git_branch_list", "git_stash_list" };
-            explorerTools = toolsByCategory["FileSystem"].Where(f => fsReadOps.Contains(f.Name))
+            explorerTools = fsFunctions.Where(f => fsReadOps.Contains(f.Name))
                 .Concat(toolsByCategory["Search"])
-                .Concat(toolsByCategory["Shell"].Where(f => shellReadOps.Contains(f.Name)))
-                .Concat(toolsByCategory["Git"].Where(f => gitReadOps.Contains(f.Name)))
+                .Concat(shellFunctions.Where(f => shellReadOps.Contains(f.Name)))
+                .Concat(gitFunctions.Where(f => gitReadOps.Contains(f.Name)))
                 .ToList();
+
+            // Curated default: ship only the common, low-risk subset by default (see
+            // CoreFileSystemTools/CoreShellTools/CoreGitTools). The rest — destructive,
+            // remote, and background-job tools — is available via --plugins Extended.
+            toolsByCategory["FileSystem"] = fsFunctions.Where(f => CoreFileSystemTools.Contains(f.Name)).ToList();
+            toolsByCategory["Shell"]      = shellFunctions.Where(f => CoreShellTools.Contains(f.Name)).ToList();
+            toolsByCategory["Git"]        = gitFunctions.Where(f => CoreGitTools.Contains(f.Name)).ToList();
 
             (skillsPlugin, skillsCatalog) = ReplSkillsLoader.BuildSkills();
             if (skillsPlugin is not null)
@@ -234,6 +269,12 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
             if (enabled.Contains("Http"))
                 toolsByCategory["Http"] = PluginRegistry.GetFunctionsFromObject(new HttpPlugin()).ToList();
+
+            if (enabled.Contains("Extended") && fsFunctions is not null && shellFunctions is not null && gitFunctions is not null)
+                toolsByCategory["Extended"] = fsFunctions.Where(f => !CoreFileSystemTools.Contains(f.Name))
+                    .Concat(shellFunctions.Where(f => !CoreShellTools.Contains(f.Name)))
+                    .Concat(gitFunctions.Where(f => !CoreGitTools.Contains(f.Name)))
+                    .ToList();
 
             if (enabled.Contains("Changes"))
             {
