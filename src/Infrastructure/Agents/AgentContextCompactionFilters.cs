@@ -439,6 +439,12 @@ internal static class AgentContextCompactionFilters
     // One ToolResultCompactionStrategy per distinct maxPairs value, shared across all agents
     // and calls that use it — the strategy is stateless (just a trigger + a count), so
     // there's no reason to reallocate it on every inner LLM call.
+    //
+    // MAF's Compaction namespace (ToolResultCompactionStrategy, CompactionTriggers,
+    // CompactionProvider below) is still gated behind MAAI001 as of Microsoft.Agents.AI
+    // 1.16.0 — this is the only place in the codebase that touches it, so the suppression
+    // is scoped here rather than project-wide (see fuseraft.csproj).
+#pragma warning disable MAAI001
     private static readonly ConcurrentDictionary<int, ToolResultCompactionStrategy> _toolPairStrategies = new();
 
     /// <summary>
@@ -473,6 +479,7 @@ internal static class AgentContextCompactionFilters
         return await CompactionProvider.CompactAsync(strategy, messages, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
     }
+#pragma warning restore MAAI001
 
     /// <summary>
     /// Trims accumulated in-turn tool-result messages when total character count exceeds
