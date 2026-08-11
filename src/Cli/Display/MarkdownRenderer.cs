@@ -48,6 +48,7 @@ public static class MarkdownRenderer
             // Fenced code block
             if (trimmed.StartsWith("```"))
             {
+                var lang = trimmed[3..].Trim();
                 var code = new StringBuilder();
                 i++;
                 while (i < lines.Length && !lines[i].TrimStart().StartsWith("```"))
@@ -57,13 +58,16 @@ public static class MarkdownRenderer
                 }
                 i++; // skip closing ```
                 var codeStr = code.ToString().TrimEnd();
-                blocks.Add(new Panel(new Text(codeStr))
+                var panel = new Panel(new Text(codeStr))
                 {
                     Border      = BoxBorder.Rounded,
                     BorderStyle = Style.Parse("dim"),
                     Padding     = new Padding(1, 0),
-                    Expand      = true,
-                });
+                    Expand      = false,
+                };
+                if (lang.Length > 0)
+                    panel.Header = new PanelHeader($"[dim]{Markup.Escape(lang)}[/]", Justify.Left);
+                blocks.Add(panel);
                 continue;
             }
 
