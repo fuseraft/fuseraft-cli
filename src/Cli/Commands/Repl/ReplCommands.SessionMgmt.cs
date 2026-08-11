@@ -55,7 +55,8 @@ internal static partial class ReplCommands
             haltedAt:        haltedAt,
             haltedRemaining: haltedRemaining,
             haltedToolCalls: ctx.HaltedToolCalls.Count > 0 ? [.. ctx.HaltedToolCalls] : null,
-            recoveryHint:    ctx.RecoveryHint);
+            recoveryHint:    ctx.RecoveryHint,
+            todoItems:       ctx.Todo?.Snapshot() is { Count: > 0 } todoItems ? [.. todoItems] : null);
 
         try
         {
