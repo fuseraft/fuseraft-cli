@@ -1,4 +1,5 @@
 using System.Text;
+using System.Threading;
 
 namespace fuseraft.Cli.Commands.Repl;
 
@@ -8,6 +9,18 @@ namespace fuseraft.Cli.Commands.Repl;
 /// </summary>
 internal sealed class ReplLineReader
 {
+    // Set by ReplTurn's Console.CancelKeyPress handler. Ctrl+C is consumed by the terminal's
+    // SIGINT/ISIG machinery before it ever reaches Console.ReadKey (confirmed empirically —
+    // the switch-case below for ConsoleKey.C+Control does not fire in a real terminal), so
+    // CancelKeyPress is the only place that ever observes an idle-prompt Ctrl+C. Without this
+    // flag, that handler had nothing to suppress the default action with and the process was
+    // killed outright by SIGINT — no "^C", no session cleanup, exit code 130. The read loop
+    // below polls this instead of blocking forever in Console.ReadKey so it can notice.
+    private volatile bool _cancelRequested;
+
+    /// <summary>Called from the CancelKeyPress handler to abandon the line currently being edited.</summary>
+    internal void RequestCancel() => _cancelRequested = true;
+
     // ── Tab completion ────────────────────────────────────────────────────────
 
     private static readonly string[] SlashCommands =
@@ -115,7 +128,20 @@ internal sealed class ReplLineReader
             while (true)
             {
                 ConsoleKeyInfo info;
-                try { info = Console.ReadKey(intercept: true); }
+                try
+                {
+                    while (!Console.KeyAvailable)
+                    {
+                        if (_cancelRequested)
+                        {
+                            _cancelRequested = false;
+                            Console.WriteLine("^C");
+                            return "";
+                        }
+                        Thread.Sleep(15);
+                    }
+                    info = Console.ReadKey(intercept: true);
+                }
                 catch (InvalidOperationException) { return null; }
 
                 // Any key other than Tab breaks the current tab-cycling run.
@@ -136,8 +162,12 @@ internal sealed class ReplLineReader
                         return line;
 
                     case ConsoleKey.C when info.Modifiers.HasFlag(ConsoleModifiers.Control):
+                        // Defensive fallback only — on every platform actually tested, Ctrl+C is
+                        // consumed by CancelKeyPress/SIGINT before ReadKey ever sees it (see
+                        // _cancelRequested above). Kept consistent with that path: abandon the
+                        // line, don't end the session.
                         Console.WriteLine("^C");
-                        return null;
+                        return "";
 
                     case ConsoleKey.D when info.Modifiers.HasFlag(ConsoleModifiers.Control):
                         if (buffer.Length == 0) { Console.WriteLine(); return null; }

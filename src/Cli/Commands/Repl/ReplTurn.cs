@@ -153,6 +153,17 @@ internal static class ReplTurn
                 e.Cancel = true;
                 ReplJsonBridge.Emit(new { type = "cancelled" });
             }
+            else
+            {
+                // Idle at the prompt: previously this branch did nothing, so .NET's default
+                // SIGINT action killed the process outright (exit code 130) — no "Session
+                // ended.", no memory extraction, no snapshot of the in-progress line. Every
+                // other REPL treats Ctrl+C here as "abandon this line," not "quit," so match
+                // that: suppress the default action and tell the blocked line reader to give
+                // up its line instead of leaving the process to die.
+                e.Cancel = true;
+                ctx.LineReader.RequestCancel();
+            }
         }
     }
 
