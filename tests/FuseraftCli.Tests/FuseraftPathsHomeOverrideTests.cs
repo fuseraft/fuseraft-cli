@@ -7,6 +7,7 @@ namespace FuseraftCli.Tests;
 /// hatch that relocates the global <c>~/.fuseraft</c> root — e.g. to a network share for
 /// RDS/VDI pools where the OS home directory is not durable across sessions.
 /// </summary>
+[Collection("FuseraftHomeEnv")]
 public sealed class FuseraftPathsHomeOverrideTests : IDisposable
 {
     private readonly string? _original = Environment.GetEnvironmentVariable(FuseraftPaths.HomeOverrideEnvVar);
