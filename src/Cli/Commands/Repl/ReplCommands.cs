@@ -105,10 +105,10 @@ internal static partial class ReplCommands
                 - `/compact` — Summarise conversation into a handoff doc and reset history
                 - `/compact <focus>` — Same, but tailor the summary toward the next session's focus
                 - `/model` — Show current model and reasoning effort
-                - `/model <id> [effort]` — Switch model; optional effort: none, low, medium, high
+                - `/model <id> [effort]` — Switch model; optional effort is provider-specific, e.g. none, low, medium, high, xhigh, max
                 - `/models` — List models available from the current provider
                 - `/reasoning` — Show current reasoning effort
-                - `/reasoning <none|low|medium|high>` — Set reasoning effort for the current model
+                - `/reasoning <effort>` — Set reasoning effort for the current model (provider-specific)
                 - `/max-tokens <n>` — Set max output tokens for each response
                 - `/max-tokens reset` — Restore provider default max output tokens
                 - `/system` — Show current system prompt
@@ -199,10 +199,10 @@ internal static partial class ReplCommands
         ctx.AddRow("[bold cyan]/compact[/]",            "Summarise conversation into a handoff doc and reset history");
         ctx.AddRow("[bold cyan]/compact <focus>[/]",    "Same, but tailor the summary toward the next session's focus");
         ctx.AddRow("[bold cyan]/model[/]",                          "Show current model and reasoning effort");
-        ctx.AddRow("[bold cyan]/model <id> [[effort]][/]",          "Switch model; effort: none, low, medium, high");
+        ctx.AddRow("[bold cyan]/model <id> [[effort]][/]",          "Switch model; effort is provider-specific, e.g. none, low, medium, high, xhigh, max");
         ctx.AddRow("[bold cyan]/models[/]",                         "List models available from the current provider");
         ctx.AddRow("[bold cyan]/reasoning[/]",                     "Show current reasoning effort");
-        ctx.AddRow("[bold cyan]/reasoning <effort>[/]",            "Set reasoning effort for the current model");
+        ctx.AddRow("[bold cyan]/reasoning <effort>[/]",            "Set reasoning effort for the current model (provider-specific)");
         ctx.AddRow("[bold cyan]/max-tokens <n>[/]",     "Set max output tokens for each response");
         ctx.AddRow("[bold cyan]/max-tokens reset[/]",   "Restore provider default max output tokens");
         ctx.AddRow("[bold cyan]/system[/]",             "Show current system prompt");
