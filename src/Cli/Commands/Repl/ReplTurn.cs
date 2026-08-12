@@ -153,6 +153,17 @@ internal static class ReplTurn
                 e.Cancel = true;
                 ReplJsonBridge.Emit(new { type = "cancelled" });
             }
+            else
+            {
+                // Idle at the prompt: previously this branch did nothing, so .NET's default
+                // SIGINT action killed the process outright (exit code 130) — no "Session
+                // ended.", no memory extraction, no snapshot of the in-progress line. Every
+                // other REPL treats Ctrl+C here as "abandon this line," not "quit," so match
+                // that: suppress the default action and tell the blocked line reader to give
+                // up its line instead of leaving the process to die.
+                e.Cancel = true;
+                ctx.LineReader.RequestCancel();
+            }
         }
     }
 
@@ -455,6 +466,7 @@ internal static class ReplTurn
             // model has no record of what it actually did once this turn scrolls out of
             // view, and re-does or re-verifies work it already has evidence for.
             ctx.History.AddMessages(rawUpdates);
+            RepairDanglingToolCalls(ctx.History);
         }
         else if (!capturePlan)
         {
@@ -1014,6 +1026,37 @@ internal static class ReplTurn
     // -------------------------------------------------------------------------
     // Static utilities
     // -------------------------------------------------------------------------
+
+    // Guards against a trailing FunctionCallContent left unresolved when the underlying
+    // stream ends without throwing right after a tool call — before its FunctionResultContent
+    // ever arrives (e.g. a dropped connection mid tool-round). Providers require every
+    // tool_use to be immediately followed by a matching tool_result, so an unrepaired
+    // dangling call permanently 400s every subsequent turn ("tool_use ids were found
+    // without tool_result blocks") — the malformed history never fixes itself. Safe to call
+    // on a fully-paired history (no-op) and cheap enough to also run once after restoring
+    // a snapshot, in case an earlier (unpatched) run already persisted one.
+    internal static void RepairDanglingToolCalls(List<ChatMessage> history)
+    {
+        var pendingCallIds = new List<string>();
+        foreach (var message in history)
+        {
+            foreach (var content in message.Contents)
+            {
+                if (content is FunctionCallContent call)
+                    pendingCallIds.Add(call.CallId);
+                else if (content is FunctionResultContent result)
+                    pendingCallIds.Remove(result.CallId);
+            }
+        }
+
+        if (pendingCallIds.Count == 0) return;
+
+        var resultContents = pendingCallIds
+            .Select(callId => (AIContent)new FunctionResultContent(
+                callId, "[interrupted — turn ended before this tool call could run]"))
+            .ToList();
+        history.Add(new ChatMessage(ChatRole.Tool, resultContents));
+    }
 
     // Returns the number of ChatMessage entries removed (0 when no trimming was needed).
     internal static int TrimHistory(List<ChatMessage> history, int contextTokenBudget)

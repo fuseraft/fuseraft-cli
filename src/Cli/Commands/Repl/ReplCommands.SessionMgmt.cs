@@ -55,7 +55,8 @@ internal static partial class ReplCommands
             haltedAt:        haltedAt,
             haltedRemaining: haltedRemaining,
             haltedToolCalls: ctx.HaltedToolCalls.Count > 0 ? [.. ctx.HaltedToolCalls] : null,
-            recoveryHint:    ctx.RecoveryHint);
+            recoveryHint:    ctx.RecoveryHint,
+            todoItems:       ctx.Todo?.Snapshot() is { Count: > 0 } todoItems ? [.. todoItems] : null);
 
         try
         {
@@ -298,6 +299,13 @@ internal static partial class ReplCommands
         grid.AddColumn(new GridColumn().NoWrap().Padding(new Padding(0, 0, 2, 0))); // age
         grid.AddColumn(new GridColumn().NoWrap().Padding(new Padding(0, 0, 0, 0))); // label
 
+        grid.AddRow(
+            "[dim underline]ID[/]",
+            "[dim underline]Model[/]",
+            "[dim underline]Turns[/]",
+            "[dim underline]Age[/]",
+            "[dim underline]Path[/]");
+
         foreach (var s in sessions)
         {
             var elapsed = DateTime.UtcNow - s.LastUpdatedAt;
@@ -305,7 +313,7 @@ internal static partial class ReplCommands
                         : elapsed.TotalHours >= 1 ? $"{(int)elapsed.TotalHours}h ago"
                         :                           $"{(int)elapsed.TotalMinutes}m ago";
             var turns   = $"{s.TurnIndex} turn{(s.TurnIndex == 1 ? "" : "s")}";
-            var model   = s.ModelId.Length > 22 ? s.ModelId[..21] + "…" : s.ModelId;
+            var model   = s.ModelId.Length > 28 ? s.ModelId[..27] + "…" : s.ModelId;
             var cwd     = Path.GetFileName(s.Cwd);
 
             grid.AddRow(

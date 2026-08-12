@@ -27,7 +27,7 @@
     <!-- Microsoft Agent Framework -->
     <PackageReference Include="Cronos" Version="0.13.0" />
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
-    <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.16.0" />
+    <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.17.0" />
     <PackageReference Include="Microsoft.Agents.AI.Workflows" Version="1.17.0" />
 
     <!-- A2A protocol — client-side agent federation -->
@@ -39,12 +39,12 @@
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
 
     <!-- Ollama provider -->
-    <PackageReference Include="OllamaSharp" Version="5.4.25" />
+    <PackageReference Include="OllamaSharp" Version="5.4.30" />
 
     <!-- DI -->
-    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.16.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.17.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.16.0" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.15.1" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.17.0" />
     <PackageReference Include="PdfPig" Version="0.1.15" />
 
     <!-- Structured logging -->
@@ -56,14 +56,14 @@
     <PackageReference Include="Spectre.Console.Cli" Version="0.55.0" />
 
     <!-- MCP client SDK -->
-    <PackageReference Include="ModelContextProtocol" Version="2.0.0" />
+    <PackageReference Include="ModelContextProtocol" Version="2.1.0" />
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
 
     <!-- SQLite — skill index FTS5 -->
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
     <!-- Bundle the native e_sqlite3 library inside the single-file executable so
          it can be self-extracted at startup without a sibling .so file on disk. -->
-    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
   </ItemGroup>
 
   <ItemGroup>
