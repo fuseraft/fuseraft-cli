@@ -498,7 +498,11 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         if (jsonMode)
             ReplJsonBridge.Emit(new { type = "session_end" });
         else
+        {
             AnsiConsole.MarkupLine("[dim]Session ended.[/]");
+            AnsiConsole.MarkupLine(
+                $"[dim]Resume with:[/] fuseraft --resume {Markup.Escape(ctx.SessionId)}");
+        }
         return 0;
     }
 
