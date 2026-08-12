@@ -223,7 +223,7 @@ internal static partial class ReplCommands
 
         AnsiConsole.MarkupLine("  [dim]I/O & events[/]");
         var io = MakeGrid();
-        io.AddRow("[bold cyan]/paste[/]",           "Enter paste mode (multi-line input; type EOF to finish)");
+        io.AddRow("[bold cyan]/paste[/]",           "Enter paste mode (multi-line input; type .done or press Ctrl+D to finish)");
         io.AddRow("[bold cyan]/save[/]",             "Save transcript to repl-<id>.md in the current directory");
         io.AddRow("[bold cyan]/save <file>[/]",      "Save transcript to the specified file");
         io.AddRow("[bold cyan]/snapshot[/]",          "Write a full debug snapshot (context, tools, history, plan) to a temp file");

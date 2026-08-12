@@ -1,4 +1,5 @@
 using System.Text;
+using System.Threading;
 
 namespace fuseraft.Cli.Commands.Repl;
 
@@ -8,6 +9,18 @@ namespace fuseraft.Cli.Commands.Repl;
 /// </summary>
 internal sealed class ReplLineReader
 {
+    // Set by ReplTurn's Console.CancelKeyPress handler. Ctrl+C is consumed by the terminal's
+    // SIGINT/ISIG machinery before it ever reaches Console.ReadKey (confirmed empirically —
+    // the switch-case below for ConsoleKey.C+Control does not fire in a real terminal), so
+    // CancelKeyPress is the only place that ever observes an idle-prompt Ctrl+C. Without this
+    // flag, that handler had nothing to suppress the default action with and the process was
+    // killed outright by SIGINT — no "^C", no session cleanup, exit code 130. The read loop
+    // below polls this instead of blocking forever in Console.ReadKey so it can notice.
+    private volatile bool _cancelRequested;
+
+    /// <summary>Called from the CancelKeyPress handler to abandon the line currently being edited.</summary>
+    internal void RequestCancel() => _cancelRequested = true;
+
     // ── Tab completion ────────────────────────────────────────────────────────
 
     private static readonly string[] SlashCommands =
@@ -15,10 +28,10 @@ internal sealed class ReplLineReader
         "/adversarial", "/assist", "/clear", "/compact", "/context",
         "/conversation", "/events", "/execute", "/exit", "/explore",
         "/fork", "/help", "/history", "/last", "/locate",
-        "/max-tokens", "/memory", "/model", "/paste", "/plan",
-        "/provider", "/recover", "/resume", "/retry", "/rewind",
-        "/safe-mode", "/save", "/sessions", "/switch", "/system",
-        "/tools",
+        "/max-tokens", "/memory", "/model", "/models", "/paste", "/plan",
+        "/provider", "/reasoning", "/recover", "/resume", "/retry", "/rewind",
+        "/run", "/safe-mode", "/save", "/sessions", "/snapshot", "/switch",
+        "/system", "/tools",
     ];
 
     private static readonly Dictionary<string, string[]> SubCommands =
@@ -110,12 +123,36 @@ internal sealed class ReplLineReader
             try { Console.SetCursorPosition(abs % width, startTop + abs / width); } catch { }
         }
 
+        // buffer stores UTF-16 code units, so characters outside the BMP (most emoji, e.g. 🚀)
+        // occupy two adjacent units as a surrogate pair. Moving/deleting one unit at a time can
+        // land the cursor between the two halves and split the pair into two lone surrogates,
+        // which render as replacement characters (U+FFFD) — these compute the real step size so
+        // every cursor move and delete stays on a whole-character boundary.
+        int StepBack(int pos) =>
+            pos >= 2 && char.IsLowSurrogate(buffer[pos - 1]) && char.IsHighSurrogate(buffer[pos - 2]) ? 2 : 1;
+
+        int StepForward(int pos) =>
+            pos + 1 < buffer.Length && char.IsHighSurrogate(buffer[pos]) && char.IsLowSurrogate(buffer[pos + 1]) ? 2 : 1;
+
         try
         {
             while (true)
             {
                 ConsoleKeyInfo info;
-                try { info = Console.ReadKey(intercept: true); }
+                try
+                {
+                    while (!Console.KeyAvailable)
+                    {
+                        if (_cancelRequested)
+                        {
+                            _cancelRequested = false;
+                            Console.WriteLine("^C");
+                            return "";
+                        }
+                        Thread.Sleep(15);
+                    }
+                    info = Console.ReadKey(intercept: true);
+                }
                 catch (InvalidOperationException) { return null; }
 
                 // Any key other than Tab breaks the current tab-cycling run.
@@ -136,13 +173,22 @@ internal sealed class ReplLineReader
                         return line;
 
                     case ConsoleKey.C when info.Modifiers.HasFlag(ConsoleModifiers.Control):
+                        // Defensive fallback only — on every platform actually tested, Ctrl+C is
+                        // consumed by CancelKeyPress/SIGINT before ReadKey ever sees it (see
+                        // _cancelRequested above). Kept consistent with that path: abandon the
+                        // line, don't end the session.
                         Console.WriteLine("^C");
-                        return null;
+                        return "";
 
                     case ConsoleKey.D when info.Modifiers.HasFlag(ConsoleModifiers.Control):
                         if (buffer.Length == 0) { Console.WriteLine(); return null; }
                         // Ctrl+D with text: delete char under cursor (same as Delete).
-                        if (cursorPos < buffer.Length) { buffer.Remove(cursorPos, 1); Redraw(); }
+                        if (cursorPos < buffer.Length)
+                        {
+                            var dStep = StepForward(cursorPos);
+                            buffer.Remove(cursorPos, dStep);
+                            Redraw();
+                        }
                         break;
 
                     // ── History navigation ────────────────────────────────────
@@ -178,7 +224,7 @@ internal sealed class ReplLineReader
                             while (cursorPos > 0 && buffer[cursorPos - 1] != ' ') cursorPos--;
                             MoveTo(cursorPos);
                         }
-                        else if (cursorPos > 0) { cursorPos--; MoveTo(cursorPos); }
+                        else if (cursorPos > 0) { cursorPos -= StepBack(cursorPos); MoveTo(cursorPos); }
                         break;
 
                     case ConsoleKey.RightArrow:
@@ -188,7 +234,7 @@ internal sealed class ReplLineReader
                             while (cursorPos < buffer.Length && buffer[cursorPos] != ' ') cursorPos++;
                             MoveTo(cursorPos);
                         }
-                        else if (cursorPos < buffer.Length) { cursorPos++; MoveTo(cursorPos); }
+                        else if (cursorPos < buffer.Length) { cursorPos += StepForward(cursorPos); MoveTo(cursorPos); }
                         break;
 
                     case ConsoleKey.Home:
@@ -205,11 +251,21 @@ internal sealed class ReplLineReader
 
                     // ── Deletion ──────────────────────────────────────────────
                     case ConsoleKey.Backspace:
-                        if (cursorPos > 0) { buffer.Remove(cursorPos - 1, 1); cursorPos--; Redraw(); }
+                        if (cursorPos > 0)
+                        {
+                            var step = StepBack(cursorPos);
+                            buffer.Remove(cursorPos - step, step);
+                            cursorPos -= step;
+                            Redraw();
+                        }
                         break;
 
                     case ConsoleKey.Delete:
-                        if (cursorPos < buffer.Length) { buffer.Remove(cursorPos, 1); Redraw(); }
+                        if (cursorPos < buffer.Length)
+                        {
+                            buffer.Remove(cursorPos, StepForward(cursorPos));
+                            Redraw();
+                        }
                         break;
 
                     case ConsoleKey.U when info.Modifiers.HasFlag(ConsoleModifiers.Control):
