@@ -16,7 +16,7 @@ Orchestration:
       ModelId: grok-4.3
       Endpoint: https://api.x.ai/v1
       ApiKeyEnvVar: XAI_API_KEY
-      ReasoningEffort: none       # none | low | medium | high
+      ReasoningEffort: none       # provider-specific, passed through as-is — common: none | minimal | low | medium | high | xhigh | max
     reasoning:
       ModelId: grok-4.3
       Endpoint: https://api.x.ai/v1
@@ -454,7 +454,7 @@ Termination:
 
 | Provider | ModelId example | Endpoint | ApiKeyEnvVar | Notes |
 |----------|----------------|----------|-------------|-------|
-| xAI | `grok-4.3` | `https://api.x.ai/v1` | `XAI_API_KEY` | Set `ReasoningEffort: none/low/medium/high` |
+| xAI | `grok-4.3` | `https://api.x.ai/v1` | `XAI_API_KEY` | Set `ReasoningEffort` (provider-specific; common: none/minimal/low/medium/high/xhigh/max) |
 | Anthropic | `claude-sonnet-4-6` | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` | |
 | OpenAI | `gpt-4o` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | |
 | Ollama (local) | `llama3.1` | `http://localhost:11434/v1` | *(none needed)* | |

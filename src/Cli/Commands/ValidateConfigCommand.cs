@@ -276,9 +276,12 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                 if (agent.ContextWindow?.ContextCapFraction is < 0.0 or > 1.0)
                     issues.Add(("error", $"Agent '{agent.Name}': ContextCapFraction must be 0.0–1.0 (got {agent.ContextWindow.ContextCapFraction})."));
 
-                var effort = agent.Model.ReasoningEffort?.ToLowerInvariant();
-                if (effort is not null and not ("none" or "low" or "medium" or "high"))
-                    issues.Add(("error", $"Agent '{agent.Name}': Model.ReasoningEffort '{agent.Model.ReasoningEffort}' is invalid. Valid values: none, low, medium, high."));
+                // Accepted values are provider- and model-specific (and keep growing — e.g.
+                // "xhigh", "max"), so this isn't checked against a fixed enum. The only thing
+                // that's unambiguously wrong is a value with embedded whitespace.
+                var effort = agent.Model.ReasoningEffort;
+                if (effort is not null && effort.Trim().Contains(' '))
+                    issues.Add(("error", $"Agent '{agent.Name}': Model.ReasoningEffort '{effort}' looks malformed — expected a single token (e.g. none, low, medium, high, xhigh, max)."));
 
                 if (settings.Strict)
                 {

@@ -439,7 +439,7 @@ Use `/tools` to see the full list at runtime.
 | `/model <id> <effort>` | Switch model and set reasoning effort in one step (e.g. `/model grok-4.3 low`) |
 | `/models` | List all models available from the current provider. Highlights the active model. |
 | `/reasoning` | Show current reasoning effort |
-| `/reasoning <effort>` | Set reasoning effort for the current model — `none`, `low`, `medium`, `high`. Injected as `"reasoning": {"effort": "..."}` in the request; supported by xAI `grok-4.3`. |
+| `/reasoning <effort>` | Set reasoning effort for the current model. Accepted values are provider-specific (common: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) — fuseraft passes the value through as-is rather than validating against a fixed list. Injected as `"reasoning": {"effort": "..."}` in the request. |
 | `/max-tokens <n>` | Cap the model's output to `n` tokens per response |
 | `/max-tokens reset` | Restore the provider's default max output tokens |
 | `/exit` | End the session |
@@ -448,7 +448,7 @@ Use `/tools` to see the full list at runtime.
 
 `/model <id>` switches the LLM mid-session without clearing history. `/reasoning <effort>` adjusts the reasoning depth of the current model without switching it. Both can be combined: `/model grok-4.3 high` switches to grok-4.3 and sets high reasoning effort in a single command.
 
-Reasoning effort levels (`none` / `low` / `medium` / `high`) are supported by xAI `grok-4.3`. `none` disables thinking tokens entirely for fast structured output; `high` uses maximum reasoning for complex tasks. The level is injected at the HTTP layer — no provider-specific SDK support is required, so the same mechanism works for any xAI model that accepts the `reasoning` parameter.
+Reasoning effort support and accepted values vary by provider and model — e.g. xAI `grok-4.3` accepts `none` / `low` / `medium` / `high`, and some newer models add finer tiers like `minimal` or `xhigh`/`max` for the low and high ends. `none` disables thinking tokens entirely for fast structured output; the highest tier a model supports uses maximum reasoning for complex tasks. The level is injected at the HTTP layer — no provider-specific SDK support is required, so the same mechanism works for any model that accepts a top-level `reasoning` object. fuseraft does not validate the value against a fixed list, so new provider tiers work without a CLI update; an unsupported value is rejected by the provider's API.
 
 **Prompt format**
 
