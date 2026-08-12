@@ -102,9 +102,11 @@ public record ModelConfig
     public double? Temperature { get; init; } = null;
 
     /// <summary>
-    /// Reasoning effort level for models that support it (e.g. <c>grok-4.3</c>).
-    /// Accepted values: <c>none</c>, <c>low</c>, <c>medium</c>, <c>high</c>.
-    /// Injected as <c>"reasoning": {"effort": "..."}</c> in the request body.
+    /// Reasoning effort level for models that support it. Passed through verbatim to the
+    /// provider — fuseraft does not validate it against a fixed enum, since accepted values
+    /// vary by provider and model and change over time (e.g. <c>none</c>/<c>low</c>/<c>medium</c>/
+    /// <c>high</c> are common; some models additionally accept <c>minimal</c>, <c>xhigh</c>, or
+    /// <c>max</c>). Injected as <c>"reasoning": {"effort": "..."}</c> in the request body.
     /// Omit for models that do not support the <c>reasoning</c> parameter.
     /// </summary>
     public string? ReasoningEffort { get; init; }

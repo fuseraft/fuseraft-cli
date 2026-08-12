@@ -268,18 +268,18 @@ internal static partial class ReplCommands
             var effortDisplay = ctx.ModelConfig.ReasoningEffort is { } e
                 ? $"  [dim]Reasoning:[/] [bold]{Markup.Escape(e)}[/]" : string.Empty;
             AnsiConsole.MarkupLine($"  [dim]Model:[/] [bold]{Markup.Escape(ctx.ModelId)}[/]{effortDisplay}");
-            AnsiConsole.MarkupLine("[dim]Run[/] [bold]/model <id> [[effort]][/] [dim]to switch models. Effort: none, low, medium, high.[/]");
+            AnsiConsole.MarkupLine($"[dim]Run[/] [bold]/model <id> [[effort]][/] [dim]to switch models. Effort is provider-specific, e.g. {string.Join(", ", CommonReasoningEfforts)}.[/]");
             return CommandResult.Continue;
         }
 
         // Optional second token is reasoning effort: /model grok-4.3 low
         var parts      = arg.Trim().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
         var newModelId = parts[0];
-        var newEffort  = parts.Length > 1 ? parts[1].ToLowerInvariant() : null;
+        var newEffort  = parts.Length > 1 ? parts[1].Trim().ToLowerInvariant() : null;
 
-        if (newEffort is not null and not ("none" or "low" or "medium" or "high"))
+        if (newEffort is not null && newEffort.Contains(' '))
         {
-            AnsiConsole.MarkupLine($"[red]✗ Invalid reasoning effort '{Markup.Escape(newEffort)}'.[/] [dim]Valid values: none, low, medium, high.[/]");
+            AnsiConsole.MarkupLine($"[red]✗ Invalid reasoning effort '{Markup.Escape(newEffort)}'.[/] [dim]Expected a single token, e.g. {string.Join(", ", CommonReasoningEfforts)} — support varies by provider.[/]");
             return CommandResult.Continue;
         }
 
@@ -332,7 +332,10 @@ internal static partial class ReplCommands
     // /reasoning
     // -------------------------------------------------------------------------
 
-    private static readonly string[] ValidReasoningEfforts = ["none", "low", "medium", "high"];
+    // Common values across providers — shown as a hint only. Not an enforced allow-list:
+    // accepted effort levels are provider- and model-specific and keep growing (e.g. "xhigh",
+    // "max"), so fuseraft passes the value through verbatim rather than gating on a fixed enum.
+    private static readonly string[] CommonReasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
     private static async Task<CommandResult> CmdReasoningAsync(ReplSessionContext ctx, string arg)
     {
@@ -340,14 +343,14 @@ internal static partial class ReplCommands
         {
             var current = ctx.ModelConfig.ReasoningEffort ?? "(not set)";
             AnsiConsole.MarkupLine($"  [dim]Reasoning effort:[/] [bold]{Markup.Escape(current)}[/]");
-            AnsiConsole.MarkupLine("[dim]Run[/] [bold]/reasoning <none|low|medium|high>[/] [dim]to change.[/]");
+            AnsiConsole.MarkupLine($"[dim]Run[/] [bold]/reasoning <effort>[/] [dim]to change. Common values: {string.Join(", ", CommonReasoningEfforts)} — support varies by provider.[/]");
             return CommandResult.Continue;
         }
 
         var effort = arg.Trim().ToLowerInvariant();
-        if (!ValidReasoningEfforts.Contains(effort))
+        if (effort.Contains(' '))
         {
-            AnsiConsole.MarkupLine($"[red]✗ Invalid value '{Markup.Escape(effort)}'.[/] [dim]Valid values: none, low, medium, high.[/]");
+            AnsiConsole.MarkupLine($"[red]✗ Invalid value '{Markup.Escape(effort)}'.[/] [dim]Expected a single token, e.g. {string.Join(", ", CommonReasoningEfforts)}.[/]");
             return CommandResult.Continue;
         }
 
