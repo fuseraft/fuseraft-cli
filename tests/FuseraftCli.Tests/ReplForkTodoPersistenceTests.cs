@@ -18,6 +18,7 @@ namespace FuseraftCli.Tests;
 /// the field correctly. Isolates <c>FUSERAFT_HOME</c> so the fork's snapshot file lands in a
 /// throwaway temp dir instead of the user's real <c>~/.fuseraft/repl-sessions</c>.
 /// </summary>
+[Collection("FuseraftHomeEnv")]
 public sealed class ReplForkTodoPersistenceTests : IDisposable
 {
     private readonly string? _originalHome = Environment.GetEnvironmentVariable(FuseraftPaths.HomeOverrideEnvVar);

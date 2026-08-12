@@ -8,6 +8,7 @@ namespace FuseraftCli.Tests;
 /// now scrubs any leftover copy from disk on every call so the plaintext key can't persist across
 /// an upgrade — these tests pin that cleanup behavior using an isolated FUSERAFT_HOME.
 /// </summary>
+[Collection("FuseraftHomeEnv")]
 public sealed class UserConfigStoreLegacyKeyFileTests : IDisposable
 {
     private readonly string? _originalHome = Environment.GetEnvironmentVariable(FuseraftPaths.HomeOverrideEnvVar);
