@@ -56,7 +56,7 @@
     <PackageReference Include="Spectre.Console.Cli" Version="0.55.0" />
 
     <!-- MCP client SDK -->
-    <PackageReference Include="ModelContextProtocol" Version="2.1.0" />
+    <PackageReference Include="ModelContextProtocol" Version="2.2.0" />
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
 
     <!-- SQLite — skill index FTS5 -->
