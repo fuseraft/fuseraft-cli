@@ -5,6 +5,7 @@ using fuseraft.Core;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure.KeyStore;
 using fuseraft.Infrastructure.Plugins;
+using fuseraft.Orchestration;
 
 namespace fuseraft.Cli;
 
@@ -49,6 +50,8 @@ public static class OrchestratorConfigLoader
 
         if (config.Agents.Count == 0)
             throw new InvalidOperationException("Config must define at least one agent.");
+
+        ValidateIsolationConstraints(config, loggerFactory);
 
         // Expand ${ENV_VAR} tokens in security and API profile config before use.
         config = ExpandEnvVars(config);
@@ -456,5 +459,47 @@ public static class OrchestratorConfigLoader
                 string.Join(", ", KnownSchemaVersions));
         else
             logger.LogDebug("Config schema_version '{SchemaVersion}' is valid.", config.SchemaVersion);
+    }
+
+    // Magentic's manager/ledger loop structurally depends on every participant seeing the same
+    // shared transcript to coordinate — Isolation.Fresh (which never reads SharedHistory) would
+    // silently starve the manager of the progress signal it needs. Reject rather than degrade
+    // quietly; the fix (drop Isolation: Fresh or switch orchestrator type) is a one-line config
+    // change, not a runtime workaround.
+    //
+    // Separately, warn (do not fail) when a Fresh agent — the default — declares no Context:
+    // sources at all: such an agent receives only the synthesized handoff directive each turn,
+    // which is fine for a terminal/leaf agent but likely a misconfiguration for one that needs
+    // durable state (brief.json, prior changes, etc.) across turns.
+    internal static void ValidateIsolationConstraints(OrchestrationConfig config, ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger(nameof(OrchestratorBuilder));
+
+        if (string.Equals(config.Selection.Type, OrchestratorTypes.Magentic, StringComparison.OrdinalIgnoreCase))
+        {
+            var freshAgents = config.Agents
+                .Where(a => a.Isolation == AgentIsolation.Fresh)
+                .Select(a => a.Name)
+                .ToList();
+            if (freshAgents.Count > 0)
+                throw new InvalidOperationException(
+                    $"Selection.Type 'magentic' requires every agent to use Isolation: Shared or " +
+                    $"Isolation: Fork — the manager's ledger loop depends on shared visibility of " +
+                    $"progress across all participants. Agent(s) declaring Isolation: Fresh (the " +
+                    $"default): {string.Join(", ", freshAgents)}. Set 'Isolation: Shared' explicitly " +
+                    $"on these agents, or on the whole roster if none should isolate.");
+        }
+
+        foreach (var agent in config.Agents)
+        {
+            if (agent.Isolation == AgentIsolation.Fresh && agent.Context is not { Count: > 0 })
+                logger.LogWarning(
+                    "Agent '{Agent}' uses Isolation: Fresh (the default) with no Context: sources " +
+                    "declared — it will receive only the synthesized handoff directive each turn, " +
+                    "nothing else. This is fine for a terminal/leaf agent; otherwise declare a " +
+                    "Context: block (session_context, brief_field:*, changes_recent:N, own_history:N, " +
+                    "etc.) or set 'Isolation: Shared' if this agent needs the group transcript.",
+                    agent.Name);
+        }
     }
 }

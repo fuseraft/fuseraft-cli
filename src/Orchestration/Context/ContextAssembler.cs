@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 using fuseraft.Core;
 using fuseraft.Core.Models;
+using fuseraft.Core.Models.Agents;
 using fuseraft.Core.Models.Context;
 using fuseraft.Infrastructure;
 
@@ -147,13 +148,17 @@ public sealed class ContextAssembler
         string task,
         IReadOnlyList<ContextSource> sources,
         IList<ChatMessage> sharedHistory,
+        AgentDirective? directive = null,
         CancellationToken ct = default)
     {
         var result = new List<ChatMessage>();
         var emptySources = new List<string>();
 
-        // 1. Task message — the agent always needs to know what it's working on.
-        result.Add(new ChatMessage(ChatRole.User, task));
+        // 1. Task message — the agent always needs to know what it's working on. When a
+        // synthesized directive is available (handoff() goal/background/constraints), it
+        // replaces the raw task string — this is what makes Fresh isolation self-contained
+        // rather than just "an empty Context: block with no explanation of what to do".
+        result.Add(new ChatMessage(ChatRole.User, directive?.Format() ?? task));
 
         // Separate own_history sources from artifact sources.
         ContextSource? ownHistorySrc = null;

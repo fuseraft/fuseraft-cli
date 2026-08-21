@@ -283,6 +283,15 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                 if (effort is not null && effort.Trim().Contains(' '))
                     issues.Add(("error", $"Agent '{agent.Name}': Model.ReasoningEffort '{effort}' looks malformed — expected a single token (e.g. none, low, medium, high, xhigh, max)."));
 
+                // Magentic's manager/ledger loop depends on every participant sharing the
+                // transcript — Isolation: Fresh (the default) would silently starve it.
+                if (agent.Isolation == fuseraft.Core.Models.Agents.AgentIsolation.Fresh
+                    && string.Equals(config.Selection.Type, OrchestratorTypes.Magentic, StringComparison.OrdinalIgnoreCase))
+                    issues.Add(("error", $"Agent '{agent.Name}': Isolation: Fresh is incompatible with Selection.Type 'magentic' — set 'Isolation: Shared' (or 'Fork')."));
+                else if (agent.Isolation == fuseraft.Core.Models.Agents.AgentIsolation.Fresh
+                    && agent.Context is not { Count: > 0 })
+                    issues.Add(("warning", $"Agent '{agent.Name}': Isolation: Fresh (the default) with no Context: sources declared — it will receive only the synthesized handoff directive each turn. Fine for a terminal/leaf agent; otherwise add a Context: block or set 'Isolation: Shared'."));
+
                 if (settings.Strict)
                 {
                     var registered = pluginRegistry.RegisteredPlugins

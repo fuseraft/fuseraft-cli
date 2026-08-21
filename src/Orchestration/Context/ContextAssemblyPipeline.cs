@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
+using fuseraft.Core.Models.Agents;
 using fuseraft.Infrastructure;
 
 namespace fuseraft.Orchestration.Context;
@@ -125,16 +126,50 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
         IReadOnlyList<string> declaredSources = [];
         IReadOnlyList<string> emptySources    = [];
 
-        if (agentCfg?.Context is { Count: > 0 } contextSources && _contextAssembler is not null)
+        var isolation = agentCfg?.Isolation ?? AgentIsolation.Fresh;
+        var directive = request.Directive
+            ?? (isolation is AgentIsolation.Fresh or AgentIsolation.Fork
+                ? OrchestratorHelpers.FindLastDirective(history)
+                : null);
+
+        if (isolation == AgentIsolation.Fresh)
+        {
+            // Fresh: never touch SharedHistory. Build from the synthesized directive (if any)
+            // plus whatever Context: sources this agent declares — even when that list is empty,
+            // this is NOT the SharedHistoryFallback path.
+            var contextSources = (IReadOnlyList<ContextSource>?)agentCfg?.Context ?? [];
+            if (_contextAssembler is not null)
+            {
+                var assembled   = await _contextAssembler.AssembleForAgentAsync(
+                    agentName, task, contextSources,
+                    history as IList<ChatMessage> ?? new List<ChatMessage>(history), directive, ct);
+                baseMessages    = assembled.Messages;
+                historyChars    = baseMessages.Sum(m => m.Text?.Length ?? 0);
+                historyMessages = baseMessages;
+                declaredSources = contextSources.Select(s => s.Source).ToList();
+                emptySources    = assembled.EmptySources;
+            }
+            else
+            {
+                // No assembler configured — degrade to the directive/task alone rather than
+                // falling back to the shared transcript, preserving the Fresh isolation invariant.
+                baseMessages    = [new ChatMessage(ChatRole.User, directive?.Format() ?? task)];
+                historyChars    = baseMessages.Sum(m => m.Text?.Length ?? 0);
+                historyMessages = baseMessages;
+            }
+            contextStrategy = ContextAssemblyMetrics.Strategies.ArtifactSpec;
+        }
+        else if (agentCfg?.Context is { Count: > 0 } contextSources2 && _contextAssembler is not null)
         {
             var assembled   = await _contextAssembler.AssembleForAgentAsync(
-                agentName, task, contextSources,
-                history as IList<ChatMessage> ?? new List<ChatMessage>(history), ct);
+                agentName, task, contextSources2,
+                history as IList<ChatMessage> ?? new List<ChatMessage>(history),
+                isolation == AgentIsolation.Fork ? directive : null, ct);
             baseMessages    = assembled.Messages;
             historyChars    = baseMessages.Sum(m => m.Text?.Length ?? 0);
             historyMessages = baseMessages;
             contextStrategy = ContextAssemblyMetrics.Strategies.ArtifactSpec;
-            declaredSources = contextSources.Select(s => s.Source).ToList();
+            declaredSources = contextSources2.Select(s => s.Source).ToList();
             emptySources    = assembled.EmptySources;
         }
         else
@@ -150,6 +185,10 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
                 sessionContextChars = sessionCtx.Length;
 
             baseMessages = BuildDefaultMessages(filtered, sessionCtx);
+
+            // Fork: layer the synthesized directive on top of the full shared transcript.
+            if (isolation == AgentIsolation.Fork && directive is not null)
+                baseMessages = [.. baseMessages, new ChatMessage(ChatRole.User, directive.Format())];
         }
 
         // ── History breakdown (role + compaction) ────────────────────────────

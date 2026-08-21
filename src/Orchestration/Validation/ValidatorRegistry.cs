@@ -69,6 +69,8 @@ internal static class ValidatorRegistry
                         sandboxRoot);
             else if (name.Equals(ValidatorNames.ArchitectureValidator, StringComparison.OrdinalIgnoreCase))
                 v = new ArchitectureValidator(projectRoot: sandboxRoot);
+            else if (name.Equals(ValidatorNames.RequireSessionContextWrite, StringComparison.OrdinalIgnoreCase))
+                v = new RequireSessionContextWriteValidator();
 
             if (v is not null)
                 result.Add(v);

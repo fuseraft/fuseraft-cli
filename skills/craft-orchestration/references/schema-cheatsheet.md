@@ -123,9 +123,10 @@ Orchestration:
     - FileSystem
     - Shell
     - Handoff
+  Isolation: Fresh                 # Fresh (default) | Shared | Fork — see "Isolation" below
   ContextWindow:
-    TextOnly: true                # strip tool-call results from context window
-  Context:                            # replaces ContextWindow when set; assembles from artifacts
+    TextOnly: true                # strip tool-call results from context window; ignored when Isolation: Fresh
+  Context:                            # this agent's own inputs — always used under Isolation: Fresh
     - Source: session_context         # handoff summary from session_context_write
     - Source: changes_recent:5        # last 5 change-log entries
     - Source: brief_field:test_targets # field from brief.json
@@ -139,6 +140,49 @@ Orchestration:
     - FileSystem
     - Search
 ```
+
+---
+
+## Isolation
+
+Controls whether an agent sees the shared session transcript other agents have been writing
+to, or only a synthesized handoff directive plus its own declared `Context:` sources — the
+same fresh-by-default, fork-by-explicit-choice split Claude Code uses for its own sub-agents.
+
+| Mode | What the agent receives | Use for |
+|---|---|---|
+| `Fresh` (default) | The synthesized `AgentDirective` (see below) + its own `Context:` sources only. Never `SharedHistory` — even with an empty/absent `Context:` block. | Most agents. No inherited reasoning, dead ends, or another agent's tool-call noise. |
+| `Shared` | `Context:` block if declared, else the windowed shared transcript (`ContextWindow`). Pre-overhaul behavior. | Conversational round-robin/keyword group chats; anything whose prompts assume prior turns are visible. |
+| `Fork` | `Shared` behavior **plus** the synthesized directive layered on top. | Meta-agents that genuinely need the full transcript AND a clear statement of what to do with it — a Verifier auditing the session, a RecoveryAgent diagnosing a failure. |
+
+**`Selection.Type: magentic` requires every agent to be `Shared` or `Fork`** — the manager's
+ledger loop depends on shared visibility of progress across all participants; config load fails
+with `Isolation: Fresh` under Magentic.
+
+A `Fresh` agent with no `Context:` sources at all still runs — it just receives nothing but the
+directive each turn. Fine for a terminal/leaf agent; a load-time warning flags this for anything
+that looks like it needs durable state.
+
+### The directive: how a `Fresh` agent learns what to do
+
+Extend the `handoff()` call with optional structured fields instead of leaving the receiving
+agent to infer intent from a bare routing keyword:
+
+```
+handoff(
+  route_keyword: "HANDOFF TO DEVELOPER",
+  goal: "Add pagination to GET /users.",
+  background: "Explored the handler in src/api/users.py — no existing page param. " +
+              "Auth middleware already extracts the caller; don't touch it.",
+  constraints: "Do not change the existing response shape for callers that omit ?page."
+)
+```
+
+`goal`/`background`/`constraints` are optional — a bare `handoff(route_keyword: ...)` still
+works exactly as before. When present, they become the receiving agent's task message under
+`Isolation: Fresh` (and are layered onto the transcript under `Fork`). Write them the way you'd
+brief a colleague who wasn't in the room: state what's already been learned or ruled out, don't
+assume they can see your reasoning.
 
 ---
 
@@ -225,9 +269,10 @@ Selection:
             Signal: "HANDOFF TO TESTER"
             Contract: ImplementationComplete
             HandoffContext:                   # inject targeted artifacts when transition fires
-              - Source: session_context
-              - Source: changes_recent
-              - Source: brief_field:test_targets
+              - Source: session_context       # NOTE: only takes effect for Shared/Fork agents —
+              - Source: changes_recent        # a Fresh agent never reads SharedHistory, so this
+              - Source: brief_field:test_targets # never reaches it. Put the same sources in the
+                                                  # target agent's own Context: block instead.
           - To: Planning
             Signal: "REPLAN REQUIRED"
 

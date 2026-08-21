@@ -17,6 +17,7 @@ public static class ValidatorNames
     public const string BlockOnConsecutiveFail         = "BlockOnConsecutiveFail";
     public const string TestReportValid                = "TestReportValid";
     public const string ArchitectureValidator          = "ArchitectureValidator";
+    public const string RequireSessionContextWrite     = "RequireSessionContextWrite";
 
     // Synthetic validator names emitted into ValidatorStuckException / event logs
     public const string StructuredRouting              = "StructuredRouting";

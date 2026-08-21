@@ -3,7 +3,9 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using fuseraft.Core.Models;
+using fuseraft.Core.Models.Agents;
 using fuseraft.Infrastructure;
+using fuseraft.Infrastructure.Plugins;
 
 namespace fuseraft.Orchestration;
 
@@ -96,6 +98,49 @@ internal static class OrchestratorHelpers
     {
         if (args is null || !args.TryGetValue(key, out var val)) return null;
         return val?.ToString();
+    }
+
+    // Builds an AgentDirective from a handoff() FunctionCallContent's optional structured
+    // arguments (goal/background/constraints). Returns null when the call omitted `goal` —
+    // callers fall back to legacy marker-message behavior in that case.
+    internal static AgentDirective? TryExtractDirective(FunctionCallContent fc)
+    {
+        var args = (IReadOnlyDictionary<string, object?>?)fc.Arguments;
+        var goal = GetArg(args, HandoffPlugin.GoalArgumentName);
+        if (string.IsNullOrWhiteSpace(goal)) return null;
+
+        var background  = GetArg(args, HandoffPlugin.BackgroundArgumentName);
+        var constraints = GetArg(args, HandoffPlugin.ConstraintsArgumentName);
+
+        return new AgentDirective
+        {
+            Goal        = goal.Trim(),
+            Background  = string.IsNullOrWhiteSpace(background) ? null : background.Trim(),
+            Constraints = string.IsNullOrWhiteSpace(constraints)
+                ? []
+                : constraints.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+        };
+    }
+
+    // Scans the tail of history for the most recent handoff() call and extracts its directive,
+    // if any. Used where a directive must be recovered after the fact (e.g. at context-assembly
+    // time) rather than at the moment the FunctionCallContent is first observed.
+    internal static AgentDirective? FindLastDirective(IReadOnlyList<ChatMessage> history, int lookback = AgentMessageLookback)
+    {
+        for (int i = history.Count - 1, scanned = 0; i >= 0 && scanned < lookback; i--)
+        {
+            foreach (var item in history[i].Contents)
+            {
+                if (item is FunctionCallContent fc &&
+                    string.Equals(fc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase))
+                {
+                    var directive = TryExtractDirective(fc);
+                    if (directive is not null) return directive;
+                }
+            }
+            if (history[i].Role == ChatRole.Assistant) scanned++;
+        }
+        return null;
     }
 
     // Counts how many consecutive assistant turns from agentName appear at the tail of

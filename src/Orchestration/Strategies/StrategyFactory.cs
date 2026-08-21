@@ -258,7 +258,8 @@ public sealed class StrategyFactory(Func<ModelConfig, IChatClient> createChatCli
                 provenanceRegistry: provenanceRegistry),
             // Threshold defaults to 3; command pattern supplied per-route via RequiredCommandPattern.
             [ValidatorNames.BlockOnConsecutiveFail] = new ConsecutiveShellFailValidator(
-                changeLogPath: config?.ChangeLogPath)
+                changeLogPath: config?.ChangeLogPath),
+            [ValidatorNames.RequireSessionContextWrite] = new RequireSessionContextWriteValidator(),
         };
 
         if (config is not null)
