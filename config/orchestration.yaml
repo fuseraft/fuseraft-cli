@@ -75,9 +75,18 @@ Orchestration:
     KeepRecentTurns: 10
     Mode: lossless
 
+  # Isolation is explicit below on every agent because this config predates the Isolation:
+  # field (default changed to Fresh — no SharedHistory unless an agent opts in). Every agent
+  # here declares `Isolation: Shared` to preserve its exact original behavior: several agents'
+  # instructions depend on prior conversation being visible (e.g. Planner step 3, "IF THIS IS
+  # A RETRY: Reviewer feedback is present in context"). Migrating individual agents to
+  # `Isolation: Fresh` + an explicit `Context:` block is a real option — most of them already
+  # read their inputs from .fuseraft/artifacts/*.json by hand — but changes turn-by-turn
+  # behavior and needs its own validation pass; not done wholesale here.
   Agents:
     - Name: Planner
       Description: Session planner who reads the task and codebase to produce a focused brief for the team.
+      Isolation: Shared
       Instructions: |
         You are a technical project planner.
 
@@ -137,6 +146,7 @@ Orchestration:
 
     - Name: PlannerCritic
       Description: Adversarially reviews the brief for completeness before the Developer starts.
+      Isolation: Shared
       Instructions: |
         You are an adversarial brief reviewer. Find reasons the brief will FAIL — not reasons
         it will succeed. A brief that passes goes directly to the Developer; one that fails
@@ -188,6 +198,7 @@ Orchestration:
 
     - Name: Developer
       Description: Senior software engineer who implements features using tools.
+      Isolation: Shared
       Instructions: |
         You are an expert software developer with access to filesystem, shell, and git tools.
 
@@ -227,6 +238,7 @@ Orchestration:
 
     - Name: Tester
       Description: QA engineer who independently verifies changes with real tool calls and blocks promotion on any failure.
+      Isolation: Shared
       Instructions: |
         You are an expert QA engineer. DO NOT trust the Developer's account — verify everything independently.
 
@@ -288,6 +300,7 @@ Orchestration:
 
     - Name: Reviewer
       Description: Tech lead who approves only after reading the code, running a spot-check, and confirming all acceptance criteria are verified passing.
+      Isolation: Shared
       Instructions: |
         You are a senior tech lead performing a final review.
 
@@ -346,6 +359,12 @@ Orchestration:
 
     - Name: Verifier
       Description: Evidence auditor who checks for inconsistencies between claims and recorded actions.
+      # Fork, not Shared: the Verifier's whole job is cross-checking claims made "in recent
+      # conversation messages" against the change log — it needs the full transcript. Fork
+      # additionally layers in a synthesized directive on the turns it's dispatched via a
+      # handoff() call; EveryNTurns-triggered runs behave the same as Shared (no directive
+      # available), so this is strictly no worse than Shared and correct for its stated role.
+      Isolation: Fork
       Instructions: |
         You are an evidence auditor. Detect inconsistencies between what agents claim
         and what is recorded in the change log.

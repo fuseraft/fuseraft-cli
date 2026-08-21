@@ -924,11 +924,29 @@ public sealed class AgentOrchestrator(
             if (memoryManager is not null)
                 instructions = await memoryManager.AugmentInstructionsAsync(agentName, instructions, cancellationToken);
 
+            var isolation = agentCfg?.Isolation ?? AgentIsolation.Fresh;
+            var directive = isolation is AgentIsolation.Fresh or AgentIsolation.Fork
+                ? OrchestratorHelpers.FindLastDirective((IReadOnlyList<ChatMessage>)history)
+                : null;
+
             IReadOnlyList<ChatMessage> filtered;
-            if (agentCfg?.Context is { Count: > 0 } agentContextSources && contextAssembler is not null)
+            if (isolation == AgentIsolation.Fresh && contextAssembler is not null)
             {
                 filtered = (await contextAssembler.AssembleForAgentAsync(
-                    agentName, task, agentContextSources, history, cancellationToken)).Messages;
+                    agentName, task, (IReadOnlyList<ContextSource>?)agentCfg?.Context ?? [],
+                    history, directive, cancellationToken)).Messages;
+            }
+            else if (isolation == AgentIsolation.Fresh)
+            {
+                // No assembler configured — degrade to the directive/task alone rather than
+                // falling back to the shared transcript.
+                filtered = [new ChatMessage(ChatRole.User, directive?.Format() ?? task)];
+            }
+            else if (agentCfg?.Context is { Count: > 0 } agentContextSources && contextAssembler is not null)
+            {
+                filtered = (await contextAssembler.AssembleForAgentAsync(
+                    agentName, task, agentContextSources, history,
+                    isolation == AgentIsolation.Fork ? directive : null, cancellationToken)).Messages;
             }
             else
             {

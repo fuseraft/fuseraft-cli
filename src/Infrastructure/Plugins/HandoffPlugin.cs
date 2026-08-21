@@ -23,6 +23,16 @@ namespace fuseraft.Infrastructure.Plugins;
 /// The tool itself is a no-op: it returns <paramref name="route_keyword"/> verbatim so that
 /// the legacy tool-result scanning paths also detect it as a fallback.
 /// </para>
+///
+/// <para>
+/// The optional <paramref name="goal"/>/<paramref name="background"/>/<paramref name="constraints"/>
+/// arguments let the handing-off agent synthesize a self-contained directive for the receiving
+/// agent instead of relying on it to infer intent from the shared transcript. Orchestrators read
+/// these directly off the <c>FunctionCallContent</c> and build an
+/// <see cref="fuseraft.Core.Models.Agents.AgentDirective"/> for the next turn. When omitted, the
+/// receiving agent falls back to whatever its <see cref="fuseraft.Core.Models.Agents.AgentIsolation"/>
+/// mode otherwise provides.
+/// </para>
 /// </summary>
 public sealed class HandoffPlugin
 {
@@ -35,8 +45,20 @@ public sealed class HandoffPlugin
     /// <summary>The argument name the model must supply (<c>route_keyword</c>).</summary>
     public const string ArgumentName = "route_keyword";
 
+    /// <summary>The optional structured-directive argument names, for orchestrators reading raw <c>FunctionCallContent</c>.</summary>
+    public const string GoalArgumentName        = "goal";
+    public const string BackgroundArgumentName   = "background";
+    public const string ConstraintsArgumentName  = "constraints";
+
     [Description("Signal completion and hand off to the next workflow step. Must be the last tool call.")]
     public string Handoff(
-        [Description("Exact routing keyword for the intended handoff.")] string route_keyword)
+        [Description("Exact routing keyword for the intended handoff.")]
+        string route_keyword,
+        [Description("What the receiving agent must accomplish this turn. Recommended: always set this — it becomes the receiving agent's task when it runs in isolated (Fresh) mode and cannot see this conversation.")]
+        string? goal = null,
+        [Description("What you already learned, tried, or ruled out that the receiving agent needs to know. Do not assume it can see your reasoning.")]
+        string? background = null,
+        [Description("Explicit constraints the receiving agent must respect, one per line.")]
+        string? constraints = null)
         => route_keyword;
 }

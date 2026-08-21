@@ -101,6 +101,17 @@ public record AgentConfig
     public List<ContextSource>? Context { get; init; }
 
     /// <summary>
+    /// Controls whether this agent sees the shared session transcript. Defaults to
+    /// <see cref="AgentIsolation.Fresh"/>: the agent never reads <c>SharedHistory</c> — its
+    /// context is built from the synthesized handoff <see cref="AgentDirective"/> plus whatever
+    /// <see cref="Context"/> sources it declares. Set <see cref="AgentIsolation.Shared"/> for
+    /// orchestration styles that need shared visibility to coordinate (e.g. Magentic's
+    /// manager/ledger loop), or <see cref="AgentIsolation.Fork"/> for meta-agents (Verifier,
+    /// RecoveryAgent) that need the full transcript plus an explicit directive.
+    /// </summary>
+    public AgentIsolation Isolation { get; init; } = AgentIsolation.Fresh;
+
+    /// <summary>
     /// When <c>true</c>, suppresses the automatic <c>execution_state</c> prepend that
     /// <c>OrchestratorBuilder</c> injects for all state-machine agents. Set this when an
     /// agent intentionally omits execution state from its context (e.g. a Planner whose

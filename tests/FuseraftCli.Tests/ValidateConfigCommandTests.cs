@@ -729,7 +729,7 @@ public class ValidateConfigCommandTests : IDisposable
         var config = """
         {
           "Orchestration": {
-            "Agents": [{"Name": "Worker", "Instructions": "do work", "Model": {"ModelId": "gpt-4o"}}],
+            "Agents": [{"Name": "Worker", "Instructions": "do work", "Model": {"ModelId": "gpt-4o"}, "Isolation": "Shared"}],
             "Selection": {
               "Type": "magentic",
               "Magentic": {
@@ -796,7 +796,7 @@ public class ValidateConfigCommandTests : IDisposable
                 "ApiKeyEnvVar": "OPENAI_API_KEY"
               }
             },
-            "Agents": [{"Name": "Worker", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
+            "Agents": [{"Name": "Worker", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "Isolation": "Shared"}],
             "Selection": {
               "Type": "magentic",
               "Magentic": {
@@ -824,7 +824,7 @@ public class ValidateConfigCommandTests : IDisposable
         var config = """
         {
           "Orchestration": {
-            "Agents": [{"Name": "Worker", "Instructions": "do work", "Model": {"ModelId": "gpt-4o"}}],
+            "Agents": [{"Name": "Worker", "Instructions": "do work", "Model": {"ModelId": "gpt-4o"}, "Isolation": "Shared"}],
             "Selection": {
               "Type": "magentic",
               "Magentic": {"Model": {"ModelId": "gpt-4o"}}
