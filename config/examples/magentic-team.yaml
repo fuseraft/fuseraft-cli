@@ -15,9 +15,14 @@ Orchestration:
       Endpoint: https://api.openai.com/v1
       ApiKeyEnvVar: OPENAI_API_KEY
 
+  # Isolation: Shared declared explicitly on every agent below because Magentic's manager/
+  # ledger loop structurally depends on shared visibility of progress across all participants —
+  # the config loader rejects Isolation: Fresh (the default) under Selection.Type: magentic.
+  # See skills/craft-orchestration/references/schema-cheatsheet.md for details.
   Agents:
     - Name: Researcher
       Description: Gathers information, summarizes findings, and answers factual questions.
+      Isolation: Shared
       Instructions: |
         You are a Researcher. Your job is to find information, analyze data, and produce
         well-sourced summaries. When asked to investigate a topic, be thorough but concise.
@@ -31,6 +36,7 @@ Orchestration:
 
     - Name: Developer
       Description: Writes code, implements features, runs tests, and fixes bugs.
+      Isolation: Shared
       Instructions: |
         You are a Developer. Your job is to write clean, working code that solves the
         problem at hand. When implementing features, write the code first, then test it.

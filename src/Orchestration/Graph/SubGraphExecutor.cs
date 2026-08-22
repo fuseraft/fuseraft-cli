@@ -66,7 +66,8 @@ internal sealed class SubGraphExecutor(TurnServices services, ILoggerFactory? lo
                 ?? (ILogger<MapReduceOrchestrator>)Microsoft.Extensions.Logging.Abstractions.NullLogger<MapReduceOrchestrator>.Instance;
             subOrchestrator = new MapReduceOrchestrator(
                 subConfig, services.AgentFactory, mrLogger,
-                services.ChangeTracker, eventEmitter, services.GovernanceKernel);
+                services.ChangeTracker, eventEmitter, services.GovernanceKernel,
+                services.HumanApprovalService, services.ContextPipeline, services.RepositoryKnowledgeStore);
         }
         else if (subSpec.IsScatterGather)
         {
@@ -83,7 +84,8 @@ internal sealed class SubGraphExecutor(TurnServices services, ILoggerFactory? lo
                 ?? (ILogger<ScatterGatherOrchestrator>)Microsoft.Extensions.Logging.Abstractions.NullLogger<ScatterGatherOrchestrator>.Instance;
             subOrchestrator = new ScatterGatherOrchestrator(
                 subConfig, services.AgentFactory, sgLogger,
-                services.ChangeTracker, eventEmitter, services.GovernanceKernel);
+                services.ChangeTracker, eventEmitter, services.GovernanceKernel,
+                services.HumanApprovalService, services.ContextPipeline, services.RepositoryKnowledgeStore);
         }
         else
         {

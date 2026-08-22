@@ -38,8 +38,13 @@ Orchestration:
     KeepRecentTurns: 6
     Mode: lossless
 
+  # Isolation: Shared declared explicitly on every agent below to preserve this example's
+  # original behavior — the default changed to Fresh (no SharedHistory) with the agent-isolation
+  # protocol overhaul. See skills/craft-orchestration/references/schema-cheatsheet.md for what
+  # Isolation: Fresh + Context: buys you and when it's safe to switch an agent over.
   Agents:
     - Name: Researcher
+      Isolation: Shared
       Description: Data researcher who fetches real information using HTTP and filesystem tools.
       Instructions: |
         You are a research specialist.
@@ -74,6 +79,7 @@ Orchestration:
         - Handoff
 
     - Name: Writer
+      Isolation: Shared
       Description: Technical writer who synthesises research into a structured report.
       Instructions: |
         You are a technical writer.

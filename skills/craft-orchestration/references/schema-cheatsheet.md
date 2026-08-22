@@ -480,6 +480,7 @@ Termination:
 | `RequireReviewJudgement` | Reviewer → Done | Reviewer emitted `{"review":[...]}` with all PASS verdicts + shell run |
 | `RequireRelatedTestsPass` | Developer → Tester | Targeted tests for changed files pass (needs `TestSelector`) |
 | `RequireAcceptanceCriteriaPassedValidator` | Developer → Reviewer | Machine-testable criteria verified by real shell output |
+| `RequireSessionContextWrite` | Any route/edge/transition whose source agent is `Isolation: Fresh` | At least one `session_context_write` call this turn — not auto-attached; add it explicitly so a `Fresh` agent that forgets to write a summary fails loudly instead of silently handing the next agent nothing |
 
 ---
 

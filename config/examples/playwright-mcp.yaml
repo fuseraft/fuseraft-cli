@@ -23,8 +23,13 @@ Orchestration:
         - "--browser"
         - "chromium"   # must match the browser installed via playwright-core's cli.js
 
+  # Isolation: Shared declared explicitly on every agent below to preserve this example's
+  # original behavior — the default changed to Fresh (no SharedHistory) with the agent-isolation
+  # protocol overhaul. See skills/craft-orchestration/references/schema-cheatsheet.md for what
+  # Isolation: Fresh + Context: buys you and when it's safe to switch an agent over.
   Agents:
     - Name: BrowserAgent
+      Isolation: Shared
       Description: Automates browser interactions using Playwright tools.
       Instructions: |
         You are a browser automation agent with access to Playwright tools.

@@ -16,8 +16,13 @@ Orchestration:
     TriggerTurnCount: 20
     KeepRecentTurns: 6
 
+  # Isolation: Shared declared explicitly on every agent below to preserve this example's
+  # original behavior — the default changed to Fresh (no SharedHistory) with the agent-isolation
+  # protocol overhaul. See skills/craft-orchestration/references/schema-cheatsheet.md for what
+  # Isolation: Fresh + Context: buys you and when it's safe to switch an agent over.
   Agents:
     - Name: Writer
+      Isolation: Shared
       Description: Technical writer who drafts or revises an article based on the task and any editor feedback.
       Instructions: |
         You are a technical writer.
@@ -49,6 +54,7 @@ Orchestration:
       FunctionChoice: none
 
     - Name: Editor
+      Isolation: Shared
       Description: Senior editor who evaluates drafts for quality, accuracy, and completeness.
       Instructions: |
         You are a senior editor.
@@ -90,6 +96,7 @@ Orchestration:
       FunctionChoice: none
 
     - Name: Publisher
+      Isolation: Shared
       Description: Publisher who saves the approved article to disk as a Markdown file.
       Instructions: |
         You are a content publisher.

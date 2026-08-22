@@ -100,17 +100,30 @@ internal static class OrchestratorHelpers
         return val?.ToString();
     }
 
+    // Same lookup as GetArg, but against FunctionCallContent.Arguments' actual declared type
+    // (IDictionary<string, object?>) — avoids an unchecked cast to IReadOnlyDictionary that
+    // would throw InvalidCastException if a future Arguments implementation didn't also
+    // implement IReadOnlyDictionary. Kept separate from GetArg (rather than overloaded) because
+    // FunctionInvocationContext.Arguments is the concrete AIFunctionArguments type, which
+    // implements both interfaces — an overload on IDictionary would make its call sites
+    // ambiguous.
+    private static string? GetHandoffArg(IDictionary<string, object?>? args, string key)
+    {
+        if (args is null || !args.TryGetValue(key, out var val)) return null;
+        return val?.ToString();
+    }
+
     // Builds an AgentDirective from a handoff() FunctionCallContent's optional structured
     // arguments (goal/background/constraints). Returns null when the call omitted `goal` —
     // callers fall back to legacy marker-message behavior in that case.
     internal static AgentDirective? TryExtractDirective(FunctionCallContent fc)
     {
-        var args = (IReadOnlyDictionary<string, object?>?)fc.Arguments;
-        var goal = GetArg(args, HandoffPlugin.GoalArgumentName);
+        var args = fc.Arguments;
+        var goal = GetHandoffArg(args, HandoffPlugin.GoalArgumentName);
         if (string.IsNullOrWhiteSpace(goal)) return null;
 
-        var background  = GetArg(args, HandoffPlugin.BackgroundArgumentName);
-        var constraints = GetArg(args, HandoffPlugin.ConstraintsArgumentName);
+        var background  = GetHandoffArg(args, HandoffPlugin.BackgroundArgumentName);
+        var constraints = GetHandoffArg(args, HandoffPlugin.ConstraintsArgumentName);
 
         return new AgentDirective
         {
@@ -134,8 +147,10 @@ internal static class OrchestratorHelpers
                 if (item is FunctionCallContent fc &&
                     string.Equals(fc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase))
                 {
-                    var directive = TryExtractDirective(fc);
-                    if (directive is not null) return directive;
+                    // Stop at the most recent handoff() call regardless of whether it carried a
+                    // directive (i.e. declared `goal`). An older handoff's goal/background was
+                    // addressed to a *different* recipient and must not be resurrected here.
+                    return TryExtractDirective(fc);
                 }
             }
             if (history[i].Role == ChatRole.Assistant) scanned++;

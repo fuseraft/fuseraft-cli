@@ -9,13 +9,16 @@ namespace fuseraft.Orchestration.Validation;
 /// current turn.
 ///
 /// <para>
-/// Auto-attached by the config loader to every route/transition whose source agent has
+/// Not auto-attached — opt in explicitly with <c>Validators: [RequireSessionContextWrite]</c>
+/// on a route/edge/transition whose source agent has
 /// <see cref="fuseraft.Core.Models.Agents.AgentIsolation.Fresh"/> isolation. A <c>Fresh</c>
 /// agent's own turn — tool calls, intermediate reasoning — never reaches the next agent;
 /// only its <c>session_context_write</c> summary and the synthesized
 /// <see cref="fuseraft.Core.Models.Agents.AgentDirective"/> do. Without this validator, an
-/// agent that forgets to write a summary silently hands the next agent nothing — this turns
-/// that into a hard, visible failure at handoff time instead of a discovered-later context gap.
+/// agent that forgets to write a summary silently hands the next agent nothing; attaching it
+/// turns that into a hard, visible failure at handoff time instead of a discovered-later
+/// context gap. See skills/craft-orchestration/references/schema-cheatsheet.md's "Built-in
+/// validators" table.
 /// </para>
 /// </summary>
 public sealed class RequireSessionContextWriteValidator : IRoutingValidator
