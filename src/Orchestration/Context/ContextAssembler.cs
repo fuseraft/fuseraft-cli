@@ -575,8 +575,12 @@ public sealed class ContextAssembler
     // ── Pending-correction extraction ───────────────────────────────────────
 
     // Returns all correction messages in shared history that appear after the last
-    // assistant turn by agentName. These are unread corrections the agent has not yet
-    // acted on; they must be included in the assembled context so the agent sees them.
+    // assistant turn by agentName AND are addressed to agentName specifically — i.e. the
+    // nearest preceding assistant turn belongs to agentName. Corrections are injected
+    // immediately after the turn that triggered them (a blocked handoff, a validation
+    // failure) with no explicit "addressed to" field, so once other agents have taken turns
+    // since agentName last spoke (e.g. a graph loop revisits agentName later), a correction
+    // meant for one of those other agents must not be attributed to agentName here.
     private static IReadOnlyList<ChatMessage> ExtractPendingCorrections(
         string agentName,
         IList<ChatMessage> history)
@@ -593,9 +597,19 @@ public sealed class ContextAssembler
         }
 
         var corrections = new List<ChatMessage>();
+        // Corrections immediately following agentName's own last turn (before any other
+        // agent's turn intervenes) are addressed to agentName by construction.
+        string? precedingAuthor = lastOwnIdx >= 0 ? agentName : null;
         for (int i = lastOwnIdx + 1; i < history.Count; i++)
         {
-            if (ContextWindowFilter.IsCorrectionMessage(history[i]))
+            if (history[i].Role == ChatRole.Assistant)
+            {
+                precedingAuthor = history[i].AuthorName;
+                continue;
+            }
+
+            if (ContextWindowFilter.IsCorrectionMessage(history[i]) &&
+                string.Equals(precedingAuthor, agentName, StringComparison.OrdinalIgnoreCase))
                 corrections.Add(history[i]);
         }
         return corrections;

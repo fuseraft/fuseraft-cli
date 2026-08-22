@@ -111,12 +111,17 @@ Orchestration:
     Mode: json
     Path: .fuseraft/checkpoints
 
+  # Isolation: Shared declared explicitly on every agent below to preserve this example's
+  # original behavior — the default changed to Fresh (no SharedHistory) with the agent-isolation
+  # protocol overhaul. See skills/craft-orchestration/references/schema-cheatsheet.md for what
+  # Isolation: Fresh + Context: buys you and when it's safe to switch an agent over.
   Agents:
 
     ## Phase 1: map the territory — orient without deep-reading files
     ## ── The only agent with hardcoded workspace paths. Update the "Workspace layout"
     ##    block below; all downstream agents derive their paths from .fuseraft/recon.md.
     - Name: Archaeologist
+      Isolation: Shared
       Instructions: |
         You are a codebase cartographer. Your job is to map the territory, not read everything.
 
@@ -192,6 +197,7 @@ Orchestration:
     ## Phase 2: deep-read the SQL layer
     ## Paths come from recon.md — no workspace-specific edits needed here.
     - Name: SQLAnalyst
+      Isolation: Shared
       Instructions: |
         You are a SQL expert. Begin by reading .fuseraft/recon.md — it lists the exact
         stored procedure paths and schema objects relevant to this flow. The database
@@ -268,6 +274,7 @@ Orchestration:
     ## Phase 3: deep-read the API layer, cross-reference SQL
     ## Paths come from recon.md — no workspace-specific edits needed here.
     - Name: APIAnalyst
+      Isolation: Shared
       Instructions: |
         You are a web API expert. Begin by reading .fuseraft/recon.md and
         .fuseraft/sql-findings.md. The recon.md lists exact API route paths; the API
@@ -343,6 +350,7 @@ Orchestration:
     ## Phase 4: extract signal from binary docs
     ## Paths come from recon.md — no workspace-specific edits needed here.
     - Name: DocAnalyst
+      Isolation: Shared
       Instructions: |
         You are a technical documentation analyst. Begin by reading .fuseraft/recon.md
         for the list of document paths. Use document_extract_text for each one
@@ -390,6 +398,7 @@ Orchestration:
     ##    are hit here in practice, consider decomposing into EntityNormalizer →
     ##    RelationshipNormalizer → AsyncFlowNormalizer → CanonicalAssembler.
     - Name: Normalizer
+      Isolation: Shared
       Instructions: |
         You are a data normalization specialist. Read all four findings files:
           .fuseraft/recon.md
@@ -459,6 +468,7 @@ Orchestration:
 
     ## Phase 6: connect the dots — this agent sees only text, never tool frames
     - Name: Synthesizer
+      Isolation: Shared
       Instructions: |
         You are a systems integration architect. Read .fuseraft/canonical-model.json
         (the normalized, deduplicated entity model) plus all findings files for prose detail:
@@ -568,6 +578,7 @@ Orchestration:
 
     ## Phase 7: produce the artifact
     - Name: DiagramBuilder
+      Isolation: Shared
       Instructions: |
         You are a DrawIO expert. Read .fuseraft/flow-model.json (machine-readable graph)
         and .fuseraft/flow-model.md (supplemental annotation only).
@@ -624,6 +635,7 @@ Orchestration:
 
     ## Phase 8: validate all outputs for consistency
     - Name: OutputValidator
+      Isolation: Shared
       Instructions: |
         You are an output validator. Read:
           .fuseraft/canonical-model.json

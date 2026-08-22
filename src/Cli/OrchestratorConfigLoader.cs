@@ -471,24 +471,31 @@ public static class OrchestratorConfigLoader
     // sources at all: such an agent receives only the synthesized handoff directive each turn,
     // which is fine for a terminal/leaf agent but likely a misconfiguration for one that needs
     // durable state (brief.json, prior changes, etc.) across turns.
+    // Shared with ValidateConfigCommand's lint pass so the "magentic requires Shared/Fork"
+    // rule can't drift out of sync between the lint-only check and this hard-throw one.
+    internal static IReadOnlyList<string> FindMagenticFreshIsolationViolations(OrchestrationConfig config)
+    {
+        if (!string.Equals(config.Selection.Type, OrchestratorTypes.Magentic, StringComparison.OrdinalIgnoreCase))
+            return [];
+
+        return config.Agents
+            .Where(a => a.Isolation == AgentIsolation.Fresh)
+            .Select(a => a.Name)
+            .ToList();
+    }
+
     internal static void ValidateIsolationConstraints(OrchestrationConfig config, ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger(nameof(OrchestratorBuilder));
 
-        if (string.Equals(config.Selection.Type, OrchestratorTypes.Magentic, StringComparison.OrdinalIgnoreCase))
-        {
-            var freshAgents = config.Agents
-                .Where(a => a.Isolation == AgentIsolation.Fresh)
-                .Select(a => a.Name)
-                .ToList();
-            if (freshAgents.Count > 0)
-                throw new InvalidOperationException(
-                    $"Selection.Type 'magentic' requires every agent to use Isolation: Shared or " +
-                    $"Isolation: Fork — the manager's ledger loop depends on shared visibility of " +
-                    $"progress across all participants. Agent(s) declaring Isolation: Fresh (the " +
-                    $"default): {string.Join(", ", freshAgents)}. Set 'Isolation: Shared' explicitly " +
-                    $"on these agents, or on the whole roster if none should isolate.");
-        }
+        var freshAgents = FindMagenticFreshIsolationViolations(config);
+        if (freshAgents.Count > 0)
+            throw new InvalidOperationException(
+                $"Selection.Type 'magentic' requires every agent to use Isolation: Shared or " +
+                $"Isolation: Fork — the manager's ledger loop depends on shared visibility of " +
+                $"progress across all participants. Agent(s) declaring Isolation: Fresh (the " +
+                $"default): {string.Join(", ", freshAgents)}. Set 'Isolation: Shared' explicitly " +
+                $"on these agents, or on the whole roster if none should isolate.");
 
         foreach (var agent in config.Agents)
         {

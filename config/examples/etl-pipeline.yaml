@@ -50,8 +50,13 @@ Orchestration:
       - "output/**"
       - ".fuseraft/artifacts/**"
 
+  # Isolation: Shared declared explicitly on every agent below to preserve this example's
+  # original behavior — the default changed to Fresh (no SharedHistory) with the agent-isolation
+  # protocol overhaul. See skills/craft-orchestration/references/schema-cheatsheet.md for what
+  # Isolation: Fresh + Context: buys you and when it's safe to switch an agent over.
   Agents:
     - Name: Extractor
+      Isolation: Shared
       Description: Reads and validates the raw input data named in the task.
       Instructions: |
         You extract and validate raw pipeline input. You never write files.
@@ -77,6 +82,7 @@ Orchestration:
       FunctionChoice: required
 
     - Name: Transformer
+      Isolation: Shared
       Description: Normalizes the extracted data and writes it to the output path.
       Instructions: |
         You transform validated pipeline data and write the result. You run

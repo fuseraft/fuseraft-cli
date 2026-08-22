@@ -117,6 +117,7 @@ public static class OrchestratorBuilder
     {
         PropertyNameCaseInsensitive = true,
         DefaultIgnoreCondition      = JsonIgnoreCondition.WhenWritingNull,
+        Converters                  = { new JsonStringEnumConverter() },
     };
 
     /// <summary>

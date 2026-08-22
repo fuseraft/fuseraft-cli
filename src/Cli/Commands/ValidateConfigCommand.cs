@@ -120,7 +120,9 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                 issues.Add(("error", $"SystemPromptPath file not found: {promptPath}"));
         }
 
-        ValidateAgents(config, settings, issues);
+        var magenticFreshViolations = OrchestratorConfigLoader.FindMagenticFreshIsolationViolations(config)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        ValidateAgents(config, settings, issues, magenticFreshViolations);
 
         // Selection strategy
         var selType = config.Selection.Type.ToLowerInvariant();
@@ -212,7 +214,8 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
     private void ValidateAgents(
         OrchestrationConfig config,
         ValidateConfigSettings settings,
-        List<(string Level, string Message)> issues)
+        List<(string Level, string Message)> issues,
+        HashSet<string> magenticFreshViolations)
     {
         if (config.Agents.Count == 0)
         {
@@ -284,9 +287,10 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                     issues.Add(("error", $"Agent '{agent.Name}': Model.ReasoningEffort '{effort}' looks malformed — expected a single token (e.g. none, low, medium, high, xhigh, max)."));
 
                 // Magentic's manager/ledger loop depends on every participant sharing the
-                // transcript — Isolation: Fresh (the default) would silently starve it.
-                if (agent.Isolation == fuseraft.Core.Models.Agents.AgentIsolation.Fresh
-                    && string.Equals(config.Selection.Type, OrchestratorTypes.Magentic, StringComparison.OrdinalIgnoreCase))
+                // transcript — Isolation: Fresh (the default) would silently starve it. Uses
+                // the same OrchestratorConfigLoader.FindMagenticFreshIsolationViolations the
+                // real config loader hard-fails on, so this lint can't drift out of sync with it.
+                if (magenticFreshViolations.Contains(agent.Name))
                     issues.Add(("error", $"Agent '{agent.Name}': Isolation: Fresh is incompatible with Selection.Type 'magentic' — set 'Isolation: Shared' (or 'Fork')."));
                 else if (agent.Isolation == fuseraft.Core.Models.Agents.AgentIsolation.Fresh
                     && agent.Context is not { Count: > 0 })

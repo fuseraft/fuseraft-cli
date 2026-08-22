@@ -82,8 +82,13 @@ Orchestration:
     KeepRecentTurns: 10
     Mode: lossless
 
+  # Isolation: Shared declared explicitly on every agent below to preserve this example's
+  # original behavior — the default changed to Fresh (no SharedHistory) with the agent-isolation
+  # protocol overhaul. See skills/craft-orchestration/references/schema-cheatsheet.md for what
+  # Isolation: Fresh + Context: buys you and when it's safe to switch an agent over.
   Agents:
     - Name: Planner
+      Isolation: Shared
       Description: Session planner who reads the task and codebase to produce a focused brief.
       Instructions: |
         You are a technical project planner.
@@ -130,6 +135,7 @@ Orchestration:
         - Handoff
 
     - Name: Developer
+      Isolation: Shared
       Description: Senior software engineer who implements features using tools.
       Instructions: |
         You are an expert software developer.
@@ -167,6 +173,7 @@ Orchestration:
         - Handoff
 
     - Name: Tester
+      Isolation: Shared
       Description: QA engineer who verifies changes with real tool calls.
       Instructions: |
         You are an expert QA engineer. Verify everything independently.
@@ -216,6 +223,7 @@ Orchestration:
         - Handoff
 
     - Name: Reviewer
+      Isolation: Shared
       Description: Tech lead who approves only after reading code, running a spot-check, and confirming all criteria pass.
       Instructions: |
         You are a senior tech lead performing a final review.
@@ -270,6 +278,7 @@ Orchestration:
         TextOnly: true
 
     - Name: Verifier
+      Isolation: Shared
       Description: Evidence auditor who checks for inconsistencies between claims and recorded actions.
       Instructions: |
         You are an evidence auditor. Detect inconsistencies between what agents claim

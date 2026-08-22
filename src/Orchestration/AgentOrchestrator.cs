@@ -965,6 +965,11 @@ public sealed class AgentOrchestrator(
                     else filtered = raw;
                 }
                 else filtered = raw;
+
+                // Fork: layer the synthesized directive on top of the full shared transcript,
+                // matching ContextAssemblyPipeline.AssembleAsync's equivalent branch.
+                if (isolation == AgentIsolation.Fork && directive is not null)
+                    filtered = [.. filtered, new ChatMessage(ChatRole.User, directive.Format())];
             }
 
             context = (hasInstructions || memoryManager is not null) && instructions is not null

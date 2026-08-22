@@ -81,9 +81,14 @@ Orchestration:
   Events:
     Path: .fuseraft/red-team/events.jsonl
 
+  # Isolation: Shared declared explicitly on every agent below to preserve this example's
+  # original behavior — the default changed to Fresh (no SharedHistory) with the agent-isolation
+  # protocol overhaul. See skills/craft-orchestration/references/schema-cheatsheet.md for what
+  # Isolation: Fresh + Context: buys you and when it's safe to switch an agent over.
   Agents:
     ## Phase 1: map the attack surface
     - Name: Recon
+      Isolation: Shared
       Description: Maps fuseraft-cli's attack surface before adversarial probing begins.
       TrustScore: 0.9
       Instructions: |
@@ -149,6 +154,7 @@ Orchestration:
 
     ## Phase 2: static code analysis
     - Name: StaticAttacker
+      Isolation: Shared
       Description: Red Team Alpha — reads source code and identifies implementation vulnerabilities.
       TrustScore: 0.70
       Instructions: |
@@ -259,6 +265,7 @@ Orchestration:
     ## Fix 1: ProbeWriter cannot execute anything. It only creates YAML files.
     ## Even if prompt-injected, it has no way to run a command.
     - Name: ProbeWriter
+      Isolation: Shared
       Description: Red Team Bravo — writes malicious config files for the Prober to test. No shell access.
       TrustScore: 0.70
       Instructions: |
@@ -422,6 +429,7 @@ Orchestration:
     ## a Docker container with --network none. The validate step uses the Probe plugin
     ## (structured, no general-purpose scripting) rather than Shell.
     - Name: Prober
+      Isolation: Shared
       Description: Red Team Bravo — runs fuseraft validate on each probe and analyses YAML parsing in Docker.
       TrustScore: 0.75
       Instructions: |
@@ -516,6 +524,7 @@ Orchestration:
 
     ## Phase 4: triage and report
     - Name: Triage
+      Isolation: Shared
       Description: Deduplicates findings from both agents, scores by severity, and writes the security report.
       TrustScore: 0.9
       Instructions: |

@@ -44,8 +44,13 @@ Orchestration:
     KeepRecentTurns: 8
     Mode: lossless
 
+  # Isolation: Shared declared explicitly on every agent below to preserve this example's
+  # original behavior — the default changed to Fresh (no SharedHistory) with the agent-isolation
+  # protocol overhaul. See skills/craft-orchestration/references/schema-cheatsheet.md for what
+  # Isolation: Fresh + Context: buys you and when it's safe to switch an agent over.
   Agents:
     - Name: Architect
+      Isolation: Shared
       Description: Senior architect who analyses requirements and writes a concrete implementation plan to disk.
       Instructions: |
         You are a senior software architect.
@@ -79,6 +84,7 @@ Orchestration:
         - Handoff
 
     - Name: Engineer
+      Isolation: Shared
       Description: Full-stack engineer who executes the plan using tools — never describes changes without making them.
       Instructions: |
         You are a full-stack engineer executing the Architect's plan.
@@ -122,6 +128,7 @@ Orchestration:
         - Handoff
 
     - Name: Operator
+      Isolation: Shared
       Description: Site reliability engineer who executes the deployment and verifies success.
       Instructions: |
         You are a site reliability engineer.
