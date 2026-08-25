@@ -133,4 +133,50 @@ public sealed class SandboxEnforcementFilterTests : IDisposable
 
         Assert.Null(result);
     }
+
+    // ── create_directory vs. a file-shaped write glob ──────────────────────
+
+    [Fact]
+    public void CreateDirectory_BareAncestorOfWriteGlob_IsAllowed()
+    {
+        // "workspace/**" only matches files under workspace/, never the literal
+        // "workspace" segment itself — but creating that directory is a prerequisite
+        // for writes the glob already permits, so it must not be denied.
+        var result = MakeFilter().Inspect("create_directory",
+            new Dictionary<string, object?> { ["path"] = "workspace" });
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void CreateDirectory_NestedAncestorOfWriteGlob_IsAllowed()
+    {
+        var result = MakeFilter().Inspect("create_directory",
+            new Dictionary<string, object?> { ["path"] = "workspace/src" });
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void CreateDirectory_OutsideWriteGlob_IsStillDenied()
+    {
+        var result = MakeFilter().Inspect("create_directory",
+            new Dictionary<string, object?> { ["path"] = "other" });
+
+        Assert.NotNull(result);
+        Assert.Contains("DENIED", result);
+    }
+
+    [Fact]
+    public void WriteFile_BareAncestorDirectory_IsNotAllowedByAncestorRule()
+    {
+        // The ancestor relaxation is scoped to create_directory only — write_file must
+        // still match the glob on its own merits, so a bare "workspace" (not a file
+        // under it) stays denied.
+        var result = MakeFilter().Inspect("write_file",
+            new Dictionary<string, object?> { ["path"] = "workspace" });
+
+        Assert.NotNull(result);
+        Assert.Contains("DENIED", result);
+    }
 }
