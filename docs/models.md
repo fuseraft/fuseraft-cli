@@ -108,11 +108,18 @@ For any model not matching the table, specify `Provider`, `Endpoint`, and `ApiKe
 {
   "modelId": "anthropic.claude-sonnet-4-6-20250929-v1:0",
   "endpoint": "http://localhost:3000/api/openai/v1",
-  "apiKeyEnvVar": "OPENWEBUI_API_KEY"
+  "apiKeyEnvVar": "OPENWEBUI_API_KEY",
+  "replContextBudget": 400000
 }
 ```
 
 Set this file via `fuseraft repl` or `fuseraft models` (the setup wizard runs automatically on first use) or edit it directly. Run `fuseraft models` to see all models available from the configured provider, or use `/models` inside a REPL session for the same list.
+
+### `replContextBudget` — REPL working-context override
+
+The REPL trims conversation history against a working-context-token budget (`ctx.ContextTokenBudget`, shown in `/context`), separate from `MaxContextTokens` above. By default this budget comes from a per-model-family heuristic (150K for 1M/128K+-class frontier models like `claude-*`/`gemini-*`/`grok-*`/`gpt-5*`, 100K for ~128K-class models like `gpt-4*`/`mistral-*`/`deepseek-*`, 80K otherwise) — deliberately conservative, since the REPL's char-based token estimate doesn't account for tool-schema tokens.
+
+Set `replContextBudget` in `~/.fuseraft/config` (a positive integer, in tokens) to override that heuristic for every model used in the REPL session, regardless of family. Leave it unset (or `0`) to keep the built-in heuristic. This is REPL-only and does not affect `MaxContextTokens` above (a separate per-agent hard ceiling enforced before each API call in non-REPL agent/orchestration contexts), nor the unrelated `ContextBudget` YAML block used in `orchestration.yaml` (warn/cutover/tool-result trimming for multi-agent orchestration runs) — the similarly-named `replContextBudget` field intentionally carries the `Repl` prefix to keep the two apart.
 
 ### OS keychain fallback
 
