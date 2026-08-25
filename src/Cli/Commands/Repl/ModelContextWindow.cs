@@ -35,8 +35,15 @@ internal static class ModelContextWindow
     /// so both bare model IDs (e.g. <c>claude-sonnet-4-6</c>) and provider-prefixed deployment
     /// IDs (e.g. Bedrock's <c>anthropic.claude-sonnet-4-6-20250929-v1:0</c>) resolve correctly.
     /// </summary>
-    internal static int GetBudget(string? modelId)
+    /// <param name="modelId">The model ID whose family determines the heuristic budget.</param>
+    /// <param name="overrideBudget">
+    /// User-configured override (<see cref="fuseraft.Core.Models.Config.UserConfig.ReplContextBudget"/>).
+    /// When positive, takes precedence over the per-family heuristic below.
+    /// </param>
+    internal static int GetBudget(string? modelId, int? overrideBudget = null)
     {
+        if (overrideBudget is > 0) return overrideBudget.Value;
+
         if (string.IsNullOrWhiteSpace(modelId)) return DefaultBudget;
 
         if (LargeFamilyMarkers.Any(m => modelId.Contains(m, StringComparison.OrdinalIgnoreCase)))
