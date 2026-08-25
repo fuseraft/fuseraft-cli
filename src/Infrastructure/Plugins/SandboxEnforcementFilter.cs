@@ -59,6 +59,7 @@ public sealed class SandboxEnforcementFilter
     private readonly Matcher? _fsDenyMatcher;
     private readonly Matcher? _fsReadMatcher;
     private readonly Matcher? _fsWriteMatcher;
+    private readonly IReadOnlyList<string> _fsWritePatterns = [];
 
     // Prefixes of OS directories that contain executables and shared libraries.
     private static readonly string[] SystemPrefixes = OperatingSystem.IsWindows()
@@ -213,6 +214,7 @@ public sealed class SandboxEnforcementFilter
         {
             _fsWriteMatcher = new Matcher(StringComparison.OrdinalIgnoreCase);
             foreach (var p in write) _fsWriteMatcher.AddInclude(p);
+            _fsWritePatterns = write;
         }
     }
 
@@ -330,8 +332,15 @@ public sealed class SandboxEnforcementFilter
             bool applyWriteGlob = isWriteOp || (_fsWriteMatcher is not null && isMixedOp && isDestArg);
             if (applyWriteGlob)
             {
+                // create_directory targets a directory, never a file, so it will never
+                // literally match a file-shaped glob like "workspace/**" — only descendants
+                // of "workspace" do. Allow it here when the requested directory is an
+                // ancestor of (or equal to) an allowed write path, since creating it is a
+                // prerequisite for writes the glob already permits.
+                bool allowAncestor = string.Equals(functionName, "create_directory", StringComparison.OrdinalIgnoreCase);
                 var writeDenial = CheckGlob(raw, _fsWriteMatcher!, matchMeansDeny: false,
-                    "Path is outside the configured FileSystem write permissions.");
+                    "Path is outside the configured FileSystem write permissions.",
+                    allowAncestorOfWriteScope: allowAncestor);
                 if (writeDenial is not null) return writeDenial;
             }
 
@@ -527,7 +536,10 @@ public sealed class SandboxEnforcementFilter
     // Evaluates a glob matcher against a resolved relative path.
     // When matchMeansDeny=true (deny list): returns a denial when the path matches.
     // When matchMeansDeny=false (allow list): returns a denial when the path does NOT match.
-    private string? CheckGlob(string rawPath, Matcher matcher, bool matchMeansDeny, string reason)
+    // allowAncestorOfWriteScope additionally passes a path that doesn't match the glob itself
+    // but is an ancestor directory of an allowed write pattern (see IsAncestorOfWriteScope).
+    private string? CheckGlob(string rawPath, Matcher matcher, bool matchMeansDeny, string reason,
+        bool allowAncestorOfWriteScope = false)
     {
         string resolved;
         try
@@ -542,9 +554,49 @@ public sealed class SandboxEnforcementFilter
         var relative = Path.GetRelativePath(_sandboxRoot, resolved).Replace('\\', '/');
         bool matches = matcher.Match(relative).HasMatches;
 
+        if (!matches && allowAncestorOfWriteScope && IsAncestorOfWriteScope(relative, _fsWritePatterns))
+            matches = true;
+
         return (matchMeansDeny ? matches : !matches)
             ? PluginResult.Denied($"[DENIED] '{relative}': {reason}")
             : null;
+    }
+
+    // True when `relative` is an ancestor directory of (or exactly equal to) the fixed,
+    // non-wildcard prefix of at least one write pattern — e.g. "workspace" is an ancestor of
+    // "workspace/**", and "src/gen" is an ancestor of "src/gen/*.g.cs". Lets create_directory
+    // succeed for directories that only exist to hold files the write glob already allows.
+    private static bool IsAncestorOfWriteScope(string relative, IReadOnlyList<string> writePatterns)
+    {
+        var candidate = relative.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (candidate.Length == 0) return false;
+
+        foreach (var pattern in writePatterns)
+        {
+            var segments = pattern.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+            int fixedCount = 0;
+            while (fixedCount < segments.Length && segments[fixedCount].IndexOfAny(['*', '?']) < 0)
+                fixedCount++;
+
+            // A fully-literal pattern (no wildcard segment) names a file, not a directory —
+            // only its parent segments are directories a create_directory call could target.
+            int ancestorDepth = fixedCount == segments.Length ? fixedCount - 1 : fixedCount;
+            if (candidate.Length > ancestorDepth) continue;
+
+            bool isPrefix = true;
+            for (int i = 0; i < candidate.Length; i++)
+            {
+                if (!string.Equals(candidate[i], segments[i], StringComparison.OrdinalIgnoreCase))
+                {
+                    isPrefix = false;
+                    break;
+                }
+            }
+            if (isPrefix) return true;
+        }
+
+        return false;
     }
 
     private string? CheckEnvelope(string rawPath)
