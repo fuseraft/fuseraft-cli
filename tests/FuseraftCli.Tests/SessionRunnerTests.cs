@@ -12,32 +12,39 @@ namespace FuseraftCli.Tests;
 
 /// <summary>
 /// Tests for <see cref="SessionRunner"/> error-handling paths that do not require live LLM calls.
+///
+/// <para>
+/// Isolates <c>FUSERAFT_HOME</c> to a throwaway temp dir for the crash-dump test below. Without
+/// this, the test read/wrote the real user's <c>~/.fuseraft/crashdump</c>, and — because
+/// <see cref="FuseraftPaths.GlobalCrashDumps"/> re-reads the env var on every access rather than
+/// caching it — a concurrently-running test in a different xUnit collection that also mutates
+/// <c>FUSERAFT_HOME</c> (e.g. <see cref="ReplForkTodoPersistenceTests"/>) could flip the resolved
+/// path between this test's "before" snapshot, the actual dump write, and its "after" assertion,
+/// so the dump landed somewhere the assertion never looked. That produced an intermittent
+/// "Assert.NotEmpty() Failure: Collection was empty" with no relation to the code under test.
+/// </para>
 /// </summary>
+[Collection("FuseraftHomeEnv")]
 public sealed class SessionRunnerTests : IDisposable
 {
     private readonly Mock<ISessionStore>         _store    = new();
     private readonly Mock<IHumanApprovalService> _approval = new();
 
-    // Snapshot dump files that existed before this test class was instantiated so
-    // Dispose() can remove only the dumps produced during this test run.
-    private readonly HashSet<string> _dumpsBefore;
+    private readonly string? _originalHome = Environment.GetEnvironmentVariable(FuseraftPaths.HomeOverrideEnvVar);
+    private readonly string  _tempHome     = Path.Combine(Path.GetTempPath(), $"fuseraft-test-{Guid.NewGuid():N}");
 
     public SessionRunnerTests()
     {
+        Environment.SetEnvironmentVariable(FuseraftPaths.HomeOverrideEnvVar, _tempHome);
+
         _store.Setup(s => s.SaveAsync(It.IsAny<SessionCheckpoint>(), It.IsAny<CancellationToken>()))
               .Returns(Task.CompletedTask);
-
-        _dumpsBefore = Directory.Exists(FuseraftPaths.GlobalCrashDumps)
-            ? [.. Directory.GetFiles(FuseraftPaths.GlobalCrashDumps, "*.json")]
-            : [];
     }
 
     public void Dispose()
     {
-        if (!Directory.Exists(FuseraftPaths.GlobalCrashDumps)) return;
-        foreach (var f in Directory.GetFiles(FuseraftPaths.GlobalCrashDumps, "*.json"))
-            if (!_dumpsBefore.Contains(f))
-                try { File.Delete(f); } catch { }
+        Environment.SetEnvironmentVariable(FuseraftPaths.HomeOverrideEnvVar, _originalHome);
+        if (Directory.Exists(_tempHome)) Directory.Delete(_tempHome, recursive: true);
     }
 
     private SessionRunner MakeRunner(IOrchestrator orchestrator) => new(
@@ -81,12 +88,10 @@ public sealed class SessionRunnerTests : IDisposable
 
         await runner.RunAsync("task", MakeCheckpoint(), hitlMode: false, showTools: false, CancellationToken.None);
 
-        var newDumps = Directory.Exists(FuseraftPaths.GlobalCrashDumps)
-            ? Directory.GetFiles(FuseraftPaths.GlobalCrashDumps, "*.json")
-                       .Where(f => !_dumpsBefore.Contains(f))
-                       .ToList()
-            : [];
-        Assert.NotEmpty(newDumps);
+        // _tempHome is a fresh directory this test instance owns exclusively, so any dump
+        // found here is unambiguously the one this run wrote — no before/after diffing needed.
+        Assert.True(Directory.Exists(FuseraftPaths.GlobalCrashDumps));
+        Assert.NotEmpty(Directory.GetFiles(FuseraftPaths.GlobalCrashDumps, "*.json"));
     }
 
     [Fact]
