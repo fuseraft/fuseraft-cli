@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
@@ -182,7 +183,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         var toolsByCategory = new Dictionary<string, List<AIFunction>>(StringComparer.OrdinalIgnoreCase);
         using ShellPlugin? shellPlugin  = settings.NoTools ? null : new ShellPlugin(shellPolicy: TryLoadDefaultShellPolicy());
         SubAgentPlugin? subAgent        = null;
-        SkillsPlugin?   skillsPlugin    = null;
+        IReadOnlyList<AgentSkill> discoveredSkills = [];
         string?         skillsCatalog   = null;
         List<AIFunction>? explorerTools = null;
         TodoPlugin?     todoPlugin      = null;
@@ -220,10 +221,6 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             toolsByCategory["FileSystem"] = fsFunctions.Where(f => CoreFileSystemTools.Contains(f.Name)).ToList();
             toolsByCategory["Shell"]      = shellFunctions.Where(f => CoreShellTools.Contains(f.Name)).ToList();
             toolsByCategory["Git"]        = gitFunctions.Where(f => CoreGitTools.Contains(f.Name)).ToList();
-
-            (skillsPlugin, skillsCatalog) = ReplSkillsLoader.BuildSkills();
-            if (skillsPlugin is not null)
-                toolsByCategory["Skills"] = PluginRegistry.GetFunctionsFromObject(skillsPlugin).ToList();
         }
 
         var initialTools = toolsByCategory.Values.SelectMany(v => v).ToList();
@@ -236,6 +233,19 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         {
             AnsiConsole.MarkupLine($"[red]✗ Could not create chat client:[/] {Markup.Escape(ex.Message)}");
             return 1;
+        }
+
+        if (!settings.NoTools)
+        {
+            // Skill discovery/parsing/validation and the load_skill/read_skill_resource/
+            // run_skill_script tools all come from Microsoft.Agents.AI's AgentFileSkillsSource/
+            // AgentSkillsProvider — the same classes orchestration uses — via a throwaway
+            // ChatClientAgent wrapping the client just built above.
+            var skillsResult = await ReplSkillsLoader.BuildAsync(client, loggerFactory, cancellationToken);
+            discoveredSkills = skillsResult.Skills;
+            skillsCatalog    = skillsResult.CatalogInstructions;
+            if (skillsResult.Tools.Count > 0)
+                toolsByCategory["Skills"] = skillsResult.Tools.ToList();
         }
 
         var cwd        = Directory.GetCurrentDirectory();
@@ -373,7 +383,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             MessageRenderer.RenderReplHeader(
                 modelId, cwd, pluginNames, sessionId,
                 memoryCount: memoryEntries.Count,
-                skillCount:  skillsPlugin?.Count ?? 0,
+                skillCount:  discoveredSkills.Count,
                 branch:      TryGetGitBranch(cwd),
                 eventsPath:  settings.Verbose ? eventsPath : null);
         }
@@ -384,10 +394,10 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             memoryStore, toolsByCategory, systemPrompt, pendingSave,
             verbose: settings.Verbose, subAgent: subAgent)
         {
-            JsonMode     = jsonMode,
-            SkillsPlugin = skillsPlugin,
-            Todo         = todoPlugin,
-            KeyStored    = keyStored,
+            JsonMode  = jsonMode,
+            Skills    = discoveredSkills,
+            Todo      = todoPlugin,
+            KeyStored = keyStored,
         };
 
         if (!settings.NoTools)
@@ -406,8 +416,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 .FirstOrDefault();
         }
         
-        if (skillsPlugin is not null)
-            ctx.LineReader.SetSkillSlugs([.. skillsPlugin.Slugs]);
+        if (discoveredSkills.Count > 0)
+            ctx.LineReader.SetSkillSlugs([.. discoveredSkills.Select(s => s.Frontmatter.Name)]);
 
         // Wire the compact_context and get_context_status tools now that ctx is available.
         replSessionPlugin?.SetCompactDelegate(async (focus, ct) =>

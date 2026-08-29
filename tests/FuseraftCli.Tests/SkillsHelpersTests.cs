@@ -1,4 +1,5 @@
 using fuseraft.Cli.Commands.Skills;
+using fuseraft.Core.Skills;
 
 namespace FuseraftCli.Tests;
 
@@ -93,5 +94,38 @@ public sealed class SkillsHelpersTests : IDisposable
         SkillsHelpers.CopySkillDirectory(_sourceDir, _destDir);
 
         Assert.True(Directory.Exists(_destDir));
+    }
+
+    // ── ExtractSlug / ExtractDescription / CanonicalizeName ────────────────────
+
+    [Fact]
+    public void ExtractSlug_SlugifiesRawName()
+    {
+        var content = "---\nname: My Bad Skill!!\ndescription: A skill.\n---";
+        Assert.Equal("my-bad-skill", SkillsHelpers.ExtractSlug(content));
+    }
+
+    [Fact]
+    public void ExtractSlug_NoNameField_ReturnsNull()
+    {
+        Assert.Null(SkillsHelpers.ExtractSlug("---\ndescription: A skill.\n---"));
+    }
+
+    [Fact]
+    public void CanonicalizeName_NameAlreadyMatchesSlug_ReturnsContentUnchanged()
+    {
+        const string content = "---\nname: my-skill\ndescription: A skill.\n---\n\nBody";
+        Assert.Same(content, SkillsHelpers.CanonicalizeName(content, "my-skill"));
+    }
+
+    [Fact]
+    public void CanonicalizeName_NameDiffersFromSlug_RewritesNameField()
+    {
+        var content   = "---\nname: My Bad Skill!!\ndescription: A skill.\n---\n\nBody";
+        var rewritten = SkillsHelpers.CanonicalizeName(content, "my-bad-skill");
+
+        Assert.Equal("my-bad-skill", SkillsHelpers.ExtractSlug(rewritten));
+        Assert.Equal("A skill.", FrontmatterFieldReader.ExtractField(rewritten, "description"));
+        Assert.Contains("Body", rewritten);
     }
 }

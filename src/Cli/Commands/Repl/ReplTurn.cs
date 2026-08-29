@@ -322,10 +322,11 @@ internal static class ReplTurn
                 var slug  = parts[0][1..]; // strip '$'
                 var args  = parts.Length > 1 ? parts[1] : string.Empty;
 
-                if (ctx.SkillsPlugin is null || !ctx.SkillsPlugin.HasSkill(slug))
+                var skill = ctx.Skills.FirstOrDefault(s => string.Equals(s.Frontmatter.Name, slug, StringComparison.OrdinalIgnoreCase));
+                if (skill is null)
                 {
-                    var available = ctx.SkillsPlugin is not null
-                        ? $"Available: {string.Join(", ", ctx.SkillsPlugin.Slugs.Take(10))}"
+                    var available = ctx.Skills.Count > 0
+                        ? $"Available: {string.Join(", ", ctx.Skills.Select(s => s.Frontmatter.Name).Take(10))}"
                         : "No skills are loaded in this session.";
                     var errMsg = string.IsNullOrEmpty(slug)
                         ? $"Usage: $<skill-name> [args]. {available}"
@@ -337,7 +338,7 @@ internal static class ReplTurn
                     continue;
                 }
 
-                var skillContent = await ctx.SkillsPlugin.LoadSkillAsync(slug, cancellationToken);
+                var skillContent = await skill.GetContentAsync(cancellationToken);
                 var input = string.IsNullOrEmpty(args) ? skillContent : $"{skillContent}\n\n{args}";
 
                 await ExecuteAsync(ctx, input, isStepRequest: false, capturePlan: false, activeStep: null, cancellationToken);
