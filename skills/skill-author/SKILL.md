@@ -44,7 +44,7 @@ description: <one or two sentences>
 ---
 ```
 
-**`name`:** A short, lowercase kebab-case slug (e.g. `debug-session`, `mcp-setup`) — letters, digits, and single hyphens only, no leading/trailing/double hyphens, max 64 characters. This is used as the install directory name when running `fuseraft skills add`. Keep it to 1–3 words, and **make it identical to the skill's directory name**: `fuseraft run` orchestration sessions silently drop the skill from the catalog if `name:` doesn't exactly match the directory name (or isn't valid kebab-case, or `description:` is empty or too long). The REPL loader is more lenient about a skill with no frontmatter at all, but once `name:` is present it applies the same check and skips the skill (with a warning) on a mismatch. Matching them keeps the skill working identically in both surfaces — run `fuseraft skills validate <path>` to confirm before installing.
+**`name`:** A short, lowercase kebab-case slug (e.g. `debug-session`, `mcp-setup`) — letters, digits, and single hyphens only, no leading/trailing/double hyphens, max 64 characters. This is used as the install directory name when running `fuseraft skills add`. Keep it to 1–3 words, and **make it identical to the skill's directory name**: the REPL and `fuseraft run` orchestration sessions both use the same discovery pipeline and silently exclude the skill from the catalog if `name:` doesn't exactly match the directory name (or isn't valid kebab-case, or `description:` is empty or too long) — there is no REPL-specific leniency once a skill directory exists somewhere fuseraft scans. Run `fuseraft skills validate <path>` to confirm before installing.
 
 **Optional fields**, per the [Agent Skills specification](https://agentskills.io/specification) — add only when they earn their keep:
 - **`license`:** a license name or reference to a bundled license file. Only relevant for skills you intend to share/distribute.
@@ -176,7 +176,7 @@ Or write directly to `~/.fuseraft/skills/<slug>/SKILL.md` — fuseraft loads fro
 
 First, run `fuseraft skills validate <path-to-skill-directory>` (or `fuseraft skills validate` with no argument once installed, to check it alongside every other installed skill). This checks the frontmatter against the full specification — name format and directory match, description presence/length, compatibility length — with the same validator both the REPL and orchestration use, before you burn a session on it.
 
-For **REPL sessions**, start or restart fuseraft and run `/tools`. The skill should appear under the `Skills` category with its name and description. Watch the startup output for a `⚠ Skipped skill at ...` warning — that means the frontmatter is present but invalid, and the skill did not load.
+For **REPL sessions**, start or restart fuseraft and run `/tools`. The skill should appear under the `Skills` category with its name and description. Watch the startup output for an `[ERR]`/`[WRN]` line naming the SKILL.md path — that means the frontmatter is invalid (most often a name/directory mismatch) and the skill did not load.
 
 For **orchestration sessions**, run `fuseraft validate` on the config first, then do a one-turn dry run:
 
@@ -187,7 +187,7 @@ fuseraft run --config <path> --max-iterations 1 "List your available skills."
 The agent should name the skill in its response. If it does not appear, check:
 - `SKILL.md` is directly inside the skill directory (not nested deeper)
 - The install path is one of the five recognized locations (project `.fuseraft/skills/`, project `.agents/skills/`, user `.fuseraft/skills/`, user `.agents/skills/`, or shipped built-in)
-- `fuseraft skills validate` passes — a violation it reports is silently dropped by `fuseraft run`'s stricter loader with no error to the user, only a log entry
+- `fuseraft skills validate` passes — a violation it reports means the skill is silently excluded from both the REPL and `fuseraft run` catalogs, with no error to the user beyond a log entry
 
 ### Step 8: Refine the Description
 

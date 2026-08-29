@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using fuseraft.Core;
@@ -165,58 +166,38 @@ public sealed class SkillCurator(
         }
 
         var skillContent = match.Groups[1].Value.Trim();
-        var frontmatter  = SkillFrontmatterSpec.TryParse(skillContent);
 
-        if (string.IsNullOrWhiteSpace(frontmatter?.Name))
+        // Curation writes a brand-new file, so — unlike 'skills add' — there is no existing
+        // directory name to reconcile a sloppy title against. The system prompt above already
+        // instructs the model to emit a ready-made kebab-case slug; strict validation here
+        // (rather than silently slugifying whatever it produced) catches the rare case where it
+        // didn't, instead of writing something that would look fine here but be silently dropped
+        // by fuseraft's orchestration skills provider. AgentSkillFrontmatter's own constructor
+        // is the sole authority on whether the raw name/description/compatibility are valid.
+        var rawName          = FrontmatterFieldReader.ExtractField(skillContent, "name");
+        var rawDescription   = FrontmatterFieldReader.ExtractField(skillContent, "description");
+        var rawCompatibility = FrontmatterFieldReader.ExtractField(skillContent, "compatibility");
+
+        AgentSkillFrontmatter frontmatter;
+        try
         {
-            const string noNameReason = "SKILL block is missing the 'name:' frontmatter field.";
+            frontmatter = new AgentSkillFrontmatter(rawName ?? string.Empty, rawDescription ?? string.Empty, rawCompatibility);
+        }
+        catch (ArgumentException ex)
+        {
             logger.LogWarning(
                 "Skill curation failed — session={Session} reason={Reason}",
-                checkpoint.SessionId, noNameReason);
+                checkpoint.SessionId, ex.Message);
             var failed = new SkillCurationResult(
                 SkillCurationOutcome.Failed,
-                FailureReason: noNameReason,
+                FailureReason: ex.Message,
                 TurnsDigested: digestTurns,
                 Model: modelId);
             await AppendCurationLogAsync(checkpoint.SessionId, failed, source, ct);
             return failed;
         }
 
-        if (!SkillFrontmatterSpec.ValidateDescription(frontmatter.Description, out var descReason))
-        {
-            logger.LogWarning(
-                "Skill curation failed — session={Session} reason={Reason}",
-                checkpoint.SessionId, descReason);
-            var failed = new SkillCurationResult(
-                SkillCurationOutcome.Failed,
-                FailureReason: descReason,
-                TurnsDigested: digestTurns,
-                Model: modelId);
-            await AppendCurationLogAsync(checkpoint.SessionId, failed, source, ct);
-            return failed;
-        }
-
-        var slug = SkillFrontmatterSpec.ToSlug(frontmatter.Name);
-        if (!SkillFrontmatterSpec.ValidateName(slug, out var slugReason))
-        {
-            var badSlugReason = $"Derived slug '{slug}' from name '{frontmatter.Name}' is invalid: {slugReason}";
-            logger.LogWarning(
-                "Skill curation failed — session={Session} reason={Reason}",
-                checkpoint.SessionId, badSlugReason);
-            var failed = new SkillCurationResult(
-                SkillCurationOutcome.Failed,
-                FailureReason: badSlugReason,
-                TurnsDigested: digestTurns,
-                Model: modelId);
-            await AppendCurationLogAsync(checkpoint.SessionId, failed, source, ct);
-            return failed;
-        }
-
-        // Guarantee the written file's 'name:' matches the directory it's written under — the
-        // LLM's raw name may need slugifying (spaces, uppercase, ...), and without this the file
-        // and its own directory would disagree, which fuseraft's orchestration skills provider
-        // treats as invalid and silently drops.
-        skillContent = SkillFrontmatterSpec.WithCanonicalName(skillContent, slug);
+        var slug = frontmatter.Name;
 
         try
         {

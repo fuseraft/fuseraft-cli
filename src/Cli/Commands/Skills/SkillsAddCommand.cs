@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Microsoft.Agents.AI;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using fuseraft.Core;
@@ -55,25 +56,11 @@ public sealed class SkillsAddCommand : AsyncCommand<SkillsAddSettings>
             return 1;
         }
 
-        if (slug.Length > SkillFrontmatterSpec.MaxNameLength)
-        {
-            slug = slug[..SkillFrontmatterSpec.MaxNameLength].TrimEnd('-');
-            AnsiConsole.MarkupLine(
-                $"[yellow]⚠[/] Derived name exceeds {SkillFrontmatterSpec.MaxNameLength} characters; truncated to [bold]{Markup.Escape(slug)}[/].");
-        }
-
         // Guarantee the installed file's 'name:' field matches the directory it's installed
         // under — a raw name that needed slugifying (spaces, uppercase, ...) would otherwise
         // leave the two disagreeing, which works fine in the REPL's lenient loader but is
         // silently dropped by fuseraft's orchestration skills provider.
         content = SkillsHelpers.CanonicalizeName(content, slug);
-
-        if (!SkillFrontmatterSpec.ValidateDescription(SkillsHelpers.ExtractDescription(content), out var descReason))
-        {
-            AnsiConsole.MarkupLine(
-                $"[yellow]⚠[/] {Markup.Escape(descReason!)} " +
-                "This skill will work in the REPL but 'fuseraft run' orchestration sessions will silently drop it.");
-        }
 
         var destDir  = Path.Combine(FuseraftPaths.GlobalSkills, slug);
         var destPath = Path.Combine(destDir, "SKILL.md");
@@ -106,6 +93,20 @@ public sealed class SkillsAddCommand : AsyncCommand<SkillsAddSettings>
 
         var verb = isUpdate ? "Updated" : "Added";
         AnsiConsole.MarkupLine($"[green]✓[/] {verb} [bold]{Markup.Escape(slug)}[/] → {Markup.Escape(destPath)}");
+
+        // Canonicalizing the name only guarantees name-matches-directory; description/
+        // compatibility could still be missing or too long. Confirm with the same
+        // AgentFileSkillsSource pipeline orchestration and the REPL actually use, rather than
+        // re-deriving the answer here.
+        var checkSource = new AgentFileSkillsSource(destDir, FuseraftSkillsSources.RunScriptAsync);
+        var checkResult = await checkSource.GetSkillsAsync(
+            new AgentSkillsSourceContext(SkillDiscoveryAgent.Create(), session: null), cancellationToken);
+        if (checkResult.Count == 0)
+            AnsiConsole.MarkupLine(
+                $"[yellow]⚠[/] '{Markup.Escape(slug)}' does not fully conform to the Agent Skills specification " +
+                $"(name matches its directory, but check description/compatibility). It will work in the REPL but " +
+                $"'fuseraft run' orchestration sessions will silently drop it — run [bold]fuseraft skills validate {Markup.Escape(slug)}[/] for details.");
+
         return 0;
     }
 }

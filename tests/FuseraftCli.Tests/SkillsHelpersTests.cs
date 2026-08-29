@@ -1,4 +1,5 @@
 using fuseraft.Cli.Commands.Skills;
+using fuseraft.Core.Skills;
 
 namespace FuseraftCli.Tests;
 
@@ -124,7 +125,7 @@ public sealed class SkillsHelpersTests : IDisposable
         var rewritten = SkillsHelpers.CanonicalizeName(content, "my-bad-skill");
 
         Assert.Equal("my-bad-skill", SkillsHelpers.ExtractSlug(rewritten));
-        Assert.Equal("A skill.", SkillsHelpers.ExtractDescription(rewritten));
+        Assert.Equal("A skill.", FrontmatterFieldReader.ExtractField(rewritten, "description"));
         Assert.Contains("Body", rewritten);
     }
 }

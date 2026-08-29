@@ -1,6 +1,6 @@
 # Skills
 
-Skills give agents specialized knowledge and step-by-step procedures for specific types of tasks. At REPL startup fuseraft scans your skill directories, injects a catalog of available skills into the system prompt, and exposes two tools the model can call to use them.
+Skills give agents specialized knowledge and step-by-step procedures for specific types of tasks, following the [Agent Skills specification](https://agentskills.io/specification). At session start fuseraft scans your skill directories, injects a catalog of available skills into the system prompt, and exposes tools the model can call to use them. Discovery, frontmatter parsing/validation, and the skill tools themselves all come from the [Microsoft Agent Framework](https://github.com/microsoft/agent-framework)'s `AgentFileSkillsSource`/`AgentSkillsProvider` — the REPL and `fuseraft run` orchestration sessions share the exact same implementation, so a skill is treated identically in both.
 
 ---
 
@@ -40,7 +40,7 @@ At startup, the skill count appears in the compact info line alongside the activ
 
 If `--no-tools` is passed, skills are disabled for that session.
 
-`fuseraft run` orchestration sessions use the same five discovery locations and the same three tools (`load_skill`, `read_skill_resource`, `run_skill_script`), wired onto every agent automatically whenever at least one skill directory exists — there is no need to add `Skills` to an agent's `Plugins:` list, though doing so as a declaration of intent is harmless.
+`fuseraft run` orchestration sessions use the same five discovery locations and the same three tools (`load_skill`, `read_skill_resource`, `run_skill_script`), wired onto every agent automatically whenever at least one skill directory exists — there is no need to add `Skills` to an agent's `Plugins:` list, though doing so as a declaration of intent is harmless. This is the same discovery pipeline the REPL uses, not a separate implementation — a skill either works identically in both, or (if its frontmatter is invalid) in neither.
 
 ---
 
@@ -220,9 +220,9 @@ fuseraft follows the [Agent Skills specification](https://agentskills.io/specifi
 
 If your instructions are long, move reference material into a `references/` subdirectory inside the skill folder. The agent loads those files on demand — with `read_skill_resource` — rather than all at once. `scripts/` and `assets/` are supported the same way.
 
-**If two installed skills share the same name**, the one in the higher-precedence location wins and a warning is logged.
+**If two installed skills share the same name**, the one in the higher-precedence location wins.
 
-> **Keep `name:` and the directory name identical.** `fuseraft run` orchestration sessions require `name:` to match the directory name **exactly** (case-sensitive), to be valid lowercase kebab-case, and require a non-empty, correctly-sized `description:`. A skill that violates any of these is silently dropped from the orchestration catalog. The REPL's loader is more lenient — a `SKILL.md` with no frontmatter at all still loads, using the directory name as its slug — but the moment a `name:`, `description:`, or `compatibility:` field *is* declared, the REPL validates it against the same rules and **skips the skill with a warning** on a violation (most commonly a name/directory mismatch), rather than silently loading something that would vanish under `fuseraft run`. Run `fuseraft skills validate [path]` to check a skill (or every installed skill) against the full specification before relying on it.
+> **`name:` must match the directory name exactly.** Both the REPL and `fuseraft run` require `name:` to match its parent directory name **exactly** (case-sensitive), to be valid lowercase kebab-case, and require a non-empty, correctly-sized `description:` — they use the identical discovery pipeline, so there is no REPL-specific leniency here. A skill that violates any of these is silently excluded from the catalog in **both** surfaces, with the reason logged as a warning or error (visible by default — no `--verbose` needed). Run `fuseraft skills validate [path]` to check a skill (or every installed skill) against the full specification before relying on it. The one exception is `fuseraft skills add`, which stays deliberately lenient — see [Installing skills](#for-all-your-projects) above.
 
 ---
 

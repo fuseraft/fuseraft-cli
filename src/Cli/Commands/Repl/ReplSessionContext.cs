@@ -1,3 +1,4 @@
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
@@ -38,7 +39,7 @@ internal sealed class ReplSessionContext
     public readonly Dictionary<string, List<AIFunction>> ToolsByCategory;
     public readonly SubAgentPlugin?     SubAgent;
     public readonly bool                Verbose;
-    public SkillsPlugin?                SkillsPlugin { get; set; }
+    public IReadOnlyList<AgentSkill>    Skills       { get; set; } = [];
     public TodoPlugin?                  Todo         { get; set; }
 
     // Mutable provider state (may be replaced by /provider setup)
