@@ -6,7 +6,7 @@ fuseraft runs teams of AI agents and mechanically enforces that they did what th
 
 Validators inspect tool-call records, file presence, and shell exit codes — not agent assertions. Claims are not evidence; artifacts and command results are. This is runtime verification: observable behavior, not self-reported outcomes.
 
-Define declarative agents and multi-agent workflows in YAML, with routing strategy and evidence contracts. Works with Anthropic, xAI, OpenAI, Azure, Ollama, and any OpenAI-compatible provider. Built on Microsoft Agent Framework.
+Pipelines are declarative — agents, routing strategy, and evidence contracts, all defined in YAML. Bring your own key (BYOK) to Anthropic, xAI, OpenAI, Azure, Ollama, or any OpenAI-compatible provider. Built on [Microsoft Agent Framework](https://github.com/microsoft/agent-framework).
 
 ---
 
