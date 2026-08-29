@@ -16,6 +16,7 @@ using Microsoft.Extensions.Logging;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
+using fuseraft.Core.Skills;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.KeyStore;
 using fuseraft.Infrastructure.Plugins;
@@ -1466,18 +1467,8 @@ public static class OrchestratorBuilder
 
     private static AgentSkillsProvider? BuildSkillsProvider(ILoggerFactory loggerFactory)
     {
-        // Project-native → project cross-client → user-native → user cross-client → built-in.
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var dirs = new[]
-        {
-            Path.Combine(Directory.GetCurrentDirectory(), ".fuseraft", "skills"),
-            Path.Combine(Directory.GetCurrentDirectory(), ".agents",   "skills"),
-            FuseraftPaths.GlobalSkills,
-            Path.Combine(home, ".agents",   "skills"),
-            Path.Combine(AppContext.BaseDirectory, "skills"),
-        }.Where(Directory.Exists).ToArray();
-
-        if (dirs.Length == 0) return null;
+        var dirs = FuseraftSkillsSources.GetDefaultSearchDirs();
+        if (!dirs.Any(Directory.Exists)) return null;
 
         // Without a logger factory, AgentFileSkillsSource discards its diagnostics (invalid
         // frontmatter, a skill 'name:' that doesn't match its directory name, symlink/path-
@@ -1486,60 +1477,9 @@ public static class OrchestratorBuilder
         // pipeline as the rest of the orchestrator.
         return new AgentSkillsProviderBuilder()
             .UseFileSkills(dirs)
-            .UseFileScriptRunner(RunSkillScriptAsync)
+            .UseFileScriptRunner(FuseraftSkillsSources.RunScriptAsync)
+            .UseOptions(FuseraftSkillsSources.DisableApproval)
             .UseLoggerFactory(loggerFactory)
             .Build();
     }
-
-    private static async Task<object?> RunSkillScriptAsync(
-        AgentFileSkill skill,
-        AgentFileSkillScript script,
-        JsonElement? arguments,
-        IServiceProvider? serviceProvider,
-        CancellationToken cancellationToken)
-    {
-        var ext = Path.GetExtension(script.FullPath).ToLowerInvariant();
-        var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-        var program = ext switch
-        {
-            ".py" => isWindows ? "python" : "python3",
-            ".sh" => "bash",
-            ".js" => "node",
-            _     => null
-        };
-        if (program is null)
-            return $"No runner registered for '{ext}' scripts.";
-
-        var psi = new ProcessStartInfo
-        {
-            FileName               = program,
-            RedirectStandardOutput = true,
-            RedirectStandardError  = true,
-            UseShellExecute        = false,
-        };
-        psi.ArgumentList.Add(script.FullPath);
-        if (arguments.HasValue && arguments.Value.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var prop in arguments.Value.EnumerateObject())
-            {
-                var val = prop.Value.ToString();
-                if (!string.IsNullOrEmpty(val))
-                    psi.ArgumentList.Add(val);
-            }
-        }
-
-        using var proc = Process.Start(psi)
-            ?? throw new InvalidOperationException($"Failed to start {program}");
-
-        // Read stdout and stderr concurrently — sequential reads deadlock if either pipe fills.
-        var stdoutTask = proc.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask  = proc.StandardError.ReadToEndAsync(cancellationToken);
-        await Task.WhenAll(stdoutTask, stderrTask);
-        await proc.WaitForExitAsync(cancellationToken);
-
-        var stdout = await stdoutTask;
-        var stderr  = await stderrTask;
-        return string.IsNullOrWhiteSpace(stderr) ? stdout : $"{stdout}\nstderr: {stderr}";
-    }
-
 }

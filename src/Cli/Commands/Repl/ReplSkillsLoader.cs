@@ -1,121 +1,76 @@
-using fuseraft.Core;
-using fuseraft.Infrastructure.Plugins;
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
+using fuseraft.Core.Skills;
 
 namespace fuseraft.Cli.Commands.Repl;
 
+/// <summary>Result of wiring up skills for a REPL session.</summary>
+/// <param name="Skills">Every skill discovered, for the startup banner count and <c>$slug</c> direct invocation.</param>
+/// <param name="CatalogInstructions">Catalog text to append to the system prompt, or <c>null</c> when no skills were found.</param>
+/// <param name="Tools">The <c>load_skill</c>/<c>read_skill_resource</c>/<c>run_skill_script</c> tools, or empty when no skills were found.</param>
+internal sealed record ReplSkillsResult(
+    IReadOnlyList<AgentSkill> Skills,
+    string?                   CatalogInstructions,
+    IReadOnlyList<AIFunction> Tools);
+
 /// <summary>
-/// Scans skill directories, parses SKILL.md frontmatter, and assembles the
-/// <see cref="SkillsPlugin"/> instance and catalog block injected into the REPL
-/// system prompt at startup.
+/// Thin REPL-side wiring over Microsoft.Agents.AI's Agent Skills feature. Discovery, frontmatter
+/// parsing/validation, and the skill tools themselves all come from
+/// <see cref="AgentFileSkillsSource"/>/<see cref="AgentSkillsProvider"/> — the same classes
+/// orchestration (<see cref="fuseraft.Cli.OrchestratorBuilder"/>) uses, so a skill is treated
+/// identically by both surfaces. This file does not parse or validate anything itself.
 /// </summary>
 internal static class ReplSkillsLoader
 {
+    /// <summary>Convenience overload used by <see cref="ReplCommand"/> — searches the default dirs.</summary>
+    internal static Task<ReplSkillsResult> BuildAsync(
+        IChatClient client, ILoggerFactory loggerFactory, CancellationToken cancellationToken) =>
+        BuildAsync(client, loggerFactory, FuseraftSkillsSources.GetDefaultSearchDirs(), cancellationToken);
+
     /// <summary>
-    /// Returns the priority-ordered list of directories to scan for skills in a
-    /// normal REPL session (project-local → user-global → install-bundled).
+    /// Discovers skills under <paramref name="searchDirs"/> using <paramref name="client"/>
+    /// (wrapped in a throwaway <see cref="ChatClientAgent"/> — the only role it plays is
+    /// satisfying the framework's generic "which agent is asking" context, since file-based
+    /// discovery never invokes it) and returns the discovered skills plus the catalog
+    /// instructions and tools an <see cref="AgentSkillsProvider"/> would attach to that agent.
     /// </summary>
-    internal static string[] GetDefaultSearchDirs()
+    internal static async Task<ReplSkillsResult> BuildAsync(
+        IChatClient client, ILoggerFactory loggerFactory, IEnumerable<string> searchDirs, CancellationToken cancellationToken)
     {
-        var cwd  = Directory.GetCurrentDirectory();
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return
-        [
-            Path.Combine(cwd,  ".fuseraft", "skills"),
-            Path.Combine(cwd,  ".agents",   "skills"),
-            FuseraftPaths.GlobalSkills,
-            Path.Combine(home, ".agents",   "skills"),
-            Path.Combine(AppContext.BaseDirectory, "skills"),
-        ];
-    }
+        var fileSource = new AgentFileSkillsSource(
+            searchDirs,
+            FuseraftSkillsSources.RunScriptAsync,
+            loggerFactory: loggerFactory);
 
-    /// <summary>
-    /// Convenience overload used by <see cref="ReplCommand"/> — searches the default dirs.
-    /// </summary>
-    internal static (SkillsPlugin? Plugin, string? CatalogBlock) BuildSkills() =>
-        BuildSkills(GetDefaultSearchDirs());
+        // Same caching+dedup pipeline AgentSkillsProvider's own convenience constructor builds
+        // internally — applied explicitly here so the skill list used for the startup banner
+        // count and $slug direct invocation agrees with what the catalog/tools below show,
+        // rather than the raw file source's un-deduplicated, per-search-dir concatenation.
+        var source = new DeduplicatingAgentSkillsSource(new CachingAgentSkillsSource(fileSource), loggerFactory);
 
-    /// <summary>
-    /// Scans <paramref name="searchDirs"/> for <c>SKILL.md</c> files, builds a
-    /// slug-to-directory map (first occurrence across dirs wins), and returns a
-    /// <see cref="SkillsPlugin"/> together with a catalog string suitable for
-    /// appending to the REPL system prompt.
-    ///
-    /// <para>Returns <c>(null, null)</c> when no skills are found.</para>
-    /// <para>
-    /// Inaccessible directories are silently skipped so a permissions error on
-    /// one dir does not block skills from other dirs.
-    /// </para>
-    /// </summary>
-    internal static (SkillsPlugin? Plugin, string? CatalogBlock) BuildSkills(IEnumerable<string> searchDirs)
-    {
-        // slug → directory containing SKILL.md; first occurrence wins.
-        var skillDirs    = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var descriptions = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        var agent = new ChatClientAgent(client);
+        IReadOnlyList<AgentSkill> skills = [.. await source.GetSkillsAsync(new AgentSkillsSourceContext(agent, session: null), cancellationToken)];
 
-        foreach (var searchDir in searchDirs.Where(Directory.Exists))
-        {
-            IEnumerable<string> skillMds;
-            try
-            {
-                skillMds = Directory.EnumerateFiles(searchDir, "SKILL.md", SearchOption.AllDirectories);
-            }
-            catch (UnauthorizedAccessException) { continue; }
-            catch (IOException)                 { continue; }
+        if (skills.Count == 0)
+            return new ReplSkillsResult(skills, null, []);
 
-            foreach (var skillMd in skillMds)
-            {
-                var skillDir = Path.GetDirectoryName(skillMd);
-                if (skillDir is null) continue;
-                var slug = Path.GetFileName(skillDir);
-                if (string.IsNullOrEmpty(slug) || skillDirs.ContainsKey(slug)) continue;
+        var provider = new AgentSkillsProviderBuilder()
+            .UseSource(source)
+            .UseOptions(FuseraftSkillsSources.DisableApproval)
+            .UseLoggerFactory(loggerFactory)
+            .Build();
 
-                skillDirs[slug]    = skillDir;
-                descriptions[slug] = ParseSkillDescription(skillMd);
-            }
-        }
+        // AIContextProvider.InvokingContext is [Experimental] (MAAI001) as of the
+        // Microsoft.Agents.AI version fuseraft depends on — see the same suppression pattern
+        // in AgentContextCompactionFilters.cs. This is the only place that touches it.
+#pragma warning disable MAAI001
+        var aiContext = await provider.InvokingAsync(
+            new AIContextProvider.InvokingContext(agent, session: null, aiContext: new AIContext()),
+            cancellationToken);
+#pragma warning restore MAAI001
 
-        if (skillDirs.Count == 0) return (null, null);
-
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine("## SKILLS available");
-        foreach (var slug in skillDirs.Keys.OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
-        {
-            var desc = descriptions.GetValueOrDefault(slug);
-            sb.AppendLine(!string.IsNullOrWhiteSpace(desc) ? $"- {slug}: {desc}" : $"- {slug}");
-        }
-        sb.AppendLine();
-        sb.Append("Call load_skill(\"<slug>\") to get full step-by-step instructions before applying a skill.");
-
-        return (new SkillsPlugin(skillDirs), sb.ToString());
-    }
-
-    /// <summary>
-    /// Reads only the <c>description:</c> field from a SKILL.md YAML frontmatter block.
-    /// Returns <c>null</c> when the field is absent, empty, or the file is unreadable.
-    /// </summary>
-    internal static string? ParseSkillDescription(string skillMdPath)
-    {
-        try
-        {
-            var inFrontmatter = false;
-            foreach (var line in File.ReadLines(skillMdPath))
-            {
-                var trimmed = line.Trim();
-                if (trimmed == "---")
-                {
-                    if (!inFrontmatter) { inFrontmatter = true; continue; }
-                    break; // closing delimiter
-                }
-                if (!inFrontmatter) break; // no opening delimiter on first line
-
-                if (trimmed.StartsWith("description:", StringComparison.OrdinalIgnoreCase))
-                {
-                    var value = trimmed["description:".Length..].Trim().Trim('"').Trim('\'');
-                    return string.IsNullOrWhiteSpace(value) ? null : value;
-                }
-            }
-            return null;
-        }
-        catch { return null; }
+        var tools = aiContext.Tools?.OfType<AIFunction>().ToList() ?? [];
+        return new ReplSkillsResult(skills, aiContext.Instructions, tools);
     }
 }

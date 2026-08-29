@@ -1965,7 +1965,7 @@ Jobs can be edited by hand — `fuseraft schedule run` reads the YAML fresh on e
 
 ## `fuseraft skills`
 
-Install, list, and remove global skills available to all agent sessions. Skills are stored in `~/.fuseraft/skills/` and registered in an FTS5 search index so fuseraft can automatically identify which ones are relevant to a given task.
+Install, list, remove, and validate global skills available to all agent sessions. Skills are stored in `~/.fuseraft/skills/` and registered in an FTS5 search index so fuseraft can automatically identify which ones are relevant to a given task.
 
 See [Skills](skills.md) for an overview of how skills work and how to write them.
 
@@ -2008,7 +2008,7 @@ List all installed global skills.
 fuseraft skills list
 ```
 
-Displays a table with the slug and description for each skill found under `~/.fuseraft/skills/`.
+Displays a table with the slug, description, `compatibility` field (if any), and Agent Skills specification conformance (`✓`/`✗`) for each skill found under `~/.fuseraft/skills/`. Run `fuseraft skills validate` for details on any `✗` entries.
 
 **Examples**
 
@@ -2071,6 +2071,34 @@ fuseraft skills curation-log --last 20 --source repl
 ```
 
 See [Configuration → Skill curation](configuration.md#skill-curation) for the log format and outcome reference.
+
+---
+
+### `fuseraft skills validate`
+
+Validate a `SKILL.md`'s frontmatter against the [Agent Skills specification](https://agentskills.io/specification) — fuseraft's equivalent of the spec's own recommended `skills-ref validate` tool. Checks the `name` field's format, length, and match against its parent directory name; the `description` field's presence and length; and the `compatibility` field's length. Uses the same validator fuseraft's orchestration skills provider applies at load time, so a skill that passes here is guaranteed to load identically in both the REPL and `fuseraft run` sessions.
+
+```
+fuseraft skills validate [path]
+```
+
+**Arguments**
+
+| Argument | Description |
+|----------|-------------|
+| `[path]` | Path to a skill directory to validate. Omitted: validates every skill under `~/.fuseraft/skills/`. |
+
+Exits with status `0` when every checked skill is fully conformant, `1` otherwise.
+
+**Examples**
+
+```bash
+# Validate every installed skill
+fuseraft skills validate
+
+# Validate a skill before installing it
+fuseraft skills validate ../skills/sandbox-test
+```
 
 ---
 
