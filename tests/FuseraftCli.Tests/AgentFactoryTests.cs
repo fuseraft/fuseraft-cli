@@ -9,6 +9,7 @@ namespace FuseraftCli.Tests;
 /// Tests that <see cref="AgentFactory"/> rejects invalid configurations before making
 /// any network calls.
 /// </summary>
+[Collection("FuseraftTestApiKeyEnv")]
 public sealed class AgentFactoryTests : IDisposable
 {
     // A real (but unused) API key so ChatClientFactory doesn't throw on the env var

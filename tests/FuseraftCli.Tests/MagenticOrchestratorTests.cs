@@ -13,6 +13,7 @@ namespace FuseraftCli.Tests;
 /// live LLM calls. Uses the InternalsVisibleTo grant in FuseraftCli.csproj to access
 /// <c>internal</c> helpers.
 /// </summary>
+[Collection("FuseraftTestApiKeyEnv")]
 public sealed class MagenticOrchestratorTests : IDisposable
 {
     private const string FakeApiKeyVar = "FUSERAFT_TEST_API_KEY";
