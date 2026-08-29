@@ -325,4 +325,135 @@ public sealed class ReplSkillsLoaderTests : IDisposable
         var ex = Record.Exception(() => ReplSkillsLoader.BuildSkills([_root]));
         Assert.Null(ex);
     }
+
+    // ── BuildSkillsDetailed — spec conformance (parity with orchestration) ────
+
+    [Fact]
+    public void BuildSkillsDetailed_NameDoesNotMatchDirectory_SkipsWithWarning()
+    {
+        WriteSkill("mismatched-dir", ValidSkillMd("totally-different-name", "A description."));
+
+        var result = ReplSkillsLoader.BuildSkillsDetailed([_root]);
+
+        Assert.Null(result.Plugin);
+        Assert.Contains(result.Warnings, w => w.Contains("does not match") && w.Contains("mismatched-dir"));
+    }
+
+    [Fact]
+    public void BuildSkillsDetailed_DeclaredNameInvalidFormat_SkipsWithWarning()
+    {
+        WriteSkill("Bad-Name", ValidSkillMd("Bad-Name", "A description.")); // uppercase not allowed
+
+        var result = ReplSkillsLoader.BuildSkillsDetailed([_root]);
+
+        Assert.Null(result.Plugin);
+        Assert.Single(result.Warnings);
+    }
+
+    [Fact]
+    public void BuildSkillsDetailed_DeclaredDescriptionTooLong_SkipsWithWarning()
+    {
+        var longDescription = new string('a', 1025);
+        WriteSkill("my-skill", ValidSkillMd("my-skill", longDescription));
+
+        var result = ReplSkillsLoader.BuildSkillsDetailed([_root]);
+
+        Assert.Null(result.Plugin);
+        Assert.Contains(result.Warnings, w => w.Contains("1024"));
+    }
+
+    [Fact]
+    public void BuildSkillsDetailed_NoNameFieldAtAll_LoadsLeniently_NoWarning()
+    {
+        // Directory-name-only skills (no 'name:' field) remain a supported, warning-free
+        // REPL convenience even though orchestration requires a declared, matching name.
+        WriteSkill("my-skill", "---\ndescription: \"A description.\"\n---\n\nBody.");
+
+        var result = ReplSkillsLoader.BuildSkillsDetailed([_root]);
+
+        Assert.NotNull(result.Plugin);
+        Assert.Equal(1, result.Plugin!.Count);
+        Assert.Empty(result.Warnings);
+    }
+
+    [Fact]
+    public void BuildSkillsDetailed_ValidNameAndDirectoryMatch_NoWarning()
+    {
+        WriteSkill("my-skill", ValidSkillMd("my-skill", "A description."));
+
+        var result = ReplSkillsLoader.BuildSkillsDetailed([_root]);
+
+        Assert.NotNull(result.Plugin);
+        Assert.Empty(result.Warnings);
+    }
+
+    [Fact]
+    public void BuildSkills_CompatibilityField_AppearsInCatalog()
+    {
+        var dir = Path.Combine(_root, "my-skill");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "SKILL.md"),
+            "---\nname: my-skill\ndescription: \"A description.\"\ncompatibility: \"Requires docker\"\n---\n\nBody.");
+
+        var (_, catalog) = ReplSkillsLoader.BuildSkills([_root]);
+
+        Assert.Contains("Requires docker", catalog!);
+    }
+
+    [Fact]
+    public void BuildSkillsDetailed_DeclaredCompatibilityTooLong_SkipsWithWarning()
+    {
+        var dir = Path.Combine(_root, "my-skill");
+        Directory.CreateDirectory(dir);
+        var longCompat = new string('a', 501);
+        File.WriteAllText(Path.Combine(dir, "SKILL.md"),
+            $"---\nname: my-skill\ndescription: \"A description.\"\ncompatibility: \"{longCompat}\"\n---\n\nBody.");
+
+        var result = ReplSkillsLoader.BuildSkillsDetailed([_root]);
+
+        Assert.Null(result.Plugin);
+        Assert.Contains(result.Warnings, w => w.Contains("500"));
+    }
+
+    [Fact]
+    public void BuildSkillsDetailed_NestedVendorNamespace_TwoLevelsDeep_IsDiscovered()
+    {
+        // Matches orchestration's AgentFileSkillsSource search depth (root/vendor/skill/SKILL.md).
+        WriteSkill(Path.Combine("vendor", "my-skill"), ValidSkillMd("my-skill", "A description."));
+
+        var result = ReplSkillsLoader.BuildSkillsDetailed([_root]);
+
+        Assert.NotNull(result.Plugin);
+        Assert.True(result.Plugin!.HasSkill("my-skill"));
+    }
+
+    [Fact]
+    public void BuildSkillsDetailed_SymlinkedSkillDirectory_IsNotFollowed()
+    {
+        var realSkillRoot = Path.Combine(Path.GetTempPath(), "fuseraft_loader_tests_real_" + Guid.NewGuid().ToString("N")[..8]);
+        var realSkillDir  = Path.Combine(realSkillRoot, "real-skill");
+        Directory.CreateDirectory(realSkillDir);
+        File.WriteAllText(Path.Combine(realSkillDir, "SKILL.md"), ValidSkillMd("real-skill", "A description."));
+
+        try
+        {
+            var link = Path.Combine(_root, "linked-skill");
+            try
+            {
+                Directory.CreateSymbolicLink(link, realSkillDir);
+            }
+            catch (Exception)
+            {
+                return; // environment doesn't allow symlinks — skip
+            }
+
+            var result = ReplSkillsLoader.BuildSkillsDetailed([_root]);
+
+            Assert.Null(result.Plugin); // the only skill lives behind a symlink, which must not be followed
+        }
+        finally
+        {
+            Directory.Delete(realSkillRoot, recursive: true);
+        }
+    }
 }

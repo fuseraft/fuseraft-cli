@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using fuseraft.Core.Skills;
 
 namespace fuseraft.Infrastructure.Plugins;
 
@@ -71,13 +72,12 @@ public sealed class SkillsPlugin
         if (string.IsNullOrWhiteSpace(resourcePath))
             return PluginResult.Error("Resource path must not be empty.");
 
-        // Resolve against the skill directory and confirm the result stays inside it —
-        // resourcePath comes from the model, so an absolute path or "../" sequence must
-        // not be able to escape to arbitrary files on disk.
-        var skillRoot = Path.GetFullPath(dir) + Path.DirectorySeparatorChar;
-        var fullPath  = Path.GetFullPath(Path.Combine(dir, resourcePath));
-        if (!fullPath.StartsWith(skillRoot, StringComparison.Ordinal))
-            return PluginResult.Error($"'{resourcePath}' is outside the skill directory.");
+        // Resolve against the skill directory and confirm the result stays inside it, with no
+        // symlinked path segment along the way — resourcePath comes from the model, so an
+        // absolute path, a "../" sequence, or a symlink planted in the skill directory must not
+        // be able to escape to arbitrary files on disk.
+        if (!SkillPathGuard.TryResolveSafePath(dir, resourcePath, out var fullPath, out var reason))
+            return PluginResult.Error($"'{resourcePath}' {reason}");
 
         if (!File.Exists(fullPath))
             return PluginResult.NotFound($"Resource '{resourcePath}' not found in skill '{skill}'.");
@@ -103,11 +103,9 @@ public sealed class SkillsPlugin
             return PluginResult.NotFound($"No skill '{skill}'.");
 
         // Resolve against the skill directory and confirm the result stays inside it — same
-        // containment check as ReadSkillResourceAsync, since 'script' comes from the model.
-        var skillRoot  = Path.GetFullPath(dir) + Path.DirectorySeparatorChar;
-        var scriptPath = Path.GetFullPath(Path.Combine(dir, script));
-        if (!scriptPath.StartsWith(skillRoot, StringComparison.Ordinal))
-            return PluginResult.Error($"'{script}' is outside the skill directory.");
+        // containment/symlink check as ReadSkillResourceAsync, since 'script' comes from the model.
+        if (!SkillPathGuard.TryResolveSafePath(dir, script, out var scriptPath, out var reason))
+            return PluginResult.Error($"'{script}' {reason}");
 
         if (!File.Exists(scriptPath))
             return PluginResult.NotFound($"Script '{script}' not found in skill '{skill}'.");

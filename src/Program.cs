@@ -144,6 +144,7 @@ services.AddTransient<SkillsAddCommand>();
 services.AddTransient<SkillsListCommand>();
 services.AddTransient<SkillsRemoveCommand>();
 services.AddTransient<SkillsCurationLogCommand>();
+services.AddTransient<SkillsValidateCommand>();
 services.AddTransient<LogEventsCommand>();
 services.AddTransient<LogReplCommand>();
 services.AddTransient<LogAppCommand>();
@@ -331,6 +332,11 @@ app.Configure(cfg =>
             .WithExample(["skills", "curation-log"])
             .WithExample(["skills", "curation-log", "--last", "20"])
             .WithExample(["skills", "curation-log", "--outcome", "failed"]);
+
+        branch.AddCommand<SkillsValidateCommand>("validate")
+            .WithDescription("Validate a SKILL.md's frontmatter against the Agent Skills specification.")
+            .WithExample(["skills", "validate"])
+            .WithExample(["skills", "validate", "../skills/sandbox-test"]);
     });
 
     cfg.AddBranch("log", branch =>

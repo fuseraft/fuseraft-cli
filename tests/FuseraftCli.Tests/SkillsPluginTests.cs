@@ -172,6 +172,31 @@ public sealed class SkillsPluginTests : IDisposable
         Assert.DoesNotContain("top secret", result);
     }
 
+    [Fact]
+    public async Task ReadSkillResource_SymlinkedFilePointingOutside_ReturnsError()
+    {
+        var dir = MakeSkillDir("my-skill", "body");
+        var secret = Path.Combine(_root, "secret.txt");
+        File.WriteAllText(secret, "top secret");
+
+        string link;
+        try
+        {
+            link = Path.Combine(dir, "innocuous.md");
+            File.CreateSymbolicLink(link, secret);
+        }
+        catch (Exception)
+        {
+            return; // environment doesn't allow symlinks — skip
+        }
+
+        var plugin = new SkillsPlugin(new Dictionary<string, string> { ["my-skill"] = dir });
+        var result = await plugin.ReadSkillResourceAsync("my-skill", "innocuous.md");
+
+        Assert.StartsWith("[ERROR]", result);
+        Assert.DoesNotContain("top secret", result);
+    }
+
     // ── RunSkillScriptAsync ───────────────────────────────────────────────────
 
     [Fact]
@@ -191,6 +216,31 @@ public sealed class SkillsPluginTests : IDisposable
         var plugin = new SkillsPlugin(new Dictionary<string, string> { ["my-skill"] = dir });
 
         var result = await plugin.RunSkillScriptAsync("my-skill", "../evil.sh");
+        Assert.StartsWith("[ERROR]", result);
+        Assert.DoesNotContain("pwned", result);
+    }
+
+    [Fact]
+    public async Task RunSkillScript_SymlinkedScriptPointingOutside_ReturnsError()
+    {
+        var dir = MakeSkillDir("my-skill", "body");
+        var outsideScript = Path.Combine(_root, "evil.sh");
+        File.WriteAllText(outsideScript, "#!/bin/sh\necho pwned\n");
+
+        string link;
+        try
+        {
+            link = Path.Combine(dir, "run.sh");
+            File.CreateSymbolicLink(link, outsideScript);
+        }
+        catch (Exception)
+        {
+            return; // environment doesn't allow symlinks — skip
+        }
+
+        var plugin = new SkillsPlugin(new Dictionary<string, string> { ["my-skill"] = dir });
+        var result = await plugin.RunSkillScriptAsync("my-skill", "run.sh");
+
         Assert.StartsWith("[ERROR]", result);
         Assert.DoesNotContain("pwned", result);
     }

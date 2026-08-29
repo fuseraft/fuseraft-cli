@@ -221,9 +221,13 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             toolsByCategory["Shell"]      = shellFunctions.Where(f => CoreShellTools.Contains(f.Name)).ToList();
             toolsByCategory["Git"]        = gitFunctions.Where(f => CoreGitTools.Contains(f.Name)).ToList();
 
-            (skillsPlugin, skillsCatalog) = ReplSkillsLoader.BuildSkills();
+            var skillsResult = ReplSkillsLoader.BuildSkillsDetailed(ReplSkillsLoader.GetDefaultSearchDirs());
+            skillsPlugin  = skillsResult.Plugin;
+            skillsCatalog = skillsResult.CatalogBlock;
             if (skillsPlugin is not null)
                 toolsByCategory["Skills"] = PluginRegistry.GetFunctionsFromObject(skillsPlugin).ToList();
+            foreach (var warning in skillsResult.Warnings)
+                AnsiConsole.MarkupLine($"[yellow]⚠[/] {Markup.Escape(warning)}");
         }
 
         var initialTools = toolsByCategory.Values.SelectMany(v => v).ToList();

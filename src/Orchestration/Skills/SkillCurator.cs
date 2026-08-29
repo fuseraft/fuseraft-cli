@@ -6,6 +6,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using fuseraft.Core;
 using fuseraft.Core.Models;
+using fuseraft.Core.Skills;
 
 namespace fuseraft.Orchestration.Skills;
 
@@ -66,9 +67,6 @@ public sealed class SkillCurator(
 {
     private static readonly Regex SkillBlock =
         new(@"<SKILL>(.*?)</SKILL>", RegexOptions.Singleline | RegexOptions.IgnoreCase);
-
-    private static readonly Regex NameFrontmatter =
-        new(@"^name:\s*(.+)$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
 
     private static readonly JsonSerializerOptions LogJsonOpts = new()
     {
@@ -167,8 +165,9 @@ public sealed class SkillCurator(
         }
 
         var skillContent = match.Groups[1].Value.Trim();
-        var nameMatch    = NameFrontmatter.Match(skillContent);
-        if (!nameMatch.Success)
+        var frontmatter  = SkillFrontmatterSpec.TryParse(skillContent);
+
+        if (string.IsNullOrWhiteSpace(frontmatter?.Name))
         {
             const string noNameReason = "SKILL block is missing the 'name:' frontmatter field.";
             logger.LogWarning(
@@ -183,8 +182,41 @@ public sealed class SkillCurator(
             return failed;
         }
 
-        var name = nameMatch.Groups[1].Value.Trim().Trim('"').Trim('\'');
-        var slug = ToSlug(name);
+        if (!SkillFrontmatterSpec.ValidateDescription(frontmatter.Description, out var descReason))
+        {
+            logger.LogWarning(
+                "Skill curation failed — session={Session} reason={Reason}",
+                checkpoint.SessionId, descReason);
+            var failed = new SkillCurationResult(
+                SkillCurationOutcome.Failed,
+                FailureReason: descReason,
+                TurnsDigested: digestTurns,
+                Model: modelId);
+            await AppendCurationLogAsync(checkpoint.SessionId, failed, source, ct);
+            return failed;
+        }
+
+        var slug = SkillFrontmatterSpec.ToSlug(frontmatter.Name);
+        if (!SkillFrontmatterSpec.ValidateName(slug, out var slugReason))
+        {
+            var badSlugReason = $"Derived slug '{slug}' from name '{frontmatter.Name}' is invalid: {slugReason}";
+            logger.LogWarning(
+                "Skill curation failed — session={Session} reason={Reason}",
+                checkpoint.SessionId, badSlugReason);
+            var failed = new SkillCurationResult(
+                SkillCurationOutcome.Failed,
+                FailureReason: badSlugReason,
+                TurnsDigested: digestTurns,
+                Model: modelId);
+            await AppendCurationLogAsync(checkpoint.SessionId, failed, source, ct);
+            return failed;
+        }
+
+        // Guarantee the written file's 'name:' matches the directory it's written under — the
+        // LLM's raw name may need slugifying (spaces, uppercase, ...), and without this the file
+        // and its own directory would disagree, which fuseraft's orchestration skills provider
+        // treats as invalid and silently drops.
+        skillContent = SkillFrontmatterSpec.WithCanonicalName(skillContent, slug);
 
         try
         {
@@ -409,9 +441,6 @@ public sealed class SkillCurator(
             logger.LogDebug(ex, "Could not append to curation log — non-fatal.");
         }
     }
-
-    private static string ToSlug(string name) =>
-        Regex.Replace(name.ToLowerInvariant().Trim(), @"[^a-z0-9]+", "-").Trim('-');
 
     private sealed record CurationLogEntry(
         string  Ts,

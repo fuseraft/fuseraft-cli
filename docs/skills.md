@@ -36,6 +36,8 @@ At startup, the skill count appears in the compact info line alongside the activ
 | `read_skill_resource` | Read a supplementary file bundled with a skill (e.g. a file under `references/`), by path relative to the skill directory. |
 | `run_skill_script` | Run a script bundled with a skill (`.sh`, `.py`, `.js`). |
 
+`read_skill_resource` and `run_skill_script` reject a path that resolves outside the skill directory, including via a symlinked file or subdirectory planted inside it.
+
 If `--no-tools` is passed, skills are disabled for that session.
 
 `fuseraft run` orchestration sessions use the same five discovery locations and the same three tools (`load_skill`, `read_skill_resource`, `run_skill_script`), wired onto every agent automatically whenever at least one skill directory exists — there is no need to add `Skills` to an agent's `Plugins:` list, though doing so as a declaration of intent is harmless.
@@ -182,6 +184,8 @@ The command accepts a path to a skill directory (containing `SKILL.md`) or direc
 
 You can also install skills by placing them directly under `~/.fuseraft/skills/` without using the CLI — skills are loaded from that directory at session start regardless of how they got there.
 
+`fuseraft skills add` canonicalizes the frontmatter as it installs: if the raw `name:` field doesn't already equal the slug it's being installed under (e.g. it had spaces or uppercase letters), the installed copy's `name:` line is rewritten to match. This guarantees an installed skill's `name:` and directory always agree, which orchestration requires (see below).
+
 ---
 
 ## Writing a skill
@@ -203,13 +207,22 @@ description: What this skill does and when to use it.
 Step-by-step guidance for the agent...
 ```
 
-The `name` field is used by `fuseraft skills add` to derive the destination directory name when installing a skill globally, so keeping it in sync with the directory name is strongly recommended. The `description` is what fuseraft uses to decide whether the skill is relevant to the current task — write it so it covers both what the skill does and the kinds of tasks that should trigger it.
+fuseraft follows the [Agent Skills specification](https://agentskills.io/specification) for `SKILL.md` frontmatter:
 
-If your instructions are long, move reference material into a `references/` subdirectory inside the skill folder. The agent loads those files on demand — with `read_skill_resource` — rather than all at once.
+| Field | Required | Notes |
+|-------|----------|-------|
+| `name` | Yes | Lowercase letters, digits, and single hyphens only (no leading/trailing/double hyphens); max 64 characters; must match the parent directory name exactly. |
+| `description` | Yes | 1–1024 characters. What fuseraft uses to decide whether the skill is relevant to the current task — write it so it covers both what the skill does and the kinds of tasks that should trigger it. |
+| `license` | No | License name, or a reference to a bundled license file. |
+| `compatibility` | No | Max 500 characters. Environment requirements (e.g. `Requires docker and jq`) — shown in the REPL's skill catalog as a `[requires: ...]` hint. |
+| `metadata` | No | Arbitrary string-to-string map for your own bookkeeping (author, version, etc.). Not surfaced to the model. |
+| `allowed-tools` | No | Space-separated list of pre-approved tools (experimental, per spec — fuseraft parses but does not currently act on this field). |
+
+If your instructions are long, move reference material into a `references/` subdirectory inside the skill folder. The agent loads those files on demand — with `read_skill_resource` — rather than all at once. `scripts/` and `assets/` are supported the same way.
 
 **If two installed skills share the same name**, the one in the higher-precedence location wins and a warning is logged.
 
-> **Keep `name:` and the directory name identical.** The REPL loader uses the directory name as the slug and never reads `name:` at load time, so a mismatch is harmless there. `fuseraft run` orchestration sessions use a stricter loader that requires `name:` to match the directory name **exactly** (case-sensitive), to be non-empty lowercase kebab-case (letters, digits, single hyphens — no leading/trailing/double hyphens), and requires a non-empty `description:`. A skill that violates any of these is silently dropped from the orchestration catalog — it works fine in the REPL but an agent in a `fuseraft run` session never sees it. Follow the frontmatter format above exactly and both surfaces will pick up the skill identically.
+> **Keep `name:` and the directory name identical.** `fuseraft run` orchestration sessions require `name:` to match the directory name **exactly** (case-sensitive), to be valid lowercase kebab-case, and require a non-empty, correctly-sized `description:`. A skill that violates any of these is silently dropped from the orchestration catalog. The REPL's loader is more lenient — a `SKILL.md` with no frontmatter at all still loads, using the directory name as its slug — but the moment a `name:`, `description:`, or `compatibility:` field *is* declared, the REPL validates it against the same rules and **skips the skill with a warning** on a violation (most commonly a name/directory mismatch), rather than silently loading something that would vanish under `fuseraft run`. Run `fuseraft skills validate [path]` to check a skill (or every installed skill) against the full specification before relying on it.
 
 ---
 

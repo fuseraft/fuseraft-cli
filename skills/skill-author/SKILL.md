@@ -44,7 +44,13 @@ description: <one or two sentences>
 ---
 ```
 
-**`name`:** A short, lowercase kebab-case slug (e.g. `debug-session`, `mcp-setup`) — letters, digits, and single hyphens only, no leading/trailing/double hyphens. This is used as the install directory name when running `fuseraft skills add`. Keep it to 1–3 words, and **make it identical to the skill's directory name**: the REPL loader ignores `name:` and uses the directory name as the slug, but `fuseraft run` orchestration sessions use a stricter loader that silently drops the skill from the catalog if `name:` doesn't exactly match the directory name (or isn't valid kebab-case, or `description:` is empty). Matching them keeps the skill working identically in both surfaces.
+**`name`:** A short, lowercase kebab-case slug (e.g. `debug-session`, `mcp-setup`) — letters, digits, and single hyphens only, no leading/trailing/double hyphens, max 64 characters. This is used as the install directory name when running `fuseraft skills add`. Keep it to 1–3 words, and **make it identical to the skill's directory name**: `fuseraft run` orchestration sessions silently drop the skill from the catalog if `name:` doesn't exactly match the directory name (or isn't valid kebab-case, or `description:` is empty or too long). The REPL loader is more lenient about a skill with no frontmatter at all, but once `name:` is present it applies the same check and skips the skill (with a warning) on a mismatch. Matching them keeps the skill working identically in both surfaces — run `fuseraft skills validate <path>` to confirm before installing.
+
+**Optional fields**, per the [Agent Skills specification](https://agentskills.io/specification) — add only when they earn their keep:
+- **`license`:** a license name or reference to a bundled license file. Only relevant for skills you intend to share/distribute.
+- **`compatibility`:** environment requirements, max 500 characters (e.g. `Requires docker and jq`, `Designed for fuseraft REPL sessions`). Shown to the agent in the REPL catalog as a `[requires: ...]` hint — add it when the skill assumes a tool or platform that isn't universally available.
+- **`metadata`:** a string-to-string map for your own bookkeeping (e.g. `author`, `version`). Not shown to the agent.
+- **`allowed-tools`:** experimental per spec; fuseraft parses it but doesn't currently act on it. Skip it.
 
 **`description`:** This is the most important field — fuseraft injects only the name and description into the agent's catalog at session start. The agent reads this to decide whether the skill is relevant. Write it so it covers:
 - What the skill produces or accomplishes
@@ -168,7 +174,9 @@ Or write directly to `~/.fuseraft/skills/<slug>/SKILL.md` — fuseraft loads fro
 
 ### Step 7: Verify
 
-For **REPL sessions**, start or restart fuseraft and run `/tools`. The skill should appear under the `Skills` category with its name and description.
+First, run `fuseraft skills validate <path-to-skill-directory>` (or `fuseraft skills validate` with no argument once installed, to check it alongside every other installed skill). This checks the frontmatter against the full specification — name format and directory match, description presence/length, compatibility length — with the same validator both the REPL and orchestration use, before you burn a session on it.
+
+For **REPL sessions**, start or restart fuseraft and run `/tools`. The skill should appear under the `Skills` category with its name and description. Watch the startup output for a `⚠ Skipped skill at ...` warning — that means the frontmatter is present but invalid, and the skill did not load.
 
 For **orchestration sessions**, run `fuseraft validate` on the config first, then do a one-turn dry run:
 
@@ -179,7 +187,7 @@ fuseraft run --config <path> --max-iterations 1 "List your available skills."
 The agent should name the skill in its response. If it does not appear, check:
 - `SKILL.md` is directly inside the skill directory (not nested deeper)
 - The install path is one of the five recognized locations (project `.fuseraft/skills/`, project `.agents/skills/`, user `.fuseraft/skills/`, user `.agents/skills/`, or shipped built-in)
-- **Orchestration-only:** `name:` in the frontmatter exactly matches the directory name (case-sensitive), is valid lowercase kebab-case, and `description:` is non-empty — a mismatch here loads fine in the REPL but is silently dropped by `fuseraft run`'s stricter loader with no error to the user, only a log entry
+- `fuseraft skills validate` passes — a violation it reports is silently dropped by `fuseraft run`'s stricter loader with no error to the user, only a log entry
 
 ### Step 8: Refine the Description
 

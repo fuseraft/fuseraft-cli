@@ -435,6 +435,7 @@ If `fuseraft run --work-dir` points at a directory you did not author, any skill
 - Only run `fuseraft` in working directories you trust. Treat `.agents/skills/` and `.fuseraft/skills/` in a cloned repo the same way you would treat a `Makefile` or `package.json` postinstall script.
 - For higher assurance, run fuseraft inside a Docker container (`CodeExecution` plugin) where the host environment is not exposed.
 - `UseScriptApproval` support is planned — when enabled it will require explicit user confirmation before any skill script executes. Until then, script execution is automatic once a skill is loaded.
+- `read_skill_resource` and `run_skill_script` resolve the model-supplied path against the skill directory and reject anything that resolves outside it, including via a symlinked file or subdirectory planted inside the skill folder — this narrows path-based escape from *within* a loaded skill, but a fully malicious skill script still runs as an OS subprocess with the full process environment; it isn't a substitute for only loading trusted skills.
 
 ---
 

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using fuseraft.Core;
+using fuseraft.Core.Skills;
 using fuseraft.Orchestration;
 
 namespace fuseraft.Cli.Commands.Skills;
@@ -54,6 +55,26 @@ public sealed class SkillsAddCommand : AsyncCommand<SkillsAddSettings>
             return 1;
         }
 
+        if (slug.Length > SkillFrontmatterSpec.MaxNameLength)
+        {
+            slug = slug[..SkillFrontmatterSpec.MaxNameLength].TrimEnd('-');
+            AnsiConsole.MarkupLine(
+                $"[yellow]⚠[/] Derived name exceeds {SkillFrontmatterSpec.MaxNameLength} characters; truncated to [bold]{Markup.Escape(slug)}[/].");
+        }
+
+        // Guarantee the installed file's 'name:' field matches the directory it's installed
+        // under — a raw name that needed slugifying (spaces, uppercase, ...) would otherwise
+        // leave the two disagreeing, which works fine in the REPL's lenient loader but is
+        // silently dropped by fuseraft's orchestration skills provider.
+        content = SkillsHelpers.CanonicalizeName(content, slug);
+
+        if (!SkillFrontmatterSpec.ValidateDescription(SkillsHelpers.ExtractDescription(content), out var descReason))
+        {
+            AnsiConsole.MarkupLine(
+                $"[yellow]⚠[/] {Markup.Escape(descReason!)} " +
+                "This skill will work in the REPL but 'fuseraft run' orchestration sessions will silently drop it.");
+        }
+
         var destDir  = Path.Combine(FuseraftPaths.GlobalSkills, slug);
         var destPath = Path.Combine(destDir, "SKILL.md");
         var isUpdate = File.Exists(destPath);
@@ -66,10 +87,8 @@ public sealed class SkillsAddCommand : AsyncCommand<SkillsAddSettings>
             // skill's own instructions point to (load_skill/read_skill_resource/run_skill_script).
             SkillsHelpers.CopySkillDirectory(sourceSkillDir, destDir);
         }
-        else
-        {
-            await File.WriteAllTextAsync(destPath, content, cancellationToken);
-        }
+        // Write (or overwrite, if just copied) SKILL.md with the possibly name-canonicalized content.
+        await File.WriteAllTextAsync(destPath, content, cancellationToken);
 
         await using var index = new SkillIndex();
         try

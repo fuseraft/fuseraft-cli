@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using fuseraft.Core;
+using fuseraft.Core.Skills;
 
 namespace fuseraft.Cli.Commands.Skills;
 
@@ -21,15 +22,17 @@ public sealed class SkillsListCommand : AsyncCommand<SkillsListSettings>
             return 0;
         }
 
-        var entries = new List<(string Slug, string Description)>();
+        var entries = new List<(string Slug, string Description, string? Compatibility, bool Valid)>();
         foreach (var dir in Directory.EnumerateDirectories(root).OrderBy(d => d))
         {
             var mdPath = Path.Combine(dir, "SKILL.md");
             if (!File.Exists(mdPath)) continue;
-            var content = await File.ReadAllTextAsync(mdPath, cancellationToken);
-            var slug    = Path.GetFileName(dir);
-            var desc    = SkillsHelpers.ExtractDescription(content);
-            entries.Add((slug, desc));
+            var content     = await File.ReadAllTextAsync(mdPath, cancellationToken);
+            var slug        = Path.GetFileName(dir);
+            var frontmatter = SkillFrontmatterSpec.TryParse(content);
+            var desc        = frontmatter?.Description ?? string.Empty;
+            var valid       = SkillFrontmatterSpec.Validate(frontmatter, slug).Count == 0;
+            entries.Add((slug, desc, frontmatter?.Compatibility, valid));
         }
 
         if (entries.Count == 0)
@@ -41,13 +44,24 @@ public sealed class SkillsListCommand : AsyncCommand<SkillsListSettings>
         var table = new Table()
             .Border(TableBorder.Simple)
             .AddColumn(new TableColumn("[bold]Slug[/]"))
-            .AddColumn(new TableColumn("[bold]Description[/]"));
+            .AddColumn(new TableColumn("[bold]Description[/]"))
+            .AddColumn(new TableColumn("[bold]Requires[/]"))
+            .AddColumn(new TableColumn("[bold]Spec[/]"));
 
-        foreach (var (slug, desc) in entries)
-            table.AddRow(Markup.Escape(slug), Markup.Escape(desc));
+        foreach (var (slug, desc, compatibility, valid) in entries)
+        {
+            var specMark = valid ? "[green]✓[/]" : "[red]✗[/]";
+            table.AddRow(
+                Markup.Escape(slug),
+                Markup.Escape(desc),
+                Markup.Escape(compatibility ?? ""),
+                specMark);
+        }
 
         AnsiConsole.Write(table);
         AnsiConsole.MarkupLine($"[dim]{entries.Count} skill(s) in {Markup.Escape(root)}[/]");
+        if (entries.Any(e => !e.Valid))
+            AnsiConsole.MarkupLine("[dim]Run [bold]fuseraft skills validate[/] for details on the ✗ entries.[/]");
         return 0;
     }
 }

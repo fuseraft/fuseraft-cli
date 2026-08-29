@@ -1,32 +1,36 @@
-using System.Text.RegularExpressions;
+using fuseraft.Core.Skills;
 
 namespace fuseraft.Cli.Commands.Skills;
 
 internal static class SkillsHelpers
 {
-    private static readonly Regex NameFrontmatter =
-        new(@"^name:\s*(.+)$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
-
-    private static readonly Regex DescriptionFrontmatter =
-        new(@"^description:\s*(.+)$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
-
+    /// <summary>Extracts the slugified <c>name:</c> field, or <c>null</c> when absent/empty.</summary>
     internal static string? ExtractSlug(string content)
     {
-        var m = NameFrontmatter.Match(content);
-        if (!m.Success) return null;
-        var name = m.Groups[1].Value.Trim().Trim('"').Trim('\'');
+        var name = SkillFrontmatterSpec.TryParse(content)?.Name;
         return string.IsNullOrWhiteSpace(name) ? null : ToSlug(name);
     }
 
-    internal static string ExtractDescription(string content)
-    {
-        var m = DescriptionFrontmatter.Match(content);
-        if (!m.Success) return string.Empty;
-        return m.Groups[1].Value.Trim().Trim('"').Trim('\'');
-    }
+    internal static string ExtractDescription(string content) =>
+        SkillFrontmatterSpec.TryParse(content)?.Description ?? string.Empty;
 
-    internal static string ToSlug(string name) =>
-        Regex.Replace(name.ToLowerInvariant().Trim(), @"[^a-z0-9]+", "-").Trim('-');
+    internal static string ToSlug(string name) => SkillFrontmatterSpec.ToSlug(name);
+
+    /// <summary>
+    /// Rewrites <paramref name="content"/>'s <c>name:</c> frontmatter field to
+    /// <paramref name="slug"/> when it isn't already exactly that value. Ensures a skill
+    /// installed under <c>&lt;slug&gt;/SKILL.md</c> always has a matching <c>name:</c> field —
+    /// without this, a raw name that needed slugifying (spaces, uppercase, etc.) would leave the
+    /// installed file internally inconsistent: fine in the REPL's lenient loader, but silently
+    /// dropped by fuseraft's orchestration skills provider, which requires an exact match.
+    /// </summary>
+    internal static string CanonicalizeName(string content, string slug)
+    {
+        var currentName = SkillFrontmatterSpec.TryParse(content)?.Name;
+        return string.Equals(currentName, slug, StringComparison.Ordinal)
+            ? content
+            : SkillFrontmatterSpec.WithCanonicalName(content, slug);
+    }
 
     /// <summary>
     /// Recursively copies every file under <paramref name="sourceDir"/> into
