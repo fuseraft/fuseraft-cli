@@ -6,7 +6,7 @@ fuseraft runs teams of AI agents and mechanically enforces that they did what th
 
 Validators inspect tool-call records, file presence, and shell exit codes — not agent assertions. Claims are not evidence; artifacts and command results are. This is runtime verification: observable behavior, not self-reported outcomes.
 
-Define pipelines in YAML with agents, routing strategy, and contracts. Works with Anthropic, xAI, OpenAI, Azure, Ollama, and any OpenAI-compatible provider. Built on Microsoft Agent Framework.
+Define declarative agents and multi-agent workflows in YAML, with routing strategy and evidence contracts. Works with Anthropic, xAI, OpenAI, Azure, Ollama, and any OpenAI-compatible provider. Built on Microsoft Agent Framework.
 
 ---
 
@@ -103,7 +103,7 @@ The binary lands in `./bin/`.
 **Coordination**
 - Twelve routing modes: sequential (one-pass), round-robin (cycling), keyword, structured, state machine, graph (parallel fan-out + hierarchical sub-graphs), workflow (cycle-native graph compiled once per session), LLM, Magentic, adversarial generate→critique, map-reduce (parallel item processing), scatter-gather (broadcast + synthesize)
 - Saga mode adds compensating rollback on failure
-- Inline agents or reusable `AgentFile` YAML; mix providers in one pipeline
+- Inline agents or reusable, declarative `AgentFile` YAML; mix providers in one pipeline
 - Federate slots via A2A protocol
 
 **Knowledge & Tools**
@@ -146,6 +146,8 @@ The binary lands in `./bin/`.
 ---
 
 ## Pipeline topologies
+
+A declarative agent is a reusable [`AgentFile`](docs/configuration.md#agent-files) — name, instructions, model, plugins, capabilities — versioned and shared like any other YAML. A declarative workflow composes several into one of the topologies below via routing strategy and evidence contracts, not an imperative graph of hand-authored condition/goto steps.
 
 **Simple**
 ```mermaid
