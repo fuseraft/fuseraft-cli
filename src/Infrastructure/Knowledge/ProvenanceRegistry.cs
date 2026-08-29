@@ -215,7 +215,14 @@ public sealed class ProvenanceRegistry
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         var json = JsonSerializer.Serialize(records, JsonOpts);
-        var tmp  = _path + ".tmp";
+        // A GUID-suffixed temp name, not a fixed "<path>.tmp" — CompactAsync's archive path is
+        // derived from FuseraftPaths + the current working directory, both process-global, so
+        // two callers can legitimately compute the identical destination path (e.g. concurrent
+        // fuseraft processes against the same project, or — as observed — unrelated tests that
+        // happen to overlap). A shared, predictable temp name lets one caller's File.Move
+        // consume the other's in-flight write, so the second Move throws FileNotFoundException
+        // on a temp file it itself just wrote.
+        var tmp = $"{_path}.{Guid.NewGuid():N}.tmp";
         await File.WriteAllTextAsync(tmp, json, ct);
         File.Move(tmp, _path, overwrite: true);
     }
@@ -225,7 +232,8 @@ public sealed class ProvenanceRegistry
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
         var json = JsonSerializer.Serialize(records, JsonOpts);
-        var tmp  = path + ".tmp";
+        // See the comment in SaveAsync above — same reasoning, same fix.
+        var tmp = $"{path}.{Guid.NewGuid():N}.tmp";
         await File.WriteAllTextAsync(tmp, json, ct);
         File.Move(tmp, path, overwrite: true);
     }

@@ -1,3 +1,4 @@
+using fuseraft.Core;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 using fuseraft.Orchestration;
@@ -8,12 +9,26 @@ namespace FuseraftCli.Tests;
 /// Integration tests covering the full knowledge layer round-trip:
 /// write evidence → query graph → traverse to ADR → broker assembles context →
 /// validator emits claim → provenance recorded → lifecycle gc runs → nothing lost.
+///
+/// <para>
+/// Isolates <c>FUSERAFT_HOME</c> into <c>_root</c> because
+/// <c>KnowledgeLifecycleManager.CompactProvenanceAsync</c> computes its archive path via
+/// <c>FuseraftPaths.LocalProvenanceArchive</c> — global-root- and CWD-derived, not anything
+/// passed to this test's own (fully isolated) store instances. Without this, that one path
+/// silently escaped isolation: it resolved under the real <c>~/.fuseraft</c>, or — worse —
+/// under whatever temp dir some unrelated, concurrently-running test (in a different xUnit
+/// collection) happened to have <c>FUSERAFT_HOME</c> pointed at that instant, including once
+/// that other test's <c>Dispose()</c> deleted its temp tree out from under this test's in-flight
+/// write, producing an intermittent "Could not find file '...provenance.archive.json...tmp'".
+/// </para>
 /// </summary>
+[Collection("FuseraftHomeEnv")]
 public sealed class KnowledgeLayerRoundTripTests : IDisposable
 {
     // All state lives in a per-test temp directory; nothing touches the real repo.
     private readonly string _root;
     private readonly string _src;
+    private readonly string? _originalHome = Environment.GetEnvironmentVariable(FuseraftPaths.HomeOverrideEnvVar);
 
     private readonly AdrStore             _adrStore;
     private readonly AdrRegistry          _adrRegistry;
@@ -28,6 +43,10 @@ public sealed class KnowledgeLayerRoundTripTests : IDisposable
     {
         _root = Path.Combine(Path.GetTempPath(), $"fuseraft_kl_{Guid.NewGuid():N}");
         _src  = Path.Combine(_root, "src");
+
+        // Confines FuseraftPaths.LocalProvenanceArchive (and anything else derived from the
+        // global root) to this test's own _root, which Dispose() already deletes wholesale.
+        Environment.SetEnvironmentVariable(FuseraftPaths.HomeOverrideEnvVar, _root);
 
         var stateDir       = Path.Combine(_root, ".fuseraft", "state");
         var decisionsDir   = Path.Combine(_root, ".fuseraft", "knowledge", "decisions");
@@ -55,7 +74,11 @@ public sealed class KnowledgeLayerRoundTripTests : IDisposable
             _adrRegistry, _graphStore, _graphBuilder, _provenance, _objectiveStore);
     }
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose()
+    {
+        Environment.SetEnvironmentVariable(FuseraftPaths.HomeOverrideEnvVar, _originalHome);
+        Directory.Delete(_root, recursive: true);
+    }
 
     // ── Stage 1 — Write evidence: build graph from source file ────────────────
 
