@@ -58,12 +58,28 @@ internal static class FileSystemSandbox
         return Path.Combine(summaryDir, $"{hex}.md");
     }
 
+    // Strips one layer of wrapping quotes a model sometimes includes in a path argument
+    // (e.g. passing `"file.txt"` instead of `file.txt`, out of habit from shell-quoting a
+    // path with spaces). A quote character is illegal in a Windows path and vanishingly rare
+    // as an actual leading/trailing character in a Unix one, so unwrapping a matched pair is
+    // safe and turns an opaque "invalid path" OS error into a working call.
+    private static string StripWrappingQuotes(string path)
+    {
+        var trimmed = path.Trim();
+        if (trimmed.Length >= 2 &&
+            ((trimmed[0] == '"' && trimmed[^1] == '"') || (trimmed[0] == '\'' && trimmed[^1] == '\'')))
+        {
+            return trimmed[1..^1];
+        }
+        return path;
+    }
+
     // Resolves 'path' to its canonical absolute form and checks it against the sandbox.
     // Returns a [DENIED] error string when the path escapes the sandbox, null when safe.
     internal static string? ResolveSafe(
         string path, string? sandboxRoot, IReadOnlyList<string> exemptedPrefixes, out string resolved)
     {
-        var expandedPath = ProcessHelper.ExpandHome(path);
+        var expandedPath = ProcessHelper.ExpandHome(StripWrappingQuotes(path));
         resolved = sandboxRoot is not null && !Path.IsPathRooted(expandedPath)
             ? Path.GetFullPath(expandedPath, sandboxRoot)
             : Path.GetFullPath(expandedPath);
