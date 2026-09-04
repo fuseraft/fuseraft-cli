@@ -400,7 +400,7 @@ Use `/tools` to see the full list at runtime.
 | `/conversation` | List all turns in memory with 1-based turn numbers and a one-line preview of each user message and assistant response. Use this to find the right turn number before running `/rewind`. |
 | `/rewind <n>` | Keep turns 1…n and discard all later turns. Turn count is the number of User messages currently in memory. Clamps safely — passing a number larger than the current turn count is a no-op. |
 | `/rewind -<n>` | Step back n turns from the current position (relative rewind). `/rewind -1` drops the last turn; `/rewind -99` clamps to 0 and clears all turns. |
-| `/clear` | Clear conversation history (system prompt is kept) |
+| `/clear` | Clear conversation history (system prompt is kept). Also clears the terminal and redraws the startup banner, unless `--no-banner` was passed at launch (in which case it just prints a confirmation line). |
 | `/compact` | Ask the model to summarise the session into a handoff document, then replace history with that summary. The system prompt and tools/skills catalog are kept; everything else is discarded. Facts the assistant stated without a backing tool call are tombstoned as `[UNVERIFIED ASSUMPTION: ...]` rather than carried forward as established facts. Use this when context is filling up but you want to continue in the same session. |
 | `/compact <focus>` | Same as `/compact`, but passes a focus hint to the model so the summary is tailored toward the next task (e.g. `/compact fix the auth bug next`) |
 | `/history` | Show a condensed view of the conversation (role + preview of each message) |

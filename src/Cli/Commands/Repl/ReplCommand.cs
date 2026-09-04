@@ -409,10 +409,12 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             memoryStore, toolsByCategory, systemPrompt, pendingSave,
             verbose: settings.Verbose, subAgent: subAgent)
         {
-            JsonMode  = jsonMode,
-            Skills    = discoveredSkills,
-            Todo      = todoPlugin,
-            KeyStored = keyStored,
+            JsonMode    = jsonMode,
+            Skills      = discoveredSkills,
+            Todo        = todoPlugin,
+            KeyStored   = keyStored,
+            NoBanner    = settings.NoBanner,
+            MemoryCount = memoryEntries.Count,
         };
 
         if (!settings.NoTools)
@@ -576,7 +578,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         return null;
     }
 
-    private static string? TryGetGitBranch(string cwd)
+    internal static string? TryGetGitBranch(string cwd)
     {
         try
         {
