@@ -265,7 +265,8 @@ app.Configure(cfg =>
         .WithDescription("Start an interactive REPL chat session with a single model (no config needed).")
         .WithExample(["repl"])
         .WithExample(["repl", "--model", "gpt-4o"])
-        .WithExample(["repl", "--model", "claude-sonnet-4-6", "--system", "You are a helpful coding assistant."]);
+        .WithExample(["repl", "--model", "claude-sonnet-4-6", "--system", "You are a helpful coding assistant."])
+        .WithExample(["repl", "--model", "claude-sonnet-4-6", "--save"]);
 
     cfg.AddBranch("context", branch =>
     {

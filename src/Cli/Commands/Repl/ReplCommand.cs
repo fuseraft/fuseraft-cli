@@ -21,6 +21,10 @@ public sealed class ReplSettings : CommandSettings
     [Description("Model ID to use (e.g. gpt-4o, claude-sonnet-4-6, grok-4). Overrides ~/.fuseraft/config if set.")]
     public string? Model { get; set; }
 
+    [CommandOption("--save")]
+    [Description("Persist --model as the new default in ~/.fuseraft/config.")]
+    public bool Save { get; set; }
+
     [CommandOption("-s|--system")]
     [Description("System prompt for the REPL session.")]
     public string? SystemPrompt { get; set; }
@@ -175,6 +179,16 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 AnsiConsole.MarkupLine("[dim]Run[/] [bold]fuseraft repl[/] [dim]to configure, or pass[/] [bold]--model[/].");
             }
             return 1;
+        }
+
+        if (settings.Save && !string.IsNullOrEmpty(settings.Model))
+        {
+            userCfg.ModelId = modelId;
+            UserConfigStore.Save(userCfg);
+            if (jsonMode)
+                ReplJsonBridge.Emit(new { type = "info", text = $"Saved default model: {modelId}" });
+            else
+                AnsiConsole.MarkupLine($"[dim]Saved[/] [bold]{Markup.Escape(modelId)}[/] [dim]as default model in[/] [bold]{Markup.Escape(UserConfigStore.ConfigPath)}[/]");
         }
 
         var modelConfig = ReplFactory.BuildModelConfig(modelId, userCfg);

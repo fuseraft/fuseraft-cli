@@ -281,6 +281,7 @@ fuseraft repl [options]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-m, --model <id>` | see below | Model ID to use (e.g. `gpt-4o`, `claude-sonnet-4-6`). Overrides `~/.fuseraft/config` when set. |
+| `--save` | off | Persist `--model` as the new default in `~/.fuseraft/config`. No effect without `--model`. |
 | `-s, --system <prompt>` | — | System prompt. Defaults to a coding/research prompt when tools are enabled. |
 | `--resume <id>` | — | Resume a previous REPL session by its session ID. Use `/sessions` inside the REPL to list resumable sessions. |
 | `--no-banner` | off | Skip the ASCII banner. |
@@ -339,6 +340,8 @@ See [Getting Started — Set your API key](getting-started.md#set-your-api-key) 
 | `GOOGLE_AI_API_KEY` | `gemini-2.0-flash` |
 | `MISTRAL_API_KEY` | `mistral-small-latest` |
 | `DEEPSEEK_API_KEY` | `deepseek-chat` |
+
+`--model` alone only overrides the model for that session. Add `--save` to also write it to `~/.fuseraft/config` as the new default (e.g. `fuseraft repl --model claude-sonnet-4-6 --save`).
 
 **Built-in tools**
 
@@ -853,6 +856,9 @@ fuseraft repl --model grok-4-1-fast-reasoning --no-tools
 
 # Set a system prompt at startup
 fuseraft repl --model grok-code-fast-1 --system "You are a Rust expert."
+
+# Switch models and make it the new default
+fuseraft repl --model claude-sonnet-4-6 --save
 ```
 
 Press Ctrl+C during a streaming response to cancel that request and return to the prompt. Press Ctrl+C at the prompt or type `/exit` to end the session. The readline layer intercepts Ctrl+C at the prompt so the process exits cleanly rather than abruptly.
@@ -2229,6 +2235,8 @@ fuseraft models
 Reads `~/.fuseraft/config` to resolve the provider endpoint and API key, then calls the provider's models listing endpoint (`GET {endpoint}/models` for OpenAI-compatible providers; `GET {endpoint}/api/tags` for Ollama). The currently configured model is highlighted.
 
 If `~/.fuseraft/config` is missing or incomplete, the command runs the same interactive setup wizard as `fuseraft repl` — prompting for a provider URL and API key, then a model picked from the live list — and saves the result before fetching the model list.
+
+The output ends with a hint pointing at `fuseraft repl --model <id>` (and `--save` to make it the default) — see [`fuseraft repl`](#fuseraft-repl) above.
 
 **Example**
 
