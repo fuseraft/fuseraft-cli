@@ -482,10 +482,39 @@ internal static class AgentContextCompactionFilters
 #pragma warning restore MAAI001
 
     /// <summary>
-    /// Trims accumulated in-turn tool-result messages when total character count exceeds
-    /// <paramref name="maxChars"/>. Oldest <see cref="ChatRole.Tool"/> result messages are
-    /// replaced with a compact placeholder (preserving the <c>CallId</c> so the provider
-    /// sees a structurally valid conversation). Non-tool messages are never removed.
+    /// A message is trimmable if it's a <see cref="ChatRole.Tool"/> result, or a pure-text
+    /// (no <see cref="FunctionCallContent"/>) <see cref="ChatRole.Assistant"/> message.
+    ///
+    /// The second case matters because <see cref="KeepLastToolPairs"/> (MAF's
+    /// <c>ToolResultCompactionStrategy</c>) replaces evicted tool-call/result groups with a
+    /// single new assistant text message — but its default formatter does not meaningfully
+    /// shrink the content (an evicted group's "summary" can land within a few dozen chars of
+    /// the original result's full size). Without treating that output as trimmable here, it
+    /// would sit in every subsequent request untouched forever, because it's no longer a
+    /// <see cref="ChatRole.Tool"/> message: <see cref="KeepLastToolPairs"/> would silently stop
+    /// providing any real token-growth protection past the point its window starts evicting
+    /// groups, which defeats the point of running it ahead of this trim.
+    ///
+    /// This is safe to treat as fair game: ordinary intermediate assistant reasoning was
+    /// already truncated by <see cref="TruncateIntermediateAssistantReasoning"/> earlier in
+    /// <see cref="ApplyInTurnFilters"/> (which explicitly leaves pure-text messages alone,
+    /// treating them as final responses) — so a pure-text assistant message still large enough
+    /// to matter by the time this runs is compaction output, not organic reasoning. It also
+    /// can't be the turn's actual final answer: this trim only ever runs on the message list
+    /// being sent as input to another inner LLM call inside an active tool loop, and a loop
+    /// that already has a trailing pure-text assistant message wouldn't call the model again.
+    /// </summary>
+    private static bool IsTrimmableMessage(ChatMessage m) =>
+        m.Role == ChatRole.Tool ||
+        (m.Role == ChatRole.Assistant &&
+         !m.Contents.OfType<FunctionCallContent>().Any() &&
+         m.Contents.OfType<TextContent>().Any());
+
+    /// <summary>
+    /// Trims accumulated in-turn tool-result messages (see <see cref="IsTrimmableMessage"/>)
+    /// when total character count exceeds <paramref name="maxChars"/>. Oldest results are
+    /// replaced with a compact placeholder (preserving the <c>CallId</c> on tool results so the
+    /// provider sees a structurally valid conversation). Everything else is never removed.
     /// </summary>
     internal static IEnumerable<ChatMessage> TrimInTurnContext(
         IEnumerable<ChatMessage> messages,
@@ -501,10 +530,10 @@ internal static class AgentContextCompactionFilters
 
         if (total <= maxChars) return list;
 
-        // Collect indices of ChatRole.Tool messages that can be trimmed (oldest first).
+        // Collect indices of trimmable messages (oldest first).
         var trimCandidates = new Queue<int>();
         for (int i = 0; i < list.Count; i++)
-            if (list[i].Role == ChatRole.Tool) trimCandidates.Enqueue(i);
+            if (IsTrimmableMessage(list[i])) trimCandidates.Enqueue(i);
 
         // Phase 1: replace oldest tool results with a tiny placeholder until under budget.
         var result = new List<ChatMessage>(list);
@@ -535,23 +564,23 @@ internal static class AgentContextCompactionFilters
         // proportionally. Phase 1 cannot help when the last N messages alone exceed the budget.
         if (total > maxChars)
         {
-            var remainingToolIndices = new List<int>();
-            int nonToolChars = 0;
+            var remainingTrimIndices = new List<int>();
+            int protectedChars = 0;
             for (int i = 0; i < result.Count; i++)
             {
-                if (result[i].Role == ChatRole.Tool)
-                    remainingToolIndices.Add(i);
+                if (IsTrimmableMessage(result[i]))
+                    remainingTrimIndices.Add(i);
                 else
-                    nonToolChars += result[i].Contents.Sum(c => EstimateContentChars(c));
+                    protectedChars += result[i].Contents.Sum(c => EstimateContentChars(c));
             }
 
-            if (remainingToolIndices.Count > 0)
+            if (remainingTrimIndices.Count > 0)
             {
-                int toolBudget    = Math.Max(maxChars - nonToolChars, 0);
-                int perResultMax  = Math.Max(toolBudget / remainingToolIndices.Count, 200);
+                int trimBudget    = Math.Max(maxChars - protectedChars, 0);
+                int perResultMax  = Math.Max(trimBudget / remainingTrimIndices.Count, 200);
                 const string TruncSuffix = "\n[...truncated — in-turn budget exceeded]";
 
-                foreach (int idx in remainingToolIndices)
+                foreach (int idx in remainingTrimIndices)
                 {
                     var old     = result[idx];
                     bool changed = false;
@@ -563,6 +592,12 @@ internal static class AgentContextCompactionFilters
                         {
                             rebuilt.Add(new FunctionResultContent(
                                 fr.CallId ?? string.Empty, s[..perResultMax] + TruncSuffix));
+                            changed = true;
+                        }
+                        else if (content is TextContent tc &&
+                                 tc.Text is { Length: > 0 } text && text.Length > perResultMax)
+                        {
+                            rebuilt.Add(new TextContent(text[..perResultMax] + TruncSuffix));
                             changed = true;
                         }
                         else
