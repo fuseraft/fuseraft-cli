@@ -271,6 +271,23 @@ fuseraft knowledge gc --apply  # applies all policies
 
 Configure retention windows in `.fuseraft/knowledge/lifecycle.yaml` (created by `fuseraft init`).
 
+**`--nuclear`** is the extreme end of `gc`: on top of the policies above, it clears every reproducible,
+machine-generated file under the global `~/.fuseraft/` home — logs, memories (REPL/agent memory and the
+repository memory graph), session checkpoints/snapshots, orchestration run state, crash dumps, and
+scratchpad — for **every project**, not just the current one. Provider config, API keys, schedule
+definitions, and installed skills are never touched, and a project's own `.fuseraft/` directory (the
+one you're standing in) is untouched too.
+
+```bash
+fuseraft knowledge gc --nuclear                # dry-run: reports what would be cleared, globally
+fuseraft knowledge gc --nuclear --apply        # prompts for an extra confirmation, then clears it
+fuseraft knowledge gc --nuclear --apply --yes  # skips the confirmation (for scripts)
+```
+
+`--nuclear` requires `--apply` to actually delete anything, and — unlike the rest of `gc` — always
+asks for an extra interactive confirmation first (since it isn't scoped to one project), unless `--yes`
+is also passed. In a non-interactive session without `--yes` it refuses and exits non-zero.
+
 ---
 
 ## Directory Layout

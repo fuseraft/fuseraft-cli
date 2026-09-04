@@ -1435,6 +1435,8 @@ fuseraft knowledge gc [options]
 | `--apply` | off | Commit lifecycle changes to disk. Without this flag the command reports what would change without touching any files. |
 | `-l, --lifecycle <path>` | `.fuseraft/knowledge/lifecycle.yaml` | Path to the lifecycle policy file. |
 | `--graph <path>` | `~/.fuseraft/state/{project_slug}/repository.graph` | Override the repository graph path. |
+| `--nuclear` | off | Extreme mode — also clears every reproducible global file (logs, memories, sessions, run state, crash dumps, scratchpad) for **every project**, not just this one. Requires `--apply`; always prompts for an extra confirmation unless `--yes` is also passed. |
+| `-y, --yes` | off | Skip the extra confirmation prompt required by `--nuclear`. |
 
 **`.fuseraftignore` integration**
 
@@ -1461,9 +1463,24 @@ fuseraft knowledge gc --apply
 
 # Use a custom lifecycle config
 fuseraft knowledge gc --apply --lifecycle custom/lifecycle.yaml
+
+# Preview the full global reset (every project's logs/memories/sessions/etc.)
+fuseraft knowledge gc --nuclear
+
+# Actually clear it, skipping the confirmation prompt
+fuseraft knowledge gc --nuclear --apply --yes
 ```
 
 Archived ADRs are moved to `.fuseraft/knowledge/decisions/archive/` and remain queryable via `decision_search`. Archived provenance records are appended to `~/.fuseraft/state/{project_slug}/provenance.archive.json`.
+
+**`--nuclear`**: the big-red-button mode. In addition to the policies above, it wipes the global,
+machine-generated subtrees under `~/.fuseraft/` — `logs/`, `memory/`, `knowledge/` (repository memory
+graphs), `sessions/`, `repl-sessions/`, `snapshots/`, `state/`, `crashdump/`, `scratchpad/`, and
+`skill-curation.jsonl` — across **every project**, not just the one you're standing in. It never
+touches `config/`, `.key`, `schedule/`, or `skills/`, and never touches a project's own `.fuseraft/`
+directory. It always prints a per-category file-count/size report first; add `--apply` to actually
+delete, which then prompts for a second confirmation (bypass with `--yes`) since the blast radius spans
+every project on the machine.
 
 ---
 

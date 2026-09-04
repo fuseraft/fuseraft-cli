@@ -447,7 +447,9 @@ app.Configure(cfg =>
             .WithDescription("Run knowledge lifecycle policies (dry-run by default; --apply to commit changes).")
             .WithExample(["knowledge", "gc"])
             .WithExample(["knowledge", "gc", "--apply"])
-            .WithExample(["knowledge", "gc", "--apply", "--lifecycle", ".fuseraft/knowledge/lifecycle.yaml"]);
+            .WithExample(["knowledge", "gc", "--apply", "--lifecycle", ".fuseraft/knowledge/lifecycle.yaml"])
+            .WithExample(["knowledge", "gc", "--nuclear"])
+            .WithExample(["knowledge", "gc", "--nuclear", "--apply", "--yes"]);
     });
 
     cfg.AddBranch("eval", branch =>
