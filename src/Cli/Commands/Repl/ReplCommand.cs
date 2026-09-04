@@ -82,7 +82,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
     // unfiltered lists below regardless of whether Extended is enabled.
     private static readonly HashSet<string> CoreFileSystemTools = new(StringComparer.OrdinalIgnoreCase)
     {
-        "read_file", "write_file", "patch_file",
+        "read_file", "write_file", "patch_file", "get_file_summary",
         "list_files", "grep_file", "get_file_info", "create_directory",
     };
 
@@ -397,7 +397,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             ? await memoryStore.BuildPromptBlockAsync(cwd, sessionId)
             : null;
         var systemPrompt = new SystemPromptBuilder()
-            .AddIdentity(modelId, cwd, initialTools.Count, settings.SystemPrompt)
+            .AddIdentity(modelId, initialTools.Count, settings.SystemPrompt)
             .AddToolGuidance(initialTools.Count)
             .AddOsEnvironment()
             .AddSessionInfo(sessionId, startedAt, cwd, initialTools.Count, activePlugins)
