@@ -306,7 +306,8 @@ public static class FuseraftPaths
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
             os    = "Windows";
-            shell = Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe";
+            shell = (Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe") +
+                    " (PowerShell syntax also works — commands cmd.exe can't resolve are retried via PowerShell automatically)";
         }
         else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
         {

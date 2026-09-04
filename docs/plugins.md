@@ -58,7 +58,9 @@ Execute shell commands and scripts.
 | `shell_get_job_output` | `jobId` | Return the full captured output of a background job so far (stdout + stderr combined, capped at 100 KB). |
 | `shell_kill_job` | `jobId` | Terminate a running background job. |
 
-The shell used is `/bin/bash` on Unix and `cmd` on Windows. The shell binary is located from common system paths at startup.
+The shell used is `/bin/bash` on Unix and `cmd.exe` on Windows. The shell binary is located from common system paths at startup.
+
+**Windows PowerShell fallback:** Agents commonly write PowerShell syntax (`Get-ChildItem`, `$env:`, `Where-Object`, ...) even though `cmd.exe` is the default shell here, since PowerShell is the modern norm on Windows. `cmd.exe` can't resolve any of that and always fails with the same `'X' is not recognized as an internal or external command` message. `shell_run` and `shell_run_script` detect that exact signature and transparently retry the command via PowerShell (preferring `pwsh` if installed, falling back to the built-in Windows PowerShell 5.1) before returning to the agent — so a PowerShell-flavored command succeeds on the first try instead of costing a wasted tool call. `shell_run_background` applies the same retry within a short grace window after starting the process, swapping in a PowerShell process before the job ID is ever handed back if the original exits immediately with that signature. If the command genuinely fails (in either shell), the original `cmd.exe` failure is what's returned — the fallback never masks a real error.
 
 **`sudo` protection:** `sudo` is always blocked. Any command or script containing `sudo` (including after pipes, `&&`, `;`, or newlines) is rejected before execution. The denial message instructs the agent to use non-privileged alternatives (`pip install --user`, `pipx`, virtualenvs) or, if elevated access is truly required, to tell the user what to run so they can do it themselves.
 
@@ -187,6 +189,8 @@ Structured hypothesis testing and assertion utilities. Useful for Tester agents 
 | `probe_assert_output` | `command`, `expected`, `matchType` (default `"contains"`), `directory`, `timeoutSeconds` | Run a command and assert its output. `matchType`: `contains`, `equals`, `regex`, `exitcode`. Returns PASS or FAIL with evidence. |
 | `probe_compare_outputs` | `commandA`, `commandB`, `directory`, `timeoutSeconds` | Run two commands and return their outputs side-by-side for comparison. |
 | `probe_run_hypothesis` | `hypothesis`, `command`, `expectedObservation`, `setupCommand` (optional), `directory`, `timeoutSeconds` | Given/When/Then structured test. |
+
+On Windows, `language: "powershell"` (or `"ps"`) resolves to `pwsh` if it's installed, otherwise falls back to the built-in Windows PowerShell 5.1 — it no longer fails outright on machines that only have the stock PowerShell.
 
 ---
 
