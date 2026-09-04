@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Stage and commit changes using the conventional commit format. Trigger when an agent needs to commit work — after implementation, after a fix, or when the Developer or Tester instructions say to commit. Ensures the message follows type: description format with a well-written body.
+description: "Stage and commit changes using the conventional commit format. Trigger when an agent needs to commit work — after implementation, after a fix, or when the Developer or Tester instructions say to commit. Ensures the message follows type: description format with a well-written body."
 ---
 
 # Git Commit

@@ -844,7 +844,7 @@ Possible `outcome` values:
 | `no_skill` | The LLM reviewed the session and determined no portable skill is warranted. |
 | `failed` | An error occurred (empty LLM response, malformed output, write failure). Check `failure_reason`. |
 
-`skill_curation_start` and `skill_curation_complete` events are also emitted to the session event log (`~/.fuseraft/logs/sessions/{project_slug}/{session_id}/events.jsonl` for `fuseraft run`, `.fuseraft/logs/repl_events.jsonl` for REPL) so you can correlate curation with the rest of the session timeline. Use `--verbose` to see debug-level output including the LLM response preview.
+`skill_curation_start` and `skill_curation_complete` events are also emitted to the session event log (`~/.fuseraft/logs/sessions/{project_slug}/{session_id}/events.jsonl` for `fuseraft run`, `~/.fuseraft/logs/{project_slug}/repl_events/{session_id}.jsonl` for REPL) so you can correlate curation with the rest of the session timeline. Use `--verbose` to see debug-level output including the LLM response preview.
 
 **Skill injection at session start (`fuseraft run` only)**
 

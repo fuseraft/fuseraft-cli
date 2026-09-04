@@ -21,6 +21,10 @@ public sealed class ReplSettings : CommandSettings
     [Description("Model ID to use (e.g. gpt-4o, claude-sonnet-4-6, grok-4). Overrides ~/.fuseraft/config if set.")]
     public string? Model { get; set; }
 
+    [CommandOption("--save")]
+    [Description("Persist --model as the new default in ~/.fuseraft/config.")]
+    public bool Save { get; set; }
+
     [CommandOption("-s|--system")]
     [Description("System prompt for the REPL session.")]
     public string? SystemPrompt { get; set; }
@@ -78,7 +82,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
     // unfiltered lists below regardless of whether Extended is enabled.
     private static readonly HashSet<string> CoreFileSystemTools = new(StringComparer.OrdinalIgnoreCase)
     {
-        "read_file", "write_file", "patch_file",
+        "read_file", "write_file", "patch_file", "get_file_summary",
         "list_files", "grep_file", "get_file_info", "create_directory",
     };
 
@@ -177,6 +181,16 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             return 1;
         }
 
+        if (settings.Save && !string.IsNullOrEmpty(settings.Model))
+        {
+            userCfg.ModelId = modelId;
+            UserConfigStore.Save(userCfg);
+            if (jsonMode)
+                ReplJsonBridge.Emit(new { type = "info", text = $"Saved default model: {modelId}" });
+            else
+                AnsiConsole.MarkupLine($"[dim]Saved[/] [bold]{Markup.Escape(modelId)}[/] [dim]as default model in[/] [bold]{Markup.Escape(UserConfigStore.ConfigPath)}[/]");
+        }
+
         var modelConfig = ReplFactory.BuildModelConfig(modelId, userCfg);
         using var factory = new ChatClientFactory();
 
@@ -248,8 +262,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 toolsByCategory["Skills"] = skillsResult.Tools.ToList();
         }
 
-        var cwd        = Directory.GetCurrentDirectory();
-        var eventsPath = FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalReplEventsLog, FuseraftPaths.ProjectSlug(cwd));
+        var cwd = Directory.GetCurrentDirectory();
 
         // Load snapshot when --resume is specified.
         ReplSessionSnapshot? snapshot = null;
@@ -266,6 +279,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
         var sessionId  = snapshot?.SessionId ?? StringHelpers.NewSessionId();
         var startedAt  = snapshot?.StartedAt  ?? DateTime.UtcNow;
+        var eventsPath = FuseraftPaths.ExpandSessionPaths(
+            FuseraftPaths.LocalReplEventsLog, sessionId, FuseraftPaths.ProjectSlug(cwd));
 
         ReplSessionPlugin? replSessionPlugin = null;
         List<IHasArtifact>  activePlugins    = [];
@@ -318,18 +333,35 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         using var emitter = new EventEmitter(eventsPath);
         emitter.SetSessionId(sessionId);
 
-        // Built before the wrap loop below so sub_agent_explore/sub_agent_locate get the same
-        // ToolResultLoggingFilter/ToolResultOffloadFilter treatment as every other REPL tool,
-        // and so the model can call them directly instead of only via /explore and /locate.
+        // Built before the wrap loop below so sub_agent_explore/sub_agent_locate/sub_agent_delegate
+        // get the same ToolResultLoggingFilter/ToolResultOffloadFilter treatment as every other
+        // REPL tool, and so the model can call them directly instead of only via /explore, /locate,
+        // and /delegate.
         // Live-tested against grok-4.3 with ~58 tools registered (2026-06-30): no empty
         // completions — the historical "54-tool" concern from commit cf897d2 did not reproduce.
         if (explorerTools is not null)
         {
+            // Delegate gets exactly the write-capable tool set the parent REPL agent itself has
+            // (Core, plus Extended if the user opted in) — never more. It never receives the
+            // SubAgent category, so it cannot recursively call sub_agent_delegate.
+            var delegateTools = fsFunctions!.Where(f => CoreFileSystemTools.Contains(f.Name))
+                .Concat(toolsByCategory["Search"])
+                .Concat(shellFunctions!.Where(f => CoreShellTools.Contains(f.Name)))
+                .Concat(gitFunctions!.Where(f => CoreGitTools.Contains(f.Name)))
+                .ToList();
+            if (settings.EnabledPlugins.Contains("Extended"))
+            {
+                delegateTools.AddRange(fsFunctions!.Where(f => !CoreFileSystemTools.Contains(f.Name)));
+                delegateTools.AddRange(shellFunctions!.Where(f => !CoreShellTools.Contains(f.Name)));
+                delegateTools.AddRange(gitFunctions!.Where(f => !CoreGitTools.Contains(f.Name)));
+            }
+
             subAgent = new SubAgentPlugin(
                 ReplFactory.BuildClient(modelConfig, factory, explorerTools.Count > 0),
                 explorerTools,
                 eventEmitter:    emitter,
-                parentAgentName: "repl");
+                parentAgentName: "repl",
+                delegateTools:   delegateTools);
             toolsByCategory["SubAgent"] = PluginRegistry.GetFunctionsFromObject(subAgent).ToList();
         }
 
@@ -365,7 +397,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             ? await memoryStore.BuildPromptBlockAsync(cwd, sessionId)
             : null;
         var systemPrompt = new SystemPromptBuilder()
-            .AddIdentity(modelId, cwd, initialTools.Count, settings.SystemPrompt)
+            .AddIdentity(modelId, initialTools.Count, settings.SystemPrompt)
             .AddToolGuidance(initialTools.Count)
             .AddOsEnvironment()
             .AddSessionInfo(sessionId, startedAt, cwd, initialTools.Count, activePlugins)
@@ -394,10 +426,12 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             memoryStore, toolsByCategory, systemPrompt, pendingSave,
             verbose: settings.Verbose, subAgent: subAgent)
         {
-            JsonMode  = jsonMode,
-            Skills    = discoveredSkills,
-            Todo      = todoPlugin,
-            KeyStored = keyStored,
+            JsonMode    = jsonMode,
+            Skills      = discoveredSkills,
+            Todo        = todoPlugin,
+            KeyStored   = keyStored,
+            NoBanner    = settings.NoBanner,
+            MemoryCount = memoryEntries.Count,
         };
 
         if (!settings.NoTools)
@@ -561,7 +595,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         return null;
     }
 
-    private static string? TryGetGitBranch(string cwd)
+    internal static string? TryGetGitBranch(string cwd)
     {
         try
         {

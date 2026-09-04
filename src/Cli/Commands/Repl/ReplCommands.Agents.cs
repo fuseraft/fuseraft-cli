@@ -138,6 +138,80 @@ internal static partial class ReplCommands
     }
 
     // -------------------------------------------------------------------------
+    // /delegate
+    // -------------------------------------------------------------------------
+
+    private static async Task<CommandResult> CmdDelegateAsync(
+        ReplSessionContext ctx, string arg, CancellationToken cancellationToken)
+    {
+        if (ctx.SubAgent is null)
+        {
+            AnsiConsole.MarkupLine("[dim]Sub-agent not available (started with --no-tools).[/]");
+            return CommandResult.Continue;
+        }
+        if (string.IsNullOrWhiteSpace(arg))
+        {
+            AnsiConsole.MarkupLine("[yellow]Usage: /delegate <task>[/]");
+            return CommandResult.Continue;
+        }
+
+        var spinCts       = ctx.JsonMode ? null : new CancellationTokenSource();
+        var spinTask      = spinCts is not null
+            ? ReplConsole.RunSpinnerAsync("delegating…", spinCts.Token)
+            : Task.CompletedTask;
+        bool spinStopped  = false;
+        bool headerPrinted = false;
+
+        async Task StopSpinner()
+        {
+            if (spinStopped || spinCts is null) return;
+            spinStopped = true;
+            spinCts.Cancel();
+            await spinTask;
+            ReplConsole.ClearSpinnerLine();
+        }
+
+        try
+        {
+            var (_, inputTok, outputTok) = await ctx.SubAgent.DelegateStreamingAsync(arg,
+                async chunk =>
+                {
+                    if (!headerPrinted)
+                    {
+                        headerPrinted = true;
+                        await StopSpinner();
+                        if (!ctx.JsonMode) AnsiConsole.MarkupLine("[dim]assistant:[/]");
+                    }
+                    if (ctx.JsonMode)
+                        ReplJsonBridge.Emit(new { type = "token", text = chunk });
+                    else
+                        await ReplConsole.WriteChunkSmoothAsync(chunk, cancellationToken);
+                },
+                cancellationToken: cancellationToken);
+            ctx.CumulativeInputTokens  += inputTok  ?? 0;
+            ctx.CumulativeOutputTokens += outputTok ?? 0;
+
+            await StopSpinner();
+            if (headerPrinted) { if (!ctx.JsonMode) AnsiConsole.WriteLine(); }
+            else AnsiConsole.MarkupLine("[dim](no output)[/]");
+            await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/delegate", task = arg });
+        }
+        catch (OperationCanceledException)
+        {
+            await StopSpinner();
+            AnsiConsole.MarkupLine("[dim](cancelled)[/]");
+        }
+        catch (Exception ex)
+        {
+            await StopSpinner();
+            AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(ex.Message)}[/]");
+        }
+
+        if (!ctx.JsonMode) AnsiConsole.WriteLine();
+        return CommandResult.Continue;
+    }
+
+    // -------------------------------------------------------------------------
     // /locate
     // -------------------------------------------------------------------------
 

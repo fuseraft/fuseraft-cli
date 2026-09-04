@@ -265,7 +265,8 @@ app.Configure(cfg =>
         .WithDescription("Start an interactive REPL chat session with a single model (no config needed).")
         .WithExample(["repl"])
         .WithExample(["repl", "--model", "gpt-4o"])
-        .WithExample(["repl", "--model", "claude-sonnet-4-6", "--system", "You are a helpful coding assistant."]);
+        .WithExample(["repl", "--model", "claude-sonnet-4-6", "--system", "You are a helpful coding assistant."])
+        .WithExample(["repl", "--model", "claude-sonnet-4-6", "--save"]);
 
     cfg.AddBranch("context", branch =>
     {
@@ -351,10 +352,11 @@ app.Configure(cfg =>
             .WithExample(["log", "events", "--session", "abc123"]);
 
         branch.AddCommand<LogReplCommand>("repl")
-            .WithDescription("View the REPL event log (.fuseraft/logs/repl_events.jsonl).")
+            .WithDescription("View REPL event logs, one file per session (.fuseraft/logs/repl_events/{session_id}.jsonl).")
             .WithExample(["log", "repl"])
             .WithExample(["log", "repl", "--last", "50"])
-            .WithExample(["log", "repl", "--event", "command"]);
+            .WithExample(["log", "repl", "--event", "command"])
+            .WithExample(["log", "repl", "--session", "abc123"]);
 
         branch.AddCommand<LogAppCommand>("app")
             .WithDescription("View the application log (.fuseraft/logs/app.log).")
@@ -446,7 +448,9 @@ app.Configure(cfg =>
             .WithDescription("Run knowledge lifecycle policies (dry-run by default; --apply to commit changes).")
             .WithExample(["knowledge", "gc"])
             .WithExample(["knowledge", "gc", "--apply"])
-            .WithExample(["knowledge", "gc", "--apply", "--lifecycle", ".fuseraft/knowledge/lifecycle.yaml"]);
+            .WithExample(["knowledge", "gc", "--apply", "--lifecycle", ".fuseraft/knowledge/lifecycle.yaml"])
+            .WithExample(["knowledge", "gc", "--nuclear"])
+            .WithExample(["knowledge", "gc", "--nuclear", "--apply", "--yes"]);
     });
 
     cfg.AddBranch("eval", branch =>
