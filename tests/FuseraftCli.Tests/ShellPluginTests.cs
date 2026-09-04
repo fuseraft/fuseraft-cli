@@ -31,6 +31,36 @@ public sealed class ShellPluginTests
         Assert.Contains("hello-not-quiet", result);
     }
 
+    // Regression: cmd.exe's /c parser doesn't follow the same quoting convention .NET uses
+    // to encode ArgumentList elements. Passing a command with an embedded quoted, multi-word
+    // argument (e.g. git commit -m "...") must reach the child process intact.
+    [Fact]
+    public async Task RunAsync_CommandWithEmbeddedQuotedMultiWordArg_PreservesQuoting()
+    {
+        using var plugin = new ShellPlugin();
+        var tmpDir = Path.Combine(Path.GetTempPath(), "shellplugin-quoting-" + Guid.NewGuid());
+        Directory.CreateDirectory(tmpDir);
+        try
+        {
+            await plugin.RunAsync("git init -q", tmpDir);
+            await File.WriteAllTextAsync(Path.Combine(tmpDir, "test.txt"), "hello");
+            await plugin.RunAsync("git add .", tmpDir);
+
+            var result = await plugin.RunAsync(
+                "git commit -m \"Initial commit: vendor intake API project files\"", tmpDir);
+
+            Assert.DoesNotContain("pathspec", result);
+            Assert.Contains("Initial commit: vendor intake API project files", result);
+        }
+        finally
+        {
+            // git marks object files read-only on Windows; clear that before deleting.
+            foreach (var file in Directory.EnumerateFiles(tmpDir, "*", SearchOption.AllDirectories))
+                File.SetAttributes(file, FileAttributes.Normal);
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
     // GetSessionTempDir
 
     [Fact]

@@ -834,7 +834,6 @@ internal static class ReplTurn
         var fileChanges        = new List<(char Sigil, string Path)>();
         var fileChangeSeen     = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var toolRounds        = 0;
-        var inToolBatch       = false;
         var turnInputTokens   = 0L;
         var turnOutputTokens  = 0L;
         int? turnFirstInputTokens = null;
@@ -881,17 +880,24 @@ internal static class ReplTurn
                 // The *first* chunk's input count is kept separately: it reflects the exact size
                 // of everything sent to the model as this turn began, before this turn's own
                 // tool-call round trips inflated the request further.
+                // toolRounds is counted here too — one increment per underlying LLM call — rather
+                // than by detecting gaps between function-call chunks. A model that chains many
+                // consecutive tool calls with no text in between (e.g. retrying a failing command)
+                // never produces such a gap, which previously left toolRounds stuck at 1 no matter
+                // how many iterations actually ran, silently defeating the hit_iteration_cap warning.
+                var sawUsageThisChunk = false;
                 foreach (var usage in chunk.Contents.OfType<UsageContent>())
                 {
                     turnInputTokens  += usage.Details.InputTokenCount  ?? 0;
                     turnOutputTokens += usage.Details.OutputTokenCount ?? 0;
                     turnFirstInputTokens ??= (int?)usage.Details.InputTokenCount;
+                    sawUsageThisChunk = true;
                 }
+                if (sawUsageThisChunk) toolRounds++;
 
                 var funcCall = chunk.Contents.OfType<FunctionCallContent>().FirstOrDefault();
                 if (funcCall is not null)
                 {
-                    if (!inToolBatch) { toolRounds++; inToolBatch = true; }
                     toolCallsThisTurn.Add(funcCall.Name);
                     TrackFileChange(funcCall.Name, funcCall.Arguments, fileChanges, fileChangeSeen, ctx.Cwd);
                     if (callIdToName is not null && funcCall.CallId is not null)
@@ -937,7 +943,6 @@ internal static class ReplTurn
 
                 var text = chunk.Text;
                 if (string.IsNullOrEmpty(text)) continue;
-                inToolBatch = false;
                 sb.Append(text);
 
                 // Terminal REPL never prints text live — only the spinner/tool chain is
@@ -994,7 +999,7 @@ internal static class ReplTurn
             sb.Clear(); rawUpdates.Clear(); toolCallsThisTurn.Clear();
             fileChanges.Clear(); fileChangeSeen.Clear();
             capturedResults?.Clear(); callIdToName?.Clear();
-            toolRounds = 0; inToolBatch = false;
+            toolRounds = 0;
             turnInputTokens = 0; turnOutputTokens = 0; turnFirstInputTokens = null;
 
             // Restart spinner for the fresh attempt.

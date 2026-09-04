@@ -135,10 +135,8 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         }
     }
 
-    // Starts a redirected child process. Throws on failure — caller decides how to report it.
-    private static System.Diagnostics.Process StartProcess(string exe, IEnumerable<string> args, string workingDirectory)
-    {
-        var startInfo = new System.Diagnostics.ProcessStartInfo
+    private static System.Diagnostics.ProcessStartInfo BuildBackgroundStartInfo(string exe, string workingDirectory) =>
+        new()
         {
             FileName               = exe,
             WorkingDirectory       = workingDirectory,
@@ -148,12 +146,33 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
             UseShellExecute        = false,
             CreateNoWindow         = true,
         };
-        foreach (var arg in args) startInfo.ArgumentList.Add(arg);
 
+    private static System.Diagnostics.Process LaunchBackgroundProcess(System.Diagnostics.ProcessStartInfo startInfo)
+    {
         var process = new System.Diagnostics.Process { StartInfo = startInfo };
         process.Start();
         process.StandardInput.Close();
         return process;
+    }
+
+    // Starts a redirected child process with each element passed as a separate argument
+    // (bypasses shell quoting). Use for direct executables like powershell.exe. Throws on
+    // failure — caller decides how to report it.
+    private static System.Diagnostics.Process StartProcess(string exe, IEnumerable<string> args, string workingDirectory)
+    {
+        var startInfo = BuildBackgroundStartInfo(exe, workingDirectory);
+        foreach (var arg in args) startInfo.ArgumentList.Add(arg);
+        return LaunchBackgroundProcess(startInfo);
+    }
+
+    // Starts a redirected child process with a raw argument string. Use when exe is itself a
+    // shell (cmd.exe) that must re-parse the string as its own command line — ArgumentList's
+    // re-quoting doesn't match cmd.exe's quoting rules and corrupts embedded quotes.
+    private static System.Diagnostics.Process StartProcess(string exe, string arguments, string workingDirectory)
+    {
+        var startInfo = BuildBackgroundStartInfo(exe, workingDirectory);
+        startInfo.Arguments = arguments;
+        return LaunchBackgroundProcess(startInfo);
     }
 
     // Attaches a job to a started process and begins draining its stdout/stderr into the
@@ -279,8 +298,12 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         if (_lastRunKey == cacheKey)
             return $"[Command already ran this turn — cached output follows]\n\n{_lastRunOutput}";
 
+        // Use the raw-string overload, not ArgumentList: cmd.exe's own /c parser doesn't
+        // follow the same quoting convention .NET uses to encode ArgumentList elements, so
+        // re-quoting the command here corrupts any embedded quotes (e.g. git commit -m "...")
+        // before cmd.exe ever sees them.
         var result = await ProcessHelper.RunAsync(
-            Shell, [ShellFlag, command],
+            Shell, $"{ShellFlag} {command}",
             resolvedDir, timeoutSeconds);
 
         result = await WithWindowsPowerShellFallbackAsync(result, () =>
@@ -516,7 +539,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         var workingDir = resolvedDir ?? Directory.GetCurrentDirectory();
 
         System.Diagnostics.Process process;
-        try { process = StartProcess(Shell, [ShellFlag, command], workingDir); }
+        try { process = StartProcess(Shell, $"{ShellFlag} {command}", workingDir); }
         catch (Exception ex)
         {
             return PluginResult.Error($"Failed to start background process: {ex.Message}");
