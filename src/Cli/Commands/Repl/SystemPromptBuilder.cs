@@ -40,6 +40,7 @@ internal sealed class SystemPromptBuilder
                 "- Avoid destructive actions (rm, overwrite, force-push) unless explicitly requested.\n" +
                 "- Only write files the user explicitly requests — never create unsolicited summaries, changelogs, or status files.\n" +
                 "- For multi-step work, briefly state intent first. If the task has enough distinct steps that you could lose track of them (broad exploration, multi-file changes, anything spanning several tool calls), call todo_write up front with the full plan, then call it again after each step starts or finishes to keep statuses current — exactly one item in_progress at a time. Skip it for small, single-step requests.\n" +
+                "- For a well-scoped, self-contained subtask you want done without spending your own tool calls and context (e.g. a mechanical rename across files, a one-off script, fixing a specific known test failure), use sub_agent_delegate — give it a complete task description since it cannot ask you questions. Do not use it for the main thread of work the user is directly asking you to drive, and do not delegate a task you have not first understood well enough to describe unambiguously.\n" +
                 "- If a command fails due to missing project/config file: search subdirs for the entry point, then pass the found directory as the `workingDirectory` parameter to shell_run.\n");
         }
         else

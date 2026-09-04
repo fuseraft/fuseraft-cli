@@ -333,18 +333,35 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         using var emitter = new EventEmitter(eventsPath);
         emitter.SetSessionId(sessionId);
 
-        // Built before the wrap loop below so sub_agent_explore/sub_agent_locate get the same
-        // ToolResultLoggingFilter/ToolResultOffloadFilter treatment as every other REPL tool,
-        // and so the model can call them directly instead of only via /explore and /locate.
+        // Built before the wrap loop below so sub_agent_explore/sub_agent_locate/sub_agent_delegate
+        // get the same ToolResultLoggingFilter/ToolResultOffloadFilter treatment as every other
+        // REPL tool, and so the model can call them directly instead of only via /explore, /locate,
+        // and /delegate.
         // Live-tested against grok-4.3 with ~58 tools registered (2026-06-30): no empty
         // completions — the historical "54-tool" concern from commit cf897d2 did not reproduce.
         if (explorerTools is not null)
         {
+            // Delegate gets exactly the write-capable tool set the parent REPL agent itself has
+            // (Core, plus Extended if the user opted in) — never more. It never receives the
+            // SubAgent category, so it cannot recursively call sub_agent_delegate.
+            var delegateTools = fsFunctions!.Where(f => CoreFileSystemTools.Contains(f.Name))
+                .Concat(toolsByCategory["Search"])
+                .Concat(shellFunctions!.Where(f => CoreShellTools.Contains(f.Name)))
+                .Concat(gitFunctions!.Where(f => CoreGitTools.Contains(f.Name)))
+                .ToList();
+            if (settings.EnabledPlugins.Contains("Extended"))
+            {
+                delegateTools.AddRange(fsFunctions!.Where(f => !CoreFileSystemTools.Contains(f.Name)));
+                delegateTools.AddRange(shellFunctions!.Where(f => !CoreShellTools.Contains(f.Name)));
+                delegateTools.AddRange(gitFunctions!.Where(f => !CoreGitTools.Contains(f.Name)));
+            }
+
             subAgent = new SubAgentPlugin(
                 ReplFactory.BuildClient(modelConfig, factory, explorerTools.Count > 0),
                 explorerTools,
                 eventEmitter:    emitter,
-                parentAgentName: "repl");
+                parentAgentName: "repl",
+                delegateTools:   delegateTools);
             toolsByCategory["SubAgent"] = PluginRegistry.GetFunctionsFromObject(subAgent).ToList();
         }
 
