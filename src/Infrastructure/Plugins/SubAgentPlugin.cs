@@ -1,6 +1,8 @@
 using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.Text;
 using Microsoft.Extensions.AI;
+using fuseraft.Infrastructure.Agents;
 
 namespace fuseraft.Infrastructure.Plugins;
 
@@ -57,6 +59,17 @@ public sealed class SubAgentPlugin(
     private const int LocateMaxOutputTokens     = 512;
     private const int DelegateMaxToolCalls      = 40;
     private const int DelegateMaxOutputTokens   = 4096;
+
+    // In-turn context trim applied before every inner LLM call inside RunLoopAsync's tool
+    // loop — mirrors AgentFactory's always-on sliding-window cap for regular agents (see
+    // AgentFactory.cs: "O(N² ) tool-result accumulation is never desirable"). Without this,
+    // the loop's own message list grows every round and FunctionInvokingChatClient resends
+    // the entire thing on every iteration; a 40-iteration DelegateAsync run editing several
+    // files can otherwise burn 7-figure cumulative input tokens for what should be a bounded
+    // task. Sized smaller than AgentFactory's defaults (12 pairs / 200k chars) because these
+    // are meant to stay lightweight relative to the parent agent.
+    private const int SubAgentMaxInTurnToolPairs = 10;
+    private const int SubAgentMaxInTurnChars     = 100_000;
 
     // Priority-ordered tool hints for Explore. Only tools actually present in explorerTools
     // are included — prevents instructing the model to call tools that don't exist.
@@ -368,7 +381,22 @@ public sealed class SubAgentPlugin(
             new(ChatRole.User,   userQuery),
         };
 
-        var loopClient = chatClient.AsBuilder()
+        // Trim first (inner), then wrap with the function-invocation loop (outer) — same
+        // layering AgentFactory uses for regular agents: FunctionInvokingChatClient keeps
+        // its own full message list for tool-call bookkeeping, but what actually goes out
+        // over the wire each round is the trimmed view built fresh every call.
+        var trimmedClient = chatClient.AsBuilder()
+            .Use(
+                getResponseFunc: async (msgs, opts, inner, ct) =>
+                {
+                    var trimmed = await AgentContextCompactionFilters.ApplyInTurnFilters(
+                        msgs, SubAgentMaxInTurnToolPairs, SubAgentMaxInTurnChars, ct);
+                    return await inner.GetResponseAsync(trimmed, opts, ct);
+                },
+                getStreamingResponseFunc: StreamWithInTurnTrimAsync)
+            .Build();
+
+        var loopClient = trimmedClient.AsBuilder()
             .UseFunctionInvocation(configure: c => c.MaximumIterationsPerRequest = maxIterations)
             .Build();
 
@@ -453,6 +481,20 @@ public sealed class SubAgentPlugin(
                     payload: new { outcome, error = ex.Message, mode }); } catch { }
             return ($"Sub-agent failed: {ex.Message}", null, null);
         }
+    }
+
+    // Streaming counterpart of the getResponseFunc trim above — same ApplyInTurnFilters call,
+    // just shaped as an async iterator since the streaming delegate can't be a simple lambda.
+    private static async IAsyncEnumerable<ChatResponseUpdate> StreamWithInTurnTrimAsync(
+        IEnumerable<ChatMessage> messages,
+        ChatOptions? options,
+        IChatClient inner,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var trimmed = await AgentContextCompactionFilters.ApplyInTurnFilters(
+            messages, SubAgentMaxInTurnToolPairs, SubAgentMaxInTurnChars, cancellationToken);
+        await foreach (var update in inner.GetStreamingResponseAsync(trimmed, options, cancellationToken))
+            yield return update;
     }
 
     // --- Prompt builders ---
