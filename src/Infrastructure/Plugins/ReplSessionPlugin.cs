@@ -74,7 +74,7 @@ public sealed class ReplSessionPlugin(
         sb.AppendLine();
         var slug = FuseraftPaths.ProjectSlug(cwd);
         sb.AppendLine("Log files:");
-        sb.AppendLine($"  repl_events     {FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalReplEventsLog, slug)}");
+        sb.AppendLine($"  repl_events     {FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalReplEventsLog, sessionId, slug)}");
         sb.AppendLine($"  events          {FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalEventsLog, sessionId, slug)}");
         sb.AppendLine($"  provider_errors {FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalProviderErrors, slug)}");
         sb.AppendLine($"  app             {FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalAppLog, slug)}");
@@ -109,13 +109,17 @@ public sealed class ReplSessionPlugin(
         [Description("Maximum number of events to return (most recent).")] int maxLines = 50)
     {
         var filter = string.IsNullOrWhiteSpace(targetSessionId) ? sessionId : targetSessionId.Trim();
-        var path = FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalReplEventsLog, FuseraftPaths.ProjectSlug(cwd));
-        if (!File.Exists(path))
-            return PluginResult.Info($"No REPL event log at {path}. The log is created on first session activity.");
+        var slug = FuseraftPaths.ProjectSlug(cwd);
+        var path = ResolveEventLogPath(filter, slug);
+
+        if (path is null || !File.Exists(path))
+            return PluginResult.Info(
+                $"No REPL event log found for session '{filter}'. Each session gets its own log file, " +
+                "created on first activity.");
 
         var allLines = await File.ReadAllLinesAsync(path);
         var matching = allLines
-            .Where(l => !string.IsNullOrWhiteSpace(l) && l.Contains($"\"{filter}\""))
+            .Where(l => !string.IsNullOrWhiteSpace(l))
             .TakeLast(Math.Max(1, maxLines))
             .ToList();
 
@@ -123,6 +127,24 @@ public sealed class ReplSessionPlugin(
             return PluginResult.Info($"No events found for session '{filter}' in {path}.");
 
         return string.Join("\n", matching);
+    }
+
+    /// <summary>
+    /// Resolves the per-session event log file for <paramref name="targetSessionId"/>: an exact
+    /// match first, then a prefix match against the other session log files in the project's
+    /// repl_events/ directory (mirrors "fuseraft log repl --session &lt;prefix&gt;").
+    /// </summary>
+    private static string? ResolveEventLogPath(string targetSessionId, string slug)
+    {
+        var exact = FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalReplEventsLog, targetSessionId, slug);
+        if (File.Exists(exact)) return exact;
+
+        var dir = FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalReplEventsDir, slug);
+        if (!Directory.Exists(dir)) return null;
+
+        return Directory.GetFiles(dir, "*.jsonl")
+            .FirstOrDefault(f => Path.GetFileNameWithoutExtension(f)
+                .StartsWith(targetSessionId, StringComparison.OrdinalIgnoreCase));
     }
 
     [Description("Read a diagnostic log file. Valid names: repl_events, events, provider_errors, app.")]
@@ -133,7 +155,7 @@ public sealed class ReplSessionPlugin(
         var slug = FuseraftPaths.ProjectSlug(cwd);
         var path = logName.ToLowerInvariant() switch
         {
-            "repl_events"     => FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalReplEventsLog, slug),
+            "repl_events"     => FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalReplEventsLog, sessionId, slug),
             "events"          => FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalEventsLog, sessionId, slug),
             "provider_errors" => FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalProviderErrors, slug),
             "app"             => FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalAppLog, slug),

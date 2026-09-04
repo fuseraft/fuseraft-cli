@@ -54,6 +54,11 @@ internal static class ReplTurn
         @"|\bdoes\s+\S.*\bexist\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    // Matches a response that ends by asking the user something, so the todo-completion
+    // correction (below) doesn't force the agent to barrel past a legitimate "should I
+    // proceed?" pause just because items are still open.
+    private static readonly Regex TrailingQuestionPattern = new(@"\?\s*$", RegexOptions.Compiled);
+
     // Returns options forcing at least one tool call for this request when the input looks like
     // an identify/locate-style question and tools are actually available — never mutates the
     // shared ctx.ChatOptions instance, so the override applies to this turn only.
@@ -502,6 +507,9 @@ internal static class ReplTurn
         await TryApplyCriticReviewAsync(
             ctx, input, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn, cancellationToken);
 
+        await TryApplyTodoCompletionCorrectionAsync(
+            ctx, responseText, isStepRequest, capturePlan, isCorrectionTurn, cancellationToken);
+
         var postEst = ctx.EstimateTokens();
         if (ctx.PrevTurnTokenEstimate > 0)
             ctx.TurnTokenDeltas.Add(postEst - ctx.PrevTurnTokenEstimate);
@@ -729,6 +737,54 @@ internal static class ReplTurn
                     isStepRequest: false, capturePlan: false, activeStep: null,
                     cancellationToken, isCorrectionTurn: true);
             }
+        }
+    }
+
+    // Free-form turns: if the self-directed todo list (see TodoPlugin) still has pending or
+    // in_progress items when the agent stops calling tools and returns final text, nudge it to
+    // keep going instead of silently abandoning the rest of the checklist — the system prompt
+    // asks the model to track completeness itself, but nothing previously enforced it, unlike
+    // /execute's per-step VerifyStepAsync. Skipped when the response ends in a question — the
+    // agent may legitimately be waiting on the user before it can continue. On the correction
+    // turn itself, only warn, so a task the agent genuinely can't finish doesn't loop forever.
+    private static async Task TryApplyTodoCompletionCorrectionAsync(
+        ReplSessionContext ctx,
+        string responseText,
+        bool isStepRequest,
+        bool capturePlan,
+        bool isCorrectionTurn,
+        CancellationToken cancellationToken)
+    {
+        if (isStepRequest || capturePlan || responseText.Length == 0 || ctx.Todo is null) return;
+        if (TrailingQuestionPattern.IsMatch(responseText.TrimEnd())) return;
+
+        var incomplete = ctx.Todo.Snapshot()
+            .Where(i => !i.Status.Equals("completed", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (incomplete.Count == 0) return;
+
+        if (!isCorrectionTurn)
+        {
+            await ctx.Emitter.EmitAsync(EventTypes.CorrectionInjected, turn: ctx.TurnIndex,
+                payload: new { reason = "todo_incomplete", remaining = incomplete.Count });
+            if (!ctx.JsonMode)
+                AnsiConsole.MarkupLine(
+                    $"[dim]  ↺ {incomplete.Count} todo item{(incomplete.Count == 1 ? "" : "s")} still open — injecting correction[/]");
+            var remainingList = string.Join("\n", incomplete.Select(i => $"- [{i.Status}] {i.Content}"));
+            var correctionMsg =
+                $"Your todo list still has {incomplete.Count} incomplete item(s):\n{remainingList}\n\n" +
+                "Continue working through them now. If an item genuinely no longer applies, call " +
+                "todo_write to update its status and say why in one sentence — do not just stop with it left open.";
+            await ExecuteAsync(
+                ctx, correctionMsg,
+                isStepRequest: false, capturePlan: false, activeStep: null,
+                cancellationToken, isCorrectionTurn: true);
+        }
+        else
+        {
+            if (!ctx.JsonMode)
+                AnsiConsole.MarkupLine(
+                    $"[yellow]  ⚠ {incomplete.Count} todo item(s) still open after correction — task may be incomplete.[/]");
         }
     }
 

@@ -101,6 +101,9 @@ public sealed class ModelsCommand : AsyncCommand
                 AnsiConsole.MarkupLine($"  {Markup.Escape(m)}");
         }
 
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[dim]Run[/] [bold]fuseraft repl --model <id>[/] [dim]to try one, or add[/] [bold]--save[/] [dim]to make it the default.[/]");
+
         return 0;
     }
 }

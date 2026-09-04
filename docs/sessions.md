@@ -101,21 +101,23 @@ REPL agents can inspect their own session and diagnostic logs using the built-in
 |------|----------------|
 | `repl_session_current` | Session ID, model, start time, working directory, snapshot path, and all log file locations |
 | `repl_session_list` | All saved sessions newest-first — the active session is marked `◄ current` |
-| `repl_session_read_event_log` | Entries from `repl_events.jsonl` filtered to a session (current by default) |
+| `repl_session_read_event_log` | Entries from a session's `repl_events/{session_id}.jsonl` (current session by default; an ID or prefix reads another session's log) |
 | `repl_session_read_log` | Tail of any diagnostic log: `repl_events`, `events`, `provider_errors`, or `app` |
 | `get_context_status` | `estimated_tokens`, `budget`, `pct_used`, `tokens_remaining`, and current `turn` index |
 | `compact_context` | Compact history into a summary; optional `focus` hint steers the summary |
 
-**Log files (global, keyed by `{project_slug}` and — for `events` — `{session_id}`):**
+**Log files (global, keyed by `{project_slug}` and — for `repl_events`/`events` — `{session_id}`):**
 
 | Log name | Path | Contents |
 |----------|------|----------|
-| `repl_events` | `~/.fuseraft/logs/{project_slug}/repl_events.jsonl` | REPL lifecycle events tagged with session ID and turn index |
+| `repl_events` | `~/.fuseraft/logs/{project_slug}/repl_events/{session_id}.jsonl` | REPL lifecycle events tagged with session ID and turn index — one file per session, so no single file grows unbounded across sessions |
 | `events` | `~/.fuseraft/sessions/{project_slug}/{session_id}/events.jsonl` | Orchestration events from `fuseraft run` sessions |
 | `provider_errors` | `~/.fuseraft/logs/{project_slug}/provider_errors.jsonl` | Provider API errors and retry attempts |
 | `app` | `~/.fuseraft/logs/{project_slug}/app.log` | Application diagnostic log |
 
-**REPL event types** emitted to `repl_events.jsonl`:
+`fuseraft log repl` reads every session's log by default; pass `--session <id or prefix>` to view just one.
+
+**REPL event types** emitted to `repl_events/{session_id}.jsonl`:
 
 | Event type | When emitted |
 |------------|-------------|

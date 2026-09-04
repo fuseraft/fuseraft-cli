@@ -281,6 +281,7 @@ fuseraft repl [options]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-m, --model <id>` | see below | Model ID to use (e.g. `gpt-4o`, `claude-sonnet-4-6`). Overrides `~/.fuseraft/config` when set. |
+| `--save` | off | Persist `--model` as the new default in `~/.fuseraft/config`. No effect without `--model`. |
 | `-s, --system <prompt>` | — | System prompt. Defaults to a coding/research prompt when tools are enabled. |
 | `--resume <id>` | — | Resume a previous REPL session by its session ID. Use `/sessions` inside the REPL to list resumable sessions. |
 | `--no-banner` | off | Skip the ASCII banner. |
@@ -340,6 +341,8 @@ See [Getting Started — Set your API key](getting-started.md#set-your-api-key) 
 | `MISTRAL_API_KEY` | `mistral-small-latest` |
 | `DEEPSEEK_API_KEY` | `deepseek-chat` |
 
+`--model` alone only overrides the model for that session. Add `--save` to also write it to `~/.fuseraft/config` as the new default (e.g. `fuseraft repl --model claude-sonnet-4-6 --save`).
+
 **Built-in tools**
 
 Unless `--no-tools` is passed, the REPL gives the model access to a curated core set — the
@@ -397,7 +400,7 @@ Use `/tools` to see the full list at runtime.
 | `/conversation` | List all turns in memory with 1-based turn numbers and a one-line preview of each user message and assistant response. Use this to find the right turn number before running `/rewind`. |
 | `/rewind <n>` | Keep turns 1…n and discard all later turns. Turn count is the number of User messages currently in memory. Clamps safely — passing a number larger than the current turn count is a no-op. |
 | `/rewind -<n>` | Step back n turns from the current position (relative rewind). `/rewind -1` drops the last turn; `/rewind -99` clamps to 0 and clears all turns. |
-| `/clear` | Clear conversation history (system prompt is kept) |
+| `/clear` | Clear conversation history (system prompt is kept). Also clears the terminal and redraws the startup banner, unless `--no-banner` was passed at launch (in which case it just prints a confirmation line). |
 | `/compact` | Ask the model to summarise the session into a handoff document, then replace history with that summary. The system prompt and tools/skills catalog are kept; everything else is discarded. Facts the assistant stated without a backing tool call are tombstoned as `[UNVERIFIED ASSUMPTION: ...]` rather than carried forward as established facts. Use this when context is filling up but you want to continue in the same session. |
 | `/compact <focus>` | Same as `/compact`, but passes a focus hint to the model so the summary is tailored toward the next task (e.g. `/compact fix the auth bug next`) |
 | `/history` | Show a condensed view of the conversation (role + preview of each message) |
@@ -816,7 +819,7 @@ Use `/context` before compacting to see how full the window is. `/compact` is ad
 
 **Event log**
 
-Every session appends structured JSONL events to `~/.fuseraft/logs/{project_slug}/repl_events.jsonl` (created automatically). Each record is tagged with a UTC timestamp, session ID, and turn index. The full set of event types:
+Every session appends structured JSONL events to its own `~/.fuseraft/logs/{project_slug}/repl_events/{session_id}.jsonl` (created automatically) — one file per session, so no single log grows unbounded across sessions. Each record is tagged with a UTC timestamp, session ID, and turn index. `fuseraft log repl` reads every session's log by default; pass `--session <id or prefix>` to view just one. The full set of event types:
 
 | Event type | When emitted |
 |------------|-------------|
@@ -853,6 +856,9 @@ fuseraft repl --model grok-4-1-fast-reasoning --no-tools
 
 # Set a system prompt at startup
 fuseraft repl --model grok-code-fast-1 --system "You are a Rust expert."
+
+# Switch models and make it the new default
+fuseraft repl --model claude-sonnet-4-6 --save
 ```
 
 Press Ctrl+C during a streaming response to cancel that request and return to the prompt. Press Ctrl+C at the prompt or type `/exit` to end the session. The readline layer intercepts Ctrl+C at the prompt so the process exits cleanly rather than abruptly.
@@ -1435,10 +1441,12 @@ fuseraft knowledge gc [options]
 | `--apply` | off | Commit lifecycle changes to disk. Without this flag the command reports what would change without touching any files. |
 | `-l, --lifecycle <path>` | `.fuseraft/knowledge/lifecycle.yaml` | Path to the lifecycle policy file. |
 | `--graph <path>` | `~/.fuseraft/state/{project_slug}/repository.graph` | Override the repository graph path. |
+| `--nuclear` | off | Extreme mode — also clears every reproducible global file (logs, memories, sessions, run state, crash dumps, scratchpad) for **every project**, not just this one. Requires `--apply`; always prompts for an extra confirmation unless `--yes` is also passed. |
+| `-y, --yes` | off | Skip the extra confirmation prompt required by `--nuclear`. |
 
 **`.fuseraftignore` integration**
 
-When `.fuseraft/.fuseraftignore` is present and `--apply` is set, `fuseraft knowledge gc` also deletes ephemeral state and log files listed in the ignore file (e.g. `knowledge_findings.json` under `~/.fuseraft/state/{project_slug}/`, and `app.log`/`repl_events.jsonl` under `~/.fuseraft/logs/{project_slug}/`). Files produced by gc itself — such as `provenance.archive.json` — are never deleted.
+When `.fuseraft/.fuseraftignore` is present and `--apply` is set, `fuseraft knowledge gc` also deletes ephemeral state and log files listed in the ignore file (e.g. `knowledge_findings.json` under `~/.fuseraft/state/{project_slug}/`, and `app.log`/`repl_events/*.jsonl` under `~/.fuseraft/logs/{project_slug}/`, scanned recursively). Files produced by gc itself — such as `provenance.archive.json` — are never deleted.
 
 **Policy fields** (in `lifecycle.yaml`)
 
@@ -1461,9 +1469,24 @@ fuseraft knowledge gc --apply
 
 # Use a custom lifecycle config
 fuseraft knowledge gc --apply --lifecycle custom/lifecycle.yaml
+
+# Preview the full global reset (every project's logs/memories/sessions/etc.)
+fuseraft knowledge gc --nuclear
+
+# Actually clear it, skipping the confirmation prompt
+fuseraft knowledge gc --nuclear --apply --yes
 ```
 
 Archived ADRs are moved to `.fuseraft/knowledge/decisions/archive/` and remain queryable via `decision_search`. Archived provenance records are appended to `~/.fuseraft/state/{project_slug}/provenance.archive.json`.
+
+**`--nuclear`**: the big-red-button mode. In addition to the policies above, it wipes the global,
+machine-generated subtrees under `~/.fuseraft/` — `logs/`, `memory/`, `knowledge/` (repository memory
+graphs), `sessions/`, `repl-sessions/`, `snapshots/`, `state/`, `crashdump/`, `scratchpad/`, and
+`skill-curation.jsonl` — across **every project**, not just the one you're standing in. It never
+touches `config/`, `.key`, `schedule/`, or `skills/`, and never touches a project's own `.fuseraft/`
+directory. It always prints a per-category file-count/size report first; add `--apply` to actually
+delete, which then prompts for a second confirmation (bypass with `--yes`) since the blast radius spans
+every project on the machine.
 
 ---
 
@@ -2151,9 +2174,9 @@ fuseraft log repl [options]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-n, --last <N>` | all | Show only the last N entries. |
-| `--session <id>` | — | Filter by session ID (prefix match). |
+| `--session <id>` | — | Show only the matching session's log (ID or unique prefix), instead of every session. |
 | `--event <type>` | — | Filter by event type (e.g. `command`, `skill_curation_complete`, `assistant_response`). |
-| `--path <path>` | `~/.fuseraft/logs/{project_slug}/repl_events.jsonl` | Override the log file path. |
+| `--path <path>` | all session logs under `~/.fuseraft/logs/{project_slug}/repl_events/` | Override the log file path. |
 
 **Examples**
 
@@ -2212,6 +2235,8 @@ fuseraft models
 Reads `~/.fuseraft/config` to resolve the provider endpoint and API key, then calls the provider's models listing endpoint (`GET {endpoint}/models` for OpenAI-compatible providers; `GET {endpoint}/api/tags` for Ollama). The currently configured model is highlighted.
 
 If `~/.fuseraft/config` is missing or incomplete, the command runs the same interactive setup wizard as `fuseraft repl` — prompting for a provider URL and API key, then a model picked from the live list — and saves the result before fetching the model list.
+
+The output ends with a hint pointing at `fuseraft repl --model <id>` (and `--save` to make it the default) — see [`fuseraft repl`](#fuseraft-repl) above.
 
 **Example**
 

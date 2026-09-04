@@ -22,12 +22,16 @@ public static class FuseraftSkillsSources
     /// Priority-ordered directories both the REPL and orchestration scan for skills
     /// (project-native → project cross-client → user-native → user cross-client → built-in).
     /// Non-existent directories are skipped by <see cref="AgentFileSkillsSource"/> itself.
+    /// Deduplicated by resolved path — when <c>cwd</c> is the home directory (e.g. running
+    /// <c>fuseraft repl</c> from <c>~</c>), the project and user <c>.agents/skills</c> entries
+    /// are the same directory on disk, and scanning it twice would make
+    /// <see cref="AgentFileSkillsSource"/> report every skill in it as a duplicate.
     /// </summary>
     public static string[] GetDefaultSearchDirs()
     {
         var cwd  = Directory.GetCurrentDirectory();
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return
+        string[] dirs =
         [
             Path.Combine(cwd,  ".fuseraft", "skills"),
             Path.Combine(cwd,  ".agents",   "skills"),
@@ -35,6 +39,8 @@ public static class FuseraftSkillsSources
             Path.Combine(home, ".agents",   "skills"),
             Path.Combine(AppContext.BaseDirectory, "skills"),
         ];
+
+        return [.. dirs.Select(Path.GetFullPath).Distinct()];
     }
 
     /// <summary>

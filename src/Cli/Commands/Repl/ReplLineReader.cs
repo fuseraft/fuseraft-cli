@@ -26,7 +26,7 @@ internal sealed class ReplLineReader
     private static readonly string[] SlashCommands =
     [
         "/adversarial", "/assist", "/clear", "/compact", "/context",
-        "/conversation", "/events", "/execute", "/exit", "/explore",
+        "/conversation", "/delegate", "/events", "/execute", "/exit", "/explore",
         "/fork", "/help", "/history", "/last", "/locate",
         "/max-tokens", "/memory", "/model", "/models", "/paste", "/plan",
         "/provider", "/reasoning", "/recover", "/resume", "/retry", "/rewind",

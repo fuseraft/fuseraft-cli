@@ -98,6 +98,11 @@ internal sealed class ReplSessionContext
     // JSON bridge mode (set when running inside VS Code webview panel)
     public bool JsonMode;
 
+    // Startup display options, captured once so /clear can redraw the same header
+    // (see MessageRenderer.RenderReplHeader) it printed at launch.
+    public bool NoBanner;
+    public int  MemoryCount;
+
     // Safe mode
     public bool             SafeMode;
     public HashSet<string>? PreSafeDisabled;

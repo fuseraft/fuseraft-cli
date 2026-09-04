@@ -5,7 +5,7 @@ using Microsoft.Extensions.AI;
 namespace fuseraft.Infrastructure.Plugins;
 
 /// <summary>
-/// Provides two lightweight sub-agent tools that any pipeline agent can delegate work to:
+/// Provides lightweight sub-agent tools that any pipeline agent can delegate work to:
 ///
 /// <list type="bullet">
 ///   <item><see cref="ExploreAsync"/> — multi-hop exploration loop for broad codebase
@@ -14,10 +14,14 @@ namespace fuseraft.Infrastructure.Plugins;
 ///   <item><see cref="LocateAsync"/> — tight 5-iteration loop for single-target symbol,
 ///     type, or file lookups. Returns a <c>path:line</c> result without filling the
 ///     caller's context window.</item>
+///   <item><see cref="DelegateAsync"/> — write-capable loop for a self-contained coding
+///     subtask (edit files, run shell commands, use git). Unlike Explore/Locate, this
+///     sub-agent is only constructed with <c>delegateTools</c> — it never receives the
+///     SubAgent tool set itself, so it cannot recursively spawn further delegates.</item>
 /// </list>
 ///
 /// <para>
-/// Both loops use <c>FunctionInvokingChatClient</c> with an enforced
+/// All loops use <c>FunctionInvokingChatClient</c> with an enforced
 /// <c>MaximumIterationsPerRequest</c> cap. The parent agent's <see cref="CancellationToken"/>
 /// is linked to a per-call timeout so interrupts propagate immediately.
 /// </para>
@@ -42,13 +46,17 @@ public sealed class SubAgentPlugin(
     EventEmitter? eventEmitter = null,
     string? parentAgentName = null,
     int maxToolCalls = 0,
-    string? workspaceRoot = null)
+    string? workspaceRoot = null,
+    IReadOnlyList<AIFunction>? delegateTools = null)
 {
-    private const double ExploreTimeoutMinutes = 8.0;
-    private const double LocateTimeoutMinutes  = 2.0;
-    private const int DefaultMaxToolCalls      = 20;
-    private const int LocateMaxToolCalls       = 5;
-    private const int LocateMaxOutputTokens    = 512;
+    private const double ExploreTimeoutMinutes  = 8.0;
+    private const double LocateTimeoutMinutes   = 2.0;
+    private const double DelegateTimeoutMinutes = 15.0;
+    private const int DefaultMaxToolCalls       = 20;
+    private const int LocateMaxToolCalls        = 5;
+    private const int LocateMaxOutputTokens     = 512;
+    private const int DelegateMaxToolCalls      = 40;
+    private const int DelegateMaxOutputTokens   = 4096;
 
     // Priority-ordered tool hints for Explore. Only tools actually present in explorerTools
     // are included — prevents instructing the model to call tools that don't exist.
@@ -79,6 +87,16 @@ public sealed class SubAgentPlugin(
             ? WrapWithNotifiers(explorerTools, eventEmitter, parentAgentName)
             : explorerTools;
 
+    // Write-capable tool set for DelegateAsync. Empty (not null) when the caller didn't
+    // configure one, so DelegateAsync can short-circuit with a clear message instead of
+    // running a loop with zero tools.
+    private readonly IReadOnlyList<AIFunction> _delegateTools =
+        delegateTools is null or { Count: 0 }
+            ? []
+            : eventEmitter is not null
+                ? WrapWithNotifiers(delegateTools, eventEmitter, parentAgentName)
+                : delegateTools;
+
     private readonly int _effectiveMaxToolCalls =
         maxToolCalls > 0 ? maxToolCalls : DefaultMaxToolCalls;
 
@@ -96,6 +114,7 @@ public sealed class SubAgentPlugin(
         CancellationToken cancellationToken = default)
     {
         var (text, _, _) = await RunLoopAsync(
+            _tools,
             BuildExplorePrompt(_tools, _effectiveMaxToolCalls, format, _workspaceRoot),
             query,
             _effectiveMaxToolCalls,
@@ -113,12 +132,34 @@ public sealed class SubAgentPlugin(
         CancellationToken cancellationToken = default)
     {
         var (text, _, _) = await RunLoopAsync(
+            _tools,
             BuildLocatePrompt(_tools, _workspaceRoot),
             $"Locate: {target}",
             LocateMaxToolCalls,
             LocateMaxOutputTokens,
             "locate",
             LocateTimeoutMinutes,
+            cancellationToken);
+        return text;
+    }
+
+    [Description("Delegate a self-contained coding subtask to a sub-agent with read/write file, shell, and git tools. Use for well-scoped work you want done without spending your own tool calls and context — e.g. 'add a null check to X and a regression test', 'rename Y across the codebase', 'run the test suite and fix any failures in Z'. The sub-agent works autonomously to completion and reports back a summary; it cannot ask clarifying questions mid-task, so give it a complete, unambiguous task description.")]
+    public async Task<string> DelegateAsync(
+        [Description("Complete, self-contained task description. Include file paths, requirements, and acceptance criteria — enough context that the sub-agent never needs to ask a question.")]
+        string task,
+        CancellationToken cancellationToken = default)
+    {
+        if (_delegateTools.Count == 0)
+            return "[SubAgent] Delegate not available — no write-capable tools were configured for this session (e.g. started with --no-tools).";
+
+        var (text, _, _) = await RunLoopAsync(
+            _delegateTools,
+            BuildDelegatePrompt(_delegateTools, _workspaceRoot),
+            task,
+            DelegateMaxToolCalls,
+            DelegateMaxOutputTokens,
+            "delegate",
+            DelegateTimeoutMinutes,
             cancellationToken);
         return text;
     }
@@ -243,7 +284,7 @@ public sealed class SubAgentPlugin(
     // Streaming variants — not registered as model tools (no [Description]).
     // onChunk is called for each text token as the final answer arrives. Unlike the
     // model-tool variants above, these return the real token usage alongside the result
-    // text so callers (REPL /explore, /locate) can roll it into session cost tracking.
+    // text so callers (REPL /explore, /locate, /delegate) can roll it into session cost tracking.
 
     public Task<(string Result, int? InputTokens, int? OutputTokens)> ExploreStreamingAsync(
         string query,
@@ -251,6 +292,7 @@ public sealed class SubAgentPlugin(
         string format = "prose",
         CancellationToken cancellationToken = default)
         => RunLoopAsync(
+            _tools,
             BuildExplorePrompt(_tools, _effectiveMaxToolCalls, format, _workspaceRoot),
             query,
             _effectiveMaxToolCalls,
@@ -265,6 +307,7 @@ public sealed class SubAgentPlugin(
         Func<string, Task> onChunk,
         CancellationToken cancellationToken = default)
         => RunLoopAsync(
+            _tools,
             BuildLocatePrompt(_tools, _workspaceRoot),
             $"Locate: {target}",
             LocateMaxToolCalls,
@@ -274,9 +317,29 @@ public sealed class SubAgentPlugin(
             cancellationToken,
             onChunk);
 
+    public Task<(string Result, int? InputTokens, int? OutputTokens)> DelegateStreamingAsync(
+        string task,
+        Func<string, Task> onChunk,
+        CancellationToken cancellationToken = default)
+        => _delegateTools.Count == 0
+            ? Task.FromResult<(string, int?, int?)>((
+                "[SubAgent] Delegate not available — no write-capable tools were configured for this session (e.g. started with --no-tools).",
+                null, null))
+            : RunLoopAsync(
+                _delegateTools,
+                BuildDelegatePrompt(_delegateTools, _workspaceRoot),
+                task,
+                DelegateMaxToolCalls,
+                DelegateMaxOutputTokens,
+                "delegate",
+                DelegateTimeoutMinutes,
+                cancellationToken,
+                onChunk);
+
     // --- Core loop (shared by both tools) ---
 
     private async Task<(string Text, int? InputTokens, int? OutputTokens)> RunLoopAsync(
+        IReadOnlyList<AIFunction> tools,
         string systemPrompt,
         string userQuery,
         int maxIterations,
@@ -311,7 +374,7 @@ public sealed class SubAgentPlugin(
 
         var options = new ChatOptions
         {
-            Tools           = _tools.Cast<AITool>().ToList(),
+            Tools           = tools.Cast<AITool>().ToList(),
             ToolMode        = ChatToolMode.Auto,
             MaxOutputTokens = outputTokens,
         };
@@ -458,6 +521,34 @@ public sealed class SubAgentPlugin(
               {cwd}/relative/path/to/file.ext:{lineToken} — brief description
             If not found after exhausting available tools, reply: "Not found."
             Do NOT implement, edit, or delete anything.
+            """;
+    }
+
+    private static string BuildDelegatePrompt(IReadOnlyList<AIFunction> tools, string cwd)
+    {
+        var toolNames = tools.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var toolList  = tools.Count > 0
+            ? string.Join(", ", tools.Select(t => t.Name))
+            : "(none configured)";
+
+        return $"""
+            You are a task-delegate sub-agent. You were handed a self-contained subtask by a
+            parent agent that wants it completed without spending its own tool calls or context.
+            Working directory: {cwd}
+            Available tools: {toolList}
+
+            Work autonomously to completion — you cannot ask the parent a clarifying question, so
+            make the most reasonable interpretation of any ambiguity and proceed. Read relevant
+            files before editing them. After writing or patching a file, re-read it to confirm the
+            change is correct. If the task implies verification (build, tests, a specific command),
+            run it and fix failures before finishing.
+            Skip .fuseraft/ — it is fuseraft-cli runtime metadata, not application code.
+            Avoid destructive or irreversible actions (force-push, deleting files/branches, `rm -rf`)
+            and do not commit or push unless the task explicitly asks for it.
+            {(toolNames.Contains("git_add") || toolNames.Contains("git_commit") ? "" : "You do not have git write access — leave any commits to the parent agent.\n")}
+            When finished, reply with a concise summary: files changed (with paths), commands run
+            and their outcome, and any follow-up the parent should know about. Do not paste full
+            file contents or command output — summarize.
             """;
     }
 

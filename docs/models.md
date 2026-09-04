@@ -113,7 +113,7 @@ For any model not matching the table, specify `Provider`, `Endpoint`, and `ApiKe
 }
 ```
 
-Set this file via `fuseraft repl` or `fuseraft models` (the setup wizard runs automatically on first use) or edit it directly. Run `fuseraft models` to see all models available from the configured provider, or use `/models` inside a REPL session for the same list.
+Set this file via `fuseraft repl` or `fuseraft models` (the setup wizard runs automatically on first use), edit it directly, or change just the default model with `fuseraft repl --model <id> --save`. Run `fuseraft models` to see all models available from the configured provider, or use `/models` inside a REPL session for the same list.
 
 ### `replContextBudget` — REPL working-context override
 

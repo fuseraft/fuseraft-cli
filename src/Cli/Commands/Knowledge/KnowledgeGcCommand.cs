@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using fuseraft.Cli.Commands.Context;
 using fuseraft.Core;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
@@ -22,6 +23,18 @@ public sealed class KnowledgeGcSettings : CommandSettings
     [CommandOption("--graph <path>")]
     [Description("Override the repository graph path (default: .fuseraft/state/repository.graph).")]
     public string? GraphPath { get; init; }
+
+    [CommandOption("--nuclear")]
+    [Description("Extreme mode: also clears ALL global fuseraft state — logs, memories, session " +
+                 "checkpoints/snapshots, orchestration run state, crash dumps, scratchpad — for every " +
+                 "project, not just this one. Provider config, API keys, schedule definitions, and " +
+                 "installed skills are never touched. Requires --apply to actually delete; prompts for " +
+                 "an extra confirmation unless --yes is also passed.")]
+    public bool Nuclear { get; init; }
+
+    [CommandOption("-y|--yes")]
+    [Description("Skip the extra confirmation prompt required by --nuclear.")]
+    public bool Yes { get; init; }
 }
 
 public sealed class KnowledgeGcCommand : AsyncCommand<KnowledgeGcSettings>
@@ -81,7 +94,160 @@ public sealed class KnowledgeGcCommand : AsyncCommand<KnowledgeGcSettings>
                     $"[dim]Deleted {deleted.Count} ephemeral state/log file(s) per .fuseraftignore.[/]");
         }
 
-        return 0;
+        return settings.Nuclear ? await RunNuclearAsync(settings) : 0;
+    }
+
+    private sealed record NuclearCategory(string Name, string Description, string[] Dirs, string[] Files);
+
+    private static List<NuclearCategory> NuclearCategories() =>
+    [
+        new("logs",
+            "REPL/provider-error/app logs and context snapshots, for every project",
+            [FuseraftPaths.GlobalLogsRoot], []),
+        new("memories",
+            "Persistent REPL/agent memories and the per-project repository memory graph",
+            [FuseraftPaths.GlobalMemoryRoot, FuseraftPaths.GlobalKnowledgeRoot], []),
+        new("sessions",
+            "Session checkpoints, REPL session snapshots, and postmortem snapshots, for every project",
+            [FuseraftPaths.GlobalSessions, FuseraftPaths.GlobalReplSessions, FuseraftPaths.GlobalSnapshotsRoot], []),
+        new("run state",
+            "Orchestration run state — evidence graphs, change logs, provenance, repository graphs",
+            [FuseraftPaths.GlobalStateRoot], []),
+        new("crash dumps",
+            "Crash dump JSON files",
+            [FuseraftPaths.GlobalCrashDumps], []),
+        new("scratchpad",
+            "Global agent scratchpad files",
+            [FuseraftPaths.GlobalScratchpad], []),
+        new("skill curation log",
+            "Skill auto-curation history",
+            [], [FuseraftPaths.GlobalSkillCurationLog]),
+    ];
+
+    private static (int Files, long Bytes) NuclearStat(NuclearCategory c)
+    {
+        int files = 0; long bytes = 0;
+
+        foreach (var dir in c.Dirs)
+        {
+            if (!Directory.Exists(dir)) continue;
+            foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+            {
+                files++;
+                try { bytes += new FileInfo(f).Length; } catch { /* file vanished mid-scan */ }
+            }
+        }
+
+        foreach (var file in c.Files)
+        {
+            if (!File.Exists(file)) continue;
+            files++;
+            try { bytes += new FileInfo(file).Length; } catch { /* file vanished mid-scan */ }
+        }
+
+        return (files, bytes);
+    }
+
+    /// <summary>
+    /// The extreme end of <c>--nuclear</c>: clears every reproducible, machine-generated file
+    /// under the global <c>~/.fuseraft/</c> home across every project. Provider config, the key
+    /// file, schedule definitions, and installed skills are never touched — those are settings
+    /// and content, not history. A project's own <c>.fuseraft/</c> (the current working
+    /// directory) is untouched too; that directory is user-authored and git-tracked.
+    /// </summary>
+    private static async Task<int> RunNuclearAsync(KnowledgeGcSettings settings)
+    {
+        var categories = NuclearCategories();
+        var stats      = categories.ToDictionary(c => c.Name, NuclearStat);
+
+        var totalFiles = stats.Values.Sum(s => s.Files);
+        var totalBytes = stats.Values.Sum(s => s.Bytes);
+
+        AnsiConsole.WriteLine();
+        if (totalFiles == 0)
+        {
+            AnsiConsole.MarkupLine("[green]--nuclear: nothing to clear — the global fuseraft store is already empty.[/]");
+            return 0;
+        }
+
+        var table = new Table()
+            .Border(TableBorder.Rounded)
+            .AddColumn("[bold]Category[/]")
+            .AddColumn("[bold]Files[/]").AddColumn("[bold]Size[/]")
+            .AddColumn("[bold]Description[/]");
+
+        foreach (var c in categories)
+        {
+            var (files, bytes) = stats[c.Name];
+            if (files == 0) continue;
+            table.AddRow(
+                $"[bold]{Markup.Escape(c.Name)}[/]",
+                files.ToString("N0"),
+                ContextHelpers.FormatSize(bytes),
+                $"[dim]{Markup.Escape(c.Description)}[/]");
+        }
+
+        AnsiConsole.MarkupLine("[bold red]--nuclear[/] — clears reproducible global state for [bold]every project[/]:");
+        AnsiConsole.Write(table);
+        AnsiConsole.MarkupLine($"[dim]{totalFiles:N0} file(s), {ContextHelpers.FormatSize(totalBytes)} total.[/]");
+        AnsiConsole.MarkupLine(
+            "[dim]Never touched: provider config, API keys, schedule definitions, installed skills, " +
+            "and this project's own .fuseraft/ directory.[/]");
+
+        if (!settings.Apply)
+        {
+            AnsiConsole.MarkupLine("[yellow]Nuclear dry-run — pass --apply to actually delete this.[/]");
+            return 0;
+        }
+
+        if (!settings.Yes)
+        {
+            if (Console.IsInputRedirected)
+            {
+                AnsiConsole.MarkupLine("[red]✗ --nuclear --apply refused in a non-interactive session without --yes.[/]");
+                return 1;
+            }
+
+            AnsiConsole.WriteLine();
+            if (!AnsiConsole.Confirm(
+                    "[bold red]Delete all of this now, for every project on this machine? This cannot be undone.[/]", false))
+            {
+                AnsiConsole.MarkupLine("[dim]Nuclear cleanup aborted. Nothing else was deleted.[/]");
+                return 0;
+            }
+        }
+
+        int deletedFiles = 0;
+        long reclaimedBytes = 0;
+        var errors = new List<string>();
+
+        foreach (var c in categories)
+        {
+            foreach (var dir in c.Dirs)
+            {
+                if (!Directory.Exists(dir)) continue;
+                var (files, bytes) = NuclearStat(new NuclearCategory(c.Name, c.Description, [dir], []));
+                try   { Directory.Delete(dir, recursive: true); deletedFiles += files; reclaimedBytes += bytes; }
+                catch (Exception ex) { errors.Add($"{dir}: {ex.Message}"); }
+            }
+
+            foreach (var file in c.Files)
+            {
+                if (!File.Exists(file)) continue;
+                var size = new FileInfo(file).Length;
+                try   { File.Delete(file); deletedFiles++; reclaimedBytes += size; }
+                catch (Exception ex) { errors.Add($"{file}: {ex.Message}"); }
+            }
+        }
+
+        AnsiConsole.MarkupLine(
+            $"[green]✓ Nuclear cleanup deleted {deletedFiles:N0} file(s) ({ContextHelpers.FormatSize(reclaimedBytes)} reclaimed).[/]");
+
+        if (errors.Count == 0) return 0;
+
+        AnsiConsole.MarkupLine($"[yellow]{errors.Count} path(s) could not be deleted:[/]");
+        foreach (var e in errors) AnsiConsole.MarkupLine($"  [dim]{Markup.Escape(e)}[/]");
+        return 1;
     }
 
     /// <summary>
@@ -109,14 +275,15 @@ public sealed class KnowledgeGcCommand : AsyncCommand<KnowledgeGcSettings>
     /// Returns log files that exist on disk and are marked ephemeral by <paramref name="rules"/>.
     /// Scans the project's diagnostics directory (<see cref="FuseraftPaths.LocalLogs"/>) — not the
     /// per-session ctx-snapshot logs, which are pruned by <c>fuseraft sessions --cleanup</c> instead.
+    /// Recurses so per-session files under logs/repl_events/ are matched too.
     /// </summary>
     private static List<string> CollectEphemeralLogFiles(string slug, FuseraftIgnoreRules rules)
     {
         var logDir = FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalLogs, slug);
         if (!Directory.Exists(logDir)) return [];
 
-        return Directory.EnumerateFiles(logDir)
-            .Where(f => rules.IsEphemeral("logs/" + Path.GetFileName(f)))
+        return Directory.EnumerateFiles(logDir, "*", SearchOption.AllDirectories)
+            .Where(f => rules.IsEphemeral("logs/" + Path.GetRelativePath(logDir, f)))
             .ToList();
     }
 

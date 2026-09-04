@@ -22,7 +22,24 @@ internal static partial class ReplCommands
         ctx.TurnTokenDeltas.Clear();
         ctx.ContextWarningShown    = false;
         ctx.ResetPlanState();
-        AnsiConsole.MarkupLine("[dim]History cleared.[/]");
+
+        if (!ctx.JsonMode && !ctx.NoBanner)
+        {
+            AnsiConsole.Clear();
+            var pluginNames = new List<string>(ctx.ToolsByCategory.Keys);
+            if (ctx.MemoryCount > 0) pluginNames.Add("Memory");
+            MessageRenderer.RenderReplHeader(
+                ctx.ModelId, ctx.Cwd, pluginNames, ctx.SessionId,
+                memoryCount: ctx.MemoryCount,
+                skillCount:  ctx.Skills.Count,
+                branch:      ReplCommand.TryGetGitBranch(ctx.Cwd),
+                eventsPath:  ctx.Verbose ? ctx.EventsPath : null);
+        }
+        else
+        {
+            AnsiConsole.MarkupLine("[dim]History cleared.[/]");
+        }
+
         await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/clear" });
         return CommandResult.Continue;
     }

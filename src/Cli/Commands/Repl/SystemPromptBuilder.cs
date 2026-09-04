@@ -8,17 +8,18 @@ internal sealed class SystemPromptBuilder
     private readonly System.Text.StringBuilder _sb = new();
 
     /// <summary>
-    /// Appends the identity line, working directory, and per-turn guidelines.
-    /// When <paramref name="customPrompt"/> is supplied it is used verbatim (with CWD appended);
-    /// otherwise the default fuseraft identity and tool-aware guidelines are generated.
+    /// Appends the identity line and per-turn guidelines. The working directory is not
+    /// repeated here — <see cref="AddOsEnvironment"/> always runs later in the same build
+    /// chain and states it once, in the runtime environment block.
+    /// When <paramref name="customPrompt"/> is supplied it is used verbatim; otherwise the
+    /// default fuseraft identity and tool-aware guidelines are generated.
     /// </summary>
     internal SystemPromptBuilder AddIdentity(
-        string? modelId, string cwd, int toolCount, string? customPrompt = null)
+        string? modelId, int toolCount, string? customPrompt = null)
     {
         if (!string.IsNullOrWhiteSpace(customPrompt))
         {
             _sb.Append(customPrompt.Trim());
-            _sb.Append($"\n\nThe current working directory is: {cwd}.");
             return this;
         }
 
@@ -30,7 +31,6 @@ internal sealed class SystemPromptBuilder
         {
             _sb.Append(
                 $"{identity} You are a precise coding and research assistant with tools for files, shell, code search, and git.\n" +
-                $"\nCurrent working directory: {cwd}\n" +
                 "\nGuidelines:\n" +
                 "- If the request is broad, open-ended, or could reasonably mean several different things (e.g. \"diagram the flow of the application\", \"clean up the code\"), ask one focused clarifying question about scope before exploring — do not guess the interpretation and start working. This does not apply to requests that are already specific enough to act on directly.\n" +
                 "- Prefer tools over guessing.\n" +
@@ -40,11 +40,12 @@ internal sealed class SystemPromptBuilder
                 "- Avoid destructive actions (rm, overwrite, force-push) unless explicitly requested.\n" +
                 "- Only write files the user explicitly requests — never create unsolicited summaries, changelogs, or status files.\n" +
                 "- For multi-step work, briefly state intent first. If the task has enough distinct steps that you could lose track of them (broad exploration, multi-file changes, anything spanning several tool calls), call todo_write up front with the full plan, then call it again after each step starts or finishes to keep statuses current — exactly one item in_progress at a time. Skip it for small, single-step requests.\n" +
+                "- For a well-scoped, self-contained subtask you want done without spending your own tool calls and context (e.g. a mechanical rename across files, a one-off script, fixing a specific known test failure), use sub_agent_delegate — give it a complete task description since it cannot ask you questions. Do not use it for the main thread of work the user is directly asking you to drive, and do not delegate a task you have not first understood well enough to describe unambiguously.\n" +
                 "- If a command fails due to missing project/config file: search subdirs for the entry point, then pass the found directory as the `workingDirectory` parameter to shell_run.\n");
         }
         else
         {
-            _sb.Append($"{identity} The current working directory is: {cwd}.");
+            _sb.Append(identity);
         }
 
         return this;
@@ -97,7 +98,7 @@ internal sealed class SystemPromptBuilder
                 $"Session ID: {sessionId}\n" +
                 $"Started:    {sessionStarted}\n" +
                 $"Snapshot:   {snapshotPath}\n" +
-                $"Event log:  {FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalReplEventsLog, FuseraftPaths.ProjectSlug(cwd))}\n" +
+                $"Event log:  {FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalReplEventsLog, sessionId, FuseraftPaths.ProjectSlug(cwd))}\n" +
                 $"Use the repl_session_* tools to inspect session metadata, list past sessions, or read log files.");
         }
 

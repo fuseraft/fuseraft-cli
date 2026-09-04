@@ -32,6 +32,7 @@ internal static partial class ReplCommands
             case "/compact":    return await CmdCompactAsync(ctx, arg, cancellationToken);
             case "/explore":    return await CmdExploreAsync(ctx, arg, cancellationToken);
             case "/locate":     return await CmdLocateAsync(ctx, arg, cancellationToken);
+            case "/delegate":   return await CmdDelegateAsync(ctx, arg, cancellationToken);
             case "/sessions":      await CmdSessionsAsync(ctx.JsonMode, cancellationToken); return CommandResult.Continue;
             case "/fork":          return await CmdForkAsync(ctx, arg, cancellationToken);
             case "/switch":        return await CmdSwitchAsync(ctx, arg, cancellationToken);
@@ -128,6 +129,7 @@ internal static partial class ReplCommands
                 - `/events` — Show session event stats (turns, tool calls, top tools, per-turn actual input/output tokens)
                 - `/explore <query>` — Run a sub-agent exploration loop and return a prose summary
                 - `/locate <symbol>` — Run a sub-agent symbol lookup; returns `path:line` result
+                - `/delegate <task>` — Hand a self-contained subtask to a write-capable sub-agent (files, shell, git) and return its summary
                 """ });
             return;
         }
@@ -231,6 +233,7 @@ internal static partial class ReplCommands
         io.AddRow("[bold cyan]/events stats[/]",     "Same as /events");
         io.AddRow("[bold cyan]/explore <query>[/]",  "Run a sub-agent exploration loop and return a prose summary");
         io.AddRow("[bold cyan]/locate <symbol>[/]",  "Run a sub-agent symbol lookup; returns path:line result");
+        io.AddRow("[bold cyan]/delegate <task>[/]",  "Hand a self-contained subtask to a write-capable sub-agent (files, shell, git)");
         AnsiConsole.Write(io);
     }
 }

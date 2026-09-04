@@ -53,6 +53,15 @@ public sealed class ProbePlugin
             return PluginResult.Error($"Unsupported language '{language}'. Supported: {supported}");
         }
 
+        // "pwsh" (PowerShell 7+) isn't installed by default on plain Windows Server/desktop
+        // images — only Windows PowerShell 5.1 is guaranteed present. Resolve to whichever
+        // actually exists rather than failing outright on a hardcoded "pwsh".
+        var executable = OperatingSystem.IsWindows() &&
+                          (language.Equals("powershell", StringComparison.OrdinalIgnoreCase) ||
+                           language.Equals("ps", StringComparison.OrdinalIgnoreCase))
+            ? ProcessHelper.WindowsPowerShellPath.Value
+            : runner.Executable;
+
         string tempFile = string.Empty;
 
         try
@@ -65,14 +74,14 @@ public sealed class ProbePlugin
                 await File.WriteAllTextAsync(tempFile, code);
                 // Pass the temp-file path as a separate argument — no quoting needed.
                 result = await ProcessHelper.RunAsync(
-                    runner.Executable, [runner.TempFileArg!, tempFile], directory, timeoutSeconds);
+                    executable, [runner.TempFileArg!, tempFile], directory, timeoutSeconds);
             }
             else
             {
                 // Pass code as a single argv element — avoids fragile manual quote-escaping
                 // that breaks when code contains trailing backslashes or nested quotes.
                 result = await ProcessHelper.RunAsync(
-                    runner.Executable, [runner.InlineFlag!, code], directory, timeoutSeconds);
+                    executable, [runner.InlineFlag!, code], directory, timeoutSeconds);
             }
 
             return FormatProbeResult(language, code, result);

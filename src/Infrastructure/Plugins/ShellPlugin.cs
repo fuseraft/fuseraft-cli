@@ -32,6 +32,34 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         return "/bin/bash";
     }
 
+    // Agents very commonly default to PowerShell syntax on Windows (Get-ChildItem, $env:,
+    // Where-Object, ...) even though cmd.exe is the sandboxed default shell here. cmd.exe has
+    // no notion of cmdlets, so it fails to resolve the leading token and always reports this
+    // exact, well-known message. Detecting it lets us retry once via PowerShell instead of
+    // handing the agent a failure it would just retry itself — saving a wasted tool call.
+    private const string CmdUnrecognizedCommandMessage = "is not recognized as an internal or external command";
+
+    private static bool IsCmdUnrecognizedCommand(string text) =>
+        text.Contains(CmdUnrecognizedCommandMessage, StringComparison.OrdinalIgnoreCase);
+
+    internal static bool LooksLikeShellMismatch(ProcessResult result) =>
+        !result.Succeeded &&
+        (IsCmdUnrecognizedCommand(result.Stdout) || IsCmdUnrecognizedCommand(result.Stderr));
+
+    // Windows-only: if cmd.exe couldn't resolve the command at all, retry it via PowerShell
+    // before returning to the caller. Only the successful PowerShell result replaces the
+    // original — if PowerShell also fails, the original cmd.exe failure is preserved since
+    // it's no less informative and avoids conflating two unrelated error messages.
+    private static async Task<ProcessResult> WithWindowsPowerShellFallbackAsync(
+        ProcessResult primary, Func<Task<ProcessResult>> retryViaPowerShell)
+    {
+        if (!OperatingSystem.IsWindows() || !LooksLikeShellMismatch(primary))
+            return primary;
+
+        var retried = await retryViaPowerShell();
+        return retried.Succeeded ? retried : primary;
+    }
+
     private readonly string? _sandboxRoot;
     private readonly Func<string, Task<bool>>? _approveCommand;
     private readonly ShellPolicy? _shellPolicy;
@@ -100,6 +128,98 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         {
             lock (OutputLock) return Output.ToString();
         }
+
+        public void ClearOutput()
+        {
+            lock (OutputLock) Output.Clear();
+        }
+    }
+
+    // Starts a redirected child process. Throws on failure — caller decides how to report it.
+    private static System.Diagnostics.Process StartProcess(string exe, IEnumerable<string> args, string workingDirectory)
+    {
+        var startInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName               = exe,
+            WorkingDirectory       = workingDirectory,
+            RedirectStandardInput  = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError  = true,
+            UseShellExecute        = false,
+            CreateNoWindow         = true,
+        };
+        foreach (var arg in args) startInfo.ArgumentList.Add(arg);
+
+        var process = new System.Diagnostics.Process { StartInfo = startInfo };
+        process.Start();
+        process.StandardInput.Close();
+        return process;
+    }
+
+    // Attaches a job to a started process and begins draining its stdout/stderr into the
+    // job's output buffer. Reading only starts here, so callers that need to discard output
+    // from a previous attempt (see the PowerShell retry below) can safely clear it first.
+    private static void WireOutputReaders(BackgroundJob job, System.Diagnostics.Process process)
+    {
+        job.Process = process;
+        job.ReaderTask = Task.WhenAll(
+            Task.Run(async () =>
+            {
+                try
+                {
+                    string? line;
+                    while ((line = await process.StandardOutput.ReadLineAsync()) is not null)
+                        job.AppendOutput(line + "\n");
+                }
+                catch { /* process may have exited */ }
+            }),
+            Task.Run(async () =>
+            {
+                try
+                {
+                    string? line;
+                    while ((line = await process.StandardError.ReadLineAsync()) is not null)
+                        job.AppendOutput($"[stderr] {line}\n");
+                }
+                catch { /* process may have exited */ }
+            }));
+    }
+
+    // Background commands that turn out to be PowerShell syntax fail near-instantly under
+    // cmd.exe with the same "not recognized" signature as the synchronous shell_run path.
+    // Give the process a brief grace window to hit that failure; if it does, swap in a
+    // PowerShell process before the job ID is ever handed back, so the agent never sees the
+    // failed cmd.exe attempt. A command that's still running (or exited cleanly, or failed for
+    // an unrelated reason) after the window is left alone.
+    private static readonly TimeSpan BackgroundMismatchGracePeriod = TimeSpan.FromMilliseconds(400);
+
+    private static async Task RetryBackgroundJobViaPowerShellIfMismatchedAsync(
+        BackgroundJob job, System.Diagnostics.Process originalProcess, string command, string workingDirectory)
+    {
+        await Task.WhenAny(originalProcess.WaitForExitAsync(), Task.Delay(BackgroundMismatchGracePeriod));
+
+        if (!originalProcess.HasExited || originalProcess.ExitCode == 0)
+            return;
+
+        if (!IsCmdUnrecognizedCommand(job.ReadOutput()))
+            return;
+
+        System.Diagnostics.Process retryProcess;
+        try
+        {
+            retryProcess = StartProcess(
+                ProcessHelper.WindowsPowerShellPath.Value,
+                ["-NoProfile", "-NonInteractive", "-Command", command],
+                workingDirectory);
+        }
+        catch
+        {
+            return; // PowerShell unavailable — leave the original cmd.exe failure visible
+        }
+
+        job.ClearOutput();
+        WireOutputReaders(job, retryProcess);
+        try { originalProcess.Dispose(); } catch { /* already exited */ }
     }
 
     public ShellPlugin(string? sandboxRoot = null, Func<string, Task<bool>>? approveCommand = null, ShellPolicy? shellPolicy = null, IEventSink? eventSink = null)
@@ -162,6 +282,12 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         var result = await ProcessHelper.RunAsync(
             Shell, [ShellFlag, command],
             resolvedDir, timeoutSeconds);
+
+        result = await WithWindowsPowerShellFallbackAsync(result, () =>
+            ProcessHelper.RunAsync(
+                ProcessHelper.WindowsPowerShellPath.Value,
+                ["-NoProfile", "-NonInteractive", "-Command", command],
+                resolvedDir, timeoutSeconds));
 
         var output = result.ToPluginOutput();
         _lastRunKey    = cacheKey;
@@ -284,6 +410,25 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
 
             var result = await ProcessHelper.RunAsync(Shell, [ShellFlag, tmpFile], resolvedDir, timeoutSeconds);
 
+            result = await WithWindowsPowerShellFallbackAsync(result, async () =>
+            {
+                // Re-materialize as .ps1 rather than reusing the .cmd file: PowerShell applies
+                // script-file security policy (execution policy, etc.) based on extension.
+                var psFile = FuseraftPaths.NewTempFile("script", ".ps1");
+                try
+                {
+                    await File.WriteAllTextAsync(psFile, script);
+                    return await ProcessHelper.RunAsync(
+                        ProcessHelper.WindowsPowerShellPath.Value,
+                        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", psFile],
+                        resolvedDir, timeoutSeconds);
+                }
+                finally
+                {
+                    try { File.Delete(psFile); } catch { /* best effort */ }
+                }
+            });
+
             return result.ToPluginOutput();
         }
         finally
@@ -366,54 +511,20 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         var denial = ValidateWorkingDirectory(workingDirectory, out var resolvedDir);
         if (denial is not null) return denial;
 
-        var jobId   = Guid.NewGuid().ToString("N")[..8];
-        var job     = new BackgroundJob(jobId);
+        var jobId      = Guid.NewGuid().ToString("N")[..8];
+        var job        = new BackgroundJob(jobId);
+        var workingDir = resolvedDir ?? Directory.GetCurrentDirectory();
 
-        var startInfo = new System.Diagnostics.ProcessStartInfo
-        {
-            FileName               = Shell,
-            Arguments              = $"{ShellFlag} {command}",
-            WorkingDirectory       = resolvedDir ?? Directory.GetCurrentDirectory(),
-            RedirectStandardInput  = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError  = true,
-            UseShellExecute        = false,
-            CreateNoWindow         = true,
-        };
-
-        var process = new System.Diagnostics.Process { StartInfo = startInfo };
-        job.Process = process;
-
-        try { process.Start(); }
+        System.Diagnostics.Process process;
+        try { process = StartProcess(Shell, [ShellFlag, command], workingDir); }
         catch (Exception ex)
         {
             return PluginResult.Error($"Failed to start background process: {ex.Message}");
         }
+        WireOutputReaders(job, process);
 
-        process.StandardInput.Close();
-
-        // Drain stdout and stderr concurrently into the job's output buffer.
-        job.ReaderTask = Task.WhenAll(
-            Task.Run(async () =>
-            {
-                try
-                {
-                    string? line;
-                    while ((line = await process.StandardOutput.ReadLineAsync()) is not null)
-                        job.AppendOutput(line + "\n");
-                }
-                catch { /* process may have exited */ }
-            }),
-            Task.Run(async () =>
-            {
-                try
-                {
-                    string? line;
-                    while ((line = await process.StandardError.ReadLineAsync()) is not null)
-                        job.AppendOutput($"[stderr] {line}\n");
-                }
-                catch { /* process may have exited */ }
-            }));
+        if (OperatingSystem.IsWindows())
+            await RetryBackgroundJobViaPowerShellIfMismatchedAsync(job, process, command, workingDir);
 
         _jobs[jobId] = job;
         return PluginResult.Ok($"Background job started. Job ID: {jobId}\nCommand: {command}\nUse shell_job_status({jobId}) to check progress.");

@@ -144,6 +144,28 @@ internal static class ProcessHelper
     }
 
     /// <summary>
+    /// Resolves the PowerShell executable to use on Windows. Prefers <c>pwsh</c> (PowerShell 7+),
+    /// which supports the <c>&amp;&amp;</c>/<c>||</c> chaining operators agents commonly emit out of
+    /// bash habit; falls back to Windows PowerShell 5.1 (<c>powershell.exe</c>), which ships in every
+    /// supported Windows release, so this always resolves to something runnable.
+    /// </summary>
+    internal static readonly Lazy<string> WindowsPowerShellPath = new(() =>
+    {
+        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator))
+        {
+            string candidate;
+            try { candidate = Path.Combine(dir, "pwsh.exe"); }
+            catch { continue; } // malformed PATH entry
+            if (File.Exists(candidate)) return candidate;
+        }
+
+        var system32Path = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "WindowsPowerShell", "v1.0", "powershell.exe");
+        return File.Exists(system32Path) ? system32Path : "powershell";
+    });
+
+    /// <summary>
     /// Expands a leading <c>~</c> to the current user's home directory.
     /// Process.Start and Path.GetFullPath do not do this — only shells do.
     /// </summary>
