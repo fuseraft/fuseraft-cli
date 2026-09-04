@@ -190,7 +190,7 @@ public sealed class FileSystemPlugin : ITurnResettable
                 var times = cacheHit.ReadCount == 1 ? "once" : $"{cacheHit.ReadCount} times";
                 hint = $"'{resolved}' has not changed since it was last read this session " +
                        $"({times}, {ago} ago). Content from that read is in your conversation " +
-                       $"history (unless compacted away). Use grep_in_file to locate a specific " +
+                       $"history (unless compacted away). Use grep_file to locate a specific " +
                        $"section, or pass startLine/maxLines to force a targeted re-read.";
             }
             return PluginResult.Info(hint);
@@ -201,7 +201,7 @@ public sealed class FileSystemPlugin : ITurnResettable
             _onCacheHit?.Invoke();
             return PluginResult.Info(
                 $"'{resolved}' already read this turn — content is in context. " +
-                $"Use grep_in_file to locate a section, then read_file with startLine/maxLines for a targeted excerpt.");
+                $"Use grep_file to locate a section, then read_file with startLine/maxLines for a targeted excerpt.");
         }
 
         return null;
@@ -348,7 +348,8 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (!File.Exists(resolved))
             return PluginResult.Error($"File not found: {resolved}");
 
-        var content = await File.ReadAllTextAsync(resolved);
+        var encoding = DetectEncoding(resolved);
+        var content = await File.ReadAllTextAsync(resolved, encoding);
         var ext     = Path.GetExtension(resolved).ToLowerInvariant();
 
         // Apply the same normalisations WriteFileAsync applies so that patch arguments are
@@ -408,7 +409,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (content.Contains("\r\n"))
             patched = patched.Replace("\n", "\r\n");
 
-        await File.WriteAllTextAsync(resolved, patched);
+        await File.WriteAllTextAsync(resolved, patched, encoding);
 
         // Invalidate caches — content has changed.
         _readThisTurn.Remove(resolved);
@@ -425,6 +426,18 @@ public sealed class FileSystemPlugin : ITurnResettable
         return PluginResult.Ok(
             $"Patched '{resolved}': replaced {oldLines}-line block with {newLines}-line block " +
             $"at character offset {idx}.");
+    }
+
+    // Sniffs the file's byte-order mark so patch_file/write_file round-trip the same encoding
+    // the file already had. File.ReadAllTextAsync/WriteAllTextAsync default to BOM-less UTF-8,
+    // which silently strips a BOM (or mangles UTF-16/32 content) on every edit unless the
+    // original encoding is detected and reused explicitly.
+    private static System.Text.Encoding DetectEncoding(string path)
+    {
+        using var stream = File.OpenRead(path);
+        using var reader = new StreamReader(stream, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        reader.Peek();
+        return reader.CurrentEncoding;
     }
 
     private static string FormatTimeAgo(TimeSpan elapsed)
@@ -520,7 +533,10 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
 
-        await File.WriteAllTextAsync(resolved, content);
+        // Preserve the existing file's encoding/BOM on overwrite so write_file never silently
+        // strips a BOM the file had before this call. New files get plain BOM-less UTF-8.
+        var encoding = File.Exists(resolved) ? DetectEncoding(resolved) : new System.Text.UTF8Encoding(false);
+        await File.WriteAllTextAsync(resolved, content, encoding);
 
         // Allow a within-turn verification read by removing from the per-turn set.
         // Prime the session cache (ReadCount:0) so later-turn reads get a "was written"

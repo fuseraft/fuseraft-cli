@@ -32,6 +32,29 @@ public sealed class SearchPlugin
         ("variable",  @"(var|let|const|val)\s+{0}\s*[=:]"),
     ];
 
+    // Shared by all three search entry points below: catches the common mistake of passing a
+    // directory path as the pattern/symbol argument instead of as 'directory' — easy to do
+    // coming from grep-style tools where the first positional argument is the path being
+    // searched, not the pattern. Returns an error string when the mistake is detected, or
+    // null when the argument looks like a genuine pattern/symbol.
+    private static string? CheckArgumentTransposition(string value, string argName, string toolName)
+    {
+        if (!string.IsNullOrEmpty(value) &&
+            Regex.IsMatch(value, @"^[\w./-]+/?$") &&
+            Directory.Exists(value))
+            return PluginResult.Error(
+                $"'{value}' looks like a directory path, not a {argName}. " +
+                $"Did you mean: {toolName}({argName}: \"<pattern>\", directory: \"{value}\")?");
+        return null;
+    }
+
+    // Appended to a "no results" message so a miss reads as "not found in what I searched"
+    // rather than "doesn't exist anywhere" — common dependency directories are skipped by
+    // default during an unscoped walk, which otherwise looks identical to a genuine absence.
+    private const string ScopeNote =
+        " Common dependency directories (node_modules, .nuget, vendor, bin, obj, .venv, __pycache__) " +
+        "are skipped by default — point 'directory' directly at one of those if the target lives in a dependency.";
+
     // Content search
 
     [Description("Search file contents by text or regex (like grep). 'query' is the pattern, not a path — use 'directory' to scope.")]
@@ -42,13 +65,8 @@ public sealed class SearchPlugin
         [Description("Max matching lines.")] int maxResults = 100,
         [Description("Case-sensitive search.")] bool caseSensitive = false)
     {
-        // Guard: catch agents passing a directory path as the query instead of as 'directory'.
-        if (!string.IsNullOrEmpty(query) &&
-            Regex.IsMatch(query, @"^[\w./-]+/?$") &&
-            Directory.Exists(query))
-            return PluginResult.Error(
-                $"'{query}' looks like a directory path, not a search pattern. " +
-                $"Did you mean: SearchContent(query: \"<pattern>\", directory: \"{query}\")?");
+        var transpositionDenial = CheckArgumentTransposition(query, "search pattern", "SearchContent");
+        if (transpositionDenial is not null) return transpositionDenial;
 
         if (!Directory.Exists(directory))
             return PluginResult.Error($"Directory not found: {directory}");
@@ -74,7 +92,7 @@ public sealed class SearchPlugin
         int skippedFiles = 0;
 
         foreach (var file in Directory.EnumerateFiles(directory, filePattern, SearchOption.AllDirectories)
-                     .Where(f => !DirectoryFilters.IsExcluded(f)))
+                     .Where(f => !DirectoryFilters.IsExcluded(f, directory)))
         {
             if (totalMatches >= maxResults) break;
 
@@ -105,7 +123,7 @@ public sealed class SearchPlugin
         if (totalMatches == 0)
         {
             var noMatchNote = skippedFiles > 0 ? $" ({skippedFiles} unreadable file(s) skipped)" : string.Empty;
-            return PluginResult.Info($"No matches found for '{query}' under {directory}{noMatchNote}");
+            return PluginResult.Info($"No matches found for '{query}' under {directory}{noMatchNote}.{ScopeNote}");
         }
 
         var header = $"[RESULTS] {totalMatches} match(es) in {filesWithMatches} file(s)";
@@ -126,6 +144,9 @@ public sealed class SearchPlugin
         [Description("File extension filter, e.g. '.cs'.")] string extension = "",
         [Description("Max results.")] int maxResults = 100)
     {
+        var transpositionDenial = CheckArgumentTransposition(symbol, "symbol name", "SearchCallers");
+        if (transpositionDenial is not null) return transpositionDenial;
+
         if (!Directory.Exists(directory))
             return PluginResult.Error($"Directory not found: {directory}");
 
@@ -160,7 +181,7 @@ public sealed class SearchPlugin
         int skippedFiles = 0;
 
         foreach (var file in Directory.EnumerateFiles(directory, filePattern, SearchOption.AllDirectories)
-                     .Where(f => !DirectoryFilters.IsExcluded(f)))
+                     .Where(f => !DirectoryFilters.IsExcluded(f, directory)))
         {
             if (totalMatches >= maxResults) break;
 
@@ -182,7 +203,7 @@ public sealed class SearchPlugin
         if (totalMatches == 0)
         {
             var note = skippedFiles > 0 ? $" ({skippedFiles} unreadable file(s) skipped)" : string.Empty;
-            return PluginResult.Info($"No call sites found for '{symbol}' under {directory}{note}");
+            return PluginResult.Info($"No call sites found for '{symbol}' under {directory}{note}.{ScopeNote}");
         }
 
         var header = $"[RESULTS] {totalMatches} call site(s) found for '{symbol}'";
@@ -203,6 +224,9 @@ public sealed class SearchPlugin
         [Description("File extension filter, e.g. '.cs'.")] string extension = "",
         [Description("Max results.")] int maxResults = 50)
     {
+        var transpositionDenial = CheckArgumentTransposition(symbol, "symbol name", "SearchSymbol");
+        if (transpositionDenial is not null) return transpositionDenial;
+
         if (!Directory.Exists(directory))
             return PluginResult.Error($"Directory not found: {directory}");
 
@@ -228,7 +252,7 @@ public sealed class SearchPlugin
         int skippedFiles = 0;
 
         foreach (var file in Directory.EnumerateFiles(directory, filePattern, SearchOption.AllDirectories)
-                     .Where(f => !DirectoryFilters.IsExcluded(f)))
+                     .Where(f => !DirectoryFilters.IsExcluded(f, directory)))
         {
             if (totalMatches >= maxResults) break;
 
@@ -249,7 +273,7 @@ public sealed class SearchPlugin
         if (totalMatches == 0)
         {
             var noMatchNote = skippedFiles > 0 ? $" ({skippedFiles} unreadable file(s) skipped)" : string.Empty;
-            return PluginResult.Info($"No definition found for '{symbol}' under {directory}{noMatchNote}");
+            return PluginResult.Info($"No definition found for '{symbol}' under {directory}{noMatchNote}.{ScopeNote}");
         }
 
         var header = $"[RESULTS] {totalMatches} definition(s) found for '{symbol}'";
