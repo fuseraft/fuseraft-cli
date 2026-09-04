@@ -816,7 +816,7 @@ Use `/context` before compacting to see how full the window is. `/compact` is ad
 
 **Event log**
 
-Every session appends structured JSONL events to `~/.fuseraft/logs/{project_slug}/repl_events.jsonl` (created automatically). Each record is tagged with a UTC timestamp, session ID, and turn index. The full set of event types:
+Every session appends structured JSONL events to its own `~/.fuseraft/logs/{project_slug}/repl_events/{session_id}.jsonl` (created automatically) — one file per session, so no single log grows unbounded across sessions. Each record is tagged with a UTC timestamp, session ID, and turn index. `fuseraft log repl` reads every session's log by default; pass `--session <id or prefix>` to view just one. The full set of event types:
 
 | Event type | When emitted |
 |------------|-------------|
@@ -1438,7 +1438,7 @@ fuseraft knowledge gc [options]
 
 **`.fuseraftignore` integration**
 
-When `.fuseraft/.fuseraftignore` is present and `--apply` is set, `fuseraft knowledge gc` also deletes ephemeral state and log files listed in the ignore file (e.g. `knowledge_findings.json` under `~/.fuseraft/state/{project_slug}/`, and `app.log`/`repl_events.jsonl` under `~/.fuseraft/logs/{project_slug}/`). Files produced by gc itself — such as `provenance.archive.json` — are never deleted.
+When `.fuseraft/.fuseraftignore` is present and `--apply` is set, `fuseraft knowledge gc` also deletes ephemeral state and log files listed in the ignore file (e.g. `knowledge_findings.json` under `~/.fuseraft/state/{project_slug}/`, and `app.log`/`repl_events/*.jsonl` under `~/.fuseraft/logs/{project_slug}/`, scanned recursively). Files produced by gc itself — such as `provenance.archive.json` — are never deleted.
 
 **Policy fields** (in `lifecycle.yaml`)
 
@@ -2151,9 +2151,9 @@ fuseraft log repl [options]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-n, --last <N>` | all | Show only the last N entries. |
-| `--session <id>` | — | Filter by session ID (prefix match). |
+| `--session <id>` | — | Show only the matching session's log (ID or unique prefix), instead of every session. |
 | `--event <type>` | — | Filter by event type (e.g. `command`, `skill_curation_complete`, `assistant_response`). |
-| `--path <path>` | `~/.fuseraft/logs/{project_slug}/repl_events.jsonl` | Override the log file path. |
+| `--path <path>` | all session logs under `~/.fuseraft/logs/{project_slug}/repl_events/` | Override the log file path. |
 
 **Examples**
 

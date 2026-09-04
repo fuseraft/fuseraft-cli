@@ -71,7 +71,7 @@ The following areas are in scope for security reports:
 | **HTTP plugin** | SSRF, allowlist bypass, private-IP filter bypass |
 | **Skills execution** | Malicious scripts in project-scoped skill directories (`<cwd>/.agents/skills/`, `<cwd>/.fuseraft/skills/`) executing without user consent; credential exfiltration via subprocess env inheritance |
 | **Prompt injection** | Adversarial tool results that override agent instructions |
-| **Session files** | Permission issues in `~/.fuseraft/sessions/` or `repl_events.jsonl` |
+| **Session files** | Permission issues in `~/.fuseraft/sessions/` or `~/.fuseraft/logs/{project_slug}/repl_events/` |
 | **MCP server integration** | Malicious tool schemas, argument injection from connected servers |
 | **Dependency vulnerabilities** | Known CVEs in direct NuGet dependencies that are exploitable via fuseraft-cli |
 

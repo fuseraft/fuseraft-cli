@@ -248,8 +248,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 toolsByCategory["Skills"] = skillsResult.Tools.ToList();
         }
 
-        var cwd        = Directory.GetCurrentDirectory();
-        var eventsPath = FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalReplEventsLog, FuseraftPaths.ProjectSlug(cwd));
+        var cwd = Directory.GetCurrentDirectory();
 
         // Load snapshot when --resume is specified.
         ReplSessionSnapshot? snapshot = null;
@@ -266,6 +265,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
         var sessionId  = snapshot?.SessionId ?? StringHelpers.NewSessionId();
         var startedAt  = snapshot?.StartedAt  ?? DateTime.UtcNow;
+        var eventsPath = FuseraftPaths.ExpandSessionPaths(
+            FuseraftPaths.LocalReplEventsLog, sessionId, FuseraftPaths.ProjectSlug(cwd));
 
         ReplSessionPlugin? replSessionPlugin = null;
         List<IHasArtifact>  activePlugins    = [];

@@ -97,7 +97,7 @@ internal sealed class SystemPromptBuilder
                 $"Session ID: {sessionId}\n" +
                 $"Started:    {sessionStarted}\n" +
                 $"Snapshot:   {snapshotPath}\n" +
-                $"Event log:  {FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalReplEventsLog, FuseraftPaths.ProjectSlug(cwd))}\n" +
+                $"Event log:  {FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalReplEventsLog, sessionId, FuseraftPaths.ProjectSlug(cwd))}\n" +
                 $"Use the repl_session_* tools to inspect session metadata, list past sessions, or read log files.");
         }
 

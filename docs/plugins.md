@@ -330,7 +330,7 @@ Gives REPL agents first-class access to their own session metadata, saved-sessio
 |----------|-----------|-------------|
 | `repl_session_current` | — | Return the current session's ID, model, start time, working directory, snapshot path, and log file locations. |
 | `repl_session_list` | — | List all saved REPL sessions newest-first. The active session is marked with `◄ current`. |
-| `repl_session_read_event_log` | `targetSessionId` (optional), `maxLines` (default 50) | Read entries from `repl_events.jsonl` filtered to a session. Defaults to the current session. |
+| `repl_session_read_event_log` | `targetSessionId` (optional), `maxLines` (default 50) | Read entries from that session's `repl_events/{session_id}.jsonl`. Defaults to the current session; accepts a full ID or unique prefix for another session. |
 | `repl_session_read_log` | `logName` (default `"repl_events"`), `maxLines` (default 100) | Read the tail of a named diagnostic log. Valid names: `repl_events`, `events`, `provider_errors`, `app`. |
 | `compact_context` | `focus` (optional) | Compact the conversation history into a concise handoff summary and replace it immediately. Pass an optional one-line focus hint (e.g. `"fix build error in SharePointClient.cs"`) to steer the summary. Call this when context is near the 80k token ceiling or the agent is repeatedly hitting budget errors. |
 | `get_context_status` | — | Return the current context budget: `estimated_tokens`, `budget`, `pct_used`, `tokens_remaining`, and `turn`. Call before a multi-file investigation or whenever you want to check how much headroom remains. |

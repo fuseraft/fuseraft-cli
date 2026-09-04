@@ -115,7 +115,7 @@ A path-refactor (mid-2026) moved nearly all runtime session/state artifacts from
 | `~/.fuseraft/state/{project_slug}/changes.json` | Change tracker: file/shell/git activity per turn |
 | `~/.fuseraft/state/{project_slug}/evidence.json` | Evidence graph: typed nodes for contract evaluation |
 | `~/.fuseraft/state/{project_slug}/file_versions.json` | Per-file monotonic write counters for conflict detection |
-| `~/.fuseraft/logs/{project_slug}/repl_events.jsonl` | REPL session events |
+| `~/.fuseraft/logs/{project_slug}/repl_events/{session_id}.jsonl` | REPL session events, one file per session |
 | `~/.fuseraft/logs/{project_slug}/provider_errors.jsonl` | LLM provider error records |
 | `~/.fuseraft/logs/{project_slug}/app.log` | Warning+ diagnostic log (always-on Serilog file sink, 5 MB rolling, 3 retained) |
 | `~/.fuseraft/crashdump/` | Crash dump JSON files |

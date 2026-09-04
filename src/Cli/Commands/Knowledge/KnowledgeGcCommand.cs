@@ -109,14 +109,15 @@ public sealed class KnowledgeGcCommand : AsyncCommand<KnowledgeGcSettings>
     /// Returns log files that exist on disk and are marked ephemeral by <paramref name="rules"/>.
     /// Scans the project's diagnostics directory (<see cref="FuseraftPaths.LocalLogs"/>) — not the
     /// per-session ctx-snapshot logs, which are pruned by <c>fuseraft sessions --cleanup</c> instead.
+    /// Recurses so per-session files under logs/repl_events/ are matched too.
     /// </summary>
     private static List<string> CollectEphemeralLogFiles(string slug, FuseraftIgnoreRules rules)
     {
         var logDir = FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalLogs, slug);
         if (!Directory.Exists(logDir)) return [];
 
-        return Directory.EnumerateFiles(logDir)
-            .Where(f => rules.IsEphemeral("logs/" + Path.GetFileName(f)))
+        return Directory.EnumerateFiles(logDir, "*", SearchOption.AllDirectories)
+            .Where(f => rules.IsEphemeral("logs/" + Path.GetRelativePath(logDir, f)))
             .ToList();
     }
 

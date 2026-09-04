@@ -119,7 +119,10 @@ public static class FuseraftPaths
 
     // logs/ — project diagnostics (not session-specific)
     public const string LocalLogs                 = "~/.fuseraft/logs/{project_slug}";
-    public const string LocalReplEventsLog        = "~/.fuseraft/logs/{project_slug}/repl_events.jsonl";
+    // REPL events are split one file per session (see ExpandSessionPaths) so a single
+    // long-lived project directory never accumulates one ever-growing shared file.
+    public const string LocalReplEventsDir        = "~/.fuseraft/logs/{project_slug}/repl_events";
+    public const string LocalReplEventsLog        = "~/.fuseraft/logs/{project_slug}/repl_events/{session_id}.jsonl";
     public const string LocalProviderErrors       = "~/.fuseraft/logs/{project_slug}/provider_errors.jsonl";
     public const string LocalAppLog               = "~/.fuseraft/logs/{project_slug}/app.log";
 
@@ -359,7 +362,7 @@ public static class FuseraftPaths
         if (includeLogs)
         {
             artifacts.AppendLine($"  {Expand(LocalEventsLog),-70} — agent/orchestration event log (JSONL)");
-            artifacts.AppendLine($"  {ExpandP(LocalReplEventsLog),-70} — REPL event log (JSONL)");
+            artifacts.AppendLine($"  {Expand(LocalReplEventsLog),-70} — REPL event log for this session (JSONL)");
             artifacts.AppendLine($"  {ExpandP(LocalAppLog),-70} — application log");
         }
 
