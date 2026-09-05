@@ -26,10 +26,15 @@ internal static class DirectoryFilters
         try { relative = Path.GetRelativePath(root, path); }
         catch { relative = path; }
 
+        // Case-insensitive on Windows/macOS's default filesystems, where a directory created
+        // as "Bin" or "Node_Modules" is the same directory as "bin"/"node_modules" and must
+        // still be excluded; case-sensitive on Linux, where they're genuinely different paths.
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
         return dirs.Any(d =>
-            relative.Contains($"{sep}{d}{sep}", StringComparison.Ordinal) ||
-            relative.StartsWith($"{d}{sep}", StringComparison.Ordinal) ||
-            relative.EndsWith($"{sep}{d}", StringComparison.Ordinal) ||
-            relative.Equals(d, StringComparison.Ordinal));
+            relative.Contains($"{sep}{d}{sep}", comparison) ||
+            relative.StartsWith($"{d}{sep}", comparison) ||
+            relative.EndsWith($"{sep}{d}", comparison) ||
+            relative.Equals(d, comparison));
     }
 }

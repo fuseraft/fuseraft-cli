@@ -37,14 +37,22 @@ public sealed class SearchPlugin
     // coming from grep-style tools where the first positional argument is the path being
     // searched, not the pattern. Returns an error string when the mistake is detected, or
     // null when the argument looks like a genuine pattern/symbol.
-    private static string? CheckArgumentTransposition(string value, string argName, string toolName)
+    //
+    // requirePathSeparator gates this to values that actually look path-shaped (contain '/').
+    // Symbol names are conventionally a single identifier, so a bare word like "Models" or
+    // "Config" — which can easily collide with a real subdirectory name — must not trip this
+    // check for SearchCallers/SearchSymbol; a genuine transposed path there still reads as
+    // "src/Models" or "./Config". Free-text search queries don't get this restriction since
+    // they're already unrestricted in shape.
+    private static string? CheckArgumentTransposition(string value, string argDescription, string paramName, string toolName, bool requirePathSeparator = false)
     {
         if (!string.IsNullOrEmpty(value) &&
             Regex.IsMatch(value, @"^[\w./-]+/?$") &&
+            (!requirePathSeparator || value.Contains('/')) &&
             Directory.Exists(value))
             return PluginResult.Error(
-                $"'{value}' looks like a directory path, not a {argName}. " +
-                $"Did you mean: {toolName}({argName}: \"<pattern>\", directory: \"{value}\")?");
+                $"'{value}' looks like a directory path, not a {argDescription}. " +
+                $"Did you mean: {toolName}({paramName}: \"<pattern>\", directory: \"{value}\")?");
         return null;
     }
 
@@ -65,7 +73,7 @@ public sealed class SearchPlugin
         [Description("Max matching lines.")] int maxResults = 100,
         [Description("Case-sensitive search.")] bool caseSensitive = false)
     {
-        var transpositionDenial = CheckArgumentTransposition(query, "search pattern", "SearchContent");
+        var transpositionDenial = CheckArgumentTransposition(query, "search pattern", "query", "SearchContent");
         if (transpositionDenial is not null) return transpositionDenial;
 
         if (!Directory.Exists(directory))
@@ -144,7 +152,7 @@ public sealed class SearchPlugin
         [Description("File extension filter, e.g. '.cs'.")] string extension = "",
         [Description("Max results.")] int maxResults = 100)
     {
-        var transpositionDenial = CheckArgumentTransposition(symbol, "symbol name", "SearchCallers");
+        var transpositionDenial = CheckArgumentTransposition(symbol, "symbol name", "symbol", "SearchCallers", requirePathSeparator: true);
         if (transpositionDenial is not null) return transpositionDenial;
 
         if (!Directory.Exists(directory))
@@ -224,7 +232,7 @@ public sealed class SearchPlugin
         [Description("File extension filter, e.g. '.cs'.")] string extension = "",
         [Description("Max results.")] int maxResults = 50)
     {
-        var transpositionDenial = CheckArgumentTransposition(symbol, "symbol name", "SearchSymbol");
+        var transpositionDenial = CheckArgumentTransposition(symbol, "symbol name", "symbol", "SearchSymbol", requirePathSeparator: true);
         if (transpositionDenial is not null) return transpositionDenial;
 
         if (!Directory.Exists(directory))

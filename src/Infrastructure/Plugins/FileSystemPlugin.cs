@@ -435,7 +435,11 @@ public sealed class FileSystemPlugin : ITurnResettable
     private static System.Text.Encoding DetectEncoding(string path)
     {
         using var stream = File.OpenRead(path);
-        using var reader = new StreamReader(stream, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        // The default passed here is only used when no BOM is found, so it must be the
+        // BOM-less UTF8 instance — Encoding.UTF8 is the BOM-emitting singleton, and using it
+        // here would make DetectEncoding indistinguishable from "found a UTF-8 BOM", injecting
+        // a BOM into every plain UTF-8 file this touches.
+        using var reader = new StreamReader(stream, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false), detectEncodingFromByteOrderMarks: true);
         reader.Peek();
         return reader.CurrentEncoding;
     }

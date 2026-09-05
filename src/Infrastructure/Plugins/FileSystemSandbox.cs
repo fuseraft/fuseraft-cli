@@ -66,12 +66,17 @@ internal static class FileSystemSandbox
     private static string StripWrappingQuotes(string path)
     {
         var trimmed = path.Trim();
-        if (trimmed.Length >= 2 &&
+
+        // Length > 2 (not >= 2) so a quoted-empty-string argument (`""` or `''`) is left alone
+        // rather than stripped down to an empty path — Path.GetFullPath("", sandboxRoot)
+        // resolves to the sandbox root itself, which callers don't expect a bare path argument
+        // to ever produce.
+        if (trimmed.Length > 2 &&
             ((trimmed[0] == '"' && trimmed[^1] == '"') || (trimmed[0] == '\'' && trimmed[^1] == '\'')))
         {
             return trimmed[1..^1];
         }
-        return path;
+        return trimmed;
     }
 
     // Resolves 'path' to its canonical absolute form and checks it against the sandbox.

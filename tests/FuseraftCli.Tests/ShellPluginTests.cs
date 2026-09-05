@@ -43,6 +43,11 @@ public sealed class ShellPluginTests
         try
         {
             await plugin.RunAsync("git init -q", tmpDir);
+            // A clean CI runner has no global git identity configured, and `git commit` refuses
+            // to run without one — set a repo-local identity so this test doesn't depend on the
+            // ambient environment having one already.
+            await plugin.RunAsync("git config user.email \"test@example.com\"", tmpDir);
+            await plugin.RunAsync("git config user.name \"Test User\"", tmpDir);
             await File.WriteAllTextAsync(Path.Combine(tmpDir, "test.txt"), "hello");
             await plugin.RunAsync("git add .", tmpDir);
 

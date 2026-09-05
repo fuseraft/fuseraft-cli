@@ -834,6 +834,8 @@ internal static class ReplTurn
         var fileChanges        = new List<(char Sigil, string Path)>();
         var fileChangeSeen     = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var toolRounds        = 0;
+        var usageRounds       = 0;
+        var finishRounds      = 0;
         var turnInputTokens   = 0L;
         var turnOutputTokens  = 0L;
         int? turnFirstInputTokens = null;
@@ -885,6 +887,15 @@ internal static class ReplTurn
                 // consecutive tool calls with no text in between (e.g. retrying a failing command)
                 // never produces such a gap, which previously left toolRounds stuck at 1 no matter
                 // how many iterations actually ran, silently defeating the hit_iteration_cap warning.
+                //
+                // Two independent signals mark a round boundary: a UsageContent chunk, and a
+                // non-null FinishReason. Not every provider emits both for every round — Ollama
+                // in particular never reports UsageContent on streaming responses — so relying on
+                // either signal alone would undercount for some provider and silently defeat the
+                // cap warning again. Tracking both and taking the max avoids that without risking
+                // double-counting a round where a provider happens to emit both signals (whether
+                // in the same chunk or two different ones): each signal still only fires at most
+                // once per underlying round, so neither counter can outpace the true round count.
                 var sawUsageThisChunk = false;
                 foreach (var usage in chunk.Contents.OfType<UsageContent>())
                 {
@@ -893,7 +904,9 @@ internal static class ReplTurn
                     turnFirstInputTokens ??= (int?)usage.Details.InputTokenCount;
                     sawUsageThisChunk = true;
                 }
-                if (sawUsageThisChunk) toolRounds++;
+                if (sawUsageThisChunk) usageRounds++;
+                if (chunk.FinishReason is not null) finishRounds++;
+                toolRounds = Math.Max(usageRounds, finishRounds);
 
                 var funcCall = chunk.Contents.OfType<FunctionCallContent>().FirstOrDefault();
                 if (funcCall is not null)
@@ -999,7 +1012,7 @@ internal static class ReplTurn
             sb.Clear(); rawUpdates.Clear(); toolCallsThisTurn.Clear();
             fileChanges.Clear(); fileChangeSeen.Clear();
             capturedResults?.Clear(); callIdToName?.Clear();
-            toolRounds = 0;
+            toolRounds = 0; usageRounds = 0; finishRounds = 0;
             turnInputTokens = 0; turnOutputTokens = 0; turnFirstInputTokens = null;
 
             // Restart spinner for the fresh attempt.

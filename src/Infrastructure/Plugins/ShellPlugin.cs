@@ -345,7 +345,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
                 ["-NoProfile", "-NonInteractive", "-Command", script],
                 resolvedDir, timeoutSeconds);
         }
-        else
+        else if (OperatingSystem.IsWindows())
         {
             // Use the raw-string overload, not ArgumentList: cmd.exe's own /c parser doesn't
             // follow the same quoting convention .NET uses to encode ArgumentList elements, so
@@ -360,6 +360,15 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
                     ProcessHelper.WindowsPowerShellPath.Value,
                     ["-NoProfile", "-NonInteractive", "-Command", command],
                     resolvedDir, timeoutSeconds));
+        }
+        else
+        {
+            // Unix shells take the whole command as a single argv element (bash -c "<command>").
+            // ArgumentList encodes that correctly; unlike cmd.exe there's no raw-string
+            // re-parse hazard here, so there's no reason to bypass .NET's own quoting.
+            result = await ProcessHelper.RunAsync(
+                Shell, [ShellFlag, command],
+                resolvedDir, timeoutSeconds);
         }
 
         var output = result.ToPluginOutput();
@@ -599,7 +608,13 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
                     ProcessHelper.WindowsPowerShellPath.Value,
                     ["-NoProfile", "-NonInteractive", "-Command", script],
                     workingDir)
-                : StartProcess(Shell, $"{ShellFlag} {command}", workingDir);
+                : OperatingSystem.IsWindows()
+                    // Raw-string overload for cmd.exe — see RunAsync for why ArgumentList
+                    // can't be used here.
+                    ? StartProcess(Shell, $"{ShellFlag} {command}", workingDir)
+                    // Unix shells take the whole command as a single argv element; ArgumentList
+                    // encodes that correctly without any raw-string re-parse hazard.
+                    : StartProcess(Shell, [ShellFlag, command], workingDir);
         }
         catch (Exception ex)
         {
