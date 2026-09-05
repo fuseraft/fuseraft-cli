@@ -443,7 +443,7 @@ internal static class CorrectionEngine
 
         var stagnationMsg = hasFailedWriteAttempts
             ? $"STUCK — ALL WRITES REJECTED ({consecutiveCount} turns): oldText does not match exactly.\n\n" +
-              $"  1. grep_in_file(path, \"distinctive line\") → get line number.\n" +
+              $"  1. grep_file(path, \"distinctive line\") → get line number.\n" +
               $"  2. read_file(path, startLine=<line-2>, maxLines=10) → copy verbatim text.\n" +
               $"  3. Paste verbatim as oldText — do not retype from memory.\n" +
               $"  4. patch_file with that oldText.\n\n" +

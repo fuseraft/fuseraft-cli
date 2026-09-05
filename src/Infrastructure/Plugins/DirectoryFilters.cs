@@ -11,11 +11,30 @@ internal static class DirectoryFilters
     internal static readonly string[] DefaultExcludedDirs =
         [".git", "node_modules", "bin", "obj", ".vs", ".idea", ".nuget", ".venv", "__pycache__", ".fuseraft", "vendor"];
 
-    internal static bool IsExcluded(string path, string[]? excludedDirs = null)
+    // Checks only path segments below `root`, not `root`'s own path. Without this, a caller
+    // that explicitly points `root` at (or inside) an excluded tree — e.g. searching directly
+    // in a package cache located under a ".nuget" or "vendor" directory — would have every
+    // single result filtered out, because the excluded name is also a prefix segment of every
+    // returned path. Exclusion is meant to stop an unscoped walk from wandering into these
+    // trees, not to block a caller who asked to look there on purpose.
+    internal static bool IsExcluded(string path, string root, string[]? excludedDirs = null)
     {
         var sep  = Path.DirectorySeparatorChar;
         var dirs = excludedDirs ?? DefaultExcludedDirs;
-        return dirs.Any(d => path.Contains($"{sep}{d}{sep}", StringComparison.Ordinal) ||
-                              path.EndsWith($"{sep}{d}", StringComparison.Ordinal));
+
+        string relative;
+        try { relative = Path.GetRelativePath(root, path); }
+        catch { relative = path; }
+
+        // Case-insensitive on Windows/macOS's default filesystems, where a directory created
+        // as "Bin" or "Node_Modules" is the same directory as "bin"/"node_modules" and must
+        // still be excluded; case-sensitive on Linux, where they're genuinely different paths.
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+        return dirs.Any(d =>
+            relative.Contains($"{sep}{d}{sep}", comparison) ||
+            relative.StartsWith($"{d}{sep}", comparison) ||
+            relative.EndsWith($"{sep}{d}", comparison) ||
+            relative.Equals(d, comparison));
     }
 }
