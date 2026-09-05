@@ -147,10 +147,10 @@ internal sealed class FileSystemManagementOps
     // call from dumping an unbounded listing into context in a very large tree.
     private const int ListFilesHardCap = 500;
 
-    [Description("List files recursively. Reports when results were truncated so you know to narrow the search — this matters most in large or multi-repo directories, where a flat result cap can silently miss files in a sibling subdirectory that wasn't reached yet.")]
+    [Description("List files recursively. Reports when results were truncated so you know to narrow the search — this matters most in large or multi-repo directories, where a flat result cap can silently miss files in a sibling subdirectory that wasn't reached yet. If you already know the exact filename, pass it as 'pattern' (e.g. 'Foo.cs') instead of '*' to skip truncation entirely.")]
     public string ListFiles(
         [Description("Directory path.")] string directory,
-        [Description("Glob pattern, e.g. '*.cs'.")] string pattern = "*",
+        [Description("Glob pattern, e.g. '*.cs'. Pass an exact filename here to find a known file directly.")] string pattern = "*",
         [Description("Max results, clamped to 500. Raise it only if the default cuts off a search you know needs to see more.")] int maxResults = 100)
     {
         var denial = FileSystemSandbox.ResolveSafe(directory, _sandboxRoot, _exemptedPrefixes, out var resolved);
@@ -168,7 +168,7 @@ internal sealed class FileSystemManagementOps
 
         var maxFiles = Math.Clamp(maxResults, 1, ListFilesHardCap);
         var files = Directory.EnumerateFiles(resolved, pattern, SearchOption.AllDirectories)
-            .Where(f => !DirectoryFilters.IsExcluded(f))
+            .Where(f => !DirectoryFilters.IsExcluded(f, resolved))
             .Take(maxFiles + 1)
             .ToList();
 
@@ -223,8 +223,8 @@ internal sealed class FileSystemManagementOps
         {
             var fi = new FileInfo(resolved);
             sb.AppendLine($"Size:     {fi.Length:N0} bytes");
-            sb.AppendLine($"Created:  {fi.CreationTimeUtc:yyyy-MM-dd HH:mm:ss} UTC");
-            sb.AppendLine($"Modified: {fi.LastWriteTimeUtc:yyyy-MM-dd HH:mm:ss} UTC");
+            sb.AppendLine($"Created:  {FormatUtcWithLocal(fi.CreationTimeUtc)}");
+            sb.AppendLine($"Modified: {FormatUtcWithLocal(fi.LastWriteTimeUtc)}");
 
             var record = _versionStore is not null ? await _versionStore.StatAsync(resolved) : null;
             sb.AppendLine(record is not null
@@ -234,8 +234,8 @@ internal sealed class FileSystemManagementOps
         else
         {
             var di = new DirectoryInfo(resolved);
-            sb.AppendLine($"Created:  {di.CreationTimeUtc:yyyy-MM-dd HH:mm:ss} UTC");
-            sb.AppendLine($"Modified: {di.LastWriteTimeUtc:yyyy-MM-dd HH:mm:ss} UTC");
+            sb.AppendLine($"Created:  {FormatUtcWithLocal(di.CreationTimeUtc)}");
+            sb.AppendLine($"Modified: {FormatUtcWithLocal(di.LastWriteTimeUtc)}");
         }
 
         if (!OperatingSystem.IsWindows())
@@ -260,6 +260,14 @@ internal sealed class FileSystemManagementOps
         }
 
         return sb.ToString().TrimEnd();
+    }
+
+    // Pairs the UTC timestamp with local time so neither direction needs manual arithmetic
+    // to reconcile against wall-clock times mentioned by the user or seen in other tools.
+    private static string FormatUtcWithLocal(DateTime utc)
+    {
+        var local = utc.ToLocalTime();
+        return $"{utc:yyyy-MM-dd HH:mm:ss} UTC ({local:yyyy-MM-dd HH:mm:ss} local)";
     }
 
     [Description("Set Unix file permissions (chmod). No-op on Windows.")]
@@ -442,7 +450,7 @@ internal sealed class FileSystemManagementOps
             preview = string.Join('\n', previewLines);
             trailer = totalLines > 30
                 ? $"\n\n[Auto-preview: showing first 30 of {totalLines:N0} lines ({sizeBytes:N0} bytes). " +
-                  $"Use grep_in_file to locate specific content, or save_file_summary to store a " +
+                  $"Use grep_file to locate specific content, or save_file_summary to store a " +
                   $"human-written summary for future turns.]"
                 : $"\n\n[Full file — {totalLines} lines, {sizeBytes:N0} bytes.]";
         }
@@ -454,7 +462,7 @@ internal sealed class FileSystemManagementOps
             preview = string.Join('\n', allLines.Take(30));
             trailer = lineCount > 30
                 ? $"\n\n[Auto-preview: showing first 30 of {lineCount} lines ({byteCount:N0} bytes). " +
-                  $"Use grep_in_file to locate specific content, or save_file_summary to store a " +
+                  $"Use grep_file to locate specific content, or save_file_summary to store a " +
                   $"human-written summary for future turns.]"
                 : $"\n\n[Full file — {lineCount} lines, {byteCount:N0} bytes.]";
         }

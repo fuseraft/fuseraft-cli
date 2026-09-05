@@ -95,7 +95,7 @@ public sealed class ToolResultArtifactStore
         $"[result offloaded — {chars:N0} chars stored to artifact store]\n" +
         $"Tool: {toolName} | {hint}\n" +
         $"Artifact: {id}\n" +
-        "Use targeted tools (e.g. read_file with startLine/maxLines, or grep_in_file) for specific sections.";
+        "Use targeted tools (e.g. read_file with startLine/maxLines, or grep_file) for specific sections.";
 }
 
 internal sealed record ToolResultArtifact

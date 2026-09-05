@@ -648,7 +648,7 @@ When a tool returns a result that exceeds 40,000 characters (~10k tokens), fuser
 [result offloaded — 52,000 chars stored to artifact store]
 Tool: read_file | path=src/LargeService.cs
 Artifact: a3f9c20b1d7e
-Use targeted tools (e.g. read_file with startLine/maxLines, or grep_in_file) for specific sections.
+Use targeted tools (e.g. read_file with startLine/maxLines, or grep_file) for specific sections.
 ```
 
 The stub is actionable: it tells the agent what happened, which tool produced the result, and how to access specific sections without pulling the full payload back into context.

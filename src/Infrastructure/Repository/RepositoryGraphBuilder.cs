@@ -81,7 +81,7 @@ public sealed class RepositoryGraphBuilder
             {
                 foreach (var f in Directory.GetFiles(root, glob, SearchOption.AllDirectories))
                 {
-                    if (DirectoryFilters.IsExcluded(f)) continue;
+                    if (DirectoryFilters.IsExcluded(f, root)) continue;
                     if (!seen.Add(f)) continue;
                     files.Add((f, strategy));
                 }

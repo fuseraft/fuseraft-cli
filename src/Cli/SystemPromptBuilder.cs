@@ -256,7 +256,7 @@ internal static class SystemPromptBuilder
         sb.AppendLine("All file paths must be relative to this root or absolute. Never include the project directory name as a prefix in a relative path.");
         sb.AppendLine($"  Correct:  src/module/file.py  or  {dirName}/src/module/file.py (absolute)");
         sb.AppendLine($"  Wrong:    {dirName}/{dirName}/src/module/file.py  ← double-nested, file will not exist");
-        sb.Append("Files you have already read this session are cached. If the file is unchanged you will see a hint instead of the full content — use grep_in_file for targeted lookup or pass startLine/maxLines for a specific section.");
+        sb.Append("Files you have already read this session are cached. If the file is unchanged you will see a hint instead of the full content — use grep_file for targeted lookup or pass startLine/maxLines for a specific section.");
         return sb.ToString();
     }
 

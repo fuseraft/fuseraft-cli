@@ -60,6 +60,43 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         return retried.Succeeded ? retried : primary;
     }
 
+    // Agents frequently wrap their actual script in an explicit `powershell -Command "..."`
+    // (or `pwsh -Command "..."`) invocation even though shell_run already runs everything
+    // through cmd.exe on Windows. Passing that whole string through cmd.exe's /c parser
+    // re-parses it a second time with an incompatible quoting dialect: cmd.exe does not treat
+    // a backslash as a quote-escape (only a bare, unescaped `"` toggles its quoted-region
+    // state), so it desyncs against the model's escaped inner quotes/backticks before
+    // PowerShell ever sees the string — silently corrupting quote- or newline-heavy content
+    // (e.g. writing a markdown file via Set-Content) while still exiting 0. Detecting this
+    // pattern and invoking powershell.exe directly, with the script passed as a single
+    // ArgumentList element, skips the cmd.exe re-parse entirely.
+    private static readonly Regex PowerShellInvocation = new(
+        @"^\s*(?:powershell(?:\.exe)?|pwsh(?:\.exe)?)\b.*?-command\s+(.*)$",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+
+    private static bool TryExtractPowerShellScript(string command, out string script)
+    {
+        var match = PowerShellInvocation.Match(command);
+        if (!match.Success)
+        {
+            script = string.Empty;
+            return false;
+        }
+
+        script = match.Groups[1].Value.Trim();
+
+        // Strip one layer of wrapping quotes the model added for cmd.exe's benefit — the
+        // script is now delivered as a single argv element, so no outer quoting is needed
+        // (and keeping it would make PowerShell see it as literal text inside a string).
+        if (script.Length >= 2 &&
+            ((script[0] == '"' && script[^1] == '"') || (script[0] == '\'' && script[^1] == '\'')))
+        {
+            script = script[1..^1];
+        }
+
+        return script.Length > 0;
+    }
+
     private readonly string? _sandboxRoot;
     private readonly Func<string, Task<bool>>? _approveCommand;
     private readonly ShellPolicy? _shellPolicy;
@@ -135,10 +172,8 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         }
     }
 
-    // Starts a redirected child process. Throws on failure — caller decides how to report it.
-    private static System.Diagnostics.Process StartProcess(string exe, IEnumerable<string> args, string workingDirectory)
-    {
-        var startInfo = new System.Diagnostics.ProcessStartInfo
+    private static System.Diagnostics.ProcessStartInfo BuildBackgroundStartInfo(string exe, string workingDirectory) =>
+        new()
         {
             FileName               = exe,
             WorkingDirectory       = workingDirectory,
@@ -148,12 +183,33 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
             UseShellExecute        = false,
             CreateNoWindow         = true,
         };
-        foreach (var arg in args) startInfo.ArgumentList.Add(arg);
 
+    private static System.Diagnostics.Process LaunchBackgroundProcess(System.Diagnostics.ProcessStartInfo startInfo)
+    {
         var process = new System.Diagnostics.Process { StartInfo = startInfo };
         process.Start();
         process.StandardInput.Close();
         return process;
+    }
+
+    // Starts a redirected child process with each element passed as a separate argument
+    // (bypasses shell quoting). Use for direct executables like powershell.exe. Throws on
+    // failure — caller decides how to report it.
+    private static System.Diagnostics.Process StartProcess(string exe, IEnumerable<string> args, string workingDirectory)
+    {
+        var startInfo = BuildBackgroundStartInfo(exe, workingDirectory);
+        foreach (var arg in args) startInfo.ArgumentList.Add(arg);
+        return LaunchBackgroundProcess(startInfo);
+    }
+
+    // Starts a redirected child process with a raw argument string. Use when exe is itself a
+    // shell (cmd.exe) that must re-parse the string as its own command line — ArgumentList's
+    // re-quoting doesn't match cmd.exe's quoting rules and corrupts embedded quotes.
+    private static System.Diagnostics.Process StartProcess(string exe, string arguments, string workingDirectory)
+    {
+        var startInfo = BuildBackgroundStartInfo(exe, workingDirectory);
+        startInfo.Arguments = arguments;
+        return LaunchBackgroundProcess(startInfo);
     }
 
     // Attaches a job to a started process and begins draining its stdout/stderr into the
@@ -279,15 +335,41 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         if (_lastRunKey == cacheKey)
             return $"[Command already ran this turn — cached output follows]\n\n{_lastRunOutput}";
 
-        var result = await ProcessHelper.RunAsync(
-            Shell, [ShellFlag, command],
-            resolvedDir, timeoutSeconds);
-
-        result = await WithWindowsPowerShellFallbackAsync(result, () =>
-            ProcessHelper.RunAsync(
+        ProcessResult result;
+        if (OperatingSystem.IsWindows() && TryExtractPowerShellScript(command, out var script))
+        {
+            // Explicit `powershell`/`pwsh -Command "..."` invocation — run it directly rather
+            // than through cmd.exe /c. See TryExtractPowerShellScript for why.
+            result = await ProcessHelper.RunAsync(
                 ProcessHelper.WindowsPowerShellPath.Value,
-                ["-NoProfile", "-NonInteractive", "-Command", command],
-                resolvedDir, timeoutSeconds));
+                ["-NoProfile", "-NonInteractive", "-Command", script],
+                resolvedDir, timeoutSeconds);
+        }
+        else if (OperatingSystem.IsWindows())
+        {
+            // Use the raw-string overload, not ArgumentList: cmd.exe's own /c parser doesn't
+            // follow the same quoting convention .NET uses to encode ArgumentList elements, so
+            // re-quoting the command here corrupts any embedded quotes (e.g. git commit -m "...")
+            // before cmd.exe ever sees them.
+            result = await ProcessHelper.RunAsync(
+                Shell, $"{ShellFlag} {command}",
+                resolvedDir, timeoutSeconds);
+
+            result = await WithWindowsPowerShellFallbackAsync(result, () =>
+                ProcessHelper.RunAsync(
+                    ProcessHelper.WindowsPowerShellPath.Value,
+                    ["-NoProfile", "-NonInteractive", "-Command", command],
+                    resolvedDir, timeoutSeconds));
+        }
+        else
+        {
+            // Unix shells take the whole command as a single argv element (bash -c "<command>").
+            // ArgumentList encodes that correctly; unlike cmd.exe there's no raw-string
+            // re-parse hazard here, so there's no reason to bypass .NET's own quoting.
+            result = await ProcessHelper.RunAsync(
+                Shell, [ShellFlag, command],
+                resolvedDir, timeoutSeconds);
+        }
 
         var output = result.ToPluginOutput();
         _lastRunKey    = cacheKey;
@@ -515,15 +597,32 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         var job        = new BackgroundJob(jobId);
         var workingDir = resolvedDir ?? Directory.GetCurrentDirectory();
 
+        var script = string.Empty;
+        var runDirectViaPowerShell = OperatingSystem.IsWindows() && TryExtractPowerShellScript(command, out script);
+
         System.Diagnostics.Process process;
-        try { process = StartProcess(Shell, [ShellFlag, command], workingDir); }
+        try
+        {
+            process = runDirectViaPowerShell
+                ? StartProcess(
+                    ProcessHelper.WindowsPowerShellPath.Value,
+                    ["-NoProfile", "-NonInteractive", "-Command", script],
+                    workingDir)
+                : OperatingSystem.IsWindows()
+                    // Raw-string overload for cmd.exe — see RunAsync for why ArgumentList
+                    // can't be used here.
+                    ? StartProcess(Shell, $"{ShellFlag} {command}", workingDir)
+                    // Unix shells take the whole command as a single argv element; ArgumentList
+                    // encodes that correctly without any raw-string re-parse hazard.
+                    : StartProcess(Shell, [ShellFlag, command], workingDir);
+        }
         catch (Exception ex)
         {
             return PluginResult.Error($"Failed to start background process: {ex.Message}");
         }
         WireOutputReaders(job, process);
 
-        if (OperatingSystem.IsWindows())
+        if (OperatingSystem.IsWindows() && !runDirectViaPowerShell)
             await RetryBackgroundJobViaPowerShellIfMismatchedAsync(job, process, command, workingDir);
 
         _jobs[jobId] = job;
