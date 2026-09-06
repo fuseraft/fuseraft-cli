@@ -109,6 +109,17 @@ internal sealed class ReplSessionContext
     public readonly HashSet<string> DisabledCategories = new(StringComparer.OrdinalIgnoreCase);
     public ChatOptions? ChatOptions;
 
+    // Per-plugin capability restrictions set via /tools restrict, using the same
+    // PluginCapabilityMap vocabulary (read/write/delete/run/...) and the same enforcement
+    // function (PluginCapabilityMap.IsAllowed) as AgentConfig.Capabilities in orchestration.
+    // Keys are plugin names ("FileSystem", "Shell", "Git", "Http", ...); values are the
+    // capability tags still allowed for that plugin. Filtering is done per-tool by
+    // PluginCapabilityMap.GetPlugin(toolName) rather than by which REPL category dictionary
+    // key currently holds the tool — so restricting "Git" also covers Git tools sitting in
+    // the "Extended" category bucket, unlike /safe-mode's category-key-only disable.
+    public readonly Dictionary<string, List<string>> CapabilityRestrictions =
+        new(StringComparer.OrdinalIgnoreCase);
+
     // Conversation
     public readonly List<ChatMessage> History;
     public readonly ConversationCompactor? Compactor;
@@ -248,7 +259,20 @@ internal sealed class ReplSessionContext
 
     public List<AIFunction> GetActiveTools() => [.. ToolsByCategory
         .Where(kv => !DisabledCategories.Contains(kv.Key))
-        .SelectMany(kv => kv.Value)];
+        .SelectMany(kv => kv.Value)
+        .Where(f => PassesCapabilityRestriction(f.Name))];
+
+    public bool PassesCapabilityRestriction(string toolName)
+    {
+        if (CapabilityRestrictions.Count == 0) return true;
+        var plugin = PluginCapabilityMap.GetPlugin(toolName);
+        // No capability-map entry (MCP tools, plugins with no fine-grained tags) — not
+        // restrictable, so it's unaffected by any /tools restrict declared so far.
+        if (plugin is null) return true;
+        // This tool's owning plugin has no restriction declared — pass through.
+        if (!CapabilityRestrictions.TryGetValue(plugin, out var allowed)) return true;
+        return PluginCapabilityMap.IsAllowed(toolName, allowed);
+    }
 
     public void BeginTurn()
     {

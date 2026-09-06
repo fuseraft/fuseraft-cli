@@ -97,6 +97,8 @@ internal static partial class ReplCommands
                 - `/tools` — List active tools by category
                 - `/tools disable <category>` — Disable a tool category (FileSystem Shell Search Git Http)
                 - `/tools enable <category>` — Re-enable a disabled tool category
+                - `/tools restrict <plugin> <tag…>` — Allow only tools tagged with one of `<tag…>` for that plugin (e.g. `/tools restrict Git read`), using the same capability vocabulary as orchestration's `AgentConfig.Capabilities`
+                - `/tools unrestrict <plugin>` — Remove a plugin's capability restriction
                 - `/undo` — Revert files written, patched, copied, moved, or deleted in the most recent turn (repeatable; walks back one turn at a time — not the same as `/rewind`, which only affects conversation history)
                 - `/safe-mode` — Show safe mode status
                 - `/safe-mode on` — Disable Shell, Git, Http tools to prevent mutations
@@ -197,6 +199,8 @@ internal static partial class ReplCommands
         tools.AddRow("[bold cyan]/tools[/]",                       "List active tools by category");
         tools.AddRow("[bold cyan]/tools disable <category>[/]",    "Disable a tool category (FileSystem Shell Search Git Http)");
         tools.AddRow("[bold cyan]/tools enable <category>[/]",     "Re-enable a disabled tool category");
+        tools.AddRow("[bold cyan]/tools restrict <plugin> <tag…>[/]", "Allow only tools tagged <tag> for that plugin (e.g. Git read)");
+        tools.AddRow("[bold cyan]/tools unrestrict <plugin>[/]",   "Remove a plugin's capability restriction");
         tools.AddRow("[bold cyan]/undo[/]",                        "Revert files written/patched/copied/moved/deleted in the most recent turn (repeatable; files only — see /rewind for conversation history)");
         tools.AddRow("[bold cyan]/safe-mode[/]",                   "Show safe mode status");
         tools.AddRow("[bold cyan]/safe-mode on[/]",                "Disable Shell, Git, Http tools to prevent mutations");

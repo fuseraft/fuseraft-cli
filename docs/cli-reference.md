@@ -408,9 +408,11 @@ Use `/tools` to see the full list at runtime.
 | `/history` | Show a condensed view of the conversation (role + preview of each message) |
 | `/system` | Print the current system prompt |
 | `/system <prompt>` | Replace the system prompt for the rest of the session |
-| `/tools` | List active tools grouped by category, with enabled/disabled status |
+| `/tools` | List active tools grouped by category, with enabled/disabled status. Restricted tools are marked `(restricted)`; any active capability restrictions are listed underneath. |
 | `/tools disable <category>` | Disable a tool category for the rest of the session (`FileSystem`, `Shell`, `Search`, `Git`, `Http`, `Skills`) |
 | `/tools enable <category>` | Re-enable a previously disabled tool category |
+| `/tools restrict <plugin> <tag…>` | Allow only tools tagged with one of `<tag…>` for that plugin (e.g. `/tools restrict Git read`), using the same capability vocabulary as orchestration's [`Capabilities`](configuration.md#capabilities) |
+| `/tools unrestrict <plugin>` | Remove a plugin's capability restriction |
 | `/undo` | Revert files written, patched, copied, moved, or deleted in the most recent turn. Repeatable — walks back one turn at a time. Only affects the filesystem; use `/rewind` to also roll back conversation history. |
 | `/mcp` | List MCP servers connected this session and their tools |
 | `/mcp add` | Interactive wizard to connect an MCP server (stdio or HTTP). Persists to `~/.fuseraft/repl-mcp-servers.json` so it reconnects automatically on future REPL launches. |
@@ -520,7 +522,28 @@ Command blocked.
 - **y / yes** — the command runs normally
 - **Enter / anything else** — the command is blocked; the agent receives `[DENIED]` and can try an alternative or ask what to do
 
-HITL mode is off by default and toggles instantly — no need to restart the session or wait for the next tool-schema rebuild. Unlike `--hitl` in `fuseraft run`, the REPL's `/hitl` only gates shell commands; it has no "pause after every turn" behavior, since the REPL is already interactive turn-by-turn. It also only covers `Shell` — `FileSystem` (`write_file`, `patch_file`, `delete_file`, …), `Git` (`git_commit`, `git_push`, …), and `Http` writes are not gated by any approval prompt; use `/safe-mode` to disable those categories outright instead.
+HITL mode is off by default and toggles instantly — no need to restart the session or wait for the next tool-schema rebuild. Unlike `--hitl` in `fuseraft run`, the REPL's `/hitl` only gates shell commands; it has no "pause after every turn" behavior, since the REPL is already interactive turn-by-turn. It also only covers `Shell` — `FileSystem` (`write_file`, `patch_file`, `delete_file`, …), `Git` (`git_commit`, `git_push`, …), and `Http` writes are not gated by any approval prompt; use `/safe-mode` to disable those categories outright, or `/tools restrict` below for a finer-grained lock.
+
+**Capability restriction (`/tools restrict`)**
+
+`/safe-mode` and `/tools disable` work at the category level — a category is either fully on or fully off. `/tools restrict <plugin> <tag…>` is finer-grained: it filters a plugin's tools down to only those tagged with one of the given capability tags, using the exact tag vocabulary and enforcement function (`PluginCapabilityMap.IsAllowed`) that orchestration's per-agent [`Capabilities`](configuration.md#capabilities) config is filtered through.
+
+```
+1> /tools restrict Git read
+Restricted Git to: read
+1> commit these changes
+fuseraft agent:
+I don't have a git_commit tool available.
+1> /tools unrestrict Git
+Restriction on Git removed.
+```
+
+- `/tools restrict <plugin> <tag> [tag2 …]` — e.g. `/tools restrict Git read` leaves `git_status`/`git_diff`/`git_log`/… available but removes `git_commit`/`git_push`/`git_reset`/… from the model's tool schema entirely (not a runtime approval prompt — the tool is simply absent)
+- `/tools restrict` with no arguments shows active restrictions
+- `/tools unrestrict <plugin>` removes a plugin's restriction
+- Run `/tools restrict` with no arguments to see which plugin names have capability tags at all (`FileSystem`, `Shell`, `Git`, `Http`, `Json`, `Document`, `Search`, `Changes`, `Scratchpad`, `Chatroom`, `Probe`, `CodeExecution`, `Decision`, `Graph`) — plugins without fine-grained tags (`Todo`, `SubAgent`, MCP servers, …) can only be turned on or off via `/tools disable`/`/tools enable`, not restricted by tag
+
+**Restricting reaches further than disabling a category.** Filtering is done per-tool by which plugin actually owns it, not by which REPL tool-category dictionary key currently holds it. That distinction matters once `--plugins Extended` is enabled: `git_push` lives in the `Extended` category, not `Git`, so `/tools restrict Git read` still removes it, while `/safe-mode on` — which only disables the `Shell`, `Git`, and `Http` category keys — does not touch `Extended` at all and leaves `git_push` (and any other Extended-bucket Shell/Git/Http tool) callable. If you need a hard guarantee with `Extended` enabled, restrict the plugin by tag rather than relying on `/safe-mode` alone.
 
 **Input and line editing**
 

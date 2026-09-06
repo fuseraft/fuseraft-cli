@@ -44,7 +44,7 @@ internal sealed class ReplLineReader
         ["/memory"]      = ["delete", "list", "save", "show"],
         ["/provider"]    = ["setup"],
         ["/safe-mode"]   = ["off", "on"],
-        ["/tools"]       = ["disable", "enable"],
+        ["/tools"]       = ["disable", "enable", "restrict", "unrestrict"],
     };
 
     private bool     _tabActive;

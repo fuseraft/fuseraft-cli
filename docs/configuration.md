@@ -164,8 +164,8 @@ Per-plugin tool filter. Keys are plugin names; values are arrays of capability t
 | Plugin | Capability tags |
 |--------|----------------|
 | `FileSystem` | `read` (read_file, grep_file, get_file_summary, get_file_info, list_files) · `write` (write_file, patch_file, save_file_summary, create_directory, copy_file, move_file, set_permissions) · `delete` (delete_file, delete_directory) |
-| `Shell` | `read` (shell_get_env, shell_get_job_status, shell_get_job_output, shell_which, shell_get_working_directory) · `run` (shell_run, shell_run_script, shell_run_background, shell_set_env, shell_kill_job) |
-| `Git` | `read` (git_status, git_diff, git_log, git_show, git_branch_list, git_stash_list) · `write` (git_add, git_commit, git_checkout, git_create_branch, git_init, git_push, git_pull, git_stash, git_stash_pop, git_reset) |
+| `Shell` | `read` (shell_get_env, shell_get_job_status, shell_get_job_output, shell_which, shell_get_working_directory, shell_get_session_temp_dir) · `run` (shell_run, shell_run_script, shell_run_background, shell_set_env, shell_kill_job) |
+| `Git` | `read` (git_status, git_diff, git_log, git_show, git_branch_list, git_stash_list, git_is_inside_work_tree, git_is_repo_root) · `write` (git_add, git_commit, git_checkout, git_create_branch, git_init, git_push, git_pull, git_stash, git_stash_pop, git_reset, git_rebase) |
 | `Http` | `get` (http_get, http_head) · `post` · `put` · `patch` · `delete` — one tag per verb, except `http_head` which shares the `get` tag rather than having its own |
 | `Json` | `read` · `write` (json_merge) |
 | `Document` | `read` (document_extract_text, document_get_info, document_list_sheets, document_get_sheet) |
