@@ -181,11 +181,11 @@ public sealed class SubAgentPlugin(
     // Reads the REPL conversation history, identifies where things are going wrong, and returns
     // a corrective instruction addressed to the REPL agent for injection as a user message.
     // Returns null when the diagnoser produces no output or the call fails/times out.
-    public async Task<string?> DiagnoseAsync(
+    public async Task<(string? Result, int? InputTokens, int? OutputTokens)> DiagnoseAsync(
         IReadOnlyList<ChatMessage> history,
         CancellationToken cancellationToken = default)
     {
-        if (chatClient is null) return null;
+        if (chatClient is null) return (null, null, null);
 
         const string diagnosticSystem =
             "You are a session diagnostician. You will receive a transcript of a conversation " +
@@ -223,16 +223,18 @@ public sealed class SubAgentPlugin(
         cts.CancelAfter(TimeSpan.FromMinutes(2));
         try
         {
-            var response = await chatClient.GetResponseAsync(messages, options, cts.Token);
-            var text     = (response.Text ?? string.Empty).Trim();
-            return string.IsNullOrEmpty(text) ? null : text;
+            var response  = await chatClient.GetResponseAsync(messages, options, cts.Token);
+            var text      = (response.Text ?? string.Empty).Trim();
+            var inputTok  = (int?)response.Usage?.InputTokenCount;
+            var outputTok = (int?)response.Usage?.OutputTokenCount;
+            return (string.IsNullOrEmpty(text) ? null : text, inputTok, outputTok);
         }
         catch (Exception ex)
         {
             if (eventEmitter is not null)
                 try { await eventEmitter.EmitAsync(EventTypes.SubAgentEnd, agent: parentAgentName,
                     payload: new { outcome = "error", error = ex.Message, mode = "diagnose" }); } catch { }
-            return null;
+            return (null, null, null);
         }
     }
 

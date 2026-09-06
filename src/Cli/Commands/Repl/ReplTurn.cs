@@ -506,15 +506,6 @@ internal static class ReplTurn
             stepPassed = await ReplTurnOutcome.HandleStepResult(ctx, activeStep, stepTotal, toolCallsThisTurn,
                 capturedResults ?? [], hitIterationCap, responseText, cancellationToken);
 
-        await TryApplyMutationCorrectionAsync(
-            ctx, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn, cancellationToken);
-
-        await TryApplyCriticReviewAsync(
-            ctx, input, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn, cancellationToken);
-
-        await TryApplyTodoCompletionCorrectionAsync(
-            ctx, responseText, isStepRequest, capturePlan, isCorrectionTurn, cancellationToken);
-
         var postEst = ctx.EstimateTokens();
         if (ctx.PrevTurnTokenEstimate > 0)
             ctx.TurnTokenDeltas.Add(postEst - ctx.PrevTurnTokenEstimate);
@@ -617,6 +608,7 @@ internal static class ReplTurn
             if (compacted)
             {
                 ctx.TurnIndex = 0;
+                ctx.LastExtractedTurnIndex = -1;
             }
             else if (!ctx.JsonMode)
             {
@@ -677,6 +669,21 @@ internal static class ReplTurn
             ReplJsonBridge.Emit(new { type = "message_end", turnIndex = ctx.TurnIndex, toolCalls = toolCallsThisTurn.ToArray() });
 
         ctx.TurnIndex++;
+
+        // Run only after this turn has fully closed out (index incremented, its own
+        // TurnEnd/message_end emitted) so a triggered correction becomes a genuinely new
+        // next turn with its own turn index and events, instead of a nested call whose
+        // TurnIndex++ and emits would otherwise land inside this turn's own tail and get
+        // relabeled onto the wrong turn.
+        await TryApplyMutationCorrectionAsync(
+            ctx, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn, cancellationToken);
+
+        await TryApplyCriticReviewAsync(
+            ctx, input, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn, cancellationToken);
+
+        await TryApplyTodoCompletionCorrectionAsync(
+            ctx, responseText, isStepRequest, capturePlan, isCorrectionTurn, cancellationToken);
+
         return stepPassed;
     }
 

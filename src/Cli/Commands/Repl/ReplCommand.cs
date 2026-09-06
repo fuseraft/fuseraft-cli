@@ -127,7 +127,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         }
         else if (!string.IsNullOrEmpty(legacyKey))
         {
-            userCfg!.ApiKey = legacyKey;
+            userCfg ??= new UserConfig();
+            userCfg.ApiKey = legacyKey;
             if (await KeyStorePersistence.TryStoreAsync(keyStore, legacyKey))
                 AnsiConsole.MarkupLine($"[dim]API key migrated to {Markup.Escape(keyStore.StoreName)}.[/]");
             UserConfigStore.Save(userCfg);
@@ -477,13 +478,6 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             }
         }
 
-        if (toolsByCategory.TryGetValue("FileSystem", out _))
-        {
-            var fsResettable = toolsByCategory["FileSystem"]
-                .Select(f => f.UnderlyingMethod?.DeclaringType)
-                .FirstOrDefault();
-        }
-        
         if (discoveredSkills.Count > 0)
             ctx.LineReader.SetSkillSlugs([.. discoveredSkills.Select(s => s.Frontmatter.Name)]);
 
