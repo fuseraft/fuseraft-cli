@@ -63,6 +63,33 @@ public sealed class McpSessionManager : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Connects to a single MCP server and returns its client and tool list directly, without
+    /// requiring a <see cref="PluginRegistry"/> — used by callers (e.g. the REPL's <c>/mcp add</c>
+    /// wizard) that manage their own tool dictionary rather than a <see cref="PluginRegistry"/>
+    /// instance. The connection is tracked by this manager and closed on <see cref="DisposeAsync"/>
+    /// like any other, so callers should still dispose the manager when the session ends.
+    /// </summary>
+    public async Task<(McpClient Client, IReadOnlyList<AIFunction> Tools)> ConnectSingleAsync(
+        McpServerConfig server,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(server.Name))
+            throw new InvalidOperationException("The MCP server entry must have a non-empty Name.");
+
+        _logger?.LogInformation("Connecting to MCP server '{Name}' via {Transport}…",
+            server.Name, server.Transport);
+
+        var client = await ConnectAsync(server, cancellationToken);
+        _clients.Add(client);
+
+        var tools = await client.ListToolsAsync(cancellationToken: cancellationToken);
+        _logger?.LogInformation("MCP server '{Name}' registered {Count} tool(s).",
+            server.Name, tools.Count);
+
+        return (client, tools.Cast<AIFunction>().ToList());
+    }
+
     public async ValueTask DisposeAsync()
     {
         List<Exception>? errors = null;

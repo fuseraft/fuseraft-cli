@@ -41,6 +41,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     private readonly SessionReadCache?  _sessionCache;
     private readonly Action?            _onWrite;
     private readonly Action?            _onCacheHit;
+    private readonly UndoSnapshotStore  _undoStore = new();
 
     // Per-turn read cache: cleared at the start of each agent turn so re-reading the same
     // file within a single turn is caught and short-circuited before dumping redundant
@@ -97,6 +98,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         _patchedThisTurn.Clear();
         _writtenThisTurn.Clear();
         _readBudgetUsed = 0;
+        _undoStore.BeginTurn();
     }
 
     // Exposed so FileSystemManagementOps (registered as "FileSystem"'s second backing object,
@@ -105,6 +107,12 @@ public sealed class FileSystemPlugin : ITurnResettable
     internal HashSet<string> ReadThisTurnState    => _readThisTurn;
     internal HashSet<string> WrittenThisTurnState => _writtenThisTurn;
     internal HashSet<string> PatchedThisTurnState => _patchedThisTurn;
+
+    // REPL's /undo command. Disabled (no-op) until EnableUndoSnapshots is called — the session
+    // ID needed to resolve a snapshot directory isn't known yet when this plugin is constructed
+    // (see ReplCommand.cs, where FileSystemPlugin is built ~70 lines before the session ID is).
+    internal UndoSnapshotStore UndoStore => _undoStore;
+    internal void EnableUndoSnapshots(string snapshotDir) => _undoStore.Enable(snapshotDir);
 
     [Description("Read text file content. Use startLine+maxLines for large files. Binary files rejected.")]
     public async Task<string> ReadFileAsync(
@@ -409,6 +417,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (content.Contains("\r\n"))
             patched = patched.Replace("\n", "\r\n");
 
+        await _undoStore.RecordBeforeMutationAsync(resolved, knownContent: content);
         await File.WriteAllTextAsync(resolved, patched, encoding);
 
         // Invalidate caches — content has changed.
@@ -540,6 +549,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         // Preserve the existing file's encoding/BOM on overwrite so write_file never silently
         // strips a BOM the file had before this call. New files get plain BOM-less UTF-8.
         var encoding = File.Exists(resolved) ? DetectEncoding(resolved) : new System.Text.UTF8Encoding(false);
+        await _undoStore.RecordBeforeMutationAsync(resolved);
         await File.WriteAllTextAsync(resolved, content, encoding);
 
         // Allow a within-turn verification read by removing from the per-turn set.
