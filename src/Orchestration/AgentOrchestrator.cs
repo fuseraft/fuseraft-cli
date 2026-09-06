@@ -345,8 +345,33 @@ public sealed class AgentOrchestrator(
         // live reader over this closure-captured counter instead.
         WireTokenBudget(termination, () => cumulativeTokens);
 
+        // True only for the very first pass through the loop below, for this StreamAsync call.
+        bool isFirstLoopIteration = true;
+
         while (true)
         {
+            // Resuming with priorHistory (e.g. SessionRunner restarting the stream right after
+            // a mid-session compaction interrupt, or a literal --resume of an already-complete
+            // checkpoint) re-injects that history above before this loop starts. Without this
+            // check, a fresh StreamAsync call always runs at least one more agent turn before it
+            // can notice the injected history already satisfies termination — normally harmless
+            // because a completed session isn't resumed, but SessionRunner's compaction-needed
+            // interrupt (RunStreamCoreAsync breaking the moment RecordMessageAsync flags
+            // compaction, even if the just-yielded message was also the terminal one) can hand
+            // back priorHistory that already ends in a satisfied termination condition — the
+            // post-turn check below never got to run for it, since the stream was torn down
+            // before this iterator resumed. Left unchecked, the agent gets invoked again, and
+            // again, never actually stopping until MaxIterations.
+            if (isFirstLoopIteration && priorHistory is { Count: > 0 }
+                && await termination.ShouldTerminateAsync(history, cancellationToken))
+            {
+                if (eventEmitter is not null)
+                    _ = eventEmitter.EmitAsync(EventTypes.TerminationSatisfied,
+                        payload: new { turn, reason = "already_satisfied_on_resume" });
+                break;
+            }
+            isFirstLoopIteration = false;
+
             // Hard iteration cap — takes effect regardless of the termination strategy.
             if (config.Termination?.ResolveMaxIterations() is > 0 and var maxIter && turn >= maxIter)
             {
