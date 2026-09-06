@@ -8,6 +8,8 @@ namespace fuseraft.Cli.Commands.Repl;
 
 internal static partial class ReplCommands
 {
+    private static readonly string[] SafeModeCategories = { "Shell", "Git", "Http" };
+
     // -------------------------------------------------------------------------
     // /tools
     // -------------------------------------------------------------------------
@@ -75,6 +77,17 @@ internal static partial class ReplCommands
                 ctx.DisabledCategories.Remove(match);
                 ctx.ChatOptions = ctx.BuildChatOptions();
                 AnsiConsole.MarkupLine($"[dim]{Markup.Escape(match)} tools enabled.[/]");
+                if (ctx.SafeMode && SafeModeCategories.Contains(match, StringComparer.OrdinalIgnoreCase))
+                {
+                    // Manually re-enabling a category safe mode is managing breaks the
+                    // "safe mode on == Shell/Git/Http disabled" guarantee — drop the flag
+                    // so it doesn't keep claiming a protection that's no longer in effect,
+                    // and so a later `/safe-mode on` actually re-disables things instead of
+                    // no-oping on "already on".
+                    ctx.SafeMode = false;
+                    ctx.PreSafeDisabled = null;
+                    AnsiConsole.MarkupLine("[yellow]Safe mode disengaged[/] [dim](re-enabled a category it was managing).[/]");
+                }
                 await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/tools enable", category = match });
             }
         }
@@ -153,9 +166,26 @@ internal static partial class ReplCommands
         ctx.ChatOptions = ctx.BuildChatOptions();
 
         if (!PluginCapabilityMap.KnownPlugins.Contains(plugin))
+        {
             AnsiConsole.MarkupLine(
                 $"[yellow]Warning:[/] '{Markup.Escape(plugin)}' has no capability-tagged tools — " +
                 $"this restriction won't match anything. Known plugins: {string.Join(", ", PluginCapabilityMap.KnownPlugins.OrderBy(p => p))}");
+        }
+        else
+        {
+            var known   = PluginCapabilityMap.GetCapabilitiesForPlugin(plugin);
+            var matched = tags.Where(t => known.Contains(t)).ToList();
+            if (matched.Count == 0)
+                AnsiConsole.MarkupLine(
+                    $"[yellow]Warning:[/] none of [{Markup.Escape(string.Join(", ", tags))}] are tags {Markup.Escape(plugin)} uses — " +
+                    $"this blocks ALL of {Markup.Escape(plugin)}'s tools. {Markup.Escape(plugin)}'s tags are: " +
+                    $"{string.Join(", ", known.OrderBy(t => t))}.");
+            else if (matched.Count < tags.Count)
+                AnsiConsole.MarkupLine(
+                    $"[yellow]Warning:[/] {Markup.Escape(plugin)} has no tools tagged " +
+                    $"{string.Join(", ", tags.Except(matched, StringComparer.OrdinalIgnoreCase).Select(Markup.Escape))} — " +
+                    $"{Markup.Escape(plugin)}'s tags are: {string.Join(", ", known.OrderBy(t => t))}.");
+        }
 
         AnsiConsole.MarkupLine($"[dim]Restricted[/] [bold]{Markup.Escape(plugin)}[/] [dim]to:[/] {Markup.Escape(string.Join(", ", tags))}");
         await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/tools restrict", plugin, tags });
@@ -185,7 +215,7 @@ internal static partial class ReplCommands
             else
             {
                 ctx.PreSafeDisabled = new HashSet<string>(ctx.DisabledCategories, StringComparer.OrdinalIgnoreCase);
-                foreach (var c in new[] { "Shell", "Git", "Http" }.Where(c => ctx.ToolsByCategory.ContainsKey(c)))
+                foreach (var c in SafeModeCategories.Where(c => ctx.ToolsByCategory.ContainsKey(c)))
                     ctx.DisabledCategories.Add(c);
                 ctx.ChatOptions = ctx.BuildChatOptions();
                 ctx.SafeMode    = true;

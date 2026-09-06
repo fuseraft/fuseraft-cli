@@ -199,6 +199,18 @@ internal static class PluginCapabilityMap
         ToolInfo.TryGetValue(toolName, out var info) ? info.Plugin : null;
 
     /// <summary>
+    /// The distinct capability tags actually used by <paramref name="plugin"/>'s tools (e.g.
+    /// <c>{"get","post","put","patch","delete"}</c> for <c>Http</c>). Used by <c>/tools
+    /// restrict</c> to catch a tag that doesn't exist for the given plugin — e.g. <c>Http</c>
+    /// has no <c>read</c>/<c>write</c> tags, so restricting it to one would silently match
+    /// zero tools and block the plugin entirely rather than the intended subset.
+    /// </summary>
+    public static IReadOnlySet<string> GetCapabilitiesForPlugin(string plugin) =>
+        new HashSet<string>(
+            ToolInfo.Values.Where(v => v.Plugin.Equals(plugin, StringComparison.OrdinalIgnoreCase)).Select(v => v.Capability),
+            StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Test-only accessor: <see langword="true"/> when <paramref name="toolName"/> has an
     /// explicit capability entry. Used by a coverage test asserting every built-in plugin
     /// tool is mapped, so a newly added tool can't silently bypass capability filtering by

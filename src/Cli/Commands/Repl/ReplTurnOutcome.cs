@@ -18,6 +18,20 @@ internal static class ReplTurnOutcome
         if (TryParsePlan(responseText, out var steps) && steps.Length > 0)
         {
             ctx.CurrentPlan = steps;
+
+            var duplicateSteps = steps.GroupBy(s => s.Step).Where(g => g.Count() > 1).Select(g => g.Key).OrderBy(n => n).ToList();
+            if (duplicateSteps.Count > 0)
+            {
+                // TopologicalSort/execution index steps by number and tolerate collisions
+                // (last one wins) rather than crashing, so a duplicate silently drops a step
+                // unless flagged here.
+                var warning = $"Plan has duplicate step number(s) {string.Join(", ", duplicateSteps)} — only the last step with each number will run.";
+                if (ctx.JsonMode)
+                    ReplJsonBridge.Emit(new { type = "warning", text = warning });
+                else
+                    AnsiConsole.MarkupLine($"[yellow]⚠ {Markup.Escape(warning)}[/]");
+            }
+
             _ = ctx.Emitter.EmitAsync(EventTypes.PlanCaptured, turn: ctx.TurnIndex, payload: new
             {
                 step_count = steps.Length,
@@ -71,18 +85,21 @@ internal static class ReplTurnOutcome
         var stepsLeft = ctx.ExecutionQueue.Count;
 
         // When deterministic checks pass and adversarial mode is on, ask the critic.
+        string? criticReason = null;
         if (passed && ctx.AdversarialMode && ctx.SubAgent is not null)
         {
-            AnsiConsole.Markup("[dim]  critic reviewing…[/]");
+            if (!ctx.JsonMode) AnsiConsole.Markup("[dim]  critic reviewing…[/]");
             var (approved, reason) = await ctx.SubAgent.CriticReviewAsync(
                 activeStep.Description, activeStep.Tool, toolCallsThisTurn, responseText, cancellationToken);
-            Console.Write($"\r{new string(' ', 40)}\r");
+            if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 40)}\r");
             if (!approved)
             {
                 passed = false;
+                criticReason = reason;
                 ctx.RecoveryHint = $"[Critic] Step {activeStep.Step} rejected: {reason}";
-                AnsiConsole.MarkupLine(
-                    $"[yellow]  ✗ Critic rejected step {activeStep.Step}: {Markup.Escape(reason ?? "no reason given")}[/]");
+                if (!ctx.JsonMode)
+                    AnsiConsole.MarkupLine(
+                        $"[yellow]  ✗ Critic rejected step {activeStep.Step}: {Markup.Escape(reason ?? "no reason given")}[/]");
             }
         }
         if (passed)
@@ -136,6 +153,7 @@ internal static class ReplTurnOutcome
                 hit_iteration_cap = hitIterationCap,
                 tool_calls        = toolCallsThisTurn.ToArray(),
                 verify_output     = verifyOutput,
+                critic_reason     = criticReason,
             });
             if (!ctx.JsonMode)
             {

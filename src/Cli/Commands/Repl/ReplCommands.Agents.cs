@@ -29,7 +29,9 @@ internal static partial class ReplCommands
             : Task.CompletedTask;
         try
         {
-            var correction = await ctx.SubAgent.DiagnoseAsync(ctx.History, cancellationToken);
+            var (correction, inputTok, outputTok) = await ctx.SubAgent.DiagnoseAsync(ctx.History, cancellationToken);
+            ctx.CumulativeInputTokens  += inputTok  ?? 0;
+            ctx.CumulativeOutputTokens += outputTok ?? 0;
             if (spinCts is not null) { spinCts.Cancel(); await spinTask; ReplConsole.ClearSpinnerLine(); }
 
             if (correction is null)

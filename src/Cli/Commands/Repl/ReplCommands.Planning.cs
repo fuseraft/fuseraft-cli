@@ -166,6 +166,7 @@ internal static partial class ReplCommands
 
         // /compact resets the displayed turn counter so status lines restart from 1.
         ctx.TurnIndex = 0;
+        ctx.LastExtractedTurnIndex = -1;
 
         if (ctx.JsonMode)
             ReplJsonBridge.Emit(new { type = "compacted" });
@@ -220,6 +221,7 @@ internal static partial class ReplCommands
         ctx.History.Add(new ChatMessage(ChatRole.User, $"[Compacted context from previous session]\n\n{summary}"));
 
         ctx.PrevTurnTokenEstimate = 0;
+        ctx.PrevCtxEstimate       = 0;
         ctx.TurnTokenDeltas.Clear();
         ctx.ContextWarningShown   = false;
         ctx.ResetPlanState();
