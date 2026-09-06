@@ -2,6 +2,8 @@
 
 fuseraft-cli supports the [Model Context Protocol (MCP)](https://modelcontextprotocol.io). You can connect any MCP server at session startup, and its tools are registered as a plugin that any agent can call.
 
+> **REPL users:** everything below configures MCP servers for `fuseraft run` via a YAML/JSON config. If you're in `fuseraft repl`, use `/mcp add` instead for an interactive wizard that connects a server on the spot and persists it for future sessions — see [CLI Reference — Connecting an MCP server](cli-reference.md#fuseraft-repl).
+
 ---
 
 ## How it works
