@@ -230,16 +230,10 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             todoPlugin                    = new TodoPlugin();
             toolsByCategory["Todo"]       = PluginRegistry.GetFunctionsFromObject(todoPlugin).ToList();
 
-            var fsReadOps    = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                { "read_file", "list_files", "grep_file", "get_file_summary", "get_file_info" };
-            var shellReadOps = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                { "shell_run", "shell_get_env", "shell_which", "shell_get_working_directory" };
-            var gitReadOps   = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                { "git_status", "git_diff", "git_log", "git_show", "git_branch_list", "git_stash_list" };
-            explorerTools = fsFunctions.Where(f => fsReadOps.Contains(f.Name))
+            explorerTools = fsFunctions.Where(f => ExplorerToolSets.FileSystemRead.Contains(f.Name))
                 .Concat(toolsByCategory["Search"])
-                .Concat(shellFunctions.Where(f => shellReadOps.Contains(f.Name)))
-                .Concat(gitFunctions.Where(f => gitReadOps.Contains(f.Name)))
+                .Concat(shellFunctions.Where(f => ExplorerToolSets.ShellRead.Contains(f.Name)))
+                .Concat(gitFunctions.Where(f => ExplorerToolSets.GitRead.Contains(f.Name)))
                 .ToList();
 
             // Curated default: ship only the common, low-risk subset by default (see

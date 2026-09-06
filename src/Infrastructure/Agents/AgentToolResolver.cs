@@ -204,12 +204,10 @@ internal sealed class AgentToolResolver(
         // Default: expanded read-oriented set. FileSystem (sandboxed, read ops only).
         var fsPlugin = new FileSystemPlugin(securityConfig?.FileSystemSandboxPath, exemptedPaths: ["~/.fuseraft/"]);
         var fsOps     = new FileSystemManagementOps(fsPlugin, securityConfig?.FileSystemSandboxPath, exemptedPaths: ["~/.fuseraft/"]);
-        var fsReadTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            { "read_file", "list_files", "grep_file", "get_file_summary", "get_file_info" };
         tools.AddRange(
             PluginRegistry.GetFunctionsFromObject(fsPlugin)
                           .Concat(PluginRegistry.GetFunctionsFromObject(fsOps))
-                          .Where(f => fsReadTools.Contains(f.Name)));
+                          .Where(f => ExplorerToolSets.FileSystemRead.Contains(f.Name)));
 
         // Search: all tools.
         if (pluginRegistry.TryGet("Search", out var searchPlugin))
@@ -218,21 +216,17 @@ internal sealed class AgentToolResolver(
         // Shell: run commands (builds, tests) + env/path helpers.
         if (pluginRegistry.TryGet("Shell", out var shellPlugin))
         {
-            var shellAllowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                { "shell_run", "shell_get_env", "shell_which", "shell_get_working_directory" };
             tools.AddRange(
                 PluginRegistry.GetFunctionsFromObject(shellPlugin)
-                              .Where(f => shellAllowed.Contains(f.Name)));
+                              .Where(f => ExplorerToolSets.ShellRead.Contains(f.Name)));
         }
 
         // Git: read-only operations.
         if (pluginRegistry.TryGet("Git", out var gitPlugin))
         {
-            var gitReadOps = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                { "git_status", "git_diff", "git_log", "git_show", "git_branch_list", "git_stash_list" };
             tools.AddRange(
                 PluginRegistry.GetFunctionsFromObject(gitPlugin)
-                              .Where(f => gitReadOps.Contains(f.Name)));
+                              .Where(f => ExplorerToolSets.GitRead.Contains(f.Name)));
         }
 
         return tools;
