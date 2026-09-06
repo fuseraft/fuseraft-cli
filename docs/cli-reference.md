@@ -145,7 +145,7 @@ This lets you keep interacting with the agent after a task completes without nee
 
 **Shell command approval in `--hitl` mode**
 
-When `--hitl` is active, every `shell_run` and `shell_run_script` call pauses for approval before executing:
+When `--hitl` is active, every `shell_run`, `shell_run_script`, and `shell_run_background` call pauses for approval before executing:
 
 ```
 ⏸ Shell command requested:
@@ -157,6 +157,8 @@ Allow? (y/N):
 - **Enter / anything else** — the command is blocked; the agent receives `[DENIED]` and can try an alternative or ask you what to do
 
 Shell command approval only applies in `--hitl` mode. In normal runs, shell commands execute without prompting.
+
+The REPL has its own toggle for the same shell-approval gate — see `/hitl` under `fuseraft repl` below. It's scoped to shell commands only and, unlike this flag, has no "pause after every turn" behavior.
 
 **2. Per-route approval gates — before a specific route fires**
 
@@ -437,6 +439,9 @@ Use `/tools` to see the full list at runtime.
 | `/safe-mode` | Show current safe mode status |
 | `/safe-mode on` | Disable Shell, Git, and Http tool categories to prevent mutations |
 | `/safe-mode off` | Restore tool categories to their state before safe mode was enabled |
+| `/hitl` | Show current HITL (human-in-the-loop) mode status |
+| `/hitl on` | Require y/N approval before each `shell_run`, `shell_run_script`, or `shell_run_background` call |
+| `/hitl off` | Run shell commands without approval again |
 | `/adversarial` | Show adversarial mode status |
 | `/adversarial on` | Enable a critic agent that reviews each `/execute` step after postconditions pass, and every free-form response. The critic judges whether the response was correct, grounded in actual tool output, and complete — halting the plan on a step rejection, or injecting one correction turn on a free-form rejection. |
 | `/adversarial off` | Disable the critic agent |
@@ -486,10 +491,12 @@ The prompt displays the current turn number followed by `>`:
 1> your message here
 ```
 
-When safe mode is active it gains a `[safe]` prefix:
+When safe mode or HITL mode is active the prompt gains a `[safe]`, `[hitl]`, or combined `[safe·hitl]` prefix:
 
 ```
 [safe] 1> your message here
+[hitl] 1> your message here
+[safe·hitl] 1> your message here
 ```
 
 After each response a compact status line is printed showing the turn number, estimated token usage, and the number of tool calls made:
@@ -497,6 +504,23 @@ After each response a compact status line is printed showing the turn number, es
 ```
   ── turn 1 · ~3,200 tok · 2 tools
 ```
+
+**Shell command approval (`/hitl`)**
+
+`/hitl on` gates every `shell_run`, `shell_run_script`, and `shell_run_background` call behind the same y/N approval prompt `fuseraft run --hitl` uses for shell commands (see [Shell command approval in `--hitl` mode](#human-in-the-loop-controls)):
+
+```
+[hitl] 2> delete the build artifacts and rerun the tests
+⏸ Shell command requested:
+  rm -rf dist/ && npm test
+Allow? (y/N):  n
+Command blocked.
+```
+
+- **y / yes** — the command runs normally
+- **Enter / anything else** — the command is blocked; the agent receives `[DENIED]` and can try an alternative or ask what to do
+
+HITL mode is off by default and toggles instantly — no need to restart the session or wait for the next tool-schema rebuild. Unlike `--hitl` in `fuseraft run`, the REPL's `/hitl` only gates shell commands; it has no "pause after every turn" behavior, since the REPL is already interactive turn-by-turn. It also only covers `Shell` — `FileSystem` (`write_file`, `patch_file`, `delete_file`, …), `Git` (`git_commit`, `git_push`, …), and `Http` writes are not gated by any approval prompt; use `/safe-mode` to disable those categories outright instead.
 
 **Input and line editing**
 

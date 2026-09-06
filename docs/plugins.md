@@ -64,7 +64,7 @@ The shell used is `/bin/bash` on Unix and `cmd.exe` on Windows. The shell binary
 
 **`sudo` protection:** `sudo` is always blocked. Any command or script containing `sudo` (including after pipes, `&&`, `;`, or newlines) is rejected before execution. The denial message instructs the agent to use non-privileged alternatives (`pip install --user`, `pipx`, virtualenvs) or, if elevated access is truly required, to tell the user what to run so they can do it themselves.
 
-**Shell command approval in `--hitl` mode:** When `fuseraft run --hitl` is active, every `shell_run` and `shell_run_script` call pauses and shows the command for approval before executing. See [CLI Reference — Shell command approval](cli-reference.md#human-in-the-loop-controls).
+**Shell command approval:** When `fuseraft run --hitl` is active, every `shell_run`, `shell_run_script`, and `shell_run_background` call pauses and shows the command for approval before executing. See [CLI Reference — Shell command approval](cli-reference.md#human-in-the-loop-controls). The REPL has the same gate behind its own `/hitl on`/`/hitl off` toggle (see [CLI Reference — `fuseraft repl`](cli-reference.md#fuseraft-repl)).
 
 **Security note:** When `FileSystemSandboxPath` is set, the `workingDirectory` argument is hard-denied if it falls outside the sandbox. The `command` and `script` arguments are scanned for absolute paths escaping the sandbox; system binary prefixes (`/usr/`, `/bin/`, `/opt/`, `/nix/`, etc.) are exempted. Shell scanning is heuristic — for strict containment use `CodeExecution` (Docker) instead.
 
