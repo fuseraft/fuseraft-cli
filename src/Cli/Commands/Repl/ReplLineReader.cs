@@ -27,7 +27,7 @@ internal sealed class ReplLineReader
     [
         "/adversarial", "/assist", "/clear", "/compact", "/context",
         "/conversation", "/delegate", "/events", "/execute", "/exit", "/explore",
-        "/fork", "/help", "/history", "/last", "/locate",
+        "/fork", "/help", "/hitl", "/history", "/last", "/locate",
         "/max-tokens", "/memory", "/model", "/models", "/paste", "/plan",
         "/provider", "/reasoning", "/recover", "/resume", "/retry", "/rewind",
         "/run", "/safe-mode", "/save", "/sessions", "/snapshot", "/switch",
@@ -39,6 +39,7 @@ internal sealed class ReplLineReader
     {
         ["/adversarial"] = ["off", "on"],
         ["/fork"]        = ["switch"],
+        ["/hitl"]        = ["off", "on"],
         ["/max-tokens"]  = ["reset"],
         ["/memory"]      = ["delete", "list", "save", "show"],
         ["/provider"]    = ["setup"],

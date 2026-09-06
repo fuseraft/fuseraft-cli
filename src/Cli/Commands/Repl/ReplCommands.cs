@@ -25,6 +25,7 @@ internal static partial class ReplCommands
             case "/recover":    return CmdRecover(ctx);
             case "/events":     await CmdEventsAsync(ctx, arg); return CommandResult.Continue;
             case "/safe-mode":    return await CmdSafeModeAsync(ctx, arg);
+            case "/hitl":         return await CmdHitlAsync(ctx, arg);
             case "/adversarial":  return CmdAdversarial(ctx, arg);
             case "/assist":       return await CmdAssistAsync(ctx, cancellationToken);
             case "/memory":     return await CmdMemoryAsync(ctx, arg, cancellationToken);
@@ -100,6 +101,9 @@ internal static partial class ReplCommands
                 - `/safe-mode` — Show safe mode status
                 - `/safe-mode on` — Disable Shell, Git, Http tools to prevent mutations
                 - `/safe-mode off` — Restore tool categories
+                - `/hitl` — Show HITL (human-in-the-loop) mode status
+                - `/hitl on` — Require y/N approval before each shell command
+                - `/hitl off` — Run shell commands without approval
                 - `/adversarial` — Show adversarial mode status
                 - `/adversarial on` — Enable critic agent to review each `/execute` step
                 - `/adversarial off` — Disable critic agent
@@ -197,6 +201,9 @@ internal static partial class ReplCommands
         tools.AddRow("[bold cyan]/safe-mode[/]",                   "Show safe mode status");
         tools.AddRow("[bold cyan]/safe-mode on[/]",                "Disable Shell, Git, Http tools to prevent mutations");
         tools.AddRow("[bold cyan]/safe-mode off[/]",               "Restore tool categories");
+        tools.AddRow("[bold cyan]/hitl[/]",                        "Show HITL (human-in-the-loop) mode status");
+        tools.AddRow("[bold cyan]/hitl on[/]",                     "Require y/N approval before each shell command");
+        tools.AddRow("[bold cyan]/hitl off[/]",                    "Run shell commands without approval");
         tools.AddRow("[bold cyan]/adversarial[/]",                 "Show adversarial mode status");
         tools.AddRow("[bold cyan]/adversarial on[/]",              "Enable critic agent to review each /execute step");
         tools.AddRow("[bold cyan]/adversarial off[/]",             "Disable critic agent");

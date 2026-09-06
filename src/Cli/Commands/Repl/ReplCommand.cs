@@ -4,6 +4,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using fuseraft.Cli;
 using fuseraft.Cli.Commands;
 using fuseraft.Cli.Display;
 using fuseraft.Core;
@@ -195,7 +196,18 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         using var factory = new ChatClientFactory();
 
         var toolsByCategory = new Dictionary<string, List<AIFunction>>(StringComparer.OrdinalIgnoreCase);
-        using ShellPlugin? shellPlugin  = settings.NoTools ? null : new ShellPlugin(shellPolicy: TryLoadDefaultShellPolicy());
+
+        // HITL (human-in-the-loop) mode — off by default, toggled at runtime via /hitl. Reuses
+        // the same IHumanApprovalService.PromptShellCommandAsync y/N gate `fuseraft run --hitl`
+        // wires into ShellPlugin (OrchestratorBuilder.ResolveSecurityConfig), just made
+        // toggleable mid-session: the closure below is ShellPlugin's only construction
+        // opportunity, so it reads hitlState live on every call rather than a fixed flag baked
+        // in at startup.
+        var hitlState       = new HitlModeState();
+        var approvalService = new ConsoleHumanApprovalService();
+        using ShellPlugin? shellPlugin  = settings.NoTools ? null : new ShellPlugin(
+            shellPolicy:    TryLoadDefaultShellPolicy(),
+            approveCommand: cmd => hitlState.Enabled ? approvalService.PromptShellCommandAsync(cmd) : Task.FromResult(true));
         SubAgentPlugin? subAgent        = null;
         IReadOnlyList<AgentSkill> discoveredSkills = [];
         string?         skillsCatalog   = null;
@@ -450,7 +462,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             cwd, sessionId, startedAt, modelId, modelConfig, userCfg, client,
             factory, keyStore, emitter, eventsPath,
             memoryStore, toolsByCategory, systemPrompt, pendingSave, adaptiveTrimTracker,
-            verbose: settings.Verbose, subAgent: subAgent, undoStore: fsPluginForCategory?.UndoStore)
+            verbose: settings.Verbose, subAgent: subAgent, undoStore: fsPluginForCategory?.UndoStore,
+            hitlState: hitlState)
         {
             JsonMode    = jsonMode,
             Skills      = discoveredSkills,

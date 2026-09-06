@@ -357,6 +357,7 @@ internal static partial class ReplCommands
             {
                 jsonMode        = ctx.JsonMode,
                 safeMode        = ctx.SafeMode,
+                hitlMode        = ctx.HitlMode,
                 adversarialMode = ctx.AdversarialMode,
                 maxOutputTokens = ctx.MaxOutputTokens,
                 verbose         = ctx.Verbose,
