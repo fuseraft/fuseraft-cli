@@ -145,11 +145,21 @@ public sealed class ConversationCompactor(
     /// is <c>lossless</c> or <c>hybrid</c>, durable evidence reconstruction replaces or
     /// augments the LLM-generated summary.
     /// </summary>
+    /// <param name="preferDeterministic">
+    /// When <c>true</c> and the configured mode would make an LLM call (<c>llm</c>/<c>hybrid</c>),
+    /// downgrade to a no-LLM-call mode if one is available: <c>intent</c> when an intent log is
+    /// configured, else <c>lossless</c> when a snapshotter is available. Used by
+    /// <c>CompactionCoordinator</c> when compaction is forced by a context-overflow recovery —
+    /// the summarizer call would otherwise embed the same oversized history that just failed a
+    /// provider request, risking the recovery compaction overflowing too. No-op if the
+    /// configured mode already makes no LLM call, or if neither fallback is available.
+    /// </param>
     public async Task<(AgentMessage Summary, IReadOnlyList<AgentMessage> Retained)> CompactAsync(
         string task,
         IReadOnlyList<AgentMessage> messages,
         CancellationToken cancellationToken = default,
-        IContextSnapshotter? snapshotter = null)
+        IContextSnapshotter? snapshotter = null,
+        bool preferDeterministic = false)
     {
         if (messages.Count < 2)
         {
@@ -171,6 +181,20 @@ public sealed class ConversationCompactor(
             toCompact.Count, toCompact[^1].TurnIndex, toRetain.Count);
 
         var mode = (config.Mode ?? CompactionModes.Llm).ToLowerInvariant();
+        if (preferDeterministic && mode is CompactionModes.Llm or CompactionModes.Hybrid)
+        {
+            var downgraded = intentLog is not null ? CompactionModes.Intent
+                : snapshotter is not null ? CompactionModes.Lossless
+                : null;
+            if (downgraded is not null)
+            {
+                logger.LogInformation(
+                    "Compaction forced by context-overflow recovery — downgrading '{Requested}' to " +
+                    "'{Downgraded}' so the recovery itself can't also overflow an LLM call.",
+                    mode, downgraded);
+                mode = downgraded;
+            }
+        }
 
         var prefixBlock = await _prefixBlocks.BuildAsync(
             toCompact[0].TurnIndex, toCompact[^1].TurnIndex, _sessionId, cancellationToken);

@@ -45,7 +45,8 @@ public sealed class SessionRunner(
     ContextWindowRecorder? contextWindowRecorder = null,
     SessionMetrics? sessionMetrics = null,
     bool quiet = false,
-    SnapshotWriter? postmortemWriter = null)
+    SnapshotWriter? postmortemWriter = null,
+    AdaptiveTrimTracker? adaptiveTrimTracker = null)
 {
     // Session-lifetime assistant-turn counter. Only ever increments — never reset after
     // compaction. Used solely for the MaxIterations hard cap.
@@ -54,6 +55,7 @@ public sealed class SessionRunner(
     private readonly ContextBudgetManager _budgetManager = new(contextBudget, contextWindowRecorder, eventEmitter);
     private readonly CompactionCoordinator _coordinator  = new(
         orchestrator, compactor, sessionStore, eventEmitter, sessionMetrics, contextWindowRecorder,
+        adaptiveTrimTracker,
         sessionId =>
         {
             if (!string.IsNullOrEmpty(configPath))
@@ -485,6 +487,14 @@ public sealed class SessionRunner(
                 $"\n[yellow]⚠ Context window exceeded — fallover chain exhausted.[/] Compacting history and retrying...\n" +
                 $"  [dim]{Markup.Escape(TrimTo(ex.Message, 200))}[/]\n");
             _coordinator.SetPendingReason(CompactionReason.ContextExceeded);
+
+            // This cycle never reaches RecordMessageAsync (no message was produced — the whole
+            // agent invocation threw), so _totalAssistantTurnCount would never advance and
+            // MaxIterations could never trip, however many times this repeats. Count the cycle
+            // here instead so a config whose budget can't fit even a single compacted round trip
+            // still terminates via MaxIterations rather than retrying indefinitely.
+            _totalAssistantTurnCount++;
+
             return new HandlerOutcome(ShouldBreak: false, ShouldContinue: false, CompactionNeeded: true,
                 Succeeded: true, ErrorMessage: null);
         }

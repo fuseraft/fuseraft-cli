@@ -44,7 +44,8 @@ public sealed class AgentFactory(
     EventEmitter? eventEmitter = null,
     ILoggerFactory? loggerFactory = null,
     AgentSkillsProvider? skillsProvider = null,
-    ToolResultArtifactStore? toolArtifactStore = null)
+    ToolResultArtifactStore? toolArtifactStore = null,
+    AdaptiveTrimTracker? adaptiveTrimTracker = null)
 {
     private string? _sessionId;
     private readonly ILogger _logger =
@@ -79,7 +80,7 @@ public sealed class AgentFactory(
     // GraphOrchestrator's _services/_subGraphExecutor/_parallelFanOut fields.
     private AgentMiddlewareBuilder? _middlewareBuilderLazy;
     private AgentMiddlewareBuilder _middlewareBuilder =>
-        _middlewareBuilderLazy ??= new(_logger, changeTracker, securityConfig, governanceKernel);
+        _middlewareBuilderLazy ??= new(_logger, changeTracker, securityConfig, governanceKernel, adaptiveTrimTracker);
 
     /// <summary>
     /// Returns the number of tool functions registered for the named agent, or 0 if the

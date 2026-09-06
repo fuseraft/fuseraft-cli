@@ -232,7 +232,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             return 1;
         }
 
-        var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, _, sessionMetrics) = built;
+        var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, _, sessionMetrics, adaptiveTrimTracker) = built;
 
         // The config can also request JSON mode (Output.Json: true) for orchestrations that are
         // always invoked by scripts. Apply the same stderr redirect if the CLI flag didn't
@@ -500,7 +500,8 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             var preLoopBudgetManager = new ContextBudgetManager(contextBudget: null, contextWindowRecorder: ctxRecorder, eventEmitter: eventEmitter);
             var preLoopCoordinator = new CompactionCoordinator(
                 orchestrator, compactor, activeStore, eventEmitter, sessionMetrics, ctxRecorder,
-                sessionId =>
+                adaptiveTrimTracker: null, // no agent turn has run yet — nothing to have needed adaptive trim
+                resumeHint: sessionId =>
                 {
                     if (!string.IsNullOrEmpty(configPath))
                     {
@@ -582,7 +583,8 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             contextWindowRecorder: ctxRecorder,
             sessionMetrics: sessionMetrics,
             postmortemWriter: snapshotWriter,
-            quiet: jsonMode);
+            quiet: jsonMode,
+            adaptiveTrimTracker: adaptiveTrimTracker);
 
         if (!isNewSession && eventEmitter is not null)
             _ = eventEmitter.EmitAsync(EventTypes.ResumeStarted,

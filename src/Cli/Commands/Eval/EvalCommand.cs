@@ -229,7 +229,7 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
                     hitlMode: false, sessionId: sessionId);
 
                 var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter,
-                     governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, _, sessionMetrics) = built;
+                     governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, _, sessionMetrics, _) = built;
                 termination = config.Termination;
 
                 await using var _mcp = mcpManager;
