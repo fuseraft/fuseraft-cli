@@ -13,6 +13,17 @@ namespace fuseraft.Cli.Commands.Repl;
 // Shared types used by ReplSession, ReplCommands, and ReplTurn.
 internal enum CommandOutcome { Continue, Exit, SendInput }
 
+/// <summary>
+/// Mutable holder for REPL HITL mode's on/off flag, shared between the ShellPlugin approver
+/// closure (built in ReplCommand.cs before a ReplSessionContext exists) and
+/// <see cref="ReplSessionContext.HitlMode"/> (toggled by <c>/hitl</c>). A plain bool can't be
+/// passed by reference across that gap the way this one shared instance can.
+/// </summary>
+internal sealed class HitlModeState
+{
+    public bool Enabled;
+}
+
 internal readonly record struct CommandResult(
     CommandOutcome Outcome,
     string?        InputOverride = null,
@@ -124,6 +135,19 @@ internal sealed class ReplSessionContext
     public bool             SafeMode;
     public HashSet<string>? PreSafeDisabled;
 
+    // HITL (human-in-the-loop) mode — when on, every shell command asks for y/N approval via
+    // the same IHumanApprovalService.PromptShellCommandAsync gate `fuseraft run --hitl` already
+    // uses (see OrchestratorBuilder.ResolveSecurityConfig). The flag lives in a separate shared
+    // object rather than a plain bool here because ShellPlugin is constructed before this
+    // ReplSessionContext exists (see ReplCommand.cs) — its approver closure captures Hitl
+    // directly, and this property just proxies to the same storage so /hitl can toggle it live.
+    public readonly HitlModeState Hitl;
+    public bool HitlMode
+    {
+        get => Hitl.Enabled;
+        set => Hitl.Enabled = value;
+    }
+
     // Adversarial mode — critic agent reviews each /execute step result
     public bool AdversarialMode;
 
@@ -186,8 +210,9 @@ internal sealed class ReplSessionContext
         string systemPrompt, bool pendingSave, AdaptiveTrimTracker adaptiveTrimTracker,
         bool verbose = false,
         SubAgentPlugin? subAgent = null, ConversationCompactor? compactor = null,
-        UndoSnapshotStore? undoStore = null)
+        UndoSnapshotStore? undoStore = null, HitlModeState? hitlState = null)
     {
+        Hitl            = hitlState ?? new HitlModeState();
         Cwd             = cwd;
         SessionId       = sessionId;
         StartedAt       = startedAt;

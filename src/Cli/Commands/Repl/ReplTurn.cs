@@ -238,9 +238,13 @@ internal static class ReplTurn
 
             var turnLabel = (ctx.TurnIndex + 1).ToString();
             if (!ctx.JsonMode)
-                AnsiConsole.Markup(ctx.SafeMode
-                    ? $"[dim][[safe]] {turnLabel}[/][bold cyan]>[/] "
-                    : $"[dim]{turnLabel}[/][bold cyan]>[/] ");
+            {
+                var modeTags = new List<string>();
+                if (ctx.SafeMode) modeTags.Add("safe");
+                if (ctx.HitlMode) modeTags.Add("hitl");
+                var prefix = modeTags.Count > 0 ? $"[[{string.Join("·", modeTags)}]] " : string.Empty;
+                AnsiConsole.Markup($"[dim]{prefix}{turnLabel}[/][bold cyan]>[/] ");
+            }
 
             string? raw;
             try   { raw = ctx.JsonMode ? ReplJsonBridge.ReadInput() : ctx.LineReader.ReadLine(); }

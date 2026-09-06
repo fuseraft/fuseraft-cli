@@ -139,6 +139,57 @@ internal static partial class ReplCommands
     }
 
     // -------------------------------------------------------------------------
+    // /hitl
+    // -------------------------------------------------------------------------
+
+    private static async Task<CommandResult> CmdHitlAsync(ReplSessionContext ctx, string arg)
+    {
+        if (string.IsNullOrEmpty(arg))
+        {
+            AnsiConsole.MarkupLine(ctx.HitlMode
+                ? "[dim]HITL mode:[/] [green]on[/]  [dim](shell commands ask for y/N approval before running)[/]"
+                : "[dim]HITL mode:[/] [dim]off[/]");
+            AnsiConsole.MarkupLine("[dim]Run[/] [bold]/hitl on[/] [dim]or[/] [bold]/hitl off[/][dim].[/]");
+            return CommandResult.Continue;
+        }
+
+        if (arg.Equals("on", StringComparison.OrdinalIgnoreCase))
+        {
+            if (ctx.HitlMode)
+            {
+                AnsiConsole.MarkupLine("[dim]HITL mode is already on.[/]");
+            }
+            else
+            {
+                ctx.HitlMode = true;
+                AnsiConsole.MarkupLine("[dim]HITL mode[/] [green]on[/][dim]: shell commands will ask for y/N approval before running.[/]");
+                await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/hitl on" });
+            }
+        }
+        else if (arg.Equals("off", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!ctx.HitlMode)
+            {
+                AnsiConsole.MarkupLine("[dim]HITL mode is already off.[/]");
+            }
+            else
+            {
+                ctx.HitlMode = false;
+                AnsiConsole.MarkupLine("[dim]HITL mode[/] [dim]off[/][dim]: shell commands run without approval again.[/]");
+                await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/hitl off" });
+            }
+        }
+        else
+        {
+            AnsiConsole.MarkupLine($"[yellow]Unknown /hitl argument:[/] {Markup.Escape(arg)}");
+            AnsiConsole.MarkupLine("[dim]Usage: /hitl     — show current status[/]");
+            AnsiConsole.MarkupLine("[dim]       /hitl on  — require y/N approval before each shell command[/]");
+            AnsiConsole.MarkupLine("[dim]       /hitl off — run shell commands without approval[/]");
+        }
+        return CommandResult.Continue;
+    }
+
+    // -------------------------------------------------------------------------
     // /adversarial
     // -------------------------------------------------------------------------
 

@@ -215,4 +215,65 @@ public sealed class ShellPluginTests
         Assert.Contains("[FAILED]", status);
         Assert.Contains("exited 7", status);
     }
+
+    // approveCommand — the HITL gate the REPL's /hitl command and `fuseraft run --hitl`
+    // both rely on (OrchestratorBuilder.ResolveSecurityConfig wires the same constructor
+    // parameter for the orchestration path; ReplCommand.cs wires it for the REPL path).
+
+    [Fact]
+    public async Task RunAsync_ApproveCommandReturnsFalse_BlocksAndDoesNotExecute()
+    {
+        var marker = Path.Combine(Path.GetTempPath(), $"shellplugin-hitl-{Guid.NewGuid():N}.txt");
+        using var plugin = new ShellPlugin(approveCommand: _ => Task.FromResult(false));
+
+        var result = await plugin.RunAsync($"touch \"{marker}\"");
+
+        Assert.Contains("[DENIED]", result);
+        Assert.False(File.Exists(marker));
+    }
+
+    [Fact]
+    public async Task RunAsync_ApproveCommandReturnsTrue_ExecutesNormally()
+    {
+        using var plugin = new ShellPlugin(approveCommand: _ => Task.FromResult(true));
+
+        var result = await plugin.RunAsync("echo hitl-approved");
+
+        Assert.Contains("hitl-approved", result);
+    }
+
+    [Fact]
+    public async Task RunAsync_ApproveCommandSeesActualCommandText()
+    {
+        string? seen = null;
+        using var plugin = new ShellPlugin(approveCommand: cmd => { seen = cmd; return Task.FromResult(true); });
+
+        await plugin.RunAsync("echo hitl-visibility-check");
+
+        Assert.Equal("echo hitl-visibility-check", seen);
+    }
+
+    [Fact]
+    public async Task RunScriptAsync_ApproveCommandReturnsFalse_BlocksAndDoesNotExecute()
+    {
+        var marker = Path.Combine(Path.GetTempPath(), $"shellplugin-hitl-script-{Guid.NewGuid():N}.txt");
+        using var plugin = new ShellPlugin(approveCommand: _ => Task.FromResult(false));
+
+        var result = await plugin.RunScriptAsync($"touch \"{marker}\"");
+
+        Assert.Contains("[DENIED]", result);
+        Assert.False(File.Exists(marker));
+    }
+
+    [Fact]
+    public async Task RunAsync_NoApproveCommand_ExecutesWithoutBlocking()
+    {
+        // Default construction (no approver) — the REPL's pre-/hitl behavior, and still the
+        // behavior once /hitl is off — must keep working unprompted.
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunAsync("echo no-approver-configured");
+
+        Assert.Contains("no-approver-configured", result);
+    }
 }
