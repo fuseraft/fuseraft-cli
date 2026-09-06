@@ -409,6 +409,11 @@ Use `/tools` to see the full list at runtime.
 | `/tools` | List active tools grouped by category, with enabled/disabled status |
 | `/tools disable <category>` | Disable a tool category for the rest of the session (`FileSystem`, `Shell`, `Search`, `Git`, `Http`, `Skills`) |
 | `/tools enable <category>` | Re-enable a previously disabled tool category |
+| `/undo` | Revert files written, patched, copied, moved, or deleted in the most recent turn. Repeatable — walks back one turn at a time. Only affects the filesystem; use `/rewind` to also roll back conversation history. |
+| `/mcp` | List MCP servers connected this session and their tools |
+| `/mcp add` | Interactive wizard to connect an MCP server (stdio or HTTP). Persists to `~/.fuseraft/repl-mcp-servers.json` so it reconnects automatically on future REPL launches. |
+| `/mcp add --session-only` | Same as `/mcp add`, but don't persist past this session |
+| `/mcp remove <name>` | Stop offering a connected server's tools to the model. The underlying connection closes when the session ends, not immediately. |
 | `/plan <task>` | Ask the model to produce a structured JSON plan (no tool calls). Each step has a description, an expected tool name, and an optional expected artifact path. |
 | `/plan` | Show the currently stored plan |
 | `/execute` | Run each plan step as a separate turn. After each step the REPL verifies postconditions (tool called, artifact created) and halts with a warning if a step fails. |
@@ -452,6 +457,26 @@ Use `/tools` to see the full list at runtime.
 `/model <id>` switches the LLM mid-session without clearing history. `/reasoning <effort>` adjusts the reasoning depth of the current model without switching it. Both can be combined: `/model grok-4.3 high` switches to grok-4.3 and sets high reasoning effort in a single command.
 
 Reasoning effort support and accepted values vary by provider and model — e.g. xAI `grok-4.3` accepts `none` / `low` / `medium` / `high`, and some newer models add finer tiers like `minimal` or `xhigh`/`max` for the low and high ends. `none` disables thinking tokens entirely for fast structured output; the highest tier a model supports uses maximum reasoning for complex tasks. The level is injected at the HTTP layer — no provider-specific SDK support is required, so the same mechanism works for any model that accepts a top-level `reasoning` object. fuseraft does not validate the value against a fixed list, so new provider tiers work without a CLI update; an unsupported value is rejected by the provider's API.
+
+**Connecting an MCP server (`/mcp`)**
+
+`/mcp add` opens the same style of interactive wizard as `/provider setup`: pick a transport (`stdio` or `http`), supply the command/args (stdio) or URL (http), and fuseraft connects immediately and registers the server's tools under an `mcp:<name>` category — available to the model on the very next turn.
+
+```
+3> /mcp add
+Add MCP server
+Server name › filesystem
+Transport   › stdio
+Command     › npx
+Arguments   › -y @modelcontextprotocol/server-filesystem /tmp
+Connecting to 'filesystem'…
+Connected 'filesystem' — 8 tool(s) available.
+Saved — will reconnect automatically on future REPL sessions.
+```
+
+By default the server is saved to `~/.fuseraft/repl-mcp-servers.json` and reconnects automatically the next time you start `fuseraft repl` in any directory — pass `/mcp add --session-only` to skip persistence for a one-off connection. `/mcp` lists what's currently connected; `/mcp remove <name>` stops offering that server's tools (the connection itself closes when the session ends).
+
+This is the REPL's interactive alternative to hand-editing `McpServers` in an orchestration config — see [MCP Integration](mcp.md) for the config-file approach used by `fuseraft run`.
 
 **Prompt format**
 
@@ -674,6 +699,25 @@ Rewound to after turn 4 — 1 turn removed.
 /switch <id-b>           # work on thread B
 …
 ```
+
+**`/undo` — revert file changes**
+
+`/rewind` only rewrites conversation history — it never touches files an agent already wrote. `/undo` is the filesystem counterpart: it reverts whatever `write_file`, `patch_file`, `copy_file`, `move_file`, or `delete_file` did in the most recent turn.
+
+```
+3> create hello.txt with "hello world"
+Created hello.txt.
+
+4> /undo
+Restored 1 file(s) from turn 3:
+  · hello.txt (deleted (did not exist before this turn))
+```
+
+One snapshot is taken per file *per turn* — the first mutation of a path captures its state before the turn started, so `/undo` always reverts to "before this turn," not to some intermediate state if the same file was touched more than once in one turn. Calling `/undo` again walks back the turn before that, and so on, for as long as recorded turns remain; there is no redo. A `move_file` snapshots both the source and destination, so undoing a move (including a directory move) recreates every file back where it started and removes it from the destination.
+
+Snapshots live under the session's directory (`~/.fuseraft/sessions/<slug>/<sessionId>/undo/`), so `/undo` still works after `--resume`.
+
+**Known limitations:** `create_directory`/`delete_directory` on their own (not part of a move) aren't covered; if a file was edited outside the agent after the snapshot was taken, `/undo` restores over that edit with no conflict detection; and this only applies to the REPL — `fuseraft run` sessions don't have `/undo`.
 
 **Adversarial mode**
 
