@@ -372,7 +372,8 @@ internal static partial class ReplCommands
             },
             tools = new
             {
-                disabledCategories = ctx.DisabledCategories.ToList(),
+                disabledCategories     = ctx.DisabledCategories.ToList(),
+                capabilityRestrictions = ctx.CapabilityRestrictions.ToDictionary(kv => kv.Key, kv => kv.Value),
                 activeCount        = ctx.GetActiveTools().Count,
                 categories         = ctx.ToolsByCategory.Select(kv => new
                 {

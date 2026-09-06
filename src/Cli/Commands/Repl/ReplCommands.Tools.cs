@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
 using fuseraft.Infrastructure;
+using fuseraft.Infrastructure.Plugins;
 
 namespace fuseraft.Cli.Commands.Repl;
 
@@ -33,7 +34,16 @@ internal static partial class ReplCommands
                     : $"  [dim]  [[{Markup.Escape(catName)}]][/]");
                 if (!off)
                     foreach (var t in funcs)
-                        AnsiConsole.MarkupLine($"  [dim]    ·[/] {Markup.Escape(t.Name)}");
+                        AnsiConsole.MarkupLine(ctx.PassesCapabilityRestriction(t.Name)
+                            ? $"  [dim]    ·[/] {Markup.Escape(t.Name)}"
+                            : $"  [dim]    ·[/] {Markup.Escape(t.Name)} [dim](restricted)[/]");
+            }
+            if (ctx.CapabilityRestrictions.Count > 0)
+            {
+                AnsiConsole.WriteLine();
+                AnsiConsole.MarkupLine("[dim]Capability restrictions:[/]");
+                foreach (var (restrictedPlugin, allowedTags) in ctx.CapabilityRestrictions)
+                    AnsiConsole.MarkupLine($"  [dim]{Markup.Escape(restrictedPlugin)}:[/] {Markup.Escape(string.Join(", ", allowedTags))}");
             }
             return CommandResult.Continue;
         }
@@ -68,14 +78,87 @@ internal static partial class ReplCommands
                 await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/tools enable", category = match });
             }
         }
+        else if (verb == "restrict")
+        {
+            await CmdToolsRestrictAsync(ctx, cat);
+        }
+        else if (verb == "unrestrict" && !string.IsNullOrEmpty(cat))
+        {
+            var removed = ctx.CapabilityRestrictions.Remove(cat);
+            if (!removed)
+            {
+                AnsiConsole.MarkupLine($"[yellow]No restriction active for:[/] {Markup.Escape(cat)}");
+            }
+            else
+            {
+                ctx.ChatOptions = ctx.BuildChatOptions();
+                AnsiConsole.MarkupLine($"[dim]Restriction on[/] [bold]{Markup.Escape(cat)}[/] [dim]removed.[/]");
+                await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/tools unrestrict", plugin = cat });
+            }
+        }
         else
         {
             AnsiConsole.MarkupLine($"[yellow]Unknown /tools subcommand:[/] {Markup.Escape(arg)}");
-            AnsiConsole.MarkupLine("[dim]Usage: /tools                    — list tools by category[/]");
-            AnsiConsole.MarkupLine("[dim]       /tools disable <category>  — disable a tool category[/]");
-            AnsiConsole.MarkupLine("[dim]       /tools enable <category>   — enable a tool category[/]");
+            AnsiConsole.MarkupLine("[dim]Usage: /tools                          — list tools by category[/]");
+            AnsiConsole.MarkupLine("[dim]       /tools disable <category>       — disable a tool category[/]");
+            AnsiConsole.MarkupLine("[dim]       /tools enable <category>        — re-enable a disabled category[/]");
+            AnsiConsole.MarkupLine("[dim]       /tools restrict <plugin> <tag…> — allow only tools tagged <tag> for that plugin[/]");
+            AnsiConsole.MarkupLine("[dim]       /tools unrestrict <plugin>      — remove a plugin's restriction[/]");
         }
         return CommandResult.Continue;
+    }
+
+    // -------------------------------------------------------------------------
+    // /tools restrict
+    // -------------------------------------------------------------------------
+
+    // Fine-grained per-plugin gate — reuses AgentConfig.Capabilities' vocabulary
+    // (read/write/delete/run/...) and PluginCapabilityMap.IsAllowed, the same enforcement
+    // function orchestration agents are filtered through. Unlike /safe-mode (which disables an
+    // entire REPL category dictionary key), this filters by each tool's own owning plugin via
+    // PluginCapabilityMap.GetPlugin, so it also reaches a restricted plugin's tools sitting in
+    // the "Extended" category — e.g. `/tools restrict Git read` blocks git_push even though
+    // git_push lives in "Extended", not "Git", once --plugins Extended is enabled.
+    private static async Task CmdToolsRestrictAsync(ReplSessionContext ctx, string restrictArg)
+    {
+        var parts = restrictArg.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        if (parts.Length == 0)
+        {
+            if (ctx.CapabilityRestrictions.Count == 0)
+            {
+                AnsiConsole.MarkupLine("[dim]No capability restrictions active.[/]");
+            }
+            else
+            {
+                foreach (var (restrictedPlugin, allowedTags) in ctx.CapabilityRestrictions)
+                    AnsiConsole.MarkupLine($"  [dim]{Markup.Escape(restrictedPlugin)}:[/] {Markup.Escape(string.Join(", ", allowedTags))}");
+            }
+            AnsiConsole.MarkupLine("[dim]Usage: /tools restrict <plugin> <tag> [tag2 …][/]");
+            AnsiConsole.MarkupLine($"[dim]Plugins with capability tags: {string.Join(", ", PluginCapabilityMap.KnownPlugins.OrderBy(p => p))}[/]");
+            return;
+        }
+
+        if (parts.Length == 1)
+        {
+            AnsiConsole.MarkupLine("[yellow]Usage: /tools restrict <plugin> <tag> [tag2 …][/]");
+            AnsiConsole.MarkupLine("[dim]Example: /tools restrict Git read[/]");
+            return;
+        }
+
+        var plugin = parts[0];
+        var tags   = parts[1..].ToList();
+
+        ctx.CapabilityRestrictions[plugin] = tags;
+        ctx.ChatOptions = ctx.BuildChatOptions();
+
+        if (!PluginCapabilityMap.KnownPlugins.Contains(plugin))
+            AnsiConsole.MarkupLine(
+                $"[yellow]Warning:[/] '{Markup.Escape(plugin)}' has no capability-tagged tools — " +
+                $"this restriction won't match anything. Known plugins: {string.Join(", ", PluginCapabilityMap.KnownPlugins.OrderBy(p => p))}");
+
+        AnsiConsole.MarkupLine($"[dim]Restricted[/] [bold]{Markup.Escape(plugin)}[/] [dim]to:[/] {Markup.Escape(string.Join(", ", tags))}");
+        await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/tools restrict", plugin, tags });
     }
 
     // -------------------------------------------------------------------------

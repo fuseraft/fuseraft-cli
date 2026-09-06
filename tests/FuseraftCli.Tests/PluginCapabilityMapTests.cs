@@ -88,4 +88,40 @@ public sealed class PluginCapabilityMapTests
         Assert.True(PluginCapabilityMap.IsAllowed(tool, [requiredTag]));
         Assert.False(PluginCapabilityMap.IsAllowed(tool, ["some-other-tag"]));
     }
+
+    // GetPlugin — the reverse lookup the REPL's /tools restrict command relies on to find every
+    // tool belonging to a given plugin regardless of which REPL tool-category bucket holds it.
+
+    [Theory]
+    [InlineData("read_file", "FileSystem")]
+    [InlineData("delete_directory", "FileSystem")]
+    [InlineData("shell_run", "Shell")]
+    [InlineData("shell_run_background", "Shell")]
+    [InlineData("git_push", "Git")]
+    [InlineData("git_status", "Git")]
+    [InlineData("http_post", "Http")]
+    public void GetPlugin_ReturnsOwningPlugin(string tool, string expectedPlugin) =>
+        Assert.Equal(expectedPlugin, PluginCapabilityMap.GetPlugin(tool), StringComparer.OrdinalIgnoreCase);
+
+    [Fact]
+    public void GetPlugin_ReturnsNull_ForUnmappedTool()
+    {
+        Assert.Null(PluginCapabilityMap.GetPlugin("write_file_audit_findings"));
+        Assert.Null(PluginCapabilityMap.GetPlugin("some_mcp_tool"));
+    }
+
+    [Theory]
+    [InlineData("FileSystem")]
+    [InlineData("Shell")]
+    [InlineData("Git")]
+    [InlineData("Http")]
+    public void KnownPlugins_ContainsCoreRestrictablePlugins(string plugin) =>
+        Assert.Contains(plugin, PluginCapabilityMap.KnownPlugins);
+
+    [Theory]
+    [InlineData("Todo")]
+    [InlineData("SubAgent")]
+    [InlineData("SessionContext")]
+    public void KnownPlugins_ExcludesPluginsWithNoCapabilityTags(string plugin) =>
+        Assert.DoesNotContain(plugin, PluginCapabilityMap.KnownPlugins);
 }

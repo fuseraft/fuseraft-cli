@@ -111,5 +111,20 @@ public sealed class PluginCapabilityMapCoverageTests : IDisposable
         Assert.True(uncovered.Count == 0,
             $"{pluginName} exposes tool(s) with no PluginCapabilityMap entry (silently unfiltered " +
             $"regardless of declared Capabilities): {string.Join(", ", uncovered)}");
+
+        // GetPlugin is a second, independently-checkable field on the same map entry (added for
+        // /tools restrict's reverse lookup) — a mismatch here means a tool was filed under the
+        // wrong plugin name, which would make /tools restrict <this plugin> silently miss it
+        // (or restrict the wrong plugin's tools) while IsAllowed-based filtering above still
+        // passes, since IsAllowed never looks at the plugin field at all.
+        var misfiled = functions
+            .Select(f => f.Name)
+            .Where(name => !IntentionallyUnmapped.Contains(name))
+            .Where(name => !string.Equals(PluginCapabilityMap.GetPlugin(name), pluginName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        Assert.True(misfiled.Count == 0,
+            $"{pluginName} exposes tool(s) whose PluginCapabilityMap.GetPlugin() doesn't match '{pluginName}': " +
+            $"{string.Join(", ", misfiled)}");
     }
 }
