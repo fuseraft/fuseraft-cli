@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using fuseraft.Core;
 using fuseraft.Core.Models;
 
 namespace fuseraft.Orchestration.Tracking;
@@ -108,9 +109,9 @@ public sealed class SnapshotWriter : IDisposable
     private sealed record ToolCallEntry(string Name, string? ArgsSummary, bool Succeeded, int? EstOutputTokens);
 
     // Estimates the output tokens consumed by one tool_use block:
-    // name chars + args JSON chars + ~12 chars of block overhead, divided by 4 (chars per token).
+    // name chars + args JSON chars + ~12 chars of block overhead.
     private static int EstOutputTokens(ToolCallRecord tc) =>
-        Math.Max(1, (tc.Name.Length + tc.ArgsCharCount + 12) / 4);
+        Math.Max(1, TokenEstimator.EstimateTokens(tc.Name.Length + tc.ArgsCharCount + 12));
 
     private sealed record ManifestRecord(
         string  Ts,

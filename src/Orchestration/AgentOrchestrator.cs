@@ -868,8 +868,8 @@ public sealed class AgentOrchestrator(
     }
 
     // Estimates the input token cost of a context slice by summing all content chars across
-    // message types and dividing by 4. Used for the pre-turn budget guard; intentionally
-    // conservative (actual tokenisation may differ but is rarely smaller than chars/4).
+    // message types. Used for the pre-turn budget guard; TokenEstimator's default ratio is
+    // intentionally conservative (actual tokenisation may differ but is rarely smaller).
     private static int EstimateContextTokens(IEnumerable<ChatMessage> messages)
     {
         int chars = 0;
@@ -883,7 +883,7 @@ public sealed class AgentOrchestrator(
                     FunctionResultContent fr => fr.Result?.ToString()?.Length ?? 0,
                     _ => 0,
                 };
-        return chars / 4;
+        return TokenEstimator.EstimateTokens(chars);
     }
 
     // Assembles the trimmed context list for a single sequential agent turn (or verifier turn).

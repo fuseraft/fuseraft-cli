@@ -71,13 +71,13 @@ public sealed class ConversationCompactor(
     {
         if (IsWindowMode)
         {
-            // Use the same chars/4 estimate as TrimToWindow so the trigger and the trim
+            // Use the same TokenEstimator ratio as TrimToWindow so the trigger and the trim
             // measure the same quantity. Usage.TotalTokens is the cumulative API call cost
             // (InputTokens = full context at that turn, not just this message), so summing
             // it across messages grows quadratically and diverges from the char-based budget
             // that TokenBudget is calibrated against — causing the trigger to fire while
             // TrimToWindow finds nothing to drop.
-            var estimated = messages.Sum(m => (m.Content?.Length ?? 0) / 4);
+            var estimated = messages.Sum(m => TokenEstimator.EstimateTokens(m.Content?.Length ?? 0));
             if (estimated > config.TokenBudget)
             {
                 logger.LogDebug(
@@ -115,7 +115,7 @@ public sealed class ConversationCompactor(
     public IReadOnlyList<AgentMessage> TrimToWindow(IReadOnlyList<AgentMessage> messages)
     {
         var list  = messages.ToList();
-        var total = list.Sum(m => (m.Content?.Length ?? 0) / 4);
+        var total = list.Sum(m => TokenEstimator.EstimateTokens(m.Content?.Length ?? 0));
         if (total <= config.TokenBudget) return list;
 
         // Skip pinned messages (compaction summaries) — they're already compact and
@@ -127,12 +127,12 @@ public sealed class ConversationCompactor(
         {
             if (list[start].Role == MessageRole.User)
             {
-                total -= (list[start].Content?.Length ?? 0) / 4;
+                total -= TokenEstimator.EstimateTokens(list[start].Content?.Length ?? 0);
                 list.RemoveAt(start);
             }
             if (start + 1 < list.Count && list[start].Role == MessageRole.Assistant)
             {
-                total -= (list[start].Content?.Length ?? 0) / 4;
+                total -= TokenEstimator.EstimateTokens(list[start].Content?.Length ?? 0);
                 list.RemoveAt(start);
             }
         }
