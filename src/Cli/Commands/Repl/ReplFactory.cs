@@ -1,6 +1,7 @@
-using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging.Abstractions;
 using Spectre.Console;
+using fuseraft.Core;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 
@@ -26,45 +27,59 @@ internal static class ReplFactory
     // addFunctionInvocation controls whether the FunctionInvokingChatClient middleware is
     // attached. The actual tool list is supplied via ChatOptions at call time — this flag
     // only decides whether the invocation loop exists at all.
+    //
+    // adaptiveTrimTracker is required (not optional) whenever addFunctionInvocation is true:
+    // without it, a provider ContextExceeded rejection has no way to signal ReplTurn that a
+    // real /compact is needed afterward, which is exactly the gap that let REPL turns die
+    // on context-overflow with no recovery path while `fuseraft run` self-healed (see
+    // AgentMiddlewareBuilder.BuildMiddlewareChain and ReplTurn's post-turn ConsumeTrim check).
     internal static IChatClient BuildClient(
         ModelConfig config, ChatClientFactory factory, bool addFunctionInvocation,
+        AdaptiveTrimTracker adaptiveTrimTracker, EventEmitter? emitter = null,
         int maxIterations = ReplTurn.ChatIterationLimit)
     {
         var client = factory.Create(config);
         if (addFunctionInvocation)
         {
-            // Apply the same in-turn context filters that AgentFactory uses: deduplication of
-            // superseded writes/reads/shells, intermediate-reasoning truncation, and a
-            // sliding tool-pair window. These run on each inner LLM call within the
-            // FunctionInvokingChatClient loop, keeping O(N²) token growth in check.
-            client = client
-                .AsBuilder()
-                .Use(
-                    getResponseFunc: async (messages, options, inner, ct) =>
-                    {
-                        messages = await AgentContextCompactionFilters.ApplyInTurnFilters(
-                            messages, InTurnToolPairLimit, maxInTurnChars: 0, ct);
-                        return await inner.GetResponseAsync(messages, options, ct);
-                    },
-                    getStreamingResponseFunc: (messages, options, inner, ct) =>
-                        StreamWithFiltersAsync(messages, options, inner, ct))
-                .UseFunctionInvocation(configure: c => c.MaximumIterationsPerRequest = maxIterations)
-                .Build();
+            var resolved = factory.Resolve(config);
+
+            // Matches AgentFactory's fallback tier for agents with no explicit MaxContextTokens:
+            // 0 disables pre-flight budget enforcement and proactive trim entirely (rare for
+            // REPL, where users typically type a model ID with no Models-registry alias), but
+            // the reactive adaptive-trim retry below fires unconditionally either way — it
+            // reacts to the provider's own rejection rather than a configured estimate.
+            var maxContextChars = resolved.MaxContextTokens > 0
+                ? TokenEstimator.EstimateChars(resolved.MaxContextTokens)
+                : 0;
+
+            var agentConfig = new AgentConfig
+            {
+                Name = ReplAgentName,
+                Model = resolved,
+                MaxToolCallsPerTurn = maxIterations,
+            };
+
+            // Routes through the same context-trim/adaptive-retry middleware AgentFactory wraps
+            // every orchestration agent with. chatOptions is null because the REPL's tool list
+            // is supplied per-call via ChatOptions, not fixed at construction like an agent's.
+            var middleware = new AgentMiddlewareBuilder(
+                logger: NullLogger.Instance, changeTracker: null, securityConfig: null,
+                governanceKernel: null, adaptiveTrimTracker: adaptiveTrimTracker);
+
+            client = middleware.BuildMiddlewareChain(
+                chatClient: client, config: agentConfig, chatOptions: null,
+                maxContextChars: maxContextChars, maxInTurnChars: 0, maxInTurnToolPairs: InTurnToolPairLimit,
+                toolSchemaChars: 0, maxPayloadBytes: resolved.MaxPayloadBytes,
+                hasHandoff: false, emitter: emitter);
+
+            client = AgentMiddlewareBuilder.BuildEventEmitMiddleware(client, agentConfig, skillsProvider: null);
         }
         return client;
-
-        async IAsyncEnumerable<ChatResponseUpdate> StreamWithFiltersAsync(
-            IEnumerable<ChatMessage> messages,
-            ChatOptions? options,
-            IChatClient inner,
-            [EnumeratorCancellation] CancellationToken ct)
-        {
-            messages = await AgentContextCompactionFilters.ApplyInTurnFilters(
-                messages, InTurnToolPairLimit, maxInTurnChars: 0, ct);
-            await foreach (var update in inner.GetStreamingResponseAsync(messages, options, ct))
-                yield return update;
-        }
     }
+
+    // Agent name used for AdaptiveTrimTracker.RecordTrim/ConsumeTrim correlation — the REPL
+    // has exactly one agent identity, unlike orchestration's per-config agent names.
+    internal const string ReplAgentName = "repl";
 
     // Matches AgentFactory.DefaultToolPairsWhenBudgeted — keeps at most this many
     // tool-call/result groups in full per inner LLM call within a single REPL turn.

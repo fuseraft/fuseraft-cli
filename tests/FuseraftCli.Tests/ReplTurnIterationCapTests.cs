@@ -128,7 +128,8 @@ public sealed class ReplTurnIterationCapTests : IDisposable
             emitter: new EventEmitter(eventsPath),
             eventsPath: eventsPath,
             memoryStore: MemoryStore.CreateForTest(Path.Combine(Path.GetTempPath(), $"fuseraft-test-mem-{Guid.NewGuid():N}")),
-            toolsByCategory: [], systemPrompt: "test system prompt", pendingSave: false);
+            toolsByCategory: [], systemPrompt: "test system prompt", pendingSave: false,
+            adaptiveTrimTracker: new());
         ctx.JsonMode = true; // skip Ansi/spinner rendering paths — irrelevant to this test
         _contexts.Add(ctx);
         return ctx;

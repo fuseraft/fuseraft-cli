@@ -236,8 +236,8 @@ internal static partial class ReplCommands
         try
         {
             var hasTools       = ctx.GetActiveTools().Count > 0;
-            ctx.Client         = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools);
-            ctx.StepClient     = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ReplTurn.StepIterationLimit);
+            ctx.Client         = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter);
+            ctx.StepClient     = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, ReplTurn.StepIterationLimit);
         }
         catch (Exception ex)
         {
@@ -297,7 +297,7 @@ internal static partial class ReplCommands
         IChatClient newClient;
         try
         {
-            newClient = ReplFactory.BuildClient(newConfig, ctx.Factory, hasTools);
+            newClient = ReplFactory.BuildClient(newConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter);
         }
         catch (Exception ex)
         {
@@ -310,7 +310,7 @@ internal static partial class ReplCommands
         ctx.ModelId     = newModelId;
         ctx.ModelConfig = newConfig;
         ctx.Client      = newClient;
-        ctx.StepClient  = ReplFactory.BuildClient(newConfig, ctx.Factory, hasTools, ReplTurn.StepIterationLimit);
+        ctx.StepClient  = ReplFactory.BuildClient(newConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, ReplTurn.StepIterationLimit);
 
         // Keep the system message identity line current with the new model.
         var sysIdx = ctx.History.FindIndex(m => m.Role == ChatRole.System);
@@ -367,8 +367,8 @@ internal static partial class ReplCommands
         var hasTools = ctx.GetActiveTools().Count > 0;
         try
         {
-            ctx.Client     = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools);
-            ctx.StepClient = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ReplTurn.StepIterationLimit);
+            ctx.Client     = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter);
+            ctx.StepClient = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, ReplTurn.StepIterationLimit);
         }
         catch (Exception ex)
         {

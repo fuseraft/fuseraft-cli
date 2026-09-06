@@ -239,10 +239,16 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         }
 
         var initialTools = toolsByCategory.Values.SelectMany(v => v).ToList();
+
+        // Shared across every client this session builds (this one, the sub-agent's below, and
+        // any later /provider or /model rebuild) so adaptive-trim signals from any of them are
+        // visible to ReplTurn's post-turn forced-compaction check — see ReplSessionContext.
+        var adaptiveTrimTracker = new AdaptiveTrimTracker();
+
         IChatClient client;
         try
         {
-            client = ReplFactory.BuildClient(modelConfig, factory, initialTools.Count > 0);
+            client = ReplFactory.BuildClient(modelConfig, factory, initialTools.Count > 0, adaptiveTrimTracker);
         }
         catch (Exception ex)
         {
@@ -377,7 +383,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             }
 
             subAgent = new SubAgentPlugin(
-                ReplFactory.BuildClient(modelConfig, factory, explorerTools.Count > 0),
+                ReplFactory.BuildClient(modelConfig, factory, explorerTools.Count > 0, adaptiveTrimTracker, emitter),
                 explorerTools,
                 eventEmitter:    emitter,
                 parentAgentName: "repl",
@@ -443,7 +449,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         var ctx = new ReplSessionContext(
             cwd, sessionId, startedAt, modelId, modelConfig, userCfg, client,
             factory, keyStore, emitter, eventsPath,
-            memoryStore, toolsByCategory, systemPrompt, pendingSave,
+            memoryStore, toolsByCategory, systemPrompt, pendingSave, adaptiveTrimTracker,
             verbose: settings.Verbose, subAgent: subAgent, undoStore: fsPluginForCategory?.UndoStore)
         {
             JsonMode    = jsonMode,

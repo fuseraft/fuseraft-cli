@@ -189,9 +189,7 @@ internal sealed class AgentMiddlewareBuilder(
 
             var merged = chatOptions is not null ? MergeOptions(messages, options, chatOptions) : options;
 
-            // Cannot retry mid-stream — pre-trim proactively when limits are known.
-            // Without configured limits we have no target, so trimming is skipped and
-            // a provider rejection surfaces as a normal error for the user to see.
+            // Pre-trim proactively when limits are known — cheap and always safe up front.
             if (maxContextChars > 0 || maxPayloadBytes > 0)
                 messages = ProactivelyTrimIfNeeded(
                     config.Name, messages, maxContextChars, maxPayloadBytes, toolSchemaChars, logger);
@@ -201,8 +199,52 @@ internal sealed class AgentMiddlewareBuilder(
                     agent: config.Name, turn: null,
                     payload: new { model = config.Model.ModelId, streaming = true });
 
-            await foreach (var update in inner.GetStreamingResponseAsync(messages, merged, ct))
-                yield return update;
+            var baseMsg = messages as IReadOnlyList<ChatMessage> ?? messages.ToList();
+
+            // Reactive adaptive-trim retry — same stages as the non-streaming path above,
+            // but only viable before the first update reaches the caller. A context-limit
+            // rejection is a request-validation failure the provider raises before emitting
+            // any tokens, so it always surfaces on the *first* MoveNextAsync — once any
+            // update has already been yielded (and displayed/consumed), a later mid-stream
+            // failure can no longer be retried without producing garbled duplicate output,
+            // so it propagates as a normal error instead, same as the non-streaming path
+            // once its own retries are exhausted.
+            for (int attempt = 0; ; attempt++)
+            {
+                var ctxMsgs = attempt == 0 ? (IEnumerable<ChatMessage>)baseMsg : AdaptiveTrimMessages(baseMsg, attempt);
+                var enumerator = inner.GetStreamingResponseAsync(ctxMsgs, merged, ct).GetAsyncEnumerator(ct);
+                try
+                {
+                    bool moved;
+                    try
+                    {
+                        moved = await enumerator.MoveNextAsync();
+                    }
+                    catch (Exception ex) when (attempt < AdaptiveContextTrimMaxRetries && IsContextLimitException(ex))
+                    {
+                        logger.LogWarning(
+                            "[context-trim] {Agent} stage {Stage}/{Max} (streaming): {Error} — reducing tool results and retrying",
+                            config.Name, attempt + 1, AdaptiveContextTrimMaxRetries,
+                            ex.Message[..Math.Min(ex.Message.Length, 120)].Replace('\n', ' '));
+                        // Same reasoning as the non-streaming path: surviving via truncation
+                        // doesn't shrink the persisted history, so flag it for a forced
+                        // real compaction before the next turn.
+                        adaptiveTrimTracker?.RecordTrim(config.Name);
+                        continue;
+                    }
+
+                    if (!moved) yield break;
+                    yield return enumerator.Current;
+
+                    while (await enumerator.MoveNextAsync())
+                        yield return enumerator.Current;
+                    yield break;
+                }
+                finally
+                {
+                    await enumerator.DisposeAsync();
+                }
+            }
         }
     }
 

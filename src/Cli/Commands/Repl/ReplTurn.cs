@@ -591,6 +591,37 @@ internal static class ReplTurn
             }
         }
 
+        // Surviving that last provider call only by truncating tool-result content in-flight
+        // (AgentMiddlewareBuilder's adaptive-trim retry) doesn't shrink what's persisted in
+        // ctx.History — without this, the identical oversized history would be resent, untouched,
+        // on the very next turn. Force a real compaction now instead, mirroring
+        // CompactionCoordinator's ContextExceeded branch in the `fuseraft run` pipeline.
+        if (ctx.AdaptiveTrimTracker.ConsumeTrim(ReplFactory.ReplAgentName))
+        {
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new
+                {
+                    type = "warning",
+                    text = "Needed adaptive context trimming to fit the last provider call. Compacting now.",
+                });
+            else
+                AnsiConsole.MarkupLine(
+                    "[yellow]  ⚡ Needed adaptive context trimming to fit the last provider call. " +
+                    "Compacting now to fix the underlying size, not just that one call.[/]");
+            var (compacted, compactError, _, _) = await ReplCommands.CompactHistoryAsync(
+                ctx, focus: null, cancellationToken, source: "adaptive_trim_forced");
+            if (compacted)
+            {
+                ctx.TurnIndex = 0;
+            }
+            else if (!ctx.JsonMode)
+            {
+                AnsiConsole.MarkupLine(
+                    $"[red]  Forced compaction failed:[/] {Markup.Escape(compactError ?? "unknown error")} " +
+                    "[dim](falling back to normal history trim)[/]");
+            }
+        }
+
         var trimmedCount = TrimHistory(ctx.History, ctx.ContextTokenBudget);
         if (trimmedCount > 0)
         {
