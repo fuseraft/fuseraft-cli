@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Spectre.Console;
 using fuseraft.Cli.Telemetry;
+using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
@@ -42,7 +43,8 @@ internal sealed class CompactionCoordinator(
         !_justCompacted
         && compactor is not null
         && contextBudget?.MaxSingleTurnInputTokens > 0
-        && checkpoint.Messages.Sum(m => (m.Content?.Length ?? 0) / 3) > contextBudget.MaxSingleTurnInputTokens;
+        && checkpoint.Messages.Sum(m => TokenEstimator.EstimateTokens(m.Content?.Length ?? 0, dense: true))
+            > contextBudget.MaxSingleTurnInputTokens;
 
     // Applies the compaction trigger policy in order and returns true when compaction is needed.
     // Fires UI messages and events for the triggers that are actually honored.

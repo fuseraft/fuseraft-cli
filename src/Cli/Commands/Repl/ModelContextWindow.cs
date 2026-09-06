@@ -7,8 +7,9 @@ namespace fuseraft.Cli.Commands.Repl;
 /// Not an authoritative model registry — a conservative heuristic so the REPL doesn't evict
 /// history at a fixed ceiling regardless of what the connected model can actually hold.
 /// Deliberately budgets well under each family's advertised maximum context window, since the
-/// REPL's own token estimate (chars/4) is rough and doesn't account for tool-schema tokens,
-/// which aren't part of the message-history estimate but do count against the same input limit.
+/// REPL's own token estimate (<see cref="fuseraft.Core.TokenEstimator"/>) is rough and doesn't
+/// account for tool-schema tokens, which aren't part of the message-history estimate but do
+/// count against the same input limit.
 /// </para>
 /// </summary>
 internal static class ModelContextWindow

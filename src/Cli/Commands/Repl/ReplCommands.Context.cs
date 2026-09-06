@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
+using fuseraft.Core;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Chat;
 
@@ -14,14 +15,15 @@ internal static partial class ReplCommands
 
     private static async Task CmdContextAsync(ReplSessionContext ctx)
     {
-        static int EstMsg(ChatMessage m) => m.Contents.Sum(AgentContextCompactionFilters.EstimateContentChars) / 4;
+        static int EstMsg(ChatMessage m) =>
+            TokenEstimator.EstimateTokens(m.Contents.Sum(AgentContextCompactionFilters.EstimateContentChars));
 
         var active      = ctx.GetActiveTools();
         var sysTok      = ctx.History.Where(m => m.Role == ChatRole.System).Sum(EstMsg);
         var userTok     = ctx.History.Where(m => m.Role == ChatRole.User).Sum(EstMsg);
         var asstTok     = ctx.History.Where(m => m.Role == ChatRole.Assistant).Sum(EstMsg);
         var toolResTok  = ctx.History.Where(m => m.Role == ChatRole.Tool).Sum(EstMsg);
-        var toolTok     = active.Sum(t => t.JsonSchema.GetRawText().Length / 4);
+        var toolTok     = active.Sum(t => TokenEstimator.EstimateTokens(t.JsonSchema.GetRawText().Length));
         // estTotal drives the per-category breakdown below (so its rows always sum to ~100%).
         // The headline number instead prefers the real provider-reported size of the most
         // recently completed turn's opening request, when available — falling back to the

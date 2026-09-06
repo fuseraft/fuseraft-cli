@@ -56,7 +56,7 @@ public sealed class DocumentPlugin(string? sandboxRoot = null)
             var (text, info)  = DocumentTextExtractor.Extract(resolved);
             var charCount     = text.Length;
             return $"{info}\nFile size: {FormatSize(fi.Length)}\n" +
-                   $"Extracted text: ~{charCount:N0} characters (~{charCount / 4:N0} tokens)";
+                   $"Extracted text: ~{charCount:N0} characters (~{TokenEstimator.EstimateTokens(charCount):N0} tokens)";
         }
         catch (Exception ex)
         {

@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
 using fuseraft.Cli.Display;
+using fuseraft.Core;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Chat;
@@ -1137,7 +1138,7 @@ internal static class ReplTurn
     internal static int TrimHistory(List<ChatMessage> history, int contextTokenBudget)
     {
         static int EstimateMessage(ChatMessage m) =>
-            m.Contents.Sum(AgentContextCompactionFilters.EstimateContentChars) / 4;
+            TokenEstimator.EstimateTokens(m.Contents.Sum(AgentContextCompactionFilters.EstimateContentChars));
 
         var total = history.Sum(EstimateMessage);
         if (total <= contextTokenBudget) return 0;

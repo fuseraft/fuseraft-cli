@@ -202,11 +202,11 @@ public sealed class AgentFactory(
         // without a tools array (which Bedrock/LiteLLM rejects with HTTP 400).
         var chatOptions = AgentMiddlewareBuilder.BuildChatOptions(config, resolvedModel, tools);
 
-        // Pre-flight context budget: 4 chars ≈ 1 token (conservative).
+        // Pre-flight context budget (see TokenEstimator for the chars-per-token ratio).
         // Checked before every inner LLM call so we fail fast with a clear message
         // instead of spending API credits on a request the provider will reject.
         var maxContextChars = resolvedModel.MaxContextTokens > 0
-            ? resolvedModel.MaxContextTokens * 4
+            ? TokenEstimator.EstimateChars(resolvedModel.MaxContextTokens)
             : 0;
 
         // In-turn context trim limit. Prevents quadratic token growth: without trimming,
@@ -218,17 +218,18 @@ public sealed class AgentFactory(
         // Priority order:
         //   1. Per-agent MaxInTurnContextTokens — explicit agent-level override.
         //   2. Session MaxSingleTurnInputTokens / 3 — allocates 1/3 of the per-turn
-        //      budget to within-turn tool results, leaving headroom for the system
-        //      prompt, tool schemas (~10–20 k tokens), and cross-turn history.
+        //      token budget (unrelated to TokenEstimator's chars-per-token ratio) to
+        //      within-turn tool results, leaving headroom for the system prompt, tool
+        //      schemas (~10–20 k tokens), and cross-turn history.
         //   3. Model MaxContextTokens — fall back to the model's context window.
         //   4. DefaultMaxInTurnChars — conservative floor for unconfigured agents.
         //      Halved from the previous 500 k to reduce the risk of single-turn
         //      explosions when neither the session nor the model has explicit limits.
         const int DefaultMaxInTurnChars = 200_000;
         var maxInTurnChars = config.MaxInTurnContextTokens > 0
-            ? config.MaxInTurnContextTokens * 4
+            ? TokenEstimator.EstimateChars(config.MaxInTurnContextTokens)
             : sessionBudget?.MaxSingleTurnInputTokens > 0
-                ? sessionBudget.MaxSingleTurnInputTokens / 3 * 4
+                ? TokenEstimator.EstimateChars(sessionBudget.MaxSingleTurnInputTokens / 3)
                 : (maxContextChars > 0 ? maxContextChars : DefaultMaxInTurnChars);
 
         // Deterministic sliding-window cap: always keep only the last N tool call/result

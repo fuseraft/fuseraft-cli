@@ -121,10 +121,11 @@ public sealed class SessionRunner(
             // post-turn compaction anyway. Skipped for the first turn after a compaction
             // (_justCompacted) so we don't thrash when the retained tail itself is large.
             //
-            // Estimate uses chars / 3 rather than / 4: code-heavy content (tool results,
-            // file reads) averages ~3 chars per token, and the estimate omits tool-schema
-            // overhead (~10–20 k tokens for agents with many tools). The conservative
-            // divisor compensates for both without needing per-agent schema introspection.
+            // Uses TokenEstimator's dense ratio (~3 chars/token) rather than the default
+            // (~4): code-heavy content (tool results, file reads) tokenizes denser than
+            // prose, and the estimate omits tool-schema overhead (~10–20 k tokens for
+            // agents with many tools). The conservative ratio compensates for both without
+            // needing per-agent schema introspection.
             if (_coordinator.NeedsPreTurnCompaction(checkpoint, contextBudget))
             {
                 AnsiConsole.MarkupLine(

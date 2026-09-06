@@ -5,6 +5,7 @@ using AgentGovernance.Trust;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using fuseraft.Core;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure.Plugins;
 
@@ -408,7 +409,7 @@ internal sealed class AgentMiddlewareBuilder(
             if (stage < AdaptiveContextTrimMaxRetries)
                 logger?.LogWarning(
                     "[context-trim] {Agent} streaming pre-trim stage {Stage}: ~{Tokens:N0} tokens — reducing tool results",
-                    agentName, stage + 1, totalChars / 4);
+                    agentName, stage + 1, TokenEstimator.EstimateTokens(totalChars));
         }
 
         return DropAllToolContent(list);
@@ -479,7 +480,7 @@ internal sealed class AgentMiddlewareBuilder(
                 grand_total                = grandTotal,
             },
             protected_data_blobs = protectedDataBlobs,
-            est_tokens           = grandTotal / 4,
+            est_tokens           = TokenEstimator.EstimateTokens(grandTotal),
         };
     }
 
@@ -503,9 +504,9 @@ internal sealed class AgentMiddlewareBuilder(
         var totalChars = msgChars + toolSchemaChars;
         if (totalChars <= maxChars) return;
 
-        var estimated     = totalChars / 4;
-        var schemaTokens  = toolSchemaChars / 4;
-        var limit         = maxChars / 4;
+        var estimated     = TokenEstimator.EstimateTokens(totalChars);
+        var schemaTokens  = TokenEstimator.EstimateTokens(toolSchemaChars);
+        var limit         = TokenEstimator.EstimateTokens(maxChars);
         throw new InvalidOperationException(
             $"[{agentName}] Context budget exceeded: ~{estimated:N0} estimated tokens in this " +
             $"request (includes ~{schemaTokens:N0} tool-schema tokens; MaxContextTokens limit: {limit:N0}). " +
