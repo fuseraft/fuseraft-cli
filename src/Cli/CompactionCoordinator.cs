@@ -24,6 +24,7 @@ internal sealed class CompactionCoordinator(
     EventEmitter? eventEmitter,
     SessionMetrics? sessionMetrics,
     ContextWindowRecorder? contextWindowRecorder,
+    AdaptiveTrimTracker? adaptiveTrimTracker,
     Func<string, string> resumeHint)
 {
     // Reason for the pending compaction cycle — set just before compactionNeeded=true,
@@ -71,6 +72,26 @@ internal sealed class CompactionCoordinator(
                 await eventEmitter.EmitAsync(EventTypes.ContextBudgetCutover,
                     agent: agentName,
                     payload: new { input_tokens = budgetResult.InputTokens, cutover_at = budgetResult.SingleTurnThreshold, reason = CompactionReason.SingleTurnLimit });
+            return true;
+        }
+
+        // AdaptiveTrim: like SingleTurnTrigger, never suppressed by _justCompacted. Surviving a
+        // provider call only by truncating tool-result content (AgentMiddlewareBuilder's
+        // adaptive-retry loop) doesn't shrink what gets persisted — without this, the same
+        // oversized history would be resent, untouched, on the very next turn. If it fired on
+        // the turn right after a compaction, that compacted tail was already too large on its
+        // own, same as a single-turn explosion.
+        if (adaptiveTrimTracker?.ConsumeTrim(agentName) == true)
+        {
+            _justCompacted = false;
+            _pendingCompactionReason = CompactionReason.ContextExceeded;
+            if (statusActive) AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine(
+                $"[yellow]  ⚡ {Markup.Escape(agentName)} needed adaptive context trimming to fit its last " +
+                $"provider call. Compacting now to fix the underlying size, not just that one call.[/]");
+            if (eventEmitter is not null)
+                await eventEmitter.EmitAsync(EventTypes.ContextBudgetCutover,
+                    agent: agentName, payload: new { reason = CompactionReason.ContextExceeded });
             return true;
         }
 
@@ -274,7 +295,9 @@ internal sealed class CompactionCoordinator(
             return checkpoint;
         }
 
-        var (summary, retained) = await compactor.CompactAsync(task, checkpoint.Messages, cancellationToken, snapshotter);
+        var (summary, retained) = await compactor.CompactAsync(
+            task, checkpoint.Messages, cancellationToken, snapshotter,
+            preferDeterministic: _pendingCompactionReason == CompactionReason.ContextExceeded);
 
         if (modifiedFilesNote.Length > 0)
             summary = summary with { Content = summary.Content + modifiedFilesNote };

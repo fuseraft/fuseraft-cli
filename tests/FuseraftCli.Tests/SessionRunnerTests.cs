@@ -1,11 +1,15 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging.Abstractions;
 using fuseraft.Cli;
 using fuseraft.Core;
 using fuseraft.Core.Exceptions;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
+using fuseraft.Core.Models.Config;
 using fuseraft.Orchestration;
+using fuseraft.Orchestration.Context;
 using Moq;
 
 namespace FuseraftCli.Tests;
@@ -155,6 +159,62 @@ public sealed class SessionRunnerTests : IDisposable
             Assert.Contains(EventTypes.MaxTurnsExceeded, events);
         }
         finally { try { File.Delete(tmp); } catch { } }
+    }
+
+    // A ContextExceeded-classified failure that recovers via compaction (HandleContextExceededAsync's
+    // withCompactor:true branch) never calls RecordMessageAsync — no AgentMessage was produced —
+    // so _totalAssistantTurnCount would never advance if this cycle didn't count toward
+    // MaxIterations, letting an unfixable-by-compaction config (e.g. tool-schema overhead alone
+    // already over budget) retry forever. Uses a real ThrowingOrchestrator that always throws the
+    // same ContextExceeded-classified exception, proving the loop still terminates via
+    // MaxIterations rather than hanging (the test itself would time out if the fix regressed).
+    [Fact]
+    public async Task RunAsync_ContextExceededEveryTurn_StillTerminatesViaMaxIterations()
+    {
+        var tmp = Path.GetTempFileName();
+        try
+        {
+            using var emitter = new EventEmitter(tmp);
+            var compactor = new ConversationCompactor(
+                new NoOpChatClient(),
+                new CompactionConfig { Mode = "window", TokenBudget = 1 },
+                NullLogger<ConversationCompactor>.Instance);
+
+            var runner = new SessionRunner(
+                new ThrowingOrchestrator(new InvalidOperationException("maximum context exceeded")),
+                compactor,
+                _store.Object,
+                _approval.Object,
+                eventEmitter:   emitter,
+                telemetry:      null,
+                modelIdByAgent: new Dictionary<string, string>(),
+                maxIterations:  3,
+                quiet:          true);
+
+            await runner.RunAsync("task", MakeCheckpoint(), hitlMode: false, showTools: false, CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(10));
+
+            var events = await ReadEventTypesAsync(tmp);
+            Assert.Contains(EventTypes.MaxTurnsExceeded, events);
+            Assert.True(events.Count(e => e == EventTypes.ContextExceededRecovery) >= 3);
+        }
+        finally { try { File.Delete(tmp); } catch { } }
+    }
+
+    private sealed class NoOpChatClient : IChatClient
+    {
+        public ChatClientMetadata Metadata => new("test", null!, "stub");
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("Not expected to be called by this test.");
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("Not expected to be called by this test.");
+
+        public object? GetService(Type serviceType, object? key = null) => null;
+        public void Dispose() { }
     }
 
     [Fact]

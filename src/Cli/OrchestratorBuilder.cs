@@ -42,7 +42,8 @@ public sealed record OrchestratorBuildResult(
     RepositoryMemoryExtractor?   RepositoryMemoryExtractor,
     ChatClientFactory            ChatClientFactory,
     fuseraft.Orchestration.DependencyPlanner? DependencyPlanner = null,
-    fuseraft.Cli.Telemetry.SessionMetrics?    SessionMetrics    = null);
+    fuseraft.Cli.Telemetry.SessionMetrics?    SessionMetrics    = null,
+    AdaptiveTrimTracker?          AdaptiveTrimTracker = null);
 
 /// <summary>
 /// Which orchestrator kind <c>Selection.Type</c> resolved to, bundled so
@@ -72,7 +73,8 @@ internal sealed record OrchestratorInfraServices(
     ChangeTracker? ChangeTracker,
     EventEmitter? EventEmitter,
     IdentityRegistry IdentityRegistry,
-    fuseraft.Infrastructure.Tools.ToolResultArtifactStore ToolArtifactStore);
+    fuseraft.Infrastructure.Tools.ToolResultArtifactStore ToolArtifactStore,
+    AdaptiveTrimTracker AdaptiveTrimTracker);
 
 /// <summary>
 /// Knowledge/memory/evidence collaborators that feed <c>ContextBroker</c>/
@@ -178,9 +180,15 @@ public static class OrchestratorBuilder
 
         WireSkillsAndVerifier(config, chatClientFactory, loggerFactory, compactor);
 
+        // Shared with SessionRunner (via OrchestratorBuildResult below) so a provider call that
+        // only survived via adaptive context-trim can force a real compaction before the next
+        // turn — see AgentMiddlewareBuilder's adaptive-retry loop and CompactionCoordinator.
+        var adaptiveTrimTracker = new AdaptiveTrimTracker();
+
         var infraServices = new OrchestratorInfraServices(
             loggerFactory, chatClientFactory, pluginRegistry, governanceKernel,
-            infra.ChangeTracker, infra.EventEmitter, identityRegistry, infra.ToolArtifactStore);
+            infra.ChangeTracker, infra.EventEmitter, identityRegistry, infra.ToolArtifactStore,
+            adaptiveTrimTracker);
         var knowledgeServices = new OrchestratorKnowledgeServices(
             infra.KnowledgeLayer, infra.ObjectiveManager, infra.EvidenceStore,
             dependencyPlanner, MemoryManager.FromConfig(config.Memory));
@@ -190,7 +198,7 @@ public static class OrchestratorBuilder
         var (orchestrator, repoMemoryExtractor) = CreateOrchestrator(
             config, kindFlags, infraServices, knowledgeServices, sessionPaths, humanApprovalService);
 
-        return new OrchestratorBuildResult(orchestrator, config, infra.McpManager, compactor, infra.ChangeTracker, infra.EventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, dependencyPlanner, infra.SessionMetrics);
+        return new OrchestratorBuildResult(orchestrator, config, infra.McpManager, compactor, infra.ChangeTracker, infra.EventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, dependencyPlanner, infra.SessionMetrics, adaptiveTrimTracker);
     }
 
     // -------------------------------------------------------------------------
@@ -1348,7 +1356,7 @@ public static class OrchestratorBuilder
 
         var strategyFactory = new StrategyFactory(chatClientFactory.Create, eventEmitter, loggerFactory, governanceKernel, humanApprovalService, evidenceStore, knowledgeLayer.ProvenanceRegistry, config.TestSelector, resolvedSandbox, contextAssembler);
 
-        var agentFactory = new AgentFactory(chatClientFactory, infra.PluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, infra.IdentityRegistry, eventEmitter, loggerFactory, BuildSkillsProvider(loggerFactory), infra.ToolArtifactStore);
+        var agentFactory = new AgentFactory(chatClientFactory, infra.PluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, infra.IdentityRegistry, eventEmitter, loggerFactory, BuildSkillsProvider(loggerFactory), infra.ToolArtifactStore, infra.AdaptiveTrimTracker);
 
         // Unified context assembly pipeline — shared across all orchestrator types.
         // Provides always-on knowledge retrieval, relevance-ranked memory, and metrics

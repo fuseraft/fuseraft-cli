@@ -23,7 +23,8 @@ internal sealed class AgentMiddlewareBuilder(
     ILogger logger,
     ChangeTracker? changeTracker,
     SecurityConfig? securityConfig,
-    GovernanceKernel? governanceKernel)
+    GovernanceKernel? governanceKernel,
+    AdaptiveTrimTracker? adaptiveTrimTracker = null)
 {
     /// <summary>
     /// Composes the context-trim and adaptive-retry middleware layer around
@@ -132,6 +133,10 @@ internal sealed class AgentMiddlewareBuilder(
                                 "[context-trim] {Agent} stage {Stage}/{Max}: {Error} — reducing tool results and retrying",
                                 config.Name, attempt + 1, AdaptiveContextTrimMaxRetries,
                                 ex.Message[..Math.Min(ex.Message.Length, 120)].Replace('\n', ' '));
+                            // Surviving this call by truncating content doesn't shrink the
+                            // persisted history — flag it so CompactionCoordinator forces a
+                            // real compaction before the next turn hits the same wall.
+                            adaptiveTrimTracker?.RecordTrim(config.Name);
                         }
                         catch (TimeoutException tex)
                         {
@@ -269,7 +274,7 @@ internal sealed class AgentMiddlewareBuilder(
     private const int AdaptiveContextTrimMaxRetries = 3;
 
     // Produces a trimmed copy of messages for the given retry stage.
-    private static List<ChatMessage> AdaptiveTrimMessages(
+    internal static List<ChatMessage> AdaptiveTrimMessages(
         IReadOnlyList<ChatMessage> messages,
         int stage)
     {
@@ -309,7 +314,7 @@ internal sealed class AgentMiddlewareBuilder(
             var newContents = new List<AIContent>(msg.Contents.Count);
             foreach (var content in msg.Contents)
             {
-                if (content is FunctionResultContent fr && fr.Result is string s)
+                if (content is FunctionResultContent fr && ExtractResultText(fr.Result) is { } s)
                 {
                     string? replacement = null;
 
@@ -346,6 +351,20 @@ internal sealed class AgentMiddlewareBuilder(
         }
         return result;
     }
+
+    // FunctionResultContent.Result is object? — a plain string only when the framework kept the
+    // raw CLR return value. It commonly arrives as a JsonElement instead (e.g. after any JSON
+    // round-trip, such as checkpoint persistence), which `is string` misses entirely, silently
+    // turning stages 1–2 of adaptive trim into no-ops (only stage 3's unconditional drop still
+    // worked). Mirrors the fallback AgentContextCompactionFilters.EstimateContentChars already
+    // uses to *measure* this same content correctly — this applies it when *truncating* too.
+    private static string? ExtractResultText(object? resultValue) => resultValue switch
+    {
+        null => null,
+        string s => s,
+        System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } je => je.GetString(),
+        _ => resultValue.ToString(),
+    };
 
     // Drops all ChatRole.Tool messages and strips FunctionCallContent from assistant messages.
     // Equivalent to ContextWindowConfig.TextOnly filtering — structurally valid for all providers.
