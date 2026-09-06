@@ -29,6 +29,7 @@ internal sealed class FileSystemManagementOps
     private readonly HashSet<string> _readThisTurn;
     private readonly HashSet<string> _writtenThisTurn;
     private readonly HashSet<string> _patchedThisTurn;
+    private readonly UndoSnapshotStore _undoStore;
 
     internal FileSystemManagementOps(
         FileSystemPlugin owner,
@@ -48,6 +49,7 @@ internal sealed class FileSystemManagementOps
         _readThisTurn     = owner.ReadThisTurnState;
         _writtenThisTurn  = owner.WrittenThisTurnState;
         _patchedThisTurn  = owner.PatchedThisTurnState;
+        _undoStore        = owner.UndoStore;
     }
 
     [Description("Search a file (grep). Cheaper than full read_file.")]
@@ -198,6 +200,7 @@ internal sealed class FileSystemManagementOps
         if (!File.Exists(resolved))
             return PluginResult.Info($"File does not exist: {resolved}");
 
+        await _undoStore.RecordBeforeMutationAsync(resolved);
         File.Delete(resolved);
         await FileSystemSandbox.InvalidatePathAsync(
             resolved, _summaryDir, _readThisTurn, _writtenThisTurn, _patchedThisTurn, _sessionCache, _versionStore);
@@ -365,6 +368,8 @@ internal sealed class FileSystemManagementOps
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
 
+        // Only the destination is mutated — the source is read-only for a copy.
+        await _undoStore.RecordBeforeMutationAsync(resolvedDst);
         await Task.Run(() => File.Copy(resolvedSrc, resolvedDst, overwrite));
         await FileSystemSandbox.InvalidatePathAsync(
             resolvedDst, _summaryDir, _readThisTurn, _writtenThisTurn, _patchedThisTurn, _sessionCache, _versionStore);
@@ -390,8 +395,16 @@ internal sealed class FileSystemManagementOps
                 return PluginResult.Error($"Destination directory already exists: {resolvedDst}");
             var dstParent = Path.GetDirectoryName(resolvedDst);
             if (!string.IsNullOrEmpty(dstParent)) Directory.CreateDirectory(dstParent);
-            // Enumerate files before the move so we have the source paths for invalidation.
+            // Enumerate files before the move so we have the source paths for invalidation
+            // and so each file's pre-move state (at both its source and destination path) can
+            // be snapshotted for /undo before Directory.Move makes that state unrecoverable.
             var movedFiles = Directory.EnumerateFiles(resolvedSrc, "*", SearchOption.AllDirectories).ToList();
+            foreach (var srcFile in movedFiles)
+            {
+                await _undoStore.RecordBeforeMutationAsync(srcFile);
+                var dstFile = Path.Combine(resolvedDst, Path.GetRelativePath(resolvedSrc, srcFile));
+                await _undoStore.RecordBeforeMutationAsync(dstFile);
+            }
             Directory.Move(resolvedSrc, resolvedDst);
             foreach (var srcFile in movedFiles)
             {
@@ -410,6 +423,11 @@ internal sealed class FileSystemManagementOps
                 return PluginResult.Error($"Destination already exists: {resolvedDst}. Set overwrite=true to replace it.");
             var dstParent = Path.GetDirectoryName(resolvedDst);
             if (!string.IsNullOrEmpty(dstParent)) Directory.CreateDirectory(dstParent);
+            // Record both sides before the move: the source snapshot lets /undo recreate the
+            // file where it was, and the destination snapshot lets /undo either remove it
+            // (if nothing was there before) or restore whatever it overwrote.
+            await _undoStore.RecordBeforeMutationAsync(resolvedSrc);
+            await _undoStore.RecordBeforeMutationAsync(resolvedDst);
             File.Move(resolvedSrc, resolvedDst, overwrite);
             await FileSystemSandbox.InvalidatePathAsync(
                 resolvedSrc, _summaryDir, _readThisTurn, _writtenThisTurn, _patchedThisTurn, _sessionCache, _versionStore);

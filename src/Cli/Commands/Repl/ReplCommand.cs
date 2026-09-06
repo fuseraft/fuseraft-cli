@@ -202,6 +202,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         List<AIFunction>? explorerTools = null;
         TodoPlugin?     todoPlugin      = null;
         FileSystemPlugin? fsPluginForCategory = null;
+        McpSessionManager? mcpManager          = null;
         List<AIFunction>? fsFunctions    = null;
         List<AIFunction>? shellFunctions = null;
         List<AIFunction>? gitFunctions   = null;
@@ -292,6 +293,9 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             var enabled = settings.EnabledPlugins;
             var slug    = FuseraftPaths.ProjectSlug(cwd);
 
+            fsPluginForCategory?.EnableUndoSnapshots(
+                FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionUndoSnapshots, sessionId, slug));
+
             if (enabled.Contains("Http"))
                 toolsByCategory["Http"] = PluginRegistry.GetFunctionsFromObject(new HttpPlugin()).ToList();
 
@@ -327,6 +331,22 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 var p = new ScratchpadPlugin("repl", FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionScratchpad, sessionId, slug));
                 toolsByCategory["Scratchpad"] = PluginRegistry.GetFunctionsFromObject(p).ToList();
                 activePlugins.Add(p);
+            }
+
+            foreach (var server in ReplMcpServerStore.Load())
+            {
+                try
+                {
+                    AnsiConsole.MarkupLine($"[dim]Connecting MCP server '{Markup.Escape(server.Name)}'…[/]");
+                    mcpManager ??= new McpSessionManager(loggerFactory);
+                    var (_, mcpTools) = await mcpManager.ConnectSingleAsync(server, cancellationToken);
+                    toolsByCategory[$"mcp:{server.Name}"] = mcpTools.ToList();
+                }
+                catch (Exception ex)
+                {
+                    AnsiConsole.MarkupLine(
+                        $"[yellow]⚠ Could not connect saved MCP server '{Markup.Escape(server.Name)}':[/] {Markup.Escape(ex.Message)}");
+                }
             }
         }
 
@@ -424,7 +444,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             cwd, sessionId, startedAt, modelId, modelConfig, userCfg, client,
             factory, keyStore, emitter, eventsPath,
             memoryStore, toolsByCategory, systemPrompt, pendingSave,
-            verbose: settings.Verbose, subAgent: subAgent)
+            verbose: settings.Verbose, subAgent: subAgent, undoStore: fsPluginForCategory?.UndoStore)
         {
             JsonMode    = jsonMode,
             Skills      = discoveredSkills,
@@ -432,6 +452,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             KeyStored   = keyStored,
             NoBanner    = settings.NoBanner,
             MemoryCount = memoryEntries.Count,
+            McpManager  = mcpManager,
         };
 
         if (!settings.NoTools)
@@ -531,6 +552,12 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             _ = ReplTurn.SaveSnapshotAsync(ctx);
 
         await ReplTurn.RunAsync(ctx, cancellationToken);
+
+        if (ctx.McpManager is not null)
+        {
+            try { await ctx.McpManager.DisposeAsync(); }
+            catch { /* best-effort — session is ending regardless */ }
+        }
 
         await emitter.EmitAsync(EventTypes.SessionEnd, payload: new { turns = ctx.TurnIndex });
         await ReplTurn.ExtractMemoriesOnExitAsync(ctx);

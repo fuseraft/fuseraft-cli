@@ -161,6 +161,8 @@ public static class FuseraftPaths
     public const string LocalPreflight            = "~/.fuseraft/sessions/{project_slug}/{session_id}/preflight.json";
     public const string LocalChatroom             = "~/.fuseraft/sessions/{project_slug}/{session_id}/chatroom.jsonl";
     public const string LocalSessionScratchpad    = "~/.fuseraft/sessions/{project_slug}/{session_id}/scratchpad";
+    // /undo snapshots (REPL only) — pre-mutation blobs + manifest.jsonl for write_file/patch_file/delete_file.
+    public const string LocalSessionUndoSnapshots = "~/.fuseraft/sessions/{project_slug}/{session_id}/undo";
     public const string LocalMemoryRefs           = "~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json";
     public const string LocalCtxViz               = "~/.fuseraft/sessions/{project_slug}/{session_id}/ctx_viz.html";
 

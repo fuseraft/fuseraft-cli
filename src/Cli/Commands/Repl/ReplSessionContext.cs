@@ -4,6 +4,7 @@ using fuseraft.Core;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.KeyStore;
+using fuseraft.Infrastructure.Mcp;
 using fuseraft.Infrastructure.Plugins;
 using fuseraft.Orchestration;
 
@@ -39,9 +40,15 @@ internal sealed class ReplSessionContext
     public readonly IApiKeyStore        KeyStore;
     public readonly Dictionary<string, List<AIFunction>> ToolsByCategory;
     public readonly SubAgentPlugin?     SubAgent;
+    public readonly UndoSnapshotStore?  UndoStore;
     public readonly bool                Verbose;
     public IReadOnlyList<AgentSkill>    Skills       { get; set; } = [];
     public TodoPlugin?                  Todo         { get; set; }
+
+    // Owns any MCP server connections added this session via /mcp add. Created lazily on
+    // first use (either loading saved servers at startup or the first /mcp add call) and
+    // disposed once, on REPL exit — see ReplCommand.cs.
+    public McpSessionManager? McpManager { get; set; }
 
     // Mutable provider state (may be replaced by /provider setup)
     private string _modelId = string.Empty;
@@ -168,7 +175,8 @@ internal sealed class ReplSessionContext
         IApiKeyStore keyStore, EventEmitter emitter, string eventsPath,
         MemoryStore memoryStore, Dictionary<string, List<AIFunction>> toolsByCategory,
         string systemPrompt, bool pendingSave, bool verbose = false,
-        SubAgentPlugin? subAgent = null, ConversationCompactor? compactor = null)
+        SubAgentPlugin? subAgent = null, ConversationCompactor? compactor = null,
+        UndoSnapshotStore? undoStore = null)
     {
         Cwd             = cwd;
         SessionId       = sessionId;
@@ -184,6 +192,7 @@ internal sealed class ReplSessionContext
         MemoryStore     = memoryStore;
         ToolsByCategory = toolsByCategory;
         SubAgent        = subAgent;
+        UndoStore       = undoStore;
         PendingSave     = pendingSave;
         Verbose         = verbose;
         History         = [new ChatMessage(ChatRole.System, systemPrompt)];

@@ -45,6 +45,8 @@ internal static partial class ReplCommands
             case "/last":          CmdLast(ctx); return CommandResult.Continue;
             case "/snapshot":      await CmdSnapshotAsync(ctx); return CommandResult.Continue;
             case "/run":           return await CmdRunAsync(ctx, arg, cancellationToken);
+            case "/undo":          return await CmdUndoAsync(ctx);
+            case "/mcp":           return await CmdMcpAsync(ctx, arg, cancellationToken);
             default:
                 AnsiConsole.MarkupLine(
                     $"[yellow]Unknown command:[/] {Markup.Escape(command)}  [dim](type /help for commands)[/]");
@@ -94,12 +96,17 @@ internal static partial class ReplCommands
                 - `/tools` — List active tools by category
                 - `/tools disable <category>` — Disable a tool category (FileSystem Shell Search Git Http)
                 - `/tools enable <category>` — Re-enable a disabled tool category
+                - `/undo` — Revert files written, patched, copied, moved, or deleted in the most recent turn (repeatable; walks back one turn at a time — not the same as `/rewind`, which only affects conversation history)
                 - `/safe-mode` — Show safe mode status
                 - `/safe-mode on` — Disable Shell, Git, Http tools to prevent mutations
                 - `/safe-mode off` — Restore tool categories
                 - `/adversarial` — Show adversarial mode status
                 - `/adversarial on` — Enable critic agent to review each `/execute` step
                 - `/adversarial off` — Disable critic agent
+                - `/mcp` — List connected MCP servers and their tools
+                - `/mcp add` — Interactive wizard to connect an MCP server (persists for future sessions)
+                - `/mcp add --session-only` — Same, but don't persist past this session
+                - `/mcp remove <name>` — Stop offering a connected server's tools to the model
 
                 ### Context & model
                 - `/context` — Show context window usage (actual once a turn has run, else estimated), per-category breakdown, and cumulative session token usage
@@ -186,12 +193,17 @@ internal static partial class ReplCommands
         tools.AddRow("[bold cyan]/tools[/]",                       "List active tools by category");
         tools.AddRow("[bold cyan]/tools disable <category>[/]",    "Disable a tool category (FileSystem Shell Search Git Http)");
         tools.AddRow("[bold cyan]/tools enable <category>[/]",     "Re-enable a disabled tool category");
+        tools.AddRow("[bold cyan]/undo[/]",                        "Revert files written/patched/copied/moved/deleted in the most recent turn (repeatable; files only — see /rewind for conversation history)");
         tools.AddRow("[bold cyan]/safe-mode[/]",                   "Show safe mode status");
         tools.AddRow("[bold cyan]/safe-mode on[/]",                "Disable Shell, Git, Http tools to prevent mutations");
         tools.AddRow("[bold cyan]/safe-mode off[/]",               "Restore tool categories");
         tools.AddRow("[bold cyan]/adversarial[/]",                 "Show adversarial mode status");
         tools.AddRow("[bold cyan]/adversarial on[/]",              "Enable critic agent to review each /execute step");
         tools.AddRow("[bold cyan]/adversarial off[/]",             "Disable critic agent");
+        tools.AddRow("[bold cyan]/mcp[/]",                         "List connected MCP servers and their tools");
+        tools.AddRow("[bold cyan]/mcp add[/]",                     "Interactive wizard to connect an MCP server (persists for future sessions)");
+        tools.AddRow("[bold cyan]/mcp add --session-only[/]",      "Same, but don't persist past this session");
+        tools.AddRow("[bold cyan]/mcp remove <name>[/]",           "Stop offering a connected server's tools to the model");
         AnsiConsole.Write(tools);
         AnsiConsole.WriteLine();
 
