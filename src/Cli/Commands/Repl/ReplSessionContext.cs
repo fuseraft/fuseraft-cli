@@ -42,6 +42,14 @@ internal sealed class ReplSessionContext
     public readonly SubAgentPlugin?     SubAgent;
     public readonly UndoSnapshotStore?  UndoStore;
     public readonly bool                Verbose;
+
+    // Shared with every IChatClient this session builds via ReplFactory.BuildClient (including
+    // the ones built before this ReplSessionContext existed, so the same instance is passed in
+    // here rather than created fresh), so a provider call that only survived via adaptive
+    // context-trim can force a real /compact before the next turn — see
+    // AgentMiddlewareBuilder's adaptive-retry loop and ReplTurn's post-turn ConsumeTrim check.
+    // Mirrors CompactionCoordinator's role in `fuseraft run`.
+    public readonly AdaptiveTrimTracker AdaptiveTrimTracker;
     public IReadOnlyList<AgentSkill>    Skills       { get; set; } = [];
     public TodoPlugin?                  Todo         { get; set; }
 
@@ -81,7 +89,8 @@ internal sealed class ReplSessionContext
     public  IChatClient  StepClient
     {
         get => _stepClient ??= ReplFactory.BuildClient(
-                   ModelConfig, Factory, ToolsByCategory.Count > 0, ReplTurn.StepIterationLimit);
+                   ModelConfig, Factory, ToolsByCategory.Count > 0,
+                   AdaptiveTrimTracker, Emitter, ReplTurn.StepIterationLimit);
         set => _stepClient = value;
     }
 
@@ -174,7 +183,8 @@ internal sealed class ReplSessionContext
         UserConfig? userCfg, IChatClient client, ChatClientFactory factory,
         IApiKeyStore keyStore, EventEmitter emitter, string eventsPath,
         MemoryStore memoryStore, Dictionary<string, List<AIFunction>> toolsByCategory,
-        string systemPrompt, bool pendingSave, bool verbose = false,
+        string systemPrompt, bool pendingSave, AdaptiveTrimTracker adaptiveTrimTracker,
+        bool verbose = false,
         SubAgentPlugin? subAgent = null, ConversationCompactor? compactor = null,
         UndoSnapshotStore? undoStore = null)
     {
@@ -198,6 +208,7 @@ internal sealed class ReplSessionContext
         History         = [new ChatMessage(ChatRole.System, systemPrompt)];
         ChatOptions     = BuildChatOptions();
         Compactor       = compactor;
+        AdaptiveTrimTracker = adaptiveTrimTracker;
     }
 
     public void ResetPlanState()

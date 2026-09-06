@@ -159,8 +159,8 @@ internal static partial class ReplCommands
             var newConfig = ReplFactory.BuildModelConfig(snapshot.ModelId, ctx.UserCfg);
             try
             {
-                var newClient     = ReplFactory.BuildClient(newConfig, ctx.Factory, hasTools);
-                var newStepClient = ReplFactory.BuildClient(newConfig, ctx.Factory, hasTools, ReplTurn.StepIterationLimit);
+                var newClient     = ReplFactory.BuildClient(newConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter);
+                var newStepClient = ReplFactory.BuildClient(newConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, ReplTurn.StepIterationLimit);
                 ctx.ModelId     = snapshot.ModelId;
                 ctx.ModelConfig = newConfig;
                 ctx.Client      = newClient;

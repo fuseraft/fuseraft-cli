@@ -181,7 +181,9 @@ internal static partial class ReplCommands
     /// metrics. Returns (success, errorReason, tokensBefore, tokensAfter).
     /// </summary>
     internal static async Task<(bool Success, string? ErrorReason, int BeforeEst, int AfterEst)>
-        CompactHistoryAsync(ReplSessionContext ctx, string? focus, CancellationToken cancellationToken)
+        CompactHistoryAsync(
+            ReplSessionContext ctx, string? focus, CancellationToken cancellationToken,
+            string source = "manual")
     {
         var beforeEst = ctx.EstimateTokens();
         var focusNote = string.IsNullOrWhiteSpace(focus) ? string.Empty : $"\n\nFocus for the next session: {focus}";
@@ -225,7 +227,7 @@ internal static partial class ReplCommands
         var afterEst = ctx.EstimateTokens();
         await ctx.Emitter.EmitAsync(EventTypes.Compaction, payload: new
         {
-            source        = "manual",
+            source,
             before_tokens = beforeEst,
             after_tokens  = afterEst,
             focus,

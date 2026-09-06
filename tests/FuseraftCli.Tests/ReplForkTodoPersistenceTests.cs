@@ -40,7 +40,8 @@ public sealed class ReplForkTodoPersistenceTests : IDisposable
         keyStore: new UnavailableKeyStore(),
         emitter: new EventEmitter(Path.Combine(Path.GetTempPath(), $"fuseraft-test-events-{Guid.NewGuid():N}.jsonl")),
         eventsPath: "unused", memoryStore: MemoryStore.CreateForTest(Path.Combine(Path.GetTempPath(), $"fuseraft-test-mem-{Guid.NewGuid():N}")),
-        toolsByCategory: [], systemPrompt: "test system prompt", pendingSave: false);
+        toolsByCategory: [], systemPrompt: "test system prompt", pendingSave: false,
+        adaptiveTrimTracker: new());
 
     /// <summary>Loads the single snapshot file /fork wrote (the isolated temp dir starts empty
     /// and /fork never re-saves the source session), regardless of its randomly generated ID.</summary>
