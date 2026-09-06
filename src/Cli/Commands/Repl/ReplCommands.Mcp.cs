@@ -23,7 +23,7 @@ internal static partial class ReplCommands
         {
             ""       => CmdMcpList(ctx),
             "add"    => await CmdMcpAddAsync(ctx, rest, cancellationToken),
-            "remove" => CmdMcpRemove(ctx, rest),
+            "remove" => await CmdMcpRemoveAsync(ctx, rest),
             _        => Unknown(),
         };
 
@@ -147,7 +147,7 @@ internal static partial class ReplCommands
         return CommandResult.Continue;
     }
 
-    private static CommandResult CmdMcpRemove(ReplSessionContext ctx, string name)
+    private static async Task<CommandResult> CmdMcpRemoveAsync(ReplSessionContext ctx, string name)
     {
         name = name.Trim();
         if (string.IsNullOrEmpty(name))
@@ -170,9 +170,20 @@ internal static partial class ReplCommands
         if (saved.RemoveAll(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) > 0)
             ReplMcpServerStore.Save(saved);
 
-        AnsiConsole.MarkupLine(
-            $"[green]Removed '{Markup.Escape(name)}'.[/] [dim]Its tools are no longer offered to the model " +
-            "(the underlying connection closes when the session ends).[/]");
+        // Actually tear down the connection (and, for stdio, its child process) instead of just
+        // hiding the tools from the model — previously the connection stayed alive, orphaned,
+        // for the rest of the session no matter how many times a server was added and removed.
+        var disconnected = false;
+        try { disconnected = ctx.McpManager is not null && await ctx.McpManager.RemoveAsync(name); }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine(
+                $"[yellow]⚠ Tools removed, but disconnecting '{Markup.Escape(name)}' failed:[/] {Markup.Escape(ex.Message)}");
+        }
+
+        AnsiConsole.MarkupLine(disconnected
+            ? $"[green]Removed '{Markup.Escape(name)}'[/] [dim]and closed its connection.[/]"
+            : $"[green]Removed '{Markup.Escape(name)}'.[/] [dim]Its tools are no longer offered to the model.[/]");
         return CommandResult.Continue;
     }
 }

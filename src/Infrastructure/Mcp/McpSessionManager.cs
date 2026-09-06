@@ -23,7 +23,10 @@ namespace fuseraft.Infrastructure.Mcp;
 /// </summary>
 public sealed class McpSessionManager : IAsyncDisposable
 {
-    private readonly List<McpClient> _clients = [];
+    // Keyed by server name (case-insensitive) rather than a flat list so a single connection
+    // can be torn down on its own via RemoveAsync — e.g. the REPL's /mcp remove — instead of
+    // only ever being reachable through DisposeAsync's tear-down-everything path.
+    private readonly Dictionary<string, McpClient> _clients = new(StringComparer.OrdinalIgnoreCase);
     private readonly ILoggerFactory? _loggerFactory;
     private readonly ILogger<McpSessionManager>? _logger;
 
@@ -52,7 +55,7 @@ public sealed class McpSessionManager : IAsyncDisposable
                 server.Name, server.Transport);
 
             var client = await ConnectAsync(server, cancellationToken);
-            _clients.Add(client);
+            _clients[server.Name] = client;
 
             var tools = await client.ListToolsAsync(cancellationToken: cancellationToken);
             _logger?.LogInformation("MCP server '{Name}' registered {Count} tool(s).",
@@ -81,7 +84,7 @@ public sealed class McpSessionManager : IAsyncDisposable
             server.Name, server.Transport);
 
         var client = await ConnectAsync(server, cancellationToken);
-        _clients.Add(client);
+        _clients[server.Name] = client;
 
         var tools = await client.ListToolsAsync(cancellationToken: cancellationToken);
         _logger?.LogInformation("MCP server '{Name}' registered {Count} tool(s).",
@@ -90,10 +93,25 @@ public sealed class McpSessionManager : IAsyncDisposable
         return (client, tools.Cast<AIFunction>().ToList());
     }
 
+    /// <summary>
+    /// Disconnects and disposes a single server's connection (terminating its stdio child
+    /// process if it has one) and stops tracking it. Returns <c>false</c> without side effects
+    /// if no server with that name is connected.
+    /// </summary>
+    public async Task<bool> RemoveAsync(string name)
+    {
+        if (!_clients.Remove(name, out var client))
+            return false;
+
+        _logger?.LogInformation("Disconnecting MCP server '{Name}'…", name);
+        await client.DisposeAsync();
+        return true;
+    }
+
     public async ValueTask DisposeAsync()
     {
         List<Exception>? errors = null;
-        foreach (var client in _clients)
+        foreach (var client in _clients.Values)
         {
             try { await client.DisposeAsync(); }
             catch (OperationCanceledException) { throw; }
