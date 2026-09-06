@@ -557,16 +557,27 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         if (snapshot is null)
             _ = ReplTurn.SaveSnapshotAsync(ctx);
 
-        await ReplTurn.RunAsync(ctx, cancellationToken);
-
-        if (ctx.McpManager is not null)
+        try
         {
-            try { await ctx.McpManager.DisposeAsync(); }
-            catch { /* best-effort — session is ending regardless */ }
+            await ReplTurn.RunAsync(ctx, cancellationToken);
         }
+        finally
+        {
+            // In a finally so an unhandled exception out of the turn loop still releases MCP
+            // connections (stdio ones are real child processes — leaked for the rest of the
+            // process's life otherwise), records SessionEnd, and extracts memories, instead of
+            // silently skipping all three. EmitAsync and ExtractMemoriesOnExitAsync already
+            // swallow their own exceptions internally; DisposeAsync is wrapped here the same
+            // way it always was, best-effort, since the session is ending regardless.
+            if (ctx.McpManager is not null)
+            {
+                try { await ctx.McpManager.DisposeAsync(); }
+                catch { /* best-effort — session is ending regardless */ }
+            }
 
-        await emitter.EmitAsync(EventTypes.SessionEnd, payload: new { turns = ctx.TurnIndex });
-        await ReplTurn.ExtractMemoriesOnExitAsync(ctx);
+            await emitter.EmitAsync(EventTypes.SessionEnd, payload: new { turns = ctx.TurnIndex });
+            await ReplTurn.ExtractMemoriesOnExitAsync(ctx);
+        }
 
         // Post-session skill curation (best-effort — never fails the session).
         if (userCfg?.SkillCuration?.Enabled == true)
