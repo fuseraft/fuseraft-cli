@@ -1,0 +1,2057 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Multi-agent orchestration CLI built on Microsoft Agent Framework">
+      
+      
+      
+        <link rel="canonical" href="https://fuseraft.ai/scripting/">
+      
+      
+        <link rel="prev" href="../cli-reference/">
+      
+      
+        <link rel="next" href="../configuration/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Scripting & Automation - fuseraft-cli</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#scripting-automation" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="fuseraft-cli" class="md-header__button md-logo" aria-label="fuseraft-cli" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            fuseraft-cli
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Scripting & Automation
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fuseraft/fuseraft-cli" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fuseraft/fuseraft-cli
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../writing-tasks/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Writing Tasks
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../spec-driven/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Spec-Driven Development
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../cli-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Scripting & Automation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../models/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Models & Providers
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../plugins/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Plugins
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../skills/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Skills
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../strategies/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Strategies
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../validators/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Validators
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../harness-engineering/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Harness Engineering
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../mcp/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  MCP
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../security/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Security
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../governance/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Governance
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../evals/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evals
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../sessions/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Sessions
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../context-management/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Context Management
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../context-store/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Context Store
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../knowledge/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Knowledge Layer
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../examples/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Examples
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../design/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Design
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="fuseraft-cli" class="md-nav__button md-logo" aria-label="fuseraft-cli" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    fuseraft-cli
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fuseraft/fuseraft-cli" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fuseraft/fuseraft-cli
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../writing-tasks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing Tasks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../spec-driven/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spec-Driven Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scripting & Automation
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scripting & Automation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-short-version" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The short version
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-interactive-flags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-interactive flags
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-json-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The --json contract
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The --json contract">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#early-failures-still-produce-clean-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Early failures still produce clean output
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exit-codes-at-a-glance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes at a glance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#triggering-runs-from-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Triggering runs from events
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Triggering runs from events">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cron-systemd-timer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cron / systemd timer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#webhooks-queues-file-watchers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Webhooks, queues, file-watchers
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worked-example-an-event-driven-etl-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worked example: an event-driven ETL pipeline
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Worked example: an event-driven ETL pipeline">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-orchestration-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The orchestration config
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-wrapper-scripts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The wrapper scripts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trying-it-yourself" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trying it yourself
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models & Providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../skills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skills
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../strategies/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Strategies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../validators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Validators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harness-engineering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harness Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../governance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Governance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../context-management/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../context-store/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Store
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../knowledge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-short-version" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The short version
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-interactive-flags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-interactive flags
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-json-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The --json contract
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The --json contract">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#early-failures-still-produce-clean-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Early failures still produce clean output
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exit-codes-at-a-glance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes at a glance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#triggering-runs-from-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Triggering runs from events
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Triggering runs from events">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cron-systemd-timer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cron / systemd timer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#webhooks-queues-file-watchers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Webhooks, queues, file-watchers
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worked-example-an-event-driven-etl-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worked example: an event-driven ETL pipeline
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Worked example: an event-driven ETL pipeline">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-orchestration-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The orchestration config
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-wrapper-scripts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The wrapper scripts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trying-it-yourself" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trying it yourself
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/fuseraft/fuseraft-cli/edit/main/docs/scripting.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="scripting-automation">Scripting &amp; Automation<a class="headerlink" href="#scripting-automation" title="Permanent link">&para;</a></h1>
+<p>fuseraft orchestrations are not limited to interactive terminal use. <code>fuseraft run</code> is a normal CLI command with a task argument, a real exit code, and (with <code>--json</code>) a single machine-parseable result on stdout — the same shape as any other tool you'd shell out to from a script. This page covers running fuseraft from bash or Python, wiring it to external events (a webhook, a queue, a cron tick, a file landing in a watched directory), and the exact contract you can rely on when doing so.</p>
+<hr />
+<h2 id="the-short-version">The short version<a class="headerlink" href="#the-short-version" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>fuseraft<span class="w"> </span>run<span class="w"> </span>--config<span class="w"> </span>pipeline.yaml<span class="w"> </span>--task-file<span class="w"> </span>task.md<span class="w"> </span>--json<span class="w"> </span>--ci<span class="w"> </span>--no-banner
+</code></pre></div>
+<ul>
+<li><code>--no-banner</code> — skip the ASCII banner</li>
+<li><code>--json</code> — stdout becomes exactly one JSON summary line; every human-readable status line goes to stderr instead</li>
+<li><code>--ci</code> — after the session completes, read <code>.fuseraft/artifacts/test-report.json</code> and exit <code>2</code> if any acceptance criterion is <code>FAIL</code></li>
+<li>Exit code: <code>0</code> success, <code>1</code> the session failed (or a setup error before it started), <code>2</code> the session succeeded but <code>--ci</code> found a failing criterion</li>
+</ul>
+<p>That's the whole contract most scripts need. The rest of this page fills in the details, then walks through a complete worked example.</p>
+<hr />
+<h2 id="non-interactive-flags">Non-interactive flags<a class="headerlink" href="#non-interactive-flags" title="Permanent link">&para;</a></h2>
+<p>These are the <code>fuseraft run</code> flags relevant to scripted invocations. Full flag reference: <a href="../cli-reference/#fuseraft-run">CLI Reference → <code>fuseraft run</code></a>.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Why it matters for scripts</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-f, --task-file &lt;path&gt;</code></td>
+<td>Pass a long or multi-line task without shell-quoting gymnastics. Build the task text yourself (e.g. from an event payload) and write it to a temp file.</td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>Stdout carries only the JSON summary; see <a href="#the-json-contract">The <code>--json</code> contract</a> below.</td>
+</tr>
+<tr>
+<td><code>--ci</code></td>
+<td>Fails the process (exit <code>2</code>) when the orchestration's own acceptance criteria didn't pass — not just when the session crashed.</td>
+</tr>
+<tr>
+<td><code>--no-banner</code></td>
+<td>Skip the ASCII banner. Redundant with <code>--json</code> (which already suppresses it) but harmless to include; useful on its own if you're not using <code>--json</code>.</td>
+</tr>
+<tr>
+<td><code>--work-dir &lt;path&gt;</code></td>
+<td>Pin the session to a specific directory instead of relying on the process's CWD — important when a single long-running handler processes events for multiple projects/directories.</td>
+</tr>
+<tr>
+<td><code>-o, --output &lt;path&gt;</code></td>
+<td>Save a Markdown transcript alongside the JSON summary, for audit trails.</td>
+</tr>
+<tr>
+<td><code>-r, --resume &lt;sessionId&gt;</code></td>
+<td>Retry a session that was interrupted (e.g. the handler process was killed mid-run) instead of starting over.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Avoid <code>--hitl</code>, <code>--devui</code>, and an omitted task in scripts.</strong> Each either blocks on terminal input or opens a browser — none make sense in an unattended process. <code>--json</code> does not change this; it's your responsibility not to combine them.</p>
+<hr />
+<h2 id="the-json-contract">The <code>--json</code> contract<a class="headerlink" href="#the-json-contract" title="Permanent link">&para;</a></h2>
+<p>Enable JSON mode two ways:</p>
+<ul>
+<li><strong>Per invocation:</strong> pass <code>--json</code> on the command line.</li>
+<li><strong>Per config:</strong> set <code>Output.Json: true</code> in the orchestration config, so every run of that config behaves this way without needing the flag. See <a href="../configuration/#output">Configuration → Output</a>. The <code>--json</code> flag always takes precedence if both are used.</li>
+</ul>
+<p><strong>Stream contract:</strong> when JSON mode is active, stdout carries <em>only</em> the final JSON summary — no banner, no turn panels, no spinner, no per-agent status. Every human-readable line, including startup diagnostics, goes to stderr. This makes stdout safe to pipe straight into <code>jq</code> or <code>json.loads()</code> without stripping anything first.</p>
+<p><strong>Summary schema and full field reference:</strong> <a href="../cli-reference/#fuseraft-run">CLI Reference → <code>fuseraft run</code> → <code>--json</code> output</a>. In short: <code>session_id</code>, <code>task</code>, <code>config</code>, <code>succeeded</code>, <code>error_message</code>, <code>exit_code</code>, <code>turns</code>, <code>elapsed_seconds</code>, <code>tokens.{input,output}</code>, <code>transcript_path</code>, and <code>ci.{passed,skipped,failed_criteria}</code> when <code>--ci</code> was used.</p>
+<h3 id="early-failures-still-produce-clean-output">Early failures still produce clean output<a class="headerlink" href="#early-failures-still-produce-clean-output" title="Permanent link">&para;</a></h3>
+<p>A run can fail before a session ever starts — a bad <code>--work-dir</code>, a missing <code>--spec</code> file, an unresolvable <code>--resume</code> ID, or the config file itself failing to load. fuseraft's contract for these:</p>
+<ul>
+<li><strong><code>--json</code> flag set:</strong> jsonMode is known from the very first line of the command, before anything else runs. Every one of these early failures still emits exactly one JSON summary line to stdout (<code>succeeded: false</code>, <code>error_message</code> set, other fields zeroed) and all diagnostic text goes to stderr — the same guarantee as a normal completed run.</li>
+<li><strong>Only <code>Output.Json: true</code> in the config (no <code>--json</code> flag):</strong> JSON mode can't be confirmed until the config has finished loading — the setting itself lives in the config. If the failure happens <em>before</em> that point, fuseraft cannot know whether to emit JSON, so it doesn't: <strong>stdout is left completely empty</strong> (never wrong, never mixed with plain text) and the failure is reported via exit code plus a stderr message only. If the config loads successfully and something fails afterward, JSON mode is fully known and behaves exactly like the <code>--json</code> flag case above.</li>
+</ul>
+<p>Either way, <strong>stdout never contains anything other than a well-formed JSON summary or nothing at all.</strong> A script's parsing logic should be: try <code>json.loads(stdout)</code>; if that fails (empty or non-JSON), treat it as a failure and fall back to the exit code plus whatever was captured on stderr.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># --json flag: JSON summary even for a setup error, no session ever started</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>$<span class="w"> </span>fuseraft<span class="w"> </span>run<span class="w"> </span>-c<span class="w"> </span>pipeline.yaml<span class="w"> </span>--work-dir<span class="w"> </span>/no/such/dir<span class="w"> </span>--json<span class="w"> </span>--no-banner
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="o">{</span><span class="s2">"session_id"</span>:null,<span class="s2">"task"</span>:null,<span class="s2">"config"</span>:<span class="s2">"/abs/path/pipeline.yaml"</span>,<span class="s2">"succeeded"</span>:false,<span class="s2">"error_message"</span>:<span class="s2">"Work directory not found: /no/such/dir"</span>,<span class="s2">"exit_code"</span>:1,<span class="s2">"turns"</span>:0,<span class="s2">"elapsed_seconds"</span>:0,<span class="s2">"tokens"</span>:<span class="o">{</span><span class="s2">"input"</span>:0,<span class="s2">"output"</span>:0<span class="o">}</span>,<span class="s2">"transcript_path"</span>:null,<span class="s2">"ci"</span>:null<span class="o">}</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>$<span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="nv">$?</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="m">1</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Output.Json: true only, same failure: stdout is empty, not corrupted</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>$<span class="w"> </span>fuseraft<span class="w"> </span>run<span class="w"> </span>-c<span class="w"> </span>pipeline.yaml<span class="w"> </span>--work-dir<span class="w"> </span>/no/such/dir<span class="w"> </span>--no-banner
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>$<span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="nv">$?</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="m">1</span>
+</code></pre></div>
+<p>If you control the invocation (which you almost always do, since you're the one writing the wrapper script), pass <code>--json</code> explicitly rather than relying on <code>Output.Json</code> alone — it closes this last gap and gives you a JSON line for every outcome, not just successful ones.</p>
+<hr />
+<h2 id="exit-codes-at-a-glance">Exit codes at a glance<a class="headerlink" href="#exit-codes-at-a-glance" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th><code>0</code></th>
+<th><code>1</code></th>
+<th><code>2</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fuseraft run</code></td>
+<td>Session completed</td>
+<td>Session failed, or a setup error before it started</td>
+<td>Only with <code>--ci</code>: session completed but an acceptance criterion is <code>FAIL</code></td>
+</tr>
+<tr>
+<td><code>fuseraft validate</code></td>
+<td>Config is valid (warnings may still print)</td>
+<td>One or more errors found</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>fuseraft schedule run</code></td>
+<td>All due jobs ticked without error</td>
+<td>A job failed</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p><code>fuseraft validate config.yaml --check-connectivity</code> is worth running as a pre-flight step in CI before the first real <code>fuseraft run</code> — it makes a 1-token call to each configured model endpoint and confirms every API key actually works, so a pipeline fails fast on a misconfigured key instead of burning a full session first. See <a href="../cli-reference/#fuseraft-validate">CLI Reference → <code>fuseraft validate</code></a>.</p>
+<hr />
+<h2 id="triggering-runs-from-events">Triggering runs from events<a class="headerlink" href="#triggering-runs-from-events" title="Permanent link">&para;</a></h2>
+<h3 id="cron-systemd-timer">Cron / systemd timer<a class="headerlink" href="#cron-systemd-timer" title="Permanent link">&para;</a></h3>
+<p>For anything on a fixed schedule, <code>fuseraft schedule</code> is usually simpler than hand-rolling a cron entry that calls <code>fuseraft run</code> directly — it stores the job definition (config path, work dir, output path template) once in <code>~/.fuseraft/schedule/</code>, and <code>fuseraft schedule run</code> is designed to be ticked every minute by cron or a systemd timer with no daemon required. See <a href="../cli-reference/#fuseraft-schedule">CLI Reference → <code>fuseraft schedule</code></a> for the full command set.</p>
+<p>For an event that should run a <em>specific</em> job on demand — not wait for its next scheduled tick — use:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>fuseraft<span class="w"> </span>schedule<span class="w"> </span>run<span class="w"> </span>--name<span class="w"> </span>my-job
+</code></pre></div>
+<p>This ignores the job's schedule and <code>enabled</code> flag and runs it immediately, while still reusing the config/work-dir/output settings stored in the job definition.</p>
+<h3 id="webhooks-queues-file-watchers">Webhooks, queues, file-watchers<a class="headerlink" href="#webhooks-queues-file-watchers" title="Permanent link">&para;</a></h3>
+<p>For anything else — a webhook payload, a message off a queue, a file landing in a watched directory — the pattern is the same regardless of trigger source: your event handler builds a task (usually naming the specific input/output the event refers to) and shells out to <code>fuseraft run --json --ci</code>. See the worked example below.</p>
+<hr />
+<h2 id="worked-example-an-event-driven-etl-pipeline">Worked example: an event-driven ETL pipeline<a class="headerlink" href="#worked-example-an-event-driven-etl-pipeline" title="Permanent link">&para;</a></h2>
+<p><code>config/examples/etl-pipeline.yaml</code> and <code>scripts/run-pipeline.sh</code> / <code>scripts/run_pipeline.py</code> are a complete, runnable version of this pattern — copy them as a starting point.</p>
+<h3 id="the-orchestration-config">The orchestration config<a class="headerlink" href="#the-orchestration-config" title="Permanent link">&para;</a></h3>
+<p>Two agents, run at most once each — a linear pipeline, not an open-ended chat:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">Orchestration</span><span class="p">:</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">EtlPipeline</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">Output</span><span class="p">:</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">    </span><span class="nt">Json</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">          </span><span class="c1"># every invocation behaves as if --json was passed</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">  </span><span class="nt">Selection</span><span class="p">:</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">    </span><span class="nt">Type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sequential</span><span class="w">     </span><span class="c1"># Extractor, then Transformer, in that fixed order</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">  </span><span class="nt">Termination</span><span class="p">:</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">    </span><span class="nt">Type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">composite</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="w">    </span><span class="nt">Strategies</span><span class="p">:</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">regex</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="w">        </span><span class="nt">Pattern</span><span class="p">:</span><span class="w"> </span><span class="s">"PIPELINE_COMPLETE"</span><span class="w">   </span><span class="c1"># Transformer's completion signal</span>
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">maxiterations</span>
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="w">        </span><span class="nt">MaxIterations</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4</span><span class="w">               </span><span class="c1"># hard stop if something loops</span>
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>
+<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a><span class="w">  </span><span class="nt">Validation</span><span class="p">:</span>
+<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a><span class="w">    </span><span class="nt">TestReportPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.fuseraft/artifacts/test-report.json</span><span class="w">   </span><span class="c1"># feeds --ci</span>
+<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a>
+<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a><span class="w">  </span><span class="nt">Security</span><span class="p">:</span>
+<a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a><span class="w">    </span><span class="nt">FileSystemSandboxPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.</span>
+<a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a><span class="w">    </span><span class="nt">ChangeEnvelope</span><span class="p">:</span>
+<a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"output/**"</span><span class="w">                     </span><span class="c1"># Transformer may only write here</span>
+<a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">".fuseraft/artifacts/**"</span>
+<a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a>
+<a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a><span class="w">  </span><span class="nt">Agents</span><span class="p">:</span>
+<a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Extractor</span><span class="w">       </span><span class="c1"># reads + validates input, never writes</span>
+<a id="__codelineno-4-29" name="__codelineno-4-29" href="#__codelineno-4-29"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Transformer</span><span class="w">      </span><span class="c1"># normalizes, writes output, files the test report</span>
+</code></pre></div>
+<p>Points worth calling out:</p>
+<ul>
+<li><strong><code>Output.Json: true</code></strong> means this config <em>always</em> reports structured results — nobody has to remember to pass <code>--json</code> when invoking it, which matters once several scripts/services call the same config.</li>
+<li><strong><code>Selection.Type: sequential</code></strong> with two agents means: Extractor runs turn 1, Transformer runs turn 2, done. There's no keyword routing to configure — sequential just advances through the agent list in order.</li>
+<li><strong><code>Termination</code></strong> combines the Transformer's own completion signal (<code>PIPELINE_COMPLETE</code>) with a hard <code>MaxIterations</code> cap, so a malfunctioning agent can't loop forever in an unattended process.</li>
+<li><strong><code>Security.ChangeEnvelope</code></strong> restricts writes to <code>output/**</code> and the artifacts directory — since this runs unattended in response to external events, it shouldn't be able to touch anything else in the sandboxed work dir even if an agent misbehaves. See <a href="../security/">Security</a>.</li>
+<li><strong><code>Validation.TestReportPath</code></strong> is what makes <code>--ci</code> meaningful here: the Transformer is instructed to write a PASS/FAIL acceptance-criteria report before signalling completion, and <code>--ci</code> reads it after the session ends.</li>
+</ul>
+<p>See the full file for the complete agent instructions. Full config schema: <a href="../configuration/">Configuration</a>.</p>
+<h3 id="the-wrapper-scripts">The wrapper scripts<a class="headerlink" href="#the-wrapper-scripts" title="Permanent link">&para;</a></h3>
+<p>Both scripts do the same thing — build a task string naming the input/output paths, invoke <code>fuseraft run --json --ci</code>, parse the summary, and exit with fuseraft's own exit code:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>scripts/run-pipeline.sh<span class="w"> </span>&lt;input-path&gt;<span class="w"> </span>&lt;output-path&gt;<span class="w"> </span><span class="o">[</span>work-dir<span class="o">]</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>python3<span class="w"> </span>scripts/run_pipeline.py<span class="w"> </span>&lt;input-path&gt;<span class="w"> </span>&lt;output-path&gt;<span class="w"> </span><span class="o">[</span>--work-dir<span class="w"> </span>DIR<span class="o">]</span>
+</code></pre></div>
+<p>The Python version is also importable as a library function, which is the more useful form for a long-running event handler (a webhook server, a queue consumer) that shouldn't fork a fresh interpreter per event:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">run_pipeline</span><span class="w"> </span><span class="kn">import</span> <span class="n">run_pipeline</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="k">def</span><span class="w"> </span><span class="nf">on_file_uploaded</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">run_pipeline</span><span class="p">(</span><span class="n">event</span><span class="p">[</span><span class="s2">"path"</span><span class="p">],</span> <span class="sa">f</span><span class="s2">"output/</span><span class="si">{</span><span class="n">event</span><span class="p">[</span><span class="s1">'id'</span><span class="p">]</span><span class="si">}</span><span class="s2">.json"</span><span class="p">)</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="k">if</span> <span class="n">result</span><span class="p">[</span><span class="s2">"succeeded"</span><span class="p">]</span> <span class="ow">and</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"ci"</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"passed"</span><span class="p">,</span> <span class="kc">True</span><span class="p">):</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>        <span class="n">notify_downstream</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>        <span class="n">alert_oncall</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+</code></pre></div>
+<p><code>run_pipeline()</code> returns the parsed JSON summary dict with <code>exit_code</code> added — a failed <em>session</em> (bad output, <code>--ci</code> FAIL, agent error) comes back as <code>result["succeeded"] is False</code> in the return value, not an exception, since callers need to branch on that as a normal, expected outcome. It only raises if <code>fuseraft</code> itself couldn't be started (e.g. not on <code>PATH</code>).</p>
+<p>Both scripts read <code>FUSERAFT_BIN</code> (default: <code>fuseraft</code> on <code>PATH</code>) and <code>FUSERAFT_PIPELINE_CONFIG</code> (default: <code>config/examples/etl-pipeline.yaml</code>) from the environment, so you can point them at a different binary or config without editing the script.</p>
+<h3 id="trying-it-yourself">Trying it yourself<a class="headerlink" href="#trying-it-yourself" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ANTHROPIC_API_KEY</span><span class="o">=</span>&lt;your-key&gt;<span class="w">   </span><span class="c1"># or the provider configured in the YAML</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="nb">echo</span><span class="w"> </span><span class="s1">'[{"id":1,"first_name":"Ada","email":"ADA@EXAMPLE.COM "}]'</span><span class="w"> </span>&gt;<span class="w"> </span>input.json
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>scripts/run-pipeline.sh<span class="w"> </span>input.json<span class="w"> </span>output/normalized.json<span class="w"> </span>.
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">"exit code: </span><span class="nv">$?</span><span class="s2">"</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>cat<span class="w"> </span>output/normalized.json
+</code></pre></div>
+<hr />
+<h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../cli-reference/#fuseraft-run">CLI Reference → <code>fuseraft run</code></a> — full flag list and the <code>--json</code> summary field reference</li>
+<li><a href="../cli-reference/#fuseraft-schedule">CLI Reference → <code>fuseraft schedule</code></a> — cron-driven sessions</li>
+<li><a href="../cli-reference/#fuseraft-validate">CLI Reference → <code>fuseraft validate</code></a> — pre-flight config and API-key checks</li>
+<li><a href="../configuration/#output">Configuration → Output</a> — the <code>Output.Json</code> config field</li>
+<li><a href="../examples/">Examples</a> — more ready-to-use orchestration configs</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../cli-reference/" class="md-footer__link md-footer__link--prev" aria-label="Previous: CLI Reference">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                CLI Reference
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../configuration/" class="md-footer__link md-footer__link--next" aria-label="Next: Configuration">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Configuration
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.footer", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

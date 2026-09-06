@@ -1,0 +1,2732 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Multi-agent orchestration CLI built on Microsoft Agent Framework">
+      
+      
+      
+        <link rel="canonical" href="https://fuseraft.ai/security/">
+      
+      
+        <link rel="prev" href="../mcp/">
+      
+      
+        <link rel="next" href="../governance/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Security - fuseraft-cli</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#security-sandbox" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="fuseraft-cli" class="md-header__button md-logo" aria-label="fuseraft-cli" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            fuseraft-cli
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Security
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fuseraft/fuseraft-cli" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fuseraft/fuseraft-cli
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../writing-tasks/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Writing Tasks
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../spec-driven/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Spec-Driven Development
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../cli-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../scripting/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Scripting & Automation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../models/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Models & Providers
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../plugins/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Plugins
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../skills/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Skills
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../strategies/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Strategies
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../validators/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Validators
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../harness-engineering/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Harness Engineering
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../mcp/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  MCP
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Security
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../governance/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Governance
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../evals/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evals
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../sessions/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Sessions
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../context-management/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Context Management
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../context-store/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Context Store
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../knowledge/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Knowledge Layer
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../examples/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Examples
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../design/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Design
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="fuseraft-cli" class="md-nav__button md-logo" aria-label="fuseraft-cli" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    fuseraft-cli
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fuseraft/fuseraft-cli" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fuseraft/fuseraft-cli
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../writing-tasks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing Tasks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../spec-driven/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spec-Driven Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scripting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scripting & Automation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models & Providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../skills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skills
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../strategies/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Strategies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../validators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Validators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harness-engineering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harness Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#filesystem-sandbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filesystem sandbox
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Filesystem sandbox">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-is-checked" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is checked
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#path-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Path resolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#shell-command-scanning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shell command scanning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#limitation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#denial-response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Denial response
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#filesystem-permissions-read-write-deny-globs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filesystem permissions (read / write / deny globs)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Filesystem permissions (read / write / deny globs)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#evaluation-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evaluation order
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#which-functions-are-covered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which functions are covered
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interaction-with-changeenvelope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interaction with ChangeEnvelope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#denial-response_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Denial response
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#shell-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shell policy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Shell policy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evaluation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#applies-to-all-shell-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Applies to all shell execution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#denial-response_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Denial response
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#change-envelope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Change envelope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#file-read-size-limit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File read size limit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#http-allowlist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP allowlist
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="HTTP allowlist">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#allowprivatehosts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AllowPrivateHosts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#combining-both" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Combining both
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docker-containment-codeexecution-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker containment (CodeExecution plugin)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution-rings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution rings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sudo-protection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sudo protection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prompt-injection-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt injection detection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-key-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API key storage
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="API key storage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#secret-masking-in-logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secret masking in logs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#crash-dumps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Crash dumps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#skills-execution-trust-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Skills execution trust model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Skills execution trust model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#risk-untrusted-project-skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Risk: untrusted project skills
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../governance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Governance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../context-management/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../context-store/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Store
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../knowledge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#filesystem-sandbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filesystem sandbox
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Filesystem sandbox">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-is-checked" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is checked
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#path-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Path resolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#shell-command-scanning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shell command scanning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#limitation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#denial-response" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Denial response
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#filesystem-permissions-read-write-deny-globs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filesystem permissions (read / write / deny globs)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Filesystem permissions (read / write / deny globs)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#evaluation-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evaluation order
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#which-functions-are-covered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which functions are covered
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interaction-with-changeenvelope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interaction with ChangeEnvelope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#denial-response_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Denial response
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#shell-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shell policy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Shell policy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evaluation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#applies-to-all-shell-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Applies to all shell execution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#denial-response_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Denial response
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#change-envelope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Change envelope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#file-read-size-limit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File read size limit
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#http-allowlist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP allowlist
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="HTTP allowlist">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#allowprivatehosts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AllowPrivateHosts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#combining-both" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Combining both
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docker-containment-codeexecution-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker containment (CodeExecution plugin)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution-rings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution rings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sudo-protection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sudo protection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prompt-injection-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt injection detection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-key-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API key storage
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="API key storage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#secret-masking-in-logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secret masking in logs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#crash-dumps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Crash dumps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#skills-execution-trust-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Skills execution trust model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Skills execution trust model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#risk-untrusted-project-skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Risk: untrusted project skills
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/fuseraft/fuseraft-cli/edit/main/docs/security.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="security-sandbox">Security &amp; Sandbox<a class="headerlink" href="#security-sandbox" title="Permanent link">&para;</a></h1>
+<p>fuseraft-cli provides two runtime containment mechanisms: a filesystem sandbox that restricts where agents can read, write, and execute, and an HTTP allowlist that restricts which hosts agents can contact. Both are enforced in code via an <code>IFunctionInvocationFilter</code> that runs before plugin functions execute.</p>
+<hr />
+<h2 id="filesystem-sandbox">Filesystem sandbox<a class="headerlink" href="#filesystem-sandbox" title="Permanent link">&para;</a></h2>
+<p>Set <code>Security.FileSystemSandboxPath</code> to a directory path. Every <code>FileSystem</code> and <code>Shell</code> plugin call that involves a path argument is checked before execution.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">Security</span><span class="p">:</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">FileSystemSandboxPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/user/projects/myapp</span>
+</code></pre></div>
+<h3 id="what-is-checked">What is checked<a class="headerlink" href="#what-is-checked" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Plugin</th>
+<th>Functions / Argument</th>
+<th>Check type</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FileSystem</code></td>
+<td><code>read_file</code>, <code>write_file</code>, <code>delete_file</code>, <code>list_files</code> — <code>path</code> / <code>directory</code></td>
+<td>Hard deny if resolved path is outside sandbox</td>
+</tr>
+<tr>
+<td><code>FileSystem</code></td>
+<td><code>patch_file</code>, <code>create_directory</code>, <code>delete_directory</code>, <code>set_permissions</code>, <code>copy_file</code>, <code>move_file</code></td>
+<td>Hard deny if resolved path is outside sandbox (always enforced, regardless of whether <code>FileSystemPermissions</code> globs are configured)</td>
+</tr>
+<tr>
+<td><code>Shell</code></td>
+<td><code>shell_run</code>, <code>shell_run_script</code> — <code>workingDirectory</code></td>
+<td>Hard deny if resolved path is outside sandbox</td>
+</tr>
+<tr>
+<td><code>Shell</code></td>
+<td><code>shell_run</code>, <code>shell_run_script</code> — <code>command</code> / <code>script</code></td>
+<td>Best-effort scan for absolute paths escaping sandbox</td>
+</tr>
+</tbody>
+</table>
+<h3 id="path-resolution">Path resolution<a class="headerlink" href="#path-resolution" title="Permanent link">&para;</a></h3>
+<p>All paths are resolved to their canonical absolute form (symlinks followed, <code>..</code> removed) before checking. A path is allowed if its canonical form starts with the sandbox root.</p>
+<h3 id="shell-command-scanning">Shell command scanning<a class="headerlink" href="#shell-command-scanning" title="Permanent link">&para;</a></h3>
+<p>The <code>command</code> and <code>script</code> arguments are scanned before execution. Two checks run in order:</p>
+<p><strong>1. Subshell blocking</strong> — Commands containing <code>$(...)</code>, <code>`...`</code> (backtick substitution), or <code>${VAR}</code> variable expansion are <strong>unconditionally denied</strong>. These constructs evaluate at runtime and produce values that cannot be statically verified against the sandbox root. If your workflow requires command substitution, use the <code>CodeExecution</code> plugin (Docker) instead.</p>
+<p><strong>2. Absolute path scan</strong> — The remaining command text is scanned with a regex for tokens that look like absolute paths. Matches are resolved and checked against the sandbox. System binary prefixes are <strong>exempted</strong> so agents can invoke normal tools without being blocked:</p>
+<p><strong>Exempted prefixes (Unix):</strong> <code>/usr/</code>, <code>/bin/</code>, <code>/sbin/</code>, <code>/lib/</code>, <code>/lib64/</code>, <code>/opt/</code>, <code>/nix/</code>, <code>/run/current-system/</code>, <code>/snap/</code></p>
+<p><strong>Exempted prefixes (Windows):</strong> <code>C:\Windows\</code>, <code>C:\Program Files\</code>, <code>C:\Program Files (x86)\</code></p>
+<p>This means <code>/usr/bin/dotnet build src/</code> is allowed, but <code>cat /etc/passwd</code> is blocked.</p>
+<h3 id="limitation">Limitation<a class="headerlink" href="#limitation" title="Permanent link">&para;</a></h3>
+<p>Absolute-path scanning is heuristic. Shell escaping (quoting, concatenation) may bypass regex detection. <strong>For strict containment, use the <code>CodeExecution</code> plugin (Docker) instead of <code>Shell</code>.</strong> Docker containers run with <code>--network none</code> and are isolated from the host filesystem.</p>
+<h3 id="denial-response">Denial response<a class="headerlink" href="#denial-response" title="Permanent link">&para;</a></h3>
+<p>When a check fails, the function is never executed and the agent receives this tool result:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>[DENIED] Path '/etc/passwd' is outside the configured sandbox '/home/user/projects/myapp'.
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>All file operations must stay within the sandbox.
+</code></pre></div>
+<p>For subshell constructs:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>[DENIED] Shell command contains a command substitution or variable expansion ('$(cat /etc/passwd)')
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>that cannot be statically verified against the sandbox. Rewrite the command without subshells,
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>or use the CodeExecution plugin (Docker) for commands that require substitution.
+</code></pre></div>
+<p>The agent sees these as tool errors and can respond accordingly (typically by staying within the sandbox).</p>
+<hr />
+<h2 id="filesystem-permissions-read-write-deny-globs">Filesystem permissions (read / write / deny globs)<a class="headerlink" href="#filesystem-permissions-read-write-deny-globs" title="Permanent link">&para;</a></h2>
+<p><code>Security.FileSystemPermissions</code> adds per-path access control on top of the sandbox boundary. All three sub-lists use the same glob syntax as <code>ChangeEnvelope</code> and are evaluated relative to <code>FileSystemSandboxPath</code>. Requires <code>FileSystemSandboxPath</code> to be set.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">Security</span><span class="p">:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">FileSystemSandboxPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/user/projects/myapp</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="nt">FileSystemPermissions</span><span class="p">:</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="nt">Read</span><span class="p">:</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">src/**</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docs/**</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">    </span><span class="nt">Write</span><span class="p">:</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tests/**</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docs/**</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">    </span><span class="nt">Deny</span><span class="p">:</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">secrets/**</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">infra/prod/**</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.env</span>
+</code></pre></div>
+<h3 id="evaluation-order">Evaluation order<a class="headerlink" href="#evaluation-order" title="Permanent link">&para;</a></h3>
+<p>For every filesystem function call, the three lists are checked in this order:</p>
+<ol>
+<li><strong>Deny</strong> — if the resolved path matches any <code>Deny</code> glob, the call is blocked immediately, regardless of <code>Read</code> or <code>Write</code>.</li>
+<li><strong>Write</strong> — if the function is a write operation and <code>Write</code> is non-empty, the path must match at least one <code>Write</code> glob to proceed.</li>
+<li><strong>Read</strong> — if the function is a read operation and <code>Read</code> is non-empty, the path must match at least one <code>Read</code> glob to proceed.</li>
+</ol>
+<h3 id="which-functions-are-covered">Which functions are covered<a class="headerlink" href="#which-functions-are-covered" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Functions</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Content-read (Read glob applies)</td>
+<td><code>read_file</code>, <code>grep_file</code>, <code>get_file_summary</code></td>
+<td>Returns file content</td>
+</tr>
+<tr>
+<td>Metadata (Deny glob only, exempt from Read)</td>
+<td><code>list_files</code>, <code>list_directory</code>, <code>get_file_info</code></td>
+<td>Returns names / timestamps only, not content — use <code>Deny</code> to restrict these</td>
+</tr>
+<tr>
+<td>Write ops (Write glob + envelope apply)</td>
+<td><code>write_file</code>, <code>patch_file</code>, <code>delete_file</code>, <code>create_directory</code>, <code>delete_directory</code>, <code>set_permissions</code></td>
+<td></td>
+</tr>
+<tr>
+<td>Mixed read+write (Copy/Move)</td>
+<td><code>copy_file</code>, <code>move_file</code></td>
+<td>Read glob checked on <code>source</code>; Write glob and envelope checked on <code>destination</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="interaction-with-changeenvelope">Interaction with ChangeEnvelope<a class="headerlink" href="#interaction-with-changeenvelope" title="Permanent link">&para;</a></h3>
+<p><code>FileSystemPermissions.Write</code> and <code>ChangeEnvelope</code> are independent restrictions — <strong>both must be satisfied</strong> when both are configured. A write is permitted only if the path matches at least one pattern from each list.</p>
+<p><code>ChangeEnvelope</code> targets brownfield workflows where the Archaeologist auto-populates the list from a discovery brief. <code>FileSystemPermissions.Write</code> is the general-purpose alternative for manual configuration.</p>
+<p><code>ChangeEnvelope</code> applies to direct writes (<code>write_file</code>, <code>patch_file</code>, <code>delete_file</code>) and to the <strong>destination</strong> of copy and move operations — so copying or moving a file into a path outside the envelope is also denied.</p>
+<h3 id="denial-response_1">Denial response<a class="headerlink" href="#denial-response_1" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>[DENIED] 'infra/prod/deploy.sh': Path is blocked by a configured FileSystem deny rule.
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>[DENIED] 'src/auth/token.go': Path is outside the configured FileSystem write permissions.
+</code></pre></div>
+<hr />
+<h2 id="shell-policy">Shell policy<a class="headerlink" href="#shell-policy" title="Permanent link">&para;</a></h2>
+<p><code>Security.ShellPolicy</code> controls which shell commands agents may execute. It is enforced in the Shell plugin before execution and <strong>does not require a filesystem sandbox</strong> — it works even when <code>FileSystemSandboxPath</code> is not set.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">Security</span><span class="p">:</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">ShellPolicy</span><span class="p">:</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">Allow</span><span class="p">:</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"go</span><span class="nv"> </span><span class="s">test"</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"npm</span><span class="nv"> </span><span class="s">test"</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"dotnet</span><span class="nv"> </span><span class="s">test"</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">    </span><span class="nt">Deny</span><span class="p">:</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"rm</span><span class="nv"> </span><span class="s">-rf"</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"curl</span><span class="nv"> </span><span class="s">|</span><span class="nv"> </span><span class="s">bash"</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"wget</span><span class="nv"> </span><span class="s">|</span><span class="nv"> </span><span class="s">sh"</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"dd</span><span class="nv"> </span><span class="s">if="</span>
+</code></pre></div>
+<h3 id="evaluation">Evaluation<a class="headerlink" href="#evaluation" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Deny is checked first.</strong> If the command text contains any <code>Deny</code> pattern (case-insensitive substring match), the command is blocked regardless of the <code>Allow</code> list.</li>
+<li><strong>Allow is evaluated next.</strong> When the <code>Allow</code> list is non-empty, the command must contain at least one <code>Allow</code> pattern (case-insensitive substring match) to proceed. Commands that match no allow pattern are rejected.</li>
+<li>When both lists are empty, the shell is unrestricted (subject to the existing <code>sudo</code> block).</li>
+</ul>
+<p>Matching is substring-based so patterns are flexible:
+- <code>"go test"</code> matches <code>go test ./...</code>, <code>go test -v ./pkg/...</code>, etc.
+- <code>"rm -rf"</code> blocks any command containing that substring.</p>
+<h3 id="applies-to-all-shell-execution">Applies to all shell execution<a class="headerlink" href="#applies-to-all-shell-execution" title="Permanent link">&para;</a></h3>
+<p>The policy is enforced in <code>shell_run</code>, <code>shell_run_script</code>, and <code>shell_run_background</code>. Commands from any of these three tools are checked against the same <code>ShellPolicy</code>.</p>
+<h3 id="denial-response_2">Denial response<a class="headerlink" href="#denial-response_2" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>[DENIED] Shell command blocked: matches configured deny pattern 'rm -rf'.
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>[DENIED] Shell command blocked: not matched by any configured allow pattern.
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>         Allowed: 'go test', 'npm test', 'dotnet test'.
+</code></pre></div>
+<hr />
+<h2 id="change-envelope">Change envelope<a class="headerlink" href="#change-envelope" title="Permanent link">&para;</a></h2>
+<p>Restricts <strong>write</strong> operations (<code>write_file</code>, <code>patch_file</code>, <code>delete_file</code>) to files matching at least one declared glob pattern. Read operations (<code>read_file</code>, <code>list_files</code>) are never affected. Requires <code>FileSystemSandboxPath</code> to be set — patterns are evaluated relative to the sandbox root.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">Security</span><span class="p">:</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">FileSystemSandboxPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/user/projects/myapp</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">ChangeEnvelope</span><span class="p">:</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">src/billing/**</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">src/payments/processor.go</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tests/billing/**</span>
+</code></pre></div>
+<p>A write attempt outside the envelope produces:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>[DENIED] Path 'src/auth/token.go' is outside the configured change envelope.
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>Only files matching the declared envelope globs may be written in this session.
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>Ask the Planner to expand the scope if this file needs to change.
+</code></pre></div>
+<p><strong>Glob syntax</strong> — standard glob patterns using <code>*</code> (single directory level), <code>**</code> (any depth), and <code>?</code> (single character). Patterns are matched case-insensitively on Windows and case-sensitively on Unix.</p>
+<p><strong>Brownfield auto-population</strong> — when <code>Brownfield.SeedEnvelopeFromBrief: true</code> is set and a discovery brief exists at <code>Brownfield.DiscoveryBriefPath</code>, the brief's <code>in_scope_files</code> list is automatically merged into <code>ChangeEnvelope</code> at session startup. The envelope grows as the Archaeologist expands scope; it never shrinks during a session. See <a href="../configuration/#brownfield-mode">Configuration → Brownfield mode</a>.</p>
+<p><strong>Enforcement is additive</strong> — any pattern already in <code>ChangeEnvelope</code> at config load is retained alongside the patterns seeded from the brief.</p>
+<p><strong>When no envelope is set</strong> — all writes within the sandbox root are permitted (default behaviour).</p>
+<hr />
+<h2 id="file-read-size-limit">File read size limit<a class="headerlink" href="#file-read-size-limit" title="Permanent link">&para;</a></h2>
+<p><code>read_file</code> returns at most <code>Security.ReadFileSizeLimit</code> characters per call (default 20,000 ≈ 5k tokens). Files larger than the limit are truncated with a notice telling the agent how to read further with <code>shell_run + tail</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">Security</span><span class="p">:</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">ReadFileSizeLimit</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">40000</span><span class="w">   </span><span class="c1"># raise to ~10k tokens per read for large-file workloads</span>
+</code></pre></div>
+<p>Tune this when agents need to read large files in one call, or lower it to reduce per-read token cost for agents with small context windows. The limit applies globally to all agents in the session.</p>
+<hr />
+<h2 id="http-allowlist">HTTP allowlist<a class="headerlink" href="#http-allowlist" title="Permanent link">&para;</a></h2>
+<p>Set <code>Security.HttpAllowedHosts</code> to a list of permitted hostnames. If the list is non-empty, any <code>Http</code> plugin call to a hostname not on the list is denied.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">Security</span><span class="p">:</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="nt">HttpAllowedHosts</span><span class="p">:</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api.github.com</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">registry.npmjs.org</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pypi.org</span>
+</code></pre></div>
+<p>Private and loopback addresses are <strong>always blocked</strong> regardless of the allowlist:</p>
+<table>
+<thead>
+<tr>
+<th>Range</th>
+<th>Blocked addresses</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Loopback</td>
+<td><code>127.0.0.0/8</code></td>
+</tr>
+<tr>
+<td>Private class A</td>
+<td><code>10.0.0.0/8</code></td>
+</tr>
+<tr>
+<td>Private class B</td>
+<td><code>172.16.0.0/12</code></td>
+</tr>
+<tr>
+<td>Private class C</td>
+<td><code>192.168.0.0/16</code></td>
+</tr>
+<tr>
+<td>Link-local</td>
+<td><code>169.254.0.0/16</code></td>
+</tr>
+<tr>
+<td>IPv6 loopback</td>
+<td><code>::1</code></td>
+</tr>
+<tr>
+<td>IPv6 link-local</td>
+<td><code>fe80::/10</code></td>
+</tr>
+</tbody>
+</table>
+<p>This prevents SSRF-style attacks where an agent is tricked into making requests to internal infrastructure.</p>
+<p>An empty <code>HttpAllowedHosts</code> list means unrestricted (but private IPs are still blocked).</p>
+<p>Entries in <code>HttpAllowedHosts</code> support <code>${ENV_VAR}</code> token expansion — the token is replaced with the environment variable's value at startup:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nt">Security</span><span class="p">:</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="nt">HttpAllowedHosts</span><span class="p">:</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"${SNOW_HOST}"</span><span class="w">       </span><span class="c1"># e.g. mycompany.service-now.com</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api.github.com</span>
+</code></pre></div>
+<p>Tokens referencing unset variables expand to an empty string. See <a href="../configuration/#apiprofiles">Configuration → ApiProfiles</a> for the same expansion applied to profile header values.</p>
+<h3 id="allowprivatehosts">AllowPrivateHosts<a class="headerlink" href="#allowprivatehosts" title="Permanent link">&para;</a></h3>
+<p>Set <code>Security.AllowPrivateHosts: true</code> to bypass the private/loopback IP check. This allows agents to reach locally-running servers such as a mock API or a development service.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">Security</span><span class="p">:</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="nt">AllowPrivateHosts</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">  </span><span class="nt">HttpAllowedHosts</span><span class="p">:</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">localhost</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"127.0.0.1"</span>
+</code></pre></div>
+<p><strong>Do not set this in production configs.</strong> It is intended exclusively for local development and sandbox environments where agents must contact a server running on the same machine. The <code>HttpAllowedHosts</code> allowlist is still enforced when set — <code>AllowPrivateHosts</code> only disables the private-IP range check, not the host allowlist.</p>
+<hr />
+<h2 id="combining-both">Combining both<a class="headerlink" href="#combining-both" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nt">Security</span><span class="p">:</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="nt">FileSystemSandboxPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/user/projects/myapp</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span><span class="nt">HttpAllowedHosts</span><span class="p">:</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">api.github.com</span>
+</code></pre></div>
+<p>Agents are now constrained to:
+- Reading and writing files only within <code>/home/user/projects/myapp</code>
+- Making HTTP requests only to <code>api.github.com</code></p>
+<hr />
+<h2 id="docker-containment-codeexecution-plugin">Docker containment (CodeExecution plugin)<a class="headerlink" href="#docker-containment-codeexecution-plugin" title="Permanent link">&para;</a></h2>
+<p>For the highest isolation, use the <code>CodeExecution</code> plugin's <code>sandbox_run</code> instead of <code>Shell</code>. Each invocation gets a fresh Docker container:</p>
+<ul>
+<li><code>--network none</code> — no network access</li>
+<li><code>--memory 256m</code> — memory capped</li>
+<li><code>--cpus 0.5</code> — CPU capped</li>
+<li>Container is removed after execution</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nt">Plugins</span><span class="p">:</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CodeExecution</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>sandbox_run(language="python", code="import os; print(os.listdir('/'))")
+</code></pre></div>
+<p>This gives a fully isolated execution environment regardless of what the <code>FileSystemSandboxPath</code> is set to.</p>
+<hr />
+<h2 id="execution-rings">Execution rings<a class="headerlink" href="#execution-rings" title="Permanent link">&para;</a></h2>
+<p>When <code>Security.FileSystemSandboxPath</code> is configured, each agent is placed in an execution ring based on its <code>TrustScore</code>. Rings layer on top of the path-level sandbox to control which <em>operations</em> the agent may perform within those paths.</p>
+<table>
+<thead>
+<tr>
+<th>Ring</th>
+<th>TrustScore</th>
+<th>Writes allowed</th>
+<th>Shell allowed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Ring 1 (Trusted)</td>
+<td>≥ 0.80</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Ring 2 (Standard)</td>
+<td>≥ 0.60</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Ring 3 (Sandbox)</td>
+<td>&lt; 0.60</td>
+<td><strong>no</strong></td>
+<td><strong>no</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Ring 3 agents can read files and list directories but are blocked from writing, deleting, running shell commands, or making network requests. This is useful for review-only agents or auditors that should not be able to modify state.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Auditor</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span><span class="nt">TrustScore</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">  </span><span class="nt">Plugins</span><span class="p">:</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">FileSystem</span>
+</code></pre></div>
+<p>See <a href="../governance/#execution-rings">Governance — Execution rings</a> for details.</p>
+<hr />
+<h2 id="sudo-protection"><code>sudo</code> protection<a class="headerlink" href="#sudo-protection" title="Permanent link">&para;</a></h2>
+<p><code>sudo</code> is unconditionally blocked in the Shell plugin. Any command or script containing <code>sudo</code> — including in pipe chains (<code>cmd &amp;&amp; sudo apt install ...</code>), semicolon sequences, or multi-line scripts — is caught before execution and the agent receives:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>[DENIED] sudo is not permitted. Prefer non-privileged alternatives: pip install --user,
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>python -m pip install --user, pipx, or a virtual environment
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>(python -m venv .venv &amp;&amp; .venv/bin/pip install ...).
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>If elevated privileges are truly required, tell the user exactly which command to run
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>and they will run it themselves.
+</code></pre></div>
+<p>This keeps privilege escalation out of the automated loop. If elevated access is genuinely needed, the agent surfaces the command to the user to run manually.</p>
+<hr />
+<h2 id="prompt-injection-detection">Prompt injection detection<a class="headerlink" href="#prompt-injection-detection" title="Permanent link">&para;</a></h2>
+<p>Tool results are scanned for adversarial instruction overrides before they are passed to the agent. If a <code>shell_run</code> or <code>read_file</code> result looks like it is trying to override the agent's instructions, the content is flagged and the event is recorded in the <a href="../governance/#audit-log">audit log</a>.</p>
+<p>Detection is automatic — no configuration required.</p>
+<hr />
+<h2 id="api-key-storage">API key storage<a class="headerlink" href="#api-key-storage" title="Permanent link">&para;</a></h2>
+<p>When you configure the REPL via the first-run wizard or <code>/provider setup</code>, the API key is stored in the OS-native credential store — never in <code>~/.fuseraft/config</code> on disk.</p>
+<h3 id="secret-masking-in-logs">Secret masking in logs<a class="headerlink" href="#secret-masking-in-logs" title="Permanent link">&para;</a></h3>
+<p>All log output (console, <code>~/.fuseraft/logs/app.log</code>, and any debug sidecar file) passes through a secret-masking text formatter before being written. The formatter applies three regex patterns:</p>
+<table>
+<thead>
+<tr>
+<th>Pattern</th>
+<th>Example match</th>
+<th>Replaced with</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sk-[A-Za-z0-9_-]{20,}</code></td>
+<td><code>sk-ant-api03-abc123…</code></td>
+<td><code>[REDACTED]</code></td>
+</tr>
+<tr>
+<td><code>(?i)bearer &lt;token&gt;</code></td>
+<td><code>Bearer eyJhbGc…</code></td>
+<td><code>[REDACTED]</code></td>
+</tr>
+<tr>
+<td><code>(?i)(api_key\|token\|secret)=&lt;value&gt;</code></td>
+<td><code>api_key=supersecret</code></td>
+<td><code>[REDACTED]</code></td>
+</tr>
+</tbody>
+</table>
+<p>This means even if a provider error response or debug trace contains an API key, it is stripped before reaching any log sink. No configuration is required — masking is always active.</p>
+<table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>Store</th>
+<th>Mechanism</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Linux</td>
+<td>GNOME Keyring</td>
+<td><code>secret-tool</code> CLI (libsecret); service=<code>fuseraft-cli</code>, account=<code>default</code></td>
+</tr>
+<tr>
+<td>macOS</td>
+<td>Keychain</td>
+<td><code>security</code> CLI; service=<code>fuseraft-cli</code>, account=<code>default</code></td>
+</tr>
+<tr>
+<td>Windows</td>
+<td>Credential Manager</td>
+<td>Win32 <code>CredRead</code>/<code>CredWrite</code> via P/Invoke; target=<code>fuseraft-cli/default</code>. Works in Git Bash and any other shell.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>No plaintext fallback.</strong> fuseraft never writes API keys to disk in plaintext, on any platform, under any circumstances. If no OS keychain is reachable (e.g. Linux without a running secret service), key storage fails with a clear message and the key is kept in memory for the current process only — you'll need to re-enter it next session, or set a provider environment variable (e.g. <code>ANTHROPIC_API_KEY</code>) so you don't have to. On startup, fuseraft also deletes (and, where possible, migrates into the keychain) any leftover <code>~/.fuseraft/.key</code> file written by fuseraft versions older than this policy.</p>
+<p><code>~/.fuseraft/config</code> stores only the model ID, provider URL, and provider type — no secrets. If you open the file you will see:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="p">{</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="w">  </span><span class="nt">"modelId"</span><span class="p">:</span><span class="w"> </span><span class="s2">"claude-sonnet-4-6"</span><span class="p">,</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w">  </span><span class="nt">"endpoint"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://api.anthropic.com/v1"</span><span class="p">,</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="w">  </span><span class="nt">"provider"</span><span class="p">:</span><span class="w"> </span><span class="s2">"openai"</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="p">}</span>
+</code></pre></div>
+<p><strong>Migration from older configs.</strong> Configs written before keychain support was added may contain a plain-text <code>apiKey</code> field, and versions predating the no-plaintext policy may have left a <code>~/.fuseraft/.key</code> file on disk. On the first run after upgrading, fuseraft detects both, attempts to move the value into the OS keychain, and removes the plaintext copies either way — even if no keychain is available to migrate into. No manual action is needed.</p>
+<p><strong>Using an environment variable instead.</strong> Setting a provider env var (e.g. <code>ANTHROPIC_API_KEY</code>) always works as a fallback. The env var is used when no <code>~/.fuseraft/config</code> exists or when the keychain has no entry for <code>fuseraft-cli</code>.</p>
+<p><strong>VS Code extension.</strong> When the fuseraft VS Code extension invokes the CLI it always passes <code>--vscode</code>. In this mode the CLI reads the API key from the <code>FUSERAFT_API_KEY</code> environment variable rather than the OS keychain. The extension stores the key in VS Code's built-in <code>SecretStorage</code> (backed by the OS credential store) and injects it into every terminal it opens. No manual configuration is needed — set your key once via <strong>fuseraft: Configure fuseraft</strong> and it is available to all commands run through the extension.</p>
+<p><strong>Relocating <code>~/.fuseraft</code> (<code>FUSERAFT_HOME</code>).</strong> Setting <code>FUSERAFT_HOME</code> moves the entire global root — config, sessions, logs, scratchpad, skills, memory — to the given directory (see <a href="../getting-started/#relocating-fuseraft">Getting Started — Relocating <code>~/.fuseraft</code></a>). This never includes the API key: OS keychains are local to the machine they run on and do not follow a redirected <code>FUSERAFT_HOME</code> to a network share, and fuseraft will not write the key to the share as a plaintext file instead (see "No plaintext fallback" above). On a machine with no reachable keychain, set a provider environment variable (e.g. <code>ANTHROPIC_API_KEY</code>) rather than relying on persisted key storage.</p>
+<hr />
+<h2 id="crash-dumps">Crash dumps<a class="headerlink" href="#crash-dumps" title="Permanent link">&para;</a></h2>
+<p>When the application exits with an unhandled exception, a structured JSON report is written to <code>~/.fuseraft/crashdump/</code> before the process terminates. Each file is named with a timestamp and a random short ID:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>~/.fuseraft/crashdump/20260422-153012-a3f1b2c4.json
+</code></pre></div>
+<p>The path is printed to the console immediately after the exception so you can locate it without searching.</p>
+<p><strong>What is captured</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>session_id</code></td>
+<td>Unique ID for this crash instance (matches the filename)</td>
+</tr>
+<tr>
+<td><code>timestamp</code></td>
+<td>UTC ISO 8601 timestamp</td>
+</tr>
+<tr>
+<td><code>command</code></td>
+<td>Command-line arguments supplied to the process</td>
+</tr>
+<tr>
+<td><code>os</code></td>
+<td>Operating system description</td>
+</tr>
+<tr>
+<td><code>runtime</code></td>
+<td>.NET framework description</td>
+</tr>
+<tr>
+<td><code>app_version</code></td>
+<td>fuseraft-cli version (semver + git hash)</td>
+</tr>
+<tr>
+<td><code>exception</code></td>
+<td>Exception type, message, and stack trace; inner exceptions are included recursively; <code>AggregateException</code> lists all inner exceptions</td>
+</tr>
+</tbody>
+</table>
+<p><strong>What is NOT captured</strong></p>
+<ul>
+<li>API keys (never written to disk outside the OS keychain)</li>
+<li>Session content (task text, agent messages, LLM responses)</li>
+<li>File contents or shell output</li>
+</ul>
+<p>A dump is written only for genuine crashes. Normal exits, user cancellation (Ctrl+C), and command-line usage errors do not produce one.</p>
+<hr />
+<h2 id="skills-execution-trust-model">Skills execution trust model<a class="headerlink" href="#skills-execution-trust-model" title="Permanent link">&para;</a></h2>
+<p>Skills loaded from <code>~/.fuseraft/skills/</code>, <code>~/.agents/skills/</code>, or the built-in <code>&lt;binary&gt;/skills/</code> directory are operator-controlled and treated as trusted. Scripts bundled in those skills execute as OS subprocesses and inherit the process environment, including any API keys in env vars.</p>
+<p>Project-scoped skills — loaded from <code>&lt;cwd&gt;/.fuseraft/skills/</code> and <code>&lt;cwd&gt;/.agents/skills/</code> — carry additional risk: <strong>they travel with the repository</strong>. A repo checked out from an untrusted source may contain a <code>.agents/skills/</code> directory with malicious scripts. Those scripts are auto-discovered and advertised to agents at session start, with no prompt to the user.</p>
+<h3 id="risk-untrusted-project-skills">Risk: untrusted project skills<a class="headerlink" href="#risk-untrusted-project-skills" title="Permanent link">&para;</a></h3>
+<p>If <code>fuseraft run --work-dir</code> points at a directory you did not author, any skill scripts in that directory will be available for agents to execute. Because script execution inherits the process environment, a malicious script can read API keys, tokens, and other credentials available as env vars.</p>
+<p><strong>Mitigations:</strong></p>
+<ul>
+<li>Only run <code>fuseraft</code> in working directories you trust. Treat <code>.agents/skills/</code> and <code>.fuseraft/skills/</code> in a cloned repo the same way you would treat a <code>Makefile</code> or <code>package.json</code> postinstall script.</li>
+<li>For higher assurance, run fuseraft inside a Docker container (<code>CodeExecution</code> plugin) where the host environment is not exposed.</li>
+<li>Microsoft Agent Framework's skills provider supports gating <code>load_skill</code>/<code>read_skill_resource</code>/<code>run_skill_script</code> behind an approval step (<code>AgentSkillsProviderOptions</code>), but fuseraft explicitly disables it today, since neither the REPL nor orchestration has a pipeline that resolves an approval request — leaving it enabled would make the tools non-functional rather than gated. Script execution is therefore automatic once a skill is loaded; wiring real approval (REPL: a confirmation prompt; orchestration: <code>IHumanApprovalService</code>) is a known future improvement, not yet implemented.</li>
+<li><code>read_skill_resource</code> and <code>run_skill_script</code> resolve the model-supplied path against the skill directory and reject anything that resolves outside it, including via a symlinked file or subdirectory planted inside the skill folder — this narrows path-based escape from <em>within</em> a loaded skill, but a fully malicious skill script still runs as an OS subprocess with the full process environment; it isn't a substitute for only loading trusted skills.</li>
+</ul>
+<hr />
+<h2 id="security-notes">Security notes<a class="headerlink" href="#security-notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>The path sandbox and ring system are enforced at the agent middleware layer, not at the OS level. A compromised plugin bypass (e.g. a malicious MCP server) could potentially circumvent them.</li>
+<li>For production use with untrusted tasks, run fuseraft-cli inside a container or VM rather than relying solely on the sandbox config.</li>
+<li>Session files in <code>~/.fuseraft/sessions/</code> are written with owner-only permissions (Unix mode 0600) to prevent other users from reading session content.</li>
+<li>See <a href="../governance/">Governance</a> for the full set of runtime safety controls.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../mcp/" class="md-footer__link md-footer__link--prev" aria-label="Previous: MCP">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                MCP
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../governance/" class="md-footer__link md-footer__link--next" aria-label="Next: Governance">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Governance
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.footer", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

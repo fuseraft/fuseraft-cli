@@ -1,0 +1,2628 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Multi-agent orchestration CLI built on Microsoft Agent Framework">
+      
+      
+      
+        <link rel="canonical" href="https://fuseraft.ai/sessions/">
+      
+      
+        <link rel="prev" href="../evals/">
+      
+      
+        <link rel="next" href="../context-management/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Sessions - fuseraft-cli</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#sessions" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="fuseraft-cli" class="md-header__button md-logo" aria-label="fuseraft-cli" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            fuseraft-cli
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Sessions
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fuseraft/fuseraft-cli" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fuseraft/fuseraft-cli
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../writing-tasks/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Writing Tasks
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../spec-driven/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Spec-Driven Development
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../cli-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../scripting/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Scripting & Automation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../models/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Models & Providers
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../plugins/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Plugins
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../skills/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Skills
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../strategies/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Strategies
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../validators/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Validators
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../harness-engineering/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Harness Engineering
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../mcp/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  MCP
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../security/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Security
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../governance/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Governance
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../evals/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evals
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Sessions
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../context-management/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Context Management
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../context-store/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Context Store
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../knowledge/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Knowledge Layer
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../examples/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Examples
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../design/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Design
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="fuseraft-cli" class="md-nav__button md-logo" aria-label="fuseraft-cli" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    fuseraft-cli
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fuseraft/fuseraft-cli" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fuseraft/fuseraft-cli
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../writing-tasks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing Tasks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../spec-driven/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spec-Driven Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scripting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scripting & Automation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models & Providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../skills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skills
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../strategies/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Strategies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../validators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Validators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harness-engineering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harness Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../governance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Governance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sessions
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#repl-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        REPL sessions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#session-self-inspection-repl-agents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session self-inspection (REPL agents)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orchestration-sessions-fuseraft-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Orchestration sessions (fuseraft run)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-sessions-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How sessions work
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resuming-a-session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resuming a session
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#error-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Error recovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#session-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session files
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#managing-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Managing sessions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#human-in-the-loop-hitl" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Human-in-the-loop (HITL)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-tracking-and-cost-estimation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Token tracking and cost estimation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#conversation-compaction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conversation compaction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#saving-transcripts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saving transcripts
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../context-management/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../context-store/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Store
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../knowledge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#repl-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        REPL sessions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#session-self-inspection-repl-agents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session self-inspection (REPL agents)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#orchestration-sessions-fuseraft-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Orchestration sessions (fuseraft run)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-sessions-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How sessions work
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resuming-a-session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resuming a session
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#error-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Error recovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#session-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session files
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#managing-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Managing sessions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#human-in-the-loop-hitl" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Human-in-the-loop (HITL)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-tracking-and-cost-estimation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Token tracking and cost estimation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#conversation-compaction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conversation compaction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#saving-transcripts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saving transcripts
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/fuseraft/fuseraft-cli/edit/main/docs/sessions.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="sessions">Sessions<a class="headerlink" href="#sessions" title="Permanent link">&para;</a></h1>
+<h2 id="repl-sessions">REPL sessions<a class="headerlink" href="#repl-sessions" title="Permanent link">&para;</a></h2>
+<p>REPL sessions (<code>fuseraft repl</code>) are automatically saved after every user turn to <code>~/.fuseraft/repl-sessions/repl-&lt;id&gt;.json</code>. No configuration is needed — every session is resumable by default.</p>
+<p><strong>Starting and resuming</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Start a new session — session ID is shown in the header</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>fuseraft<span class="w"> </span>repl
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># List your resumable sessions from inside the REPL</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>/sessions
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># Resume a specific session by ID</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>fuseraft<span class="w"> </span>repl<span class="w"> </span>--resume<span class="w"> </span>a87569bcd7b0
+</code></pre></div>
+<p>When resuming:</p>
+<ul>
+<li>The full conversation history (text, tool calls, tool results) is restored.</li>
+<li>The system prompt is refreshed to pick up any new memories or <code>AGENTS.md</code> changes.</li>
+<li>The turn counter continues from where it left off.</li>
+</ul>
+<p><strong>Branching sessions</strong></p>
+<p>A session can be forked at any point to create a diverging copy of the conversation from the current turn.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Inside the REPL — snapshot to a new ID, stay in the current session</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>/fork
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Fork and immediately switch to it (original is already auto-saved)</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>/fork<span class="w"> </span>switch
+</code></pre></div>
+<p><code>/fork</code> writes a complete snapshot — conversation history, plan queue, and halted-step state — to a new session ID and saves it immediately. The running session is not affected. Resume the fork later:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>fuseraft<span class="w"> </span>repl<span class="w"> </span>--resume<span class="w"> </span>&lt;fork-id&gt;
+</code></pre></div>
+<p><code>/fork switch</code> does the same but mutates the live session to become the fork: future auto-saves, events, and turn tracking all use the new ID. The original session is left on disk at the branch point (the last turn's auto-save).</p>
+<p>All forks appear in <code>/sessions</code> and <code>fuseraft repl --resume</code> like any other saved session.</p>
+<p><strong>Switching between sessions</strong></p>
+<p><code>/switch &lt;id&gt;</code> saves the current session and loads another one in its place — no exit or restart required. History, turn counter, plan state, and model (rebuilt if different) are all restored from the target snapshot.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>8&gt; /switch a3f1c9de
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Switched to: a3f1c9de  (was b8fe12c0)
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>Model: claude-sonnet-4-6
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>5 turns · started 2026-05-25 14:32
+</code></pre></div>
+<p>Use <code>/sessions</code> to find IDs, then <code>/switch</code> to hop between them freely.</p>
+<p><strong>Rewinding</strong></p>
+<p>Use <code>/conversation</code> to list all turns in memory with their 1-based indices, then <code>/rewind</code> to truncate history to a chosen point:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>/conversation           # see turn numbers and previews
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>/rewind 3               # keep turns 1–3, discard the rest
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>/rewind -1              # drop the last turn
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>/rewind 0               # clear all turns (like /clear)
+</code></pre></div>
+<p>Rewind updates the turn counter, resets plan state, and adjusts token tracking. Out-of-range values are clamped silently — <code>/rewind -99</code> is always safe.</p>
+<p>A common pattern: fork to preserve the current state, then rewind in the fork to explore a different direction from an earlier point.</p>
+<p><strong>Session files</strong></p>
+<p>REPL snapshots are stored at <code>~/.fuseraft/repl-sessions/repl-&lt;id&gt;.json</code> with owner-only permissions (Unix mode 0600). Each file contains:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SessionId</code></td>
+<td>8-character hex identifier shown in the REPL header</td>
+</tr>
+<tr>
+<td><code>ModelId</code></td>
+<td>Model used for the session</td>
+</tr>
+<tr>
+<td><code>Cwd</code></td>
+<td>Working directory when the session was started</td>
+</tr>
+<tr>
+<td><code>StartedAt</code></td>
+<td>UTC timestamp when the session was first created</td>
+</tr>
+<tr>
+<td><code>LastUpdatedAt</code></td>
+<td>UTC timestamp of the most recent save</td>
+</tr>
+<tr>
+<td><code>TurnIndex</code></td>
+<td>Number of completed turns</td>
+</tr>
+<tr>
+<td><code>History</code></td>
+<td>Full serialized conversation (text, function calls, function results)</td>
+</tr>
+</tbody>
+</table>
+<p>Sessions are never automatically deleted. Remove old ones manually from <code>~/.fuseraft/repl-sessions/</code> when no longer needed.</p>
+<hr />
+<h2 id="session-self-inspection-repl-agents">Session self-inspection (REPL agents)<a class="headerlink" href="#session-self-inspection-repl-agents" title="Permanent link">&para;</a></h2>
+<p>REPL agents can inspect their own session and diagnostic logs using the built-in <code>repl_session_*</code> tools. The current session ID, start time, snapshot path, and event log path are also injected into the system prompt so the agent can orient itself immediately.</p>
+<p><strong>Tools available to the agent:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>What it returns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>repl_session_current</code></td>
+<td>Session ID, model, start time, working directory, snapshot path, and all log file locations</td>
+</tr>
+<tr>
+<td><code>repl_session_list</code></td>
+<td>All saved sessions newest-first — the active session is marked <code>◄ current</code></td>
+</tr>
+<tr>
+<td><code>repl_session_read_event_log</code></td>
+<td>Entries from a session's <code>repl_events/{session_id}.jsonl</code> (current session by default; an ID or prefix reads another session's log)</td>
+</tr>
+<tr>
+<td><code>repl_session_read_log</code></td>
+<td>Tail of any diagnostic log: <code>repl_events</code>, <code>events</code>, <code>provider_errors</code>, or <code>app</code></td>
+</tr>
+<tr>
+<td><code>get_context_status</code></td>
+<td><code>estimated_tokens</code>, <code>budget</code>, <code>pct_used</code>, <code>tokens_remaining</code>, and current <code>turn</code> index</td>
+</tr>
+<tr>
+<td><code>compact_context</code></td>
+<td>Compact history into a summary; optional <code>focus</code> hint steers the summary</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Log files (global, keyed by <code>{project_slug}</code> and — for <code>repl_events</code>/<code>events</code> — <code>{session_id}</code>):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Log name</th>
+<th>Path</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>repl_events</code></td>
+<td><code>~/.fuseraft/logs/{project_slug}/repl_events/{session_id}.jsonl</code></td>
+<td>REPL lifecycle events tagged with session ID and turn index — one file per session, so no single file grows unbounded across sessions</td>
+</tr>
+<tr>
+<td><code>events</code></td>
+<td><code>~/.fuseraft/sessions/{project_slug}/{session_id}/events.jsonl</code></td>
+<td>Orchestration events from <code>fuseraft run</code> sessions</td>
+</tr>
+<tr>
+<td><code>provider_errors</code></td>
+<td><code>~/.fuseraft/logs/{project_slug}/provider_errors.jsonl</code></td>
+<td>Provider API errors and retry attempts</td>
+</tr>
+<tr>
+<td><code>app</code></td>
+<td><code>~/.fuseraft/logs/{project_slug}/app.log</code></td>
+<td>Application diagnostic log</td>
+</tr>
+</tbody>
+</table>
+<p><code>fuseraft log repl</code> reads every session's log by default; pass <code>--session &lt;id or prefix&gt;</code> to view just one.</p>
+<p><strong>REPL event types</strong> emitted to <code>repl_events/{session_id}.jsonl</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Event type</th>
+<th>When emitted</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>session_start</code></td>
+<td>Session begins</td>
+</tr>
+<tr>
+<td><code>session_end</code></td>
+<td>Session exits cleanly</td>
+</tr>
+<tr>
+<td><code>user_input</code></td>
+<td>Each user message submitted</td>
+</tr>
+<tr>
+<td><code>turn_start</code></td>
+<td>Model starts processing a turn</td>
+</tr>
+<tr>
+<td><code>turn_end</code></td>
+<td>Model finishes a turn — payload: <code>elapsed_ms</code>, <code>estimated_tokens</code>, <code>tool_rounds</code>, <code>tool_count</code>, <code>is_step</code>, <code>is_correction</code></td>
+</tr>
+<tr>
+<td><code>assistant_response</code></td>
+<td>Final assistant message for the turn</td>
+</tr>
+<tr>
+<td><code>tool_call</code></td>
+<td>Each individual tool invocation</td>
+</tr>
+<tr>
+<td><code>compaction</code></td>
+<td>Context compacted (via <code>/compact</code> or <code>compact_context</code> tool) — payload: <code>before_tokens</code>, <code>after_tokens</code>, <code>source</code>, <code>focus</code></td>
+</tr>
+<tr>
+<td><code>cancelled</code></td>
+<td>Turn cancelled by Ctrl+C</td>
+</tr>
+<tr>
+<td><code>context_warning</code></td>
+<td>Context exceeds 75% of the 80k token budget — payload: <code>estimated_tokens</code>, <code>budget</code>, <code>pct</code></td>
+</tr>
+<tr>
+<td><code>correction_injected</code></td>
+<td>Harness injects a write-tool correction after a mutation claim without a backing tool call — payload: <code>reason</code></td>
+</tr>
+<tr>
+<td><code>plan_captured</code></td>
+<td><code>/plan</code> stores a new step plan — payload: <code>step_count</code></td>
+</tr>
+<tr>
+<td><code>step_complete</code></td>
+<td><code>/execute</code> step passes postconditions — payload: <code>step</code>, <code>total</code>, <code>skipped</code>, <code>steps_left</code>, <code>hit_iteration_cap</code></td>
+</tr>
+<tr>
+<td><code>step_halted</code></td>
+<td><code>/execute</code> step fails postconditions — payload: <code>step</code>, <code>total</code>, <code>expected_tool</code>, <code>expected_creates</code>, <code>tool_calls</code>, <code>hit_iteration_cap</code></td>
+</tr>
+<tr>
+<td><code>command</code></td>
+<td>Slash command issued</td>
+</tr>
+</tbody>
+</table>
+<p>All REPL events are tagged with the session ID (<code>session</code> field in the JSONL), so the agent can distinguish events from different sessions in the same log file.</p>
+<hr />
+<p><strong>Orchestration event types</strong> emitted to <code>events.jsonl</code> by <code>fuseraft run</code>:</p>
+<p><em>Session / turn lifecycle</em></p>
+<table>
+<thead>
+<tr>
+<th>Event type</th>
+<th>When emitted</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>session_start</code></td>
+<td>Session begins</td>
+</tr>
+<tr>
+<td><code>session_end</code></td>
+<td>Session completes successfully</td>
+</tr>
+<tr>
+<td><code>session_error</code></td>
+<td>Unrecoverable session error</td>
+</tr>
+<tr>
+<td><code>session_recovered</code></td>
+<td>Session resumed from a prior checkpoint</td>
+</tr>
+<tr>
+<td><code>session_aborted</code></td>
+<td>Session stopped before completion</td>
+</tr>
+<tr>
+<td><code>session_summary</code></td>
+<td>Post-run summary written</td>
+</tr>
+<tr>
+<td><code>turn_start</code></td>
+<td>Agent turn begins</td>
+</tr>
+<tr>
+<td><code>turn_end</code></td>
+<td>Agent turn completes</td>
+</tr>
+<tr>
+<td><code>turn_timeout</code></td>
+<td>Agent turn exceeded its time limit</td>
+</tr>
+</tbody>
+</table>
+<p><em>Checkpointing / resume</em></p>
+<table>
+<thead>
+<tr>
+<th>Event type</th>
+<th>When emitted</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>checkpoint_created</code></td>
+<td>Seed checkpoint written for a new session</td>
+</tr>
+<tr>
+<td><code>checkpoint_loaded</code></td>
+<td>Existing checkpoint loaded for a resume</td>
+</tr>
+<tr>
+<td><code>resume_started</code></td>
+<td>Resumed session is about to begin streaming</td>
+</tr>
+<tr>
+<td><code>resume_completed</code></td>
+<td>Resumed session ran to successful completion</td>
+</tr>
+<tr>
+<td><code>event_replay_start</code></td>
+<td>Prior message history is being replayed as context</td>
+</tr>
+<tr>
+<td><code>event_replay_complete</code></td>
+<td>Message history replay finished</td>
+</tr>
+<tr>
+<td><code>event_corruption_detected</code></td>
+<td>A session file failed to deserialise — payload: <code>session</code>, <code>source</code>, <code>error</code></td>
+</tr>
+</tbody>
+</table>
+<p><em>Agent execution</em></p>
+<table>
+<thead>
+<tr>
+<th>Event type</th>
+<th>When emitted</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>agent_start</code></td>
+<td>Individual agent begins its turn</td>
+</tr>
+<tr>
+<td><code>agent_end</code></td>
+<td>Individual agent turn completes</td>
+</tr>
+<tr>
+<td><code>agent_error</code></td>
+<td>Agent threw an unhandled error</td>
+</tr>
+<tr>
+<td><code>agent_timeout</code></td>
+<td>Agent exceeded its time limit</td>
+</tr>
+<tr>
+<td><code>agent_routed</code></td>
+<td>Routing selected the next agent</td>
+</tr>
+<tr>
+<td><code>agent_blocked</code></td>
+<td>Agent declared an unrecoverable blocker</td>
+</tr>
+</tbody>
+</table>
+<p><em>Model invocation</em></p>
+<table>
+<thead>
+<tr>
+<th>Event type</th>
+<th>When emitted</th>
+<th>Key payload fields</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>model_call</code></td>
+<td>LLM HTTP request is about to be sent — payload: <code>model</code>, <code>attempt</code>, <code>message_count</code>, <code>call_seq</code></td>
+<td>correlates with <code>inner_call_context</code> via <code>call_seq</code></td>
+</tr>
+<tr>
+<td><code>model_response</code></td>
+<td>LLM response received — payload: <code>model</code>, <code>finish_reason</code>, <code>input_tokens</code>, <code>output_tokens</code>, <code>call_seq</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>model_error</code></td>
+<td>LLM call failed (non-timeout) — payload: <code>model</code>, <code>attempt</code>, <code>call_seq</code>, <code>error</code></td>
+<td>includes context-limit exhaustion</td>
+</tr>
+<tr>
+<td><code>model_timeout</code></td>
+<td>LLM call or streaming response timed out — payload: <code>model</code>, <code>attempt</code>, <code>message</code></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p><em>Tool use</em></p>
+<table>
+<thead>
+<tr>
+<th>Event type</th>
+<th>When emitted</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tool_call</code></td>
+<td>Tool invoked by an agent</td>
+</tr>
+<tr>
+<td><code>tool_result</code></td>
+<td>Tool result returned</td>
+</tr>
+<tr>
+<td><code>tool_blocked</code></td>
+<td>Tool call denied by governance</td>
+</tr>
+<tr>
+<td><code>tool_error</code></td>
+<td>Tool threw an exception</td>
+</tr>
+<tr>
+<td><code>tool_timeout</code></td>
+<td>Tool execution timed out</td>
+</tr>
+</tbody>
+</table>
+<p><em>Validation / governance</em></p>
+<table>
+<thead>
+<tr>
+<th>Event type</th>
+<th>When emitted</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>validation_fail</code></td>
+<td>Validator rejected an agent response</td>
+</tr>
+<tr>
+<td><code>hitl_escalation</code></td>
+<td>Human-in-the-loop intervention required</td>
+</tr>
+<tr>
+<td><code>hitl_approved</code></td>
+<td>HITL operator approved continuation</td>
+</tr>
+<tr>
+<td><code>hitl_rejected</code></td>
+<td>HITL operator rejected continuation</td>
+</tr>
+<tr>
+<td><code>circuit_breaker_open</code></td>
+<td>Circuit breaker tripped on consecutive LLM failures</td>
+</tr>
+<tr>
+<td><code>retry_scheduled</code></td>
+<td>Retry attempt queued after a recoverable failure</td>
+</tr>
+<tr>
+<td><code>retry_exhausted</code></td>
+<td>All retry attempts consumed</td>
+</tr>
+<tr>
+<td><code>max_turns_exceeded</code></td>
+<td>Session hit the <code>MaxIterations</code> cap</td>
+</tr>
+<tr>
+<td><code>termination_satisfied</code></td>
+<td>Termination condition met naturally</td>
+</tr>
+<tr>
+<td><code>termination_forced</code></td>
+<td>Session forcibly stopped (budget, cap, etc.)</td>
+</tr>
+</tbody>
+</table>
+<p><em>Cancellation</em></p>
+<table>
+<thead>
+<tr>
+<th>Event type</th>
+<th>When emitted</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cancellation_requested</code></td>
+<td><code>OperationCanceledException</code> caught mid-turn (Ctrl+C during streaming)</td>
+</tr>
+<tr>
+<td><code>cancellation_observed</code></td>
+<td>Cancellation token checked between turns and loop is stopping cleanly</td>
+</tr>
+</tbody>
+</table>
+<p><em>Compaction</em></p>
+<table>
+<thead>
+<tr>
+<th>Event type</th>
+<th>When emitted</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>compaction</code></td>
+<td>Compaction applied to reduce history size</td>
+</tr>
+<tr>
+<td><code>compaction_resume_candidate</code></td>
+<td>Session paused to await resume after compaction</td>
+</tr>
+</tbody>
+</table>
+<p>All orchestration events include <code>ts</code> (ISO 8601 timestamp), <code>session</code> (8-char hex ID), <code>agent</code>, and <code>turn</code> fields alongside the <code>event_type</code> and <code>payload</code>. Use <code>fuseraft log</code> to view them in a formatted table.</p>
+<hr />
+<h2 id="orchestration-sessions-fuseraft-run">Orchestration sessions (<code>fuseraft run</code>)<a class="headerlink" href="#orchestration-sessions-fuseraft-run" title="Permanent link">&para;</a></h2>
+<h2 id="how-sessions-work">How sessions work<a class="headerlink" href="#how-sessions-work" title="Permanent link">&para;</a></h2>
+<p>A session begins when you run <code>fuseraft run</code>. The orchestrator:</p>
+<ol>
+<li>Generates an 8-character hex session ID (e.g. <code>a3f92c1d</code>)</li>
+<li>Saves a checkpoint to <code>~/.fuseraft/sessions/&lt;sessionId&gt;.json</code> after every agent turn</li>
+<li>Streams responses to the terminal as they arrive</li>
+<li>Marks the session complete when the termination strategy fires</li>
+</ol>
+<p>If the run is interrupted for any reason (network error, <code>Ctrl+C</code>, process kill), the checkpoint is already saved up to the last completed turn.</p>
+<hr />
+<h2 id="resuming-a-session">Resuming a session<a class="headerlink" href="#resuming-a-session" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Show a list of incomplete sessions and choose one</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>fuseraft<span class="w"> </span>run<span class="w"> </span>--resume
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># Resume a specific session by ID</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>fuseraft<span class="w"> </span>run<span class="w"> </span>--resume<span class="w"> </span>a3f92c1d
+</code></pre></div>
+<p>The orchestrator re-injects the prior history into the group chat and continues from the next agent turn. The model receives the full conversation context (or a compacted summary if compaction fired).</p>
+<p>You can resume with a different config or task — the session ID is what ties the checkpoint to the run, not the config file.</p>
+<hr />
+<h2 id="error-recovery">Error recovery<a class="headerlink" href="#error-recovery" title="Permanent link">&para;</a></h2>
+<p>fuseraft saves a checkpoint after every agent turn. If a session is interrupted for any reason, the checkpoint is already up to date.</p>
+<p><strong>Checkpoint save failures</strong> are non-fatal. If a checkpoint write fails (disk full, permissions error), a yellow warning is printed to the terminal and the session continues using its in-memory state. The next successful save will catch up. No in-progress work is lost.</p>
+<p><strong>Unexpected errors</strong> (exceptions not covered by a specific handler) write a crash dump to <code>~/.fuseraft/crashdumps/&lt;id&gt;.json</code> and print the dump path to the terminal. The session terminates, but the checkpoint is intact:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>fuseraft<span class="w"> </span>run<span class="w"> </span>--resume<span class="w"> </span>&lt;sessionId&gt;
+</code></pre></div>
+<p><strong>Context window exceeded with no compactor</strong> — if the model's context window fills and no <code>Compaction</code> section is configured, fuseraft shows an actionable error message and saves the checkpoint. Resume after adding compaction to your config:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">Compaction</span><span class="p">:</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">Mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">window</span><span class="w">        </span><span class="c1"># simplest option — no LLM cost</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">TokenBudget</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">80000</span><span class="w">  </span><span class="c1"># optional</span>
+</code></pre></div>
+<p>Then:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>fuseraft<span class="w"> </span>run<span class="w"> </span>--resume<span class="w"> </span>&lt;sessionId&gt;
+</code></pre></div>
+<hr />
+<h2 id="session-files">Session files<a class="headerlink" href="#session-files" title="Permanent link">&para;</a></h2>
+<p>Sessions are stored at <code>~/.fuseraft/sessions/&lt;sessionId&gt;.json</code> with owner-only read/write permissions (Unix mode 0600).</p>
+<p><strong>Checkpoint fields:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SessionId</code></td>
+<td>8-character hex identifier</td>
+</tr>
+<tr>
+<td><code>Task</code></td>
+<td>Original task string</td>
+</tr>
+<tr>
+<td><code>ConfigPath</code></td>
+<td>Path to the orchestration config used</td>
+</tr>
+<tr>
+<td><code>Messages</code></td>
+<td>All agent messages produced so far</td>
+</tr>
+<tr>
+<td><code>StartedAt</code></td>
+<td>UTC timestamp when session was first created</td>
+</tr>
+<tr>
+<td><code>LastUpdatedAt</code></td>
+<td>UTC timestamp of the most recent update</td>
+</tr>
+<tr>
+<td><code>IsComplete</code></td>
+<td><code>true</code> once the session has run to completion</td>
+</tr>
+<tr>
+<td><code>ResumeExecutorId</code></td>
+<td>Hint for <code>GraphOrchestrator</code> identifying which node was active when the session was last checkpointed; <code>null</code> for non-<code>GraphOrchestrator</code> sessions</td>
+</tr>
+<tr>
+<td><code>MagenticState</code></td>
+<td><code>MagenticCheckpointState</code> snapshot (<code>CurrentPlan</code>, <code>RoundIndex</code>, <code>StallCount</code>, <code>ResetCount</code>, <code>AwaitingPlanReview</code>) used to resume the Magentic inner loop; <code>null</code> for non-Magentic sessions</td>
+</tr>
+<tr>
+<td><code>StateHistory</code></td>
+<td>Ordered list of <code>AgentState</code> snapshots produced during the session; <code>null</code> for non-<code>GraphOrchestrator</code> sessions</td>
+</tr>
+<tr>
+<td><code>StructuredTask</code></td>
+<td><code>TaskModel</code> snapshot (<code>Goal</code>, <code>Constraints</code>, <code>ActiveTargets</code>, <code>Phase</code>) injected into agent context at session start. Populated automatically from the task string; can be enriched by the orchestrator as agents write files.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Message fields:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>AgentName</code></td>
+<td>Agent name, or <code>"Human"</code> for HITL injections</td>
+</tr>
+<tr>
+<td><code>Content</code></td>
+<td>Text content of the response</td>
+</tr>
+<tr>
+<td><code>Timestamp</code></td>
+<td>UTC timestamp</td>
+</tr>
+<tr>
+<td><code>TurnIndex</code></td>
+<td>Zero-based turn index within the session</td>
+</tr>
+<tr>
+<td><code>Role</code></td>
+<td><code>"assistant"</code> for agent turns, <code>"user"</code> for HITL injections</td>
+</tr>
+<tr>
+<td><code>Usage</code></td>
+<td>Token counts and estimated cost (null for HITL turns)</td>
+</tr>
+<tr>
+<td><code>IsCompactionSummary</code></td>
+<td><code>true</code> if this message is a compaction summary</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="managing-sessions">Managing sessions<a class="headerlink" href="#managing-sessions" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># List all incomplete sessions</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>fuseraft<span class="w"> </span>sessions
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># List all sessions including completed</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>fuseraft<span class="w"> </span>sessions<span class="w"> </span>--all
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="c1"># Delete a session by ID</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>fuseraft<span class="w"> </span>sessions<span class="w"> </span>--delete<span class="w"> </span>a3f92c1d
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="c1"># Purge all completed sessions</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>fuseraft<span class="w"> </span>sessions<span class="w"> </span>--delete<span class="w"> </span>all
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="c1"># Remove orphaned sessions (config file no longer exists on disk)</span>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>fuseraft<span class="w"> </span>sessions<span class="w"> </span>--prune
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="c1"># Age-based cleanup — deletes sessions older than 30 days (default)</span>
+<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a>fuseraft<span class="w"> </span>sessions<span class="w"> </span>--cleanup
+<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>
+<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a><span class="c1"># Cleanup with a custom threshold, scoped to one project</span>
+<a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a>fuseraft<span class="w"> </span>sessions<span class="w"> </span>--cleanup<span class="w"> </span>--older-than<span class="w"> </span>2w<span class="w"> </span>--project<span class="w"> </span>brewer
+</code></pre></div>
+<p>A session is <strong>orphaned</strong> when its <code>ConfigPath</code> points to an orchestration config file that no longer exists — for example, after a project directory is deleted or the <code>.fuseraft/</code> workspace is reset. Orphaned sessions cannot be resumed and accumulate silently over time. <code>--prune</code> removes all of them in one pass.</p>
+<p><strong>Age-based cleanup (<code>--cleanup</code>)</strong></p>
+<p><code>--cleanup</code> removes session index entries and artifact directories for sessions older than the <code>--older-than</code> threshold (<code>30d</code> by default; accepts <code>Nd</code>, <code>Nw</code>, <code>Nh</code>).</p>
+<p>When <code>.fuseraft/.fuseraftignore</code> is present, only files marked ephemeral by the ignore rules are deleted — large reproducible artifacts like <code>read_cache.json</code>, <code>tool-results/</code>, <code>events.jsonl</code>, and <code>ctx_viz.html</code>. Handoff artifacts (<code>brief.json</code>, <code>conventions.json</code>, <code>context_summary.md</code>, <code>intents.json</code>) are preserved by the default <code>!</code>-prefixed keep rules. Empty directories are removed after the file sweep. When no <code>.fuseraftignore</code> exists, the entire session directory is deleted.</p>
+<hr />
+<h2 id="human-in-the-loop-hitl">Human-in-the-loop (HITL)<a class="headerlink" href="#human-in-the-loop-hitl" title="Permanent link">&para;</a></h2>
+<p>Run with <code>--hitl</code> to pause after every agent turn and review before continuing:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>fuseraft<span class="w"> </span>run<span class="w"> </span>--hitl<span class="w"> </span><span class="s2">"Refactor the payment module"</span>
+</code></pre></div>
+<p>After each turn you see:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>[HITL] Press Enter to continue, type a message to inject it, or 'q' to quit:
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Enter</td>
+<td>Continue to the next agent turn</td>
+</tr>
+<tr>
+<td>Any text</td>
+<td>Inject that text as a user message, then continue</td>
+</tr>
+<tr>
+<td><code>q</code></td>
+<td>Save checkpoint and exit cleanly</td>
+</tr>
+</tbody>
+</table>
+<p>Injected messages are saved in the session checkpoint with <code>Role: "user"</code> and <code>AgentName: "Human"</code>. They are re-injected on resume so the conversation context is complete.</p>
+<hr />
+<h2 id="token-tracking-and-cost-estimation">Token tracking and cost estimation<a class="headerlink" href="#token-tracking-and-cost-estimation" title="Permanent link">&para;</a></h2>
+<p>Token counts and estimated costs are tracked per turn and accumulated for the session.</p>
+<p>Token counts appear in <code>--verbose</code> mode and in the <code>--output</code> transcript. The session summary table shows input and output tokens per agent.</p>
+<p><strong>Per-turn data:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>InputTokens</code></td>
+<td>Tokens in the model's input (prompt + history)</td>
+</tr>
+<tr>
+<td><code>OutputTokens</code></td>
+<td>Tokens in the model's output</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Token budget:</strong> Set <code>MaxTotalTokens</code> in the config to stop the run before the next turn if the cumulative token count (input + output combined) exceeds the limit. The session is saved and can be resumed later.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">MaxTotalTokens</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">200000</span>
+</code></pre></div>
+<p>Token counts are always exact — reported directly by the provider API.</p>
+<hr />
+<h2 id="conversation-compaction">Conversation compaction<a class="headerlink" href="#conversation-compaction" title="Permanent link">&para;</a></h2>
+<p>Long-running sessions will eventually exceed the model's context window. Compaction automatically reduces old turns to keep the session alive indefinitely.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nt">Compaction</span><span class="p">:</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="nt">TriggerTurnCount</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span><span class="nt">KeepRecentTurns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">  </span><span class="nt">Mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">intent</span><span class="w">      </span><span class="c1"># or "llm" (default), "lossless", "hybrid", or "window"</span>
+</code></pre></div>
+<p><strong>How it works (llm / lossless / hybrid / intent):</strong></p>
+<ol>
+<li>When the assistant-turn count reaches <code>TriggerTurnCount</code>, compaction fires.</li>
+<li>All turns except the most recent <code>KeepRecentTurns</code> are replaced by a single context message.</li>
+<li>The checkpoint is saved with the compacted history.</li>
+<li>The session continues with the context message providing background for older work.</li>
+</ol>
+<p><code>TriggerTurnCount</code> must be greater than <code>KeepRecentTurns</code>. An error is thrown at startup if this constraint is violated.</p>
+<p><strong>How it works (window):</strong></p>
+<ol>
+<li>After each checkpoint save, the estimated token count of the full history (characters ÷ 4) is compared against <code>TokenBudget</code>.</li>
+<li>When over budget, the oldest user+assistant pairs are dropped one at a time until the count falls within the budget.</li>
+<li>No LLM call is made and no summary message is injected — only the tail of the conversation is kept.</li>
+<li>Prior compaction summaries (from an earlier <code>llm</code>/<code>lossless</code>/<code>hybrid</code> run) are pinned and never dropped.</li>
+</ol>
+<p><strong>Compaction modes</strong></p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>llm</code></td>
+<td>Default. An LLM call summarises the compacted turns using conversation history and <code>changes.json</code>. Requires a model.</td>
+</tr>
+<tr>
+<td><code>lossless</code></td>
+<td>Reconstructs context from durable disk artifacts only — the evidence graph, all contract evaluations, and the current state machine position. No LLM call is made. No hallucination is possible because every fact is read directly from disk. Falls back to <code>llm</code> when no state machine strategy with evidence store is active.</td>
+</tr>
+<tr>
+<td><code>hybrid</code></td>
+<td>Prepends the lossless reconstruction before the LLM summary. Agents get authoritative ground-truth (what was actually done) plus narrative context (how it unfolded).</td>
+</tr>
+<tr>
+<td><code>window</code></td>
+<td>Sliding window: drops the oldest user+assistant pairs until the estimated token count is within <code>TokenBudget</code> (default 80,000). No LLM call; no summary message is injected. <code>TriggerTurnCount</code> and <code>KeepRecentTurns</code> are ignored.</td>
+</tr>
+<tr>
+<td><code>intent</code></td>
+<td>Reconstructs context from the intent log (<code>intents.json</code>). Produces a <code>✓</code>/<code>✗</code>/<code>⧖</code> per-operation block covering every tracked tool call in the compacted range. No LLM call; no hallucination. Requires <code>ChangeTracking</code> to be configured. Falls back to <code>lossless</code> then <code>llm</code> when the intent log is unavailable. Works with any selection strategy.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Intent compaction</strong> is the recommended mode for most sessions when <code>ChangeTracking</code> is configured. It doesn't require a state machine or evidence store. The reconstructed context looks like:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>[INTENT-DERIVED RECONSTRUCTION — covers turns 1–20]
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>OPERATIONS (chronological):
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>  ✓ write_file → "src/api/users.go" (turn 3, Developer)
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>  ✗ patch_file → "src/api/auth.go" — oldText not found… (turn 4, Developer)
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>  ✓ shell_run → "go test ./..." (turn 5, Tester)
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a>RESUMPTION NOTE: History compacted from intent log — deterministic ground truth.
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>Do not re-execute operations marked ✓ (applied).
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>Operations marked ✗ (failed) should be retried if the task requires them.
+</code></pre></div>
+<p><strong>Lossless compaction</strong> is recommended for <code>statemachine</code> sessions with an <code>EvidenceStore</code>. The reconstructed context message looks like:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>[CONTEXT RECONSTRUCTION — derived from durable evidence, not summarised by LLM]
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>STATE MACHINE POSITION: Testing
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>CONTRACT STATUS:
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>  ✓ BriefExists
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>  ✓ ImplementationComplete
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a>  ✗ TestsValid
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a>      Reason: test-report.json has 2 FAIL results
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a>
+<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a>RECENT EVIDENCE (newest first):
+<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a>  [CommandRun] go test ./... → exit 1 (turn 14, agent Developer)
+<a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a>  [FileWrite] wrote src/api/users.go (turn 13, agent Developer)
+<a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a>  ...
+<a id="__codelineno-15-15" name="__codelineno-15-15" href="#__codelineno-15-15"></a>
+<a id="__codelineno-15-16" name="__codelineno-15-16" href="#__codelineno-15-16"></a>RESUMPTION NOTE: History compacted. Continue from state 'Testing'.
+<a id="__codelineno-15-17" name="__codelineno-15-17" href="#__codelineno-15-17"></a>Satisfy all ✗ contracts before emitting a transition signal.
+</code></pre></div>
+<p>This is structurally superior to an LLM summary: the state machine position cannot drift, contract status is re-evaluated fresh at compaction time, and every evidence item is a real disk record.</p>
+<p><strong>Change log grounding (<code>llm</code> and <code>hybrid</code> modes):</strong> When <code>ChangeTracking</code> or <code>Validation.ChangeLogPath</code> is configured, the compactor reads <code>changes.json</code> at compaction time and injects it into the LLM summary prompt as authoritative ground truth. Fabricated progress reports are corrected before they are carried forward as fact.</p>
+<p><strong>Compaction model:</strong> By default, the first agent's model is used for generating summaries (<code>llm</code> and <code>hybrid</code> only). Override with <code>Compaction.Model</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nt">Compaction</span><span class="p">:</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span><span class="nt">TriggerTurnCount</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">  </span><span class="nt">KeepRecentTurns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">  </span><span class="nt">Mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">hybrid</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">  </span><span class="nt">Model</span><span class="p">:</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">    </span><span class="nt">ModelId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gpt-4o-mini</span>
+</code></pre></div>
+<p><strong>Window mode example:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nt">Compaction</span><span class="p">:</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">  </span><span class="nt">Mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">window</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">  </span><span class="nt">TokenBudget</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">60000</span><span class="w">   </span><span class="c1"># optional — defaults to 80000</span>
+</code></pre></div>
+<p><code>TriggerTurnCount</code> and <code>KeepRecentTurns</code> have no effect in <code>window</code> mode and can be omitted.</p>
+<p><strong>Cost accounting:</strong> The summary message's cumulative cost includes all the turns it replaced, so budget tracking remains accurate after compaction. <code>lossless</code>, <code>intent</code>, and <code>window</code> modes incur no LLM cost at compaction time.</p>
+<hr />
+<h2 id="saving-transcripts">Saving transcripts<a class="headerlink" href="#saving-transcripts" title="Permanent link">&para;</a></h2>
+<p>Write the full session transcript to a Markdown file:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>fuseraft<span class="w"> </span>run<span class="w"> </span>--output<span class="w"> </span>my-session.md<span class="w"> </span><span class="s2">"Build a CLI todo app"</span>
+</code></pre></div>
+<p>The file includes every agent turn with agent name, timestamp, content, and per-turn token/cost data. Useful for review, sharing, or archiving completed sessions.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../evals/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Evals">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Evals
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../context-management/" class="md-footer__link md-footer__link--next" aria-label="Next: Context Management">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Context Management
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.footer", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,2238 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Multi-agent orchestration CLI built on Microsoft Agent Framework">
+      
+      
+      
+        <link rel="canonical" href="https://fuseraft.ai/skills/">
+      
+      
+        <link rel="prev" href="../plugins/">
+      
+      
+        <link rel="next" href="../strategies/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Skills - fuseraft-cli</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#skills" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="fuseraft-cli" class="md-header__button md-logo" aria-label="fuseraft-cli" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            fuseraft-cli
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Skills
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fuseraft/fuseraft-cli" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fuseraft/fuseraft-cli
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../writing-tasks/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Writing Tasks
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../spec-driven/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Spec-Driven Development
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../cli-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../scripting/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Scripting & Automation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../models/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Models & Providers
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../plugins/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Plugins
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Skills
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../strategies/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Strategies
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../validators/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Validators
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../harness-engineering/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Harness Engineering
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../mcp/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  MCP
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../security/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Security
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../governance/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Governance
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../evals/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evals
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../sessions/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Sessions
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../context-management/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Context Management
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../context-store/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Context Store
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../knowledge/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Knowledge Layer
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../examples/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Examples
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../design/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Design
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="fuseraft-cli" class="md-nav__button md-logo" aria-label="fuseraft-cli" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    fuseraft-cli
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fuseraft/fuseraft-cli" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fuseraft/fuseraft-cli
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../writing-tasks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing Tasks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../spec-driven/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spec-Driven Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scripting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scripting & Automation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models & Providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skills
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skills
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#where-skills-come-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where skills come from
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-skills-work-in-the-repl" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How skills work in the REPL
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#shipped-skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shipped skills
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Shipped skills">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#commit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        commit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sandbox-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sandbox-test
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#craft-orchestration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        craft-orchestration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#debug-session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        debug-session
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#config-audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        config-audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mcp-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mcp-setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#skill-author" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        skill-author
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build-docx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        build-docx
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#knowledge-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        knowledge-setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cross-session-handoff-compact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cross-session handoff: /compact
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#installing-skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installing skills
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Installing skills">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#for-a-single-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        For a single project
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#for-all-your-projects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        For all your projects
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#writing-a-skill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing a skill
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#automatic-skill-generation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automatic skill generation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Automatic skill generation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#enabling-curation-for-repl-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enabling curation for REPL sessions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#enabling-curation-for-fuseraft-run-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enabling curation for fuseraft run sessions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../strategies/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Strategies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../validators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Validators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harness-engineering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harness Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../governance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Governance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../context-management/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../context-store/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Store
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../knowledge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#where-skills-come-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where skills come from
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-skills-work-in-the-repl" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How skills work in the REPL
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#shipped-skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shipped skills
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Shipped skills">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#commit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        commit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sandbox-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sandbox-test
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#craft-orchestration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        craft-orchestration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#debug-session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        debug-session
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#config-audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        config-audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mcp-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mcp-setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#skill-author" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        skill-author
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build-docx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        build-docx
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#knowledge-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        knowledge-setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cross-session-handoff-compact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cross-session handoff: /compact
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#installing-skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installing skills
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Installing skills">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#for-a-single-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        For a single project
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#for-all-your-projects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        For all your projects
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#writing-a-skill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing a skill
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#automatic-skill-generation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automatic skill generation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Automatic skill generation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#enabling-curation-for-repl-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enabling curation for REPL sessions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#enabling-curation-for-fuseraft-run-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enabling curation for fuseraft run sessions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/fuseraft/fuseraft-cli/edit/main/docs/skills.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="skills">Skills<a class="headerlink" href="#skills" title="Permanent link">&para;</a></h1>
+<p>Skills give agents specialized knowledge and step-by-step procedures for specific types of tasks, following the <a href="https://agentskills.io/specification">Agent Skills specification</a>. At session start fuseraft scans your skill directories, injects a catalog of available skills into the system prompt, and exposes tools the model can call to use them. Discovery, frontmatter parsing/validation, and the skill tools themselves all come from the <a href="https://github.com/microsoft/agent-framework">Microsoft Agent Framework</a>'s <code>AgentFileSkillsSource</code>/<code>AgentSkillsProvider</code> — the REPL and <code>fuseraft run</code> orchestration sessions share the exact same implementation, so a skill is treated identically in both.</p>
+<hr />
+<h2 id="where-skills-come-from">Where skills come from<a class="headerlink" href="#where-skills-come-from" title="Permanent link">&para;</a></h2>
+<p>fuseraft loads skills from five locations, in precedence order (earlier entries win when two skills share the same name):</p>
+<table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>Path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Project (fuseraft)</td>
+<td><code>&lt;project&gt;/.fuseraft/skills/</code></td>
+</tr>
+<tr>
+<td>Project (shared)</td>
+<td><code>&lt;project&gt;/.agents/skills/</code></td>
+</tr>
+<tr>
+<td>User (fuseraft)</td>
+<td><code>~/.fuseraft/skills/</code></td>
+</tr>
+<tr>
+<td>User (shared)</td>
+<td><code>~/.agents/skills/</code></td>
+</tr>
+<tr>
+<td>Built-in</td>
+<td>shipped with fuseraft</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="how-skills-work-in-the-repl">How skills work in the REPL<a class="headerlink" href="#how-skills-work-in-the-repl" title="Permanent link">&para;</a></h2>
+<p>fuseraft uses a progressive-disclosure pattern to keep context lean:</p>
+<ol>
+<li><strong>Catalog injection</strong> — At session start, the names and descriptions of all discovered skills are appended to the system prompt so the model knows what is available without loading every full body.</li>
+<li><strong>On-demand load</strong> — When the model decides a skill is relevant, it calls <code>load_skill("&lt;slug&gt;")</code> to retrieve the full <code>SKILL.md</code> content, then follows those step-by-step instructions using its other tools.</li>
+<li><strong>Resource reading</strong> — If a skill ships supplementary reference material (e.g. under <code>references/</code>), the model reads it with <code>read_skill_resource("&lt;slug&gt;", "&lt;path&gt;")</code>, e.g. <code>read_skill_resource("build-docx", "references/python-docx-patterns.md")</code>.</li>
+<li><strong>Script execution</strong> — If a skill bundles executable scripts alongside its <code>SKILL.md</code>, the model can run them with <code>run_skill_script("&lt;slug&gt;", "&lt;filename&gt;")</code>.</li>
+<li><strong>Direct invocation</strong> — Type <code>$&lt;slug&gt;</code> at the REPL prompt to invoke a skill immediately without describing what you want. The <code>SKILL.md</code> content is loaded directly into the turn so the model applies the skill right away. Append arguments after the slug to pass context: <code>$commit fix typo in readme</code>. Tab completion cycles through matching skill slugs.</li>
+</ol>
+<p>At startup, the skill count appears in the compact info line alongside the active tool categories (e.g. <code>… · 3 skills · …</code>). Run <code>/tools</code> at any time to list all active tools by category, including the <code>Skills</code> category.</p>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>load_skill</code></td>
+<td>Load the full <code>SKILL.md</code> for a skill by slug.</td>
+</tr>
+<tr>
+<td><code>read_skill_resource</code></td>
+<td>Read a supplementary file bundled with a skill (e.g. a file under <code>references/</code>), by path relative to the skill directory.</td>
+</tr>
+<tr>
+<td><code>run_skill_script</code></td>
+<td>Run a script bundled with a skill (<code>.sh</code>, <code>.py</code>, <code>.js</code>).</td>
+</tr>
+</tbody>
+</table>
+<p><code>read_skill_resource</code> and <code>run_skill_script</code> reject a path that resolves outside the skill directory, including via a symlinked file or subdirectory planted inside it.</p>
+<p>If <code>--no-tools</code> is passed, skills are disabled for that session.</p>
+<p><code>fuseraft run</code> orchestration sessions use the same five discovery locations and the same three tools (<code>load_skill</code>, <code>read_skill_resource</code>, <code>run_skill_script</code>), wired onto every agent automatically whenever at least one skill directory exists — there is no need to add <code>Skills</code> to an agent's <code>Plugins:</code> list, though doing so as a declaration of intent is harmless. This is the same discovery pipeline the REPL uses, not a separate implementation — a skill either works identically in both, or (if its frontmatter is invalid) in neither.</p>
+<hr />
+<h2 id="shipped-skills">Shipped skills<a class="headerlink" href="#shipped-skills" title="Permanent link">&para;</a></h2>
+<p>fuseraft ships with the following built-in skills. Install any of them globally with <code>fuseraft skills add</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>fuseraft<span class="w"> </span>skills<span class="w"> </span>add<span class="w"> </span>path/to/fuseraft/skills/sandbox-test
+</code></pre></div>
+<hr />
+<h3 id="commit"><code>commit</code><a class="headerlink" href="#commit" title="Permanent link">&para;</a></h3>
+<p>Stages and commits changes using the conventional commit format. Triggers when an agent finishes implementing, after a fix, or when a Developer or Tester instruction says to commit.</p>
+<p>When it triggers, the agent will:</p>
+<ol>
+<li>Run <code>git status</code> and <code>git diff HEAD</code> to see what changed.</li>
+<li>Choose the right commit type (<code>feat</code>, <code>fix</code>, <code>refactor</code>, <code>docs</code>, <code>chore</code>, etc.).</li>
+<li>Write a subject line in imperative mood, ≤ 72 characters, lowercase after the colon.</li>
+<li>Add a body with <code>why</code> bullets when the change is non-trivial.</li>
+<li>Stage only the relevant files (never <code>git add -A</code>).</li>
+<li>Commit and verify with <code>git log --oneline -1</code>.</li>
+</ol>
+<p>Does not push to remote or amend prior commits — use <code>shell_run</code> for those directly.</p>
+<hr />
+<h3 id="sandbox-test"><code>sandbox-test</code><a class="headerlink" href="#sandbox-test" title="Permanent link">&para;</a></h3>
+<p>Activates automatically when the agent needs to verify logic before touching real source files — for example, when debugging a defect, testing an edge case, or confirming a behavioral hypothesis.</p>
+<p>When it triggers, the agent will:</p>
+<ol>
+<li>Detect your project stack (.NET, Go, Rust, Python, TypeScript, Node.js, or Java).</li>
+<li>Create a throwaway harness in the system temp directory.</li>
+<li>Write and run harness code with debug output at key boundaries.</li>
+<li>Iterate until the behavior is understood (up to 5 runs).</li>
+<li>Apply the confirmed change to your real files and remove the harness.</li>
+</ol>
+<p>You don't need to invoke this skill explicitly — it activates on its own when appropriate.</p>
+<hr />
+<h3 id="craft-orchestration"><code>craft-orchestration</code><a class="headerlink" href="#craft-orchestration" title="Permanent link">&para;</a></h3>
+<p>Guides the agent through building a valid, runnable <code>orchestration.yaml</code> from scratch. Triggers when the user asks to create or scaffold a fuseraft config, set up a multi-agent pipeline, or convert a described workflow into a runnable config.</p>
+<p>The skill gathers requirements (agent roles, model, routing strategy, plugins, validators), picks the right skeleton, generates the YAML, validates it with <code>fuseraft validate</code>, and writes it to disk ready to run.</p>
+<hr />
+<h3 id="debug-session"><code>debug-session</code><a class="headerlink" href="#debug-session" title="Permanent link">&para;</a></h3>
+<p>Diagnoses a failing, stuck, or unexpectedly terminated <code>fuseraft run</code> session. Triggers when a session looped without progress, raised a <code>ValidatorStuckException</code>, hit the iteration cap, crashed, or stopped with a budget or circuit-breaker error.</p>
+<p>The skill reads the session checkpoint, events log, and crash dumps, maps the symptoms to a root cause (stuck validator, missing keyword, context loss after compaction, API failures, sandbox denial), and recommends the exact config or instruction fix.</p>
+<hr />
+<h3 id="config-audit"><code>config-audit</code><a class="headerlink" href="#config-audit" title="Permanent link">&para;</a></h3>
+<p>Reviews an existing orchestration config for correctness before running it. Triggers when the user wants to validate a config, when <code>fuseraft validate</code> passes but the run still fails, or when a config was recently written or modified.</p>
+<p>The skill runs <code>fuseraft validate</code>, then performs a deeper semantic audit: routing keyword alignment, plugin prerequisites, validator dependency chains, termination safety, failure handling, instruction quality, and model alias consistency. Findings are grouped by severity (error / warning / suggestion).</p>
+<hr />
+<h3 id="mcp-setup"><code>mcp-setup</code><a class="headerlink" href="#mcp-setup" title="Permanent link">&para;</a></h3>
+<p>Connects a fuseraft config to an MCP server and wires its tools to agents. Triggers when the user wants to add an MCP server (npm package, Python module, or HTTP endpoint), or when an existing <code>McpServers</code> block is failing at startup.</p>
+<p>The skill verifies the server command or endpoint, adds the <code>McpServers</code> entry to the config, wires the plugin name to the right agents, validates the result, and runs a one-turn dry-run to confirm the connection and tool registration.</p>
+<hr />
+<h3 id="skill-author"><code>skill-author</code><a class="headerlink" href="#skill-author" title="Permanent link">&para;</a></h3>
+<p>Guides the agent through writing a new fuseraft skill from scratch. Triggers when the user wants to create a skill, capture a reusable procedure, or understand how to structure a <code>SKILL.md</code> file.</p>
+<p>The skill gathers requirements (what it does, when it triggers, where it lives), writes the frontmatter and body, decides whether reference files or bundled scripts are needed, installs the skill at the chosen scope, and verifies it appears in the catalog.</p>
+<hr />
+<h3 id="build-docx"><code>build-docx</code><a class="headerlink" href="#build-docx" title="Permanent link">&para;</a></h3>
+<p>Generates a DOCX file from structured content, a template, or a description. Triggers when the user wants to produce a Word document, export content to <code>.docx</code>, fill in a DOCX template, or convert Markdown/JSON/outline data to a formatted document.</p>
+<p>The skill detects the project stack, selects the appropriate library (<code>python-docx</code>, <code>docx</code> npm, or <code>DocumentFormat.OpenXml</code>/<code>DocX</code>), gathers content requirements, writes a self-contained builder script, runs it, and reports the output path. Reference files for each library's common patterns are loaded on demand to keep context lean.</p>
+<hr />
+<h3 id="knowledge-setup"><code>knowledge-setup</code><a class="headerlink" href="#knowledge-setup" title="Permanent link">&para;</a></h3>
+<p>Bootstraps the fuseraft knowledge layer in a new or existing project. Triggers when the user wants to set up ADR tracking, the repository semantic graph, architecture drift detection, or objective tracking — or when <code>Decision</code>, <code>Graph</code>, or <code>Objective</code> plugins are wired in a config but the backing stores have not been initialized.</p>
+<p>The skill scaffolds <code>.fuseraft/knowledge/</code> via <code>fuseraft init</code>, builds the repository semantic graph with <code>fuseraft graph build</code>, guides authoring of <code>.fuseraft/architecture.yaml</code> for <code>fuseraft arch check</code>, tunes the lifecycle policy for <code>fuseraft knowledge gc</code>, and wires the knowledge plugins (<code>Decision</code>, <code>Graph</code>, <code>Objective</code>) to the right agents in the orchestration config.</p>
+<hr />
+<h2 id="cross-session-handoff-compact">Cross-session handoff: <code>/compact</code><a class="headerlink" href="#cross-session-handoff-compact" title="Permanent link">&para;</a></h2>
+<p>To pass context from the current REPL session to a new one, use the <code>/compact</code> command. <code>/compact</code> generates a concise summary of what was worked on, key decisions, current state, and what comes next; it then replaces the conversation history with that summary so the session can continue with a clean context window.</p>
+<p>If you want to carry a summary to a <em>different</em> session or agent entirely, run <code>/compact</code> and copy the resulting summary into the new session as an opening message.</p>
+<hr />
+<h2 id="installing-skills">Installing skills<a class="headerlink" href="#installing-skills" title="Permanent link">&para;</a></h2>
+<h3 id="for-a-single-project">For a single project<a class="headerlink" href="#for-a-single-project" title="Permanent link">&para;</a></h3>
+<p>Place a skill directory under <code>.fuseraft/skills/</code> in your working directory:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>my-project/
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>└── .fuseraft/
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    └── skills/
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>        └── my-skill/
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>            └── SKILL.md
+</code></pre></div>
+<p>Use <code>.agents/skills/</code> instead if you want the skill available to other Agent Skills–compatible tools (Claude Code, Cursor, Copilot) running in the same directory.</p>
+<p>To share a skill with your team, commit the skill directory. <code>.agents/skills/</code> is the recommended location for shared skills.</p>
+<blockquote>
+<p><strong>Trust warning:</strong> Skills travel with the repository. Treat <code>.fuseraft/skills/</code> and <code>.agents/skills/</code> the same as a <code>Makefile</code> or postinstall script — only run fuseraft in directories you trust. See <a href="../security/#skills-execution-trust-model">Security — Skills execution trust model</a>.</p>
+</blockquote>
+<h3 id="for-all-your-projects">For all your projects<a class="headerlink" href="#for-all-your-projects" title="Permanent link">&para;</a></h3>
+<p>Use <code>fuseraft skills add</code> to copy a skill into <code>~/.fuseraft/skills/</code> and register it in the global search index:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>fuseraft<span class="w"> </span>skills<span class="w"> </span>add<span class="w"> </span>../skills/productivity/handoff
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>fuseraft<span class="w"> </span>skills<span class="w"> </span>add<span class="w"> </span>~/my-skills/triage
+</code></pre></div>
+<p>The command accepts a path to a skill directory (containing <code>SKILL.md</code>) or directly to a <code>SKILL.md</code> file. The slug is derived from the <code>name:</code> field in the frontmatter; if no <code>name:</code> field is present, the directory name is used. If a skill with the same slug already exists it is updated in place.</p>
+<p>You can also install skills by placing them directly under <code>~/.fuseraft/skills/</code> without using the CLI — skills are loaded from that directory at session start regardless of how they got there.</p>
+<p><code>fuseraft skills add</code> canonicalizes the frontmatter as it installs: if the raw <code>name:</code> field doesn't already equal the slug it's being installed under (e.g. it had spaces or uppercase letters), the installed copy's <code>name:</code> line is rewritten to match. This guarantees an installed skill's <code>name:</code> and directory always agree, which orchestration requires (see below).</p>
+<hr />
+<h2 id="writing-a-skill">Writing a skill<a class="headerlink" href="#writing-a-skill" title="Permanent link">&para;</a></h2>
+<p>Create a directory named after your skill and add a <code>SKILL.md</code> file:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>.fuseraft/skills/my-skill
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>---
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>name: my-skill
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="gu">description: What this skill does and when to use it.</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="gu">---</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="gh"># Instructions</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>Step-by-step guidance for the agent...
+</code></pre></div>
+<p>fuseraft follows the <a href="https://agentskills.io/specification">Agent Skills specification</a> for <code>SKILL.md</code> frontmatter:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>Yes</td>
+<td>Lowercase letters, digits, and single hyphens only (no leading/trailing/double hyphens); max 64 characters; must match the parent directory name exactly.</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>Yes</td>
+<td>1–1024 characters. What fuseraft uses to decide whether the skill is relevant to the current task — write it so it covers both what the skill does and the kinds of tasks that should trigger it.</td>
+</tr>
+<tr>
+<td><code>license</code></td>
+<td>No</td>
+<td>License name, or a reference to a bundled license file.</td>
+</tr>
+<tr>
+<td><code>compatibility</code></td>
+<td>No</td>
+<td>Max 500 characters. Environment requirements (e.g. <code>Requires docker and jq</code>) — shown in the REPL's skill catalog as a <code>[requires: ...]</code> hint.</td>
+</tr>
+<tr>
+<td><code>metadata</code></td>
+<td>No</td>
+<td>Arbitrary string-to-string map for your own bookkeeping (author, version, etc.). Not surfaced to the model.</td>
+</tr>
+<tr>
+<td><code>allowed-tools</code></td>
+<td>No</td>
+<td>Space-separated list of pre-approved tools (experimental, per spec — fuseraft parses but does not currently act on this field).</td>
+</tr>
+</tbody>
+</table>
+<p>If your instructions are long, move reference material into a <code>references/</code> subdirectory inside the skill folder. The agent loads those files on demand — with <code>read_skill_resource</code> — rather than all at once. <code>scripts/</code> and <code>assets/</code> are supported the same way.</p>
+<p><strong>If two installed skills share the same name</strong>, the one in the higher-precedence location wins.</p>
+<blockquote>
+<p><strong><code>name:</code> must match the directory name exactly.</strong> Both the REPL and <code>fuseraft run</code> require <code>name:</code> to match its parent directory name <strong>exactly</strong> (case-sensitive), to be valid lowercase kebab-case, and require a non-empty, correctly-sized <code>description:</code> — they use the identical discovery pipeline, so there is no REPL-specific leniency here. A skill that violates any of these is silently excluded from the catalog in <strong>both</strong> surfaces, with the reason logged as a warning or error (visible by default — no <code>--verbose</code> needed). Run <code>fuseraft skills validate [path]</code> to check a skill (or every installed skill) against the full specification before relying on it. The one exception is <code>fuseraft skills add</code>, which stays deliberately lenient — see <a href="#for-all-your-projects">Installing skills</a> above.</p>
+</blockquote>
+<hr />
+<h2 id="automatic-skill-generation">Automatic skill generation<a class="headerlink" href="#automatic-skill-generation" title="Permanent link">&para;</a></h2>
+<p>When skill curation is enabled, fuseraft automatically creates or updates a skill at the end of qualifying sessions. If the session produced a reusable procedure — a debugging workflow, a multi-step pattern, a problem-solving approach — fuseraft writes it to <code>~/.fuseraft/skills/</code> so future sessions can benefit from it.</p>
+<p>Trivial or highly project-specific sessions typically produce no output. If a skill with the same slug already exists it is updated in place, so the procedure is refined over time rather than duplicated.</p>
+<h3 id="enabling-curation-for-repl-sessions">Enabling curation for REPL sessions<a class="headerlink" href="#enabling-curation-for-repl-sessions" title="Permanent link">&para;</a></h3>
+<p>Add a <code>skillCuration</code> block to <code>~/.fuseraft/config</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="p">{</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">"modelId"</span><span class="p">:</span><span class="w"> </span><span class="s2">"claude-sonnet-4-6"</span><span class="p">,</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nt">"skillCuration"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="nt">"enabled"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="p">}</span>
+</code></pre></div>
+<p>All the standard knobs are supported (<code>minTurns</code>, <code>digestTurns</code>, <code>model</code>, <code>libraryPath</code>, <code>indexTopN</code>, <code>logPath</code>). Note that skill injection at session start (surfacing relevant skills before the first turn) is only available in <code>fuseraft run</code> sessions — the REPL has no upfront task description to query against.</p>
+<h3 id="enabling-curation-for-fuseraft-run-sessions">Enabling curation for <code>fuseraft run</code> sessions<a class="headerlink" href="#enabling-curation-for-fuseraft-run-sessions" title="Permanent link">&para;</a></h3>
+<p>Set <code>SkillCuration.Enabled: true</code> in your orchestration YAML. See <a href="../configuration/#skill-curation">Configuration → Skill curation</a> for the full field reference, start-of-session skill injection, and the curation log format.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../plugins/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Plugins">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Plugins
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../strategies/" class="md-footer__link md-footer__link--next" aria-label="Next: Strategies">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Strategies
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.footer", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

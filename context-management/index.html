@@ -1,0 +1,3140 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Multi-agent orchestration CLI built on Microsoft Agent Framework">
+      
+      
+      
+        <link rel="canonical" href="https://fuseraft.ai/context-management/">
+      
+      
+        <link rel="prev" href="../sessions/">
+      
+      
+        <link rel="next" href="../context-store/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Context Management - fuseraft-cli</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#context-management" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="fuseraft-cli" class="md-header__button md-logo" aria-label="fuseraft-cli" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            fuseraft-cli
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Context Management
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fuseraft/fuseraft-cli" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fuseraft/fuseraft-cli
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../writing-tasks/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Writing Tasks
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../spec-driven/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Spec-Driven Development
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../cli-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../scripting/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Scripting & Automation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../models/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Models & Providers
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../plugins/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Plugins
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../skills/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Skills
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../strategies/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Strategies
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../validators/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Validators
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../harness-engineering/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Harness Engineering
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../mcp/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  MCP
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../security/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Security
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../governance/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Governance
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../evals/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evals
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../sessions/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Sessions
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Context Management
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../context-store/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Context Store
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../knowledge/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Knowledge Layer
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../examples/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Examples
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../design/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Design
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="fuseraft-cli" class="md-nav__button md-logo" aria-label="fuseraft-cli" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    fuseraft-cli
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fuseraft/fuseraft-cli" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fuseraft/fuseraft-cli
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../writing-tasks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing Tasks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../spec-driven/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spec-Driven Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scripting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scripting & Automation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models & Providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../skills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skills
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../strategies/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Strategies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../validators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Validators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harness-engineering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harness Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../governance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Governance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Management
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#automatic-runtime-injection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automatic runtime injection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-1-context-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 1: Context Store
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-2-persistent-memory-pipeline-injected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 2: Persistent Memory (pipeline-injected)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-2b-memory-provider-per-turn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 2b: Memory provider (per-turn)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-3-contextwindow-per-agent-history-filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 3: ContextWindow (per-agent history filter)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Layer 3: ContextWindow (per-agent history filter)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#filters-and-their-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filters and their order
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#textonly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TextOnly
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#excludeagents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ExcludeAgents
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#maxturnage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MaxTurnAge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#maxtailmessages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MaxTailMessages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#replay-truncation-maxreplaychars" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Replay truncation (MaxReplayChars)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tool-result-truncation-maxtoolresultchars" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool-result truncation (MaxToolResultChars)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#handoffcontext-targeted-transition-injection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HandoffContext (targeted transition injection)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-3a-context-spec-artifact-first-assembly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 3a: Context spec (artifact-first assembly)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-4-compaction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 4: Compaction
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Layer 4: Compaction">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#trigger" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trigger
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Modes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pinned-summaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pinned summaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compaction-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compaction model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#enriching-summaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enriching summaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#history-pre-pruning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        History pre-pruning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#anti-thrash-protection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Anti-thrash protection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#failure-resilience" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure resilience
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#change-log-grounding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Change log grounding
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cost-accounting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost accounting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-5-context-budget-per-agent-token-trigger" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 5: Context Budget (per-agent token trigger)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#in-turn-tool-result-sliding-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In-turn tool-result sliding window
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="In-turn tool-result sliding window">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#token-budget-based-tool-result-window-maxtoolresulttokens-inturntoolwindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Token-budget-based tool-result window (MaxToolResultTokens / InTurnToolWindow)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tool-result-artifact-offloading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool-result artifact offloading
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#session-read-cache-cross-turn-file-deduplication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session read cache (cross-turn file deduplication)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adaptive-context-trim-retry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adaptive context-trim retry
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#context-window-visualization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context window visualization
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-layers-fit-together" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the layers fit together
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choosing-a-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing a strategy
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../context-store/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Store
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../knowledge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#automatic-runtime-injection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automatic runtime injection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-1-context-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 1: Context Store
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-2-persistent-memory-pipeline-injected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 2: Persistent Memory (pipeline-injected)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-2b-memory-provider-per-turn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 2b: Memory provider (per-turn)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-3-contextwindow-per-agent-history-filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 3: ContextWindow (per-agent history filter)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Layer 3: ContextWindow (per-agent history filter)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#filters-and-their-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filters and their order
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#textonly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TextOnly
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#excludeagents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ExcludeAgents
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#maxturnage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MaxTurnAge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#maxtailmessages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MaxTailMessages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#replay-truncation-maxreplaychars" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Replay truncation (MaxReplayChars)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tool-result-truncation-maxtoolresultchars" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool-result truncation (MaxToolResultChars)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#handoffcontext-targeted-transition-injection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HandoffContext (targeted transition injection)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-3a-context-spec-artifact-first-assembly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 3a: Context spec (artifact-first assembly)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-4-compaction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 4: Compaction
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Layer 4: Compaction">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#trigger" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trigger
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Modes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pinned-summaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pinned summaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compaction-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compaction model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#enriching-summaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enriching summaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#history-pre-pruning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        History pre-pruning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#anti-thrash-protection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Anti-thrash protection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#failure-resilience" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure resilience
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#change-log-grounding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Change log grounding
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cost-accounting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost accounting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-5-context-budget-per-agent-token-trigger" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 5: Context Budget (per-agent token trigger)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#in-turn-tool-result-sliding-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In-turn tool-result sliding window
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="In-turn tool-result sliding window">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#token-budget-based-tool-result-window-maxtoolresulttokens-inturntoolwindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Token-budget-based tool-result window (MaxToolResultTokens / InTurnToolWindow)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tool-result-artifact-offloading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool-result artifact offloading
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#session-read-cache-cross-turn-file-deduplication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session read cache (cross-turn file deduplication)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adaptive-context-trim-retry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adaptive context-trim retry
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#context-window-visualization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context window visualization
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-layers-fit-together" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the layers fit together
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choosing-a-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing a strategy
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/fuseraft/fuseraft-cli/edit/main/docs/context-management.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="context-management">Context Management<a class="headerlink" href="#context-management" title="Permanent link">&para;</a></h1>
+<p>Context is the most important resource in a long-running agent session. Every token an agent
+sees costs money and time; everything it misses is a potential hallucination or regression.
+fuseraft manages context through a unified assembly pipeline that fires every agent turn, plus
+several independent layers that augment it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Session start
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  └─ Auto-injection              → runtime environment + .gitignore (always on, no config)
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  └─ Layer 1: Context Store      → files imported before the session
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>Each agent turn — ContextAssemblyPipeline (always on)
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  └─ Intent analysis             → keywords, PascalCase symbols, failure patterns extracted from task
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>  └─ Memory block                → per-agent memories ranked by relevance (not alphabetical)
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>  └─ Knowledge retrieval         → ADRs, graph nodes, repository memory, session findings (KnowledgeWeight)
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>  └─ Graph expansion             → one-hop symbol neighbours for KnowledgeWeight.High agents
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>  └─ Context window filter       → per-agent history slice (ContextWindow config)
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>  └─ Session context injection   → session summary prepended (if present)
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>  └─ Artifact offloading         → tool results &gt; 40k chars stored to disk; stub replaces inline (always on)
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>  └─ Task Reminder               → task repeated at recency end when context &gt; 2 000 chars (primacy+recency sandwich)
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>History too long
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>  └─ Compaction                  → replace old turns with a summary + tool-call trace
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>  └─ Context Budget              → token-based compaction trigger per agent
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>After each run
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>  └─ Visualization               → HTML chart of cumulative input tokens per agent
+</code></pre></div>
+<p>The pipeline is the single entry point for every agent invocation across all orchestrator
+types — <code>AgentOrchestrator</code> (sequential, parallel, verifier), <code>MagenticOrchestrator</code>
+(participant agents), and <code>GraphOrchestrator</code> (node executors, parallel nodes, recovery
+agents) all call <code>AssembleAsync</code> identically. Most layers are always-on; use <code>KnowledgeWeight</code>
+on an agent's config to tune retrieval depth.</p>
+<hr />
+<h2 id="automatic-runtime-injection">Automatic runtime injection<a class="headerlink" href="#automatic-runtime-injection" title="Permanent link">&para;</a></h2>
+<p>Before any configurable layer runs, fuseraft injects two blocks into every agent's system prompt automatically — no configuration required.</p>
+<p><strong>Runtime environment</strong> — OS, CPU architecture, shell, working directory, and current date/time:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>## Runtime Environment
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>OS: Linux
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>Architecture: x64
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>Shell: /usr/bin/bash
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>Working directory: /home/dev/my-project
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>Date/time: 2026-05-27 10:30:00 -05:00 (America/Chicago)
+</code></pre></div>
+<p>This prevents agents from spending tool calls probing for environment details they can read directly from their instructions.</p>
+<p><strong><code>.gitignore</code></strong> — the project's <code>.gitignore</code> (capped at 100 lines) is read from the session working directory and injected so agents know which paths to avoid writing to without discovering the file via tool calls. Omitted silently when no <code>.gitignore</code> is present.</p>
+<hr />
+<h2 id="layer-1-context-store">Layer 1: Context Store<a class="headerlink" href="#layer-1-context-store" title="Permanent link">&para;</a></h2>
+<p>The context store pre-loads static reference files into <code>.fuseraft/context/</code> before a session
+starts. Every agent sees a compact index block at the top of its system prompt listing what is
+available, and can access the full content with <code>read_file</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># No config required — populated by CLI before running:</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1">#   fuseraft context add ~/docs/schema.sql --name db-schema</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1">#   fuseraft context add ~/specs/          --name specs</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1">#   fuseraft context add ~/docs/design.pdf --name design   # text extracted automatically</span>
+</code></pre></div>
+<p><strong>When to use:</strong> Database schemas, API specs, architecture docs, slide decks, spreadsheets,
+task briefs — anything too large to paste into the task argument but that agents should know
+exists from turn one.</p>
+<p><strong>Binary documents:</strong> When you import a <code>.pdf</code>, <code>.docx</code>, <code>.pptx</code>, or <code>.xlsx</code> file, fuseraft
+extracts the plain text at import time and stores a <code>.txt</code> file instead. Agents access it
+via <code>read_file</code> with no extra plugin. For documents found <em>during</em> a session — or when you
+need individual Excel sheets — use the <a href="../plugins/#document"><code>Document</code> plugin</a> directly.</p>
+<p>See <a href="../context-store/">Context Store</a> for the full CLI reference.</p>
+<hr />
+<h2 id="layer-2-persistent-memory-pipeline-injected">Layer 2: Persistent Memory (pipeline-injected)<a class="headerlink" href="#layer-2-persistent-memory-pipeline-injected" title="Permanent link">&para;</a></h2>
+<p>Every agent's persistent memory store is loaded and ranked by relevance before each turn.
+Memories survive between sessions — they accumulate over time, giving agents a working
+knowledge of the project.</p>
+<p>The memory block is automatically injected into the agent's system prompt by the pipeline.
+No per-agent config is required.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>MEMORY — facts recalled from prior sessions:
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>[feedback] preferred-test-runner: Use `go test -race ./...` for all test runs.
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>[fact] auth-middleware: The auth middleware was rewritten in v2.3 — do not touch the legacy layer.
+</code></pre></div>
+<p><strong>Ranking:</strong> Memories are now ranked by relevance to the current task — entries whose name,
+description, or body contain keywords or symbols extracted from the task score higher. Type
+priority (<code>feedback</code> &gt; <code>project</code> &gt; <code>user</code> &gt; <code>reference</code>) is used as a tiebreaker.
+The prompt block is capped at 8,000 characters; entries that do not fit are silently dropped.</p>
+<p><strong>Storage locations:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Context</th>
+<th>Path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>REPL sessions</td>
+<td><code>~/.fuseraft/memory/repl/</code></td>
+</tr>
+<tr>
+<td>Orchestration agents</td>
+<td><code>~/.fuseraft/memory/agents/{AgentName}/</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Memory scoping:</strong> In a project directory that has <code>.fuseraft/</code>, only memories saved in that
+directory are loaded. Directories without <code>.fuseraft/</code> fall back to all global memories.</p>
+<p><strong>REPL:</strong> Memory is always active in the REPL — no config flag needed. Memories are extracted
+automatically at the end of each session and scoped to the working directory via
+<code>~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json</code>. Use <code>/memory</code> commands to inspect or delete them.</p>
+<p>See <a href="../configuration/#memory">Configuration — Memory</a> for the full field reference.</p>
+<hr />
+<h2 id="layer-2b-memory-provider-per-turn">Layer 2b: Memory provider (per-turn)<a class="headerlink" href="#layer-2b-memory-provider-per-turn" title="Permanent link">&para;</a></h2>
+<p>The <code>Memory:</code> top-level config key activates a live provider that runs pre- and post-turn hooks around every agent turn. The provider can persist the accumulated history after each turn and supply additional context from external sources.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">Memory</span><span class="p">:</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">Provider</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local</span><span class="w">    </span><span class="c1"># or "webhook"</span>
+</code></pre></div>
+<p>Two built-in providers are available:</p>
+<ul>
+<li><strong><code>local</code></strong> — refreshes the file-backed memory store every turn. Useful when another process is writing new memories during the session.</li>
+<li><strong><code>webhook</code></strong> — delegates load and save to an HTTP endpoint you control (vector store, knowledge graph, managed memory service).</li>
+</ul>
+<p>See <a href="../configuration/#pluggable-memory-provider">Configuration — Pluggable memory provider</a> for the full reference.</p>
+<hr />
+<h2 id="layer-3-contextwindow-per-agent-history-filter">Layer 3: ContextWindow (per-agent history filter)<a class="headerlink" href="#layer-3-contextwindow-per-agent-history-filter" title="Permanent link">&para;</a></h2>
+<p>By default every agent receives the full accumulated conversation history, including tool-call
+frames and tool-result messages from all prior turns. In a long multi-agent session this can
+reach hundreds of thousands of tokens — most of it irrelevant to late-stage agents.</p>
+<p><code>ContextWindow</code> lets each agent declare a lighter view. The shared history is never mutated;
+only the slice passed to that agent's turn is affected.</p>
+<h3 id="filters-and-their-order">Filters and their order<a class="headerlink" href="#filters-and-their-order" title="Permanent link">&para;</a></h3>
+<p>Filters are applied in this order every turn:</p>
+<ol>
+<li><strong>TextOnly / ExcludeAgents</strong> — strip tool noise or specific agents' output</li>
+<li><strong>MaxTurnAge</strong> — keep only messages from the last N agent turns (semantic cut)</li>
+<li><strong>MaxTailMessages</strong> — hard cap: keep only the last N messages (raw count)</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">Agents</span><span class="p">:</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Reviewer</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">ContextWindow</span><span class="p">:</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">      </span><span class="nt">TextOnly</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">          </span><span class="c1"># strip all tool-call frames and tool results</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">      </span><span class="nt">ExcludeAgents</span><span class="p">:</span><span class="w">          </span><span class="c1"># also strip all output from these agents</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Tester</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">      </span><span class="nt">MaxTurnAge</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span><span class="w">           </span><span class="c1"># only keep messages from the last 5 assistant turns</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">      </span><span class="nt">MaxTailMessages</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">40</span><span class="w">     </span><span class="c1"># hard cap after the above filters</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">      </span><span class="nt">ContextCapFraction</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.8</span><span class="w"> </span><span class="c1"># emit context_cap_warning when at 80% of MaxTailMessages</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">      </span><span class="nt">MaxToolResultChars</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8000</span><span class="w">  </span><span class="c1"># truncate individual tool results in replayed history</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">      </span><span class="nt">ToolResultCharOverrides</span><span class="p">:</span><span class="w">  </span><span class="c1"># raise the cap for specific tools</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">        </span><span class="nt">search_content</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20000</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="w">        </span><span class="nt">grep_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20000</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="w">      </span><span class="nt">MaxReplayChars</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4000</span><span class="w">    </span><span class="c1"># truncate verbose assistant messages in replayed history</span>
+</code></pre></div>
+<h3 id="textonly">TextOnly<a class="headerlink" href="#textonly" title="Permanent link">&para;</a></h3>
+<p>Strips all tool-call frames (assistant messages containing only a function-call request) and
+all tool-result messages from the history slice. Text-bearing assistant messages and all user
+messages are kept.</p>
+<p><strong>This is the primary lever for context reduction.</strong> A Reviewer that independently re-reads
+files and re-runs commands gains nothing from seeing the hundreds of tool results produced by
+the Developer — stripping them can reduce input tokens by 90%+ in typical sessions.</p>
+<p>When <code>ExcludeAgents</code> is set, tool-result messages are stripped automatically even when
+<code>TextOnly</code> is false. Tool results are not attributed to a specific agent; leaving them without
+their corresponding call frames produces a malformed context with orphaned result IDs.</p>
+<h3 id="excludeagents">ExcludeAgents<a class="headerlink" href="#excludeagents" title="Permanent link">&para;</a></h3>
+<p>Names of agents whose messages should be excluded entirely — both text-bearing replies and
+tool-call frames.</p>
+<h3 id="maxturnage">MaxTurnAge<a class="headerlink" href="#maxturnage" title="Permanent link">&para;</a></h3>
+<p>Keeps only messages from the last N <em>agent turns</em>, where each turn ends with an assistant
+reply. Unlike <code>MaxTailMessages</code> (a raw message count), <code>MaxTurnAge</code> is semantic: it counts
+backward from the end of history and discards everything before the cut-point.</p>
+<p>Use this to discard early-session context from phases or agents no longer relevant to the
+current work — without needing to know the exact message count.</p>
+<h3 id="maxtailmessages">MaxTailMessages<a class="headerlink" href="#maxtailmessages" title="Permanent link">&para;</a></h3>
+<p>Hard cap applied after the other filters. When the filtered list still exceeds this count,
+the oldest messages are dropped. Set <code>ContextCapFraction</code> to receive a <code>context_cap_warning</code>
+event as an early signal before the hard cap is reached.</p>
+<h3 id="replay-truncation-maxreplaychars">Replay truncation (<code>MaxReplayChars</code>)<a class="headerlink" href="#replay-truncation-maxreplaychars" title="Permanent link">&para;</a></h3>
+<p>Agents sometimes produce verbose stream-of-consciousness output (3–5k tokens). When that text
+is replayed verbatim in every subsequent turn, compaction summaries grow each cycle and input
+tokens balloon. fuseraft truncates verbose non-summary assistant messages to 2,000 characters
+by default when replaying them; set <code>MaxReplayChars</code> to override this cap per agent.
+Compaction summaries are never truncated regardless of this setting.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">Agents</span><span class="p">:</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Developer</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="nt">ContextWindow</span><span class="p">:</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">      </span><span class="nt">MaxReplayChars</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4000</span><span class="w">   </span><span class="c1"># truncate replayed assistant messages to 4 000 chars</span>
+</code></pre></div>
+<p>Default: <code>0</code> (uses the global 2,000-character fallback).</p>
+<h3 id="tool-result-truncation-maxtoolresultchars">Tool-result truncation (<code>MaxToolResultChars</code>)<a class="headerlink" href="#tool-result-truncation-maxtoolresultchars" title="Permanent link">&para;</a></h3>
+<p>A large tool result — for example, a <code>read_file</code> on a 200 KB source file — is replayed
+verbatim into every subsequent agent turn, compounding context growth each cycle. Set
+<code>MaxToolResultChars</code> to truncate <code>FunctionResultContent</code> strings in the replayed history
+slice. A suffix noting the omitted character count is appended so agents know the result
+was cut.</p>
+<p>Unlike <code>TextOnly</code> (which drops tool messages entirely), this keeps the result visible
+but bounded:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">Agents</span><span class="p">:</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Developer</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="nt">ContextWindow</span><span class="p">:</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">      </span><span class="nt">MaxToolResultChars</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8000</span><span class="w">   </span><span class="c1"># truncate tool results in replayed history to 8 000 chars</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">      </span><span class="nt">ToolResultCharOverrides</span><span class="p">:</span><span class="w">   </span><span class="c1"># per-tool overrides (search tools can afford a higher cap)</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">        </span><span class="nt">search_content</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20000</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">        </span><span class="nt">grep_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20000</span>
+</code></pre></div>
+<p>Default: <code>0</code> (no truncation). <code>ToolResultCharOverrides</code> is only meaningful when <code>MaxToolResultChars</code> is also set; a value of <code>0</code> in the overrides map disables truncation for that specific tool entirely.</p>
+<p><strong>Consumed-read optimisation:</strong> fuseraft distinguishes between <code>read_file</code> results that
+the agent has already acted on and those that are still load-bearing:</p>
+<ul>
+<li><strong>Consumed read</strong> — a <code>write_file</code> or <code>patch_file</code> to the same path appears later in
+  the history. The content is stale (the file has since been rewritten). These are capped
+  at 500 characters regardless of <code>MaxToolResultChars</code>, with a stub noting that the file
+  was subsequently modified and can be re-read if needed.</li>
+<li><strong>Unconsumed read</strong> — no downstream write to the same path exists. The model may still
+  need this content to plan its next action, so it is left at the full <code>MaxToolResultChars</code>
+  limit.</li>
+<li><strong>All other tool results</strong> (shell output, grep results, etc.) are truncated uniformly
+  at <code>MaxToolResultChars</code>.</li>
+</ul>
+<p>This means a file that was read and then immediately patched stops consuming context across
+all subsequent turns, while a file that was read but not yet written remains fully visible.</p>
+<hr />
+<h2 id="handoffcontext-targeted-transition-injection">HandoffContext (targeted transition injection)<a class="headerlink" href="#handoffcontext-targeted-transition-injection" title="Permanent link">&para;</a></h2>
+<p>Declared on a <code>TransitionConfig</code> in the state machine. When a transition fires, the orchestrator reads from durable disk artifacts and injects a compact block into shared history before the receiving agent's first turn. Agents that don't use a <code>Context</code> spec see the injected block as part of the conversation history.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">Transitions</span><span class="p">:</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">To</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Testing</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="nt">Signal</span><span class="p">:</span><span class="w"> </span><span class="s">"HANDOFF</span><span class="nv"> </span><span class="s">TO</span><span class="nv"> </span><span class="s">TESTER"</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span><span class="nt">Contract</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ImplementationComplete</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">    </span><span class="nt">HandoffContext</span><span class="p">:</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">session_context</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">changes_recent</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">brief_field:test_targets</span>
+</code></pre></div>
+<p><strong>Supported source types</strong> (same as <code>Context</code> spec, minus <code>own_history</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>session_context</code></td>
+<td>Handoff summary from <code>session_context_write</code></td>
+</tr>
+<tr>
+<td><code>changes_recent[:N]</code></td>
+<td>Last N entries from <code>changes.json</code> (default: all recent)</td>
+</tr>
+<tr>
+<td><code>brief_field:FIELD</code></td>
+<td>A named field from <code>brief.json</code></td>
+</tr>
+<tr>
+<td><code>file:PATH</code></td>
+<td>Raw contents of an artifact file</td>
+</tr>
+</tbody>
+</table>
+<p><code>own_history</code> is not supported in <code>HandoffContext</code>. Use the <code>Context</code> spec on the receiving agent instead.</p>
+<p><strong>How it differs from <code>Context</code> spec:</strong> <code>HandoffContext</code> injects content <em>into shared history</em> so any agent (including those without a <code>Context</code> spec) sees it in subsequent turns. <code>Context</code> spec is a per-agent read at invocation time and does not touch shared history at all.</p>
+<hr />
+<h2 id="layer-3a-context-spec-artifact-first-assembly">Layer 3a: Context spec (artifact-first assembly)<a class="headerlink" href="#layer-3a-context-spec-artifact-first-assembly" title="Permanent link">&para;</a></h2>
+<p>When <code>Context:</code> is declared on an agent, the orchestrator assembles that agent's context from disk artifacts instead of filtering or replaying the shared transcript. The agent receives only the declared sources plus its own prior turns — no Planner analysis, no Developer tool traces, nothing from other agents.</p>
+<blockquote>
+<p><strong>Recommended for judgment-independent roles.</strong> When every agent shares the same growing
+transcript (Layer 3), a downstream agent can't distinguish a verified fact from an earlier
+agent's unverified claim — the conversation itself becomes evidence, and claims compound
+into hallucinations several turns later. <code>Context:</code> spec is the fix: it drives assembly from
+durable artifacts (<code>brief.json</code>, <code>changes.json</code>, the evidence graph) instead of replayed
+chat, so an agent's information diet is exactly what someone deliberately packaged for it.
+Treat it as the default for roles that render an independent verdict — Reviewer, Tester,
+Critic, Auditor — and reserve full shared-history replay (<code>ContextWindow</code>, below) for
+collaborative/continuity roles (Planner, Developer mid-phase) and for rapid prototyping,
+where you don't yet know which artifacts a new agent needs. The <code>swe</code>, <code>greenfield</code>,
+<code>audit</code>, <code>research</code>, <code>brownfield</code>, and <code>devops</code> templates generated by <code>fuseraft init</code>
+apply <code>Context:</code> to their Reviewer/Tester/Critic/Auditor/Verifier-equivalent agents by
+default — use those as a starting point rather than designing a source list from scratch.</p>
+<p><strong>Exception:</strong> an agent whose job is specifically to catch a mismatch between what other
+agents <em>claimed</em> and what the change log / execution state actually shows (e.g. an
+evidence-auditor <code>Verifier</code> that cross-checks "claimed success without evidence" patterns)
+needs to see the claims to audit them — isolating it via <code>Context:</code> would remove the very
+signal it exists to check. The <code>swe</code> template's <code>Verifier</code> is intentionally left on shared
+history for this reason.</p>
+<p>A declared source resolving to no content is itself a signal worth watching, not just a
+silent gap — see <code>empty_sources</code> in the <a href="../configuration/#events"><code>context_assembly</code> event payload</a> below.</p>
+</blockquote>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">Agents</span><span class="p">:</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Tester</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">Context</span><span class="p">:</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">session_context</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">changes_recent:5</span><span class="w">        </span><span class="c1"># last 5 change-log entries</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">brief_field:test_targets</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">brief_field:build_command</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">own_history:4</span><span class="w">           </span><span class="c1"># agent's own last 4 turns, text-only, char-bounded</span>
+</code></pre></div>
+<p><strong><code>ContextSource</code> fields:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Source</code></td>
+<td>string</td>
+<td>—</td>
+<td>Required. One of: <code>session_context</code>, <code>changes_recent[:N]</code>, <code>brief_field:FIELD</code>, <code>file:PATH</code>, <code>own_history[:N]</code></td>
+</tr>
+<tr>
+<td><code>MaxChars</code></td>
+<td>int</td>
+<td>4000 (artifacts) / 8000 (own_history)</td>
+<td>Per-source character cap</td>
+</tr>
+<tr>
+<td><code>Label</code></td>
+<td>string</td>
+<td>derived from source type</td>
+<td>Section header override</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>own_history</code> semantics:</strong> text-only (tool-call frames and tool results stripped), char-bounded to <code>MaxChars</code>, oldest turns dropped first if the cap is reached. If the last surviving turn is still over the cap, it is truncated at the cap boundary.</p>
+<p><strong>Architectural shift:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>What the agent receives</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Without <code>Context</code> spec</td>
+<td><code>filtered_history</code> (via <code>ContextWindow</code>) + optional <code>HandoffContext</code> injection</td>
+</tr>
+<tr>
+<td>With <code>Context</code> spec</td>
+<td><code>task</code> + <code>own_history</code> + assembled artifact block</td>
+</tr>
+</tbody>
+</table>
+<p>Token cost with a <code>Context</code> spec is O(relevant artifacts + own recent work) rather than O(session length).</p>
+<p><strong><code>ContextWindow</code> interaction:</strong> when <code>Context:</code> is declared, <code>ContextWindow:</code> is ignored for that agent. Shared history is still written after each turn so routing and termination strategies work normally; only what the model receives changes.</p>
+<hr />
+<h2 id="layer-4-compaction">Layer 4: Compaction<a class="headerlink" href="#layer-4-compaction" title="Permanent link">&para;</a></h2>
+<p>When conversation history grows long enough to approach a model's context window, compaction
+fires. It replaces the oldest turns with a single context message that agents treat as
+background, then resumes from the retained tail.</p>
+<h3 id="trigger">Trigger<a class="headerlink" href="#trigger" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">Compaction</span><span class="p">:</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="nt">TriggerTurnCount</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span><span class="w">   </span><span class="c1"># fire when assistant-turn count reaches this</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span><span class="nt">KeepRecentTurns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span><span class="w">    </span><span class="c1"># keep this many turns verbatim; compact the rest</span>
+</code></pre></div>
+<p>Compaction fires in three situations:
+- Before a session stream starts, when resuming a checkpoint already over the threshold.
+- Mid-session, after each checkpoint save, once the live history crosses the threshold.
+- On demand, when an agent calls <code>compact_conversation</code> via the <a href="../plugins/#compaction"><code>Compaction</code> plugin</a>.</p>
+<p><code>TriggerTurnCount</code> must be greater than <code>KeepRecentTurns</code>.</p>
+<h3 id="modes">Modes<a class="headerlink" href="#modes" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>How context is reconstructed</th>
+<th>LLM call?</th>
+<th>Requirements</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>llm</code></td>
+<td>LLM summarizes the compacted turns</td>
+<td>Yes</td>
+<td>A model</td>
+</tr>
+<tr>
+<td><code>intent</code></td>
+<td>Deterministic <code>✓</code>/<code>✗</code>/<code>⧖</code> per tool call from <code>intents.json</code></td>
+<td>No</td>
+<td><code>ChangeTracking</code></td>
+</tr>
+<tr>
+<td><code>lossless</code></td>
+<td>Evidence graph + contract status + state machine position</td>
+<td>No</td>
+<td><code>statemachine</code> strategy + <code>EvidenceStore</code></td>
+</tr>
+<tr>
+<td><code>hybrid</code></td>
+<td>Lossless reconstruction prepended before the LLM summary</td>
+<td>Yes</td>
+<td><code>statemachine</code> strategy + <code>EvidenceStore</code></td>
+</tr>
+<tr>
+<td><code>window</code></td>
+<td>Oldest user+assistant pairs dropped until within <code>TokenBudget</code></td>
+<td>No</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>intent</code> is the recommended mode</strong> for most sessions when <code>ChangeTracking</code> is configured.
+It requires no state machine and produces a deterministic record of every tool call:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>[INTENT-DERIVED RECONSTRUCTION — covers turns 1–20]
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>OPERATIONS (chronological):
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>  ✓ write_file → "src/api/users.go" (turn 3, Developer)
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>  ✗ patch_file → "src/api/auth.go" — oldText not found… (turn 4, Developer)
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>  ✓ shell_run → "go test ./..." (turn 5, Tester)
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>RESUMPTION NOTE: History compacted from intent log — deterministic ground truth.
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>Do not re-execute operations marked ✓ (applied).
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>Operations marked ✗ (failed) should be retried if the task requires them.
+</code></pre></div>
+<p><strong><code>lossless</code> is the recommended mode</strong> for <code>statemachine</code> sessions with an <code>EvidenceStore</code>.
+Instead of summarizing the conversation, it reads disk state directly — state machine position,
+contract pass/fail, evidence items — and injects it as ground truth. No hallucination is
+possible because no LLM generates the summary.</p>
+<p><strong><code>window</code> mode</strong> trades context continuity for simplicity. No summary is injected; the oldest
+turns are silently dropped. Useful for exploratory sessions where older context genuinely
+doesn't matter, or when you want no compaction LLM cost at all.</p>
+<h3 id="pinned-summaries">Pinned summaries<a class="headerlink" href="#pinned-summaries" title="Permanent link">&para;</a></h3>
+<p>Prior compaction summaries (<code>IsCompactionSummary</code>) are pinned and never dropped by <code>window</code>
+mode. This preserves the head of the conversation — each compaction cycle adds a new summary
+at the front while the window trims from behind it.</p>
+<h3 id="compaction-model">Compaction model<a class="headerlink" href="#compaction-model" title="Permanent link">&para;</a></h3>
+<p>By default, <code>llm</code> and <code>hybrid</code> modes use the first agent's model to generate the summary.
+Override with <code>Compaction.Model</code> to use a cheaper model for compaction:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">Compaction</span><span class="p">:</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="nt">TriggerTurnCount</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">  </span><span class="nt">KeepRecentTurns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">  </span><span class="nt">Mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">hybrid</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">  </span><span class="nt">Model</span><span class="p">:</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">    </span><span class="nt">ModelId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gpt-4o-mini</span>
+</code></pre></div>
+<h3 id="enriching-summaries">Enriching summaries<a class="headerlink" href="#enriching-summaries" title="Permanent link">&para;</a></h3>
+<p>Several structured context blocks are automatically prepended before the LLM summary text.
+When all are enabled, they appear in this order: brief snapshot, symbol graph, objectives,
+reasoning excerpts, exploration history.</p>
+<p><strong><code>[BRIEF SNAPSHOT]</code></strong> — always prepended when <code>Validation.BriefPath</code> is configured and the
+brief file exists. Embeds the brief's <code>goal</code>, <code>files_to_change</code>, <code>verify_command</code>, and
+<code>execution_checklist</code> directly in every compaction summary. With the brief content in the
+summary, agents resuming after compaction do not need to re-read <code>brief.json</code> — the resumption
+note's step (1) becomes a no-op. No configuration flag: the block is present whenever
+<code>Validation.BriefPath</code> resolves to an existing file.</p>
+<p><strong><code>IncludeReasoning</code></strong> (default <code>true</code>) — prepends a <code>[REASONING EXCERPTS]</code> block containing
+the model's thinking for each compacted turn (truncated to ~500 tokens per turn). Useful when
+the <em>why</em> behind prior decisions matters as much as the <em>what</em>. Requires <code>Events</code> to be
+configured (reasoning excerpts are read from the session events log). When the events log is
+absent or contains no reasoning events the block is omitted silently.</p>
+<p><strong><code>IncludeSymbolGraph</code></strong> (default <code>true</code>) — prepends a <code>[SYMBOL DEPENDENCY GRAPH]</code> block
+listing every <code>SymbolDefinition</code> and <code>SymbolReference</code> node in the evidence store for files
+written during the session. Gives agents an explicit map of what symbols were in scope during
+the compacted turns. Requires <code>EvidenceStore</code> and <code>ChangeTracking</code> to be configured. When no
+evidence store is wired the block is omitted silently.</p>
+<p><strong><code>IncludeExploration</code></strong> (default <code>true</code>) — prepends an <code>[EXPLORATION HISTORY]</code> block listing
+files read, files grepped, and shell searches performed before compaction. When the session
+events log has no reads yet (e.g. on the first compaction), the block falls back to
+<code>read_cache.json</code> (written synchronously on every <code>read_file</code> call) so the history is never
+empty due to event-log timing. Omitted silently when both sources are empty.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nt">Compaction</span><span class="p">:</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="nt">TriggerTurnCount</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">40</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span><span class="nt">KeepRecentTurns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">  </span><span class="nt">Mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">hybrid</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">  </span><span class="nt">IncludeReasoning</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">    </span><span class="c1"># default; set to false to suppress</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">  </span><span class="nt">IncludeSymbolGraph</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">  </span><span class="c1"># default; set to false to suppress</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">  </span><span class="nt">IncludeExploration</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">  </span><span class="c1"># default; set to false to suppress</span>
+</code></pre></div>
+<p><strong>Conditional resumption note</strong> — the <code>RESUMPTION NOTE</code> appended to every compaction summary
+instructs agents to re-read <code>brief.json</code> only when the brief's <code>goal</code> and <code>files_to_change</code>
+are not already visible in the summary. When the <code>[BRIEF SNAPSHOT]</code> block is present (i.e.
+<code>Validation.BriefPath</code> is configured), agents skip the re-read automatically.</p>
+<h3 id="history-pre-pruning">History pre-pruning<a class="headerlink" href="#history-pre-pruning" title="Permanent link">&para;</a></h3>
+<p>Before passing conversation history to the LLM summarizer, fuseraft truncates any single
+message whose content exceeds <code>MaxCharsPerHistoryMessage</code> (default 8 000 characters, ≈2 000
+tokens). Long messages receive a <code>[TRUNCATED — N chars total]</code> suffix, and any tool calls
+recorded for that turn are appended as a compact one-line list so the summarizer still knows
+what operations were attempted.</p>
+<p>This prevents a single verbose agent turn — a large shell output or a file read embedded in the
+reply — from dominating the summary prompt and inflating LLM cost.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nt">Compaction</span><span class="p">:</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span><span class="nt">TriggerTurnCount</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">  </span><span class="nt">KeepRecentTurns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">  </span><span class="nt">MaxCharsPerHistoryMessage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4000</span><span class="w">   </span><span class="c1"># stricter; ~1 000 tokens per message max</span>
+</code></pre></div>
+<p>Set to <code>0</code> to disable truncation and restore the previous behaviour (full content verbatim).</p>
+<h3 id="anti-thrash-protection">Anti-thrash protection<a class="headerlink" href="#anti-thrash-protection" title="Permanent link">&para;</a></h3>
+<p>If repeated compactions save very little — for example, a conversation that is near the trigger
+threshold but whose LLM summary is nearly as long as the history it replaced — fuseraft
+suppresses further compaction until the history grows meaningfully.</p>
+<p>The guard tracks the savings ratio of the last <code>AntiThrashWindow</code> compactions (default 10). If
+every entry in that window is below <code>AntiThrashMinSavingsRatio</code> (default 10%), <code>ShouldCompact</code>
+returns <code>false</code>. The guard resets automatically as new turns extend the conversation past the
+trigger again.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nt">Compaction</span><span class="p">:</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">  </span><span class="nt">TriggerTurnCount</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">  </span><span class="nt">KeepRecentTurns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">  </span><span class="nt">AntiThrashMinSavingsRatio</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.15</span><span class="w">   </span><span class="c1"># suppress if saving less than 15% (default: 0.10)</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">  </span><span class="nt">AntiThrashWindow</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4</span><span class="w">               </span><span class="c1"># look at last 4 compactions (default: 10)</span>
+</code></pre></div>
+<p>Set either field to <code>0</code> to disable the guard entirely.</p>
+<h3 id="failure-resilience">Failure resilience<a class="headerlink" href="#failure-resilience" title="Permanent link">&para;</a></h3>
+<p>When the LLM summary call fails (network error, rate limit, model timeout), fuseraft injects a
+<code>[COMPACTION FAILED]</code> marker message that tells agents the history for that range could not be
+preserved, and instructs them to read disk state directly rather than relying on memory. The
+session then continues from the retained tail.</p>
+<p>For <code>hybrid</code> mode specifically, if the LLM call fails the session falls back to the lossless
+reconstruction alone — still useful, just without the narrative summary layer.</p>
+<p>If compaction itself fails for any other reason (infrastructure error, serialization failure),
+the session terminates gracefully with a crash dump written to <code>~/.fuseraft/crashdumps/</code> and a
+resume hint printed to the terminal. The checkpoint saved before compaction began is intact and
+can be resumed.</p>
+<h3 id="change-log-grounding">Change log grounding<a class="headerlink" href="#change-log-grounding" title="Permanent link">&para;</a></h3>
+<p>When <code>ChangeTracking</code> or <code>Validation.ChangeLogPath</code> is configured, <code>llm</code> and <code>hybrid</code>
+compactors read <code>changes.json</code> at compaction time and inject it into the summary prompt as
+authoritative ground truth. Agent success claims are overridden by what <code>changes.json</code> actually
+records — exit codes and file writes are facts; assistant self-reports are not.</p>
+<h3 id="cost-accounting">Cost accounting<a class="headerlink" href="#cost-accounting" title="Permanent link">&para;</a></h3>
+<p>The summary message's cumulative cost includes all the turns it replaced. Budget tracking
+remains exact across compaction boundaries. <code>intent</code>, <code>lossless</code>, and <code>window</code> modes incur
+no LLM cost at compaction time.</p>
+<hr />
+<h2 id="layer-5-context-budget-per-agent-token-trigger">Layer 5: Context Budget (per-agent token trigger)<a class="headerlink" href="#layer-5-context-budget-per-agent-token-trigger" title="Permanent link">&para;</a></h2>
+<p>While Layer 4 Compaction fires on <em>turn count</em>, the Context Budget fires on <em>cumulative input tokens</em> — a more direct measure of context pressure. Each agent's input token consumption is tracked independently across turns, and two thresholds can be configured:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nt">ContextBudget</span><span class="p">:</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span><span class="nt">WarnAt</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">80000</span><span class="w">      </span><span class="c1"># warn when any agent exceeds this</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">  </span><span class="nt">CutoverAt</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">120000</span><span class="w">  </span><span class="c1"># compact when any agent exceeds this</span>
+</code></pre></div>
+<p><strong>Why input tokens?</strong> Turn count is a coarse proxy — a single tool-heavy turn can consume as many tokens as ten brief turns. Tracking cumulative input tokens catches context rot directly, regardless of turn count.</p>
+<p><strong>Warn phase (<code>WarnAt</code>):</strong> when a single agent's cumulative input tokens since the last compaction reach <code>WarnAt</code>, a yellow warning is printed to the console and a <code>context_budget_warn</code> event is emitted. This is a signal that compaction is coming soon. The warning fires at most once per agent per compaction cycle so it doesn't spam.</p>
+<p><strong>Cutover phase (<code>CutoverAt</code>):</strong> when a single agent's cumulative input tokens reach <code>CutoverAt</code>, compaction triggers immediately (same as if turn-count compaction had fired). The per-agent counters reset after compaction, so the next context window starts with a fresh budget — allowing the session to run indefinitely.</p>
+<p><strong>Relationship to turn-count compaction:</strong> both triggers are active simultaneously. Whichever fires first wins. If turn-count compaction fires, the context budget counters reset too. The two mechanisms complement each other: turn count protects against verbose-but-sparse sessions; token budget protects against dense, token-heavy turns.</p>
+<p><strong>Requires <code>Compaction</code>:</strong> <code>CutoverAt</code> cannot fire without a configured compactor. <code>fuseraft validate</code> reports an error if <code>CutoverAt &gt; 0</code> without a <code>Compaction</code> section.</p>
+<p>See <a href="../configuration/#context-budget">Configuration — Context budget</a> for the full field reference.</p>
+<hr />
+<h2 id="in-turn-tool-result-sliding-window">In-turn tool-result sliding window<a class="headerlink" href="#in-turn-tool-result-sliding-window" title="Permanent link">&para;</a></h2>
+<p>Compaction and Context Budget operate across turns. The in-turn sliding window operates
+<em>within</em> a single agent turn — before each inner LLM call in the tool-calling loop.</p>
+<p>Without a cap, N sequential tool calls cost O(N²) cumulative tokens across the turn because
+each iteration resends all prior tool results. The sliding window keeps this cost at O(window)
+by replacing every tool result older than the last <code>MaxInTurnToolPairs</code> with a compact
+placeholder before the next LLM call:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nt">Agents</span><span class="p">:</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Developer</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">    </span><span class="nt">MaxInTurnToolPairs</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">12</span><span class="w">   </span><span class="c1"># keep only the last 12 tool call/result pairs in full</span>
+</code></pre></div>
+<p><strong>Deterministic vs. budget-reactive:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>When it fires</th>
+<th>Guarantee</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MaxInTurnToolPairs</code></td>
+<td>Every inner LLM call, unconditionally</td>
+<td>O(N) tool-result footprint always</td>
+</tr>
+<tr>
+<td><code>MaxInTurnContextTokens</code></td>
+<td>Only when total in-turn chars exceed the budget</td>
+<td>Fires only after the budget is exceeded</td>
+</tr>
+</tbody>
+</table>
+<p>Use <code>MaxInTurnToolPairs</code> when you want a hard bound regardless of result sizes. Use
+<code>MaxInTurnContextTokens</code> when result sizes vary and you want to preserve more context for
+turns with small results. Both can be set simultaneously — the sliding window runs first.</p>
+<p><strong>Replaced results:</strong> replaced pairs become <code>[result omitted — sliding window]</code>. The
+<code>CallId</code> on each <code>FunctionResultContent</code> is preserved so the conversation structure stays
+valid for strict providers. The agent can re-read a file or re-run a command if it needs
+the full content again.</p>
+<p><strong>Recommended values:</strong> 8–16 for high-volume action agents (Developer, Tester, Operator).</p>
+<hr />
+<h3 id="token-budget-based-tool-result-window-maxtoolresulttokens-inturntoolwindow">Token-budget-based tool-result window (<code>MaxToolResultTokens</code> / <code>InTurnToolWindow</code>)<a class="headerlink" href="#token-budget-based-tool-result-window-maxtoolresulttokens-inturntoolwindow" title="Permanent link">&para;</a></h3>
+<p>A complementary mechanism in <code>ContextBudget</code> applies a token-budget cap across all tool results in the context slice sent to the model on any single invocation — not just per agent-config:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="nt">ContextBudget</span><span class="p">:</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="w">  </span><span class="nt">MaxToolResultTokens</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">80000</span><span class="w">   </span><span class="c1"># evict oldest tool results once total exceeds this</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w">  </span><span class="nt">InTurnToolWindow</span><span class="p">:</span><span class="w">    </span><span class="l l-Scalar l-Scalar-Plain">20</span><span class="w">      </span><span class="c1"># always retain at least the last 20 results verbatim</span>
+</code></pre></div>
+<p>When the cumulative estimated token cost of all tool-result messages in the context slice exceeds <code>MaxToolResultTokens</code>, the oldest results beyond the last <code>InTurnToolWindow</code> are replaced with enriched tombstones that include the tool name, a key argument label, and up to 300 characters of the original content as a preview:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>[tool result — evicted: read_file(src/LargeService.cs). Preview: "using System;…". Re-read with targeted ranges if needed.]
+</code></pre></div>
+<p>When evictions occur, a <code>[Context Manifest]</code> message is also appended at the end of the context slice listing active tool results still in context alongside the superseded (evicted) ones, so the agent knows which reads are still available and which must be re-issued with targeted ranges.</p>
+<p><strong>Key difference from <code>MaxInTurnToolPairs</code>:</strong> <code>MaxInTurnToolPairs</code> is an agent-level count-based cap applied unconditionally before every inner LLM call. <code>MaxToolResultTokens</code> is a session-level token-budget cap applied at the <code>ContextBudget</code> layer — it only fires when the total tool-result token footprint actually exceeds the threshold, preserving full context for turns with few or small results.</p>
+<p><strong>Audit trail:</strong> the full tool results remain in the shared conversation history and on-disk artifacts. Only the slice passed to the model is trimmed — compaction and session replay are unaffected.</p>
+<p><strong>Recommended values:</strong> set <code>MaxToolResultTokens</code> to 50–80% of your model's context window and <code>InTurnToolWindow</code> to 15–25 for action agents that call many tools per turn.</p>
+<hr />
+<h2 id="tool-result-artifact-offloading">Tool-result artifact offloading<a class="headerlink" href="#tool-result-artifact-offloading" title="Permanent link">&para;</a></h2>
+<p>When a tool returns a result that exceeds 40,000 characters (~10k tokens), fuseraft offloads the full content to disk and replaces the inline result with a compact reference stub before it enters the conversation history.</p>
+<p><strong>Why this matters:</strong> a large result injected once is replayed on every subsequent agent turn. In a long session with many tool calls, that compounds quadratically. Offloading prevents the payload from ever landing in history — the stub is what all future turns replay, not the raw content.</p>
+<p><strong>What the agent sees instead of the full result:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>[result offloaded — 52,000 chars stored to artifact store]
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>Tool: read_file | path=src/LargeService.cs
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>Artifact: a3f9c20b1d7e
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>Use targeted tools (e.g. read_file with startLine/maxLines, or grep_file) for specific sections.
+</code></pre></div>
+<p>The stub is actionable: it tells the agent what happened, which tool produced the result, and how to access specific sections without pulling the full payload back into context.</p>
+<p><strong>Storage:</strong> the full content is written to <code>~/.fuseraft/sessions/{project_slug}/{session_id}/tool-results/{id}.json</code>. Nothing is lost — the artifact is available for inspection or future retrieval.</p>
+<p><strong>Coverage:</strong> applies to all tools in both <code>fuseraft run</code> sessions and <code>fuseraft repl</code> sessions. No configuration is required.</p>
+<p><strong>Threshold:</strong> 40,000 characters (approximately 10,000 tokens at 4 chars/token). Results below this threshold are passed through unchanged.</p>
+<p><strong>Relationship to <code>MaxToolResultChars</code>:</strong> these two mechanisms are complementary and both may be active simultaneously. Artifact offloading fires at production time — large results never enter history. <code>MaxToolResultChars</code> fires at replay time — medium-sized results already in history are truncated before being sent to the model. Together they form a two-stage defence against context inflation from tool outputs.</p>
+<hr />
+<h2 id="session-read-cache-cross-turn-file-deduplication">Session read cache (cross-turn file deduplication)<a class="headerlink" href="#session-read-cache-cross-turn-file-deduplication" title="Permanent link">&para;</a></h2>
+<p>Every <code>fuseraft run</code> session maintains a per-session read cache keyed by resolved file path, validated by mtime + file size, and persisted to <code>read_cache.json</code> in the session directory. Its purpose is to prevent agents from re-injecting full file content into the conversation on every turn.</p>
+<p><strong>How it works:</strong></p>
+<p>When an agent calls <code>read_file</code> without <code>startLine</code>/<code>maxLines</code>:</p>
+<ol>
+<li>The cache checks whether the file has changed since it was last read or written this session.</li>
+<li>If unchanged, the tool returns a hint message instead of the full content:</li>
+<li><strong>Write-primed entry</strong> (<code>ReadCount = 0</code>): the file was written via <code>write_file</code> this session and not yet read. The hint says the content is in history via the <code>write_file</code> call.</li>
+<li><strong>Read-primed entry</strong> (<code>ReadCount ≥ 1</code>): the file was previously read this session. The hint says the content is in history from that earlier read, and reports how many times and how long ago.</li>
+<li>Both hints include the caveat "(unless compacted away)" so agents know to force a re-read with <code>startLine</code>/<code>maxLines</code> if the turn is post-compaction.</li>
+</ol>
+<p><strong>Write priming (<code>write_file</code>):</strong></p>
+<p>When <code>write_file</code> succeeds, the session cache is primed with <code>ReadCount: 0</code> rather than invalidated. This prevents the next cross-turn read of an unchanged written file from re-injecting its full content into context — the agent already has the content from the write call itself.</p>
+<p>Within the same turn, the cache hint is suppressed so the agent can immediately read back and verify what it just wrote. The suppression is cleared at the next <code>BeginTurn()</code>.</p>
+<p><strong><code>patch_file</code> is not write-primed:</strong> <code>patch_file</code> gives the agent a delta, not full content, so the patched file's cache entry is invalidated rather than primed. A subsequent cross-turn <code>read_file</code> will read the actual content.</p>
+<p><strong>Bypassing the cache:</strong> pass <code>startLine</code> and/or <code>maxLines</code> to any <code>read_file</code> call to bypass the session cache and force a targeted re-read. This is the correct recovery path after compaction removes earlier file content from context.</p>
+<p><strong>Storage:</strong> the cache is persisted to <code>read_cache.json</code> in the session directory and survives compaction. Cache entries record <code>mtime</code>, <code>size</code>, <code>reads</code> (read count), and <code>last</code> (last read or write timestamp).</p>
+<p>No configuration is required — the session read cache is always active when <code>fuseraft run</code> is used.</p>
+<hr />
+<h2 id="adaptive-context-trim-retry">Adaptive context-trim retry<a class="headerlink" href="#adaptive-context-trim-retry" title="Permanent link">&para;</a></h2>
+<p>When a provider call fails due to a context or payload size error — HTTP 413, a Bedrock
+thinking-budget mismatch, or an orphaned tool-call pair — fuseraft automatically retries
+with progressively reduced tool-result content rather than failing the session outright.</p>
+<p><strong>Retry stages (non-streaming path):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Truncate all <code>FunctionResultContent</code> to 4,000 chars; consumed <code>read_file</code> results capped at 500 chars</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Truncate all <code>FunctionResultContent</code> to 500 chars; consumed <code>read_file</code> results capped at 500 chars</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Drop all tool messages entirely (text-only nuclear option)</td>
+</tr>
+</tbody>
+</table>
+<p>The consumed-read cap applies at every stage: a <code>read_file</code> result whose file was
+subsequently written or patched is always capped at 500 characters because the content is
+stale regardless of how aggressive the retry is.</p>
+<p>Each stage re-runs the pre-flight budget/payload checks on the trimmed context before
+calling the provider, so both fuseraft's own pre-flight throws and provider 400/413
+rejections recover automatically.</p>
+<p><strong>Streaming path:</strong> when <code>MaxContextTokens</code> or <code>MaxPayloadBytes</code> is configured, fuseraft
+proactively pre-trims before streaming begins (streaming cannot retry mid-response). Without
+explicit limits, provider errors on the streaming path surface normally.</p>
+<p>No configuration is required — the retry logic fires automatically on every classifiable
+context error.</p>
+<hr />
+<h2 id="context-window-visualization">Context window visualization<a class="headerlink" href="#context-window-visualization" title="Permanent link">&para;</a></h2>
+<p>After every <code>fuseraft run</code>, fuseraft automatically writes a Chart.js HTML file that shows
+how each agent's cumulative input token count grew turn by turn.</p>
+<p><strong>Files written to <code>~/.fuseraft/logs/sessions/{project_slug}/{session_id}/</code>:</strong></p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ctx_snapshots.jsonl</code></td>
+<td>Raw per-turn snapshots (one JSON line per turn)</td>
+</tr>
+<tr>
+<td><code>ctx_viz.html</code></td>
+<td>Self-contained Chart.js visualization</td>
+</tr>
+</tbody>
+</table>
+<p>The path to the HTML file is printed at the end of the run:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>Context viz → ~/.fuseraft/logs/sessions/home-scs-github-myproject/abc123/ctx_viz.html
+</code></pre></div>
+<p>Open the file in a browser. It requires internet access for the Chart.js CDN.</p>
+<p><strong>What the chart shows:</strong></p>
+<ul>
+<li>One line per agent — cumulative input tokens on the Y axis, turn number on the X axis.</li>
+<li><strong>Compaction events</strong> appear as vertical dashed grey lines labelled <code>⚡ compact</code>.</li>
+<li><strong><code>warn_at</code> threshold</strong> appears as a horizontal dashed yellow line (when <code>ContextBudget.WarnAt</code> is set).</li>
+<li><strong><code>cutover_at</code> threshold</strong> appears as a horizontal dashed red line (when <code>ContextBudget.CutoverAt</code> is set).</li>
+<li>Hovering a point shows the turn's per-turn input and output token counts alongside the cumulative total.</li>
+</ul>
+<p><strong>Why it's useful:</strong> Visual inspection quickly reveals which agent is consuming the most context, whether compaction is firing at the right threshold, and whether any single turn caused a spike that warrants <code>TextOnly</code> or <code>MaxTurnAge</code> tuning on that agent.</p>
+<hr />
+<h2 id="how-the-layers-fit-together">How the layers fit together<a class="headerlink" href="#how-the-layers-fit-together" title="Permanent link">&para;</a></h2>
+<p>Here is the full sequence from session start through a long-running session:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>1. fuseraft run
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>   ├─ Auto-injection     → runtime environment block + .gitignore (always on)
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>   └─ Context Store index → injected into every agent's system prompt
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>2. Each agent turn — ContextAssemblyPipeline
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a>   ├─ Intent analysis    → keywords + PascalCase symbols + failure patterns from task
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a>   ├─ Memory block       → aggregated via MemoryManager (all providers + repository-approved entries)
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a>   ├─ Knowledge retrieval → ADR registry + graph nodes + repository memory + session findings
+<a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a>   │     KnowledgeWeight.None    → skip retrieval entirely
+<a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a>   │     KnowledgeWeight.Low     → Verified/Inferred items only
+<a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a>   │     KnowledgeWeight.Default → all non-expired items (default)
+<a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a>   │     KnowledgeWeight.High    → Default + one-hop graph expansion on seed symbols
+<a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a>   ├─ System prompt      → instructions + memory block (unified)
+<a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a>   ├─ HandoffContext injection (state machine only) → artifact block written into shared history when a transition fires
+<a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a>   ├─ ContextWindow filter or Context: spec
+<a id="__codelineno-22-16" name="__codelineno-22-16" href="#__codelineno-22-16"></a>   │  ├─ TextOnly / ExcludeAgents strip tool noise
+<a id="__codelineno-22-17" name="__codelineno-22-17" href="#__codelineno-22-17"></a>   │  ├─ MaxTurnAge semantic cut
+<a id="__codelineno-22-18" name="__codelineno-22-18" href="#__codelineno-22-18"></a>   │  ├─ MaxTailMessages hard cap
+<a id="__codelineno-22-19" name="__codelineno-22-19" href="#__codelineno-22-19"></a>   │  ├─ MaxToolResultChars — truncate large tool results in replayed history
+<a id="__codelineno-22-20" name="__codelineno-22-20" href="#__codelineno-22-20"></a>   │  └─ SanitizeToolPairs — strip orphaned assistant tool-call frames (strict providers)
+<a id="__codelineno-22-21" name="__codelineno-22-21" href="#__codelineno-22-21"></a>   ├─ Session context injection → context_summary.md prepended when present
+<a id="__codelineno-22-22" name="__codelineno-22-22" href="#__codelineno-22-22"></a>   ├─ Knowledge artifact appended as [Pipeline Knowledge] user message
+<a id="__codelineno-22-23" name="__codelineno-22-23" href="#__codelineno-22-23"></a>   ├─ Task Reminder appended when context &gt; 2 000 chars — primacy+recency sandwich reduces lost-in-the-middle drift
+<a id="__codelineno-22-24" name="__codelineno-22-24" href="#__codelineno-22-24"></a>   └─ Assembled context → sent to LLM
+<a id="__codelineno-22-25" name="__codelineno-22-25" href="#__codelineno-22-25"></a>      ├─ Session read cache — read_file returns hint instead of full content if file unchanged since last read/write this session
+<a id="__codelineno-22-26" name="__codelineno-22-26" href="#__codelineno-22-26"></a>      ├─ Tool-result artifact offloading — results &gt; 40k chars stored to disk; stub replaces inline content
+<a id="__codelineno-22-27" name="__codelineno-22-27" href="#__codelineno-22-27"></a>      ├─ MaxInTurnToolPairs — sliding window: keep only last N tool pairs per inner call
+<a id="__codelineno-22-28" name="__codelineno-22-28" href="#__codelineno-22-28"></a>      ├─ MaxInTurnContextTokens — budget-reactive: trim oldest pairs when over budget
+<a id="__codelineno-22-29" name="__codelineno-22-29" href="#__codelineno-22-29"></a>      ├─ MaxToolResultTokens / InTurnToolWindow — tombstone oldest results with label+preview; append [Context Manifest] when evictions occur
+<a id="__codelineno-22-30" name="__codelineno-22-30" href="#__codelineno-22-30"></a>      └─ On context/413 error → adaptive trim retry (up to 3 stages)
+<a id="__codelineno-22-31" name="__codelineno-22-31" href="#__codelineno-22-31"></a>
+<a id="__codelineno-22-32" name="__codelineno-22-32" href="#__codelineno-22-32"></a>   Post-turn
+<a id="__codelineno-22-33" name="__codelineno-22-33" href="#__codelineno-22-33"></a>   ├─ Memory provider    → post-turn hooks (if Memory: is configured)
+<a id="__codelineno-22-34" name="__codelineno-22-34" href="#__codelineno-22-34"></a>   └─ Knowledge findings → entity-scoped observations persisted to knowledge_findings.json
+<a id="__codelineno-22-35" name="__codelineno-22-35" href="#__codelineno-22-35"></a>
+<a id="__codelineno-22-36" name="__codelineno-22-36" href="#__codelineno-22-36"></a>3. After each checkpoint save
+<a id="__codelineno-22-37" name="__codelineno-22-37" href="#__codelineno-22-37"></a>   └─ Compaction check
+<a id="__codelineno-22-38" name="__codelineno-22-38" href="#__codelineno-22-38"></a>      ├─ (llm/intent/lossless/hybrid) assistant-turn count ≥ TriggerTurnCount?
+<a id="__codelineno-22-39" name="__codelineno-22-39" href="#__codelineno-22-39"></a>      │     YES → compact oldest (Count − KeepRecentTurns) turns into one message
+<a id="__codelineno-22-40" name="__codelineno-22-40" href="#__codelineno-22-40"></a>      │           save checkpoint with compacted history → continue
+<a id="__codelineno-22-41" name="__codelineno-22-41" href="#__codelineno-22-41"></a>      ├─ (window) estimated token count &gt; TokenBudget?
+<a id="__codelineno-22-42" name="__codelineno-22-42" href="#__codelineno-22-42"></a>      │     YES → drop oldest user+assistant pairs until within budget
+<a id="__codelineno-22-43" name="__codelineno-22-43" href="#__codelineno-22-43"></a>      │           (pinned summaries are never dropped)
+<a id="__codelineno-22-44" name="__codelineno-22-44" href="#__codelineno-22-44"></a>      ├─ (ContextBudget) any agent's cumulative input tokens ≥ CutoverAt?
+<a id="__codelineno-22-45" name="__codelineno-22-45" href="#__codelineno-22-45"></a>      │     YES → compact (same as turn-count trigger)
+<a id="__codelineno-22-46" name="__codelineno-22-46" href="#__codelineno-22-46"></a>      │           reset per-agent token counters → continue
+<a id="__codelineno-22-47" name="__codelineno-22-47" href="#__codelineno-22-47"></a>      └─ (Compaction plugin) agent called compact_conversation()?
+<a id="__codelineno-22-48" name="__codelineno-22-48" href="#__codelineno-22-48"></a>            YES → compact (same as turn-count trigger)
+<a id="__codelineno-22-49" name="__codelineno-22-49" href="#__codelineno-22-49"></a>
+<a id="__codelineno-22-50" name="__codelineno-22-50" href="#__codelineno-22-50"></a>4. After run completes
+<a id="__codelineno-22-51" name="__codelineno-22-51" href="#__codelineno-22-51"></a>   └─ Context window visualization rendered to ~/.fuseraft/logs/sessions/{project_slug}/{session_id}/ctx_viz.html
+</code></pre></div>
+<hr />
+<h2 id="choosing-a-strategy">Choosing a strategy<a class="headerlink" href="#choosing-a-strategy" title="Permanent link">&para;</a></h2>
+<p><strong>For most sessions with <code>ChangeTracking</code>:</strong> use <code>intent</code> mode.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="nt">ChangeTracking</span><span class="p">:</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="w">  </span><span class="nt">Path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.fuseraft/state/{project_slug}/changes.json</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="nt">Compaction</span><span class="p">:</span>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="w">  </span><span class="nt">TriggerTurnCount</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">40</span>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="w">  </span><span class="nt">KeepRecentTurns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8</span>
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="w">  </span><span class="nt">Mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">intent</span>
+</code></pre></div>
+<p><strong>For <code>statemachine</code> sessions with <code>EvidenceStore</code>:</strong> use <code>lossless</code> or <code>hybrid</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="nt">Compaction</span><span class="p">:</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="w">  </span><span class="nt">TriggerTurnCount</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="w">  </span><span class="nt">KeepRecentTurns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="w">  </span><span class="nt">Mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">lossless</span><span class="w">   </span><span class="c1"># or "hybrid" to add an LLM narrative on top</span>
+</code></pre></div>
+<p><strong>For exploratory / throw-away sessions:</strong> use <code>window</code> to avoid any compaction cost.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="nt">Compaction</span><span class="p">:</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="w">  </span><span class="nt">Mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">window</span>
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="w">  </span><span class="nt">TokenBudget</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">60000</span>
+</code></pre></div>
+<p><strong>For a judgment-independent agent (Reviewer, Tester, Critic, Auditor) in production:</strong> use
+<code>Context:</code> spec (Layer 3a) — see below. It's the recommended default for these roles because
+it assembles from durable artifacts rather than replayed chat, so the agent can't mistake an
+earlier agent's unverified claim for a fact. The remaining examples below (<code>ContextWindow</code>
+filtering of shared history) are the lighter/compatibility path — reach for them when you're
+prototyping a new pipeline and haven't yet worked out which artifacts a role needs, or for
+roles that are meant to see prior claims (see the exception noted in Layer 3a above).</p>
+<p><strong>For a downstream agent still on shared history that just needs less of it:</strong> use <code>ContextWindow</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="nt">Agents</span><span class="p">:</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Reviewer</span>
+<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="w">    </span><span class="nt">ContextWindow</span><span class="p">:</span>
+<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="w">      </span><span class="nt">TextOnly</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a><span class="w">      </span><span class="nt">MaxTurnAge</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
+</code></pre></div>
+<p><strong>For an agent that should know nothing about earlier phases but is still on shared history:</strong>
+combine <code>ExcludeAgents</code> with <code>MaxTailMessages</code> so it only sees the final handoff.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="nt">Agents</span><span class="p">:</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Auditor</span>
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="w">    </span><span class="nt">ContextWindow</span><span class="p">:</span>
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="w">      </span><span class="nt">ExcludeAgents</span><span class="p">:</span>
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Developer</span>
+<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Tester</span>
+<a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a><span class="w">      </span><span class="nt">MaxTailMessages</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20</span>
+</code></pre></div>
+<p><strong>For sessions where turns vary wildly in token size</strong> (e.g. a Developer that runs large shell
+commands or reads big files), add <code>ContextBudget</code> so compaction tracks actual context pressure
+rather than a coarse turn count:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="nt">ContextBudget</span><span class="p">:</span>
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="w">  </span><span class="nt">WarnAt</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">80000</span>
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="w">  </span><span class="nt">CutoverAt</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">120000</span>
+<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a>
+<a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a><span class="nt">Compaction</span><span class="p">:</span>
+<a id="__codelineno-28-6" name="__codelineno-28-6" href="#__codelineno-28-6"></a><span class="w">  </span><span class="nt">TriggerTurnCount</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">40</span>
+<a id="__codelineno-28-7" name="__codelineno-28-7" href="#__codelineno-28-7"></a><span class="w">  </span><span class="nt">KeepRecentTurns</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8</span>
+<a id="__codelineno-28-8" name="__codelineno-28-8" href="#__codelineno-28-8"></a><span class="w">  </span><span class="nt">Mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">intent</span>
+</code></pre></div>
+<p>Both triggers are active simultaneously — whichever fires first wins.</p>
+<p><strong>For an agent that should see NO cross-agent history — only artifacts and its own work:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="nt">Agents</span><span class="p">:</span>
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Tester</span>
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="w">    </span><span class="nt">Context</span><span class="p">:</span>
+<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">session_context</span>
+<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">changes_recent:5</span>
+<a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">brief_field:test_targets</span>
+<a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">own_history:4</span>
+<a id="__codelineno-29-8" name="__codelineno-29-8" href="#__codelineno-29-8"></a><span class="w">        </span><span class="nt">MaxChars</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8000</span>
+</code></pre></div>
+<p><strong>For action agents that make many sequential tool calls</strong> (Developer, Tester, Operator), set
+<code>MaxInTurnToolPairs</code> to keep within-turn context cost at O(N) regardless of how many tool
+calls the agent makes in a single turn:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="nt">Agents</span><span class="p">:</span>
+<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Developer</span>
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="w">    </span><span class="nt">MaxInTurnToolPairs</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">12</span>
+</code></pre></div>
+<p>Combine with <code>ContextBudget</code> to protect against both within-turn spikes and across-turn accumulation.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../sessions/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Sessions">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Sessions
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../context-store/" class="md-footer__link md-footer__link--next" aria-label="Next: Context Store">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Context Store
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.footer", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

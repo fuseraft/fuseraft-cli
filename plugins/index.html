@@ -1,0 +1,3458 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Multi-agent orchestration CLI built on Microsoft Agent Framework">
+      
+      
+      
+        <link rel="canonical" href="https://fuseraft.ai/plugins/">
+      
+      
+        <link rel="prev" href="../models/">
+      
+      
+        <link rel="next" href="../skills/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Plugins - fuseraft-cli</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#plugins" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="fuseraft-cli" class="md-header__button md-logo" aria-label="fuseraft-cli" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            fuseraft-cli
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Plugins
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fuseraft/fuseraft-cli" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fuseraft/fuseraft-cli
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../writing-tasks/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Writing Tasks
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../spec-driven/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Spec-Driven Development
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../cli-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../scripting/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Scripting & Automation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../models/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Models & Providers
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Plugins
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../skills/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Skills
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../strategies/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Strategies
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../validators/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Validators
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../harness-engineering/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Harness Engineering
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../mcp/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  MCP
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../security/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Security
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../governance/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Governance
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../evals/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evals
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../sessions/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Sessions
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../context-management/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Context Management
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../context-store/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Context Store
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../knowledge/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Knowledge Layer
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../examples/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Examples
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../design/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Design
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="fuseraft-cli" class="md-nav__button md-logo" aria-label="fuseraft-cli" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    fuseraft-cli
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fuseraft/fuseraft-cli" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fuseraft/fuseraft-cli
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../writing-tasks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing Tasks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../spec-driven/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spec-Driven Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scripting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scripting & Automation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models & Providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#filesystem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FileSystem
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#shell" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shell
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#git" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Git
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#http" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Http
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Http">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api-profiles-profile-parameter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API profiles (profile parameter)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Json
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#search" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Search
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#probe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Probe
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#codeexecution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CodeExecution
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scratchpad" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scratchpad
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#chatroom" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chatroom
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#investigation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Investigation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#todo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Todo
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compaction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compaction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#handoff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Handoff
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#subagent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SubAgent
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SubAgent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#sub-agent-model-override-subagentmodel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sub-agent model override (SubAgentModel)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sub-agent-iteration-cap-subagentmaxtoolcalls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sub-agent iteration cap (SubAgentMaxToolCalls)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-sub-agent-plugin-list-subagentplugins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom sub-agent plugin list (SubAgentPlugins)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#document" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Document
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Graph
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#objective" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Objective
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sessioncontext" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SessionContext
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#artifact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Artifact
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Skills
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mcp-plugins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP plugins
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../skills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skills
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../strategies/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Strategies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../validators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Validators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harness-engineering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harness Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../governance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Governance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../context-management/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../context-store/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Store
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../knowledge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#filesystem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FileSystem
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#shell" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shell
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#git" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Git
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#http" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Http
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Http">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api-profiles-profile-parameter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API profiles (profile parameter)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Json
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#search" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Search
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#probe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Probe
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#codeexecution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CodeExecution
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scratchpad" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scratchpad
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#chatroom" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chatroom
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#investigation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Investigation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#todo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Todo
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compaction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compaction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#handoff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Handoff
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#subagent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SubAgent
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SubAgent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#sub-agent-model-override-subagentmodel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sub-agent model override (SubAgentModel)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sub-agent-iteration-cap-subagentmaxtoolcalls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sub-agent iteration cap (SubAgentMaxToolCalls)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-sub-agent-plugin-list-subagentplugins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom sub-agent plugin list (SubAgentPlugins)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#document" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Document
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Graph
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#objective" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Objective
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sessioncontext" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SessionContext
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#artifact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Artifact
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Skills
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mcp-plugins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP plugins
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/fuseraft/fuseraft-cli/edit/main/docs/plugins.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="plugins">Plugins<a class="headerlink" href="#plugins" title="Permanent link">&para;</a></h1>
+<p>Plugins are the tools agents can call. Each plugin is a named collection of kernel functions. Add plugin names to an agent's <code>Plugins</code> list to make them available.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">Plugins</span><span class="p">:</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">FileSystem</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Shell</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Git</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Search</span>
+</code></pre></div>
+<p>Plugin names are case-insensitive.</p>
+<hr />
+<h2 id="filesystem">FileSystem<a class="headerlink" href="#filesystem" title="Permanent link">&para;</a></h2>
+<p>Read, write, and navigate the local filesystem.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>read_file</code></td>
+<td><code>path</code>, <code>startLine</code> (default 1), <code>maxLines</code> (optional)</td>
+<td>Read a text file. Returns up to <code>Security.ReadFileSizeLimit</code> characters (default 20,000). Larger files are truncated with a notice. Rejects binary files.</td>
+</tr>
+<tr>
+<td><code>grep_file</code></td>
+<td><code>path</code>, <code>pattern</code>, <code>contextLines</code> (default 2), <code>maxMatches</code> (default 30)</td>
+<td>Case-insensitive text or regex search within a single file. Returns matching lines with surrounding context.</td>
+</tr>
+<tr>
+<td><code>get_file_summary</code></td>
+<td><code>path</code></td>
+<td>Return a previously saved structural summary, or a character-count notice when no summary exists.</td>
+</tr>
+<tr>
+<td><code>save_file_summary</code></td>
+<td><code>path</code>, <code>summary</code></td>
+<td>Persist a structural summary of a file so future agents can retrieve it cheaply via <code>get_file_summary</code>.</td>
+</tr>
+<tr>
+<td><code>list_files</code></td>
+<td><code>directory</code>, <code>pattern</code> (default <code>"*"</code>), <code>maxResults</code> (default 100, clamped to 500)</td>
+<td>List files recursively matching a glob pattern. Reports when the cap truncated results — in a large or multi-repo directory the matches beyond the cap may be concentrated in whichever subtree was walked first, so narrow with <code>directory</code>/<code>pattern</code> rather than only raising <code>maxResults</code>.</td>
+</tr>
+<tr>
+<td><code>get_file_info</code></td>
+<td><code>path</code></td>
+<td>Returns metadata: type (file/directory), size, created/modified timestamps, Unix permissions (on Unix systems), and — for files — the write-version counter (<code>NOT_TRACKED</code> if the file exists but was never written through <code>write_file</code>). Cheaper than <code>read_file</code>, and doubles as an existence check: a "Path not found" result means the path doesn't exist.</td>
+</tr>
+<tr>
+<td><code>write_file</code></td>
+<td><code>path</code>, <code>content</code>, <code>raw</code> (default false), <code>baseVersion</code> (default 0)</td>
+<td>Create or overwrite a file. Creates parent directories automatically. When <code>baseVersion &gt; 0</code>, the write is rejected with <code>VERSION_MISMATCH</code> if the current stored version differs — use <code>get_file_info</code> first to read the version and detect concurrent writes.</td>
+</tr>
+<tr>
+<td><code>patch_file</code></td>
+<td><code>path</code>, <code>oldText</code>, <code>newText</code></td>
+<td>Replace an exact block of text in a file. Fails with a hint if <code>oldText</code> is not found verbatim.</td>
+</tr>
+<tr>
+<td><code>delete_file</code></td>
+<td><code>path</code></td>
+<td>Delete a file if it exists.</td>
+</tr>
+<tr>
+<td><code>set_permissions</code></td>
+<td><code>path</code>, <code>mode</code></td>
+<td>Set Unix file permissions (chmod). Accepts a 3- or 4-digit octal string such as <code>"755"</code> or <code>"0644"</code>. No-op on Windows.</td>
+</tr>
+<tr>
+<td><code>create_directory</code></td>
+<td><code>path</code></td>
+<td>Create a directory and all intermediate parent directories. Safe to call when the directory already exists.</td>
+</tr>
+<tr>
+<td><code>delete_directory</code></td>
+<td><code>path</code>, <code>recursive</code> (default false)</td>
+<td>Delete a directory. Set <code>recursive=true</code> to remove a non-empty directory and all its contents. Refuses to delete the sandbox root.</td>
+</tr>
+<tr>
+<td><code>copy_file</code></td>
+<td><code>source</code>, <code>destination</code>, <code>overwrite</code> (default false)</td>
+<td>Copy a file to a new location. Creates the destination directory if needed.</td>
+</tr>
+<tr>
+<td><code>move_file</code></td>
+<td><code>source</code>, <code>destination</code>, <code>overwrite</code> (default false)</td>
+<td>Move or rename a file or directory. Creates the destination parent directory if needed.</td>
+</tr>
+<tr>
+<td><code>list_directory</code></td>
+<td><code>directory</code>, <code>pattern</code> (default <code>"*"</code>)</td>
+<td>List files and subdirectories in a single directory (non-recursive). Subdirectories are shown with a trailing <code>/</code>. Returns up to 500 entries.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Tip:</strong> When <code>FileSystemSandboxPath</code> is configured, all paths are resolved to canonical form and rejected if they fall outside the sandbox root. See <a href="../security/">Security</a>.</p>
+<hr />
+<h2 id="shell">Shell<a class="headerlink" href="#shell" title="Permanent link">&para;</a></h2>
+<p>Execute shell commands and scripts.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>shell_run</code></td>
+<td><code>command</code>, <code>workingDirectory</code> (optional), <code>timeoutSeconds</code> (default 60), <code>quiet</code> (default false)</td>
+<td>Run a shell command. Supports pipes, redirects, and chained commands. Captures stdout, stderr, and exit code. Pass <code>quiet: true</code> to get <code>OK</code> back on success instead of full output (e.g. scaffolding, <code>dotnet restore</code>, environment setup) — full output and exit code are still returned on failure regardless of <code>quiet</code>.</td>
+</tr>
+<tr>
+<td><code>shell_run_script</code></td>
+<td><code>script</code>, <code>workingDirectory</code> (optional), <code>timeoutSeconds</code> (default 120)</td>
+<td>Write a multi-line script to a temp file and execute it. Useful for complex multi-command workflows.</td>
+</tr>
+<tr>
+<td><code>shell_get_env</code></td>
+<td><code>name</code></td>
+<td>Return an environment variable value (empty string if not set).</td>
+</tr>
+<tr>
+<td><code>shell_set_env</code></td>
+<td><code>name</code>, <code>value</code></td>
+<td>Set an environment variable for the current session. Inherited by all subsequent <code>shell_run</code> calls. Pass an empty string to clear a variable.</td>
+</tr>
+<tr>
+<td><code>shell_which</code></td>
+<td><code>program</code></td>
+<td>Return the full path of a program (equivalent to <code>which</code> / <code>where</code>).</td>
+</tr>
+<tr>
+<td><code>shell_get_working_directory</code></td>
+<td>—</td>
+<td>Return the effective working directory. Returns the sandbox root if a sandbox is configured.</td>
+</tr>
+<tr>
+<td><code>shell_get_session_temp_dir</code></td>
+<td>—</td>
+<td>Return a session-scoped temporary directory. Created on first call; deleted automatically when the session ends.</td>
+</tr>
+<tr>
+<td><code>shell_run_background</code></td>
+<td><code>command</code>, <code>workingDirectory</code> (optional)</td>
+<td>Start a command without blocking and return a job ID. Use for long-running processes (dev servers, watchers, pipelines) where you need to continue working while the process runs.</td>
+</tr>
+<tr>
+<td><code>shell_get_job_status</code></td>
+<td><code>jobId</code></td>
+<td>Check whether a background job is still running, has completed, or was killed. Includes a short tail of recent output.</td>
+</tr>
+<tr>
+<td><code>shell_get_job_output</code></td>
+<td><code>jobId</code></td>
+<td>Return the full captured output of a background job so far (stdout + stderr combined, capped at 100 KB).</td>
+</tr>
+<tr>
+<td><code>shell_kill_job</code></td>
+<td><code>jobId</code></td>
+<td>Terminate a running background job.</td>
+</tr>
+</tbody>
+</table>
+<p>The shell used is <code>/bin/bash</code> on Unix and <code>cmd.exe</code> on Windows. The shell binary is located from common system paths at startup.</p>
+<p><strong>Windows PowerShell fallback:</strong> Agents commonly write PowerShell syntax (<code>Get-ChildItem</code>, <code>$env:</code>, <code>Where-Object</code>, ...) even though <code>cmd.exe</code> is the default shell here, since PowerShell is the modern norm on Windows. <code>cmd.exe</code> can't resolve any of that and always fails with the same <code>'X' is not recognized as an internal or external command</code> message. <code>shell_run</code> and <code>shell_run_script</code> detect that exact signature and transparently retry the command via PowerShell (preferring <code>pwsh</code> if installed, falling back to the built-in Windows PowerShell 5.1) before returning to the agent — so a PowerShell-flavored command succeeds on the first try instead of costing a wasted tool call. <code>shell_run_background</code> applies the same retry within a short grace window after starting the process, swapping in a PowerShell process before the job ID is ever handed back if the original exits immediately with that signature. If the command genuinely fails (in either shell), the original <code>cmd.exe</code> failure is what's returned — the fallback never masks a real error.</p>
+<p><strong><code>sudo</code> protection:</strong> <code>sudo</code> is always blocked. Any command or script containing <code>sudo</code> (including after pipes, <code>&amp;&amp;</code>, <code>;</code>, or newlines) is rejected before execution. The denial message instructs the agent to use non-privileged alternatives (<code>pip install --user</code>, <code>pipx</code>, virtualenvs) or, if elevated access is truly required, to tell the user what to run so they can do it themselves.</p>
+<p><strong>Shell command approval:</strong> When <code>fuseraft run --hitl</code> is active, every <code>shell_run</code>, <code>shell_run_script</code>, and <code>shell_run_background</code> call pauses and shows the command for approval before executing. See <a href="../cli-reference/#human-in-the-loop-controls">CLI Reference — Shell command approval</a>. The REPL has the same gate behind its own <code>/hitl on</code>/<code>/hitl off</code> toggle (see <a href="../cli-reference/#fuseraft-repl">CLI Reference — <code>fuseraft repl</code></a>).</p>
+<p><strong>Security note:</strong> When <code>FileSystemSandboxPath</code> is set, the <code>workingDirectory</code> argument is hard-denied if it falls outside the sandbox. The <code>command</code> and <code>script</code> arguments are scanned for absolute paths escaping the sandbox; system binary prefixes (<code>/usr/</code>, <code>/bin/</code>, <code>/opt/</code>, <code>/nix/</code>, etc.) are exempted. Shell scanning is heuristic — for strict containment use <code>CodeExecution</code> (Docker) instead.</p>
+<hr />
+<h2 id="git">Git<a class="headerlink" href="#git" title="Permanent link">&para;</a></h2>
+<p>Read and write a Git repository.</p>
+<p><strong>Read operations</strong></p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>git_status</code></td>
+<td><code>repoPath</code> (default <code>"."</code>)</td>
+<td>Show working-tree status: staged, unstaged, and untracked files.</td>
+</tr>
+<tr>
+<td><code>git_diff</code></td>
+<td><code>repoPath</code>, <code>staged</code> (default false), <code>maxLines</code> (default 200)</td>
+<td>Show a unified diff. Pass <code>staged: true</code> for the index diff.</td>
+</tr>
+<tr>
+<td><code>git_log</code></td>
+<td><code>repoPath</code>, <code>count</code> (default 10), <code>ref</code> (optional)</td>
+<td>Show recent commit history with hashes, authors, and messages.</td>
+</tr>
+<tr>
+<td><code>git_show</code></td>
+<td><code>commitRef</code>, <code>repoPath</code>, <code>maxLines</code> (default 300)</td>
+<td>Show the content and diff of a specific commit.</td>
+</tr>
+<tr>
+<td><code>git_branch_list</code></td>
+<td><code>repoPath</code>, <code>includeRemotes</code> (default false)</td>
+<td>List branches.</td>
+</tr>
+<tr>
+<td><code>git_stash_list</code></td>
+<td><code>repoPath</code></td>
+<td>List all stashed changesets.</td>
+</tr>
+<tr>
+<td><code>git_is_inside_work_tree</code></td>
+<td><code>repoPath</code> (optional)</td>
+<td>Returns <code>"true"</code> if the path is inside a git working tree, <code>"false"</code> otherwise (exit codes 128 or 129 map to <code>"false"</code>). Use this to guard git operations when the sandbox may not be a git repository.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Write operations</strong></p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>git_add</code></td>
+<td><code>paths</code>, <code>repoPath</code></td>
+<td>Stage files. Pass <code>"."</code> to stage everything.</td>
+</tr>
+<tr>
+<td><code>git_commit</code></td>
+<td><code>message</code>, <code>repoPath</code>, <code>stageAll</code> (default false)</td>
+<td>Commit staged changes.</td>
+</tr>
+<tr>
+<td><code>git_checkout</code></td>
+<td><code>target</code>, <code>repoPath</code>, <code>createBranch</code> (default false)</td>
+<td>Switch to a branch or restore files.</td>
+</tr>
+<tr>
+<td><code>git_create_branch</code></td>
+<td><code>branchName</code>, <code>repoPath</code></td>
+<td>Create a new branch from HEAD.</td>
+</tr>
+<tr>
+<td><code>git_init</code></td>
+<td><code>directory</code> (optional)</td>
+<td>Initialize a new repository.</td>
+</tr>
+<tr>
+<td><code>git_push</code></td>
+<td><code>remote</code> (optional), <code>branch</code> (optional), <code>setUpstream</code> (default false), <code>repoPath</code></td>
+<td>Push local commits to a remote. Omit <code>remote</code> and <code>branch</code> to push the current tracking branch. 120 s timeout.</td>
+</tr>
+<tr>
+<td><code>git_pull</code></td>
+<td><code>remote</code> (optional), <code>branch</code> (optional), <code>repoPath</code></td>
+<td>Fetch and integrate changes from a remote. 120 s timeout.</td>
+</tr>
+<tr>
+<td><code>git_stash</code></td>
+<td><code>message</code> (optional), <code>repoPath</code></td>
+<td>Save the current working-tree changes to the stash.</td>
+</tr>
+<tr>
+<td><code>git_stash_pop</code></td>
+<td><code>repoPath</code></td>
+<td>Apply the most recent stash entry and remove it from the stash list.</td>
+</tr>
+<tr>
+<td><code>git_reset</code></td>
+<td><code>mode</code> (default <code>"mixed"</code>), <code>ref</code> (default <code>"HEAD"</code>), <code>repoPath</code></td>
+<td>Reset HEAD. <code>soft</code>: moves HEAD only. <code>mixed</code>: unstages changes. <code>hard</code>: discards all uncommitted changes — use with caution.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="http">Http<a class="headerlink" href="#http" title="Permanent link">&para;</a></h2>
+<p>Make HTTP requests to external APIs.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>http_get</code></td>
+<td><code>url</code>, <code>headers</code> (JSON, optional), <code>timeoutSeconds</code> (default 30), <code>profile</code> (optional)</td>
+<td>GET request. Returns response body as text.</td>
+</tr>
+<tr>
+<td><code>http_post</code></td>
+<td><code>url</code>, <code>body</code>, <code>contentType</code> (default <code>"application/json"</code>), <code>headers</code>, <code>timeoutSeconds</code>, <code>profile</code></td>
+<td>POST request with body.</td>
+</tr>
+<tr>
+<td><code>http_put</code></td>
+<td><code>url</code>, <code>body</code>, <code>contentType</code> (default <code>"application/json"</code>), <code>headers</code>, <code>timeoutSeconds</code>, <code>profile</code></td>
+<td>PUT request.</td>
+</tr>
+<tr>
+<td><code>http_patch</code></td>
+<td><code>url</code>, <code>body</code>, <code>contentType</code> (default <code>"application/json"</code>), <code>headers</code>, <code>timeoutSeconds</code>, <code>profile</code></td>
+<td>PATCH request. Useful for partial updates (e.g. closing a ticket).</td>
+</tr>
+<tr>
+<td><code>http_delete</code></td>
+<td><code>url</code>, <code>headers</code>, <code>timeoutSeconds</code> (default 30), <code>profile</code></td>
+<td>DELETE request.</td>
+</tr>
+<tr>
+<td><code>http_head</code></td>
+<td><code>url</code>, <code>headers</code>, <code>timeoutSeconds</code> (default 30), <code>profile</code></td>
+<td>HEAD request. Returns response headers only, no body.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="api-profiles-profile-parameter">API profiles (<code>profile</code> parameter)<a class="headerlink" href="#api-profiles-profile-parameter" title="Permanent link">&para;</a></h3>
+<p>All HTTP functions accept an optional <code>profile</code> parameter. When provided, the plugin looks up that name in the <code>ApiProfiles</code> config section and applies:</p>
+<ul>
+<li><strong>Base URL</strong> — if <code>url</code> is a relative path (no <code>http://</code>/<code>https://</code> scheme), it is prepended with the profile's <code>BaseUrl</code>. Absolute URLs are used as-is.</li>
+<li><strong>Default headers</strong> — merged with any per-call <code>headers</code>. Per-call headers win on conflicts.</li>
+<li><strong>Timeout</strong> — the profile's <code>TimeoutSeconds</code> is used when the caller does not supply an explicit timeout (i.e. when <code>timeoutSeconds</code> equals the default of 30).</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># .fuseraft/config/orchestration.yaml snippet</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">ApiProfiles</span><span class="p">:</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">snow</span><span class="p">:</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="nt">BaseUrl</span><span class="p">:</span><span class="w"> </span><span class="s">"https://mycompany.service-now.com/api/now"</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="nt">TimeoutSeconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">60</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="nt">DefaultHeaders</span><span class="p">:</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">      </span><span class="nt">Authorization</span><span class="p">:</span><span class="w"> </span><span class="s">"Bearer</span><span class="nv"> </span><span class="s">${SNOW_API_TOKEN}"</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">      </span><span class="nt">Accept</span><span class="p">:</span><span class="w"> </span><span class="s">"application/json"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a># Agent can now call:
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>http_get(url="/table/incident", profile="snow")
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a># → GET https://mycompany.service-now.com/api/now/table/incident
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>#   Authorization: Bearer &lt;value of $SNOW_API_TOKEN&gt;
+</code></pre></div>
+<p>Header values in <code>DefaultHeaders</code> support <code>${ENV_VAR}</code> token expansion — the token is replaced with the environment variable's value at startup. See <a href="../configuration/#apiprofiles">Configuration → ApiProfiles</a> for the full reference.</p>
+<p><strong>Security note:</strong> When <code>HttpAllowedHosts</code> is non-empty, only listed hostnames are permitted. The allowlist is enforced after profile resolution — a profile that resolves to an unlisted host is still denied. Private and loopback addresses (<code>127.x</code>, <code>10.x</code>, <code>172.16–31.x</code>, <code>192.168.x</code>, <code>169.254.x</code>, IPv6 loopback/link-local) are always blocked regardless of the allowlist.</p>
+<hr />
+<h2 id="json">Json<a class="headerlink" href="#json" title="Permanent link">&para;</a></h2>
+<p>Parse, transform, and query JSON data.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>json_format</code></td>
+<td><code>json</code></td>
+<td>Pretty-print a JSON string with indentation.</td>
+</tr>
+<tr>
+<td><code>json_minify</code></td>
+<td><code>json</code></td>
+<td>Strip whitespace to produce compact output.</td>
+</tr>
+<tr>
+<td><code>json_get</code></td>
+<td><code>json</code>, <code>path</code></td>
+<td>Get a nested value using dot-separated path notation, e.g. <code>"data.results.0.title"</code>.</td>
+</tr>
+<tr>
+<td><code>json_keys</code></td>
+<td><code>json</code></td>
+<td>Return top-level keys of an object, or the length of an array.</td>
+</tr>
+<tr>
+<td><code>json_search</code></td>
+<td><code>json</code>, <code>keyName</code></td>
+<td>Find all keys matching a search term (case-insensitive, deep search).</td>
+</tr>
+<tr>
+<td><code>json_merge</code></td>
+<td><code>baseJson</code>, <code>patchJson</code></td>
+<td>Shallow-merge two JSON objects. Patch fields overwrite base fields.</td>
+</tr>
+<tr>
+<td><code>json_to_text</code></td>
+<td><code>json</code>, <code>depth</code> (default 0)</td>
+<td>Convert JSON to a human-readable summary suitable for feeding into a model prompt.</td>
+</tr>
+<tr>
+<td><code>json_validate</code></td>
+<td><code>json</code></td>
+<td>Check whether a string is well-formed JSON.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="search">Search<a class="headerlink" href="#search" title="Permanent link">&para;</a></h2>
+<p>Search file contents and locate symbols. Finding files by name is <code>list_files</code> in <a href="#filesystem">FileSystem</a> — kept there rather than duplicated here since it's the one covered by sandbox path enforcement and the FileSystem capability map.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>search_content</code></td>
+<td><code>query</code>, <code>directory</code> (default <code>"."</code>), <code>filePattern</code> (default <code>"*"</code>), <code>maxResults</code> (default 100), <code>caseSensitive</code> (default false)</td>
+<td>Search file contents by regex or plain text (like grep).</td>
+</tr>
+<tr>
+<td><code>search_symbol</code></td>
+<td><code>symbol</code>, <code>directory</code> (default <code>"."</code>), <code>extension</code> (default <code>""</code>), <code>maxResults</code> (default 50)</td>
+<td>Find symbol definitions (class, function, interface, variable, etc.) using language-agnostic patterns. Results are automatically recorded as <code>SymbolDefinition</code> nodes in the evidence graph when <code>EvidenceStore</code> is configured.</td>
+</tr>
+<tr>
+<td><code>search_callers</code></td>
+<td><code>symbol</code>, <code>directory</code> (default <code>"."</code>), <code>extension</code> (default <code>""</code>), <code>maxResults</code> (default 100)</td>
+<td>Find call sites and usages of a symbol: invocations, constructor calls, type annotations, and inheritance declarations. Excludes definition lines so results contain only references. Results are automatically recorded as <code>SymbolReference</code> nodes in the evidence graph when <code>EvidenceStore</code> is configured; <code>TargetFile</code> is resolved from any existing <code>SymbolDefinition</code> nodes for the same symbol.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Directory exclusions:</strong> all three functions skip <code>.git</code>, <code>node_modules</code>, <code>bin</code>, <code>obj</code>, <code>.vs</code>, <code>.idea</code>, <code>.nuget</code>, <code>.venv</code>, <code>__pycache__</code>, <code>.fuseraft</code>, and <code>vendor</code> — the same list <code>list_files</code> (FileSystem) uses. This matters most for <code>search_content</code>: without it, an unscoped query (<code>directory: "."</code>, <code>filePattern: "*"</code>) walks into compiled build output and can match inside a <code>.dll</code>/<code>.pdb</code> read as text, returning megabytes of garbage. Pass a narrower <code>directory</code> or <code>filePattern</code> (e.g. <code>*.cs</code>) to scope a search further.</p>
+<hr />
+<h2 id="probe">Probe<a class="headerlink" href="#probe" title="Permanent link">&para;</a></h2>
+<p>Structured hypothesis testing and assertion utilities. Useful for Tester agents that need to verify behavior with evidence.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>probe_code</code></td>
+<td><code>language</code>, <code>code</code>, <code>directory</code> (default <code>"."</code>), <code>timeoutSeconds</code> (default 30)</td>
+<td>Execute a code snippet and return stdout/stderr/exit code. Supported languages: <code>bash</code>, <code>python</code>, <code>javascript</code>, <code>go</code>, <code>csharp</code>, <code>powershell</code>, <code>kiwi</code>.</td>
+</tr>
+<tr>
+<td><code>probe_assert_output</code></td>
+<td><code>command</code>, <code>expected</code>, <code>matchType</code> (default <code>"contains"</code>), <code>directory</code>, <code>timeoutSeconds</code></td>
+<td>Run a command and assert its output. <code>matchType</code>: <code>contains</code>, <code>equals</code>, <code>regex</code>, <code>exitcode</code>. Returns PASS or FAIL with evidence.</td>
+</tr>
+<tr>
+<td><code>probe_compare_outputs</code></td>
+<td><code>commandA</code>, <code>commandB</code>, <code>directory</code>, <code>timeoutSeconds</code></td>
+<td>Run two commands and return their outputs side-by-side for comparison.</td>
+</tr>
+<tr>
+<td><code>probe_run_hypothesis</code></td>
+<td><code>hypothesis</code>, <code>command</code>, <code>expectedObservation</code>, <code>setupCommand</code> (optional), <code>directory</code>, <code>timeoutSeconds</code></td>
+<td>Given/When/Then structured test.</td>
+</tr>
+</tbody>
+</table>
+<p>On Windows, <code>language: "powershell"</code> (or <code>"ps"</code>) resolves to <code>pwsh</code> if it's installed, otherwise falls back to the built-in Windows PowerShell 5.1 — it no longer fails outright on machines that only have the stock PowerShell.</p>
+<hr />
+<h2 id="codeexecution">CodeExecution<a class="headerlink" href="#codeexecution" title="Permanent link">&para;</a></h2>
+<p>Sandboxed code execution via Docker containers. Each run gets a fresh, isolated container with no network access and capped resources.</p>
+<p><strong>Requirements:</strong> Docker CLI and daemon must be running. Check with the <code>check_docker</code> function.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>code_execution_check_docker</code></td>
+<td>—</td>
+<td>Verify Docker is available and the daemon is reachable.</td>
+</tr>
+<tr>
+<td><code>code_execution_sandbox_run</code></td>
+<td><code>language</code>, <code>code</code>, <code>timeoutSeconds</code> (default 30)</td>
+<td>Run code in a fresh Docker container. Supported languages: <code>python</code>, <code>node</code>, <code>bash</code>, <code>go</code>, <code>rust</code>.</td>
+</tr>
+<tr>
+<td><code>code_execution_repl_start</code></td>
+<td><code>language</code></td>
+<td>Start a REPL session (Python or Node). Returns a session ID.</td>
+</tr>
+<tr>
+<td><code>code_execution_repl_exec</code></td>
+<td><code>sessionId</code>, <code>code</code>, <code>timeoutSeconds</code></td>
+<td>Execute code in an active REPL session. Variables and functions persist between calls.</td>
+</tr>
+<tr>
+<td><code>code_execution_repl_reset</code></td>
+<td><code>sessionId</code></td>
+<td>Clear accumulated code in a REPL session (session stays open).</td>
+</tr>
+<tr>
+<td><code>code_execution_repl_stop</code></td>
+<td><code>sessionId</code></td>
+<td>Remove the REPL session and all accumulated state.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Container resource limits:</strong> <code>--network none</code>, <code>--memory 256m</code>, <code>--cpus 0.5</code></p>
+<p><strong>Docker images used:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Language</th>
+<th>Image</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Python</td>
+<td><code>python:3.12-slim</code></td>
+</tr>
+<tr>
+<td>Node</td>
+<td><code>node:20-slim</code></td>
+</tr>
+<tr>
+<td>Bash</td>
+<td><code>bash:5.2</code></td>
+</tr>
+<tr>
+<td>Go</td>
+<td><code>golang:1.23-alpine</code></td>
+</tr>
+<tr>
+<td>Rust</td>
+<td><code>rust:1-slim</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="scratchpad">Scratchpad<a class="headerlink" href="#scratchpad" title="Permanent link">&para;</a></h2>
+<p>Persistent per-agent key-value store that survives across sessions. Each agent that includes <code>"Scratchpad"</code> in its <code>Plugins</code> list gets an isolated JSON file at <code>~/.fuseraft/scratchpad/{AgentName}.json</code>. A <code>global</code> scope (<code>~/.fuseraft/scratchpad/global.json</code>) is shared by all agents in the orchestration.</p>
+<p>Files are stored outside the project directory so notes persist regardless of which project or config file is used.</p>
+<p><strong>Typical usage pattern:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>At the start of a resumed session:  scratchpad_read_all()
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>When you make a key decision:       scratchpad_write("auth_decision", "Use JWT tokens", tags="auth")
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>When you want to find past notes:   scratchpad_search("auth")
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>Before ending the session:          scratchpad_write("session_summary", "Completed task X, left Y for next time")
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scratchpad_write</code></td>
+<td><code>key</code>, <code>value</code>, <code>tags</code> (optional), <code>scope</code> (default <code>"agent"</code>)</td>
+<td>Store or update an entry. Tags are comma-separated keywords.</td>
+</tr>
+<tr>
+<td><code>scratchpad_read</code></td>
+<td><code>key</code>, <code>scope</code> (default <code>"agent"</code>)</td>
+<td>Retrieve a single entry by key.</td>
+</tr>
+<tr>
+<td><code>scratchpad_read_all</code></td>
+<td><code>scope</code> (default <code>"agent"</code>)</td>
+<td>Read all entries — call this at session start to restore context.</td>
+</tr>
+<tr>
+<td><code>scratchpad_search</code></td>
+<td><code>query</code>, <code>scope</code> (default <code>"agent"</code>)</td>
+<td>Case-insensitive substring search across keys, values, and tags.</td>
+</tr>
+<tr>
+<td><code>scratchpad_delete</code></td>
+<td><code>key</code>, <code>scope</code> (default <code>"agent"</code>)</td>
+<td>Remove an entry.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Scope values:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>File</th>
+<th>Visibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>agent</code> (default)</td>
+<td><code>~/.fuseraft/scratchpad/{AgentName}.json</code></td>
+<td>Private to this agent</td>
+</tr>
+<tr>
+<td><code>global</code></td>
+<td><code>~/.fuseraft/scratchpad/global.json</code></td>
+<td>Shared by all agents</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Note:</strong> Unlike other plugins, <code>"Scratchpad"</code> is not shared between agents — each agent gets its own instance backed by its own file. This is handled automatically; no extra configuration is needed.</p>
+<hr />
+<h2 id="chatroom">Chatroom<a class="headerlink" href="#chatroom" title="Permanent link">&para;</a></h2>
+<p>Shared append-only message log for agent-to-agent coordination. All agents that include <code>"Chatroom"</code> in their <code>Plugins</code> list share the same JSONL file, but each agent sends under its own name.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>chatroom_send</code></td>
+<td><code>recipient</code>, <code>message</code></td>
+<td>Append a message to the log. <code>recipient</code> can be a specific agent name or <code>"All"</code> to broadcast.</td>
+</tr>
+<tr>
+<td><code>chatroom_read</code></td>
+<td><code>count</code> (default <code>20</code>)</td>
+<td>Read the most recent <code>count</code> messages from the log.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Typical usage:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>After completing a task:    chatroom_send("Tester", "Files are written and build passes.")
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>At the start of your turn:  chatroom_read()
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>Broadcasting a blocker:     chatroom_send("All", "Blocked on missing dependency — need shell access.")
+</code></pre></div>
+<p><strong>Note:</strong> Like <code>"Scratchpad"</code>, <code>"Chatroom"</code> is instantiated per-agent (so each instance knows the sender's name), but all instances write to the same file so messages are visible across the team.</p>
+<hr />
+<h2 id="changes">Changes<a class="headerlink" href="#changes" title="Permanent link">&para;</a></h2>
+<p>Read-only view of the session change log written automatically by the orchestrator's <code>ChangeTracker</code>. Records which files were written, which commands ran, and which git commits were made — turn by turn — so downstream agents (Tester, Reviewer) know exactly what happened without having to infer it from the chat history.</p>
+<p><strong>Availability:</strong> Only registered when <code>ChangeTracking</code> is present in the orchestration config. See <a href="../configuration/#change-tracking">Configuration</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>changes_read</code></td>
+<td>—</td>
+<td>Return the full session change log: every agent turn that wrote files, ran commands, or made git commits.</td>
+</tr>
+<tr>
+<td><code>changes_read_latest</code></td>
+<td><code>count</code> (default <code>1</code>)</td>
+<td>Return the <code>count</code> most-recent change entries. Use this before deciding what to test or review.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Typical usage:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Tester, before writing tests:   changes_read_latest()
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>Reviewer, at session start:     changes_read()
+</code></pre></div>
+<p>Each entry shows the agent name, turn index, timestamp, files written/deleted, commands run (with pass/fail status), and git commits.</p>
+<hr />
+<h2 id="investigation">Investigation<a class="headerlink" href="#investigation" title="Permanent link">&para;</a></h2>
+<p>Durable investigation memory: records hypotheses, rejected paths, and confirmed root causes so future agents never re-run the same dead-end investigation. All writes go to <code>~/.fuseraft/state/{project_slug}/investigation-log.json</code>. The log survives compaction and is injected into every agent's context via the <code>investigation_log</code> context source.</p>
+<p><strong>Availability:</strong> Only registered when <code>ChangeTracking</code> is present in the orchestration config — same gate as <a href="#changes">Changes</a>. Used by the <code>brownfield</code>, <code>audit</code>, and <code>graph</code> init templates.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>investigation_create_hypothesis</code></td>
+<td><code>hypothesis</code></td>
+<td>Record a new hypothesis for investigation. Returns an assigned ID (<code>H-001</code>, <code>H-002</code>, ...).</td>
+</tr>
+<tr>
+<td><code>investigation_reject_hypothesis</code></td>
+<td><code>id</code>, <code>reason</code>, <code>evidence</code> (optional, one item per line)</td>
+<td>Mark a hypothesis as rejected with the reason and disproving evidence. Also emits an <code>AttemptFailedEvent</code> to the event sink.</td>
+</tr>
+<tr>
+<td><code>investigation_confirm_hypothesis</code></td>
+<td><code>id</code>, <code>evidence</code> (optional, one item per line)</td>
+<td>Mark a hypothesis as confirmed with supporting evidence.</td>
+</tr>
+<tr>
+<td><code>investigation_record</code></td>
+<td><code>summary</code>, <code>conclusion</code></td>
+<td>Log a completed investigation with its summary and conclusion.</td>
+</tr>
+<tr>
+<td><code>investigation_identify_root_cause</code></td>
+<td><code>cause</code></td>
+<td>Append a confirmed root cause to the log. No-ops if the same cause is already recorded.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Typical usage:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Investigate a lead:      investigation_create_hypothesis("Race condition in the cache invalidation path")
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>Dead end:                investigation_reject_hypothesis("H-001", "Cache writes are already mutex-guarded", evidence="Checked FileSystemPlugin.cs:120-140")
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>Confirmed:               investigation_confirm_hypothesis("H-002", evidence="Reproduced with concurrent write_file calls")
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>Wrap up:                 investigation_record("Checked cache invalidation for races", "Not the cause — see H-003")
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>Root cause found:        investigation_identify_root_cause("SessionReadCache does not invalidate on write_file with baseVersion=0")
+</code></pre></div>
+<hr />
+<h2 id="session">Session<a class="headerlink" href="#session" title="Permanent link">&para;</a></h2>
+<p>Gives REPL agents first-class access to their own session metadata, saved-session history, diagnostic log files, and context management. Always available in the REPL when tools are enabled; not applicable to <code>fuseraft run</code> orchestrations.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>repl_session_current</code></td>
+<td>—</td>
+<td>Return the current session's ID, model, start time, working directory, snapshot path, and log file locations.</td>
+</tr>
+<tr>
+<td><code>repl_session_list</code></td>
+<td>—</td>
+<td>List all saved REPL sessions newest-first. The active session is marked with <code>◄ current</code>.</td>
+</tr>
+<tr>
+<td><code>repl_session_read_event_log</code></td>
+<td><code>targetSessionId</code> (optional), <code>maxLines</code> (default 50)</td>
+<td>Read entries from that session's <code>repl_events/{session_id}.jsonl</code>. Defaults to the current session; accepts a full ID or unique prefix for another session.</td>
+</tr>
+<tr>
+<td><code>repl_session_read_log</code></td>
+<td><code>logName</code> (default <code>"repl_events"</code>), <code>maxLines</code> (default 100)</td>
+<td>Read the tail of a named diagnostic log. Valid names: <code>repl_events</code>, <code>events</code>, <code>provider_errors</code>, <code>app</code>.</td>
+</tr>
+<tr>
+<td><code>compact_context</code></td>
+<td><code>focus</code> (optional)</td>
+<td>Compact the conversation history into a concise handoff summary and replace it immediately. Pass an optional one-line focus hint (e.g. <code>"fix build error in SharePointClient.cs"</code>) to steer the summary. Call this when context is near the 80k token ceiling or the agent is repeatedly hitting budget errors.</td>
+</tr>
+<tr>
+<td><code>get_context_status</code></td>
+<td>—</td>
+<td>Return the current context budget: <code>estimated_tokens</code>, <code>budget</code>, <code>pct_used</code>, <code>tokens_remaining</code>, and <code>turn</code>. Call before a multi-file investigation or whenever you want to check how much headroom remains.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Session context in system prompt:</strong> The current session ID, start time, snapshot path, and event log path are injected into the system prompt automatically — the agent always knows its session without needing to call a tool first.</p>
+<p><strong>Typical usage:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a># Find my session ID and log locations
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>repl_session_current()
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a># Compare this session with past ones
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>repl_session_list()
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a># Debug what happened in the last 20 events
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>repl_session_read_event_log(maxLines=20)
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a># Check for provider errors
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>repl_session_read_log(logName="provider_errors")
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a># Check how full the context window is before a large investigation
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>get_context_status()
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a># Free up context when nearing the 80k ceiling
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>compact_context(focus="finish fixing the auth middleware")
+</code></pre></div>
+<hr />
+<h2 id="todo">Todo<a class="headerlink" href="#todo" title="Permanent link">&para;</a></h2>
+<p>Self-directed todo list the model uses to plan and track its own multi-step work within a single REPL session. In-memory only — scoped to the session, not persisted to disk. Always available in the REPL when tools are enabled (i.e. unless <code>fuseraft repl --no-tools</code> is used); not applicable to <code>fuseraft run</code> orchestrations and not added via an agent's <code>Plugins</code> list.</p>
+<p>Unlike <a href="#scratchpad">Scratchpad</a> (free-form key/value notes), Todo holds one ordered checklist that is always replaced wholesale on write — the model writes the full plan up front, then rewrites the full list after each step to flip statuses, rather than patching individual entries.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>todo_write</code></td>
+<td><code>itemsJson</code></td>
+<td>Replace the current todo list. Pass a JSON array of items, e.g. <code>[{"content":"Read entry point","status":"completed"},{"content":"Map request flow","status":"in_progress"}]</code>. <code>status</code> is one of <code>pending</code>, <code>in_progress</code>, <code>completed</code>. Always pass the complete list, not just the changed item — this call replaces the whole list.</td>
+</tr>
+<tr>
+<td><code>todo_read</code></td>
+<td>—</td>
+<td>Read the current todo list.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="compaction">Compaction<a class="headerlink" href="#compaction" title="Permanent link">&para;</a></h2>
+<p>Lets an agent request a history compaction flush on demand — the same path as the automatic
+turn-count and token-budget triggers, using whatever compaction mode is configured.</p>
+<p><strong>Availability:</strong> Only effective when <code>Compaction</code> is present in the orchestration config.
+Calling <code>compact_conversation</code> without a configured compactor is a no-op.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">Plugins</span><span class="p">:</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Compaction</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a># In agent instructions:
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>When your context is growing large and you need to free up space, call compact_conversation().
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>compact_conversation</code></td>
+<td>—</td>
+<td>Compact conversation history using the configured compaction mode.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>How it works:</strong> The tool returns immediately. The runner detects the call at the end of the
+turn and triggers <code>ApplyCompactionAsync</code> before the next stream starts — identical to the
+automatic threshold trigger.</p>
+<hr />
+<h2 id="handoff">Handoff<a class="headerlink" href="#handoff" title="Permanent link">&para;</a></h2>
+<p>Provides a single <code>handoff</code> tool for deterministic, type-safe routing. Agents call <code>handoff(route_keyword: "...")</code> instead of emitting a keyword in free text. The tool-call argument is parsed by the model's function-calling infrastructure — far more reliable than expecting an exact string on its own line in an open-ended prose response.</p>
+<p>When <code>handoff</code> is called, fuseraft terminates the agent's tool loop immediately so no further tools can be called in the same turn. This guarantees the handoff is always the last action the agent takes.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">Plugins</span><span class="p">:</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Handoff</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a># In agent instructions:
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>When your work is complete, call handoff(route_keyword: "HANDOFF TO TESTER").
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>handoff</code></td>
+<td><code>route_keyword</code></td>
+<td>Signal completion and hand off to the next step. Provide the exact keyword defined in your instructions (e.g. <code>"HANDOFF TO TESTER"</code>, <code>"APPROVED"</code>). Must be the last tool call in your response.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>How it interacts with keyword routing:</strong> The keyword strategy checks for a <code>handoff</code> tool call first. If found, the <code>route_keyword</code> argument is used directly as the routing signal — text scanning is skipped entirely. Text-based keywords are still supported as a fallback for configs that do not include the <code>Handoff</code> plugin.</p>
+<hr />
+<h2 id="subagent">SubAgent<a class="headerlink" href="#subagent" title="Permanent link">&para;</a></h2>
+<p>Exposes two lightweight sub-agent tools that keep the caller's context window clean. Instead of reading many files directly, the parent agent delegates work to a focused loop that returns only a distilled result.</p>
+<p>Both tools share the same tool set, timeout (8 minutes), and cancellation behaviour — the parent agent's cancellation token is linked so interrupts propagate immediately. The sub-agent's current working directory is automatically injected into its system prompt so it never wastes a tool call discovering it.</p>
+<p><strong>Default tool set (read-only):</strong> <code>read_file</code>, <code>list_files</code>, <code>grep_file</code>, <code>get_file_summary</code>, <code>get_file_info</code>, <code>search_content</code>, <code>search_symbol</code>, <code>shell_run</code>, <code>shell_get_env</code>, <code>shell_which</code>, <code>git_status</code>, <code>git_diff</code>, <code>git_log</code>, <code>git_show</code>, <code>git_branch_list</code>, <code>git_stash_list</code>. The sub-agent is instructed never to implement, edit, delete, commit, or push anything.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">Plugins</span><span class="p">:</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SubAgent</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sub_agent_explore</code></td>
+<td><code>query</code>, <code>format</code></td>
+<td>Multi-hop exploration. Returns a prose summary (≤600 words) or a bulleted file list depending on <code>format</code>. Up to 20 iterations by default.</td>
+</tr>
+<tr>
+<td><code>sub_agent_locate</code></td>
+<td><code>target</code></td>
+<td>Single-target lookup. Finds where a symbol, type, method, interface, or file is defined. Returns <code>path:line — description</code>. Capped at 5 iterations and 512 output tokens — much cheaper than explore for targeted lookups.</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>format</code> values for <code>sub_agent_explore</code>:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Output</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"prose"</code> (default)</td>
+<td>Narrative summary, ≤600 words</td>
+</tr>
+<tr>
+<td><code>"file_list"</code></td>
+<td>Markdown bullet list of relevant file paths, each with a one-line role description</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Tool selection inside the sub-agent loop (enforced by system prompt):</strong></p>
+<blockquote>
+<p><code>search_symbol</code> → <code>list_files</code> → <code>search_content</code> → <code>get_file_summary</code> → <code>grep_file</code> → <code>read_file</code> → <code>shell_run</code></p>
+</blockquote>
+<p>The model is instructed to prefer earlier options when they suffice, reserving <code>read_file</code> for when a summary is insufficient and <code>shell_run</code> only for verifying a specific hypothesis (build, test) — not for browsing.</p>
+<p><strong>Typical usage:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a># Broad question — use explore
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>sub_agent_explore("Which files in src/Parsing/ handle string interpolation and how do they interact?")
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a># Need a list of paths — use file_list format
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>sub_agent_explore("What files does AgentFactory depend on?", format="file_list")
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a># Single target — use locate (5 iterations, much cheaper)
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>sub_agent_locate("IOrchestrationHook")
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>sub_agent_locate("AgentFactory.Create")
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>sub_agent_locate("EventEmitter.cs")
+</code></pre></div>
+<h3 id="sub-agent-model-override-subagentmodel">Sub-agent model override (<code>SubAgentModel</code>)<a class="headerlink" href="#sub-agent-model-override-subagentmodel" title="Permanent link">&para;</a></h3>
+<p>By default the sub-agent inherits the parent agent's model. Set <code>SubAgentModel</code> to run it on a cheaper model for cost control:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nt">Agents</span><span class="p">:</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Developer</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">    </span><span class="nt">Model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-opus-4-7</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">    </span><span class="nt">Plugins</span><span class="p">:</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">FileSystem</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Shell</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SubAgent</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="w">    </span><span class="nt">SubAgentModel</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">claude-haiku-4-5-20251001</span><span class="w">   </span><span class="c1"># exploration on a cheaper model</span>
+</code></pre></div>
+<p>Any model alias or provider model ID accepted by the <code>Models</code> config section can be used here.</p>
+<h3 id="sub-agent-iteration-cap-subagentmaxtoolcalls">Sub-agent iteration cap (<code>SubAgentMaxToolCalls</code>)<a class="headerlink" href="#sub-agent-iteration-cap-subagentmaxtoolcalls" title="Permanent link">&para;</a></h3>
+<p>Controls the maximum number of tool-call iterations inside the <code>sub_agent_explore</code> loop. <code>sub_agent_locate</code> always uses a hard cap of 5.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nt">Agents</span><span class="p">:</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Archaeologist</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">    </span><span class="nt">Plugins</span><span class="p">:</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SubAgent</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">    </span><span class="nt">SubAgentMaxToolCalls</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30</span><span class="w">   </span><span class="c1"># allow deeper exploration for this agent</span>
+</code></pre></div>
+<p><code>0</code> (default) uses the built-in default of 20.</p>
+<h3 id="custom-sub-agent-plugin-list-subagentplugins">Custom sub-agent plugin list (<code>SubAgentPlugins</code>)<a class="headerlink" href="#custom-sub-agent-plugin-list-subagentplugins" title="Permanent link">&para;</a></h3>
+<p>To give the sub-agent a different set of plugins from the default, list them under <code>SubAgentPlugins</code>. Capability filters from <code>Capabilities</code> apply to sub-agent plugins the same way they apply to the parent. Unknown plugin names raise an error at session startup (they are not silently ignored).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nt">Agents</span><span class="p">:</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Developer</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">    </span><span class="nt">Plugins</span><span class="p">:</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">FileSystem</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Shell</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">SubAgent</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">    </span><span class="nt">SubAgentPlugins</span><span class="p">:</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">FileSystem</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Search</span>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Git</span>
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="w">    </span><span class="nt">Capabilities</span><span class="p">:</span>
+<a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a><span class="w">      </span><span class="nt">Git</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">read</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p><strong>Note:</strong> <code>SubAgent</code> is instantiated per-agent by <code>AgentFactory</code>. The stub registered in <code>PluginRegistry</code> is only used by <code>fuseraft plugins</code> for enumeration.</p>
+<hr />
+<h2 id="document">Document<a class="headerlink" href="#document" title="Permanent link">&para;</a></h2>
+<p>Read rich document formats as plain text. All operations are read-only. Sandbox rules apply when <code>FileSystemSandboxPath</code> is configured.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>document_extract_text</code></td>
+<td><code>path</code></td>
+<td>Extract full plain text from a PDF, DOCX, PPTX, or XLSX file. Returns a format/size header followed by the extracted text.</td>
+</tr>
+<tr>
+<td><code>document_get_info</code></td>
+<td><code>path</code></td>
+<td>Return format metadata (page/sheet count, file size, extracted character count) without returning the full text. Cheaper than <code>extract_text</code> for planning.</td>
+</tr>
+<tr>
+<td><code>document_list_sheets</code></td>
+<td><code>path</code></td>
+<td>List sheet names in an Excel file (<code>.xlsx</code> only).</td>
+</tr>
+<tr>
+<td><code>document_get_sheet</code></td>
+<td><code>path</code>, <code>sheetName</code>, <code>maxRows</code> (default 0 = all)</td>
+<td>Extract one sheet from an Excel file as a pipe-delimited text table.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Supported formats:</strong> <code>.pdf</code>, <code>.docx</code>, <code>.pptx</code>, <code>.xlsx</code></p>
+<p><strong>Context store integration:</strong> When you run <code>fuseraft context add</code> on a supported document, the text is automatically extracted and stored as a <code>.txt</code> file at import time. Agents can then access it via <code>read_file</code> without needing the <code>Document</code> plugin. Use <code>Document</code> when you need on-demand extraction inside a session (e.g. processing documents found during a task, or working with individual Excel sheets).</p>
+<hr />
+<h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
+<p>Architecture Decision Registry (ADR) — record, search, and supersede architecture decisions across sessions. Each decision gets a stable ID (<code>ADR-NNNN</code>) and tracks title, context, rationale, alternatives, consequences, and tags.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>decision_search</code></td>
+<td><code>query</code> (default <code>""</code>), <code>status</code> (optional), <code>tag</code> (optional)</td>
+<td>Search ADRs by keyword across title, context, decision text, and tags. Filter by status (<code>Proposed</code>, <code>Accepted</code>, <code>Deprecated</code>, <code>Superseded</code>) or tag. Leave <code>query</code> empty to list all.</td>
+</tr>
+<tr>
+<td><code>decision_read</code></td>
+<td><code>id</code></td>
+<td>Fetch a single ADR by ID (e.g. <code>ADR-0042</code>). Returns full detail including alternatives, consequences, and governed files.</td>
+</tr>
+<tr>
+<td><code>decision_create</code></td>
+<td><code>title</code>, <code>context</code>, <code>decision</code>, <code>alternatives</code> (optional), <code>consequences</code> (optional), <code>tags</code> (optional), <code>supersedes</code> (optional), <code>governs</code> (optional)</td>
+<td>Record a new architecture decision. <code>alternatives</code> and <code>consequences</code> are comma-separated lists. <code>supersedes</code> is a comma-separated list of ADR IDs; those records are automatically marked Superseded. <code>governs</code> is a comma-separated list of file paths or symbol IDs the decision applies to.</td>
+</tr>
+<tr>
+<td><code>decision_supersede</code></td>
+<td><code>id</code>, <code>newId</code></td>
+<td>Mark an existing ADR as Superseded. <code>newId</code> is the replacement ADR (recorded for traceability).</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="graph">Graph<a class="headerlink" href="#graph" title="Permanent link">&para;</a></h2>
+<p>Read the repository semantic graph — nodes (files, packages/namespaces, types, methods, interfaces, ADRs) and edges (references, inheritance, implementation, dependencies), covering C#, Go, and Python source. The graph is populated automatically by the <code>search_symbol</code> and <code>search_callers</code> tools and by <code>decision_create</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>graph_search</code></td>
+<td><code>query</code> (default <code>""</code>), <code>kind</code> (optional), <code>file</code> (optional)</td>
+<td>Find graph nodes by name, kind, or file path. <code>kind</code> accepts <code>File</code>, <code>Namespace</code>, <code>Package</code>, <code>Type</code>, <code>Interface</code>, <code>Method</code>, <code>Property</code>, <code>Field</code>, or <code>Adr</code>. Returns up to 50 results.</td>
+</tr>
+<tr>
+<td><code>graph_refs</code></td>
+<td><code>symbolId</code></td>
+<td>Find all nodes that reference, implement, or inherit from the given symbol ID (e.g. <code>type:fuseraft.Core.Models.AdrEntry</code>). Returns inbound <code>references</code>, <code>implements</code>, and <code>inherits</code> edges.</td>
+</tr>
+<tr>
+<td><code>graph_dependents</code></td>
+<td><code>symbolId</code>, <code>depth</code> (default 3)</td>
+<td>Transitively walk inbound <code>depends_on</code>, <code>references</code>, <code>implements</code>, and <code>inherits</code> edges up to <code>depth</code> hops (max 10). Shows every node that directly or indirectly depends on the target.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="objective">Objective<a class="headerlink" href="#objective" title="Permanent link">&para;</a></h2>
+<p>Long-horizon objective tracking — record multi-session goals, attach tasks, and track progress across orchestration runs.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>objective_create</code></td>
+<td><code>title</code>, <code>description</code> (optional), <code>tasks</code> (optional)</td>
+<td>Create a new objective. <code>tasks</code> is a comma-separated list of remaining task descriptions. Returns the assigned ID (<code>OBJ-NNNN</code>).</td>
+</tr>
+<tr>
+<td><code>objective_read</code></td>
+<td><code>id</code></td>
+<td>Fetch a single objective by ID with full detail: description, status, completed/remaining tasks, linked sessions, and timestamps.</td>
+</tr>
+<tr>
+<td><code>objective_update</code></td>
+<td><code>id</code>, <code>title</code> (optional), <code>description</code> (optional), <code>status</code> (optional)</td>
+<td>Update an objective's title, description, or status. <code>status</code> accepts <code>Active</code>, <code>Paused</code>, <code>Completed</code>, or <code>Abandoned</code>.</td>
+</tr>
+<tr>
+<td><code>objective_list</code></td>
+<td><code>status</code> (optional)</td>
+<td>List all objectives. Filter by status (<code>Active</code>, <code>Paused</code>, <code>Completed</code>, <code>Abandoned</code>). Shows title, status, and completion percentage.</td>
+</tr>
+<tr>
+<td><code>objective_link_task</code></td>
+<td><code>id</code>, <code>task</code>, <code>completed</code> (default <code>true</code>), <code>sessionId</code> (optional)</td>
+<td>Add a task to an objective or mark an existing task as completed. When <code>completed=false</code>, the task is added to the remaining list. Tracks the current session ID when provided.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="sessioncontext">SessionContext<a class="headerlink" href="#sessioncontext" title="Permanent link">&para;</a></h2>
+<p>Shared writable context summary for the current orchestration session. Agents write a plain-text summary before handing off; the successor reads it to catch up without re-reading every source file. The summary is stored at <code>~/.fuseraft/sessions/{project_slug}/{session_id}/context_summary.md</code> — each <code>session_context_write</code> call replaces the previous content so the file always reflects current state.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>session_context_read</code></td>
+<td>—</td>
+<td>Read the context summary written by the previous agent. Returns a truncation notice if the file exceeds 8,000 characters. Call this at the start of every turn before reading source files.</td>
+</tr>
+<tr>
+<td><code>session_context_write</code></td>
+<td><code>summary</code></td>
+<td>Write or replace the session context summary. Overwrites any previous summary. Call this before every handoff. Bullet-point format works well — include what was accomplished, which files changed, and any open issues the next agent should know about.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="artifact">Artifact<a class="headerlink" href="#artifact" title="Permanent link">&para;</a></h2>
+<p>Fixed-target-path artifact writers for recon and planning-style agents (e.g. the <code>brownfield</code> template's Archaeologist, <code>greenfield</code>'s Preflight, <code>audit</code>'s Auditor and Prioritizer, <code>devops</code>'s OpsPlanner, <code>research</code>'s Researcher and Reviewer). Each registered name below is the same underlying class bound at construction to exactly one file path, one required format, and one uniquely-named write tool — there is no path parameter, so a call can never be redirected at the project's own source files the way <code>write_file</code>/<code>patch_file</code> can. Pair with <code>Capabilities: { FileSystem: [read] }</code> so the agent can examine the sandbox but can only persist findings through its one write tool.</p>
+<p>Every instance validates <code>content</code> against its required format before writing (<code>json</code> parses with <code>System.Text.Json</code>, <code>yaml</code> with YamlDotNet, <code>md</code> has no required structure), and creates parent directories automatically.</p>
+<table>
+<thead>
+<tr>
+<th>Plugin name</th>
+<th>Tool</th>
+<th>Format</th>
+<th>Default path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Conventions</code></td>
+<td><code>write_file_conventions</code></td>
+<td>json</td>
+<td><code>~/.fuseraft/sessions/{project_slug}/{session_id}/conventions.json</code></td>
+</tr>
+<tr>
+<td><code>DiscoveryBrief</code></td>
+<td><code>write_file_discovery_brief</code></td>
+<td>json</td>
+<td><code>~/.fuseraft/sessions/{project_slug}/{session_id}/brief.brownfield.json</code></td>
+</tr>
+<tr>
+<td><code>Preflight</code></td>
+<td><code>write_file_preflight</code></td>
+<td>json</td>
+<td><code>~/.fuseraft/sessions/{project_slug}/{session_id}/preflight.json</code></td>
+</tr>
+<tr>
+<td><code>Brief</code></td>
+<td><code>write_file_brief</code></td>
+<td>json</td>
+<td><code>~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json</code></td>
+</tr>
+<tr>
+<td><code>BriefReview</code></td>
+<td><code>write_file_brief_review</code></td>
+<td>json</td>
+<td><code>~/.fuseraft/sessions/{project_slug}/{session_id}/brief-review.json</code></td>
+</tr>
+<tr>
+<td><code>AuditFindings</code></td>
+<td><code>write_file_audit_findings</code></td>
+<td>json</td>
+<td><code>.fuseraft/artifacts/audit-findings.json</code> (sandbox-relative)</td>
+</tr>
+<tr>
+<td><code>RemediationPlan</code></td>
+<td><code>write_file_remediation_plan</code></td>
+<td>json</td>
+<td><code>.fuseraft/artifacts/remediation-plan.json</code> (sandbox-relative)</td>
+</tr>
+<tr>
+<td><code>OpsPlan</code></td>
+<td><code>write_file_ops_plan</code></td>
+<td>yaml</td>
+<td><code>.fuseraft/artifacts/ops-plan.yaml</code> (sandbox-relative)</td>
+</tr>
+<tr>
+<td><code>ResearchFindings</code></td>
+<td><code>write_file_research_findings</code></td>
+<td>md</td>
+<td><code>.fuseraft/docs/research-findings.md</code> (sandbox-relative)</td>
+</tr>
+<tr>
+<td><code>ResearchReview</code></td>
+<td><code>write_file_research_review</code></td>
+<td>json</td>
+<td><code>.fuseraft/docs/research-review.json</code> (sandbox-relative)</td>
+</tr>
+</tbody>
+</table>
+<p>Each write tool takes <code>content</code> (full file content) and <code>format</code> (must be exactly <code>md</code>, <code>json</code>, or <code>yaml</code> — and must match the instance's required format above).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nt">Agents</span><span class="p">:</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Auditor</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">    </span><span class="nt">Plugins</span><span class="p">:</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">FileSystem</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Search</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Shell</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Investigation</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">AuditFindings</span>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="w">    </span><span class="nt">Capabilities</span><span class="p">:</span>
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="w">      </span><span class="nt">FileSystem</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">read</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p><strong>Note:</strong> the <code>Conventions</code>/<code>DiscoveryBrief</code>/<code>Preflight</code>/<code>Brief</code>/<code>BriefReview</code> paths are session-scoped — one file per session, under the global <code>~/.fuseraft/sessions/</code> tree. The <code>AuditFindings</code>/<code>RemediationPlan</code>/<code>OpsPlan</code>/<code>ResearchFindings</code>/<code>ResearchReview</code> paths are fixed relative to the sandbox root (or the current directory when no <code>FileSystemSandboxPath</code> is set) — shared across sessions in the same project so a downstream agent's <code>read_file</code> call always finds them regardless of which session wrote them.</p>
+<hr />
+<h2 id="skills">Skills<a class="headerlink" href="#skills" title="Permanent link">&para;</a></h2>
+<p>Exposes installed skills as callable tools in the REPL. Only present when at least one skill is found at startup — see <a href="../skills/">Skills</a> for how discovery works.</p>
+<p>Unlike other plugins, Skills is not listed in an agent's <code>Plugins</code> config. It is registered automatically by the REPL based on what is installed on the filesystem.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Parameters</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>load_skill</code></td>
+<td><code>name</code></td>
+<td>Load the full <code>SKILL.md</code> body for a skill by slug. The model calls this when the catalog entry indicates the skill is relevant to the current task.</td>
+</tr>
+<tr>
+<td><code>run_skill_script</code></td>
+<td><code>skill</code>, <code>script</code>, <code>args</code> (optional)</td>
+<td>Run a script bundled with a skill. <code>script</code> is the filename inside the skill directory (e.g. <code>transform.py</code>). <code>args</code> is a space-separated argument string. Supported extensions: <code>.sh</code>, <code>.py</code>, <code>.js</code>.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="mcp-plugins">MCP plugins<a class="headerlink" href="#mcp-plugins" title="Permanent link">&para;</a></h2>
+<p>In addition to the built-in plugins above, tools from any connected MCP server are available as plugins. The plugin name is the <code>Name</code> field from <code>McpServers</code> config.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="nt">McpServers</span><span class="p">:</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">MyTools</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w">    </span><span class="nt">Transport</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">stdio</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="w">    </span><span class="nt">Command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">npx</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="w">    </span><span class="nt">Args</span><span class="p">:</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"-y"</span>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-mcp-server</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="nt">Agents</span><span class="p">:</span>
+<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Developer</span>
+<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="w">    </span><span class="nt">Plugins</span><span class="p">:</span>
+<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">FileSystem</span>
+<a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Shell</span>
+<a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">MyTools</span>
+</code></pre></div>
+<p>See <a href="../mcp/">MCP Integration</a> for full detail.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../models/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Models &amp; Providers">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Models & Providers
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../skills/" class="md-footer__link md-footer__link--next" aria-label="Next: Skills">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Skills
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.footer", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

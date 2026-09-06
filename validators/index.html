@@ -1,0 +1,2752 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Multi-agent orchestration CLI built on Microsoft Agent Framework">
+      
+      
+      
+        <link rel="canonical" href="https://fuseraft.ai/validators/">
+      
+      
+        <link rel="prev" href="../strategies/">
+      
+      
+        <link rel="next" href="../harness-engineering/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Validators - fuseraft-cli</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#validators" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="fuseraft-cli" class="md-header__button md-logo" aria-label="fuseraft-cli" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            fuseraft-cli
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Validators
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fuseraft/fuseraft-cli" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fuseraft/fuseraft-cli
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../writing-tasks/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Writing Tasks
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../spec-driven/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Spec-Driven Development
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../cli-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../scripting/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Scripting & Automation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../models/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Models & Providers
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../plugins/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Plugins
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../skills/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Skills
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../strategies/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Strategies
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Validators
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../harness-engineering/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Harness Engineering
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../mcp/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  MCP
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../security/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Security
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../governance/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Governance
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../evals/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evals
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../sessions/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Sessions
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../context-management/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Context Management
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../context-store/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Context Store
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../knowledge/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Knowledge Layer
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../examples/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Examples
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../design/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Design
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="fuseraft-cli" class="md-nav__button md-logo" aria-label="fuseraft-cli" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    fuseraft-cli
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fuseraft/fuseraft-cli" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fuseraft/fuseraft-cli
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../writing-tasks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing Tasks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../spec-driven/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spec-Driven Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scripting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scripting & Automation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models & Providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../skills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skills
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../strategies/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Strategies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Validators
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Validators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#validators-on-routing-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validators on routing routes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validators-on-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validators on routes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validators-on-termination-strategies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validators on termination strategies
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requirebrief" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RequireBrief
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requireshellpass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RequireShellPass
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RequireShellPass">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#requiredcommandpattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RequiredCommandPattern
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requirewritefile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RequireWriteFile
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RequireWriteFile">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#shellfallbackpattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ShellFallbackPattern
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requireallfileswritten" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RequireAllFilesWritten
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requirerelatedtestspass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RequireRelatedTestsPass
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testreportvalid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TestReportValid
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="TestReportValid">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#test-report-schema" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test report schema
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assertion-pattern-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assertion pattern detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#command-cross-reference-check-8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command cross-reference (check 8)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requirereviewjudgement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RequireReviewJudgement
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RequireReviewJudgement">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#expected-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Expected format
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requireacceptancecriteriapassed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RequireAcceptanceCriteriaPassed
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RequireAcceptanceCriteriaPassed">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#testable-criterion-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testable criterion format
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#brief-schema" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Brief schema
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#evidence-contracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evidence contracts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#relationship-between-validators-and-agent-instructions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relationship between validators and agent instructions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stuck-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stuck detection
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harness-engineering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harness Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../governance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Governance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../context-management/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../context-store/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Store
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../knowledge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#validators-on-routing-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validators on routing routes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validators-on-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validators on routes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validators-on-termination-strategies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validators on termination strategies
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requirebrief" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RequireBrief
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requireshellpass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RequireShellPass
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RequireShellPass">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#requiredcommandpattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RequiredCommandPattern
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requirewritefile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RequireWriteFile
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RequireWriteFile">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#shellfallbackpattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ShellFallbackPattern
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requireallfileswritten" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RequireAllFilesWritten
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requirerelatedtestspass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RequireRelatedTestsPass
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testreportvalid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TestReportValid
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="TestReportValid">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#test-report-schema" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test report schema
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assertion-pattern-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Assertion pattern detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#command-cross-reference-check-8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command cross-reference (check 8)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requirereviewjudgement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RequireReviewJudgement
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RequireReviewJudgement">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#expected-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Expected format
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requireacceptancecriteriapassed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RequireAcceptanceCriteriaPassed
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RequireAcceptanceCriteriaPassed">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#testable-criterion-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testable criterion format
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#brief-schema" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Brief schema
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#evidence-contracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evidence contracts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#relationship-between-validators-and-agent-instructions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relationship between validators and agent instructions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stuck-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stuck detection
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/fuseraft/fuseraft-cli/edit/main/docs/validators.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="validators">Validators<a class="headerlink" href="#validators" title="Permanent link">&para;</a></h1>
+<p>Validators are deterministic pre-flight checks that run before a keyword route fires or before a termination strategy ends the session. They prevent agents from advancing the pipeline without real evidence — blocking claims like "I wrote the file" that were never actually executed, or "all tests pass" when no test report exists.</p>
+<p>When a validator fails, the route or termination is blocked, an error message is injected into the conversation as a user turn, and the agent is re-invoked. The agent must address the error and retry before the handoff or completion can proceed.</p>
+<hr />
+<h2 id="validators-on-routing-routes">Validators on routing routes<a class="headerlink" href="#validators-on-routing-routes" title="Permanent link">&para;</a></h2>
+<p>Reference a validator by name on individual keyword routes:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">Selection</span><span class="p">:</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">Type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">keyword</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">Routes</span><span class="p">:</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Keyword</span><span class="p">:</span><span class="w"> </span><span class="s">"HANDOFF</span><span class="nv"> </span><span class="s">TO</span><span class="nv"> </span><span class="s">DEVELOPER"</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">      </span><span class="nt">Agent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Developer</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">      </span><span class="nt">Validator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RequireBrief</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">      </span><span class="nt">SourceAgents</span><span class="p">:</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Planner</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Keyword</span><span class="p">:</span><span class="w"> </span><span class="s">"HANDOFF</span><span class="nv"> </span><span class="s">TO</span><span class="nv"> </span><span class="s">TESTER"</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">      </span><span class="nt">Agent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Tester</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">      </span><span class="nt">Validator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RequireWriteFile</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">      </span><span class="nt">SourceAgents</span><span class="p">:</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Developer</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Keyword</span><span class="p">:</span><span class="w"> </span><span class="s">"HANDOFF</span><span class="nv"> </span><span class="s">TO</span><span class="nv"> </span><span class="s">TESTER"</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">      </span><span class="nt">Agent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Tester</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">      </span><span class="nt">Validator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RequireShellPass</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">      </span><span class="nt">RequiredCommandPattern</span><span class="p">:</span><span class="w"> </span><span class="s">"go</span><span class="nv"> </span><span class="s">build|go</span><span class="nv"> </span><span class="s">test"</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">      </span><span class="nt">SourceAgents</span><span class="p">:</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Developer</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Keyword</span><span class="p">:</span><span class="w"> </span><span class="s">"HANDOFF</span><span class="nv"> </span><span class="s">TO</span><span class="nv"> </span><span class="s">REVIEWER"</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="w">      </span><span class="nt">Agent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Reviewer</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="w">      </span><span class="nt">Validator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TestReportValid</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="w">      </span><span class="nt">SourceAgents</span><span class="p">:</span>
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Tester</span>
+</code></pre></div>
+<h2 id="validators-on-routes">Validators on routes<a class="headerlink" href="#validators-on-routes" title="Permanent link">&para;</a></h2>
+<p>Validators attached to a <code>Selection.Routes</code> entry run before the handoff fires. Use <code>Validators</code> (AND semantics — all must pass) or the single <code>Validator</code> field:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">Routes</span><span class="p">:</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Keyword</span><span class="p">:</span><span class="w"> </span><span class="s">"HANDOFF</span><span class="nv"> </span><span class="s">TO</span><span class="nv"> </span><span class="s">TESTER"</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">Agent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Tester</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="nt">Validators</span><span class="p">:</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RequireWriteFile</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RequireShellPass</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="nt">SourceAgents</span><span class="p">:</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Developer</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Keyword</span><span class="p">:</span><span class="w"> </span><span class="s">"HANDOFF</span><span class="nv"> </span><span class="s">TO</span><span class="nv"> </span><span class="s">REVIEWER"</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">    </span><span class="nt">Agent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Reviewer</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">    </span><span class="nt">Validator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TestReportValid</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">    </span><span class="nt">SourceAgents</span><span class="p">:</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Tester</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Keyword</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">APPROVED</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">    </span><span class="nt">Agent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Reviewer</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">    </span><span class="nt">Validators</span><span class="p">:</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RequireShellPass</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RequireReviewJudgement</span>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="w">    </span><span class="nt">SourceAgents</span><span class="p">:</span>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Reviewer</span>
+</code></pre></div>
+<h2 id="validators-on-termination-strategies">Validators on termination strategies<a class="headerlink" href="#validators-on-termination-strategies" title="Permanent link">&para;</a></h2>
+<p>Validators may also be placed on <code>Termination.Strategies</code> entries. For keyword-routed configs, route validation via <code>Selection.Routes</code> is the authoritative gate — termination validators on the same pattern are not re-evaluated separately when the route already passed its validator.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">Termination</span><span class="p">:</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">Type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">composite</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">MaxIterations</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">40</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">Strategies</span><span class="p">:</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">regex</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">      </span><span class="nt">Pattern</span><span class="p">:</span><span class="w"> </span><span class="s">'(?m)^\s*APPROVED\s*$'</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">      </span><span class="nt">AgentNames</span><span class="p">:</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Reviewer</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">maxiterations</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">      </span><span class="nt">MaxIterations</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">40</span>
+</code></pre></div>
+<p>The <code>maxiterations</code> child always fires unconditionally — it is not affected by validators and acts as the hard cap.</p>
+<p>The <code>Validation</code> section provides file paths and patterns used by the validators:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">Validation</span><span class="p">:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">BriefPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="nt">TestReportPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.fuseraft/artifacts/test-report.json</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="nt">ChangeLogPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.fuseraft/state/{project_slug}/changes.json</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="nt">TestAssertionPatterns</span><span class="p">:</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tester::assert</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"if</span><span class="nv"> </span><span class="s">.+</span><span class="nv"> </span><span class="s">throw"</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">\bassert\b</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">\bexpect\b</span>
+</code></pre></div>
+<p>The <code>Validation</code> section is required when any route uses <code>TestReportValid</code>. It is optional for <code>RequireWriteFile</code> and <code>RequireShellPass</code>. <code>ChangeLogPath</code> enables check 8 — cross-referencing test-report commands against the <a href="../configuration/#change-tracking">change log</a> produced by <code>ChangeTracking</code>; omit it to skip that check.</p>
+<hr />
+<h2 id="requirebrief">RequireBrief<a class="headerlink" href="#requirebrief" title="Permanent link">&para;</a></h2>
+<p><strong>Used on:</strong> <code>HANDOFF TO DEVELOPER</code> (blocks the Planner from handing off without a written brief)</p>
+<p><strong>What it checks:</strong> Reads <code>brief.json</code> from <code>Validation.BriefPath</code> (default <code>~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json</code>) and verifies it exists on disk with valid, complete content.</p>
+<p><strong>Passes if:</strong> <code>brief.json</code> exists, is valid JSON, and contains non-empty <code>goal</code>, <code>files_to_change</code>, <code>acceptance_criteria</code>, and <code>implementation</code> fields.</p>
+<p><strong>Fails with a specific error for each missing piece:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Failure</th>
+<th>Error</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>File missing</td>
+<td>Instructs the Planner to explore the codebase and write the brief</td>
+</tr>
+<tr>
+<td>Invalid JSON</td>
+<td>Reports the parse error and asks for a fix</td>
+</tr>
+<tr>
+<td>Empty <code>goal</code></td>
+<td>Asks for a one-sentence objective</td>
+</tr>
+<tr>
+<td>Empty <code>files_to_change</code></td>
+<td>Asks for an explicit file list with reasons</td>
+</tr>
+<tr>
+<td>Empty <code>acceptance_criteria</code></td>
+<td>Asks for testable criteria the Tester will verify</td>
+</tr>
+<tr>
+<td>Empty <code>implementation</code></td>
+<td>Asks for ordered write/patch actions covering every file in <code>files_to_change</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Note:</strong> <code>RequireBrief</code> requires the <code>Validation</code> section to be present (it reads <code>Validation.BriefPath</code>). If no <code>Validation</code> section is configured the validator is silently unavailable.</p>
+</blockquote>
+<hr />
+<h2 id="requireshellpass">RequireShellPass<a class="headerlink" href="#requireshellpass" title="Permanent link">&para;</a></h2>
+<p><strong>Used on:</strong> Any route where you require the agent to have run and verified a shell command this turn (e.g. a build or smoke-test before handoff)</p>
+<p><strong>What it checks:</strong> Walks backward through the conversation history looking for completed <code>shell_run</code> tool calls (<code>Role=Tool</code> messages with a <code>FunctionResultContent</code> whose function name contains <code>shell_run</code>). Stops at the most recent user-role message.</p>
+<p><strong>Passes if:</strong> At least one <code>shell_run</code> call completed successfully this turn — i.e. the result does not start with <code>[EXIT</code>, <code>[ERROR]</code>, <code>[TIMEOUT]</code>, or <code>[DENIED]</code>.</p>
+<p><strong>Fails if:</strong> No successful <code>shell_run</code> result is found — the agent either ran no command at all, or every command it ran failed.</p>
+<h3 id="requiredcommandpattern">RequiredCommandPattern<a class="headerlink" href="#requiredcommandpattern" title="Permanent link">&para;</a></h3>
+<p>When the route also sets <code>RequiredCommandPattern</code>, a passing shell run is only accepted if the original command matches at least one of the pipe-separated alternatives (case-insensitive):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Keyword</span><span class="p">:</span><span class="w"> </span><span class="s">"HANDOFF</span><span class="nv"> </span><span class="s">TO</span><span class="nv"> </span><span class="s">TESTER"</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">Agent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Tester</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">Validator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RequireShellPass</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">RequiredCommandPattern</span><span class="p">:</span><span class="w"> </span><span class="s">"go</span><span class="nv"> </span><span class="s">build|go</span><span class="nv"> </span><span class="s">test"</span>
+</code></pre></div>
+<p>With this config, a run of <code>go mod tidy</code> exits 0 but is rejected because it matches neither <code>go build</code> nor <code>go test</code>. The agent must run the actual build or test command before the handoff fires.</p>
+<p>The pattern is extracted from the <code>FunctionCallContent</code> that preceded the result, so the check is mechanical — it reads the command the model actually called, not what the model wrote in prose.</p>
+<p><strong>Error injected on failure:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Handoff blocked: no matching (go build|go test) shell_run passed this turn.
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>The validator checks THIS TURN ONLY — prior-turn runs do not carry forward.
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>  1. Call shell_run to run the required command (exit 0).
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>  2. Emit the handoff keyword in the same response.
+</code></pre></div>
+<hr />
+<h2 id="requirewritefile">RequireWriteFile<a class="headerlink" href="#requirewritefile" title="Permanent link">&para;</a></h2>
+<p><strong>Used on:</strong> Any route where the agent must have written at least one file this turn (e.g. <code>HANDOFF TO TESTER</code>, <code>RECON COMPLETE</code>, <code>HANDOFF TO REVIEWER</code>)</p>
+<p><strong>What it checks:</strong> Walks backward through the conversation history looking for completed <code>write_file</code> or <code>patch_file</code> tool calls (<code>Role=Tool</code> messages with a <code>FunctionResultContent</code> whose function name contains either string). Stops at the most recent user-role message.</p>
+<p><strong>Passes if:</strong> At least one <code>write_file</code> or <code>patch_file</code> call completed in the current agent turn.</p>
+<p><strong>Fails if:</strong> Neither tool was called — meaning the agent described a file write in text but never actually called the tool. Text, code blocks, and responses are not saved to disk.</p>
+<h3 id="shellfallbackpattern">ShellFallbackPattern<a class="headerlink" href="#shellfallbackpattern" title="Permanent link">&para;</a></h3>
+<p>Some fixes require only a shell command (e.g. a dependency update) and produce no file-write call. Set <code>ShellFallbackPattern</code> on the route to allow a successful matching <code>shell_run</code> to satisfy the validator instead:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Keyword</span><span class="p">:</span><span class="w"> </span><span class="s">"HANDOFF</span><span class="nv"> </span><span class="s">TO</span><span class="nv"> </span><span class="s">TESTER"</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">Agent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Tester</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="nt">Validator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RequireWriteFile</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span><span class="nt">ShellFallbackPattern</span><span class="p">:</span><span class="w"> </span><span class="s">"npm</span><span class="nv"> </span><span class="s">install|pip</span><span class="nv"> </span><span class="s">install|go</span><span class="nv"> </span><span class="s">mod</span><span class="nv"> </span><span class="s">tidy|go</span><span class="nv"> </span><span class="s">get"</span>
+</code></pre></div>
+<p>The pattern is a pipe-separated list of substrings (case-insensitive). The validator passes if the turn contains a successful <code>shell_run</code> whose command matches any alternative. A failed shell command (exit code non-zero, <code>[ERROR]</code>, <code>[TIMEOUT]</code>, <code>[DENIED]</code>) is never accepted regardless of the pattern.</p>
+<p>When <code>ShellFallbackPattern</code> is omitted the validator behaves as before — only <code>write_file</code>, <code>patch_file</code>, or <code>git_commit</code> satisfy it.</p>
+<p><strong>Error injected on failure:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Handoff blocked: no evidence of real work this turn
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>(no write_file, no patch_file, no git_commit, no shell fallback matched).
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>You must write at least one file before handing off. Use write_file for new files
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>or patch_file for surgical edits to existing files. Code blocks in your response
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>are NOT saved to disk — you must call the tool.
+</code></pre></div>
+<hr />
+<h2 id="requireallfileswritten">RequireAllFilesWritten<a class="headerlink" href="#requireallfileswritten" title="Permanent link">&para;</a></h2>
+<p><strong>Used on:</strong> <code>HANDOFF TO TESTER</code> (or any route where you need to verify the entire brief's file list has been written, not just one file)</p>
+<p><strong>What it checks:</strong> Reads <code>brief.json</code> from <code>Validation.BriefPath</code> and verifies that every path listed in <code>files_to_change</code> has been written via <code>write_file</code> — either in the current agent turn or in a previous turn recorded in <code>changes.json</code>.</p>
+<p>This closes the loophole where a Developer writes a single helper file to satisfy <code>RequireWriteFile</code> while leaving the important implementation files unwritten.</p>
+<p><strong><code>files_to_change</code> format:</strong> Both plain strings and objects are supported:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">"files_to_change"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="s2">"src/api/users.py"</span><span class="p">,</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"tests/test_users.py"</span><span class="p">,</span><span class="w"> </span><span class="nt">"reason"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Add pagination tests"</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="p">]</span>
+</code></pre></div>
+<p>The validator extracts the path from both forms automatically.</p>
+<p><strong>Two sources are checked:</strong></p>
+<ol>
+<li><strong>Current turn</strong> — scans <code>Role=Tool</code> messages backward to the most recent user message, collecting the <code>path</code> argument of each successful <code>write_file</code> call (matched via <code>FunctionCallContent.Id</code> / <code>FunctionResultContent.CallId</code>).</li>
+<li><strong>Previous turns</strong> — when <code>Validation.ChangeLogPath</code> is configured, reads <code>changes.json</code> and accumulates <code>FilesWritten</code> entries from the current session (filtered by <code>ActiveSessionId</code> to exclude prior sessions).</li>
+</ol>
+<p><strong>Passes if:</strong> Every path in <code>brief.json</code>'s <code>files_to_change</code> is covered by at least one source.</p>
+<p><strong>Fails if:</strong> One or more required files have not been written, with each missing path listed in the error and two remediation options:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Handoff blocked: these files from brief.json were not written this session:
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>  ✗ src/api/users.py
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>  ✗ tests/test_users.py
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>To resolve, either:
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>  A. Modify each missing file with write_file or patch_file.
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>  B. If a file does not actually need changes, update brief.json to remove it
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>     from files_to_change, then retry the handoff.
+</code></pre></div>
+<blockquote>
+<p><strong>Important:</strong> Every file listed in <code>files_to_change</code> must be written this session — including files that already exist on disk. Listing a file in <code>files_to_change</code> is a commitment to modify it. If the file turns out not to need changes, remove it from the brief rather than leaving it unwritten.</p>
+</blockquote>
+<p><strong>Path matching</strong> is case-insensitive and normalises leading <code>./</code> so <code>./src/main.go</code> and <code>src/main.go</code> are treated as the same file. Absolute/relative mismatches (e.g. <code>/project/src/main.go</code> vs <code>src/main.go</code>) are handled via suffix matching.</p>
+<p><strong>When <code>brief.json</code> is missing</strong>, the handoff is blocked with an error asking the Planner to write it. When <code>files_to_change</code> is absent or empty the validator passes immediately (nothing to verify).</p>
+<p><strong>Example route config:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Keyword</span><span class="p">:</span><span class="w"> </span><span class="s">"HANDOFF</span><span class="nv"> </span><span class="s">TO</span><span class="nv"> </span><span class="s">TESTER"</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="nt">Agent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Tester</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span><span class="nt">Validator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RequireAllFilesWritten</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">  </span><span class="nt">SourceAgents</span><span class="p">:</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Developer</span>
+</code></pre></div>
+<p><strong>Relationship to RequireWriteFile:</strong> Use <code>RequireWriteFile</code> when you only need evidence that <em>something</em> was written this turn (cheap check). Use <code>RequireAllFilesWritten</code> when you need to verify completeness against the brief (stronger check, requires <code>Validation</code> section with <code>BriefPath</code>).</p>
+<blockquote>
+<p><strong>Note:</strong> <code>RequireAllFilesWritten</code> requires the <code>Validation</code> section to be present (it reads <code>Validation.BriefPath</code>). <code>Validation.ChangeLogPath</code> is optional — omit it to check only the current turn.</p>
+</blockquote>
+<hr />
+<h2 id="requirerelatedtestspass">RequireRelatedTestsPass<a class="headerlink" href="#requirerelatedtestspass" title="Permanent link">&para;</a></h2>
+<p><strong>Used on:</strong> <code>HANDOFF TO TESTER</code> or <code>HANDOFF TO REVIEWER</code> (blocks handoff until targeted tests for the session's changed files pass)</p>
+<p><strong>What it checks:</strong> Reads the change log to find every file written in the current session, runs <code>TestSelector.FindRelatedCommand</code> for each changed file to discover related test targets, then executes only those tests. Falls back to <code>TestSelector.FullSuiteCommand</code> when discovery returns nothing.</p>
+<p><strong>Passes if:</strong> The test command (targeted or full-suite fallback) exits 0.</p>
+<p><strong>Fails if:</strong> The discovery command fails, the test runner exits non-zero, or <code>TestSelector</code> is not configured.</p>
+<p><strong>Requirements:</strong>
+- <code>TestSelector.FindRelatedCommand</code> must be set (template with <code>{file}</code> substitution).
+- <code>TestSelector.FullSuiteCommand</code> must be set (used as fallback and as the test runner that receives discovered targets as arguments).
+- <code>ChangeTracking</code> must be configured so changed files can be resolved.</p>
+<p><strong>Example route config:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nt">Orchestration</span><span class="p">:</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="nt">ChangeTracking</span><span class="p">:</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">    </span><span class="nt">Path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.fuseraft/state/{project_slug}/changes.json</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">  </span><span class="nt">TestSelector</span><span class="p">:</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">    </span><span class="nt">FindRelatedCommand</span><span class="p">:</span><span class="w"> </span><span class="s">"pytest</span><span class="nv"> </span><span class="s">--collect-only</span><span class="nv"> </span><span class="s">-q</span><span class="nv"> </span><span class="s">{file}</span><span class="nv"> </span><span class="s">2&gt;/dev/null</span><span class="nv"> </span><span class="s">|</span><span class="nv"> </span><span class="s">grep</span><span class="nv"> </span><span class="s">'::'</span><span class="nv"> </span><span class="s">|</span><span class="nv"> </span><span class="s">head</span><span class="nv"> </span><span class="s">-40"</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="w">    </span><span class="nt">FullSuiteCommand</span><span class="p">:</span><span class="w"> </span><span class="s">"pytest"</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="w">  </span><span class="nt">Contracts</span><span class="p">:</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TestedChanges</span>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="w">      </span><span class="nt">Requires</span><span class="p">:</span>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RelatedTestsPass</span>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a><span class="w">  </span><span class="nt">Selection</span><span class="p">:</span>
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="w">    </span><span class="nt">Type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">keyword</span>
+<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a><span class="w">    </span><span class="nt">Routes</span><span class="p">:</span>
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Keyword</span><span class="p">:</span><span class="w"> </span><span class="s">"HANDOFF</span><span class="nv"> </span><span class="s">TO</span><span class="nv"> </span><span class="s">REVIEWER"</span>
+<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a><span class="w">        </span><span class="nt">Agent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Reviewer</span>
+<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a><span class="w">        </span><span class="nt">Contracts</span><span class="p">:</span>
+<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TestedChanges</span>
+<a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a><span class="w">        </span><span class="nt">SourceAgents</span><span class="p">:</span>
+<a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Tester</span>
+</code></pre></div>
+<p><strong>How target discovery works:</strong></p>
+<ol>
+<li>Changed files are read from <code>changes.json</code> for the active session (<code>ActiveSessionId</code>).</li>
+<li><code>FindRelatedCommand</code> is run once per changed file (<code>{file}</code> substituted). Each non-empty output line is treated as a test target.</li>
+<li>Discovered targets are appended as space-separated arguments to <code>FullSuiteCommand</code>.</li>
+<li>If discovery produces no targets, <code>FullSuiteCommand</code> is run without arguments (full suite fallback).</li>
+</ol>
+<p><strong>Error injected on failure:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>Handoff blocked: targeted tests failed (exit 1).
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>Command: pytest tests/test_api.py tests/test_auth.py
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>&lt;test output truncated to 2000 chars&gt;
+</code></pre></div>
+<p><strong>Relationship to <code>RequireShellPass</code>:</strong> <code>RequireShellPass</code> checks whether the agent ran any passing shell command this turn. <code>RequireRelatedTestsPass</code> is a contract predicate that the orchestrator runs independently — it does not inspect conversation history, it runs the tests itself. Use <code>RequireRelatedTestsPass</code> when you want the framework to enforce test coverage of specific changed files. Use <code>RequireShellPass</code> when you want to verify the agent ran a command in its own turn.</p>
+<hr />
+<h2 id="testreportvalid">TestReportValid<a class="headerlink" href="#testreportvalid" title="Permanent link">&para;</a></h2>
+<p><strong>Used on:</strong> <code>HANDOFF TO REVIEWER</code></p>
+<p><strong>What it checks (in order):</strong></p>
+<ol>
+<li><code>test-report.json</code> exists at <code>Validation.TestReportPath</code></li>
+<li>The file is valid JSON and has at least one entry in <code>results</code></li>
+<li>No result has <code>status: FAIL</code></li>
+<li>No PASS result has an empty <code>command</code> field (fabrication guard)
+4b. No PASS result has a plugin tool-call string in the <code>command</code> field (e.g. <code>FileSystem-read_file path=...</code>) — a test result must be backed by a real shell command, not a file read</li>
+<li>The <code>fake_test_files</code> array is empty (or absent)</li>
+<li>The number of results is at least as large as the number of acceptance criteria in <code>brief.json</code> (if <code>brief.json</code> exists)</li>
+<li>Every test file listed in <code>brief.json</code>'s <code>files_to_change</code> that contains "test" in its path contains at least one pattern from <code>TestAssertionPatterns</code> (static fake-test detection)</li>
+<li>PASS result commands are cross-referenced against <code>changes.json</code> (if <code>Validation.ChangeLogPath</code> is set) — each non-trivial command in the report must match a command that was actually executed and recorded by the change tracker</li>
+</ol>
+<p><strong>Passes if:</strong> All applicable checks pass.</p>
+<p><strong>Fails with a specific error for each check.</strong></p>
+<h3 id="test-report-schema">Test report schema<a class="headerlink" href="#test-report-schema" title="Permanent link">&para;</a></h3>
+<p>The Tester must write a file at <code>Validation.TestReportPath</code> (default <code>.fuseraft/artifacts/test-report.json</code>) matching this schema before writing <code>HANDOFF TO REVIEWER</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="p">{</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="nt">"results"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">      </span><span class="nt">"criterion"</span><span class="p">:</span><span class="w"> </span><span class="s2">"The add command stores a task and returns a non-zero ID"</span><span class="p">,</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">      </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="s2">"PASS"</span><span class="p">,</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">      </span><span class="nt">"command"</span><span class="p">:</span><span class="w"> </span><span class="s2">"cargo test test_add_command -- --nocapture"</span><span class="p">,</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">      </span><span class="nt">"exit_code"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="w">  </span><span class="nt">"fake_test_files"</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="p">}</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>results</code></td>
+<td>yes</td>
+<td>Array with one entry per acceptance criterion.</td>
+</tr>
+<tr>
+<td><code>results[].criterion</code></td>
+<td>yes</td>
+<td>The exact acceptance criterion text from the brief.</td>
+</tr>
+<tr>
+<td><code>results[].status</code></td>
+<td>yes</td>
+<td><code>PASS</code> or <code>FAIL</code>.</td>
+</tr>
+<tr>
+<td><code>results[].command</code></td>
+<td>yes (for PASS)</td>
+<td>The exact shell command that was executed to verify this criterion. An empty command on a PASS result is rejected as fabricated.</td>
+</tr>
+<tr>
+<td><code>results[].exit_code</code></td>
+<td>no</td>
+<td>The actual exit code. Informational — not validated.</td>
+</tr>
+<tr>
+<td><code>results[].output</code></td>
+<td>yes (for FAIL)</td>
+<td>Relevant stderr/stdout from the failing command. Required on FAIL results so the Developer can diagnose without re-running. Omit on PASS results — the Reviewer re-runs commands themselves and pre-recorded output adds noise to the history.</td>
+</tr>
+<tr>
+<td><code>fake_test_files</code></td>
+<td>yes</td>
+<td>List of test files that contain no real assertions. Must be empty for handoff to proceed.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="assertion-pattern-detection">Assertion pattern detection<a class="headerlink" href="#assertion-pattern-detection" title="Permanent link">&para;</a></h3>
+<p>The <code>TestAssertionPatterns</code> list contains regular expressions. A test file is considered real if its contents match at least one pattern. The defaults cover the most common assertion styles:</p>
+<table>
+<thead>
+<tr>
+<th>Pattern</th>
+<th>Matches</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tester::assert</code></td>
+<td>Kiwi-lang / fuseraft-lang assertions</td>
+</tr>
+<tr>
+<td><code>if .+ throw</code></td>
+<td>Manual if/throw assertion pattern</td>
+</tr>
+<tr>
+<td><code>\bassert\b</code></td>
+<td>Native assert (most languages)</td>
+</tr>
+<tr>
+<td><code>\bexpect\b</code></td>
+<td>Jest, Chai, Vitest, RSpec, etc.</td>
+</tr>
+</tbody>
+</table>
+<p>Add your own patterns if your test framework uses a different convention:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nt">Validation</span><span class="p">:</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span><span class="nt">TestAssertionPatterns</span><span class="p">:</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">\bassert\b</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">\bexpect\b</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">assertEqual</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">assertTrue</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">should\.be</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">"#\\[test\\]"</span>
+</code></pre></div>
+<h3 id="command-cross-reference-check-8">Command cross-reference (check 8)<a class="headerlink" href="#command-cross-reference-check-8" title="Permanent link">&para;</a></h3>
+<p>When <code>Validation.ChangeLogPath</code> is set and <code>changes.json</code> exists, check 8 cross-references the commands listed in <code>test-report.json</code> PASS results against the commands that were actually executed and recorded by the <a href="../configuration/#change-tracking">change tracker</a>.</p>
+<p>Two tiers:</p>
+<ol>
+<li><strong>Any commands ran at all</strong> — if <code>changes.json</code> records zero successful commands but the report has PASS results, all passes are rejected as unverifiable.</li>
+<li><strong>Per-result token match</strong> — for each PASS result whose <code>command</code> field is 8+ characters, at least one executed command in <code>changes.json</code> must share a significant token with it (substring or token-overlap match). Commands shorter than 8 characters are skipped to avoid false matches on tokens like <code>run</code>.</li>
+</ol>
+<p><strong>Error when no commands ran:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>HANDOFF TO REVIEWER blocked: N PASS result(s) but no shell commands recorded. Run tests with shell_run before handing off.
+</code></pre></div>
+<p><strong>Error when a command has no match:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>HANDOFF TO REVIEWER blocked: 1 PASS result(s) not found in the change log.
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>Each PASS must be backed by a real shell_run this session:
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>  1. shell_run the command.
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>  2. Update 'command' in test-report.json.
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>  3. write_file the report.
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a>Unverified:
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>  ✗ cargo test test_add_command -- --nocapture
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a>
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a>Commands recorded in changes.json for this session:
+<a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a>  - go test ./...
+</code></pre></div>
+<hr />
+<h2 id="requirereviewjudgement">RequireReviewJudgement<a class="headerlink" href="#requirereviewjudgement" title="Permanent link">&para;</a></h2>
+<p><strong>Used on:</strong> The <code>APPROVED</code> route in <code>Selection.Routes</code> (blocks session completion until the Reviewer has produced a structured per-criterion judgement)</p>
+<p><strong>What it checks:</strong> Scans the Reviewer's last assistant message in the current turn for a <code>{"review":[...]}</code> JSON block and enforces four rules:</p>
+<ol>
+<li>The block exists and has at least one entry with non-empty <code>criterion</code>, <code>verdict</code>, and <code>evidence</code>.</li>
+<li>No entry has <code>verdict: FAIL</code> — a FAIL means the change is incomplete and must be routed back.</li>
+<li>When <code>Validation.BriefPath</code> is set, the review must have at least as many entries as the brief's <code>acceptance_criteria</code> array — every criterion must be explicitly addressed.</li>
+<li>When any entry has <code>verdict: PASS</code>, at least one successful <code>shell_run</code> must have been called this turn — code inspection alone is not sufficient to claim PASS.</li>
+</ol>
+<p><strong>Passes if:</strong> All four rules are satisfied.</p>
+<p><strong>Fails with a specific error for each rule.</strong></p>
+<h3 id="expected-format">Expected format<a class="headerlink" href="#expected-format" title="Permanent link">&para;</a></h3>
+<p>The Reviewer should emit the block inside a <code>```json ```</code> fence before writing the decision keyword:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="p">{</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">  </span><span class="nt">"review"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">"criterion"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;exact criterion text from brief.json&gt;"</span><span class="p">,</span><span class="w"> </span><span class="nt">"verdict"</span><span class="p">:</span><span class="w"> </span><span class="s2">"PASS"</span><span class="p">,</span><span class="w"> </span><span class="nt">"evidence"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;one sentence: what you ran or read to verify this&gt;"</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">"criterion"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;another criterion&gt;"</span><span class="p">,</span><span class="w">                    </span><span class="nt">"verdict"</span><span class="p">:</span><span class="w"> </span><span class="s2">"FAIL"</span><span class="p">,</span><span class="w"> </span><span class="nt">"evidence"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;what you found&gt;"</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>verdict</code> must be <code>PASS</code> or <code>FAIL</code>. Every acceptance criterion from the brief must appear as an entry when <code>Validation.BriefPath</code> is configured.</p>
+<p><strong>Errors injected on failure:</strong></p>
+<p><em>No review block:</em>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>APPROVED blocked: response has no structured review block.
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>Add a ```json block before APPROVED:
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>{ "review": [{ "criterion": "...", "verdict": "PASS", "evidence": "..." }] }
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>Cover every acceptance criterion. Use PASS or FAIL. Then write APPROVED on its own line.
+</code></pre></div></p>
+<p><em>FAIL verdict present:</em>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>APPROVED blocked: review contains FAIL verdict(s).
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>Fix the failing criteria before writing APPROVED, or route
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>REVISION REQUIRED so the developer can address them.
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>Failing:
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>  ✗ &lt;criterion text&gt;
+</code></pre></div></p>
+<p><em>Coverage gap (when BriefPath is set):</em>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>APPROVED blocked: the review covers 2 criterion/criteria but brief.json lists 4.
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>Add one review entry per acceptance criterion — every criterion must be explicitly
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>addressed with its own verdict and evidence.
+</code></pre></div></p>
+<p><em>No shell run for PASS verdict:</em>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>APPROVED blocked: review contains PASS verdicts but no shell command was
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>successfully run this turn.
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>Code inspection alone is not sufficient — the Reviewer must execute something
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>to confirm behavioral correctness:
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>  1. Run a verification command with shell_run:
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>       • Build:  shell_run("dotnet build") / etc.
+<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a>       • Tests:  shell_run("dotnet test") / etc.
+<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a>       • Run-it: shell_run("kiwi test.ki") or equivalent.
+<a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a>  2. Update 'evidence' fields to describe what you ran and what you observed.
+<a id="__codelineno-21-12" name="__codelineno-21-12" href="#__codelineno-21-12"></a>  3. Re-emit the ```json review block followed by APPROVED on its own line.
+</code></pre></div></p>
+<p><strong>Typical config (combined with <code>RequireShellPass</code> and <code>BriefPath</code>):</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="nt">Validation</span><span class="p">:</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">  </span><span class="nt">BriefPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="nt">Selection</span><span class="p">:</span>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="w">  </span><span class="nt">Type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">keyword</span>
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="w">  </span><span class="nt">Routes</span><span class="p">:</span>
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Keyword</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">APPROVED</span>
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="w">      </span><span class="nt">Agent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Reviewer</span>
+<a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="w">      </span><span class="nt">Validators</span><span class="p">:</span>
+<a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RequireShellPass</span>
+<a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RequireReviewJudgement</span>
+<a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a><span class="w">      </span><span class="nt">SourceAgents</span><span class="p">:</span>
+<a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Reviewer</span>
+</code></pre></div>
+<p><code>RequireShellPass</code> and the shell-run check in <code>RequireReviewJudgement</code> are complementary: <code>RequireShellPass</code> blocks the route if <em>no</em> shell command ran at all; <code>RequireReviewJudgement</code>'s inner check additionally requires a shell run specifically when the review claims PASS verdicts. Setting <code>Validation.BriefPath</code> activates coverage enforcement.</p>
+<blockquote>
+<p><strong>Note:</strong> <code>APPROVED</code> must be declared in <code>Selection.Routes</code> for the routing engine to recognize it. Adding it only to <code>Termination.Strategies</code> is insufficient — route ownership is read exclusively from <code>Selection.Routes</code>.</p>
+<p><strong>Note:</strong> When <code>Validation.BriefPath</code> is omitted, the coverage check is skipped. The other three checks always run.</p>
+</blockquote>
+<hr />
+<h2 id="requireacceptancecriteriapassed">RequireAcceptanceCriteriaPassed<a class="headerlink" href="#requireacceptancecriteriapassed" title="Permanent link">&para;</a></h2>
+<p><strong>Used on:</strong> The <code>developer → reviewer</code> handoff edge, and optionally the <code>reviewer → approved</code> edge for defence in depth.</p>
+<p><strong>What it checks:</strong> Reads <code>brief.json</code> from <code>Validation.BriefPath</code> and finds every acceptance criterion that has an <code>expected_output_contains</code> field. For each such criterion, it scans the session's shell history in <code>changes.json</code> (filtered to the current <code>ActiveSessionId</code>) and verifies that at least one successful command produced output containing that sentinel string. Criteria without <code>expected_output_contains</code> are skipped — they remain subject to the Reviewer's judgement.</p>
+<p><strong>Passes if:</strong> Every machine-testable criterion has been satisfied by a real command run that produced the expected output.</p>
+<p><strong>Fails if:</strong> Any testable criterion has no matching successful command output this session.</p>
+<h3 id="testable-criterion-format">Testable criterion format<a class="headerlink" href="#testable-criterion-format" title="Permanent link">&para;</a></h3>
+<p>Write acceptance criteria as objects with <code>expected_output_contains</code> to make them machine-verifiable:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="nt">"acceptance_criteria"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="w">  </span><span class="p">{</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="w">    </span><span class="nt">"criterion"</span><span class="p">:</span><span class="w"> </span><span class="s2">"x = include 'lib/math'; x.sqrt(16) prints 4.0"</span><span class="p">,</span>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="w">    </span><span class="nt">"test_command"</span><span class="p">:</span><span class="w"> </span><span class="s2">"kiwi test_include.ki"</span><span class="p">,</span>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="w">    </span><span class="nt">"expected_output_contains"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4.0"</span>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="w">  </span><span class="p">{</span>
+<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="w">    </span><span class="nt">"criterion"</span><span class="p">:</span><span class="w"> </span><span class="s2">"build.sh succeeds"</span><span class="p">,</span>
+<a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a><span class="w">    </span><span class="nt">"test_command"</span><span class="p">:</span><span class="w"> </span><span class="s2">"./build.sh"</span><span class="p">,</span>
+<a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a><span class="w">    </span><span class="nt">"expected_output_contains"</span><span class="p">:</span><span class="w"> </span><span class="s2">"BUILD SUCCEEDED"</span>
+<a id="__codelineno-23-11" name="__codelineno-23-11" href="#__codelineno-23-11"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-23-12" name="__codelineno-23-12" href="#__codelineno-23-12"></a><span class="p">]</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>criterion</code></td>
+<td>yes</td>
+<td>Human-readable description of the expected behavior.</td>
+</tr>
+<tr>
+<td><code>expected_output_contains</code></td>
+<td>yes (to be machine-testable)</td>
+<td>Sentinel string that must appear in a successful command's output. Case-insensitive.</td>
+</tr>
+<tr>
+<td><code>test_command</code></td>
+<td>no</td>
+<td>The command the Developer should run. Shown in the error message when the criterion is unsatisfied. Not executed by the validator itself.</td>
+</tr>
+</tbody>
+</table>
+<p>Plain-string criteria and object criteria without <code>expected_output_contains</code> are ignored by this validator.</p>
+<p><strong>Error injected on failure:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>Handoff blocked: the following acceptance criteria have not been verified by a passing shell command this session:
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>  ✗ x = include 'lib/math'; x.sqrt(16) prints 4.0
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>    Run: kiwi test_include.ki
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>    Expected in output: "4.0"
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>Run the indicated command(s), confirm the expected output appears, then retry the handoff.
+</code></pre></div>
+<p><strong>Example route config:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="nt">Validation</span><span class="p">:</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="w">  </span><span class="nt">BriefPath</span><span class="p">:</span><span class="w">     </span><span class="l l-Scalar l-Scalar-Plain">~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json</span>
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="w">  </span><span class="nt">ChangeLogPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.fuseraft/state/{project_slug}/changes.json</span>
+<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a>
+<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a><span class="nt">Selection</span><span class="p">:</span>
+<a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a><span class="w">  </span><span class="nt">Type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">keyword</span>
+<a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a><span class="w">  </span><span class="nt">Routes</span><span class="p">:</span>
+<a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Keyword</span><span class="p">:</span><span class="w"> </span><span class="s">"HANDOFF</span><span class="nv"> </span><span class="s">TO</span><span class="nv"> </span><span class="s">REVIEWER"</span>
+<a id="__codelineno-25-9" name="__codelineno-25-9" href="#__codelineno-25-9"></a><span class="w">      </span><span class="nt">Agent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Reviewer</span>
+<a id="__codelineno-25-10" name="__codelineno-25-10" href="#__codelineno-25-10"></a><span class="w">      </span><span class="nt">Validators</span><span class="p">:</span>
+<a id="__codelineno-25-11" name="__codelineno-25-11" href="#__codelineno-25-11"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RequireAllFilesWritten</span>
+<a id="__codelineno-25-12" name="__codelineno-25-12" href="#__codelineno-25-12"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RequireAcceptanceCriteriaPassed</span>
+<a id="__codelineno-25-13" name="__codelineno-25-13" href="#__codelineno-25-13"></a><span class="w">      </span><span class="nt">SourceAgents</span><span class="p">:</span>
+<a id="__codelineno-25-14" name="__codelineno-25-14" href="#__codelineno-25-14"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Developer</span>
+<a id="__codelineno-25-15" name="__codelineno-25-15" href="#__codelineno-25-15"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Keyword</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">APPROVED</span>
+<a id="__codelineno-25-16" name="__codelineno-25-16" href="#__codelineno-25-16"></a><span class="w">      </span><span class="nt">Agent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Reviewer</span>
+<a id="__codelineno-25-17" name="__codelineno-25-17" href="#__codelineno-25-17"></a><span class="w">      </span><span class="nt">Validators</span><span class="p">:</span>
+<a id="__codelineno-25-18" name="__codelineno-25-18" href="#__codelineno-25-18"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RequireShellPass</span>
+<a id="__codelineno-25-19" name="__codelineno-25-19" href="#__codelineno-25-19"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RequireReviewJudgement</span>
+<a id="__codelineno-25-20" name="__codelineno-25-20" href="#__codelineno-25-20"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RequireAcceptanceCriteriaPassed</span><span class="w">  </span><span class="c1"># defence in depth</span>
+<a id="__codelineno-25-21" name="__codelineno-25-21" href="#__codelineno-25-21"></a><span class="w">      </span><span class="nt">SourceAgents</span><span class="p">:</span>
+<a id="__codelineno-25-22" name="__codelineno-25-22" href="#__codelineno-25-22"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Reviewer</span>
+</code></pre></div>
+<blockquote>
+<p><strong>Note:</strong> <code>RequireAcceptanceCriteriaPassed</code> requires <code>Validation.BriefPath</code> to be set (it reads acceptance criteria from the brief). <code>Validation.ChangeLogPath</code> is required to read command outputs from the session history — without it the validator passes immediately (nothing to check against).</p>
+</blockquote>
+<p><strong>Relationship to <code>RequireReviewJudgement</code>:</strong> <code>RequireReviewJudgement</code> checks that the Reviewer wrote a structured verdict block. <code>RequireAcceptanceCriteriaPassed</code> checks that the Developer (or the Reviewer) actually <em>ran</em> commands whose output matched the brief's sentinels. Use both together for maximum coverage: the former enforces a structured narrative review; the latter enforces that the feature was mechanically verified.</p>
+<hr />
+<h2 id="brief-schema">Brief schema<a class="headerlink" href="#brief-schema" title="Permanent link">&para;</a></h2>
+<p>The <code>TestReportValid</code> validator reads <code>brief.json</code> to check criterion coverage. The Planner agent should write this file using <code>write_file</code> before handing off to the Developer.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="p">{</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="w">  </span><span class="nt">"goal"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Add a pagination endpoint to the user list API"</span><span class="p">,</span>
+<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="w">  </span><span class="nt">"files_to_change"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"src/api/users.py"</span><span class="p">,</span><span class="w">      </span><span class="nt">"reason"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Add pagination parameters to list endpoint"</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a><span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"tests/test_users.py"</span><span class="p">,</span><span class="w">   </span><span class="nt">"reason"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Add tests for paginated response"</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a><span class="w">  </span><span class="nt">"files_for_context"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a><span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"src/api/base.py"</span><span class="p">,</span><span class="w">       </span><span class="nt">"reason"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Understand existing endpoint patterns"</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-26-10" name="__codelineno-26-10" href="#__codelineno-26-10"></a><span class="w">  </span><span class="nt">"acceptance_criteria"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-26-11" name="__codelineno-26-11" href="#__codelineno-26-11"></a><span class="w">    </span><span class="s2">"GET /users?page=2&amp;limit=10 returns the correct slice of results"</span><span class="p">,</span>
+<a id="__codelineno-26-12" name="__codelineno-26-12" href="#__codelineno-26-12"></a><span class="w">    </span><span class="s2">"Response includes total_count and has_next fields"</span><span class="p">,</span>
+<a id="__codelineno-26-13" name="__codelineno-26-13" href="#__codelineno-26-13"></a><span class="w">    </span><span class="s2">"Invalid page or limit values return 400 with a descriptive error"</span><span class="p">,</span>
+<a id="__codelineno-26-14" name="__codelineno-26-14" href="#__codelineno-26-14"></a><span class="w">    </span><span class="s2">"Test files contain real assertions (not just print statements)"</span>
+<a id="__codelineno-26-15" name="__codelineno-26-15" href="#__codelineno-26-15"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-26-16" name="__codelineno-26-16" href="#__codelineno-26-16"></a><span class="w">  </span><span class="nt">"constraints"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-26-17" name="__codelineno-26-17" href="#__codelineno-26-17"></a><span class="w">    </span><span class="s2">"Do not change the existing /users endpoint response shape for page=1"</span><span class="p">,</span>
+<a id="__codelineno-26-18" name="__codelineno-26-18" href="#__codelineno-26-18"></a><span class="w">    </span><span class="s2">"Do not add new dependencies"</span>
+<a id="__codelineno-26-19" name="__codelineno-26-19" href="#__codelineno-26-19"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-26-20" name="__codelineno-26-20" href="#__codelineno-26-20"></a><span class="w">  </span><span class="nt">"implementation"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-26-21" name="__codelineno-26-21" href="#__codelineno-26-21"></a><span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">"action"</span><span class="p">:</span><span class="w"> </span><span class="s2">"patch"</span><span class="p">,</span><span class="w"> </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"src/api/users.py"</span><span class="p">,</span><span class="w">    </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Add page/limit query params and slice logic"</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-26-22" name="__codelineno-26-22" href="#__codelineno-26-22"></a><span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">"action"</span><span class="p">:</span><span class="w"> </span><span class="s2">"write"</span><span class="p">,</span><span class="w"> </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"tests/test_users.py"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Tests for paginated response and error cases"</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-26-23" name="__codelineno-26-23" href="#__codelineno-26-23"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-26-24" name="__codelineno-26-24" href="#__codelineno-26-24"></a><span class="p">}</span>
+</code></pre></div>
+<hr />
+<h2 id="evidence-contracts">Evidence contracts<a class="headerlink" href="#evidence-contracts" title="Permanent link">&para;</a></h2>
+<p>Evidence contracts are a composable, reusable alternative to individual validators. Where validators are attached directly to a route and contain logic in code, contracts are declared in YAML and reference named predicates. Multiple routes and state machine transitions can share the same contract without duplicating validation logic.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="nt">Orchestration</span><span class="p">:</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="w">  </span><span class="nt">Contracts</span><span class="p">:</span>
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ImplementationComplete</span>
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="w">      </span><span class="nt">Requires</span><span class="p">:</span>
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">CommandSucceeded</span><span class="p">:</span>
+<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a><span class="w">            </span><span class="nt">PatternField</span><span class="p">:</span><span class="w"> </span><span class="s">"verify_command"</span><span class="w">   </span><span class="c1"># reads the verify command from brief.json</span>
+<a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a>
+<a id="__codelineno-27-8" name="__codelineno-27-8" href="#__codelineno-27-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TestsValid</span>
+<a id="__codelineno-27-9" name="__codelineno-27-9" href="#__codelineno-27-9"></a><span class="w">      </span><span class="nt">Requires</span><span class="p">:</span>
+<a id="__codelineno-27-10" name="__codelineno-27-10" href="#__codelineno-27-10"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">FileExists</span><span class="p">:</span>
+<a id="__codelineno-27-11" name="__codelineno-27-11" href="#__codelineno-27-11"></a><span class="w">            </span><span class="nt">Path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.fuseraft/artifacts/test-report.json</span>
+<a id="__codelineno-27-12" name="__codelineno-27-12" href="#__codelineno-27-12"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">TestReport</span><span class="p">:</span>
+<a id="__codelineno-27-13" name="__codelineno-27-13" href="#__codelineno-27-13"></a><span class="w">            </span><span class="nt">NoFailures</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-27-14" name="__codelineno-27-14" href="#__codelineno-27-14"></a><span class="w">            </span><span class="nt">HasAssertions</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-27-15" name="__codelineno-27-15" href="#__codelineno-27-15"></a>
+<a id="__codelineno-27-16" name="__codelineno-27-16" href="#__codelineno-27-16"></a><span class="w">  </span><span class="nt">Selection</span><span class="p">:</span>
+<a id="__codelineno-27-17" name="__codelineno-27-17" href="#__codelineno-27-17"></a><span class="w">    </span><span class="nt">Type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">keyword</span>
+<a id="__codelineno-27-18" name="__codelineno-27-18" href="#__codelineno-27-18"></a><span class="w">    </span><span class="nt">Routes</span><span class="p">:</span>
+<a id="__codelineno-27-19" name="__codelineno-27-19" href="#__codelineno-27-19"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Keyword</span><span class="p">:</span><span class="w"> </span><span class="s">"HANDOFF</span><span class="nv"> </span><span class="s">TO</span><span class="nv"> </span><span class="s">TESTER"</span>
+<a id="__codelineno-27-20" name="__codelineno-27-20" href="#__codelineno-27-20"></a><span class="w">        </span><span class="nt">Agent</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Tester</span>
+<a id="__codelineno-27-21" name="__codelineno-27-21" href="#__codelineno-27-21"></a><span class="w">        </span><span class="nt">Contracts</span><span class="p">:</span>
+<a id="__codelineno-27-22" name="__codelineno-27-22" href="#__codelineno-27-22"></a><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ImplementationComplete</span>
+<a id="__codelineno-27-23" name="__codelineno-27-23" href="#__codelineno-27-23"></a><span class="w">        </span><span class="nt">SourceAgents</span><span class="p">:</span>
+<a id="__codelineno-27-24" name="__codelineno-27-24" href="#__codelineno-27-24"></a><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Developer</span>
+</code></pre></div>
+<p><strong>When to use contracts vs. validators</strong></p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Validators</th>
+<th>Contracts</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Declared in</td>
+<td>Code (built-in)</td>
+<td>YAML (your config)</td>
+</tr>
+<tr>
+<td>Reusable across routes</td>
+<td>No — attach individually</td>
+<td>Yes — reference by name</td>
+</tr>
+<tr>
+<td>Supported routing types</td>
+<td>Keyword, termination</td>
+<td>Keyword, state machine</td>
+</tr>
+<tr>
+<td>Evidence source</td>
+<td>Conversation history scan</td>
+<td>Evidence graph (or <code>changes.json</code>)</td>
+</tr>
+<tr>
+<td>Custom predicates</td>
+<td>No</td>
+<td>Yes (FilesWritten, ChecklistComplete, CommandSucceeded, FileExists, TestReport, RelatedTestsPass)</td>
+</tr>
+</tbody>
+</table>
+<p>Contracts and validators compose: a route may declare both <code>Validators</code> and <code>Contracts</code>. All must pass (AND semantics).</p>
+<p>For full predicate reference, see <a href="../configuration/#evidence-contracts">Evidence contracts</a>.</p>
+<blockquote>
+<p><strong>Why not include <code>FilesWritten</code> in <code>ImplementationComplete</code>?</strong> Adding <code>FilesWritten</code> alongside <code>CommandSucceeded</code> creates two separate satisfaction points: the contract partially passes when files land on disk, giving the agent a checkpoint before the verify command runs. In practice this causes agents to commit early — once on file write, then again after verify — producing duplicate commits with identical messages. <code>CommandSucceeded</code> on the <code>verify_command</code> is sufficient: if the verify command passes, the files were obviously written correctly.</p>
+</blockquote>
+<hr />
+<h2 id="relationship-between-validators-and-agent-instructions">Relationship between validators and agent instructions<a class="headerlink" href="#relationship-between-validators-and-agent-instructions" title="Permanent link">&para;</a></h2>
+<p>Validators are a mechanism-level guarantee — they run in code regardless of what the agent says. But they work best when agent instructions are aligned. The default config's Tester instructions explicitly prohibit writing <code>HANDOFF TO REVIEWER</code> without a valid test report, and the Developer is told to always call <code>write_file</code> before handing off. Validators catch cases where the model ignores these instructions.</p>
+<hr />
+<h2 id="stuck-detection">Stuck detection<a class="headerlink" href="#stuck-detection" title="Permanent link">&para;</a></h2>
+<p><code>ValidatorStuckException</code> is the hard stop that ends a session when an agent cannot get past a route. What counts as "stuck" — and which counter tracks it — depends on <code>Selection.Type</code>:</p>
+<ul>
+<li><strong>No keyword</strong> — the response contains no recognized keyword on its own line.</li>
+<li><strong>Foreign keyword</strong> — the response contains a keyword that belongs to a different agent role (e.g. Developer writing <code>BUGS FOUND</code>, which is a Tester-only keyword).</li>
+<li><strong>Multiple keywords</strong> — the response contains more than one keyword on separate lines (ambiguous).</li>
+<li><strong>Validator failure</strong> — the response has a valid keyword but a pre-flight validator (e.g. <code>RequireShellPass</code>) rejected the handoff.</li>
+</ul>
+<p><strong><code>Selection.Type: graph</code></strong> (<code>GraphOrchestrator</code>): a single counter covers all four modes above. It increments whenever any correction is injected and resets only when the agent produces a clean routed turn — alternating failure modes hit the threshold at the same rate as consecutive identical failures. Threshold: <code>Selection.Graph.MaxRetries</code> (default 4).</p>
+<p><strong><code>Selection.Type: keyword</code></strong> (<code>KeywordSelectionStrategy</code>) <strong>and <code>statemachine</code></strong> (<code>StateMachineSelectionStrategy</code>): validator/contract failures are classified by type (<code>MissingEvidence</code>, <code>InvalidTransition</code>, <code>ConflictingEvidence</code>, <code>NoProgress</code>) and escalate independently per <code>FailureHandling.&lt;Type&gt;.Threshold</code> (default 3, except <code>ConflictingEvidence</code> which defaults to 2) — see <a href="../configuration/#failure-handling">Failure handling</a>. A turn with <strong>no keyword/signal at all</strong> is <em>not</em> covered by that counter: it triggers a periodic warning every 5 consecutive same-agent turns and is otherwise bounded only by <code>Termination.MaxIterations</code>, unless you explicitly set <code>FailureHandling.MaxConsecutiveTurnsWithoutSignal</code> (statemachine only; default <code>0</code> = disabled).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../strategies/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Strategies">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Strategies
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../harness-engineering/" class="md-footer__link md-footer__link--next" aria-label="Next: Harness Engineering">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Harness Engineering
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.footer", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
