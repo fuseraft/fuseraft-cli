@@ -309,16 +309,27 @@ The session ID is shown on every startup so you can note it down for later resum
 > |-----------|-------|----------------|
 > | CLI → VS Code | `ready` | `sessionId`, `model` |
 > | CLI → VS Code | `token` | `text` (streaming chunk) |
-> | CLI → VS Code | `tool_call` | `name` |
+> | CLI → VS Code | `tool_call` | `name`, `args?` |
+> | CLI → VS Code | `approval_request` | `kind`, `command` (HITL shell-command gate — see below) |
 > | CLI → VS Code | `message_end` | `turnIndex`, `toolCalls[]` |
-> | CLI → VS Code | `cancelled` | — |
+> | CLI → VS Code | `cancelled` | — (turn was interrupted; see below) |
+> | CLI → VS Code | `retrying` | `attempt`, `max` (transient stream disconnect, auto-retrying) |
+> | CLI → VS Code | `warning` | `text` |
 > | CLI → VS Code | `error` | `text` |
+> | CLI → VS Code | `info` | `text` |
+> | CLI → VS Code | `text` | `text` (pre-rendered slash-command output) |
+> | CLI → VS Code | `file_changes` | `changes[]` (`{sigil, path}`) |
 > | CLI → VS Code | `plan` | `steps[]` |
 > | CLI → VS Code | `step_status` | `step`, `total`, `status`, `stepsLeft` |
+> | CLI → VS Code | `compacted` | — (history replaced with a compact summary) |
 > | CLI → VS Code | `session_end` | — |
 > | VS Code → CLI | `user_input` | `text` |
+> | VS Code → CLI | `approval_response` | `approved` (bool; answers a pending `approval_request`) |
+> | VS Code → CLI | `interrupt` | — (Windows only; see below) |
 >
 > Non-JSON lines emitted by the CLI (e.g. from slash-command output) are silently ignored by the extension.
+>
+> **Cancelling a turn ("Stop" button)** — the extension needs to interrupt a turn that's already streaming. On Linux/macOS it sends a real `SIGINT` to the CLI process, which the REPL's `Console.CancelKeyPress` handler turns into a clean cancellation (emits `cancelled`) instead of killing the session. Windows has no way to deliver a signal to a specific child process, so the extension instead writes an in-band `{"type":"interrupt"}` line to the CLI's stdin. A dedicated background reader (`ReplStdinPump`) owns stdin for the life of the session specifically so this line is acted on the instant it arrives — cancelling whatever turn is active — rather than waiting for the main loop to next read a line at a turn boundary, which would leave a mid-stream interrupt sitting unread until the turn finished on its own.
 
 **First-time setup**
 
