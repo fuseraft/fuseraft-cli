@@ -49,8 +49,14 @@ public sealed class SubAgentPlugin(
     string? parentAgentName = null,
     int maxToolCalls = 0,
     string? workspaceRoot = null,
-    IReadOnlyList<AIFunction>? delegateTools = null)
+    IReadOnlyList<AIFunction>? delegateTools = null,
+    IReadOnlyList<AIFunction>? diagnosticTools = null)
 {
+    // Session-introspection tools (current session metadata, saved-session list, event/log
+    // file reads) withheld from the REPL agent's own default tool set — they let a caller
+    // read a *different* session's full event log by ID, real cross-session data exposure
+    // with no turn-to-turn value for the primary loop — but useful for /assist's diagnosis.
+    private readonly IReadOnlyList<AIFunction> _diagnosticTools = diagnosticTools ?? [];
     private const double ExploreTimeoutMinutes  = 8.0;
     private const double LocateTimeoutMinutes   = 2.0;
     private const double DelegateTimeoutMinutes = 15.0;
@@ -187,7 +193,7 @@ public sealed class SubAgentPlugin(
     {
         if (chatClient is null) return (null, null, null);
 
-        const string diagnosticSystem =
+        var diagnosticSystem =
             "You are a session diagnostician. You will receive a transcript of a conversation " +
             "between a user and an AI coding assistant that has stalled or gone off track.\n\n" +
             "Identify the root cause: repeated failures, fabricated tool output, " +
@@ -198,6 +204,11 @@ public sealed class SubAgentPlugin(
             "Be specific and concrete. Reference file paths or symbols where relevant.\n\n" +
             "Output ONLY the corrective instruction. No preamble, no diagnosis header, " +
             "no explanation to the user — just the message to inject.";
+        if (_diagnosticTools.Count > 0)
+            diagnosticSystem +=
+                "\n\nThe transcript below is truncated. If it doesn't give you enough to go on, " +
+                "call the available session tools first (e.g. read the event log for the full " +
+                "tool-call history) before writing the corrective instruction.";
 
         const int msgCap = 800;
         var transcript = new StringBuilder();
@@ -218,6 +229,8 @@ public sealed class SubAgentPlugin(
             new(ChatRole.User,   $"Conversation transcript:\n\n{transcript}"),
         };
         var options = new ChatOptions { MaxOutputTokens = 512 };
+        if (_diagnosticTools.Count > 0)
+            options.Tools = [.. _diagnosticTools];
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(TimeSpan.FromMinutes(2));
