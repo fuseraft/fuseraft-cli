@@ -170,6 +170,21 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         {
             lock (OutputLock) Output.Clear();
         }
+
+        // Process.HasExited and "the stdout/stderr pipes have been fully drained into Output"
+        // are two independently-timed signals — the OS process can exit before ReaderTask's
+        // async ReadLineAsync loops finish pumping the last buffered lines. Callers that are
+        // about to report a job as finished (status or output) must await this first, or they
+        // can observe a [COMPLETED]/[FAILED] job with output that hasn't arrived yet. Bounded
+        // by timeout so a reader that never reaches EOF (e.g. a child left holding the pipe
+        // open) can't block status reporting indefinitely.
+        public async Task EnsureDrainedAsync(TimeSpan timeout)
+        {
+            if (Process?.HasExited != true) return;
+            var reader = ReaderTask;
+            if (reader is null || reader.IsCompleted) return;
+            try { await reader.WaitAsync(timeout); } catch { /* timed out or faulted — report with whatever's captured so far */ }
+        }
     }
 
     private static System.Diagnostics.ProcessStartInfo BuildBackgroundStartInfo(string exe, string workingDirectory) =>
@@ -248,6 +263,10 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     // failed cmd.exe attempt. A command that's still running (or exited cleanly, or failed for
     // an unrelated reason) after the window is left alone.
     private static readonly TimeSpan BackgroundMismatchGracePeriod = TimeSpan.FromMilliseconds(400);
+
+    // Bound on how long GetJobStatus/GetJobOutput will wait for a just-exited job's output
+    // readers to finish draining before reporting its final state. See BackgroundJob.EnsureDrainedAsync.
+    private static readonly TimeSpan JobDrainTimeout = TimeSpan.FromSeconds(2);
 
     private static async Task RetryBackgroundJobViaPowerShellIfMismatchedAsync(
         BackgroundJob job, System.Diagnostics.Process originalProcess, string command, string workingDirectory)
@@ -630,11 +649,13 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     }
 
     [Description("Get the status of a background job.")]
-    public string GetJobStatus(
+    public async Task<string> GetJobStatus(
         [Description("Job ID.")] string jobId)
     {
         if (!_jobs.TryGetValue(jobId, out var job))
             return PluginResult.Error($"No background job with ID '{jobId}'. Use shell_job_status with an ID returned by shell_run_background.");
+
+        await job.EnsureDrainedAsync(JobDrainTimeout);
 
         if (job.IsRunning)
         {
@@ -653,11 +674,13 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     }
 
     [Description("Get the full output of a background job.")]
-    public string GetJobOutput(
+    public async Task<string> GetJobOutput(
         [Description("Job ID.")] string jobId)
     {
         if (!_jobs.TryGetValue(jobId, out var job))
             return PluginResult.Error($"No background job with ID '{jobId}'.");
+
+        await job.EnsureDrainedAsync(JobDrainTimeout);
 
         var output = job.ReadOutput();
         return string.IsNullOrEmpty(output)
