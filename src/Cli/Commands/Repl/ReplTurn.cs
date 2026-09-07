@@ -36,7 +36,26 @@ internal static class ReplTurn
     // Tool-call round-trip cap for free-form turns (ctx.Client) — mirrors StepIterationLimit
     // but far more permissive since a chat turn isn't scoped to one action. Named so
     // ReplFactory.BuildClient's default and the hit-cap check below can't drift apart.
-    internal const int ChatIterationLimit = 20;
+    //
+    // This is a backstop, not the primary cutoff — MaxConsecutiveToolFailures below is what
+    // actually catches a turn that's stuck. Both Cline (MistakeTracker, resets on any success)
+    // and Codex (guardian consecutive-denial cap) stop on a short streak of consecutive
+    // failures rather than a flat round count, precisely because a long chain of *successful*
+    // tool calls — a big scaffold-and-test task, say — shouldn't trip an arbitrary ceiling.
+    // Raised from the old 20 (which fired routinely on exactly that kind of task) now that it
+    // only needs to catch a turn that keeps succeeding at small, unproductive calls forever
+    // without ever failing (so the failure-streak check below never engages).
+    internal const int ChatIterationLimit = 50;
+
+    // Stop the round-trip loop after this many *consecutive* tool-call failures — mirrors
+    // Cline's MistakeTracker default (3, resets to 0 on any success) and Codex's guardian
+    // consecutive-denial cap (also 3). Checked against each FunctionResultContent's own
+    // content (see IsToolFailure) rather than relying solely on
+    // FunctionInvokingChatClient.MaximumConsecutiveErrorsPerRequest, which only ever sees a
+    // hard .NET exception during invocation — most tool failures in this codebase are business-
+    // logic failures a plugin catches and returns as a normal string (see PluginResult in
+    // ProcessHelper.cs), which the SDK's own counter never observes.
+    internal const int MaxConsecutiveToolFailures = 3;
 
     // Maximum times a transient streaming error (ResponseEnded, IOException, TimeoutException)
     // is retried automatically before surfacing the failure to the user.
@@ -432,6 +451,8 @@ internal static class ReplTurn
         var rawUpdates        = stream.RawUpdates;
         var turnInputTokens   = stream.TurnInputTokens;
         var turnOutputTokens  = stream.TurnOutputTokens;
+        var hitConsecutiveFailureLimit = stream.HitConsecutiveFailureLimit;
+        var lastToolFailureDetail      = stream.LastToolFailureDetail;
 
         responseText = SanitizeAssistantResponse(responseText, out var warningMessage);
         if (!capturePlan && responseText.Length == 0)
@@ -494,7 +515,7 @@ internal static class ReplTurn
         bool stepPassed = true;
         if (isStepRequest && activeStep is not null)
             stepPassed = await ReplTurnOutcome.HandleStepResult(ctx, activeStep, stepTotal, toolCallsThisTurn,
-                capturedResults ?? [], hitIterationCap, responseText, cancellationToken);
+                capturedResults ?? [], hitIterationCap, hitConsecutiveFailureLimit, responseText, cancellationToken);
 
         var postEst = ctx.EstimateTokens();
         if (ctx.PrevTurnTokenEstimate > 0)
@@ -551,6 +572,32 @@ internal static class ReplTurn
                 ReplJsonBridge.Emit(new { type = "warning", text = capMsg });
             else
                 AnsiConsole.MarkupLine($"[dim yellow]  ⚠ {capMsg}[/]");
+        }
+
+        // Consecutive-tool-failure cutoff — mirrors Cline's MistakeTracker / Codex's guardian
+        // consecutive-denial cap: the turn stopped itself after MaxConsecutiveToolFailures
+        // failures in a row rather than burning through the rest of ChatIterationLimit on a
+        // loop that's stuck, not making progress. Step turns get an equivalent notice via
+        // HandleStepResult above.
+        if (!isStepRequest && hitConsecutiveFailureLimit && responseText.Length > 0)
+        {
+            var lastTool = toolCallsThisTurn.Count > 0 ? toolCallsThisTurn[^1] : "tool";
+            var snippet  = lastToolFailureDetail?.Trim();
+            var detail   = string.IsNullOrEmpty(snippet) ? ""
+                : $" Last failure ({lastTool}): {(snippet.Length > 200 ? snippet[..200] + "…" : snippet)}";
+
+            await ctx.Emitter.EmitAsync(EventTypes.ReplWarning, turn: ctx.TurnIndex, payload: new
+            {
+                message   = "hit_consecutive_failure_limit",
+                failures  = MaxConsecutiveToolFailures,
+                last_tool = lastTool,
+            });
+            var failMsg = $"Stopped after {MaxConsecutiveToolFailures} consecutive tool failures.{detail} " +
+                          "Progress so far was kept — send a follow-up once the issue is addressed.";
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new { type = "warning", text = failMsg });
+            else
+                AnsiConsole.MarkupLine($"[dim yellow]  ⚠ {Markup.Escape(failMsg)}[/]");
         }
 
         // One-time 75 % context warning. Fires on free-form turns only (not
@@ -840,13 +887,15 @@ internal static class ReplTurn
         long TurnInputTokens,
         long TurnOutputTokens,
         int? TurnFirstInputTokens,
-        List<ChatResponseUpdate> RawUpdates)
+        List<ChatResponseUpdate> RawUpdates,
+        bool HitConsecutiveFailureLimit,
+        string? LastToolFailureDetail)
     {
         // toolCallsThisTurn is preserved from the aborted attempt (not always empty) so a
         // step halted mid-stream can still report which tools it managed to call before
         // failing — see ReplTurnOutcome.HaltStepOnStreamFailure.
         internal static TurnStreamResult MakeFailed(List<string> toolCallsThisTurn) =>
-            new(false, "", toolCallsThisTurn, [], 0, null, 0, 0, null, []);
+            new(false, "", toolCallsThisTurn, [], 0, null, 0, 0, null, [], false, null);
     }
 
     /// <summary>
@@ -887,6 +936,10 @@ internal static class ReplTurn
         // Captured tool outputs for inspect-step history injection (step execution only).
         List<(string ToolName, string Output)>? capturedResults = isStepRequest ? [] : null;
         Dictionary<string, string>? callIdToName = isStepRequest ? [] : null;
+        // See MaxConsecutiveToolFailures — resets to 0 on any non-failing FunctionResultContent.
+        var consecutiveToolFailures    = 0;
+        var hitConsecutiveFailureLimit = false;
+        string? lastToolFailureDetail  = null;
 
         var reqCts    = new CancellationTokenSource();
         ctx.ActiveCts = reqCts;
@@ -953,6 +1006,20 @@ internal static class ReplTurn
                 if (chunk.FinishReason is not null) finishRounds++;
                 toolRounds = Math.Max(usageRounds, finishRounds);
 
+                // A round can end without ever producing a FunctionCallContent this loop
+                // recognises — e.g. the FunctionInvokingChatClient middleware strips tools on
+                // the forced last iteration (see the hit_iteration_cap comment below) and the
+                // model just keeps narrating text-only round after text-only round, or a
+                // malformed/failed tool-call attempt never surfaces as a valid FunctionCallContent
+                // at all. Those boundaries are still visible via the same usage/finish signals
+                // used for toolRounds above, so arm the break there too — otherwise the next
+                // round's narration glues onto this one's with no separator (the same symptom
+                // 78edb6b fixed for the tool-call case, recurring for boundaries it didn't cover).
+                // Armed *after* this chunk's own text is appended below (not here) so a trailing
+                // usage/finish chunk that also happens to carry this round's tail text isn't
+                // mistaken for the start of the next round.
+                var isRoundBoundary = sawUsageThisChunk || chunk.FinishReason is not null;
+
                 var funcCall = chunk.Contents.OfType<FunctionCallContent>().FirstOrDefault();
                 if (funcCall is not null)
                 {
@@ -991,23 +1058,52 @@ internal static class ReplTurn
                 }
 
                 var funcResult = chunk.Contents.OfType<FunctionResultContent>().FirstOrDefault();
-                if (funcResult is not null && capturedResults is not null)
+                if (funcResult is not null)
                 {
-                    var toolName = funcResult.CallId is not null &&
-                                  callIdToName?.TryGetValue(funcResult.CallId, out var n) == true
-                                  ? n : "tool";
-                    capturedResults.Add((toolName, funcResult.Result?.ToString() ?? string.Empty));
+                    if (IsToolFailure(funcResult))
+                    {
+                        consecutiveToolFailures++;
+                        lastToolFailureDetail = funcResult.Result?.ToString();
+                    }
+                    else
+                    {
+                        consecutiveToolFailures = 0;
+                    }
+
+                    if (capturedResults is not null)
+                    {
+                        var toolName = funcResult.CallId is not null &&
+                                      callIdToName?.TryGetValue(funcResult.CallId, out var n) == true
+                                      ? n : "tool";
+                        capturedResults.Add((toolName, funcResult.Result?.ToString() ?? string.Empty));
+                    }
+                    if (isRoundBoundary) pendingParagraphBreak = true;
+
+                    // Stop enumerating now, before the automatic-invocation loop ever requests
+                    // another round — GetStreamingResponseAsync only advances past this chunk
+                    // (and only then invokes the next round) on the *next* MoveNextAsync, so
+                    // breaking here means no further request is ever made for this turn.
+                    if (consecutiveToolFailures >= MaxConsecutiveToolFailures)
+                    {
+                        hitConsecutiveFailureLimit = true;
+                        break;
+                    }
                     continue;
                 }
 
                 var text = chunk.Text;
-                if (string.IsNullOrEmpty(text)) continue;
+                if (string.IsNullOrEmpty(text))
+                {
+                    if (isRoundBoundary) pendingParagraphBreak = true;
+                    continue;
+                }
                 if (pendingParagraphBreak && sb.Length > 0)
                 {
                     text = "\n\n" + text;
                     pendingParagraphBreak = false;
                 }
                 sb.Append(text);
+                if (isRoundBoundary) pendingParagraphBreak = true;
 
                 // Terminal REPL never prints text live — only the spinner/tool chain is
                 // shown while generating; the full response is markdown-rendered once the
@@ -1066,6 +1162,7 @@ internal static class ReplTurn
             capturedResults?.Clear(); callIdToName?.Clear();
             toolRounds = 0; usageRounds = 0; finishRounds = 0;
             turnInputTokens = 0; turnOutputTokens = 0; turnFirstInputTokens = null;
+            consecutiveToolFailures = 0; hitConsecutiveFailureLimit = false; lastToolFailureDetail = null;
 
             // Restart spinner for the fresh attempt.
             spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
@@ -1120,7 +1217,8 @@ internal static class ReplTurn
 
         return new TurnStreamResult(
             true, sb.ToString(), toolCallsThisTurn, fileChanges, toolRounds, capturedResults,
-            turnInputTokens, turnOutputTokens, turnFirstInputTokens, rawUpdates);
+            turnInputTokens, turnOutputTokens, turnFirstInputTokens, rawUpdates,
+            hitConsecutiveFailureLimit, lastToolFailureDetail);
     }
 
     internal static async Task ExtractMemoriesOnExitAsync(ReplSessionContext ctx)
@@ -1300,6 +1398,24 @@ internal static class ReplTurn
         var display = MakeRelativePath(rawPath, cwd);
         if (seen.Add(display))
             fileChanges.Add((sigil, display));
+    }
+
+    // Recognises the codebase-wide failure-signalling conventions plugins use in their string
+    // results — PluginResult's bracketed tags (ProcessHelper.cs) plus ProcessResult.ToPluginOutput's
+    // "[EXIT n]" prefix, which only ever appears on a non-zero exit — in addition to a hard .NET
+    // exception during invocation. Anything else, including plain "[OK]"/"[INFO]" results and
+    // un-prefixed raw success output (e.g. ordinary shell stdout), counts as a success and resets
+    // the consecutive-failure streak. Not exhaustive — a handful of plugins don't route through
+    // PluginResult — but it covers the common, high-traffic failure paths (shell, filesystem, git,
+    // http) without requiring every plugin to adopt a shared result envelope.
+    private static readonly string[] ToolFailurePrefixes =
+        ["[ERROR]", "[FAIL]", "[DENIED]", "[NOT FOUND]", "[TIMEOUT]", "[EXIT "];
+
+    private static bool IsToolFailure(FunctionResultContent funcResult)
+    {
+        if (funcResult.Exception is not null) return true;
+        var text = funcResult.Result?.ToString();
+        return text is not null && ToolFailurePrefixes.Any(p => text.StartsWith(p, StringComparison.Ordinal));
     }
 
     private static string? GetArg(IDictionary<string, object?>? args, string key)

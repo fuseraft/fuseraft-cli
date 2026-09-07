@@ -79,6 +79,7 @@ internal static class ReplTurnOutcome
     internal static async Task<bool> HandleStepResult(
         ReplSessionContext ctx, PlanStep activeStep, int total, List<string> toolCallsThisTurn,
         List<(string ToolName, string Output)> capturedResults, bool hitIterationCap,
+        bool hitConsecutiveFailureLimit = false,
         string responseText = "", CancellationToken cancellationToken = default)
     {
         var (passed, verifyOutput) = await VerifyStepAsync(activeStep, toolCallsThisTurn, ctx.Cwd, cancellationToken);
@@ -122,6 +123,7 @@ internal static class ReplTurnOutcome
                 skipped,
                 steps_left = stepsLeft,
                 hit_iteration_cap = hitIterationCap,
+                hit_consecutive_failure_limit = hitConsecutiveFailureLimit,
                 verify_output     = verifyOutput,
             });
             if (ctx.JsonMode)
@@ -138,6 +140,9 @@ internal static class ReplTurnOutcome
                 if (hitIterationCap)
                     AnsiConsole.MarkupLine(
                         $"[dim]  ↯ Step {activeStep.Step} reached the {ReplTurn.StepIterationLimit}-round limit; later calls in this step may have been cut short.[/]");
+                if (hitConsecutiveFailureLimit)
+                    AnsiConsole.MarkupLine(
+                        $"[dim]  ↯ Step {activeStep.Step} stopped after {ReplTurn.MaxConsecutiveToolFailures} consecutive tool failures; later calls in this step may have been cut short.[/]");
                 if (zeroCallSkip && activeStep.Tool is not null && !InspectTools.Contains(activeStep.Tool))
                     AnsiConsole.MarkupLine(
                         $"[yellow]  ⚠ Step {activeStep.Step}: '{Markup.Escape(activeStep.Tool)}' was not called — verify the agent did not fabricate this result.[/]");
@@ -152,6 +157,7 @@ internal static class ReplTurnOutcome
                 expected_tool     = activeStep.Tool,
                 expected_creates  = activeStep.Creates,
                 hit_iteration_cap = hitIterationCap,
+                hit_consecutive_failure_limit = hitConsecutiveFailureLimit,
                 tool_calls        = toolCallsThisTurn.ToArray(),
                 verify_output     = verifyOutput,
                 critic_reason     = criticReason,
@@ -165,6 +171,10 @@ internal static class ReplTurnOutcome
                         AnsiConsole.MarkupLine(
                             $"[yellow]  ⚠ Step {activeStep.Step}: hit the {ReplTurn.StepIterationLimit}-round limit before " +
                             $"'{Markup.Escape(activeStep.Tool)}' was called — step may be too broad, consider splitting it.[/]");
+                    else if (hitConsecutiveFailureLimit)
+                        AnsiConsole.MarkupLine(
+                            $"[yellow]  ⚠ Step {activeStep.Step}: stopped after {ReplTurn.MaxConsecutiveToolFailures} consecutive " +
+                            $"tool failures before '{Markup.Escape(activeStep.Tool)}' was called.[/]");
                     else
                         AnsiConsole.MarkupLine(
                             $"[yellow]  ⚠ Step {activeStep.Step}: expected tool '{Markup.Escape(activeStep.Tool)}' was not called.[/]");
