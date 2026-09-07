@@ -118,6 +118,14 @@ Task("Clean")
             Verbosity     = DotNetVerbosity.Minimal
         });
 
+        // dotnet clean doesn't always fully clear stale intermediate output — observed
+        // causing an intermittent false failure in
+        // ShellPluginTests.RunBackgroundAsync_StartsJobAndReportsCompletion. Force-delete
+        // the known bin/obj trees directly rather than relying on dotnet clean alone.
+        foreach (var dir in new[] { "obj", "src/bin", "src/obj", "tests/FuseraftCli.Tests/bin", "tests/FuseraftCli.Tests/obj" })
+            if (DirectoryExists(dir))
+                DeleteDirectory(dir, new DeleteDirectorySettings { Recursive = true, Force = true });
+
         Information("Clean complete.");
     });
 

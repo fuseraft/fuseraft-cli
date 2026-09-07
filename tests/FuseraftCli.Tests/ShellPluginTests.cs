@@ -189,12 +189,12 @@ public sealed class ShellPluginTests
         string status = "";
         for (var i = 0; i < 50 && !status.Contains("COMPLETED"); i++)
         {
-            status = plugin.GetJobStatus(jobId);
+            status = await plugin.GetJobStatus(jobId);
             if (!status.Contains("COMPLETED")) await Task.Delay(50);
         }
 
         Assert.Contains("[COMPLETED]", status);
-        Assert.Contains("background-job-output", plugin.GetJobOutput(jobId));
+        Assert.Contains("background-job-output", await plugin.GetJobOutput(jobId));
     }
 
     [Fact]
@@ -208,7 +208,7 @@ public sealed class ShellPluginTests
         string status = "";
         for (var i = 0; i < 50 && !status.Contains("FAILED"); i++)
         {
-            status = plugin.GetJobStatus(jobId);
+            status = await plugin.GetJobStatus(jobId);
             if (!status.Contains("FAILED")) await Task.Delay(50);
         }
 
