@@ -8,6 +8,7 @@ using fuseraft.Cli;
 using fuseraft.Cli.Commands;
 using fuseraft.Cli.Display;
 using fuseraft.Core;
+using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.KeyStore;
@@ -219,9 +220,13 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // wires into ShellPlugin (OrchestratorBuilder.ResolveSecurityConfig), just made
         // toggleable mid-session: the closure below is ShellPlugin's only construction
         // opportunity, so it reads hitlState live on every call rather than a fixed flag baked
-        // in at startup.
+        // in at startup. In jsonMode (VS Code webview), the console-based prompt would write to
+        // stdout the extension can't parse and block on a stdin reply it can never send — use
+        // the JSON-bridge approval service instead so the webview can render and answer it.
         var hitlState       = new HitlModeState();
-        var approvalService = new ConsoleHumanApprovalService();
+        IHumanApprovalService approvalService = jsonMode
+            ? new JsonBridgeHumanApprovalService()
+            : new ConsoleHumanApprovalService();
         using ShellPlugin? shellPlugin  = settings.NoTools ? null : new ShellPlugin(
             shellPolicy:    TryLoadDefaultShellPolicy(),
             approveCommand: cmd => hitlState.Enabled ? approvalService.PromptShellCommandAsync(cmd) : Task.FromResult(true));
