@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using fuseraft.Cli.Commands.Repl;
 using fuseraft.Core;
@@ -99,6 +100,24 @@ public sealed class ReplTurnIterationCapTests : IDisposable
         };
     }
 
+    // Two text-only rounds with no FunctionCallContent between them at all — mirrors the
+    // FunctionInvokingChatClient middleware stripping tools on the forced last iteration (see
+    // ReplTurn's hit_iteration_cap comment) and the model narrating text-only round after
+    // text-only round, or a malformed tool-call attempt that never surfaces as a valid
+    // FunctionCallContent. The only round-boundary signal here is UsageContent.
+    private static async IAsyncEnumerable<ChatResponseUpdate> TextOnlyRoundsAsync(params string[] rounds)
+    {
+        foreach (var text in rounds)
+        {
+            yield return new ChatResponseUpdate
+            {
+                Role     = ChatRole.Assistant,
+                Contents = [new TextContent(text), new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 5 })],
+            };
+            await Task.Yield();
+        }
+    }
+
     private sealed class StubChatClient(int rounds, bool withUsage = true) : IChatClient
     {
         public ChatClientMetadata Metadata => new("test", null!, "stub");
@@ -112,6 +131,22 @@ public sealed class ReplTurnIterationCapTests : IDisposable
             => withUsage
                 ? ConsecutiveToolCallsThenTextAsync(rounds)
                 : ConsecutiveToolCallsThenTextNoUsageAsync(rounds);
+
+        public object? GetService(Type serviceType, object? key = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class TextOnlyStubChatClient(params string[] rounds) : IChatClient
+    {
+        public ChatClientMetadata Metadata => new("test", null!, "stub");
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, string.Empty)));
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+            => TextOnlyRoundsAsync(rounds);
 
         public object? GetService(Type serviceType, object? key = null) => null;
         public void Dispose() { }
@@ -179,5 +214,141 @@ public sealed class ReplTurnIterationCapTests : IDisposable
 
         var events = await File.ReadAllLinesAsync(eventsPath);
         Assert.Contains(events, l => l.Contains("\"hit_iteration_cap\":true"));
+    }
+
+    // Regression coverage for the run-together-narration bug: 78edb6b inserted a paragraph
+    // break only when a round followed a FunctionCallContent, but a round boundary can also
+    // occur with no tool call at all (the FunctionInvokingChatClient middleware stripping tools
+    // on the forced last iteration is exactly this shape) — those boundaries must still get a
+    // separator, or two consecutive rounds' narration glues together mid-sentence.
+    [Fact]
+    public async Task TextOnlyRoundsWithNoFunctionCall_GetParagraphBreakBetweenThem()
+    {
+        var eventsPath = Path.Combine(Path.GetTempPath(), $"fuseraft-test-events-{Guid.NewGuid():N}.jsonl");
+        var ctx = NewContext(
+            new TextOnlyStubChatClient("Shell calls were getting mangled.", "Retrying with a minimal command."),
+            eventsPath);
+
+        await ReplTurn.ExecuteAsync(
+            ctx, "fix it", isStepRequest: false, capturePlan: false, activeStep: null, CancellationToken.None);
+
+        var content = await ReadAssistantResponseContentAsync(eventsPath);
+        Assert.Contains("mangled.\n\nRetrying", content);
+        Assert.DoesNotContain("mangled.Retrying", content);
+    }
+
+    private static async Task<string> ReadAssistantResponseContentAsync(string eventsPath)
+    {
+        foreach (var line in await File.ReadAllLinesAsync(eventsPath))
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            using var doc = JsonDocument.Parse(line);
+            if (doc.RootElement.TryGetProperty("event_type", out var et) &&
+                et.GetString() == fuseraft.Core.Events.EventTypes.AssistantResponse &&
+                doc.RootElement.TryGetProperty("payload", out var payload) &&
+                payload.TryGetProperty("content", out var content))
+                return content.GetString() ?? string.Empty;
+        }
+        return string.Empty;
+    }
+
+    // Round 0 is pure narration (no tool call) so responseText ends up non-empty and the
+    // consecutive-failure warning block — gated on responseText.Length > 0, same as
+    // hit_iteration_cap — actually fires, mirroring how a real model narrates before acting.
+    // Rounds 1..N are FunctionCallContent+FunctionResultContent pairs whose result string is
+    // given verbatim by `results`; a "[ERROR]"/"[FAIL]"/etc.-prefixed one counts as a tool
+    // failure per ReplTurn.IsToolFailure, anything else resets the streak.
+    private static async IAsyncEnumerable<ChatResponseUpdate> ToolCallResultRoundsAsync(
+        List<int> roundsStarted, params string[] results)
+    {
+        yield return new ChatResponseUpdate
+        {
+            Role     = ChatRole.Assistant,
+            Contents = [new TextContent("Let me check."), new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 5 })],
+        };
+        await Task.Yield();
+
+        for (var i = 0; i < results.Length; i++)
+        {
+            roundsStarted.Add(i);
+            yield return new ChatResponseUpdate
+            {
+                Role     = ChatRole.Assistant,
+                Contents = [new FunctionCallContent($"call-{i}", "shell_run")],
+            };
+            await Task.Yield();
+            yield return new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                Contents =
+                [
+                    new FunctionResultContent($"call-{i}", results[i]),
+                    new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 5 }),
+                ],
+            };
+            await Task.Yield();
+        }
+    }
+
+    private sealed class ToolCallResultStubChatClient(List<int> roundsStarted, params string[] results) : IChatClient
+    {
+        public ChatClientMetadata Metadata => new("test", null!, "stub");
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, string.Empty)));
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+            => ToolCallResultRoundsAsync(roundsStarted, results);
+
+        public object? GetService(Type serviceType, object? key = null) => null;
+        public void Dispose() { }
+    }
+
+    // Regression coverage for replacing the flat round cap with a Cline/Codex-style
+    // consecutive-failure cutoff: a genuinely stuck tool-call loop must stop itself well before
+    // ChatIterationLimit, after MaxConsecutiveToolFailures failures in a row.
+    [Fact]
+    public async Task ConsecutiveToolFailures_StopsAfterThreshold_AndEmitsWarning()
+    {
+        var eventsPath = Path.Combine(Path.GetTempPath(), $"fuseraft-test-events-{Guid.NewGuid():N}.jsonl");
+        var roundsStarted = new List<int>();
+        var ctx = NewContext(
+            new ToolCallResultStubChatClient(roundsStarted,
+                "[ERROR] boom 1", "[ERROR] boom 2", "[ERROR] boom 3", "[ERROR] boom 4", "[ERROR] boom 5"),
+            eventsPath);
+
+        await ReplTurn.ExecuteAsync(
+            ctx, "fix it", isStepRequest: false, capturePlan: false, activeStep: null, CancellationToken.None);
+
+        // The 4th and 5th failing rounds the stub had queued up were never even started —
+        // proves the loop broke early rather than the stub simply running out of rounds.
+        Assert.Equal(ReplTurn.MaxConsecutiveToolFailures, roundsStarted.Count);
+
+        var events = await File.ReadAllLinesAsync(eventsPath);
+        Assert.Contains(events, l => l.Contains("\"hit_consecutive_failure_limit\""));
+    }
+
+    // A success must reset the consecutive-failure streak — mirrors Cline's MistakeTracker
+    // (consecutiveMistakes = 0 on any non-failing result). Never more than two failures in a
+    // row here, so all six rounds must run even though total failures exceed the threshold.
+    [Fact]
+    public async Task ToolFailures_InterspersedWithSuccess_DoesNotTripCutoff()
+    {
+        var eventsPath = Path.Combine(Path.GetTempPath(), $"fuseraft-test-events-{Guid.NewGuid():N}.jsonl");
+        var roundsStarted = new List<int>();
+        var ctx = NewContext(
+            new ToolCallResultStubChatClient(roundsStarted,
+                "[ERROR] boom", "[ERROR] boom", "[OK] fixed", "[ERROR] boom", "[ERROR] boom", "[OK] fixed"),
+            eventsPath);
+
+        await ReplTurn.ExecuteAsync(
+            ctx, "fix it", isStepRequest: false, capturePlan: false, activeStep: null, CancellationToken.None);
+
+        Assert.Equal(6, roundsStarted.Count);
+
+        var events = await File.ReadAllLinesAsync(eventsPath);
+        Assert.DoesNotContain(events, l => l.Contains("\"hit_consecutive_failure_limit\""));
     }
 }

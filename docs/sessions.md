@@ -131,10 +131,11 @@ REPL agents can inspect their own session and diagnostic logs using the built-in
 | `compaction` | Context compacted (via `/compact` or `compact_context` tool) — payload: `before_tokens`, `after_tokens`, `source`, `focus` |
 | `cancelled` | Turn cancelled by Ctrl+C |
 | `context_warning` | Context exceeds 75% of the 80k token budget — payload: `estimated_tokens`, `budget`, `pct` |
+| `repl_warning` | Non-fatal issue with a turn's response — payload: `message` (`empty_response`, `invalid_response_content`, `hit_iteration_cap`, or `hit_consecutive_failure_limit`), plus `tool_rounds`/`limit` for `hit_iteration_cap` or `failures`/`last_tool` for `hit_consecutive_failure_limit` |
 | `correction_injected` | Harness injects a write-tool correction after a mutation claim without a backing tool call — payload: `reason` |
 | `plan_captured` | `/plan` stores a new step plan — payload: `step_count` |
-| `step_complete` | `/execute` step passes postconditions — payload: `step`, `total`, `skipped`, `steps_left`, `hit_iteration_cap` |
-| `step_halted` | `/execute` step fails postconditions — payload: `step`, `total`, `expected_tool`, `expected_creates`, `tool_calls`, `hit_iteration_cap` |
+| `step_complete` | `/execute` step passes postconditions — payload: `step`, `total`, `skipped`, `steps_left`, `hit_iteration_cap`, `hit_consecutive_failure_limit` |
+| `step_halted` | `/execute` step fails postconditions — payload: `step`, `total`, `expected_tool`, `expected_creates`, `tool_calls`, `hit_iteration_cap`, `hit_consecutive_failure_limit` |
 | `command` | Slash command issued |
 
 All REPL events are tagged with the session ID (`session` field in the JSONL), so the agent can distinguish events from different sessions in the same log file.
