@@ -8,7 +8,10 @@ namespace fuseraft.Cli.Commands.Repl;
 
 internal static partial class ReplCommands
 {
-    private static readonly string[] SafeModeCategories = { "Shell", "Git", "Http" };
+    // Category keys safe-mode disables in ToolsByCategory. Same plugin names as
+    // ReplSessionContext.SafeModePlugins — the ownership check covers Extended-bucket
+    // tools that don't live under these keys.
+    private static readonly string[] SafeModeCategories = ReplSessionContext.SafeModePlugins;
 
     // -------------------------------------------------------------------------
     // /tools
@@ -36,9 +39,12 @@ internal static partial class ReplCommands
                     : $"  [dim]  [[{Markup.Escape(catName)}]][/]");
                 if (!off)
                     foreach (var t in funcs)
-                        AnsiConsole.MarkupLine(ctx.PassesCapabilityRestriction(t.Name)
-                            ? $"  [dim]    ·[/] {Markup.Escape(t.Name)}"
-                            : $"  [dim]    ·[/] {Markup.Escape(t.Name)} [dim](restricted)[/]");
+                    {
+                        var blocked = !ctx.PassesCapabilityRestriction(t.Name) || !ctx.PassesSafeMode(t.Name);
+                        AnsiConsole.MarkupLine(blocked
+                            ? $"  [dim]    ·[/] {Markup.Escape(t.Name)} [dim](restricted)[/]"
+                            : $"  [dim]    ·[/] {Markup.Escape(t.Name)}");
+                    }
             }
             if (ctx.CapabilityRestrictions.Count > 0)
             {
@@ -80,10 +86,11 @@ internal static partial class ReplCommands
                 if (ctx.SafeMode && SafeModeCategories.Contains(match, StringComparer.OrdinalIgnoreCase))
                 {
                     // Manually re-enabling a category safe mode is managing breaks the
-                    // "safe mode on == Shell/Git/Http disabled" guarantee — drop the flag
-                    // so it doesn't keep claiming a protection that's no longer in effect,
-                    // and so a later `/safe-mode on` actually re-disables things instead of
-                    // no-oping on "already on".
+                    // "safe mode on == Shell/Git/Http blocked" guarantee — drop the flag
+                    // so it doesn't keep claiming a protection that's no longer in effect
+                    // (PassesSafeMode would still block those plugins' tools), and so a
+                    // later `/safe-mode on` actually re-applies instead of no-oping on
+                    // "already on".
                     ctx.SafeMode = false;
                     ctx.PreSafeDisabled = null;
                     AnsiConsole.MarkupLine("[yellow]Safe mode disengaged[/] [dim](re-enabled a category it was managing).[/]");
@@ -127,11 +134,11 @@ internal static partial class ReplCommands
 
     // Fine-grained per-plugin gate — reuses AgentConfig.Capabilities' vocabulary
     // (read/write/delete/run/...) and PluginCapabilityMap.IsAllowed, the same enforcement
-    // function orchestration agents are filtered through. Unlike /safe-mode (which disables an
-    // entire REPL category dictionary key), this filters by each tool's own owning plugin via
-    // PluginCapabilityMap.GetPlugin, so it also reaches a restricted plugin's tools sitting in
-    // the "Extended" category — e.g. `/tools restrict Git read` blocks git_push even though
-    // git_push lives in "Extended", not "Git", once --plugins Extended is enabled.
+    // function orchestration agents are filtered through. Like /safe-mode's PassesSafeMode
+    // check, this filters by each tool's own owning plugin via PluginCapabilityMap.GetPlugin,
+    // so it also reaches a restricted plugin's tools sitting in the "Extended" category —
+    // e.g. `/tools restrict Git read` blocks git_push even though git_push lives in
+    // "Extended", not "Git", once --plugins Extended is enabled.
     private static async Task CmdToolsRestrictAsync(ReplSessionContext ctx, string restrictArg)
     {
         var parts = restrictArg.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -195,12 +202,17 @@ internal static partial class ReplCommands
     // /safe-mode
     // -------------------------------------------------------------------------
 
+    // Blocks Shell/Git/Http by owning plugin (via PassesSafeMode + category disable), so
+    // tools that live in the "Extended" bucket under --plugins Extended are covered too —
+    // the same per-tool GetPlugin reach /tools restrict already had. FileSystem-owned
+    // Extended tools are left alone. Any prior /tools restrict on Shell/Git/Http is
+    // left untouched in CapabilityRestrictions and remains after /safe-mode off.
     private static async Task<CommandResult> CmdSafeModeAsync(ReplSessionContext ctx, string arg)
     {
         if (string.IsNullOrEmpty(arg))
         {
             AnsiConsole.MarkupLine(ctx.SafeMode
-                ? "[dim]Safe mode:[/] [green]on[/]  [dim](Shell, Git, Http disabled)[/]"
+                ? "[dim]Safe mode:[/] [green]on[/]  [dim](Shell, Git, Http blocked by owning plugin — including Extended-bucket tools)[/]"
                 : "[dim]Safe mode:[/] [dim]off[/]");
             AnsiConsole.MarkupLine("[dim]Run[/] [bold]/safe-mode on[/] [dim]or[/] [bold]/safe-mode off[/][dim].[/]");
             return CommandResult.Continue;
@@ -214,12 +226,18 @@ internal static partial class ReplCommands
             }
             else
             {
+                // Snapshot prior category disables so /safe-mode off can restore them.
+                // CapabilityRestrictions are intentionally not touched — a prior
+                // `/tools restrict Git read` (etc.) stays in place under safe mode and
+                // remains after safe mode is turned off.
                 ctx.PreSafeDisabled = new HashSet<string>(ctx.DisabledCategories, StringComparer.OrdinalIgnoreCase);
                 foreach (var c in SafeModeCategories.Where(c => ctx.ToolsByCategory.ContainsKey(c)))
                     ctx.DisabledCategories.Add(c);
                 ctx.ChatOptions = ctx.BuildChatOptions();
                 ctx.SafeMode    = true;
-                AnsiConsole.MarkupLine("[dim]Safe mode[/] [green]on[/][dim]: Shell, Git, Http tools disabled.[/]");
+                AnsiConsole.MarkupLine(
+                    "[dim]Safe mode[/] [green]on[/][dim]: Shell, Git, Http tools blocked " +
+                    "(by owning plugin, including any in the Extended bucket).[/]");
                 await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/safe-mode on" });
             }
         }
@@ -237,7 +255,7 @@ internal static partial class ReplCommands
                 ctx.PreSafeDisabled = null;
                 ctx.ChatOptions     = ctx.BuildChatOptions();
                 ctx.SafeMode        = false;
-                AnsiConsole.MarkupLine("[dim]Safe mode[/] [dim]off[/][dim]: tool categories restored.[/]");
+                AnsiConsole.MarkupLine("[dim]Safe mode[/] [dim]off[/][dim]: prior tool categories restored.[/]");
                 await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/safe-mode off" });
             }
         }
@@ -245,8 +263,8 @@ internal static partial class ReplCommands
         {
             AnsiConsole.MarkupLine($"[yellow]Unknown /safe-mode argument:[/] {Markup.Escape(arg)}");
             AnsiConsole.MarkupLine("[dim]Usage: /safe-mode     — show current status[/]");
-            AnsiConsole.MarkupLine("[dim]       /safe-mode on  — disable Shell, Git, Http tools[/]");
-            AnsiConsole.MarkupLine("[dim]       /safe-mode off — restore tool categories[/]");
+            AnsiConsole.MarkupLine("[dim]       /safe-mode on  — block Shell, Git, Http tools (incl. Extended-bucket)[/]");
+            AnsiConsole.MarkupLine("[dim]       /safe-mode off — restore prior tool categories[/]");
         }
         return CommandResult.Continue;
     }

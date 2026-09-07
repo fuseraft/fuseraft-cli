@@ -12,10 +12,11 @@ namespace FuseraftCli.Tests;
 /// AgentConfig.Capabilities is filtered through in orchestration) instead of REPL's own
 /// whole-category /safe-mode / /tools disable toggles.
 ///
-/// <see cref="Restrict_AppliesAcrossCategoryBuckets"/> is the key differentiator from
-/// /safe-mode: filtering happens per-tool by PluginCapabilityMap.GetPlugin(toolName), not by
-/// which ReplSessionContext.ToolsByCategory dictionary key currently holds the tool — so a
+/// <see cref="Restrict_AppliesAcrossCategoryBuckets"/> proves the cross-bucket reach:
+/// filtering happens per-tool by PluginCapabilityMap.GetPlugin(toolName), not by which
+/// ReplSessionContext.ToolsByCategory dictionary key currently holds the tool — so a
 /// restricted plugin's tools sitting in the "Extended" bucket are covered too.
+/// (/safe-mode uses the same ownership check; see ReplSafeModeCommandTests.)
 /// </summary>
 [Collection("FuseraftHomeEnv")]
 public sealed class ReplToolsRestrictCommandTests : IDisposable
