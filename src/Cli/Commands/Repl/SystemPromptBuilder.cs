@@ -99,7 +99,7 @@ internal sealed class SystemPromptBuilder
                 $"Started:    {sessionStarted}\n" +
                 $"Snapshot:   {snapshotPath}\n" +
                 $"Event log:  {FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalReplEventsLog, sessionId, FuseraftPaths.ProjectSlug(cwd))}\n" +
-                $"Use the repl_session_* tools to inspect session metadata, list past sessions, or read log files.");
+                $"Use repl_session_compact_context to free up context budget and repl_session_get_context_status to check current usage.");
         }
 
         // Orient the agent to the .fuseraft/ layout so it never wastes context
