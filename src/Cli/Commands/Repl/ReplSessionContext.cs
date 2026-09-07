@@ -126,6 +126,10 @@ internal sealed class ReplSessionContext
 
     // Plan/execution
     public PlanStep[]?                                CurrentPlan;
+    // The raw text passed to /plan <task> — kept alongside CurrentPlan/ExecutionQueue so the
+    // adversarial-mode critic can judge each step against what the user actually asked for,
+    // not just the plan's own (possibly drifted) per-step description.
+    public string?                                    CurrentPlanRequest;
     public readonly Queue<(PlanStep Step, int Total)> ExecutionQueue = new();
 
     // Halted plan state — set when a step fails, cleared by /recover or /resume
@@ -251,6 +255,7 @@ internal sealed class ReplSessionContext
     {
         ExecutionQueue.Clear();
         CurrentPlan = null;
+        CurrentPlanRequest = null;
         HaltedAt = null;
         HaltedRemaining.Clear();
         HaltedToolCalls.Clear();

@@ -252,9 +252,11 @@ public sealed class SubAgentPlugin(
     }
 
     // Single-turn critic review — not a model tool (no [Description]).
-    // Used both for /execute plan steps (taskDescription = step description, expectedTool set)
-    // and free-form REPL turns under adversarial mode (taskDescription = user input, expectedTool
-    // null — free-form questions have no single fixed expected tool).
+    // Used both for /execute plan steps (taskDescription = step description, expectedTool set,
+    // originalUserRequest = the /plan <task> text so the critic has the real ask, not just the
+    // plan's own per-step paraphrase) and free-form REPL turns under adversarial mode
+    // (taskDescription = user input, expectedTool null, originalUserRequest omitted since
+    // taskDescription already is the user's own words).
     // Returns (true, null) when approved, (false, reason) when rejected.
     // Degrades gracefully on timeout or error so a critic failure never blocks execution.
     public async Task<(bool Approved, string? Reason)> CriticReviewAsync(
@@ -262,24 +264,36 @@ public sealed class SubAgentPlugin(
         string? expectedTool,
         IReadOnlyList<string> toolsCalled,
         string agentResponse,
+        string? originalUserRequest = null,
         CancellationToken cancellationToken = default)
     {
         if (chatClient is null)
             return (true, null);
 
         const string criticSystem =
-            "You are a strict critic reviewing an AI assistant's response for accuracy. You " +
-            "receive the task or question, the tools the agent called, and the agent's response. " +
-            "Judge whether the response is fully correct, grounded in the tool output actually " +
-            "returned (not fabricated, guessed, or assumed), and completely addresses the task.\n" +
-            "If it is, respond with exactly:\nAPPROVED\n\n" +
+            "You are a strict critic reviewing an AI assistant's response. You receive the " +
+            "user's original request, the specific task or step being judged, the tools the " +
+            "agent called, and the agent's response. Judge all of the following:\n" +
+            "1. Correct — fully accurate, grounded in the tool output actually returned " +
+            "(not fabricated, guessed, or assumed).\n" +
+            "2. Complete — addresses everything the task/step asked for; nothing silently skipped.\n" +
+            "3. Right-sized for the user's original request — doesn't leave out something the " +
+            "request implied, and doesn't add unrequested scope: extra deliverables, files, or " +
+            "changes beyond what was actually asked. Do NOT count verification actions that " +
+            "confirm the requested change worked (e.g. re-reading a file just written, checking " +
+            "a command's exit code) as scope creep — those are expected diligence, not padding.\n" +
+            "If all three hold, respond with exactly:\nAPPROVED\n\n" +
             "Otherwise, describe the specific defect in one or two sentences. Be precise — " +
-            "state what is wrong or missing, not just that something is wrong.";
+            "state what is wrong, missing, or out of scope — not just that something is wrong.";
 
         var toolsStr     = toolsCalled.Count > 0 ? string.Join(", ", toolsCalled) : "(none)";
         var expectedStr  = expectedTool is not null ? $"\nExpected tool: {expectedTool}" : string.Empty;
+        var requestStr   = !string.IsNullOrWhiteSpace(originalUserRequest) &&
+                            !originalUserRequest.Equals(taskDescription, StringComparison.Ordinal)
+            ? $"User's original request: {originalUserRequest}\n"
+            : string.Empty;
         var userMsg      =
-            $"Task: {taskDescription}{expectedStr}\n" +
+            $"{requestStr}Task: {taskDescription}{expectedStr}\n" +
             $"Tools called: {toolsStr}\n\n" +
             $"Agent response:\n{agentResponse}";
 
