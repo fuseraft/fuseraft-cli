@@ -219,6 +219,10 @@ internal sealed class ReplSessionContext
     // Ctrl+C interception for in-flight requests only
     public CancellationTokenSource? ActiveCts;
 
+    // JsonMode only — see ReplStdinPump for why this exists (Windows has no way to deliver a
+    // real SIGINT to a child process, so "Stop" arrives as an in-band stdin message instead).
+    public ReplStdinPump? StdinPump;
+
     // History-aware line reader (shared across turns so history persists)
     public readonly ReplLineReader LineReader = new();
     

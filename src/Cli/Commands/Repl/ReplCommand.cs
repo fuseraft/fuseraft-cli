@@ -223,9 +223,16 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // in at startup. In jsonMode (VS Code webview), the console-based prompt would write to
         // stdout the extension can't parse and block on a stdin reply it can never send — use
         // the JSON-bridge approval service instead so the webview can render and answer it.
-        var hitlState       = new HitlModeState();
+        var hitlState = new HitlModeState();
+        // ctxForStdin is assigned once `ctx` exists below — captured by reference so the pump's
+        // cancel callback always reaches the live session, even though the pump itself (and the
+        // approval service that shares it) must be constructed before `ctx` is.
+        ReplSessionContext? ctxForStdin = null;
+        ReplStdinPump? stdinPump = jsonMode
+            ? new ReplStdinPump(Console.In, () => ctxForStdin?.ActiveCts)
+            : null;
         IHumanApprovalService approvalService = jsonMode
-            ? new JsonBridgeHumanApprovalService()
+            ? new JsonBridgeHumanApprovalService(stdinPump!)
             : new ConsoleHumanApprovalService();
         using ShellPlugin? shellPlugin  = settings.NoTools ? null : new ShellPlugin(
             shellPolicy:    TryLoadDefaultShellPolicy(),
@@ -492,7 +499,10 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             NoBanner    = settings.NoBanner,
             MemoryCount = memoryEntries.Count,
             McpManager  = mcpManager,
+            StdinPump   = stdinPump,
         };
+        ctxForStdin = ctx;
+        stdinPump?.Start();
 
         if (!settings.NoTools)
         {
