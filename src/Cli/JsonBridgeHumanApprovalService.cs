@@ -11,14 +11,14 @@ namespace fuseraft.Cli;
 /// would appear to hang with no visible prompt and then resolve as denied. This service instead
 /// emits an <c>approval_request</c> JSONL event the webview renders as an inline approve/deny UI,
 /// and blocks for the matching <c>approval_response</c> JSONL reply (see
-/// <see cref="ReplJsonBridge.ReadApprovalResponse"/>).
+/// <see cref="ReplStdinPump.ReadApprovalResponseAsync"/>).
 /// </summary>
-public sealed class JsonBridgeHumanApprovalService : IHumanApprovalService
+public sealed class JsonBridgeHumanApprovalService(ReplStdinPump stdinPump) : IHumanApprovalService
 {
-    public Task<bool> PromptShellCommandAsync(string command)
+    public async Task<bool> PromptShellCommandAsync(string command)
     {
         ReplJsonBridge.Emit(new { type = "approval_request", kind = "shell_command", command });
-        return Task.FromResult(ReplJsonBridge.ReadApprovalResponse());
+        return await stdinPump.ReadApprovalResponseAsync();
     }
 
     // The REPL's /hitl mode only ever gates shell commands (see ShellPlugin's approveCommand

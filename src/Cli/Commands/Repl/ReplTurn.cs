@@ -247,20 +247,10 @@ internal static class ReplTurn
             }
 
             string? raw;
-            try   { raw = ctx.JsonMode ? ReplJsonBridge.ReadInput() : ctx.LineReader.ReadLine(); }
+            try   { raw = ctx.JsonMode ? await ctx.StdinPump!.ReadInputAsync() : ctx.LineReader.ReadLine(); }
             catch (OperationCanceledException) { break; }
 
             if (raw is null) break;
-
-            // Interrupt signal sent via stdin (Windows path: SIGINT can't be used).
-            if (ctx.JsonMode && raw == ReplJsonBridge.InterruptToken)
-            {
-                var c = ctx.ActiveCts;
-                if (c is not null && !c.IsCancellationRequested)
-                    c.Cancel();
-                // If no active request, the signal was stale — silently discard.
-                continue;
-            }
 
             raw = raw.Trim();
             if (string.IsNullOrEmpty(raw)) continue;
