@@ -551,7 +551,12 @@ internal static class ReplTurn
                 tool_rounds = toolRounds,
                 limit       = ChatIterationLimit,
             });
-            var capMsg = $"Hit the {ChatIterationLimit}-round tool-call limit — this response may be incomplete or cut short.";
+            // "Round" here is LLM round-trips (toolRounds), not the visible tool-call badge
+            // count — a round with no tool call (pure narration) still consumes the cap, so
+            // toolCallsThisTurn.Count is routinely lower than ChatIterationLimit even when the
+            // cap is hit. Naming it a "tool-call limit" reads as a claim about that badge
+            // count, so keep the wording scoped to rounds (matches the step-turn message below).
+            var capMsg = $"Hit the {ChatIterationLimit}-round limit for this turn — the response may be incomplete or cut short.";
             if (ctx.JsonMode)
                 ReplJsonBridge.Emit(new { type = "warning", text = capMsg });
             else
@@ -872,6 +877,13 @@ internal static class ReplTurn
         CancellationToken cancellationToken)
     {
         var sb                = new StringBuilder();
+        // Automatic function invocation drives multiple model round trips within this
+        // single streaming enumeration. Each round's leading/trailing text has no
+        // knowledge of the round before or after it, so once a tool call has been seen,
+        // the next round's text needs an explicit paragraph break inserted before it —
+        // otherwise consecutive rounds' narration runs together mid-sentence (e.g.
+        // "...the full diff.Branch tip matches main...").
+        var pendingParagraphBreak = false;
         var rawUpdates        = new List<ChatResponseUpdate>();
         var toolCallsThisTurn = new List<string>();
         var fileChanges        = new List<(char Sigil, string Path)>();
@@ -954,6 +966,7 @@ internal static class ReplTurn
                 var funcCall = chunk.Contents.OfType<FunctionCallContent>().FirstOrDefault();
                 if (funcCall is not null)
                 {
+                    pendingParagraphBreak = true;
                     toolCallsThisTurn.Add(funcCall.Name);
                     TrackFileChange(funcCall.Name, funcCall.Arguments, fileChanges, fileChangeSeen, ctx.Cwd);
                     if (callIdToName is not null && funcCall.CallId is not null)
@@ -999,6 +1012,11 @@ internal static class ReplTurn
 
                 var text = chunk.Text;
                 if (string.IsNullOrEmpty(text)) continue;
+                if (pendingParagraphBreak && sb.Length > 0)
+                {
+                    text = "\n\n" + text;
+                    pendingParagraphBreak = false;
+                }
                 sb.Append(text);
 
                 // Terminal REPL never prints text live — only the spinner/tool chain is
@@ -1053,6 +1071,7 @@ internal static class ReplTurn
 
             // Reset per-attempt accumulators before reissuing the request.
             sb.Clear(); rawUpdates.Clear(); toolCallsThisTurn.Clear();
+            pendingParagraphBreak = false;
             fileChanges.Clear(); fileChangeSeen.Clear();
             capturedResults?.Clear(); callIdToName?.Clear();
             toolRounds = 0; usageRounds = 0; finishRounds = 0;
