@@ -116,9 +116,17 @@ internal sealed class ReplSessionContext
     // capability tags still allowed for that plugin. Filtering is done per-tool by
     // PluginCapabilityMap.GetPlugin(toolName) rather than by which REPL category dictionary
     // key currently holds the tool — so restricting "Git" also covers Git tools sitting in
-    // the "Extended" category bucket, unlike /safe-mode's category-key-only disable.
+    // the "Extended" category bucket. /safe-mode uses the same GetPlugin ownership check
+    // (see PassesSafeMode) in addition to disabling the Shell/Git/Http category keys.
     public readonly Dictionary<string, List<string>> CapabilityRestrictions =
         new(StringComparer.OrdinalIgnoreCase);
+
+    // Plugin names closed off by /safe-mode. Category-key disable covers the curated Core
+    // buckets; PassesSafeMode covers the same plugins' tools wherever they sit — including
+    // the Extended bucket — via PluginCapabilityMap.GetPlugin, without touching
+    // CapabilityRestrictions (so a prior /tools restrict on Shell/Git/Http is preserved
+    // across safe-mode on/off rather than wiped and needing restore).
+    public static readonly string[] SafeModePlugins = ["Shell", "Git", "Http"];
 
     // Conversation
     public readonly List<ChatMessage> History;
@@ -126,6 +134,10 @@ internal sealed class ReplSessionContext
 
     // Plan/execution
     public PlanStep[]?                                CurrentPlan;
+    // The raw text passed to /plan <task> — kept alongside CurrentPlan/ExecutionQueue so the
+    // adversarial-mode critic can judge each step against what the user actually asked for,
+    // not just the plan's own (possibly drifted) per-step description.
+    public string?                                    CurrentPlanRequest;
     public readonly Queue<(PlanStep Step, int Total)> ExecutionQueue = new();
 
     // Halted plan state — set when a step fails, cleared by /recover or /resume
@@ -251,6 +263,7 @@ internal sealed class ReplSessionContext
     {
         ExecutionQueue.Clear();
         CurrentPlan = null;
+        CurrentPlanRequest = null;
         HaltedAt = null;
         HaltedRemaining.Clear();
         HaltedToolCalls.Clear();
@@ -260,7 +273,27 @@ internal sealed class ReplSessionContext
     public List<AIFunction> GetActiveTools() => [.. ToolsByCategory
         .Where(kv => !DisabledCategories.Contains(kv.Key))
         .SelectMany(kv => kv.Value)
-        .Where(f => PassesCapabilityRestriction(f.Name))];
+        .Where(f => IsToolAllowed(f.Name))];
+
+    /// <summary>True when the tool passes both safe-mode and capability-restriction gates.</summary>
+    public bool IsToolAllowed(string toolName) =>
+        PassesSafeMode(toolName) && PassesCapabilityRestriction(toolName);
+
+    /// <summary>
+    /// When safe mode is on, reject tools owned by Shell/Git/Http regardless of which
+    /// <see cref="ToolsByCategory"/> bucket holds them — same GetPlugin ownership check
+    /// <c>/tools restrict</c> uses, so Extended-bucket tools like <c>git_push</c> and
+    /// <c>shell_run_background</c> are covered. FileSystem-owned tools are never blocked
+    /// here; safe-mode has never claimed to touch FileSystem.
+    /// </summary>
+    public bool PassesSafeMode(string toolName)
+    {
+        if (!SafeMode) return true;
+        var plugin = PluginCapabilityMap.GetPlugin(toolName);
+        // No capability-map entry (MCP tools, …) — not a Shell/Git/Http built-in.
+        if (plugin is null) return true;
+        return !SafeModePlugins.Contains(plugin, StringComparer.OrdinalIgnoreCase);
+    }
 
     public bool PassesCapabilityRestriction(string toolName)
     {

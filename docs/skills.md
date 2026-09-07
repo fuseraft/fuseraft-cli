@@ -143,6 +143,14 @@ The skill scaffolds `.fuseraft/knowledge/` via `fuseraft init`, builds the repos
 
 ---
 
+### `repl-tmux-driver`
+
+Drives an interactive `fuseraft repl` session from outside via tmux, for live-testing REPL changes against a real model instead of relying on unit tests alone. Triggers when the user wants to dogfood the REPL agent on a real task, reproduce a REPL bug interactively, or verify `/safe-mode`, `/tools`, `/hitl`, or similar mode toggles against real agent-visible behavior.
+
+The skill covers launching the REPL in a detached tmux session, injecting single- or multi-line input (via `/paste` plus `tmux load-buffer`/`paste-buffer` for anything with embedded newlines), polling for the idle prompt with a wait loop instead of blind sleeps, capturing pane output to a file for review, and cleaning up with `/exit` so session-end bookkeeping runs.
+
+---
+
 ## Cross-session handoff: `/compact`
 
 To pass context from the current REPL session to a new one, use the `/compact` command. `/compact` generates a concise summary of what was worked on, key decisions, current state, and what comes next; it then replaces the conversation history with that summary so the session can continue with a clean context window.
