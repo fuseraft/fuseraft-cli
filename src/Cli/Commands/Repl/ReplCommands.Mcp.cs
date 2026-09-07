@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
 using fuseraft.Core.Models.Config;
@@ -95,7 +96,7 @@ internal static partial class ReplCommands
                 Name      = name,
                 Transport = "stdio",
                 Command   = command.Trim(),
-                Args      = argsLine.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList(),
+                Args      = SplitStdioArgs(argsLine),
             };
         }
         else
@@ -145,6 +146,41 @@ internal static partial class ReplCommands
         }
 
         return CommandResult.Continue;
+    }
+
+    // Quote-aware split for the stdio "Arguments" prompt — a bare space.Split would break an
+    // argument value containing a space (e.g. a path) into multiple Args entries.
+    private static List<string> SplitStdioArgs(string argsLine)
+    {
+        var result  = new List<string>();
+        var current = new StringBuilder();
+        char? quote = null;
+        var inToken = false;
+
+        foreach (var c in argsLine)
+        {
+            if (quote is not null)
+            {
+                if (c == quote) quote = null;
+                else current.Append(c);
+                continue;
+            }
+            if (c is '"' or '\'')
+            {
+                quote   = c;
+                inToken = true;
+                continue;
+            }
+            if (char.IsWhiteSpace(c))
+            {
+                if (inToken) { result.Add(current.ToString()); current.Clear(); inToken = false; }
+                continue;
+            }
+            current.Append(c);
+            inToken = true;
+        }
+        if (inToken) result.Add(current.ToString());
+        return result;
     }
 
     private static async Task<CommandResult> CmdMcpRemoveAsync(ReplSessionContext ctx, string name)

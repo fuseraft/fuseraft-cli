@@ -439,7 +439,7 @@ Use `/tools` to see the full list at runtime.
 | `/explore <query>` | Run a sub-agent exploration loop over the codebase and return a prose summary. The sub-agent uses read-only tools and runs in an isolated context with no shared history from the main session. |
 | `/locate <symbol>` | Run a sub-agent symbol lookup and return a `path:line` result. Faster and more targeted than `/explore` for single-symbol lookups. |
 | `/safe-mode` | Show current safe mode status |
-| `/safe-mode on` | Disable Shell, Git, and Http tool categories to prevent mutations |
+| `/safe-mode on` | Block Shell, Git, and Http tools by owning plugin (including those in the Extended bucket) |
 | `/safe-mode off` | Restore tool categories to their state before safe mode was enabled |
 | `/hitl` | Show current HITL (human-in-the-loop) mode status |
 | `/hitl on` | Require y/N approval before each `shell_run`, `shell_run_script`, or `shell_run_background` call |
@@ -543,7 +543,7 @@ Restriction on Git removed.
 - `/tools unrestrict <plugin>` removes a plugin's restriction
 - Run `/tools restrict` with no arguments to see which plugin names have capability tags at all (`FileSystem`, `Shell`, `Git`, `Http`, `Json`, `Document`, `Search`, `Changes`, `Scratchpad`, `Chatroom`, `Probe`, `CodeExecution`, `Decision`, `Graph`) — plugins without fine-grained tags (`Todo`, `SubAgent`, MCP servers, …) can only be turned on or off via `/tools disable`/`/tools enable`, not restricted by tag
 
-**Restricting reaches further than disabling a category.** Filtering is done per-tool by which plugin actually owns it, not by which REPL tool-category dictionary key currently holds it. That distinction matters once `--plugins Extended` is enabled: `git_push` lives in the `Extended` category, not `Git`, so `/tools restrict Git read` still removes it, while `/safe-mode on` — which only disables the `Shell`, `Git`, and `Http` category keys — does not touch `Extended` at all and leaves `git_push` (and any other Extended-bucket Shell/Git/Http tool) callable. If you need a hard guarantee with `Extended` enabled, restrict the plugin by tag rather than relying on `/safe-mode` alone.
+**Owning-plugin filtering reaches across category buckets.** Both `/tools restrict` and `/safe-mode` filter per-tool by which plugin actually owns the tool (`PluginCapabilityMap.GetPlugin`), not only by which REPL tool-category dictionary key currently holds it. That distinction matters once `--plugins Extended` is enabled: `git_push` and `shell_run_background` live in the `Extended` category, not `Git`/`Shell`, but both commands still block them. `/safe-mode` leaves FileSystem-owned Extended tools (e.g. `delete_file`) alone; use `/tools restrict FileSystem …` when you need that lock too.
 
 **Input and line editing**
 

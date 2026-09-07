@@ -18,6 +18,7 @@ internal static partial class ReplCommands
         ctx.History.Clear();
         if (sys is not null) ctx.History.Add(sys);
         ctx.TurnIndex              = 0;
+        ctx.LastExtractedTurnIndex = -1;
         ctx.PrevTurnTokenEstimate  = 0;
         ctx.TurnTokenDeltas.Clear();
         ctx.ContextWarningShown    = false;
@@ -332,6 +333,7 @@ internal static partial class ReplCommands
         ctx.History.Clear();
         ctx.History.AddRange(kept);
         ctx.TurnIndex             = targetTurn;
+        ctx.LastExtractedTurnIndex = -1;
         ctx.PrevTurnTokenEstimate = 0;
         ctx.PrevCtxEstimate       = 0;
         if (ctx.TurnTokenDeltas.Count > targetTurn)

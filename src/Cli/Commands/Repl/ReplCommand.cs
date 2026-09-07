@@ -99,6 +99,22 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         "git_add", "git_commit", "git_stash_list",
     };
 
+    // ReplSessionPlugin split in two: compact_context/get_context_status are load-bearing for
+    // the main loop's own context-budget self-management, so they stay in the default tool set.
+    // current/list/read_event_log/read_log let the model enumerate and read a *different*
+    // session's full event log by ID/prefix match — real cross-session data exposure with no
+    // turn-to-turn value for the primary agent, so they're withheld from the default set and
+    // handed only to /assist's diagnose loop instead (see SubAgentPlugin's diagnosticTools).
+    private static readonly HashSet<string> CoreSessionTools = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "repl_session_compact_context", "repl_session_get_context_status",
+    };
+
+    private static readonly HashSet<string> SessionDiagnosticTools = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "repl_session_current", "repl_session_list", "repl_session_read_event_log", "repl_session_read_log",
+    };
+
     protected override async Task<int> ExecuteAsync(
         CommandContext context, ReplSettings settings, CancellationToken cancellationToken)
     {
@@ -127,7 +143,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         }
         else if (!string.IsNullOrEmpty(legacyKey))
         {
-            userCfg!.ApiKey = legacyKey;
+            userCfg ??= new UserConfig();
+            userCfg.ApiKey = legacyKey;
             if (await KeyStorePersistence.TryStoreAsync(keyStore, legacyKey))
                 AnsiConsole.MarkupLine($"[dim]API key migrated to {Markup.Escape(keyStore.StoreName)}.[/]");
             UserConfigStore.Save(userCfg);
@@ -212,6 +229,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         IReadOnlyList<AgentSkill> discoveredSkills = [];
         string?         skillsCatalog   = null;
         List<AIFunction>? explorerTools = null;
+        List<AIFunction> sessionDiagnosticTools = [];
         TodoPlugin?     todoPlugin      = null;
         FileSystemPlugin? fsPluginForCategory = null;
         McpSessionManager? mcpManager          = null;
@@ -300,7 +318,9 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         if (!settings.NoTools)
         {
             replSessionPlugin = new ReplSessionPlugin(sessionId, startedAt, modelId, cwd);
-            toolsByCategory["Session"] = PluginRegistry.GetFunctionsFromObject(replSessionPlugin).ToList();
+            var sessionFunctions = PluginRegistry.GetFunctionsFromObject(replSessionPlugin).ToList();
+            toolsByCategory["Session"] = sessionFunctions.Where(f => CoreSessionTools.Contains(f.Name)).ToList();
+            sessionDiagnosticTools = sessionFunctions.Where(f => SessionDiagnosticTools.Contains(f.Name)).ToList();
 
             var enabled = settings.EnabledPlugins;
             var slug    = FuseraftPaths.ProjectSlug(cwd);
@@ -391,9 +411,10 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             subAgent = new SubAgentPlugin(
                 ReplFactory.BuildClient(modelConfig, factory, explorerTools.Count > 0, adaptiveTrimTracker, emitter),
                 explorerTools,
-                eventEmitter:    emitter,
-                parentAgentName: "repl",
-                delegateTools:   delegateTools);
+                eventEmitter:     emitter,
+                parentAgentName:  "repl",
+                delegateTools:    delegateTools,
+                diagnosticTools:  sessionDiagnosticTools);
             toolsByCategory["SubAgent"] = PluginRegistry.GetFunctionsFromObject(subAgent).ToList();
         }
 
@@ -477,13 +498,6 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             }
         }
 
-        if (toolsByCategory.TryGetValue("FileSystem", out _))
-        {
-            var fsResettable = toolsByCategory["FileSystem"]
-                .Select(f => f.UnderlyingMethod?.DeclaringType)
-                .FirstOrDefault();
-        }
-        
         if (discoveredSkills.Count > 0)
             ctx.LineReader.SetSkillSlugs([.. discoveredSkills.Select(s => s.Frontmatter.Name)]);
 
