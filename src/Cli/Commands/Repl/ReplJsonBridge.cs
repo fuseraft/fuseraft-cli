@@ -57,4 +57,30 @@ internal static class ReplJsonBridge
         return line;
     }
 
+    /// <summary>
+    /// Blocks for one JSON line from stdin carrying the webview's answer to a pending
+    /// <c>approval_request</c> event (see <see cref="fuseraft.Cli.JsonBridgeHumanApprovalService"/>),
+    /// e.g. <c>{"type":"approval_response","approved":true}</c>. Only ever called from within a
+    /// single shell-tool-call approval gate, never concurrently with <see cref="ReadInput"/> (that
+    /// is only read between turns), so there is no contention over stdin. Anything other than a
+    /// well-formed approval with <c>approved:true</c> — malformed JSON, the wrong "type", or EOF
+    /// because the panel/process went away — denies the command rather than risking a false
+    /// approval.
+    /// </summary>
+    internal static bool ReadApprovalResponse()
+    {
+        var line = Console.ReadLine();
+        if (line is null) return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            if (doc.RootElement.TryGetProperty("type", out var typeEl) &&
+                typeEl.GetString() is "approval_response" &&
+                doc.RootElement.TryGetProperty("approved", out var approvedEl) &&
+                approvedEl.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                return approvedEl.GetBoolean();
+        }
+        catch { }
+        return false;
+    }
 }
