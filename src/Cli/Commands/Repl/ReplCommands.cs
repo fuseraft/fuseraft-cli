@@ -101,8 +101,8 @@ internal static partial class ReplCommands
                 - `/tools unrestrict <plugin>` — Remove a plugin's capability restriction
                 - `/undo` — Revert files written, patched, copied, moved, or deleted in the most recent turn (repeatable; walks back one turn at a time — not the same as `/rewind`, which only affects conversation history)
                 - `/safe-mode` — Show safe mode status
-                - `/safe-mode on` — Disable Shell, Git, Http tools to prevent mutations
-                - `/safe-mode off` — Restore tool categories
+                - `/safe-mode on` — Block Shell, Git, Http tools (by owning plugin, including Extended-bucket tools)
+                - `/safe-mode off` — Restore prior category disables
                 - `/hitl` — Show HITL (human-in-the-loop) mode status
                 - `/hitl on` — Require y/N approval before each shell command
                 - `/hitl off` — Run shell commands without approval
@@ -203,8 +203,8 @@ internal static partial class ReplCommands
         tools.AddRow("[bold cyan]/tools unrestrict <plugin>[/]",   "Remove a plugin's capability restriction");
         tools.AddRow("[bold cyan]/undo[/]",                        "Revert files written/patched/copied/moved/deleted in the most recent turn (repeatable; files only — see /rewind for conversation history)");
         tools.AddRow("[bold cyan]/safe-mode[/]",                   "Show safe mode status");
-        tools.AddRow("[bold cyan]/safe-mode on[/]",                "Disable Shell, Git, Http tools to prevent mutations");
-        tools.AddRow("[bold cyan]/safe-mode off[/]",               "Restore tool categories");
+        tools.AddRow("[bold cyan]/safe-mode on[/]",                "Block Shell, Git, Http tools (incl. Extended-bucket)");
+        tools.AddRow("[bold cyan]/safe-mode off[/]",               "Restore prior category disables");
         tools.AddRow("[bold cyan]/hitl[/]",                        "Show HITL (human-in-the-loop) mode status");
         tools.AddRow("[bold cyan]/hitl on[/]",                     "Require y/N approval before each shell command");
         tools.AddRow("[bold cyan]/hitl off[/]",                    "Run shell commands without approval");
