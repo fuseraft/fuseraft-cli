@@ -43,6 +43,7 @@ internal static partial class ReplCommands
             $"Focus on intentful actions only — no defensive steps like verifying CWD or reading files back." +
             $"\n\nTask: {arg}";
 
+        ctx.CurrentPlanRequest = arg;
         await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/plan", task = arg });
         return CommandResult.Send(planPrompt, capturePlan: true);
     }

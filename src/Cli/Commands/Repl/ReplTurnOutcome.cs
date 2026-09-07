@@ -90,7 +90,8 @@ internal static class ReplTurnOutcome
         {
             if (!ctx.JsonMode) AnsiConsole.Markup("[dim]  critic reviewing…[/]");
             var (approved, reason) = await ctx.SubAgent.CriticReviewAsync(
-                activeStep.Description, activeStep.Tool, toolCallsThisTurn, responseText, cancellationToken);
+                activeStep.Description, activeStep.Tool, toolCallsThisTurn, responseText,
+                originalUserRequest: ctx.CurrentPlanRequest, cancellationToken: cancellationToken);
             if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 40)}\r");
             if (!approved)
             {
