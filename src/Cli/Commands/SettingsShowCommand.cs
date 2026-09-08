@@ -56,6 +56,7 @@ public sealed class SettingsShowCommand : AsyncCommand
         repl.AddRow("No banner",      config.Repl.NoBanner       ? "[green]on[/]" : "[dim]off[/]");
         repl.AddRow("Verbose",        config.Repl.Verbose        ? "[green]on[/]" : "[dim]off[/]");
         repl.AddRow("Safe mode",      config.Repl.SafeModeDefault ? "[green]on[/]" : "[dim]off[/]");
+        repl.AddRow("Auto-compact",   config.Repl.AutoCompact     ? "[green]on[/]" : "[dim]off[/]");
         repl.AddRow("Plugins",        config.Repl.Plugins.Count > 0 ? Markup.Escape(string.Join(", ", config.Repl.Plugins)) : "[dim](none)[/]");
         AnsiConsole.Write(repl);
         AnsiConsole.WriteLine();

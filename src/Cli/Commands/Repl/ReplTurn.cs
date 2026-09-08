@@ -600,31 +600,76 @@ internal static class ReplTurn
                 AnsiConsole.MarkupLine($"[dim yellow]  ⚠ {Markup.Escape(failMsg)}[/]");
         }
 
-        // One-time 75 % context warning. Fires on free-form turns only (not
-        // plan steps or plan-capture) so it never interrupts /execute flow.
-        // Resets after /compact or /clear so it can fire once per "fill cycle".
+        // One-time 75 % context check. Fires on free-form turns only (not plan steps or
+        // plan-capture) so it never interrupts /execute flow. Resets after a successful
+        // compaction (manual or auto) or /clear so it can fire once per "fill cycle".
+        // Prefers the provider-reported actual input-token count for this turn's first round
+        // (LastActualContextTokens) over the char-based heuristic (postEst) when available,
+        // since it reflects real billed size rather than an estimate — same preference /context
+        // already uses (see ReplCommands.Context.cs).
         if (!ctx.ContextWarningShown && !isStepRequest && !capturePlan && responseText.Length > 0)
         {
-            var pct = (double)postEst / ctx.ContextTokenBudget;
+            var isActual  = ctx.LastActualContextTokens.HasValue;
+            var effective = ctx.LastActualContextTokens ?? postEst;
+            var pct       = (double)effective / ctx.ContextTokenBudget;
             if (pct >= 0.75)
             {
                 ctx.ContextWarningShown = true;
+                var autoCompact = ctx.UserCfg?.Repl?.AutoCompact ?? true;
                 await ctx.Emitter.EmitAsync(EventTypes.ContextWarning, turn: ctx.TurnIndex, payload: new
                 {
-                    estimated_tokens = postEst,
+                    estimated_tokens = effective,
+                    is_actual        = isActual,
                     budget           = ctx.ContextTokenBudget,
                     pct              = Math.Round(pct, 3),
+                    auto_compact     = autoCompact,
                 });
-                if (ctx.JsonMode)
-                    ReplJsonBridge.Emit(new
+
+                var autoCompacted = false;
+                if (autoCompact)
+                {
+                    if (!ctx.JsonMode) AnsiConsole.Markup($"[dim]  ⚡ context is {pct:P0} full — auto-compacting…[/]");
+                    var (compacted, compactError, beforeTok, afterTok) = await ReplCommands.CompactHistoryAsync(
+                        ctx, focus: null, cancellationToken, source: "auto_compact_threshold");
+                    if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 60)}\r");
+
+                    if (compacted)
                     {
-                        type = "warning",
-                        text = $"Context is {pct:P0} full. Consider /compact to summarise and free space.",
-                    });
-                else
-                    AnsiConsole.MarkupLine(
-                        $"[dim yellow]  ⚠ Context {pct:P0} full — consider [/][bold]/compact[/]" +
-                        $"[dim yellow] to summarise and free space.[/]");
+                        autoCompacted = true;
+                        ctx.TurnIndex = 0;
+                        ctx.LastExtractedTurnIndex = -1;
+                        if (ctx.JsonMode)
+                            ReplJsonBridge.Emit(new
+                            {
+                                type = "warning",
+                                text = $"Context was {pct:P0} full — auto-compacted ({beforeTok:N0} → {afterTok:N0} tok).",
+                            });
+                        else
+                            AnsiConsole.MarkupLine(
+                                $"[dim yellow]  ⚡ Context was {pct:P0} full — auto-compacted[/] " +
+                                $"[dim]({beforeTok:N0} → {afterTok:N0} tok)[/]");
+                    }
+                    else if (!ctx.JsonMode)
+                    {
+                        AnsiConsole.MarkupLine(
+                            $"[red]  Auto-compaction failed:[/] {Markup.Escape(compactError ?? "unknown error")} " +
+                            "[dim](falling back to warning)[/]");
+                    }
+                }
+
+                if (!autoCompacted)
+                {
+                    if (ctx.JsonMode)
+                        ReplJsonBridge.Emit(new
+                        {
+                            type = "warning",
+                            text = $"Context is {pct:P0} full. Consider /compact to summarise and free space.",
+                        });
+                    else
+                        AnsiConsole.MarkupLine(
+                            $"[dim yellow]  ⚠ Context {pct:P0} full — consider [/][bold]/compact[/]" +
+                            $"[dim yellow] to summarise and free space.[/]");
+                }
             }
         }
 
