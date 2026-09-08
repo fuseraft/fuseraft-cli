@@ -112,10 +112,12 @@ internal static class AuditChainViewer
         var anyFailed = false;
         foreach (var path in existing)
         {
-            var (ok, checkedCount, failure) = await VerifyFileAsync(path, ct);
+            var (ok, checkedCount, failure, claimedPredecessorHash) = await VerifyFileAsync(path, ct);
             if (ok)
             {
                 AnsiConsole.MarkupLine($"[green]✓ intact[/]  {Markup.Escape(path)}  [dim]({checkedCount} entries)[/]");
+                if (claimedPredecessorHash is not null)
+                    AnsiConsole.MarkupLine(DescribeLink(path, claimedPredecessorHash));
             }
             else
             {
@@ -128,10 +130,11 @@ internal static class AuditChainViewer
         return anyFailed ? 1 : 0;
     }
 
-    private static async Task<(bool Ok, int Checked, string? Failure)> VerifyFileAsync(string path, CancellationToken ct)
+    private static async Task<(bool Ok, int Checked, string? Failure, string? ClaimedPredecessorHash)> VerifyFileAsync(string path, CancellationToken ct)
     {
         var seq = 0;
         var previousHash = string.Empty;
+        string? claimedPredecessorHash = null;
 
         await foreach (var line in File.ReadLinesAsync(path, ct))
         {
@@ -139,25 +142,70 @@ internal static class AuditChainViewer
 
             AuditLogEntry? entry;
             try { entry = JsonSerializer.Deserialize<AuditLogEntry>(line, JsonOpts); }
-            catch (JsonException ex) { return (false, seq, $"line {seq + 1}: malformed JSON ({ex.Message})"); }
+            catch (JsonException ex) { return (false, seq, $"line {seq + 1}: malformed JSON ({ex.Message})", null); }
 
-            if (entry is null) return (false, seq, $"line {seq + 1}: malformed JSON");
+            if (entry is null) return (false, seq, $"line {seq + 1}: malformed JSON", null);
 
             if (entry.Seq != seq)
-                return (false, seq, $"seq {entry.Seq}: expected seq {seq} — an entry was reordered, inserted, or removed");
+                return (false, seq, $"seq {entry.Seq}: expected seq {seq} — an entry was reordered, inserted, or removed", null);
 
             if (entry.PreviousHash != previousHash)
-                return (false, seq, $"seq {entry.Seq}: previous_hash does not match the prior entry's hash — chain link broken");
+                return (false, seq, $"seq {entry.Seq}: previous_hash does not match the prior entry's hash — chain link broken", null);
 
             var recomputed = ComputeHash(entry.Seq, entry.Timestamp, entry.AgentId ?? "", entry.Action ?? "", entry.Decision ?? "", entry.PreviousHash ?? "");
             if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(recomputed), Encoding.UTF8.GetBytes(entry.Hash ?? "")))
-                return (false, seq, $"seq {entry.Seq}: stored hash does not match the recomputed hash — entry contents were modified");
+                return (false, seq, $"seq {entry.Seq}: stored hash does not match the recomputed hash — entry contents were modified", null);
+
+            if (seq == 0 && entry.Action is { } a0 && a0.StartsWith(SessionLinkPrefix, StringComparison.Ordinal))
+                claimedPredecessorHash = a0[SessionLinkPrefix.Length..];
 
             previousHash = entry.Hash ?? "";
             seq++;
         }
 
-        return (true, seq, null);
+        return (true, seq, null, claimedPredecessorHash);
+    }
+
+    // Matches the action text OrchestratorBuilder.InitGovernanceKernel stamps into a new
+    // session's first entry when it finds a prior session for the project to link to.
+    private const string SessionLinkPrefix = "SessionLinked:prev=";
+
+    private static string DescribeLink(string path, string claimedPredecessorHash)
+    {
+        var match = FindSiblingWithTipHash(path, claimedPredecessorHash);
+        return match is not null
+            ? $"  [dim]↳ linked to {Markup.Escape(match)}[/]"
+            : $"  [yellow]↳ claims predecessor hash {Markup.Escape(HashPrefix(claimedPredecessorHash))} but no sibling session in this project has that as its chain tip[/]";
+    }
+
+    // Confirms a SessionLinked claim by checking whether any sibling session directory's
+    // audit-chain.jsonl really ends with the claimed hash as its own tip.
+    private static string? FindSiblingWithTipHash(string path, string claimedHash)
+    {
+        var sessionDir = Path.GetDirectoryName(Path.GetFullPath(path));
+        var projectDir = sessionDir is null ? null : Path.GetDirectoryName(sessionDir);
+        if (projectDir is null || !Directory.Exists(projectDir)) return null;
+
+        foreach (var siblingDir in Directory.GetDirectories(projectDir))
+        {
+            if (string.Equals(siblingDir, sessionDir, StringComparison.OrdinalIgnoreCase)) continue;
+
+            var candidate = Path.Combine(siblingDir, "audit-chain.jsonl");
+            if (!File.Exists(candidate)) continue;
+
+            var lastLine = File.ReadLines(candidate).LastOrDefault(l => !string.IsNullOrWhiteSpace(l));
+            if (lastLine is null) continue;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(lastLine);
+                if (doc.RootElement.TryGetProperty("hash", out var h) && h.GetString() == claimedHash)
+                    return candidate;
+            }
+            catch { /* skip malformed sibling file */ }
+        }
+
+        return null;
     }
 
     // Mirrors AgentGovernance.Audit.AuditLogger's private ComputeHash exactly (verified by

@@ -583,6 +583,20 @@ public static class OrchestratorBuilder
             }
         }
 
+        // Link this session's chain to the project's most recent prior session, so the audit
+        // trail isn't just N disconnected per-session chains. AuditLogger hardcodes the first
+        // entry's previous_hash to "" with no way to override it, so the link is carried in the
+        // entry's own (hashed) action text instead of the previous_hash field — `fuseraft log
+        // audit --verify` confirms the claimed hash really is some sibling session's chain tip.
+        // Only on a genuinely new file: a resumed session re-appends to an existing chain, and
+        // must not re-inject a link entry into the middle of it.
+        if (!File.Exists(auditLogPath))
+        {
+            var previousTipHash = FindPreviousSessionTipHash(projectSlug, auditLogPath);
+            if (previousTipHash is not null)
+                PersistAuditEntry(auditLogger.Log("system", $"SessionLinked:prev={previousTipHash}", "allow"));
+        }
+
         governanceKernel.OnAllEvents(evt =>
         {
             var action   = evt.PolicyName is not null ? $"{evt.Type}:{evt.PolicyName}" : evt.Type.ToString();
@@ -648,6 +662,47 @@ public static class OrchestratorBuilder
         }
 
         return (governanceKernel, chatClientFactory, identityRegistry, dependencyPlanner);
+    }
+
+    /// <summary>
+    /// Finds the SHA-256 chain-tip hash of this project's most recently written prior session,
+    /// for stamping into a new session's first audit entry (see the "Link this session's chain"
+    /// block in <see cref="InitGovernanceKernel"/>). Scans sibling directories of
+    /// <paramref name="currentAuditLogPath"/> under <c>~/.fuseraft/sessions/{projectSlug}/</c>
+    /// for an <c>audit-chain.jsonl</c>, picks the most recently modified one, and reads its
+    /// last line's <c>hash</c> field. Returns <c>null</c> when this is the project's first
+    /// session or no prior chain file can be read.
+    /// </summary>
+    private static string? FindPreviousSessionTipHash(string projectSlug, string currentAuditLogPath)
+    {
+        var sessionsRoot = FuseraftPaths.GlobalProjectSessions(projectSlug);
+        if (!Directory.Exists(sessionsRoot)) return null;
+
+        var currentDir = Path.GetDirectoryName(Path.GetFullPath(currentAuditLogPath));
+
+        var candidate = Directory.GetDirectories(sessionsRoot)
+            .Where(d => !string.Equals(Path.GetFullPath(d), currentDir, StringComparison.OrdinalIgnoreCase))
+            .Select(d => Path.Combine(d, "audit-chain.jsonl"))
+            .Where(File.Exists)
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .FirstOrDefault();
+
+        return candidate is null ? null : ReadTipHash(candidate);
+    }
+
+    private static string? ReadTipHash(string auditLogPath)
+    {
+        try
+        {
+            var lastLine = File.ReadLines(auditLogPath).LastOrDefault(l => !string.IsNullOrWhiteSpace(l));
+            if (lastLine is null) return null;
+            using var doc = JsonDocument.Parse(lastLine);
+            return doc.RootElement.TryGetProperty("hash", out var h) ? h.GetString() : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     // -------------------------------------------------------------------------
