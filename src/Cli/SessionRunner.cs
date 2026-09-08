@@ -597,6 +597,8 @@ public sealed class SessionRunner(
             _ = eventEmitter.EmitAsync(EventTypes.SessionAborted,
                 payload: new { session = checkpoint.SessionId, reason = errorMessage });
 
+        try { telemetry?.RecordSession(succeeded, elapsed); } catch { }
+
         if (sessionMetrics is not null)
             try { await sessionMetrics.PrintSummaryAsync(eventEmitter, checkpoint.SessionId); } catch { }
 

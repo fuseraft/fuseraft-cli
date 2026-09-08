@@ -912,14 +912,36 @@ Telemetry:
 
 *Metrics*
 
+Per-turn (tagged with `agent.name` and `model.id`):
+
 | Instrument | Type | Unit | Description |
 |------------|------|------|-------------|
 | `fuseraft.agent.turns` | counter | — | Agent turns completed |
 | `fuseraft.tokens.input` | counter | — | Total input tokens consumed |
 | `fuseraft.tokens.output` | counter | — | Total output tokens produced |
 | `fuseraft.agent.duration_seconds` | histogram | s | Wall-clock seconds per turn |
+| `fuseraft.tool.calls` | counter | — | Tool calls made, additionally tagged `tool.name` and `tool.success` |
 
-All instruments carry `agent.name` and `model.id` attributes so you can slice by agent or model.
+Session-level (tagged `succeeded`):
+
+| Instrument | Type | Unit | Description |
+|------------|------|------|-------------|
+| `fuseraft.session.completed` | counter | — | Sessions completed |
+| `fuseraft.session.duration_seconds` | histogram | s | Wall-clock seconds per session |
+
+Reliability (forwarded from the `events.jsonl` log by a `TelemetryEventHook`; tagged `agent.name` and/or `reason` where the source event carries them):
+
+| Instrument | Type | Unit | Description |
+|------------|------|------|-------------|
+| `fuseraft.compaction.count` | counter | — | Conversation compaction cycles, tagged `reason` |
+| `fuseraft.retry.attempts` | counter | — | Agent-turn retries scheduled, tagged `agent.name` and `reason` |
+| `fuseraft.retry.exhausted` | counter | — | Times an agent's retry budget was exhausted, tagged `agent.name` and `reason` |
+| `fuseraft.circuit_breaker.opens` | counter | — | Times the provider circuit breaker tripped open |
+| `fuseraft.hitl.escalations` | counter | — | Human-in-the-loop escalations, tagged `agent.name` |
+| `fuseraft.hitl.rejections` | counter | — | Human-in-the-loop rejections, tagged `agent.name` |
+| `fuseraft.context_budget.warnings` | counter | — | Context token budget warnings, tagged `agent.name` |
+| `fuseraft.context_budget.cutovers` | counter | — | Context token budget cutovers into compaction, tagged `agent.name` |
+| `fuseraft.session.max_turns_exceeded` | counter | — | Times a session hit its max-turns/max-iterations cap |
 
 **Quick start with Jaeger**
 

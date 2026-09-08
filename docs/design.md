@@ -880,6 +880,7 @@ Event consumers may inject messages, trigger external systems, or enforce additi
 |---|---|
 | `ValidationDiagnosticHook` | Watches `validation_fail` events; on consecutive ≥ 2, reads the most recent change log entry and injects a diagnostic summary into the shared history. Gives the re-invoked agent ground-truth data (what was actually written/run on disk) rather than only the abstract validator error. |
 | `ReasoningAuditHook` | SHA-256-digests reasoning-token content into the governance audit chain, registered by `OrchestratorBuilder`. |
+| `TelemetryEventHook` | Forwards `compaction`, `retry_attempt`/`retry_scheduled`/`retry_exhausted`, `circuit_breaker_open`, `hitl_escalation`/`hitl_rejected`, `context_budget_warn`/`context_budget_cutover`, and `max_turns_exceeded` events into OTel counters via `FuseraftTelemetry`. Registered by `RunCommand` whenever `Telemetry` is configured — see [Telemetry](configuration.md#telemetry). |
 
 `AgentOrchestrator` registers `ValidationDiagnosticHook` automatically when both `Events` and `ChangeTracking` are configured. The hook is registered once per orchestrator instance and uses a mutable `_activeHistory` reference so it always targets the current session's history across multiple `StreamAsync` calls.
 

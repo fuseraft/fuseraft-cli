@@ -253,6 +253,8 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
                 StringComparer.OrdinalIgnoreCase);
 
         using var telemetry = FuseraftTelemetry.Create(config.Telemetry, config.Name);
+        if (telemetry is not null)
+            eventEmitter?.RegisterHook(new TelemetryEventHook(telemetry));
 
         if (!settings.NoBanner && !jsonMode)
         {
