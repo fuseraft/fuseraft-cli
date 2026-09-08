@@ -25,6 +25,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Invoke-WebRequest renders a progress bar on every buffer chunk, which is
+# dramatically slow for a large file (~50-90MB releases here) — often minutes
+# instead of seconds. Disabling it is the standard fix.
+$ProgressPreference = 'SilentlyContinue'
+
 # Ensure TLS 1.2 for older Windows / PS 5.1 environments
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 

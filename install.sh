@@ -80,11 +80,22 @@ fi
 ###############################################################################
 echo "Fetching latest release from github.com/${REPO}..."
 
-API_URL="https://api.github.com/repos/${REPO}/releases/latest"
-RELEASE_JSON="$("${FETCH_CMD[@]}" "$API_URL")"
+# Resolve the tag from the redirect target of /releases/latest instead of the
+# GitHub API: a HEAD-sized request instead of a multi-KB JSON body, and it
+# isn't subject to the unauthenticated API's 60-requests/hour rate limit.
+TAG=""
+if [[ "${FETCH_CMD[0]}" == "curl" ]]; then
+  FINAL_URL="$(curl -fsSIL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" 2>/dev/null || true)"
+  CANDIDATE_TAG="${FINAL_URL##*/}"
+  [[ "$CANDIDATE_TAG" == v* ]] && TAG="$CANDIDATE_TAG"
+fi
 
-TAG="$(printf '%s\n' "$RELEASE_JSON" | grep '"tag_name"' | head -n1 | \
-  sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+if [[ -z "$TAG" ]]; then
+  RELEASE_JSON="$("${FETCH_CMD[@]}" "https://api.github.com/repos/${REPO}/releases/latest")"
+  TAG="$(printf '%s\n' "$RELEASE_JSON" | grep '"tag_name"' | head -n1 | \
+    sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+fi
+
 if [[ -z "$TAG" ]]; then
   echo "ERROR: Could not determine the latest release tag." >&2
   echo "       Check https://github.com/${REPO}/releases" >&2
@@ -93,13 +104,6 @@ fi
 
 VERSION="${TAG#v}"
 ARCHIVE="fuseraft-${VERSION}-${RID}.tar.gz"
-
-# Validate the expected asset exists in the release metadata
-if ! printf '%s\n' "$RELEASE_JSON" | grep -qF "\"${ARCHIVE}\""; then
-  echo "ERROR: Release asset '${ARCHIVE}' not found in release ${TAG}." >&2
-  exit 1
-fi
-
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${TAG}/${ARCHIVE}"
 
 # UX: show current version when updating
@@ -117,7 +121,12 @@ TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t fuseraft)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 echo "Downloading ${ARCHIVE}..."
-"${FETCH_CMD[@]}" "$DOWNLOAD_URL" > "${TMP_DIR}/${ARCHIVE}"
+if ! "${FETCH_CMD[@]}" "$DOWNLOAD_URL" > "${TMP_DIR}/${ARCHIVE}"; then
+  rm -f "${TMP_DIR}/${ARCHIVE}"
+  echo "ERROR: Failed to download '${ARCHIVE}'." >&2
+  echo "       It may not exist for release ${TAG} — check https://github.com/${REPO}/releases/tag/${TAG}" >&2
+  exit 1
+fi
 
 echo "Extracting..."
 tar -xzf "${TMP_DIR}/${ARCHIVE}" -C "$TMP_DIR"
