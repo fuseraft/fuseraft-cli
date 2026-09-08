@@ -28,10 +28,10 @@ internal sealed class ReplLineReader
         "/adversarial", "/assist", "/clear", "/compact", "/context",
         "/conversation", "/delegate", "/events", "/execute", "/exit", "/explore",
         "/fork", "/help", "/hitl", "/history", "/last", "/locate",
-        "/max-tokens", "/memory", "/model", "/models", "/paste", "/plan",
+        "/max-tokens", "/mcp", "/memory", "/model", "/models", "/paste", "/plan",
         "/provider", "/reasoning", "/recover", "/resume", "/retry", "/rewind",
-        "/run", "/safe-mode", "/save", "/sessions", "/snapshot", "/switch",
-        "/system", "/tools",
+        "/run", "/safe-mode", "/save", "/seed", "/sessions", "/snapshot", "/switch",
+        "/system", "/temperature", "/tools", "/top-p", "/undo",
     ];
 
     private static readonly Dictionary<string, string[]> SubCommands =
@@ -41,10 +41,14 @@ internal sealed class ReplLineReader
         ["/fork"]        = ["switch"],
         ["/hitl"]        = ["off", "on"],
         ["/max-tokens"]  = ["reset"],
+        ["/mcp"]         = ["add", "remove"],
         ["/memory"]      = ["delete", "list", "save", "show"],
         ["/provider"]    = ["setup"],
         ["/safe-mode"]   = ["off", "on"],
+        ["/seed"]        = ["reset"],
+        ["/temperature"] = ["reset"],
         ["/tools"]       = ["disable", "enable", "restrict", "unrestrict"],
+        ["/top-p"]       = ["reset"],
     };
 
     private bool     _tabActive;
