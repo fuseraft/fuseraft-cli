@@ -213,6 +213,16 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         var modelConfig = ReplFactory.BuildModelConfig(modelId, userCfg);
         using var factory = new ChatClientFactory();
 
+        // Persisted REPL defaults (UserConfig.Repl) can only add to what the CLI flags for
+        // this invocation already request, never take something away — e.g. a configured
+        // `noBanner: true` can't be un-set from the command line, matching how --plugins
+        // and --no-banner behave everywhere else (flags enable, they don't disable a default).
+        var enabledPlugins = new HashSet<string>(settings.EnabledPlugins, StringComparer.OrdinalIgnoreCase);
+        if (userCfg?.Repl?.Plugins is { Count: > 0 } cfgPlugins)
+            enabledPlugins.UnionWith(cfgPlugins);
+        bool noBanner = settings.NoBanner || (userCfg?.Repl?.NoBanner ?? false);
+        bool verbose  = settings.Verbose  || (userCfg?.Repl?.Verbose  ?? false);
+
         var toolsByCategory = new Dictionary<string, List<AIFunction>>(StringComparer.OrdinalIgnoreCase);
 
         // HITL (human-in-the-loop) mode — off by default, toggled at runtime via /hitl. Reuses
@@ -334,7 +344,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             toolsByCategory["Session"] = sessionFunctions.Where(f => CoreSessionTools.Contains(f.Name)).ToList();
             sessionDiagnosticTools = sessionFunctions.Where(f => SessionDiagnosticTools.Contains(f.Name)).ToList();
 
-            var enabled = settings.EnabledPlugins;
+            var enabled = enabledPlugins;
             var slug    = FuseraftPaths.ProjectSlug(cwd);
 
             fsPluginForCategory?.EnableUndoSnapshots(
@@ -413,7 +423,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 .Concat(shellFunctions!.Where(f => CoreShellTools.Contains(f.Name)))
                 .Concat(gitFunctions!.Where(f => CoreGitTools.Contains(f.Name)))
                 .ToList();
-            if (settings.EnabledPlugins.Contains("Extended"))
+            if (enabledPlugins.Contains("Extended"))
             {
                 delegateTools.AddRange(fsFunctions!.Where(f => !CoreFileSystemTools.Contains(f.Name)));
                 delegateTools.AddRange(shellFunctions!.Where(f => !CoreShellTools.Contains(f.Name)));
@@ -471,7 +481,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             .AddSkills(skillsCatalog)
             .Build();
 
-        if (!jsonMode && !settings.NoBanner)
+        if (!jsonMode && !noBanner)
         {
             // Build plugin name list: tool categories + "Memory" if memories are loaded.
             var pluginNames = new List<string>(toolsByCategory.Keys);
@@ -482,27 +492,33 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 memoryCount: memoryEntries.Count,
                 skillCount:  discoveredSkills.Count,
                 branch:      TryGetGitBranch(cwd),
-                eventsPath:  settings.Verbose ? eventsPath : null);
+                eventsPath:  verbose ? eventsPath : null);
         }
 
         var ctx = new ReplSessionContext(
             cwd, sessionId, startedAt, modelId, modelConfig, userCfg, client,
             factory, keyStore, emitter, eventsPath,
             memoryStore, toolsByCategory, systemPrompt, pendingSave, adaptiveTrimTracker,
-            verbose: settings.Verbose, subAgent: subAgent, undoStore: fsPluginForCategory?.UndoStore,
+            verbose: verbose, subAgent: subAgent, undoStore: fsPluginForCategory?.UndoStore,
             hitlState: hitlState)
         {
             JsonMode    = jsonMode,
             Skills      = discoveredSkills,
             Todo        = todoPlugin,
             KeyStored   = keyStored,
-            NoBanner    = settings.NoBanner,
+            NoBanner    = noBanner,
             MemoryCount = memoryEntries.Count,
             McpManager  = mcpManager,
             StdinPump   = stdinPump,
         };
         ctxForStdin = ctx;
         stdinPump?.Start();
+
+        // A persisted safe-mode default engages the real category-disable logic (not just the
+        // bool) so it actually blocks Shell/Git/Http like a manual `/safe-mode on` would.
+        // Skipped in the VS Code webview bridge, matching how NoBanner is jsonMode-gated above.
+        if (!jsonMode && userCfg?.Repl?.SafeModeDefault == true)
+            await ReplCommands.CmdSafeModeAsync(ctx, "on");
 
         if (!settings.NoTools)
         {

@@ -162,6 +162,8 @@ services.AddTransient<EvalCommand>();
 services.AddTransient<EvalInitCommand>();
 services.AddTransient<KeychainCommand>();
 services.AddTransient<ModelsCommand>();
+services.AddTransient<SettingsShowCommand>();
+services.AddTransient<SettingsSetCommand>();
 
 // Use CommandApp<ReplCommand> so bare `fuseraft` drops straight into the REPL.
 var registrar = new ServiceCollectionRegistrar(services);
@@ -377,6 +379,22 @@ app.Configure(cfg =>
     cfg.AddCommand<KeychainCommand>("keychain")
         .WithDescription("Manage the fuseraft API key in the OS keychain (bidirectional sync with the VS Code extension).")
         .IsHidden();
+
+    cfg.AddBranch("settings", branch =>
+    {
+        branch.SetDescription("View or edit the global config (~/.fuseraft/config): provider, sampling, REPL, telemetry, and skill-curation defaults.");
+
+        branch.AddCommand<SettingsShowCommand>("show")
+            .WithDescription("Display the global config as rich tables.")
+            .WithExample(["settings", "show"]);
+
+        branch.AddCommand<SettingsSetCommand>("set")
+            .WithDescription("Set one global config field by dotted key. Run with no arguments to list valid keys.")
+            .WithExample(["settings", "set"])
+            .WithExample(["settings", "set", "sampling.temperature", "0.7"])
+            .WithExample(["settings", "set", "repl.noBanner", "true"])
+            .WithExample(["settings", "set", "sampling.temperature", "\"\""]);
+    });
 
     cfg.AddBranch("graph", branch =>
     {

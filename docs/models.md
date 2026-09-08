@@ -102,24 +102,28 @@ For any model not matching the table, specify `Provider`, `Endpoint`, and `ApiKe
 
 ## Global config defaults
 
-`~/.fuseraft/config` can define a default `endpoint` and `apiKeyEnvVar` that are applied to every agent model (and named alias) that doesn't set those fields itself. This means you only need to configure the provider once — generated agent files work out of the box without repeating the values.
+`~/.fuseraft/config`'s `provider` section can define a default `endpoint` and `apiKeyEnvVar` that are applied to every agent model (and named alias) that doesn't set those fields itself. This means you only need to configure the provider once — generated agent files work out of the box without repeating the values. The same file's `telemetry` section also seeds `Telemetry.OtlpEndpoint`/`ServiceName` for any project config that doesn't declare its own (see [Telemetry](configuration.md#telemetry)).
 
 ```json
 {
-  "modelId": "anthropic.claude-sonnet-4-6-20250929-v1:0",
-  "endpoint": "http://localhost:3000/api/openai/v1",
-  "apiKeyEnvVar": "OPENWEBUI_API_KEY",
-  "replContextBudget": 400000
+  "provider": {
+    "modelId": "anthropic.claude-sonnet-4-6-20250929-v1:0",
+    "endpoint": "http://localhost:3000/api/openai/v1",
+    "apiKeyEnvVar": "OPENWEBUI_API_KEY"
+  },
+  "repl": {
+    "contextBudget": 400000
+  }
 }
 ```
 
-Set this file via `fuseraft repl` or `fuseraft models` (the setup wizard runs automatically on first use), edit it directly, or change just the default model with `fuseraft repl --model <id> --save`. Run `fuseraft models` to see all models available from the configured provider, or use `/models` inside a REPL session for the same list.
+Set individual fields from the command line with `fuseraft settings set <key> <value>` (e.g. `fuseraft settings set provider.apiKeyEnvVar OPENWEBUI_API_KEY`), inspect the whole file with `fuseraft settings show`, run `fuseraft repl` or `fuseraft models` (the setup wizard runs automatically on first use), edit the file directly, or change just the default model with `fuseraft repl --model <id> --save`. See [CLI Reference — `fuseraft settings`](cli-reference.md#fuseraft-settings) for the full list of keys. Run `fuseraft models` to see all models available from the configured provider, or use `/models` inside a REPL session for the same list.
 
-### `replContextBudget` — REPL working-context override
+### `repl.contextBudget` — REPL working-context override
 
 The REPL trims conversation history against a working-context-token budget (`ctx.ContextTokenBudget`, shown in `/context`), separate from `MaxContextTokens` above. By default this budget comes from a per-model-family heuristic (150K for 1M/128K+-class frontier models like `claude-*`/`gemini-*`/`grok-*`/`gpt-5*`, 100K for ~128K-class models like `gpt-4*`/`mistral-*`/`deepseek-*`, 80K otherwise) — deliberately conservative, since the REPL's char-based token estimate doesn't account for tool-schema tokens.
 
-Set `replContextBudget` in `~/.fuseraft/config` (a positive integer, in tokens) to override that heuristic for every model used in the REPL session, regardless of family. Leave it unset (or `0`) to keep the built-in heuristic. This is REPL-only and does not affect `MaxContextTokens` above (a separate per-agent hard ceiling enforced before each API call in non-REPL agent/orchestration contexts), nor the unrelated `ContextBudget` YAML block used in `orchestration.yaml` (warn/cutover/tool-result trimming for multi-agent orchestration runs) — the similarly-named `replContextBudget` field intentionally carries the `Repl` prefix to keep the two apart.
+Set `repl.contextBudget` in `~/.fuseraft/config` (a positive integer, in tokens — `fuseraft settings set repl.contextBudget 400000`) to override that heuristic for every model used in the REPL session, regardless of family. Leave it unset to keep the built-in heuristic. This is REPL-only and does not affect `MaxContextTokens` above (a separate per-agent hard ceiling enforced before each API call in non-REPL agent/orchestration contexts), nor the unrelated `ContextBudget` YAML block used in `orchestration.yaml` (warn/cutover/tool-result trimming for multi-agent orchestration runs) — the similarly-named field intentionally lives under the `repl` section to keep the two apart.
 
 ### OS keychain fallback
 
@@ -127,7 +131,7 @@ If an agent model has neither `ApiKey` nor `ApiKeyEnvVar` set after global defau
 
 1. Explicit `ApiKey` in the agent file (literal value)
 2. `ApiKeyEnvVar` from the agent file (env var lookup)
-3. `apiKeyEnvVar` from `~/.fuseraft/config` (env var lookup)
+3. `provider.apiKeyEnvVar` from `~/.fuseraft/config` (env var lookup)
 4. OS keychain (retrieved once at startup, injected as literal key)
 5. Nothing — Ollama and other unauthenticated providers work without a key
 

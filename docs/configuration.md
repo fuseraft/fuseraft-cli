@@ -780,7 +780,7 @@ The substitution tokens are:
 
 Automatically authors a reusable `SKILL.md` from each completed session. When enabled, fuseraft makes one LLM call after the session ends to evaluate whether the session produced learnable, portable knowledge, and writes a skill to the configured library path if it did.
 
-Curation is available in both `fuseraft run` sessions (configured in the orchestration YAML) and interactive REPL sessions (configured in `~/.fuseraft/config`).
+Curation is available in both `fuseraft run` sessions (configured in the orchestration YAML) and interactive REPL sessions (configured in the `skillCuration` section of `~/.fuseraft/config`).
 
 **`fuseraft run` (YAML):**
 
@@ -795,12 +795,14 @@ SkillCuration:
 
 ```json
 {
-  "modelId": "claude-sonnet-4-6",
+  "provider": { "modelId": "claude-sonnet-4-6" },
   "skillCuration": {
-    "enabled": true
+    "Enabled": true
   }
 }
 ```
+
+The quickest way to flip this on is `fuseraft settings set skillCuration.enabled true` — see [CLI Reference — `fuseraft settings`](cli-reference.md#fuseraft-settings). Other `skillCuration` fields below aren't exposed as individual `settings set` keys yet; edit the file directly for those.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -902,6 +904,8 @@ Telemetry:
 | `OtlpEndpoint` | string | `"http://localhost:4317"` | OTLP gRPC endpoint for both traces and metrics. |
 | `ServiceName` | string | orchestration `Name` | Service name reported in trace/metric attributes. |
 
+**Global default** — a config with no `Telemetry` section at all inherits the global default set via `fuseraft settings set telemetry.otlpEndpoint <url>` (see [CLI Reference — `fuseraft settings`](cli-reference.md#fuseraft-settings)), so every project on the machine exports to the same collector without repeating the endpoint in each `orchestration.yaml`. A project's own `Telemetry` section always takes precedence when present.
+
 **What is exported**
 
 *Traces* — one span per agent turn (`agent.turn/<AgentName>`), tagged with `agent.name`, `model.id`, `turn.index`, `tokens.input`, `tokens.output`, and `duration_seconds`. MAF internal AI spans are forwarded automatically via `Microsoft.Agents.AI*`.
@@ -925,7 +929,7 @@ docker run --rm -p 4317:4317 -p 16686:16686 jaegertracing/all-in-one
 
 Then add `"Telemetry": { "OtlpEndpoint": "http://localhost:4317" }` to your config and open `http://localhost:16686`.
 
-**Omit** `Telemetry` entirely if you don't need OTel export.
+**Omit** `Telemetry` entirely if you don't need OTel export — as long as you also haven't set a global default (see above); otherwise all projects export unless a project opts out. There's currently no per-project "opt out of the global default" switch.
 
 ---
 

@@ -146,7 +146,12 @@ public static class OrchestratorConfigLoader
         var globalEndpoint     = globalCfg is not null && !string.IsNullOrWhiteSpace(globalCfg.Endpoint)     ? globalCfg.Endpoint     : null;
         var globalApiKeyEnvVar = globalCfg is not null && !string.IsNullOrWhiteSpace(globalCfg.ApiKeyEnvVar) ? globalCfg.ApiKeyEnvVar : null;
 
-        if (globalModelId is null && globalEndpoint is null && globalApiKeyEnvVar is null) return config;
+        // A project config's own Telemetry section always wins; the global default only fills
+        // in when the project declares none at all.
+        var telemetry = config.Telemetry ?? globalCfg?.Telemetry;
+
+        if (globalModelId is null && globalEndpoint is null && globalApiKeyEnvVar is null)
+            return config with { Telemetry = telemetry };
 
         ModelConfig Fill(ModelConfig m) => m with
         {
@@ -167,7 +172,7 @@ public static class OrchestratorConfigLoader
                 : null,
         };
 
-        return config with { Agents = agents, Models = models, Selection = sel };
+        return config with { Agents = agents, Models = models, Selection = sel, Telemetry = telemetry };
     }
 
     // Injects the OS keychain key as a literal ApiKey on every model config that has

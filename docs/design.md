@@ -100,7 +100,7 @@ A path-refactor (mid-2026) moved nearly all runtime session/state artifacts from
 
 | Path | Contents |
 |------|----------|
-| `~/.fuseraft/config` | Model ID, endpoint URL (no secrets) |
+| `~/.fuseraft/config` | Sectioned global config: provider (model ID, endpoint URL — no secrets), sampling defaults, REPL defaults, MCP servers, telemetry default, skill curation. See [CLI Reference — `fuseraft settings`](cli-reference.md#fuseraft-settings). |
 | `~/.fuseraft/.key` | Plain-text fallback API key (mode 0600; used only when no keychain) |
 | `~/.fuseraft/sessions/` | Session checkpoint files (`<sessionId>.json`, mode 0600) — flat, not nested by `{project_slug}` |
 | `~/.fuseraft/sessions/index.json` | Lightweight session index (no message history) for fast listing |

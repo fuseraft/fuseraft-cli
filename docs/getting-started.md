@@ -73,7 +73,7 @@ Model  (2 available from https://api.anthropic.com/v1)
 >
 ```
 
-The config is saved after the first successful reply. Once saved, subsequent `fuseraft` invocations start immediately using those defaults. Use `/provider setup` inside the REPL to change settings at any time.
+The config is saved after the first successful reply. Once saved, subsequent `fuseraft` invocations start immediately using those defaults. Use `/provider setup` inside the REPL to reconfigure the provider/model/key at any time, or `fuseraft settings show`/`fuseraft settings set <key> <value>` to view or tweak everything else the file holds (sampling defaults, REPL startup defaults, telemetry, skill curation) — see [CLI Reference — `fuseraft settings`](cli-reference.md#fuseraft-settings).
 
 The API key is stored in the OS keychain — never in the config file, and never in plaintext on disk anywhere:
 

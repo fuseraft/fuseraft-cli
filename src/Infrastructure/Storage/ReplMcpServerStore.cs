@@ -1,5 +1,3 @@
-using System.Text.Json;
-using fuseraft.Core;
 using fuseraft.Core.Models.Config;
 
 namespace fuseraft.Infrastructure.Storage;
@@ -7,37 +5,21 @@ namespace fuseraft.Infrastructure.Storage;
 /// <summary>
 /// Persists MCP servers added via the REPL's <c>/mcp add</c> wizard so they reconnect
 /// automatically on the next <c>fuseraft repl</c> launch, without re-running the wizard.
-/// Deliberately a separate file from <see cref="UserConfigStore"/> — that store's schema
-/// (model/provider/API key) is unrelated and already carries legacy-field migration logic
-/// that a list-shaped addition would only complicate.
+/// Backed by the <c>mcpServers</c> section of the shared <c>~/.fuseraft/config</c> file (see
+/// <see cref="UserConfigStore"/>) — a thin wrapper so <c>/mcp add</c>/<c>/mcp remove</c> don't
+/// need to know about the rest of that file's shape.
 /// </summary>
 public static class ReplMcpServerStore
 {
-    public static string StorePath => Path.Combine(FuseraftPaths.GlobalRoot, "repl-mcp-servers.json");
+    public static string StorePath => UserConfigStore.ConfigPath;
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNameCaseInsensitive = true,
-    };
-
-    public static List<McpServerConfig> Load()
-    {
-        if (!File.Exists(StorePath)) return [];
-        try
-        {
-            var json = File.ReadAllText(StorePath);
-            return JsonSerializer.Deserialize<List<McpServerConfig>>(json, JsonOptions) ?? [];
-        }
-        catch
-        {
-            return [];
-        }
-    }
+    public static List<McpServerConfig> Load() =>
+        UserConfigStore.Load().Config?.McpServers ?? [];
 
     public static void Save(List<McpServerConfig> servers)
     {
-        Directory.CreateDirectory(FuseraftPaths.GlobalRoot);
-        File.WriteAllText(StorePath, JsonSerializer.Serialize(servers, JsonOptions));
+        var config = UserConfigStore.Load().Config ?? new UserConfig();
+        config.McpServers = servers;
+        UserConfigStore.Save(config);
     }
 }

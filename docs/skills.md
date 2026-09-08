@@ -242,18 +242,18 @@ Trivial or highly project-specific sessions typically produce no output. If a sk
 
 ### Enabling curation for REPL sessions
 
-Add a `skillCuration` block to `~/.fuseraft/config`:
+Quickest way: `fuseraft settings set skillCuration.enabled true` (see [CLI Reference — `fuseraft settings`](cli-reference.md#fuseraft-settings)). Or add a `skillCuration` block to `~/.fuseraft/config` directly:
 
 ```json
 {
-  "modelId": "claude-sonnet-4-6",
+  "provider": { "modelId": "claude-sonnet-4-6" },
   "skillCuration": {
     "enabled": true
   }
 }
 ```
 
-All the standard knobs are supported (`minTurns`, `digestTurns`, `model`, `libraryPath`, `indexTopN`, `logPath`). Note that skill injection at session start (surfacing relevant skills before the first turn) is only available in `fuseraft run` sessions — the REPL has no upfront task description to query against.
+All the standard knobs are supported (`minTurns`, `digestTurns`, `model`, `libraryPath`, `indexTopN`, `logPath`) — `fuseraft settings set` only exposes the `enabled` toggle so far, so set these by editing the file directly. Note that skill injection at session start (surfacing relevant skills before the first turn) is only available in `fuseraft run` sessions — the REPL has no upfront task description to query against.
 
 ### Enabling curation for `fuseraft run` sessions
 

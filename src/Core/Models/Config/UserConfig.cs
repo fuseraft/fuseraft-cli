@@ -19,17 +19,26 @@ public sealed class UserConfig
     [JsonPropertyName("skillCuration")]
     public SkillCurationConfig? SkillCuration { get; set; }
 
+    /// <summary>Persisted default sampling parameters for new REPL sessions.</summary>
+    [JsonPropertyName("sampling")]
+    public SamplingDefaultsConfig Sampling { get; set; } = new();
+
+    /// <summary>Persisted REPL startup defaults (banner, verbosity, plugins, safe mode, context budget).</summary>
+    [JsonPropertyName("repl")]
+    public ReplDefaultsConfig Repl { get; set; } = new();
+
+    /// <summary>MCP servers added via the REPL's <c>/mcp add</c> wizard.</summary>
+    [JsonPropertyName("mcpServers")]
+    public List<McpServerConfig> McpServers { get; set; } = [];
+
     /// <summary>
-    /// Overrides the REPL's heuristic working-context-token budget (<see cref="fuseraft.Cli.Commands.Repl.ModelContextWindow"/>)
-    /// used for history trimming and the /context, /compact, and context-warning displays.
-    /// REPL-only — unrelated to the orchestration-level <c>ContextBudgetConfig</c>
-    /// (warn/cutover/tool-result trimming for agent orchestration runs); the similar name is
-    /// coincidental, hence the <c>Repl</c> prefix here to keep the two unambiguous.
-    /// Applies to every model used in the REPL session, regardless of model family. Null or
-    /// &lt;= 0 falls back to the built-in per-family heuristic.
+    /// Global default OpenTelemetry export settings, used by project orchestration configs
+    /// that don't declare their own <c>Telemetry</c> section (see
+    /// <c>OrchestratorConfigLoader.ApplyGlobalDefaults</c>). Null means telemetry is disabled
+    /// by default.
     /// </summary>
-    [JsonPropertyName("replContextBudget")]
-    public int? ReplContextBudget { get; set; }
+    [JsonPropertyName("telemetry")]
+    public TelemetryConfig? Telemetry { get; set; }
 
     // Never written to disk — populated at runtime from the OS keychain.
     [JsonIgnore]

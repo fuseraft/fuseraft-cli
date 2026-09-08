@@ -77,12 +77,12 @@ internal sealed class ReplSessionContext
         set
         {
             _modelId = value;
-            ContextTokenBudget = ModelContextWindow.GetBudget(value, UserCfg?.ReplContextBudget);
+            ContextTokenBudget = ModelContextWindow.GetBudget(value, UserCfg?.Repl?.ContextBudget);
         }
     }
 
     // Working token budget for history trimming (TrimHistory) and the /context, /compact,
-    // and context-warning displays — derived from ModelId (and UserCfg.ReplContextBudget, if set)
+    // and context-warning displays — derived from ModelId (and UserCfg.Repl.ContextBudget, if set)
     // so a large-context model isn't held to the same ceiling as a small-context local model.
     // Recomputed automatically whenever ModelId is (re)assigned, including on /provider setup,
     // /model switch, and session resume. Relies on UserCfg already being current at that point
@@ -249,6 +249,10 @@ internal sealed class ReplSessionContext
         SessionId       = sessionId;
         StartedAt       = startedAt;
         UserCfg         = userCfg;
+        Temperature     = userCfg?.Sampling?.Temperature;
+        TopP            = userCfg?.Sampling?.TopP;
+        Seed            = userCfg?.Sampling?.Seed;
+        MaxOutputTokens = userCfg?.Sampling?.MaxOutputTokens ?? 0;
         ModelId         = modelId;
         ModelConfig     = modelConfig;
         Client          = client;

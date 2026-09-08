@@ -368,17 +368,21 @@ This means even if a provider error response or debug trace contains an API key,
 
 **No plaintext fallback.** fuseraft never writes API keys to disk in plaintext, on any platform, under any circumstances. If no OS keychain is reachable (e.g. Linux without a running secret service), key storage fails with a clear message and the key is kept in memory for the current process only — you'll need to re-enter it next session, or set a provider environment variable (e.g. `ANTHROPIC_API_KEY`) so you don't have to. On startup, fuseraft also deletes (and, where possible, migrates into the keychain) any leftover `~/.fuseraft/.key` file written by fuseraft versions older than this policy.
 
-`~/.fuseraft/config` stores only the model ID, provider URL, and provider type — no secrets. If you open the file you will see:
+`~/.fuseraft/config`'s `provider` section stores only the model ID, provider URL, and provider type — no secrets. Its other sections (sampling, REPL, and telemetry defaults; MCP server connection details; skill-curation settings) are likewise plain, non-secret settings. If you open the file you will see:
 
 ```json
 {
-  "modelId": "claude-sonnet-4-6",
-  "endpoint": "https://api.anthropic.com/v1",
-  "provider": "openai"
+  "provider": {
+    "modelId": "claude-sonnet-4-6",
+    "endpoint": "https://api.anthropic.com/v1",
+    "type": "openai"
+  }
 }
 ```
 
-**Migration from older configs.** Configs written before keychain support was added may contain a plain-text `apiKey` field, and versions predating the no-plaintext policy may have left a `~/.fuseraft/.key` file on disk. On the first run after upgrading, fuseraft detects both, attempts to move the value into the OS keychain, and removes the plaintext copies either way — even if no keychain is available to migrate into. No manual action is needed.
+(Other sections are omitted here for brevity — see [CLI Reference — `fuseraft settings`](cli-reference.md#fuseraft-settings) for the full shape, or run `fuseraft settings show`.)
+
+**Migration from older configs.** Configs written before keychain support was added may contain a plain-text `apiKey` field, and versions predating the no-plaintext policy may have left a `~/.fuseraft/.key` file on disk. On the first run after upgrading, fuseraft detects both, attempts to move the value into the OS keychain, and removes the plaintext copies either way — even if no keychain is available to migrate into. No manual action is needed. Separately, a config written before this file was sectioned (a flat object, without the `provider`/`sampling`/etc. structure above) is rewritten into the new shape the same way, on the same first run — see [`fuseraft settings` — Migrating from the old flat config](cli-reference.md#migrating-from-the-old-flat-config).
 
 **Using an environment variable instead.** Setting a provider env var (e.g. `ANTHROPIC_API_KEY`) always works as a fallback. The env var is used when no `~/.fuseraft/config` exists or when the keychain has no entry for `fuseraft-cli`.
 

@@ -38,7 +38,7 @@ internal static class ModelContextWindow
     /// </summary>
     /// <param name="modelId">The model ID whose family determines the heuristic budget.</param>
     /// <param name="overrideBudget">
-    /// User-configured override (<see cref="fuseraft.Core.Models.Config.UserConfig.ReplContextBudget"/>).
+    /// User-configured override (<see cref="fuseraft.Core.Models.Config.ReplDefaultsConfig.ContextBudget"/>).
     /// When positive, takes precedence over the per-family heuristic below.
     /// </param>
     internal static int GetBudget(string? modelId, int? overrideBudget = null)

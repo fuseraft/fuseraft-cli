@@ -207,7 +207,10 @@ internal static partial class ReplCommands
     // the same per-tool GetPlugin reach /tools restrict already had. FileSystem-owned
     // Extended tools are left alone. Any prior /tools restrict on Shell/Git/Http is
     // left untouched in CapabilityRestrictions and remains after /safe-mode off.
-    private static async Task<CommandResult> CmdSafeModeAsync(ReplSessionContext ctx, string arg)
+    // internal (not private): also invoked from ReplCommand.ExecuteAsync at startup when
+    // UserConfig.Repl.SafeModeDefault is set, so a default engages the same real category-
+    // disable logic rather than just flipping the SafeMode bool.
+    internal static async Task<CommandResult> CmdSafeModeAsync(ReplSessionContext ctx, string arg)
     {
         if (string.IsNullOrEmpty(arg))
         {

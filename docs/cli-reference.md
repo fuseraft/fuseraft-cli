@@ -286,10 +286,12 @@ fuseraft repl [options]
 | `--save` | off | Persist `--model` as the new default in `~/.fuseraft/config`. No effect without `--model`. |
 | `-s, --system <prompt>` | — | System prompt. Defaults to a coding/research prompt when tools are enabled. |
 | `--resume <id>` | — | Resume a previous REPL session by its session ID. Use `/sessions` inside the REPL to list resumable sessions. |
-| `--no-banner` | off | Skip the ASCII banner. |
+| `--no-banner` | off | Skip the ASCII banner. Persist as the default with `fuseraft settings set repl.noBanner true`. |
 | `--no-tools` | off | Disable all built-in tools and start a plain chat session. |
-| `--verbose` | off | Enable debug logging: prints per-turn detail (token estimate, tool-round count, total tool calls) and shows the event log path at startup. |
+| `--verbose` | off | Enable debug logging: prints per-turn detail (token estimate, tool-round count, total tool calls) and shows the event log path at startup. Persist as the default with `fuseraft settings set repl.verbose true`. |
 | `--vscode` | off | VS Code mode. When stdin is also redirected (the process is spawned by the fuseraft VS Code extension's REPL panel), switches to JSON bridge mode: all output is emitted as JSONL events to stdout and input is read as JSONL from stdin. In this mode the ASCII banner, ANSI prompts, spinner, and status lines are suppressed; the API key is read from `FUSERAFT_API_KEY` instead of the OS keychain. Automatically passed by the extension — not intended for manual use. |
+
+A `repl.*` default from `fuseraft settings` only ever *adds* to what a flag for this invocation already requests — e.g. `repl.noBanner: true` can't be un-set from the command line; there's no `--banner` flag to force it back on for one run.
 
 **Startup display**
 
@@ -333,7 +335,9 @@ The session ID is shown on every startup so you can note it down for later resum
 
 **First-time setup**
 
-If `~/.fuseraft/config` is missing or incomplete, `fuseraft repl` runs an interactive setup wizard before starting the session. It prompts for a provider URL and API key (leave the key blank for Ollama), tests the endpoint's model listing (`GET {endpoint}/models`, falling back to Ollama's `GET {endpoint}/api/tags`), and lets you pick a model from the live results — falling back to a free-typed model ID if neither endpoint responds. Settings are saved after the first successful reply — the config file stores model, endpoint, and provider only; the API key goes into the OS keychain. Use `/provider setup` to reconfigure at any time.
+If `~/.fuseraft/config` is missing or incomplete, `fuseraft repl` runs an interactive setup wizard before starting the session. It prompts for a provider URL and API key (leave the key blank for Ollama), tests the endpoint's model listing (`GET {endpoint}/models`, falling back to Ollama's `GET {endpoint}/api/tags`), and lets you pick a model from the live results — falling back to a free-typed model ID if neither endpoint responds. Settings are saved after the first successful reply — the wizard only ever fills in the `provider` section; the API key goes into the OS keychain, never the file. Use `/provider setup` to reconfigure at any time.
+
+`~/.fuseraft/config` also holds sampling defaults, other REPL startup defaults, MCP servers, a global telemetry default, and skill-curation settings — see [`fuseraft settings`](#fuseraft-settings) below for the full picture and how to edit it from the command line.
 
 **Custom and enterprise providers** — the wizard accepts any OpenAI-compatible endpoint. Supply the full base URL (e.g. `https://chat.mycompany.com/openai/`); if the endpoint exposes a models listing you can pick from the live results, otherwise type the model ID manually, including non-standard formats such as AWS Bedrock deployment IDs (`anthropic.claude-sonnet-4-6-20250929-v1:0`). When both a custom endpoint and an API key are provided, auto-detection is skipped entirely and the endpoint is treated as OpenAI-compatible.
 
@@ -342,7 +346,7 @@ See [Getting Started — Set your API key](getting-started.md#set-your-api-key) 
 **Model resolution order**
 
 1. `--model` flag (if passed)
-2. `modelId` in `~/.fuseraft/config` (if the config is complete)
+2. `provider.modelId` in `~/.fuseraft/config` (if the config is complete)
 3. First provider with an API key in the environment (fallback auto-detection):
 
 | Environment variable | Default model |
@@ -372,7 +376,7 @@ common, low-risk operations that cover a typical session (read, edit, search, st
 | Session | `repl_session_current`, `repl_session_list`, `repl_session_read_event_log`, `repl_session_read_log`, `compact_context`, `get_context_status` |
 | Skills | `load_skill`, `run_skill_script` (only when skills are installed — see [Skills](skills.md)) |
 
-**Optional plugins** — not loaded by default; pass `--plugins <name>,<name>` (comma-separated) to enable them. Kept opt-in because every registered tool adds its schema to every request — a smaller default tool surface means smaller, faster requests and less chance of tripping a provider's tool-schema limits.
+**Optional plugins** — not loaded by default; pass `--plugins <name>,<name>` (comma-separated) to enable them. Kept opt-in because every registered tool adds its schema to every request — a smaller default tool surface means smaller, faster requests and less chance of tripping a provider's tool-schema limits. Persist a set of plugins you always want with `fuseraft settings set repl.plugins <name>,<name>` — they're unioned with whatever `--plugins` passes for that invocation.
 
 | Plugin | Tools |
 |--------|-------|
@@ -426,7 +430,7 @@ Use `/tools` to see the full list at runtime.
 | `/tools unrestrict <plugin>` | Remove a plugin's capability restriction |
 | `/undo` | Revert files written, patched, copied, moved, or deleted in the most recent turn. Repeatable — walks back one turn at a time. Only affects the filesystem; use `/rewind` to also roll back conversation history. |
 | `/mcp` | List MCP servers connected this session and their tools |
-| `/mcp add` | Interactive wizard to connect an MCP server (stdio or HTTP). Persists to `~/.fuseraft/repl-mcp-servers.json` so it reconnects automatically on future REPL launches. |
+| `/mcp add` | Interactive wizard to connect an MCP server (stdio or HTTP). Persists to the `mcpServers` section of `~/.fuseraft/config` so it reconnects automatically on future REPL launches. |
 | `/mcp add --session-only` | Same as `/mcp add`, but don't persist past this session |
 | `/mcp remove <name>` | Stop offering a connected server's tools to the model. The underlying connection closes when the session ends, not immediately. |
 | `/plan <task>` | Ask the model to produce a structured JSON plan (no tool calls). Each step has a description, an expected tool name, and an optional expected artifact path. |
@@ -484,7 +488,7 @@ Reasoning effort support and accepted values vary by provider and model — e.g.
 
 **Sampling knobs (`/temperature`, `/top-p`, `/seed`)**
 
-These three, along with `/max-tokens`, are REPL-only runtime settings — plain session state applied to every request's `ChatOptions` for the rest of the session (or until changed again), independent of any config file. Run with no argument to see the current value; `reset` clears it back to the provider's default (unset for `/seed`, since there's no "default" seed to restore). Some models reject `temperature` or `top_p` outright (e.g. reasoning models tuned to always sample at a fixed setting) — the provider's error surfaces immediately on the next turn if so.
+These three, along with `/max-tokens`, are runtime settings applied to every request's `ChatOptions` for the rest of the session (or until changed again). A session starts from the `sampling` defaults in `~/.fuseraft/config`, if any are set (`fuseraft settings set sampling.temperature 0.7`, etc. — see [`fuseraft settings`](#fuseraft-settings)); these four commands only ever change the *current session's* values in memory and never write back to that file. Run with no argument to see the current value; `reset` clears it back to the provider's default (unset for `/seed`, since there's no "default" seed to restore). Some models reject `temperature` or `top_p` outright (e.g. reasoning models tuned to always sample at a fixed setting) — the provider's error surfaces immediately on the next turn if so.
 
 This is distinct from `fuseraft run`, where `Temperature` is set per-model in `orchestration.yaml`'s `Models` registry (see [`fuseraft run`](#fuseraft-run) above) — the REPL has no equivalent registry and does not read that file.
 
@@ -504,7 +508,9 @@ Connected 'filesystem' — 8 tool(s) available.
 Saved — will reconnect automatically on future REPL sessions.
 ```
 
-By default the server is saved to `~/.fuseraft/repl-mcp-servers.json` and reconnects automatically the next time you start `fuseraft repl` in any directory — pass `/mcp add --session-only` to skip persistence for a one-off connection. `/mcp` lists what's currently connected; `/mcp remove <name>` stops offering that server's tools (the connection itself closes when the session ends).
+By default the server is saved to the `mcpServers` section of `~/.fuseraft/config` (`fuseraft settings show` lists connected server names) and reconnects automatically the next time you start `fuseraft repl` in any directory — pass `/mcp add --session-only` to skip persistence for a one-off connection. `/mcp` lists what's currently connected; `/mcp remove <name>` stops offering that server's tools (the connection itself closes when the session ends).
+
+Servers saved before this file was sectioned lived in a standalone `~/.fuseraft/repl-mcp-servers.json` — it's folded into `~/.fuseraft/config` and deleted automatically the next time any `fuseraft` command runs, no action needed.
 
 This is the REPL's interactive alternative to hand-editing `McpServers` in an orchestration config — see [MCP Integration](mcp.md) for the config-file approach used by `fuseraft run`.
 
@@ -546,6 +552,8 @@ Command blocked.
 - **Enter / anything else** — the command is blocked; the agent receives `[DENIED]` and can try an alternative or ask what to do
 
 HITL mode is off by default and toggles instantly — no need to restart the session or wait for the next tool-schema rebuild. Unlike `--hitl` in `fuseraft run`, the REPL's `/hitl` only gates shell commands; it has no "pause after every turn" behavior, since the REPL is already interactive turn-by-turn. It also only covers `Shell` — `FileSystem` (`write_file`, `patch_file`, `delete_file`, …), `Git` (`git_commit`, `git_push`, …), and `Http` writes are not gated by any approval prompt; use `/safe-mode` to disable those categories outright, or `/tools restrict` below for a finer-grained lock.
+
+Safe mode is off by default; engage it on every REPL launch with `fuseraft settings set repl.safeMode true` (skipped in VS Code/JSON-bridge mode) instead of typing `/safe-mode on` each session.
 
 **Capability restriction (`/tools restrict`)**
 
@@ -1172,7 +1180,7 @@ For sequential configs the diagram renders as a simple linear chain: `Task → A
 
 ## `fuseraft config`
 
-Display or list config files.
+Display or list *project* orchestration config files (`orchestration.yaml`/`.json`). For the machine-wide `~/.fuseraft/config` (provider, sampling, REPL, telemetry, and skill-curation defaults), see [`fuseraft settings`](#fuseraft-settings) instead.
 
 ```
 fuseraft config [path] [options]
@@ -2348,7 +2356,7 @@ fuseraft models
 
 Reads `~/.fuseraft/config` to resolve the provider endpoint and API key, then calls the provider's models listing endpoint (`GET {endpoint}/models` for OpenAI-compatible providers; `GET {endpoint}/api/tags` for Ollama). The currently configured model is highlighted.
 
-If `~/.fuseraft/config` is missing or incomplete, the command runs the same interactive setup wizard as `fuseraft repl` — prompting for a provider URL and API key, then a model picked from the live list — and saves the result before fetching the model list.
+If `~/.fuseraft/config` is missing or incomplete, the command runs the same interactive setup wizard as `fuseraft repl` — prompting for a provider URL and API key, then a model picked from the live list — and saves the result before fetching the model list. Use `fuseraft settings show` to inspect the rest of the file (sampling, REPL, telemetry, and skill-curation defaults) without making a network call.
 
 The output ends with a hint pointing at `fuseraft repl --model <id>` (and `--save` to make it the default) — see [`fuseraft repl`](#fuseraft-repl) above.
 
@@ -2408,3 +2416,80 @@ fuseraft update --check
 # Download and install the latest release
 fuseraft update
 ```
+
+---
+
+## `fuseraft settings`
+
+View or edit the global `~/.fuseraft/config` file — provider, sampling, REPL, telemetry, and skill-curation defaults shared by every project on the machine. For a project's own `orchestration.yaml`/`.json`, see [`fuseraft config`](#fuseraft-config) instead.
+
+```
+fuseraft settings show
+fuseraft settings set <key> [value]
+```
+
+### `fuseraft settings show`
+
+Prints every section of the file as tables: Provider (including whether an API key is stored in the OS keychain — the key itself is never shown), Sampling defaults, REPL defaults, Telemetry default, Skill curation, and connected MCP server names. If no config exists yet, prints a pointer to `/provider setup` or `settings set` instead of erroring.
+
+```bash
+fuseraft settings show
+```
+
+### `fuseraft settings set`
+
+Sets one field by a dotted, case-insensitive key. Loads the existing config (or starts a fresh one if none exists yet — a non-interactive alternative to the REPL's `/provider setup` wizard, handy for scripting or CI) and saves after applying the change. Run with no arguments to print the full list of valid keys.
+
+**Arguments**
+
+| Argument | Description |
+|----------|-------------|
+| `<key>` | Dotted setting key, e.g. `sampling.temperature`. |
+| `[value]` | New value. Omit or pass an empty string (`""`) to clear a value back to its default. |
+
+**Valid keys**
+
+| Key | Description |
+|-----|-------------|
+| `provider.modelId` | Model ID, e.g. `claude-sonnet-4-6` |
+| `provider.endpoint` | Provider base URL |
+| `provider.type` | Provider identifier, e.g. `openai`, `anthropic`, `ollama` |
+| `provider.apiKeyEnvVar` | Env var name to read the API key from |
+| `sampling.temperature` | `0.0`–`2.0`, or `""` to clear |
+| `sampling.topP` | `0.0`–`1.0`, or `""` to clear |
+| `sampling.seed` | Integer, or `""` to clear |
+| `sampling.maxOutputTokens` | Integer, or `""` to clear |
+| `repl.contextBudget` | Token budget override, or `""` to clear |
+| `repl.noBanner` | `true`/`false` |
+| `repl.verbose` | `true`/`false` |
+| `repl.safeMode` | `true`/`false` — engage `/safe-mode` at startup |
+| `repl.plugins` | Comma-separated plugin list, e.g. `Scratchpad,Http` |
+| `telemetry.otlpEndpoint` | OTLP endpoint URL, or `""` to disable |
+| `telemetry.serviceName` | Requires `telemetry.otlpEndpoint` to already be set |
+| `skillCuration.enabled` | `true`/`false` |
+
+`provider.apiKey` is deliberately not a valid key — API keys are never written to this file. Set `FUSERAFT_API_KEY` and run `fuseraft keychain --set` instead. MCP servers (`/mcp add` in the REPL) and the rest of `skillCuration` (see [Skill curation](configuration.md#skill-curation)) also aren't exposed here yet — edit the file directly for those.
+
+**Examples**
+
+```bash
+# Bootstrap a config non-interactively (e.g. in CI)
+fuseraft settings set provider.modelId claude-sonnet-4-6
+fuseraft settings set provider.type anthropic
+
+# Persist a default sampling temperature
+fuseraft settings set sampling.temperature 0.7
+
+# Always start with the banner suppressed
+fuseraft settings set repl.noBanner true
+
+# Clear a previously set value
+fuseraft settings set sampling.temperature ""
+
+# List all valid keys
+fuseraft settings set
+```
+
+### Migrating from the old flat config
+
+Configs created before this file was sectioned (a flat `{"modelId": ..., "endpoint": ..., "provider": ...}` object, and — if you'd added MCP servers — a separate `~/.fuseraft/repl-mcp-servers.json`) are migrated automatically and transparently the first time any `fuseraft` command runs: the fields are mapped into the new `provider`/`repl` sections, any standalone MCP servers file is folded into `mcpServers` and deleted, and the file is rewritten in place. No action needed — just run `fuseraft settings show` afterward to confirm.
