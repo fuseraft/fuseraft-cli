@@ -360,6 +360,9 @@ internal static partial class ReplCommands
                 hitlMode        = ctx.HitlMode,
                 adversarialMode = ctx.AdversarialMode,
                 maxOutputTokens = ctx.MaxOutputTokens,
+                temperature     = ctx.Temperature,
+                topP            = ctx.TopP,
+                seed            = ctx.Seed,
                 verbose         = ctx.Verbose,
             },
             context = new

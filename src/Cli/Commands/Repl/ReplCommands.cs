@@ -30,6 +30,9 @@ internal static partial class ReplCommands
             case "/assist":       return await CmdAssistAsync(ctx, cancellationToken);
             case "/memory":     return await CmdMemoryAsync(ctx, arg, cancellationToken);
             case "/max-tokens": return CmdMaxTokens(ctx, arg);
+            case "/temperature": return CmdTemperature(ctx, arg);
+            case "/top-p":       return CmdTopP(ctx, arg);
+            case "/seed":        return CmdSeed(ctx, arg);
             case "/compact":    return await CmdCompactAsync(ctx, arg, cancellationToken);
             case "/explore":    return await CmdExploreAsync(ctx, arg, cancellationToken);
             case "/locate":     return await CmdLocateAsync(ctx, arg, cancellationToken);
@@ -125,6 +128,12 @@ internal static partial class ReplCommands
                 - `/reasoning <effort>` — Set reasoning effort for the current model (provider-specific)
                 - `/max-tokens <n>` — Set max output tokens for each response
                 - `/max-tokens reset` — Restore provider default max output tokens
+                - `/temperature <n>` — Set sampling temperature (0.0–2.0, lower = more deterministic)
+                - `/temperature reset` — Restore provider default temperature
+                - `/top-p <n>` — Set nucleus sampling top-p (0.0–1.0)
+                - `/top-p reset` — Restore provider default top-p
+                - `/seed <n>` — Fix the sampling seed for reproducible output (provider support varies)
+                - `/seed reset` — Clear the sampling seed
                 - `/system` — Show current system prompt
                 - `/system <prompt>` — Set a new system prompt
                 - `/provider` — Show current provider, model, and API key
@@ -230,6 +239,12 @@ internal static partial class ReplCommands
         ctx.AddRow("[bold cyan]/reasoning <effort>[/]",            "Set reasoning effort for the current model (provider-specific)");
         ctx.AddRow("[bold cyan]/max-tokens <n>[/]",     "Set max output tokens for each response");
         ctx.AddRow("[bold cyan]/max-tokens reset[/]",   "Restore provider default max output tokens");
+        ctx.AddRow("[bold cyan]/temperature <n>[/]",    "Set sampling temperature (0.0–2.0, lower = more deterministic)");
+        ctx.AddRow("[bold cyan]/temperature reset[/]",  "Restore provider default temperature");
+        ctx.AddRow("[bold cyan]/top-p <n>[/]",          "Set nucleus sampling top-p (0.0–1.0)");
+        ctx.AddRow("[bold cyan]/top-p reset[/]",        "Restore provider default top-p");
+        ctx.AddRow("[bold cyan]/seed <n>[/]",           "Fix the sampling seed for reproducible output (provider support varies)");
+        ctx.AddRow("[bold cyan]/seed reset[/]",         "Clear the sampling seed");
         ctx.AddRow("[bold cyan]/system[/]",             "Show current system prompt");
         ctx.AddRow("[bold cyan]/system <prompt>[/]",    "Set a new system prompt");
         ctx.AddRow("[bold cyan]/provider[/]",           "Show current provider, model, and API key");

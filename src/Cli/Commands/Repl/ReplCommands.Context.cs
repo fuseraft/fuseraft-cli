@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
@@ -187,6 +188,111 @@ internal static partial class ReplCommands
         ctx.MaxOutputTokens = n;
         ctx.ChatOptions = ctx.BuildChatOptions();
         AnsiConsole.MarkupLine($"[dim]Max output tokens set to[/] [bold]{n:N0}[/][dim].[/]");
+        return CommandResult.Continue;
+    }
+
+    // -------------------------------------------------------------------------
+    // /temperature
+    // -------------------------------------------------------------------------
+
+    private static CommandResult CmdTemperature(ReplSessionContext ctx, string arg)
+    {
+        if (string.IsNullOrEmpty(arg))
+        {
+            AnsiConsole.MarkupLine(ctx.Temperature is { } t
+                ? $"[dim]Temperature:[/] [bold]{t:0.00}[/]"
+                : "[dim]Temperature:[/] provider default");
+            AnsiConsole.MarkupLine("[dim]Run[/] [bold]/temperature <n>[/] [dim]to set (0.0–2.0, lower = more deterministic), or[/] [bold]/temperature reset[/] [dim]to restore the provider default.[/]");
+            return CommandResult.Continue;
+        }
+
+        if (arg.Equals("reset", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Temperature = null;
+            ctx.ChatOptions = ctx.BuildChatOptions();
+            AnsiConsole.MarkupLine("[dim]Temperature reset to provider default.[/]");
+            return CommandResult.Continue;
+        }
+
+        if (!double.TryParse(arg, NumberStyles.Float, CultureInfo.InvariantCulture, out var n) || n < 0.0 || n > 2.0)
+        {
+            AnsiConsole.MarkupLine($"[yellow]Invalid value:[/] {Markup.Escape(arg)}  [dim](must be a number between 0.0 and 2.0)[/]");
+            return CommandResult.Continue;
+        }
+
+        ctx.Temperature = n;
+        ctx.ChatOptions = ctx.BuildChatOptions();
+        AnsiConsole.MarkupLine($"[dim]Temperature set to[/] [bold]{n:0.00}[/][dim].[/]");
+        return CommandResult.Continue;
+    }
+
+    // -------------------------------------------------------------------------
+    // /top-p
+    // -------------------------------------------------------------------------
+
+    private static CommandResult CmdTopP(ReplSessionContext ctx, string arg)
+    {
+        if (string.IsNullOrEmpty(arg))
+        {
+            AnsiConsole.MarkupLine(ctx.TopP is { } p
+                ? $"[dim]Top-p:[/] [bold]{p:0.00}[/]"
+                : "[dim]Top-p:[/] provider default");
+            AnsiConsole.MarkupLine("[dim]Run[/] [bold]/top-p <n>[/] [dim]to set (0.0–1.0, nucleus sampling), or[/] [bold]/top-p reset[/] [dim]to restore the provider default.[/]");
+            return CommandResult.Continue;
+        }
+
+        if (arg.Equals("reset", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.TopP = null;
+            ctx.ChatOptions = ctx.BuildChatOptions();
+            AnsiConsole.MarkupLine("[dim]Top-p reset to provider default.[/]");
+            return CommandResult.Continue;
+        }
+
+        if (!double.TryParse(arg, NumberStyles.Float, CultureInfo.InvariantCulture, out var n) || n < 0.0 || n > 1.0)
+        {
+            AnsiConsole.MarkupLine($"[yellow]Invalid value:[/] {Markup.Escape(arg)}  [dim](must be a number between 0.0 and 1.0)[/]");
+            return CommandResult.Continue;
+        }
+
+        ctx.TopP = n;
+        ctx.ChatOptions = ctx.BuildChatOptions();
+        AnsiConsole.MarkupLine($"[dim]Top-p set to[/] [bold]{n:0.00}[/][dim].[/]");
+        return CommandResult.Continue;
+    }
+
+    // -------------------------------------------------------------------------
+    // /seed
+    // -------------------------------------------------------------------------
+
+    private static CommandResult CmdSeed(ReplSessionContext ctx, string arg)
+    {
+        if (string.IsNullOrEmpty(arg))
+        {
+            AnsiConsole.MarkupLine(ctx.Seed is { } s
+                ? $"[dim]Seed:[/] [bold]{s}[/]"
+                : "[dim]Seed:[/] (not set — non-deterministic)");
+            AnsiConsole.MarkupLine("[dim]Run[/] [bold]/seed <n>[/] [dim]to fix sampling for reproducible output, or[/] [bold]/seed reset[/] [dim]to clear it. Support varies by provider.[/]");
+            return CommandResult.Continue;
+        }
+
+        if (arg.Equals("reset", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Seed = null;
+            ctx.ChatOptions = ctx.BuildChatOptions();
+            AnsiConsole.MarkupLine("[dim]Seed cleared.[/]");
+            return CommandResult.Continue;
+        }
+
+        if (!long.TryParse(arg, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n))
+        {
+            AnsiConsole.MarkupLine($"[yellow]Invalid value:[/] {Markup.Escape(arg)}  [dim](must be an integer)[/]");
+            return CommandResult.Continue;
+        }
+
+        ctx.Seed = n;
+        ctx.ChatOptions = ctx.BuildChatOptions();
+        AnsiConsole.MarkupLine($"[dim]Seed set to[/] [bold]{n}[/][dim].[/]");
         return CommandResult.Continue;
     }
 

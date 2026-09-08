@@ -468,6 +468,12 @@ Use `/tools` to see the full list at runtime.
 | `/reasoning <effort>` | Set reasoning effort for the current model. Accepted values are provider-specific (common: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) — fuseraft passes the value through as-is rather than validating against a fixed list. Injected as `"reasoning": {"effort": "..."}` in the request. |
 | `/max-tokens <n>` | Cap the model's output to `n` tokens per response |
 | `/max-tokens reset` | Restore the provider's default max output tokens |
+| `/temperature <n>` | Set sampling temperature (`0.0`–`2.0`; lower is more deterministic) |
+| `/temperature reset` | Restore the provider's default temperature |
+| `/top-p <n>` | Set nucleus sampling top-p (`0.0`–`1.0`) |
+| `/top-p reset` | Restore the provider's default top-p |
+| `/seed <n>` | Fix the sampling seed for reproducible output (provider support varies) |
+| `/seed reset` | Clear the sampling seed |
 | `/exit` | End the session |
 
 **Switching models and reasoning effort**
@@ -475,6 +481,12 @@ Use `/tools` to see the full list at runtime.
 `/model <id>` switches the LLM mid-session without clearing history. `/reasoning <effort>` adjusts the reasoning depth of the current model without switching it. Both can be combined: `/model grok-4.3 high` switches to grok-4.3 and sets high reasoning effort in a single command.
 
 Reasoning effort support and accepted values vary by provider and model — e.g. xAI `grok-4.3` accepts `none` / `low` / `medium` / `high`, and some newer models add finer tiers like `minimal` or `xhigh`/`max` for the low and high ends. `none` disables thinking tokens entirely for fast structured output; the highest tier a model supports uses maximum reasoning for complex tasks. The level is injected at the HTTP layer — no provider-specific SDK support is required, so the same mechanism works for any model that accepts a top-level `reasoning` object. fuseraft does not validate the value against a fixed list, so new provider tiers work without a CLI update; an unsupported value is rejected by the provider's API.
+
+**Sampling knobs (`/temperature`, `/top-p`, `/seed`)**
+
+These three, along with `/max-tokens`, are REPL-only runtime settings — plain session state applied to every request's `ChatOptions` for the rest of the session (or until changed again), independent of any config file. Run with no argument to see the current value; `reset` clears it back to the provider's default (unset for `/seed`, since there's no "default" seed to restore). Some models reject `temperature` or `top_p` outright (e.g. reasoning models tuned to always sample at a fixed setting) — the provider's error surfaces immediately on the next turn if so.
+
+This is distinct from `fuseraft run`, where `Temperature` is set per-model in `orchestration.yaml`'s `Models` registry (see [`fuseraft run`](#fuseraft-run) above) — the REPL has no equivalent registry and does not read that file.
 
 **Connecting an MCP server (`/mcp`)**
 

@@ -182,6 +182,11 @@ internal sealed class ReplSessionContext
     // Max output tokens (0 = provider default)
     public int MaxOutputTokens;
 
+    // Sampling knobs (null = provider default). Set via /temperature, /top-p, /seed.
+    public double? Temperature;
+    public double? TopP;
+    public long?   Seed;
+
     // Context growth tracking
     public int              PrevCtxEstimate;
     public readonly List<int> TurnTokenDeltas = [];
@@ -322,10 +327,16 @@ internal sealed class ReplSessionContext
         var active = GetActiveTools();
         var hasTools = active.Count > 0;
         var hasMax   = MaxOutputTokens > 0;
-        if (!hasTools && !hasMax) return null;
+        var hasTemp  = Temperature is not null;
+        var hasTopP  = TopP is not null;
+        var hasSeed  = Seed is not null;
+        if (!hasTools && !hasMax && !hasTemp && !hasTopP && !hasSeed) return null;
         var opts = new ChatOptions();
         if (hasTools) opts.Tools = active.Cast<AITool>().ToList();
         if (hasMax)   opts.MaxOutputTokens = MaxOutputTokens;
+        if (hasTemp)  opts.Temperature = (float)Temperature!.Value;
+        if (hasTopP)  opts.TopP = (float)TopP!.Value;
+        if (hasSeed)  opts.Seed = Seed!.Value;
         return opts;
     }
 
