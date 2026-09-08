@@ -36,7 +36,7 @@ public sealed class LogEventsCommand : AsyncCommand<LogEventsSettings>
             return await EventLogViewer.RenderAsync(path, settings.Last, settings.Session, settings.Event, cancellationToken);
         }
 
-        var globalSessionsRoot = System.IO.Path.Combine(FuseraftPaths.GlobalRoot, "logs", "sessions");
+        var globalSessionsRoot = System.IO.Path.Combine(FuseraftPaths.GlobalRoot, "sessions");
 
         if (!string.IsNullOrWhiteSpace(settings.Session))
         {
