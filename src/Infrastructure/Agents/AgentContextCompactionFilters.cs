@@ -145,13 +145,22 @@ internal static class AgentContextCompactionFilters
         _ => false
     };
 
+    // NOT the original value — a metadata note describing what was elided. The model has been
+    // seen re-echoing this exact string as a literal argument value in a later, live tool call
+    // (e.g. reconstructing a prior write_file's `content` from its own truncated history when
+    // asked to move/duplicate the file), writing the placeholder itself to disk. The wording
+    // must make clear this is not reusable content, not just that it was shortened.
     private static object? TruncateArgValue(object? value) => value switch
     {
-        string s                                                                   => $"[{s.Length:N0} chars — omitted from intermediate context]",
+        string s                                                                   => ElisionNote(s.Length),
         System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.String
-            => $"[{je.GetString()?.Length ?? 0:N0} chars — omitted from intermediate context]",
+            => ElisionNote(je.GetString()?.Length ?? 0),
         _ => value
     };
+
+    private static string ElisionNote(int originalChars) =>
+        $"[ELIDED — {originalChars:N0} chars, NOT the real value. Do not reuse this placeholder as " +
+        "content; re-read the file or regenerate the value if you need it again.]";
 
     /// <summary>
     /// For <c>shell_run</c> calls with identical <c>command</c> + <c>workingDirectory</c>
