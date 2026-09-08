@@ -55,16 +55,21 @@ Detection is heuristic and runs automatically — no configuration is needed. De
 
 All governance events are recorded in a session-scoped hash-chain audit log. Each entry links to the previous one via a SHA-256 hash, making the log tamper-evident: any modification of a past entry breaks the chain.
 
-Events recorded:
+fuseraft subscribes to every governance event the kernel emits, so the log isn't limited to a fixed allowlist — but in the current codebase, fuseraft itself only triggers these:
 
 | Event | When it fires |
 |-------|---------------|
 | `AgentRegistered` | When an agent is created for a new session |
 | `PolicyViolation` | When a routing or termination validator blocks a handoff |
 | `ToolCallBlocked` | When the sandbox or injection detector denies a tool call |
-| `TrustFailed` | When a trust-level check fails |
 
-The log is in-memory for the lifetime of the session. It is not written to disk automatically — `--verbose` output includes governance events as they fire. Future versions may add a `--audit-path` flag to persist the log.
+(The AGT SDK also defines `PolicyCheck`, `TrustVerified`, `TrustFailed`, `CheckpointCreated`, and `DriftDetected`, but fuseraft doesn't currently invoke the trust-verification or checkpoint APIs that would raise them.)
+
+Each turn's reasoning block is folded into the same chain: the reasoning text is SHA-256-hashed and only the first 16 hex characters of that hash are recorded, as a `ReasoningEmitted:<hash>` entry. This ties reasoning to the tamper-evident record without ever putting the raw reasoning text in the audit log.
+
+Each entry is written to disk as it's appended, as one JSON object per line, to `audit-chain.jsonl` next to the session's `events.jsonl` (i.e. `~/.fuseraft/sessions/{project_slug}/{session_id}/audit-chain.jsonl`; if `Events` isn't configured for the run, it falls back to `~/.fuseraft/logs/{project_slug}/audit-chain.jsonl`). Fields are snake_case to match every other JSONL log fuseraft writes: `seq`, `timestamp`, `agent_id`, `action`, `decision`, `previous_hash`, `hash`. Audit writes are best-effort — a failure to write never disrupts the session.
+
+`fuseraft log audit` reads the chain back: with no flags it lists entries (filterable by `--session`, `--agent`, `--decision`, `--last`); with `--verify` it independently recomputes every hash and reports whether the chain is intact, exiting non-zero if any entry's stored hash, chain link, or sequence number doesn't match what's recomputed from the file. `--verbose` output also includes governance events as they fire, for watching the chain build up live.
 
 ---
 

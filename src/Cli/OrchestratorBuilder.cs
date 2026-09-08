@@ -123,6 +123,13 @@ public static class OrchestratorBuilder
         Converters                  = { new JsonStringEnumConverter() },
     };
 
+    // Matches the snake_case convention used by every other JSONL log in fuseraft (events.jsonl,
+    // provider_errors.jsonl, etc.) so the hash-chain audit log reads consistently on disk.
+    private static readonly JsonSerializerOptions AuditJsonOpts = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+    };
+
     /// <summary>
     /// Loads <paramref name="configPath"/>, validates it, connects to any configured MCP servers,
     /// and returns a configured orchestrator together with the active session manager.
@@ -551,8 +558,31 @@ public static class OrchestratorBuilder
         }
 
         // Hash-chain audit log: subscribe to all governance events so every denial
-        // and policy check is tamper-evidently recorded for the session's lifetime.
-        var auditLogger = new AuditLogger();
+        // and policy check is tamper-evidently recorded for the session's lifetime, and
+        // persist each entry to disk as it's appended so the chain survives the process.
+        var auditLogger  = new AuditLogger();
+        var auditLogPath = config.Events is { } auditEventsPath
+            ? Path.Combine(Path.GetDirectoryName(auditEventsPath.Path) ?? FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalLogs, projectSlug), "audit-chain.jsonl")
+            : FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalAuditLog, projectSlug);
+        var auditFileLock = new object();
+
+        void PersistAuditEntry(AuditEntry entry)
+        {
+            try
+            {
+                lock (auditFileLock)
+                {
+                    var dir = Path.GetDirectoryName(auditLogPath);
+                    if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                    File.AppendAllText(auditLogPath, JsonSerializer.Serialize(entry, AuditJsonOpts) + "\n");
+                }
+            }
+            catch
+            {
+                // Best-effort — audit file I/O must never disrupt the session.
+            }
+        }
+
         governanceKernel.OnAllEvents(evt =>
         {
             var action   = evt.PolicyName is not null ? $"{evt.Type}:{evt.PolicyName}" : evt.Type.ToString();
@@ -560,7 +590,7 @@ public static class OrchestratorBuilder
                                or GovernanceEventType.ToolCallBlocked
                                or GovernanceEventType.TrustFailed
                 ? "deny" : "allow";
-            auditLogger.Log(evt.AgentId, action, decision);
+            PersistAuditEntry(auditLogger.Log(evt.AgentId, action, decision));
         });
 
         // Reasoning audit: each turn's reasoning block is SHA-256-hashed and appended to the
@@ -568,7 +598,7 @@ public static class OrchestratorBuilder
         // without exposing the full reasoning text in the audit record.
         if (eventEmitter is not null)
         {
-            eventEmitter.RegisterHook(new ReasoningAuditHook(auditLogger));
+            eventEmitter.RegisterHook(new ReasoningAuditHook(auditLogger, PersistAuditEntry));
         }
 
         var identityRegistry  = new IdentityRegistry();

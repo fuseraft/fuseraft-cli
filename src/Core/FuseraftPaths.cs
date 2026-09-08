@@ -133,6 +133,7 @@ public static class FuseraftPaths
     public const string LocalReplEventsDir        = "~/.fuseraft/logs/{project_slug}/repl_events";
     public const string LocalReplEventsLog        = "~/.fuseraft/logs/{project_slug}/repl_events/{session_id}.jsonl";
     public const string LocalProviderErrors       = "~/.fuseraft/logs/{project_slug}/provider_errors.jsonl";
+    public const string LocalAuditLog             = "~/.fuseraft/logs/{project_slug}/audit-chain.jsonl";
     public const string LocalAppLog               = "~/.fuseraft/logs/{project_slug}/app.log";
 
     // state/ — cross-session mutable runtime state
@@ -150,6 +151,10 @@ public static class FuseraftPaths
     // sessions/ — all session-scoped runtime data, keyed by {project_slug}/{session_id}
     public const string LocalSessions             = "~/.fuseraft/sessions/{project_slug}";
     public const string LocalEventsLog            = "~/.fuseraft/sessions/{project_slug}/{session_id}/events.jsonl";
+    // Written next to LocalEventsLog (see OrchestratorBuilder.InitGovernanceKernel); this
+    // template exists so `fuseraft log audit` can locate/describe the path without needing
+    // the session's already-resolved events path.
+    public const string LocalAuditChainLog        = "~/.fuseraft/sessions/{project_slug}/{session_id}/audit-chain.jsonl";
     public const string LocalIntents              = "~/.fuseraft/sessions/{project_slug}/{session_id}/intents.json";
     public const string LocalSessionContext       = "~/.fuseraft/sessions/{project_slug}/{session_id}/context_summary.md";
     public const string LocalSessionReadCache     = "~/.fuseraft/sessions/{project_slug}/{session_id}/read_cache.json";

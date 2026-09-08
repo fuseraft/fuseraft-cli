@@ -148,6 +148,7 @@ services.AddTransient<SkillsValidateCommand>();
 services.AddTransient<LogEventsCommand>();
 services.AddTransient<LogReplCommand>();
 services.AddTransient<LogAppCommand>();
+services.AddTransient<LogAuditCommand>();
 services.AddTransient<UpdateCommand>();
 services.AddTransient<GraphBuildCommand>();
 services.AddTransient<MemoryReviewCommand>();
@@ -365,6 +366,14 @@ app.Configure(cfg =>
             .WithExample(["log", "app"])
             .WithExample(["log", "app", "--last", "100"])
             .WithExample(["log", "app", "--level", "err"]);
+
+        branch.AddCommand<LogAuditCommand>("audit")
+            .WithDescription("View or verify the hash-chain governance audit log (.fuseraft/sessions/{id}/audit-chain.jsonl).")
+            .WithExample(["log", "audit"])
+            .WithExample(["log", "audit", "--session", "abc123"])
+            .WithExample(["log", "audit", "--decision", "deny"])
+            .WithExample(["log", "audit", "--verify"])
+            .WithExample(["log", "audit", "--session", "abc123", "--verify"]);
     });
 
     cfg.AddCommand<ModelsCommand>("models")

@@ -17,7 +17,7 @@ namespace fuseraft.Orchestration.Hooks;
 /// exposing potentially sensitive model thinking in the compliance record.
 /// </para>
 /// </summary>
-public sealed class ReasoningAuditHook(AuditLogger auditLogger) : IOrchestrationHook
+public sealed class ReasoningAuditHook(AuditLogger auditLogger, Action<AuditEntry>? onEntryLogged = null) : IOrchestrationHook
 {
     public Task OnEventAsync(OrchestrationEvent evt, CancellationToken cancellationToken = default)
     {
@@ -30,7 +30,8 @@ public sealed class ReasoningAuditHook(AuditLogger auditLogger) : IOrchestration
 
         var hash    = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
         var agentId = evt.Agent ?? "unknown";
-        auditLogger.Log(agentId, $"ReasoningEmitted:{hash[..16]}", "allow");
+        var entry   = auditLogger.Log(agentId, $"ReasoningEmitted:{hash[..16]}", "allow");
+        onEntryLogged?.Invoke(entry);
 
         return Task.CompletedTask;
     }
