@@ -32,4 +32,11 @@ public sealed class ReplDefaultsConfig
     /// <summary>Optional plugins enabled by default, e.g. <c>["Scratchpad", "Http"]</c>. Merged with <c>--plugins</c>.</summary>
     [JsonPropertyName("plugins")]
     public List<string> Plugins { get; set; } = [];
+
+    /// <summary>
+    /// Auto-compact history when context crosses 75% of budget, instead of only warning.
+    /// Default on; set false to restore the old warn-only behavior.
+    /// </summary>
+    [JsonPropertyName("autoCompact")]
+    public bool AutoCompact { get; set; } = true;
 }

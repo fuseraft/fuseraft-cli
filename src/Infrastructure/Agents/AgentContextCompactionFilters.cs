@@ -145,13 +145,22 @@ internal static class AgentContextCompactionFilters
         _ => false
     };
 
+    // NOT the original value — a metadata note describing what was elided. The model has been
+    // seen re-echoing this exact string as a literal argument value in a later, live tool call
+    // (e.g. reconstructing a prior write_file's `content` from its own truncated history when
+    // asked to move/duplicate the file), writing the placeholder itself to disk. The wording
+    // must make clear this is not reusable content, not just that it was shortened.
     private static object? TruncateArgValue(object? value) => value switch
     {
-        string s                                                                   => $"[{s.Length:N0} chars — omitted from intermediate context]",
+        string s                                                                   => ElisionNote(s.Length),
         System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.String
-            => $"[{je.GetString()?.Length ?? 0:N0} chars — omitted from intermediate context]",
+            => ElisionNote(je.GetString()?.Length ?? 0),
         _ => value
     };
+
+    private static string ElisionNote(int originalChars) =>
+        $"[ELIDED — {originalChars:N0} chars, NOT the real value. Do not reuse this placeholder as " +
+        "content; re-read the file or regenerate the value if you need it again.]";
 
     /// <summary>
     /// For <c>shell_run</c> calls with identical <c>command</c> + <c>workingDirectory</c>
@@ -536,8 +545,12 @@ internal static class AgentContextCompactionFilters
             if (IsTrimmableMessage(list[i])) trimCandidates.Enqueue(i);
 
         // Phase 1: replace oldest tool results with a tiny placeholder until under budget.
+        // Wording mirrors AgentContextCompactionFilters.ElisionNote: not just "shortened" but
+        // explicitly not the real output, so the model doesn't reuse it as data (e.g. treating
+        // an elided read_file result as the actual file contents when writing it elsewhere).
         var result = new List<ChatMessage>(list);
-        const string Placeholder = "[result omitted — in-turn context trimmed]";
+        const string Placeholder =
+            "[RESULT ELIDED — not the real output, do not reuse this as data. Re-run the tool if you need this result again.]";
         while (total > maxChars && trimCandidates.Count > 0)
         {
             int idx = trimCandidates.Dequeue();
@@ -578,7 +591,12 @@ internal static class AgentContextCompactionFilters
             {
                 int trimBudget    = Math.Max(maxChars - protectedChars, 0);
                 int perResultMax  = Math.Max(trimBudget / remainingTrimIndices.Count, 200);
-                const string TruncSuffix = "\n[...truncated — in-turn budget exceeded]";
+                // Unlike Placeholder above, the content before this suffix IS real — only
+                // everything after the cut point is missing. Says so explicitly so the model
+                // doesn't treat the retained prefix as the complete result.
+                const string TruncSuffix =
+                    "\n[TRUNCATED HERE — everything after this point was cut for context budget; " +
+                    "this is not the complete output. Re-run the tool if you need the rest.]";
 
                 foreach (int idx in remainingTrimIndices)
                 {
