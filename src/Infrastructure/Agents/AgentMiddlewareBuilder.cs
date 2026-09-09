@@ -375,9 +375,7 @@ internal sealed class AgentMiddlewareBuilder(
                         s.Length > ConsumedReadCapChars)
                     {
                         replacement = s[..ConsumedReadCapChars] +
-                            $"\n[...{s.Length - ConsumedReadCapChars:N0} chars elided — " +
-                            $"file was written or patched later this session; " +
-                            $"call read_file again if current content is needed]";
+                            ElisionMarkers.ConsumedReadTail(s.Length - ConsumedReadCapChars);
                     }
                     else if (s.Length > maxChars)
                     {

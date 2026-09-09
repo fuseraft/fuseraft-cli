@@ -383,6 +383,9 @@ public sealed class FileSystemPlugin : ITurnResettable
         var normalOld     = oldText.Replace("\r\n", "\n");
         var normalNew     = newText.Replace("\r\n", "\n");
 
+        var elisionDenial = FilePatchDiffing.DetectElisionPlaceholder(normalNew);
+        if (elisionDenial is not null) return elisionDenial;
+
         var idx = normalContent.IndexOf(normalOld, StringComparison.Ordinal);
         if (idx < 0)
         {
@@ -480,6 +483,9 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (content is null)
             return PluginResult.Error(
                 "The 'content' parameter is required but was not provided. Pass the file text as 'content' separately.");
+
+        var elisionDenial = FilePatchDiffing.DetectElisionPlaceholder(content);
+        if (elisionDenial is not null) return elisionDenial;
 
         var pathDenial = ValidateWritePath(path, out var resolved);
         if (pathDenial is not null) return pathDenial;
