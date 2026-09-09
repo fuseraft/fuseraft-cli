@@ -38,6 +38,8 @@ Read, write, and navigate the local filesystem.
 
 **Tip:** When `FileSystemSandboxPath` is configured, all paths are resolved to canonical form and rejected if they fall outside the sandbox root. See [Security](security.md).
 
+**Write/delete approval:** When `fuseraft run --hitl` is active, every write or delete call (`write_file`, `patch_file`, `delete_file`, `delete_directory`, `copy_file`, `move_file`, `create_directory`, `set_permissions`, `save_file_summary`) pauses for approval before executing — `read_file`/`grep_file`/`list_files`/etc. are never gated. See [CLI Reference — Shell/FileSystem/Git/Http write approval](cli-reference.md#human-in-the-loop-controls). The REPL has the same gate behind its own `/hitl on`/`/hitl off` toggle.
+
 ---
 
 ## Shell
@@ -64,7 +66,7 @@ The shell used is `/bin/bash` on Unix and `cmd.exe` on Windows. The shell binary
 
 **`sudo` protection:** `sudo` is always blocked. Any command or script containing `sudo` (including after pipes, `&&`, `;`, or newlines) is rejected before execution. The denial message instructs the agent to use non-privileged alternatives (`pip install --user`, `pipx`, virtualenvs) or, if elevated access is truly required, to tell the user what to run so they can do it themselves.
 
-**Shell command approval:** When `fuseraft run --hitl` is active, every `shell_run`, `shell_run_script`, and `shell_run_background` call pauses and shows the command for approval before executing. See [CLI Reference — Shell command approval](cli-reference.md#human-in-the-loop-controls). The REPL has the same gate behind its own `/hitl on`/`/hitl off` toggle (see [CLI Reference — `fuseraft repl`](cli-reference.md#fuseraft-repl)).
+**Shell command approval:** When `fuseraft run --hitl` is active, every `shell_run`, `shell_run_script`, and `shell_run_background` call pauses and shows the command for approval before executing. See [CLI Reference — Shell/FileSystem/Git/Http write approval](cli-reference.md#human-in-the-loop-controls). The REPL has the same gate behind its own `/hitl on`/`/hitl off` toggle (see [CLI Reference — `fuseraft repl`](cli-reference.md#fuseraft-repl)).
 
 **Security note:** When `FileSystemSandboxPath` is set, the `workingDirectory` argument is hard-denied if it falls outside the sandbox. The `command` and `script` arguments are scanned for absolute paths escaping the sandbox; system binary prefixes (`/usr/`, `/bin/`, `/opt/`, `/nix/`, etc.) are exempted. Shell scanning is heuristic — for strict containment use `CodeExecution` (Docker) instead.
 
@@ -100,6 +102,11 @@ Read and write a Git repository.
 | `git_stash` | `message` (optional), `repoPath` | Save the current working-tree changes to the stash. |
 | `git_stash_pop` | `repoPath` | Apply the most recent stash entry and remove it from the stash list. |
 | `git_reset` | `mode` (default `"mixed"`), `ref` (default `"HEAD"`), `repoPath` | Reset HEAD. `soft`: moves HEAD only. `mixed`: unstages changes. `hard`: discards all uncommitted changes — use with caution. |
+| `git_rebase` | `upstream` (optional), `onto` (optional), `control` (optional: `abort`/`continue`/`skip`), `repoPath` | Rebase the current branch onto `upstream`, or onto `onto` with `upstream` as the fork point. Pass `control` alone to manage a rebase already in progress. |
+
+**Sandbox:** When `FileSystemSandboxPath` is configured, every function above — including the read-only ones — resolves `repoPath` (or `directory` for `git_init`) to canonical form and rejects it if it falls outside the sandbox root; an unspecified `repoPath` defaults to the sandbox root rather than the process's actual working directory. See [Security](security.md).
+
+**Write approval:** When `fuseraft run --hitl` is active, every write operation above pauses for approval before executing — the read operations are never gated. See [CLI Reference — Shell/FileSystem/Git/Http write approval](cli-reference.md#human-in-the-loop-controls). The REPL has the same gate behind its own `/hitl on`/`/hitl off` toggle.
 
 ---
 
@@ -115,6 +122,8 @@ Make HTTP requests to external APIs.
 | `http_patch` | `url`, `body`, `contentType` (default `"application/json"`), `headers`, `timeoutSeconds`, `profile` | PATCH request. Useful for partial updates (e.g. closing a ticket). |
 | `http_delete` | `url`, `headers`, `timeoutSeconds` (default 30), `profile` | DELETE request. |
 | `http_head` | `url`, `headers`, `timeoutSeconds` (default 30), `profile` | HEAD request. Returns response headers only, no body. |
+
+**Write approval:** When `fuseraft run --hitl` is active, `http_post`/`http_put`/`http_patch`/`http_delete` pause for approval before sending — `http_get`/`http_head` are never gated. See [CLI Reference — Shell/FileSystem/Git/Http write approval](cli-reference.md#human-in-the-loop-controls). The REPL has the same gate behind its own `/hitl on`/`/hitl off` toggle.
 
 ### API profiles (`profile` parameter)
 

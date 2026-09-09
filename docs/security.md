@@ -6,7 +6,7 @@ fuseraft-cli provides two runtime containment mechanisms: a filesystem sandbox t
 
 ## Filesystem sandbox
 
-Set `Security.FileSystemSandboxPath` to a directory path. Every `FileSystem` and `Shell` plugin call that involves a path argument is checked before execution.
+Set `Security.FileSystemSandboxPath` to a directory path. Every `FileSystem`, `Shell`, and `Git` plugin call that involves a path argument is checked before execution.
 
 ```yaml
 Security:
@@ -21,6 +21,7 @@ Security:
 | `FileSystem` | `patch_file`, `create_directory`, `delete_directory`, `set_permissions`, `copy_file`, `move_file` | Hard deny if resolved path is outside sandbox (always enforced, regardless of whether `FileSystemPermissions` globs are configured) |
 | `Shell` | `shell_run`, `shell_run_script` — `workingDirectory` | Hard deny if resolved path is outside sandbox |
 | `Shell` | `shell_run`, `shell_run_script` — `command` / `script` | Best-effort scan for absolute paths escaping sandbox |
+| `Git` | Every function — `repoPath` (`directory` for `git_init`) | Hard deny if resolved path is outside sandbox, including read-only queries (`git_status`, `git_log`, `git_show`, …); an unspecified `repoPath` defaults to the sandbox root |
 
 ### Path resolution
 
