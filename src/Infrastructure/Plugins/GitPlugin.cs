@@ -1,20 +1,48 @@
 using System.ComponentModel;
 using Microsoft.Extensions.AI;
+using fuseraft.Core;
 
 namespace fuseraft.Infrastructure.Plugins;
 
 /// <summary>
 /// Gives agents access to common Git operations.
 /// Requires <c>git</c> to be installed and available on PATH.
+///
+/// When <paramref name="sandboxRoot"/> is provided (recommended for production, and required
+/// for parity with <see cref="FileSystemPlugin"/>/<see cref="ShellPlugin"/>), every method's
+/// <c>repoPath</c>/<c>directory</c> argument is resolved to its absolute canonical form and
+/// rejected if it falls outside the sandbox tree — including read-only queries, since
+/// <c>git log</c>/<c>git show</c> against an arbitrary path outside the sandbox is an
+/// information-disclosure concern, not just a write-safety one.
 /// </summary>
 public sealed class GitPlugin
 {
+    private readonly Func<string, string, Task<bool>>? _approveAction;
+    private readonly string? _sandboxRoot;
+
+    public GitPlugin(Func<string, string, Task<bool>>? approveAction = null, string? sandboxRoot = null)
+    {
+        _approveAction = approveAction;
+        _sandboxRoot   = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
+    }
+
+    // Validates that repoPath (or directory, for InitAsync) stays within the sandbox. When a
+    // sandbox is active and no path is specified, defaults to the sandbox root so commands
+    // never run against an uncontrolled directory. Applies to every method below, read-only
+    // queries included — see the sandboxRoot doc comment above for why.
+    // Returns a [DENIED] error string on violation, null when safe.
+    private string? ValidateRepoPath(string? repoPath, out string? resolved) =>
+        FileSystemSandbox.ResolveSafeDirectory(repoPath, _sandboxRoot, out resolved);
+
     // Read-only queries
 
     [Description("Get working-tree status.")]
     public async Task<string> StatusAsync([Description("Repo path.")] string? repoPath = null)
     {
-        var result = await Git("status --short --branch", repoPath);
+        var denial = ValidateRepoPath(repoPath, out var resolved);
+        if (denial is not null) return denial;
+
+        var result = await Git("status --short --branch", resolved);
         return result.ToPluginOutput();
     }
 
@@ -24,8 +52,11 @@ public sealed class GitPlugin
         [Description("Show staged diff.")] bool staged = false,
         [Description("Max output lines.")] int maxLines = 200)
     {
+        var denial = ValidateRepoPath(repoPath, out var resolved);
+        if (denial is not null) return denial;
+
         var args = staged ? "diff --cached" : "diff";
-        var result = await Git(args, repoPath);
+        var result = await Git(args, resolved);
         return TruncateLines(result.ToPluginOutput(), maxLines);
     }
 
@@ -35,9 +66,12 @@ public sealed class GitPlugin
         [Description("Max commits.")] int count = 10,
         [Description("Branch or ref.")] string? @ref = null)
     {
+        var denial = ValidateRepoPath(repoPath, out var resolved);
+        if (denial is not null) return denial;
+
         var refArg = string.IsNullOrWhiteSpace(@ref) ? string.Empty : $" {@ref}";
         var result = await Git(
-            $"log --oneline --decorate -n {count}{refArg}", repoPath);
+            $"log --oneline --decorate -n {count}{refArg}", resolved);
         return result.ToPluginOutput();
     }
 
@@ -47,7 +81,10 @@ public sealed class GitPlugin
         [Description("Repo path.")] string? repoPath = null,
         [Description("Max output lines.")] int maxLines = 300)
     {
-        var result = await Git($"show {commitRef}", repoPath);
+        var denial = ValidateRepoPath(repoPath, out var resolved);
+        if (denial is not null) return denial;
+
+        var result = await Git($"show {commitRef}", resolved);
         return TruncateLines(result.ToPluginOutput(), maxLines);
     }
 
@@ -56,25 +93,44 @@ public sealed class GitPlugin
         [Description("Repo path.")] string? repoPath = null,
         [Description("Include remote-tracking branches.")] bool includeRemotes = false)
     {
+        var denial = ValidateRepoPath(repoPath, out var resolved);
+        if (denial is not null) return denial;
+
         var args = includeRemotes ? "branch -a" : "branch";
-        var result = await Git(args, repoPath);
+        var result = await Git(args, resolved);
         return result.ToPluginOutput();
     }
 
     // Write operations
+
+    // Called before every write operation below in --hitl mode. Returns a [DENIED] string
+    // when the user blocks the action, or null to proceed — mirrors ShellPlugin's
+    // approveCommand gate, generalized across Git's write surface.
+    private async Task<string?> CheckApprovalAsync(string action, string detail)
+    {
+        if (_approveAction is not null && !await _approveAction(action, detail))
+            return PluginResult.Denied("Git operation blocked by user.");
+        return null;
+    }
 
     [Description("Stage files for commit.")]
     public async Task<string> AddAsync(
         [Description("File path(s) or '.' for everything.")] string paths,
         [Description("Repo path.")] string? repoPath = null)
     {
+        var pathDenial = ValidateRepoPath(repoPath, out var resolved);
+        if (pathDenial is not null) return pathDenial;
+
+        var approvalDenial = await CheckApprovalAsync("git_add", paths);
+        if (approvalDenial is not null) return approvalDenial;
+
         // Split on whitespace so "src/ tests/" stages two paths safely.
         var parts = paths.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var args = new[] { "add" }.Concat(parts);
-        var result = await ProcessHelper.RunAsync("git", args, repoPath);
+        var result = await ProcessHelper.RunAsync("git", args, resolved);
         // Always unstage fuseraft's own working directory — .fuseraft/ contains session
         // artifacts (event logs, summaries, memory) that should never be committed by the agent.
-        await ProcessHelper.RunAsync("git", ["reset", "--", ".fuseraft/"], repoPath);
+        await ProcessHelper.RunAsync("git", ["reset", "--", ".fuseraft/"], resolved);
         return result.ToPluginOutput();
     }
 
@@ -84,10 +140,16 @@ public sealed class GitPlugin
         [Description("Repo path.")] string? repoPath = null,
         [Description("Stage all tracked changes before commit.")] bool stageAll = false)
     {
+        var pathDenial = ValidateRepoPath(repoPath, out var resolved);
+        if (pathDenial is not null) return pathDenial;
+
+        var approvalDenial = await CheckApprovalAsync("git_commit", message);
+        if (approvalDenial is not null) return approvalDenial;
+
         var args = stageAll
             ? new[] { "commit", "-a", "-m", message }
             : new[] { "commit", "-m", message };
-        var result = await ProcessHelper.RunAsync("git", args, repoPath);
+        var result = await ProcessHelper.RunAsync("git", args, resolved);
         return result.ToPluginOutput();
     }
 
@@ -97,10 +159,16 @@ public sealed class GitPlugin
         [Description("Repo path.")] string? repoPath = null,
         [Description("Create branch if it doesn't exist.")] bool createBranch = false)
     {
+        var pathDenial = ValidateRepoPath(repoPath, out var resolved);
+        if (pathDenial is not null) return pathDenial;
+
+        var approvalDenial = await CheckApprovalAsync("git_checkout", target);
+        if (approvalDenial is not null) return approvalDenial;
+
         var args = createBranch
             ? new[] { "checkout", "-b", target }
             : new[] { "checkout", target };
-        var result = await ProcessHelper.RunAsync("git", args, repoPath);
+        var result = await ProcessHelper.RunAsync("git", args, resolved);
         return result.ToPluginOutput();
     }
 
@@ -109,14 +177,26 @@ public sealed class GitPlugin
         [Description("Branch name.")] string branchName,
         [Description("Repo path.")] string? repoPath = null)
     {
-        var result = await ProcessHelper.RunAsync("git", ["checkout", "-b", branchName], repoPath);
+        var pathDenial = ValidateRepoPath(repoPath, out var resolved);
+        if (pathDenial is not null) return pathDenial;
+
+        var approvalDenial = await CheckApprovalAsync("git_create_branch", branchName);
+        if (approvalDenial is not null) return approvalDenial;
+
+        var result = await ProcessHelper.RunAsync("git", ["checkout", "-b", branchName], resolved);
         return result.ToPluginOutput();
     }
 
     [Description("Initialize a git repository.")]
     public async Task<string> InitAsync([Description("Directory path.")] string? directory = null)
     {
-        var result = await Git("init", directory);
+        var pathDenial = ValidateRepoPath(directory, out var resolved);
+        if (pathDenial is not null) return pathDenial;
+
+        var approvalDenial = await CheckApprovalAsync("git_init", resolved ?? "(cwd)");
+        if (approvalDenial is not null) return approvalDenial;
+
+        var result = await Git("init", resolved);
         return result.ToPluginOutput();
     }
 
@@ -127,7 +207,10 @@ public sealed class GitPlugin
     public async Task<string> IsInsideWorkTreeAsync(
         [Description("Repo path to check (defaults to CWD).")] string? repoPath = null)
     {
-        var result = await Git("rev-parse --is-inside-work-tree", repoPath);
+        var denial = ValidateRepoPath(repoPath, out var resolved);
+        if (denial is not null) return denial;
+
+        var result = await Git("rev-parse --is-inside-work-tree", resolved);
         return result.ExitCode is 128 or 129 ? "false"
              : result.Succeeded               ? "true"
              : "false";
@@ -143,13 +226,16 @@ public sealed class GitPlugin
     public async Task<string> IsRepoRootAsync(
         [Description("Directory to check (defaults to CWD).")] string? repoPath = null)
     {
-        var result = await Git("rev-parse --show-toplevel", repoPath);
+        var denial = ValidateRepoPath(repoPath, out var resolved);
+        if (denial is not null) return denial;
+
+        var result = await Git("rev-parse --show-toplevel", resolved);
         if (!result.Succeeded) return "false";
 
         var toplevel = result.Stdout.Trim().TrimEnd('/', '\\');
-        var target   = Path.GetFullPath(string.IsNullOrWhiteSpace(repoPath)
+        var target   = Path.GetFullPath(string.IsNullOrWhiteSpace(resolved)
             ? Directory.GetCurrentDirectory()
-            : ProcessHelper.ExpandHome(repoPath)).TrimEnd('/', '\\');
+            : ProcessHelper.ExpandHome(resolved)).TrimEnd('/', '\\');
 
         return string.Equals(toplevel, target, StringComparison.Ordinal) ? "true" : "false";
     }
@@ -161,11 +247,17 @@ public sealed class GitPlugin
         [Description("Set upstream tracking reference.")] bool setUpstream = false,
         [Description("Repo path.")] string? repoPath = null)
     {
+        var pathDenial = ValidateRepoPath(repoPath, out var resolved);
+        if (pathDenial is not null) return pathDenial;
+
+        var approvalDenial = await CheckApprovalAsync("git_push", $"{remote ?? "(default remote)"} {branch ?? ""}".Trim());
+        if (approvalDenial is not null) return approvalDenial;
+
         var args = new List<string> { "push" };
         if (setUpstream) args.Add("--set-upstream");
         if (!string.IsNullOrWhiteSpace(remote)) args.Add(remote);
         if (!string.IsNullOrWhiteSpace(branch)) args.Add(branch);
-        var result = await ProcessHelper.RunAsync("git", args, repoPath, timeoutSeconds: 120);
+        var result = await ProcessHelper.RunAsync("git", args, resolved, timeoutSeconds: 120);
         return result.ToPluginOutput();
     }
 
@@ -175,10 +267,16 @@ public sealed class GitPlugin
         [Description("Branch to pull.")] string? branch = null,
         [Description("Repo path.")] string? repoPath = null)
     {
+        var pathDenial = ValidateRepoPath(repoPath, out var resolved);
+        if (pathDenial is not null) return pathDenial;
+
+        var approvalDenial = await CheckApprovalAsync("git_pull", $"{remote ?? "(default remote)"} {branch ?? ""}".Trim());
+        if (approvalDenial is not null) return approvalDenial;
+
         var args = new List<string> { "pull" };
         if (!string.IsNullOrWhiteSpace(remote)) args.Add(remote);
         if (!string.IsNullOrWhiteSpace(branch)) args.Add(branch);
-        var result = await ProcessHelper.RunAsync("git", args, repoPath, timeoutSeconds: 120);
+        var result = await ProcessHelper.RunAsync("git", args, resolved, timeoutSeconds: 120);
         return result.ToPluginOutput();
     }
 
@@ -187,8 +285,14 @@ public sealed class GitPlugin
         [Description("Stash message.")] string? message = null,
         [Description("Repo path.")] string? repoPath = null)
     {
+        var pathDenial = ValidateRepoPath(repoPath, out var resolved);
+        if (pathDenial is not null) return pathDenial;
+
+        var approvalDenial = await CheckApprovalAsync("git_stash", message ?? "(no message)");
+        if (approvalDenial is not null) return approvalDenial;
+
         var args = string.IsNullOrWhiteSpace(message) ? "stash push" : $"stash push -m \"{message}\"";
-        var result = await Git(args, repoPath);
+        var result = await Git(args, resolved);
         return result.ToPluginOutput();
     }
 
@@ -196,7 +300,10 @@ public sealed class GitPlugin
     public async Task<string> StashListAsync(
         [Description("Repo path.")] string? repoPath = null)
     {
-        var result = await Git("stash list", repoPath);
+        var denial = ValidateRepoPath(repoPath, out var resolved);
+        if (denial is not null) return denial;
+
+        var result = await Git("stash list", resolved);
         return result.ToPluginOutput();
     }
 
@@ -204,7 +311,13 @@ public sealed class GitPlugin
     public async Task<string> StashPopAsync(
         [Description("Repo path.")] string? repoPath = null)
     {
-        var result = await Git("stash pop", repoPath);
+        var pathDenial = ValidateRepoPath(repoPath, out var resolved);
+        if (pathDenial is not null) return pathDenial;
+
+        var approvalDenial = await CheckApprovalAsync("git_stash_pop", resolved ?? "(cwd)");
+        if (approvalDenial is not null) return approvalDenial;
+
+        var result = await Git("stash pop", resolved);
         return result.ToPluginOutput();
     }
 
@@ -217,7 +330,14 @@ public sealed class GitPlugin
         mode = mode.ToLowerInvariant();
         if (mode is not ("soft" or "mixed" or "hard"))
             return PluginResult.Error($"Invalid mode '{mode}'. Must be 'soft', 'mixed', or 'hard'.");
-        var result = await Git($"reset --{mode} {@ref}", repoPath);
+
+        var pathDenial = ValidateRepoPath(repoPath, out var resolved);
+        if (pathDenial is not null) return pathDenial;
+
+        var approvalDenial = await CheckApprovalAsync("git_reset", $"--{mode} {@ref}");
+        if (approvalDenial is not null) return approvalDenial;
+
+        var result = await Git($"reset --{mode} {@ref}", resolved);
         return result.ToPluginOutput();
     }
 
@@ -230,26 +350,36 @@ public sealed class GitPlugin
         [Description("Control an in-progress rebase: 'abort', 'continue', or 'skip'.")] string? control = null,
         [Description("Repo path.")] string? repoPath = null)
     {
+        var pathDenial = ValidateRepoPath(repoPath, out var resolved);
+        if (pathDenial is not null) return pathDenial;
+
         if (!string.IsNullOrWhiteSpace(control))
         {
             control = control.Trim().ToLowerInvariant();
             if (control is not ("abort" or "continue" or "skip"))
                 return PluginResult.Error($"Invalid control value '{control}'. Must be 'abort', 'continue', or 'skip'.");
-            var result = await ProcessHelper.RunAsync("git", ["rebase", $"--{control}"], repoPath);
+
+            var controlApprovalDenial = await CheckApprovalAsync("git_rebase", $"--{control}");
+            if (controlApprovalDenial is not null) return controlApprovalDenial;
+
+            var result = await ProcessHelper.RunAsync("git", ["rebase", $"--{control}"], resolved);
             return result.ToPluginOutput();
         }
 
         if (string.IsNullOrWhiteSpace(upstream))
             return PluginResult.Error("upstream is required when not using control.");
 
+        var approvalDenial = await CheckApprovalAsync("git_rebase", onto is { Length: > 0 } ? $"--onto {onto} {upstream}" : upstream);
+        if (approvalDenial is not null) return approvalDenial;
+
         if (!string.IsNullOrWhiteSpace(onto))
         {
-            var result = await ProcessHelper.RunAsync("git", ["rebase", "--onto", onto.Trim(), upstream.Trim()], repoPath);
+            var result = await ProcessHelper.RunAsync("git", ["rebase", "--onto", onto.Trim(), upstream.Trim()], resolved);
             return result.ToPluginOutput();
         }
         else
         {
-            var result = await ProcessHelper.RunAsync("git", ["rebase", upstream.Trim()], repoPath);
+            var result = await ProcessHelper.RunAsync("git", ["rebase", upstream.Trim()], resolved);
             return result.ToPluginOutput();
         }
     }

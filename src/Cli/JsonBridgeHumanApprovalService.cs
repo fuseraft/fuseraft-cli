@@ -21,10 +21,18 @@ public sealed class JsonBridgeHumanApprovalService(ReplStdinPump stdinPump) : IH
         return await stdinPump.ReadApprovalResponseAsync();
     }
 
-    // The REPL's /hitl mode only ever gates shell commands (see ShellPlugin's approveCommand
-    // hook in ReplCommand.cs) — none of the prompts below are reachable from the webview today.
-    // They default to the same "no human available" behavior as NonInteractiveHumanApprovalService
-    // rather than blocking on a console prompt the webview has no UI for and could never answer.
+    public async Task<bool> PromptToolActionAsync(string plugin, string action, string detail)
+    {
+        ReplJsonBridge.Emit(new { type = "approval_request", kind = "tool_action", plugin, action, detail });
+        return await stdinPump.ReadApprovalResponseAsync();
+    }
+
+    // The REPL's /hitl mode only gates Shell/FileSystem/Git/Http mutating calls (see
+    // ShellPlugin's approveCommand hook and FileSystemPlugin/GitPlugin/HttpPlugin's
+    // approveAction hook in ReplCommand.cs) — none of the prompts below are reachable from the
+    // webview today. They default to the same "no human available" behavior as
+    // NonInteractiveHumanApprovalService rather than blocking on a console prompt the webview
+    // has no UI for and could never answer.
     public Task<string?> PromptContinueAsync() => Task.FromResult<string?>(null);
 
     public Task<string?> PromptRedirectAsync(string agentName) => Task.FromResult<string?>(null);

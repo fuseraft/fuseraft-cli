@@ -276,4 +276,69 @@ public sealed class ShellPluginTests
 
         Assert.Contains("no-approver-configured", result);
     }
+
+    // sandboxRoot — ValidateWorkingDirectory delegates to the shared
+    // FileSystemSandbox.ResolveSafeDirectory helper (also used by GitPlugin's repoPath check;
+    // see GitPluginTests). No prior coverage existed for this path before that extraction.
+
+    [Fact]
+    public async Task RunAsync_WorkingDirectoryOutsideSandbox_ReturnsDenial()
+    {
+        var sandboxDir = Path.Combine(Path.GetTempPath(), "fuseraft_shellplugin_sandbox_" + Guid.NewGuid().ToString("N")[..8]);
+        var outsideDir = Path.Combine(Path.GetTempPath(), "fuseraft_shellplugin_outside_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(sandboxDir);
+        Directory.CreateDirectory(outsideDir);
+        try
+        {
+            using var plugin = new ShellPlugin(sandboxRoot: sandboxDir);
+
+            var result = await plugin.RunAsync("echo hi", workingDirectory: outsideDir);
+
+            Assert.Contains("[DENIED]", result);
+        }
+        finally
+        {
+            Directory.Delete(sandboxDir, recursive: true);
+            Directory.Delete(outsideDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_NoWorkingDirectory_DefaultsToSandboxRootRatherThanDenying()
+    {
+        var sandboxDir = Path.Combine(Path.GetTempPath(), "fuseraft_shellplugin_sandbox_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(sandboxDir);
+        try
+        {
+            using var plugin = new ShellPlugin(sandboxRoot: sandboxDir);
+
+            var result = await plugin.RunAsync("pwd", workingDirectory: null);
+
+            Assert.DoesNotContain("[DENIED]", result);
+            Assert.Contains(Path.GetFullPath(sandboxDir).TrimEnd('/'), result);
+        }
+        finally
+        {
+            Directory.Delete(sandboxDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_WorkingDirectoryInsideSandbox_ExecutesNormally()
+    {
+        var sandboxDir = Path.Combine(Path.GetTempPath(), "fuseraft_shellplugin_sandbox_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(sandboxDir);
+        try
+        {
+            using var plugin = new ShellPlugin(sandboxRoot: sandboxDir);
+
+            var result = await plugin.RunAsync("echo inside-sandbox", workingDirectory: sandboxDir);
+
+            Assert.Contains("inside-sandbox", result);
+        }
+        finally
+        {
+            Directory.Delete(sandboxDir, recursive: true);
+        }
+    }
 }

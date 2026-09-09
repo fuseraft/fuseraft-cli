@@ -226,13 +226,14 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         var toolsByCategory = new Dictionary<string, List<AIFunction>>(StringComparer.OrdinalIgnoreCase);
 
         // HITL (human-in-the-loop) mode — off by default, toggled at runtime via /hitl. Reuses
-        // the same IHumanApprovalService.PromptShellCommandAsync y/N gate `fuseraft run --hitl`
-        // wires into ShellPlugin (OrchestratorBuilder.ResolveSecurityConfig), just made
-        // toggleable mid-session: the closure below is ShellPlugin's only construction
-        // opportunity, so it reads hitlState live on every call rather than a fixed flag baked
-        // in at startup. In jsonMode (VS Code webview), the console-based prompt would write to
-        // stdout the extension can't parse and block on a stdin reply it can never send — use
-        // the JSON-bridge approval service instead so the webview can render and answer it.
+        // the same IHumanApprovalService.PromptShellCommandAsync/PromptToolActionAsync y/N gates
+        // `fuseraft run --hitl` wires into ShellPlugin/FileSystemPlugin/GitPlugin/HttpPlugin
+        // (OrchestratorBuilder.ResolveSecurityConfig), just made toggleable mid-session: the
+        // closures below are each plugin's only construction opportunity, so they read hitlState
+        // live on every call rather than a fixed flag baked in at startup. In jsonMode (VS Code
+        // webview), the console-based prompt would write to stdout the extension can't parse and
+        // block on a stdin reply it can never send — use the JSON-bridge approval service
+        // instead so the webview can render and answer it.
         var hitlState = new HitlModeState();
         // ctxForStdin is assigned once `ctx` exists below — captured by reference so the pump's
         // cancel callback always reaches the live session, even though the pump itself (and the
@@ -247,6 +248,13 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         using ShellPlugin? shellPlugin  = settings.NoTools ? null : new ShellPlugin(
             shellPolicy:    TryLoadDefaultShellPolicy(),
             approveCommand: cmd => hitlState.Enabled ? approvalService.PromptShellCommandAsync(cmd) : Task.FromResult(true));
+
+        // Same y/N gate as ShellPlugin's approveCommand above, generalized to the mutating
+        // FileSystem/Git/Http tools — see IHumanApprovalService.PromptToolActionAsync.
+        Func<string, Func<string, string, Task<bool>>> approveToolAction = pluginName =>
+            (action, detail) => hitlState.Enabled
+                ? approvalService.PromptToolActionAsync(pluginName, action, detail)
+                : Task.FromResult(true);
         SubAgentPlugin? subAgent        = null;
         IReadOnlyList<AgentSkill> discoveredSkills = [];
         string?         skillsCatalog   = null;
@@ -260,12 +268,12 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         List<AIFunction>? gitFunctions   = null;
         if (!settings.NoTools)
         {
-            fsPluginForCategory = new FileSystemPlugin();
+            fsPluginForCategory = new FileSystemPlugin(approveAction: approveToolAction("FileSystem"));
             fsFunctions    = PluginRegistry.GetFunctionsFromObject(fsPluginForCategory)
                 .Concat(PluginRegistry.GetFunctionsFromObject(new FileSystemManagementOps(fsPluginForCategory)))
                 .ToList();
             shellFunctions = PluginRegistry.GetFunctionsFromObject(shellPlugin!).ToList();
-            gitFunctions   = PluginRegistry.GetFunctionsFromObject(new GitPlugin()).ToList();
+            gitFunctions   = PluginRegistry.GetFunctionsFromObject(new GitPlugin(approveToolAction("Git"))).ToList();
             toolsByCategory["Search"]     = PluginRegistry.GetFunctionsFromObject(new SearchPlugin()).ToList();
             todoPlugin                    = new TodoPlugin();
             toolsByCategory["Todo"]       = PluginRegistry.GetFunctionsFromObject(todoPlugin).ToList();
@@ -351,7 +359,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionUndoSnapshots, sessionId, slug));
 
             if (enabled.Contains("Http"))
-                toolsByCategory["Http"] = PluginRegistry.GetFunctionsFromObject(new HttpPlugin()).ToList();
+                toolsByCategory["Http"] = PluginRegistry.GetFunctionsFromObject(new HttpPlugin(approveToolAction("Http"))).ToList();
 
             if (enabled.Contains("Extended") && fsFunctions is not null && shellFunctions is not null && gitFunctions is not null)
                 toolsByCategory["Extended"] = fsFunctions.Where(f => !CoreFileSystemTools.Contains(f.Name))

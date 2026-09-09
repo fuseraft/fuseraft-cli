@@ -198,11 +198,18 @@ public sealed class PluginRegistry : IDisposable
         FileVersionStore? fileVersionStore = null,
         SessionReadCache? sessionReadCache = null,
         Action? onCacheHit = null,
-        IEventSink? eventSink = null)
+        IEventSink? eventSink = null,
+        Func<string, string, string, Task<bool>>? toolActionApprover = null)
     {
         var sandboxRoot       = security.FileSystemSandboxPath;
         var allowedHosts      = security.HttpAllowedHosts is { Count: > 0 } h ? (IReadOnlyList<string>)h : null;
         var allowPrivateHosts = security.AllowPrivateHosts;
+
+        // Binds the 3-arg (plugin, action, detail) approver down to the 2-arg (action, detail)
+        // shape each plugin constructor expects — same role as ReplCommand.cs's
+        // approveToolAction closure, kept in parity here for `fuseraft run --hitl`.
+        Func<string, string, Task<bool>>? BindApprover(string plugin) =>
+            toolActionApprover is null ? null : (action, detail) => toolActionApprover(plugin, action, detail);
 
         // Create ShellPlugin once so FileSystemPlugin can reference its cache invalidator.
         // Both are registered as singletons — the factory lambda returns the same instance.
@@ -211,11 +218,12 @@ public sealed class PluginRegistry : IDisposable
 
         // Same eager-construction-plus-shared-closure pattern as RegisterDefaults — both
         // "FileSystem" registrations must share one FileSystemPlugin instance's per-turn state.
-        var fsPlugin = new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore, sessionCache: sessionReadCache, onWrite: shellInstance.InvalidateRunCache, onCacheHit: onCacheHit, exemptedPaths: ["~/.fuseraft/"]);
+        var fsPlugin = new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore, sessionCache: sessionReadCache, onWrite: shellInstance.InvalidateRunCache, onCacheHit: onCacheHit, exemptedPaths: ["~/.fuseraft/"], approveAction: BindApprover("FileSystem"));
         Register("FileSystem", () => fsPlugin);
         RegisterAdditional("FileSystem", () => new FileSystemManagementOps(
             fsPlugin, sandboxRoot, sessionCache: sessionReadCache, versionStore: fileVersionStore, exemptedPaths: ["~/.fuseraft/"]));
-        Register("Http",       () => new HttpPlugin(_sharedHttpClient, allowedHosts, apiProfiles, allowPrivateHosts, _loggerFactory?.CreateLogger<HttpPlugin>()));
+        Register("Git",        () => new GitPlugin(BindApprover("Git"), sandboxRoot));
+        Register("Http",       () => new HttpPlugin(_sharedHttpClient, allowedHosts, apiProfiles, allowPrivateHosts, _loggerFactory?.CreateLogger<HttpPlugin>(), BindApprover("Http")));
         Register("Document",   () => new DocumentPlugin(sandboxRoot));
 
         // Resolve against the same root FileSystemPlugin uses, so each artifact lands exactly

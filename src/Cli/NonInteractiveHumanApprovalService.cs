@@ -40,6 +40,8 @@ public sealed class NonInteractiveHumanApprovalService : IHumanApprovalService
 
     public Task<bool> PromptShellCommandAsync(string command) => Task.FromResult(true);
 
+    public Task<bool> PromptToolActionAsync(string plugin, string action, string detail) => Task.FromResult(true);
+
     public Task<string?> PromptPostSessionAsync() => Task.FromResult<string?>(null);
 
     public Task<string?> PromptPlanReviewAsync(string planText) => Task.FromResult<string?>(null);

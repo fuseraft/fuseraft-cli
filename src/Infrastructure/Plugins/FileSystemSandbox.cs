@@ -10,6 +10,11 @@ namespace fuseraft.Infrastructure.Plugins;
 /// former field reads as explicit parameters instead, so the two classes can share this logic
 /// without sharing an instance — only the per-turn <c>HashSet&lt;string&gt;</c>s passed into
 /// <see cref="InvalidatePathAsync"/> are shared by reference between them.
+///
+/// <see cref="ResolveSafeDirectory"/> is also shared by <see cref="ShellPlugin"/> (working
+/// directory) and <see cref="GitPlugin"/> (repo path) — despite the class name, it is the
+/// general-purpose "directory, not a file path" half of sandbox enforcement, kept here
+/// alongside <see cref="ResolveSafe"/> (the file-path half) rather than duplicated per plugin.
 /// </summary>
 internal static class FileSystemSandbox
 {
@@ -108,6 +113,36 @@ internal static class FileSystemSandbox
 
             return PluginResult.Denied($"Path '{resolved}' is outside the configured sandbox '{sandboxRoot}'.");
         }
+
+        return null;
+    }
+
+    // Validates that a directory argument (a shell working directory, a git repo path) stays
+    // within the sandbox. When a sandbox is active and no directory is specified, defaults to
+    // the sandbox root so commands never run in an uncontrolled directory. Unlike
+    // <see cref="ResolveSafe"/>, this never full-paths or checks the directory when no sandbox
+    // is configured — callers pass the argument straight through to a subprocess that resolves
+    // relative/null paths against its own working directory itself.
+    // Returns a [DENIED] error string on violation, null when safe.
+    internal static string? ResolveSafeDirectory(string? directory, string? sandboxRoot, out string? resolved)
+    {
+        if (sandboxRoot is null)
+        {
+            resolved = directory;
+            return null;
+        }
+
+        resolved = Path.GetFullPath(directory ?? sandboxRoot);
+
+        var sandboxPrefix = sandboxRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var resolvedCheck = resolved.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        if (!resolvedCheck.StartsWith(sandboxPrefix, comparison))
+            return PluginResult.Denied($"Directory '{resolved}' is outside the configured sandbox '{sandboxRoot}'.");
 
         return null;
     }

@@ -52,6 +52,17 @@ public interface IHumanApprovalService
     Task<bool> PromptShellCommandAsync(string command);
 
     /// <summary>
+    /// Called before a FileSystem, Git, or Http write/delete tool call executes in --hitl mode —
+    /// the same gate <see cref="PromptShellCommandAsync"/> provides for Shell, generalized to
+    /// the other mutating plugins. <paramref name="plugin"/> is the owning plugin name
+    /// ("FileSystem"/"Git"/"Http"), <paramref name="action"/> is the tool name (e.g.
+    /// "write_file", "git_push", "http_post"), and <paramref name="detail"/> is a short
+    /// human-readable target (a resolved path, a "src → dst" pair, or a URL).
+    /// Returns true to allow the call, false to block it (the plugin returns [DENIED]).
+    /// </summary>
+    Task<bool> PromptToolActionAsync(string plugin, string action, string detail);
+
+    /// <summary>
     /// Prompts the human operator to review a Magentic manager-generated plan.
     /// Called when <c>Selection.Magentic.EnablePlanReview</c> is true.
     /// Returns null to approve the plan as-is, or a non-empty string as revision feedback

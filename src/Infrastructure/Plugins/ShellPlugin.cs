@@ -773,28 +773,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     // When a sandbox is active and no directory is specified, defaults to the sandbox root
     // so commands never run in an uncontrolled directory.
     // Returns a [DENIED] error string on violation, null when safe.
-    private string? ValidateWorkingDirectory(string? workingDirectory, out string? resolved)
-    {
-        if (_sandboxRoot is null)
-        {
-            resolved = workingDirectory;
-            return null;
-        }
-
-        // Default to sandbox root when no directory is specified.
-        resolved = Path.GetFullPath(workingDirectory ?? _sandboxRoot);
-
-        var sandboxPrefix = _sandboxRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        var resolvedCheck = resolved.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-
-        if (!resolvedCheck.StartsWith(sandboxPrefix, comparison))
-            return PluginResult.Denied($"Working directory '{resolved}' is outside the configured sandbox '{_sandboxRoot}'.");
-
-        return null;
-    }
+    private string? ValidateWorkingDirectory(string? workingDirectory, out string? resolved) =>
+        FileSystemSandbox.ResolveSafeDirectory(workingDirectory, _sandboxRoot, out resolved);
 
 }

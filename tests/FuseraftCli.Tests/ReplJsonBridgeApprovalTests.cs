@@ -70,6 +70,32 @@ public sealed class ReplJsonBridgeApprovalTests
         Assert.False(allowed);
     }
 
+    [Fact]
+    public async Task PromptToolActionAsync_RelaysParsedApprovalFromStdin()
+    {
+        var pump = new ReplStdinPump(
+            new StringReader("""{"type":"approval_response","approved":true}""" + "\n"), () => null);
+        pump.Start();
+        var service = new JsonBridgeHumanApprovalService(pump);
+
+        var allowed = await service.PromptToolActionAsync("FileSystem", "write_file", "/tmp/scratch.txt");
+
+        Assert.True(allowed);
+    }
+
+    [Fact]
+    public async Task PromptToolActionAsync_DeniedResponse_ReturnsFalse()
+    {
+        var pump = new ReplStdinPump(
+            new StringReader("""{"type":"approval_response","approved":false}""" + "\n"), () => null);
+        pump.Start();
+        var service = new JsonBridgeHumanApprovalService(pump);
+
+        var allowed = await service.PromptToolActionAsync("Git", "git_push", "origin main");
+
+        Assert.False(allowed);
+    }
+
     // Regression coverage for the actual "Stop button doesn't work" bug: on Windows there's no
     // way to deliver a real SIGINT to a child process, so the extension sends the interrupt as an
     // in-band {"type":"interrupt"} stdin line instead. The old design only read stdin from inside

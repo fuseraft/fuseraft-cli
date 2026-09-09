@@ -30,6 +30,7 @@ internal sealed class FileSystemManagementOps
     private readonly HashSet<string> _writtenThisTurn;
     private readonly HashSet<string> _patchedThisTurn;
     private readonly UndoSnapshotStore _undoStore;
+    private readonly Func<string, string, Task<bool>>? _approveAction;
 
     internal FileSystemManagementOps(
         FileSystemPlugin owner,
@@ -50,6 +51,7 @@ internal sealed class FileSystemManagementOps
         _writtenThisTurn  = owner.WrittenThisTurnState;
         _patchedThisTurn  = owner.PatchedThisTurnState;
         _undoStore        = owner.UndoStore;
+        _approveAction    = owner.ApproveAction;
     }
 
     [Description("Search a file (grep). Cheaper than full read_file.")]
@@ -200,6 +202,9 @@ internal sealed class FileSystemManagementOps
         if (!File.Exists(resolved))
             return PluginResult.Info($"File does not exist: {resolved}");
 
+        if (_approveAction is not null && !await _approveAction("delete_file", resolved))
+            return PluginResult.Denied("File delete blocked by user.");
+
         await _undoStore.RecordBeforeMutationAsync(resolved);
         File.Delete(resolved);
         await FileSystemSandbox.InvalidatePathAsync(
@@ -274,7 +279,7 @@ internal sealed class FileSystemManagementOps
     }
 
     [Description("Set Unix file permissions (chmod). No-op on Windows.")]
-    public string SetPermissions(
+    public async Task<string> SetPermissionsAsync(
         [Description("File or directory path.")] string path,
         [Description("Octal mode, e.g. '755' or '644'.")] string mode)
     {
@@ -290,6 +295,9 @@ internal sealed class FileSystemManagementOps
         if (!File.Exists(resolved) && !Directory.Exists(resolved))
             return PluginResult.Error($"Path not found: {resolved}");
 
+        if (_approveAction is not null && !await _approveAction("set_permissions", $"{resolved} → {mode}"))
+            return PluginResult.Denied("Permission change blocked by user.");
+
         try
         {
             var unixMode = (UnixFileMode)Convert.ToInt32(mode, 8);
@@ -303,10 +311,13 @@ internal sealed class FileSystemManagementOps
     }
 
     [Description("Create a directory (including parents).")]
-    public string CreateDirectory([Description("Directory path.")] string path)
+    public async Task<string> CreateDirectoryAsync([Description("Directory path.")] string path)
     {
         var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
         if (denial is not null) return denial;
+
+        if (_approveAction is not null && !await _approveAction("create_directory", resolved))
+            return PluginResult.Denied("Directory creation blocked by user.");
 
         Directory.CreateDirectory(resolved);
         return PluginResult.Ok($"Directory ready: {resolved}");
@@ -332,6 +343,9 @@ internal sealed class FileSystemManagementOps
             if (string.Equals(sandboxCheck, resolvedCheck, comparison))
                 return PluginResult.Denied("Cannot delete the sandbox root directory.");
         }
+
+        if (_approveAction is not null && !await _approveAction("delete_directory", resolved))
+            return PluginResult.Denied("Directory delete blocked by user.");
 
         // Enumerate all contained files before deletion so their state can be invalidated
         // after the directory tree is gone.
@@ -364,6 +378,9 @@ internal sealed class FileSystemManagementOps
         if (!overwrite && File.Exists(resolvedDst))
             return PluginResult.Error($"Destination already exists: {resolvedDst}. Set overwrite=true to replace it.");
 
+        if (_approveAction is not null && !await _approveAction("copy_file", $"{resolvedSrc} → {resolvedDst}"))
+            return PluginResult.Denied("File copy blocked by user.");
+
         var dir = Path.GetDirectoryName(resolvedDst);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
@@ -388,6 +405,9 @@ internal sealed class FileSystemManagementOps
 
         var dstDenial = FileSystemSandbox.ResolveSafe(destination, _sandboxRoot, _exemptedPrefixes, out var resolvedDst);
         if (dstDenial is not null) return dstDenial;
+
+        if (_approveAction is not null && !await _approveAction("move_file", $"{resolvedSrc} → {resolvedDst}"))
+            return PluginResult.Denied("File move blocked by user.");
 
         if (Directory.Exists(resolvedSrc))
         {
@@ -498,6 +518,9 @@ internal sealed class FileSystemManagementOps
 
         var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
         if (denial is not null) return denial;
+
+        if (_approveAction is not null && !await _approveAction("save_file_summary", resolved))
+            return PluginResult.Denied("Summary save blocked by user.");
 
         Directory.CreateDirectory(_summaryDir);
         var summaryPath = FileSystemSandbox.SummaryPath(resolved, _summaryDir);
