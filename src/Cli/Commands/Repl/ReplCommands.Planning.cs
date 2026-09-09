@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using Spectre.Console;
+using fuseraft.Core;
 using fuseraft.Core.Models;
 
 namespace fuseraft.Cli.Commands.Repl;
@@ -160,6 +161,10 @@ internal static partial class ReplCommands
                 AnsiConsole.MarkupLine("[dim](cancelled)[/]");
             else if (errorReason == "empty")
                 AnsiConsole.MarkupLine("[yellow]Compaction returned empty output — history unchanged.[/]");
+            else if (errorReason == "nothing_to_compact")
+                AnsiConsole.MarkupLine("[dim]Nothing to compact — recent history already fits within the preserved window.[/]");
+            else if (errorReason == "not_smaller")
+                AnsiConsole.MarkupLine("[yellow]Compaction didn't shrink the history — keeping it as-is rather than risking lost context for no gain.[/]");
             else
                 AnsiConsole.MarkupLine($"[red]✗ Compaction failed:[/] {Markup.Escape(errorReason ?? "unknown error")}");
             return CommandResult.Continue;
@@ -177,10 +182,49 @@ internal static partial class ReplCommands
         return CommandResult.Continue;
     }
 
+    // Fraction of ctx.ContextTokenBudget kept verbatim as the most recent whole turn-groups
+    // (see FindPreserveTailStart) rather than folded into the LLM summary. Mirrors Cline's
+    // preserveRecentTokens (fixed 20k / 128k default budget ≈ 15.6%) scaled to fuseraft's
+    // per-model budget instead of a fixed token count. Exists specifically so a session that
+    // just made several tool calls doesn't have that work paraphrased away right when it's
+    // most likely to still matter — only what's older than the tail gets summarized.
+    private const double PreserveRecentTailRatio = 0.20;
+
+    private static int EstimateMessageListTokens(IEnumerable<ChatMessage> messages) =>
+        messages.Sum(m => TokenEstimator.EstimateTokens(m.Contents.Sum(AgentContextCompactionFilters.EstimateContentChars)));
+
+    // Returns the index in `history` where the verbatim "preserve recent" tail should begin —
+    // the start of a User-led turn group (mirrors ReplTurn.TrimHistory's grouping: a User
+    // message plus every following non-User message, so a tool call's FunctionCallContent is
+    // never separated from its FunctionResultContent, which providers reject). Walks backward
+    // from the end, accumulating whole groups until at least `preserveTokens` are covered —
+    // always keeps at least the single most recent group, even when preserveTokens is 0.
+    private static int FindPreserveTailStart(List<ChatMessage> history, int sysEnd, int preserveTokens)
+    {
+        var groupStarts = new List<int>();
+        for (int i = sysEnd; i < history.Count; i++)
+            if (history[i].Role == ChatRole.User) groupStarts.Add(i);
+
+        if (groupStarts.Count == 0) return history.Count;
+
+        int total = 0;
+        int keepFromGroup = groupStarts.Count;
+        for (int g = groupStarts.Count - 1; g >= 0; g--)
+        {
+            int groupEnd = g + 1 < groupStarts.Count ? groupStarts[g + 1] : history.Count;
+            for (int i = groupStarts[g]; i < groupEnd; i++)
+                total += TokenEstimator.EstimateTokens(history[i].Contents.Sum(AgentContextCompactionFilters.EstimateContentChars));
+            keepFromGroup = g;
+            if (total >= preserveTokens) break;
+        }
+        return groupStarts[keepFromGroup];
+    }
+
     /// <summary>
     /// Core compaction logic shared by the /compact command and the compact_context tool.
-    /// Generates a handoff summary via LLM, replaces ctx.History, and resets per-turn
-    /// metrics. Returns (success, errorReason, tokensBefore, tokensAfter).
+    /// Summarises everything older than a verbatim recent tail via LLM, replaces ctx.History
+    /// with [system?, summary, ...preserved tail], and resets per-turn metrics. Returns
+    /// (success, errorReason, tokensBefore, tokensAfter).
     /// </summary>
     internal static async Task<(bool Success, string? ErrorReason, int BeforeEst, int AfterEst)>
         CompactHistoryAsync(
@@ -188,6 +232,19 @@ internal static partial class ReplCommands
             string source = "manual")
     {
         var beforeEst = ctx.EstimateTokens();
+
+        var sys    = ctx.History.FirstOrDefault(m => m.Role == ChatRole.System);
+        int sysEnd = ctx.History.Count > 0 && ctx.History[0].Role == ChatRole.System ? 1 : 0;
+
+        var preserveTokens = (int)(ctx.ContextTokenBudget * PreserveRecentTailRatio);
+        var tailStart       = FindPreserveTailStart(ctx.History, sysEnd, preserveTokens);
+        var toSummarize     = ctx.History.Skip(sysEnd).Take(tailStart - sysEnd).ToList();
+        var preservedTail   = ctx.History.Skip(tailStart).ToList();
+
+        // Recent history alone already fits the preserved window — nothing old enough to
+        // fold into a summary, so don't spend an LLM call summarising nothing.
+        if (toSummarize.Count == 0) return (false, "nothing_to_compact", beforeEst, beforeEst);
+
         var focusNote = string.IsNullOrWhiteSpace(focus) ? string.Empty : $"\n\nFocus for the next session: {focus}";
         var compactionPrompt =
             "Write a concise handoff document summarising this conversation so a fresh session can continue the work. " +
@@ -201,14 +258,18 @@ internal static partial class ReplCommands
             "Facts confirmed by actual tool output are verified and should be stated normally." +
             focusNote;
 
-        var messages = new List<ChatMessage>(ctx.History) { new ChatMessage(ChatRole.User, compactionPrompt) };
+        var messages = new List<ChatMessage>(toSummarize) { new ChatMessage(ChatRole.User, compactionPrompt) };
 
         string summary;
         try
         {
-            var mc       = ctx.Factory.Create(ctx.ModelConfig);
-            using var _  = mc as IDisposable;
-            var response = await mc.GetResponseAsync(messages, cancellationToken: cancellationToken);
+            // Route through ctx.Client rather than a bare ctx.Factory.Create client: this call
+            // fires exactly when history is largest (75%+ of budget, or a forced post-overflow
+            // recovery), so it needs the same AgentMiddlewareBuilder adaptive-trim-and-retry
+            // protection normal turns get. No ChatOptions/tools are passed, so the wrapped
+            // FunctionInvokingChatClient just runs a single pass-through round — it never invokes
+            // a tool mid-summarization.
+            var response = await ctx.Client.GetResponseAsync(messages, cancellationToken: cancellationToken);
             summary      = response.Text ?? string.Empty;
         }
         catch (OperationCanceledException) { return (false, "cancelled", 0, 0); }
@@ -216,10 +277,22 @@ internal static partial class ReplCommands
 
         if (string.IsNullOrWhiteSpace(summary)) return (false, "empty", 0, 0);
 
-        var sys = ctx.History.FirstOrDefault(m => m.Role == ChatRole.System);
+        var candidate = new List<ChatMessage>();
+        if (sys is not null) candidate.Add(sys);
+        candidate.Add(new ChatMessage(ChatRole.User, $"[Compacted context from previous session]\n\n{summary}"));
+        candidate.AddRange(preservedTail);
+
+        // Acceptance bar (mirrors Cline's overflow-recovery contract): a compaction that
+        // doesn't actually shrink the history isn't worth the fidelity loss + LLM round-trip
+        // it cost — reject it and leave ctx.History untouched rather than silently accepting
+        // a "compaction" that made things worse or no better.
+        var afterMsgTokens  = EstimateMessageListTokens(candidate);
+        var beforeMsgTokens = EstimateMessageListTokens(ctx.History);
+        if (afterMsgTokens >= beforeMsgTokens)
+            return (false, "not_smaller", beforeEst, afterMsgTokens);
+
         ctx.History.Clear();
-        if (sys is not null) ctx.History.Add(sys);
-        ctx.History.Add(new ChatMessage(ChatRole.User, $"[Compacted context from previous session]\n\n{summary}"));
+        ctx.History.AddRange(candidate);
 
         ctx.PrevTurnTokenEstimate = 0;
         ctx.PrevCtxEstimate       = 0;
