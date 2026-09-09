@@ -1135,7 +1135,7 @@ internal static class ReplTurn
                     if (callIdToName is not null && funcCall.CallId is not null)
                         callIdToName[funcCall.CallId] = funcCall.Name;
 
-                    var callSignature = ToolCallSignature(funcCall.Arguments);
+                    var callSignature = ToolCallSignature.Compute(funcCall.Arguments);
                     consecutiveIdenticalToolCalls =
                         funcCall.Name == lastToolCallName && callSignature == lastToolCallSignature
                             ? consecutiveIdenticalToolCalls + 1 : 1;
@@ -1544,23 +1544,6 @@ internal static class ReplTurn
         if (funcResult.Exception is not null) return true;
         var text = funcResult.Result?.ToString();
         return text is not null && ToolFailurePrefixes.Any(p => text.StartsWith(p, StringComparison.Ordinal));
-    }
-
-    // Stable signature for MaxConsecutiveIdenticalToolCalls comparison — sorted so the model
-    // varying key order between two otherwise-identical calls doesn't defeat detection. Tool
-    // name is compared separately by the caller, so this covers arguments only. Also reused by
-    // ReplToolLoopGuard (same comparison, different layer — see SoftRepeatedToolCallThreshold).
-    internal static string ToolCallSignature(IDictionary<string, object?>? args)
-    {
-        if (args is null || args.Count == 0) return string.Empty;
-        var sb = new StringBuilder();
-        foreach (var key in args.Keys.OrderBy(k => k, StringComparer.Ordinal))
-        {
-            var value = args[key];
-            var s = value is JsonElement je ? je.ToString() : value?.ToString() ?? "null";
-            sb.Append(key).Append('=').Append(s).Append(';');
-        }
-        return sb.ToString();
     }
 
     private static string? GetArg(IDictionary<string, object?>? args, string key)

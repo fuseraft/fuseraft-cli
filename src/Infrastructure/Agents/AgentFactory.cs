@@ -263,7 +263,11 @@ public sealed class AgentFactory(
             emitter: eventEmitter);
 
         // Pre-configure FunctionInvokingChatClient and wrap the skills context provider.
-        var agentChatClient = AgentMiddlewareBuilder.BuildEventEmitMiddleware(effectiveClient, config, skillsProvider);
+        // AgentToolLoopGuard guards against a model looping on the exact same tool call forever —
+        // see its own doc comment for why this needs FunctionInvoker specifically.
+        var agentChatClient = AgentMiddlewareBuilder.BuildEventEmitMiddleware(
+            effectiveClient, config, skillsProvider,
+            new AgentToolLoopGuard(config.Name, eventEmitter).InvokeAsync);
 
         // Construct the base ChatClientAgent with tools and chat options.
         ChatClientAgent baseAgent = new(
