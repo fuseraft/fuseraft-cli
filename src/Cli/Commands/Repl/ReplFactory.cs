@@ -72,7 +72,18 @@ internal static class ReplFactory
                 toolSchemaChars: 0, maxPayloadBytes: resolved.MaxPayloadBytes,
                 hasHandoff: false, emitter: emitter);
 
-            client = AgentMiddlewareBuilder.BuildEventEmitMiddleware(client, agentConfig, skillsProvider: null);
+            // ReplToolLoopGuard's soft repeated-call nudge only makes sense for free-form turns
+            // (isStepRequest: false) — StepIterationLimit (5) already bounds a step turn tightly
+            // enough that the extra mechanism isn't worth the complexity there. maxIterations
+            // still carries that distinction here (ChatIterationLimit for free-form vs.
+            // StepIterationLimit for steps — see ReplTurn.ChatIterationLimit's own comment on
+            // why this parameter and that constant can't drift apart).
+            Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>? functionInvoker =
+                maxIterations == ReplTurn.ChatIterationLimit
+                    ? new ReplToolLoopGuard().InvokeAsync
+                    : null;
+            client = AgentMiddlewareBuilder.BuildEventEmitMiddleware(
+                client, agentConfig, skillsProvider: null, functionInvoker);
         }
         return client;
     }

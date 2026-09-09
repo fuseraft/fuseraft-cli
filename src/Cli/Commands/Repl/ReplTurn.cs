@@ -75,6 +75,17 @@ internal static class ReplTurn
     // earlier soft-warning point available to hook into.
     internal const int MaxConsecutiveIdenticalToolCalls = 5;
 
+    // Soft counterpart to MaxConsecutiveIdenticalToolCalls, mirroring Cline's
+    // LoopDetectionTracker softThreshold exactly (3). Unlike the hard cutoff above, this one
+    // *is* implementable as a genuine mid-turn nudge — see ReplToolLoopGuard, which uses
+    // FunctionInvokingChatClient.FunctionInvoker (verified empirically: appending to
+    // FunctionInvocationContext.Messages directly lands the nudge *between* a tool_use and its
+    // own tool_result, which providers requiring strict adjacency — e.g. Anthropic — reject;
+    // the safe seam is embedding the nudge text in the returned result itself, in the same
+    // tool-result message). Only ReplFactory's free-form client (ctx.Client) gets this guard —
+    // step turns keep their existing StepIterationLimit-bounded handling unchanged.
+    internal const int SoftRepeatedToolCallThreshold = 3;
+
     // Maximum times a transient streaming error (ResponseEnded, IOException, TimeoutException)
     // is retried automatically before surfacing the failure to the user.
     private const int MaxStreamRetries = 2;
@@ -1537,8 +1548,9 @@ internal static class ReplTurn
 
     // Stable signature for MaxConsecutiveIdenticalToolCalls comparison — sorted so the model
     // varying key order between two otherwise-identical calls doesn't defeat detection. Tool
-    // name is compared separately by the caller, so this covers arguments only.
-    private static string ToolCallSignature(IDictionary<string, object?>? args)
+    // name is compared separately by the caller, so this covers arguments only. Also reused by
+    // ReplToolLoopGuard (same comparison, different layer — see SoftRepeatedToolCallThreshold).
+    internal static string ToolCallSignature(IDictionary<string, object?>? args)
     {
         if (args is null || args.Count == 0) return string.Empty;
         var sb = new StringBuilder();
