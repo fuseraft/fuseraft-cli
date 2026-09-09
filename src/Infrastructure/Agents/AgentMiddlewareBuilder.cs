@@ -254,10 +254,17 @@ internal sealed class AgentMiddlewareBuilder(
     /// <see cref="AgentSkillsProvider"/> is present, an outer AIContextProvider layer so
     /// skill tools are visible to the function-invoker.
     /// </summary>
+    /// <param name="functionInvoker">
+    /// Optional override for <see cref="FunctionInvokingChatClient.FunctionInvoker"/> — lets a
+    /// caller observe/short-circuit each tool invocation (see <c>ReplToolLoopGuard</c>, the only
+    /// current user). Null (the default, and the only value orchestration agents pass) leaves
+    /// the framework's own invocation path untouched.
+    /// </param>
     public static IChatClient BuildEventEmitMiddleware(
         IChatClient effectiveClient,
         AgentConfig config,
-        AgentSkillsProvider? skillsProvider)
+        AgentSkillsProvider? skillsProvider,
+        Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>? functionInvoker = null)
     {
         // Pre-configure FunctionInvokingChatClient so ChatClientAgent reuses our instance
         // (it only adds its own when none is present in the pipeline). This lets us set
@@ -266,7 +273,11 @@ internal sealed class AgentMiddlewareBuilder(
         var maxIterations = config.MaxToolCallsPerTurn > 0 ? config.MaxToolCallsPerTurn : 40;
         var functionInvokingClient = effectiveClient
             .AsBuilder()
-            .UseFunctionInvocation(configure: c => c.MaximumIterationsPerRequest = maxIterations)
+            .UseFunctionInvocation(configure: c =>
+            {
+                c.MaximumIterationsPerRequest = maxIterations;
+                if (functionInvoker is not null) c.FunctionInvoker = functionInvoker;
+            })
             .Build();
 
         // Skills context provider wraps outside the function-invoker so that skill tools
