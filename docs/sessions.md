@@ -128,9 +128,9 @@ REPL agents can inspect their own session and diagnostic logs using the built-in
 | `turn_end` | Model finishes a turn — payload: `elapsed_ms`, `estimated_tokens`, `tool_rounds`, `tool_count`, `is_step`, `is_correction` |
 | `assistant_response` | Final assistant message for the turn |
 | `tool_call` | Each individual tool invocation |
-| `compaction` | Context compacted (via `/compact` or `compact_context` tool) — payload: `before_tokens`, `after_tokens`, `source`, `focus` |
+| `compaction` | Context compacted (manual `/compact`, `compact_context` tool, or automatic 75% trigger) — payload: `before_tokens`, `after_tokens`, `source`, `focus` |
 | `cancelled` | Turn cancelled by Ctrl+C |
-| `context_warning` | Context exceeds 75% of the 80k token budget — payload: `estimated_tokens`, `budget`, `pct` |
+| `context_warning` | Context exceeds 75% of the 80k token budget — payload: `estimated_tokens`, `is_actual`, `budget`, `pct`, `auto_compact` |
 | `repl_warning` | Non-fatal issue with a turn's response — payload: `message` (`empty_response`, `invalid_response_content`, `hit_iteration_cap`, or `hit_consecutive_failure_limit`), plus `tool_rounds`/`limit` for `hit_iteration_cap` or `failures`/`last_tool` for `hit_consecutive_failure_limit` |
 | `correction_injected` | Harness injects a write-tool correction after a mutation claim without a backing tool call — payload: `reason` |
 | `plan_captured` | `/plan` stores a new step plan — payload: `step_count` |

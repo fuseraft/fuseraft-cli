@@ -418,7 +418,7 @@ Use `/tools` to see the full list at runtime.
 | `/rewind <n>` | Keep turns 1…n and discard all later turns. Turn count is the number of User messages currently in memory. Clamps safely — passing a number larger than the current turn count is a no-op. |
 | `/rewind -<n>` | Step back n turns from the current position (relative rewind). `/rewind -1` drops the last turn; `/rewind -99` clamps to 0 and clears all turns. |
 | `/clear` | Clear conversation history (system prompt is kept). Also clears the terminal and redraws the startup banner, unless `--no-banner` was passed at launch (in which case it just prints a confirmation line). |
-| `/compact` | Ask the model to summarise the session into a handoff document, then replace history with that summary. The system prompt and tools/skills catalog are kept; everything else is discarded. Facts the assistant stated without a backing tool call are tombstoned as `[UNVERIFIED ASSUMPTION: ...]` rather than carried forward as established facts. Use this when context is filling up but you want to continue in the same session. |
+| `/compact` | Ask the model to summarise everything older than a recent verbatim tail into a handoff document, then replace history with `[system, summary, ...recent turns]`. The system prompt, tools/skills catalog, and the most recent turns (~20% of the context budget, kept as whole turn-groups) are preserved as-is; only the older portion is folded into the summary. Declines with a message rather than mutating history if there's nothing old enough to summarise, or if the result wouldn't actually be smaller. Facts the assistant stated without a backing tool call are tombstoned as `[UNVERIFIED ASSUMPTION: ...]` rather than carried forward as established facts. Use this when context is filling up but you want to continue in the same session. The same logic fires automatically at 75% of the context budget unless disabled — see "Compacting a session" below. |
 | `/compact <focus>` | Same as `/compact`, but passes a focus hint to the model so the summary is tailored toward the next task (e.g. `/compact fix the auth bug next`) |
 | `/history` | Show a condensed view of the conversation (role + preview of each message) |
 | `/system` | Print the current system prompt |
@@ -909,11 +909,15 @@ If the agent still does not call a write tool on the correction turn, a warning 
 
 **Compacting a session**
 
-As a conversation grows, token usage climbs and the model's effective context window shrinks. Use `/compact` to reset history without losing continuity:
+As a conversation grows, token usage climbs and the model's effective context window shrinks. Use `/compact` to reset history without losing continuity — or let it happen automatically:
 
-1. The model summarises the entire conversation into a handoff document — what was being worked on, key decisions, current state, and what comes next.
-2. The full history is discarded and replaced with that single summary message. The system prompt, tools, and skills catalog are kept intact.
-3. The session continues as if it had just started, but with the summary as its opening context.
+1. Everything older than a recent verbatim tail (~20% of the context budget, kept as whole turn-groups so a tool call is never separated from its result) is summarised into a handoff document — what was being worked on, key decisions, current state, and what comes next.
+2. History is replaced with `[system, summary, ...recent turns]`. The recent turns survive exactly as they happened — not paraphrased — so tool-call detail from the last few turns isn't lost. The system prompt, tools, and skills catalog are kept intact too.
+3. The session continues with the summary plus the preserved tail as its opening context.
+
+Two safeguards protect against a compaction that would do more harm than good: if recent history alone already fits inside the preserved window, there's nothing old enough to summarise and compaction declines rather than spending an LLM call on nothing; if the summarizer's result isn't actually smaller than what it replaced, compaction is rejected outright and history is left completely untouched.
+
+**Automatic compaction:** the same logic fires on its own once context usage crosses 75% of the budget, so a long session doesn't have to be babysat with manual `/compact` calls. Disable it with `fuseraft settings set repl.autoCompact false` — at 75% full you'll then just see a warning suggesting `/compact` instead.
 
 **Unverified assumption tombstoning**
 
@@ -952,9 +956,9 @@ Every session appends structured JSONL events to its own `~/.fuseraft/logs/{proj
 | `turn_end` | Model finishes a turn — includes `elapsed_ms`, `estimated_tokens`, `tool_rounds`, `tool_count` |
 | `assistant_response` | Final assistant message for a turn |
 | `tool_call` | Each individual tool invocation |
-| `compaction` | `/compact` or `compact_context` fires — includes `before_tokens`, `after_tokens`, `source`, `focus` |
+| `compaction` | Compaction actually applied — manual `/compact`, `compact_context` tool, or automatic 75% trigger — includes `before_tokens`, `after_tokens`, `source`, `focus` |
 | `cancelled` | Turn cancelled by Ctrl+C |
-| `context_warning` | Context window exceeds 75% of the 80k token budget — includes `estimated_tokens`, `budget`, `pct` |
+| `context_warning` | Context window exceeds 75% of the 80k token budget — includes `estimated_tokens`, `is_actual`, `budget`, `pct`, `auto_compact` |
 | `correction_injected` | Harness injects a write-tool correction after a mutation claim with no tool call |
 | `plan_captured` | `/plan` stores a new plan — includes `step_count` |
 | `step_complete` | `/execute` step passes postconditions — includes `step`, `total`, `steps_left` |
@@ -2460,6 +2464,7 @@ Sets one field by a dotted, case-insensitive key. Loads the existing config (or 
 | `sampling.seed` | Integer, or `""` to clear |
 | `sampling.maxOutputTokens` | Integer, or `""` to clear |
 | `repl.contextBudget` | Token budget override, or `""` to clear |
+| `repl.autoCompact` | `true`/`false` — auto-compact at 75% context instead of only warning (default `true`) |
 | `repl.noBanner` | `true`/`false` |
 | `repl.verbose` | `true`/`false` |
 | `repl.safeMode` | `true`/`false` — engage `/safe-mode` at startup |
