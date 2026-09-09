@@ -1238,7 +1238,16 @@ internal static class ReplTurn
                     if (isRoundBoundary) pendingParagraphBreak = true;
                     continue;
                 }
-                if (pendingParagraphBreak && sb.Length > 0)
+                // Held off while sb currently ends inside an unclosed **bold** span (odd
+                // count of ** markers) — e.g. a round that finishes right as the model
+                // opens a "**" for a section header, with the matching close arriving in
+                // the next round's first chunk. Injecting the blank line there would split
+                // the pair across it, and fuseraft-vscode's per-block markdown renderer
+                // can't heal a bold span that crosses a paragraph gap (each block is parsed
+                // independently, so both "**" delimiters render as literal asterisks).
+                // pendingParagraphBreak stays armed and is retried on the next chunk, once
+                // the span closes — a delayed separator beats a corrupted one.
+                if (pendingParagraphBreak && sb.Length > 0 && !HasOpenBoldSpan(sb))
                 {
                     text = "\n\n" + text;
                     pendingParagraphBreak = false;
@@ -1560,6 +1569,24 @@ internal static class ReplTurn
         if (funcResult.Exception is not null) return true;
         var text = funcResult.Result?.ToString();
         return text is not null && ToolFailurePrefixes.Any(p => text.StartsWith(p, StringComparison.Ordinal));
+    }
+
+    // True when the turn's accumulated text so far ends inside an unclosed **bold**
+    // span (an odd number of "**" markers). Only called right before a round-boundary
+    // paragraph break would be inserted, so the occasional full-buffer scan is cheap —
+    // it happens once per round, not once per streamed chunk.
+    private static bool HasOpenBoldSpan(StringBuilder sb)
+    {
+        var count = 0;
+        for (var i = 0; i + 1 < sb.Length; i++)
+        {
+            if (sb[i] == '*' && sb[i + 1] == '*')
+            {
+                count++;
+                i++; // skip the second '*' so "***" counts as one pair, not two overlapping ones
+            }
+        }
+        return count % 2 == 1;
     }
 
     private static string? GetArg(IDictionary<string, object?>? args, string key)
