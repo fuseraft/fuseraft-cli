@@ -300,6 +300,7 @@ fuseraft repl [options]
 | `--no-tools` | off | Disable all built-in tools and start a plain chat session. |
 | `--verbose` | off | Enable debug logging: prints per-turn detail (token estimate, tool-round count, total tool calls) and shows the event log path at startup. Persist as the default with `fuseraft settings set repl.verbose true`. |
 | `--vscode` | off | VS Code mode. When stdin is also redirected (the process is spawned by the fuseraft VS Code extension's REPL panel), switches to JSON bridge mode: all output is emitted as JSONL events to stdout and input is read as JSONL from stdin. In this mode the ASCII banner, ANSI prompts, spinner, and status lines are suppressed; the API key is read from `FUSERAFT_API_KEY` instead of the OS keychain. Automatically passed by the extension — not intended for manual use. |
+| `--yolo` | off | Skip the REPL's default safety gates: HITL approval is off instead of on, FileSystem/Shell/Git are not sandboxed to the launch directory, and any `repl.safeMode` default from `fuseraft settings` is ignored. Restores the fully-open behavior for trusted, unattended sessions. Prints a warning banner when active. |
 
 A `repl.*` default from `fuseraft settings` only ever *adds* to what a flag for this invocation already requests — e.g. `repl.noBanner: true` can't be un-set from the command line; there's no `--banner` flag to force it back on for one run.
 
@@ -569,9 +570,11 @@ Action allowed.
 - **y / yes** — the call runs normally
 - **Enter / anything else** — the call is blocked; the agent receives `[DENIED]` and can try an alternative or ask what to do
 
-HITL mode is off by default and toggles instantly — no need to restart the session or wait for the next tool-schema rebuild. Unlike `--hitl` in `fuseraft run`, the REPL's `/hitl` has no "pause after every turn" behavior, since the REPL is already interactive turn-by-turn. Read-only tools (`read_file`, `git_status`, `http_get`, …) are never gated; use `/safe-mode` to disable whole categories outright, or `/tools restrict` below for a finer-grained lock.
+HITL mode is **on by default** and toggles instantly — no need to restart the session or wait for the next tool-schema rebuild. `/hitl off` disables it for the rest of the session, or launch with `--yolo` to start with it already off. Unlike `--hitl` in `fuseraft run`, the REPL's `/hitl` has no "pause after every turn" behavior, since the REPL is already interactive turn-by-turn. Read-only tools (`read_file`, `git_status`, `http_get`, …) are never gated; use `/safe-mode` to disable whole categories outright, or `/tools restrict` below for a finer-grained lock.
 
-Safe mode is off by default; engage it on every REPL launch with `fuseraft settings set repl.safeMode true` (skipped in VS Code/JSON-bridge mode) instead of typing `/safe-mode on` each session.
+The REPL also sandboxes FileSystem/Shell/Git to the launch directory by default — a path outside it is rejected before the approval prompt even fires. `--yolo` removes this sandbox too.
+
+Safe mode itself (`/safe-mode`, distinct from HITL) is off by default; engage it on every REPL launch with `fuseraft settings set repl.safeMode true` (skipped in VS Code/JSON-bridge mode, and skipped under `--yolo`) instead of typing `/safe-mode on` each session.
 
 **Capability restriction (`/tools restrict`)**
 

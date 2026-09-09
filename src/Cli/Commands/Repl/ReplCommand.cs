@@ -55,6 +55,10 @@ public sealed class ReplSettings : CommandSettings
     [Description("Run in VS Code webview mode (JSON bridge over stdio). Set globally by Program.cs pre-parse; declared here so Spectre does not reject it as an unknown flag.")]
     public bool VsCode { get; set; }
 
+    [CommandOption("--yolo")]
+    [Description("Skip the default safety gates: no /hitl approval prompts and no filesystem/shell/git sandbox. Restores fully-open behavior for trusted, unattended sessions.")]
+    public bool Yolo { get; set; }
+
     internal IReadOnlySet<string> EnabledPlugins =>
         Plugins is null
             ? (IReadOnlySet<string>)new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -225,8 +229,9 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
         var toolsByCategory = new Dictionary<string, List<AIFunction>>(StringComparer.OrdinalIgnoreCase);
 
-        // HITL (human-in-the-loop) mode — off by default, toggled at runtime via /hitl. Reuses
-        // the same IHumanApprovalService.PromptShellCommandAsync/PromptToolActionAsync y/N gates
+        // HITL (human-in-the-loop) mode — on by default (safe-by-default), toggled at runtime
+        // via /hitl, or skipped entirely with --yolo for trusted/unattended sessions. Reuses the
+        // same IHumanApprovalService.PromptShellCommandAsync/PromptToolActionAsync y/N gates
         // `fuseraft run --hitl` wires into ShellPlugin/FileSystemPlugin/GitPlugin/HttpPlugin
         // (OrchestratorBuilder.ResolveSecurityConfig), just made toggleable mid-session: the
         // closures below are each plugin's only construction opportunity, so they read hitlState
@@ -234,7 +239,16 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // webview), the console-based prompt would write to stdout the extension can't parse and
         // block on a stdin reply it can never send — use the JSON-bridge approval service
         // instead so the webview can render and answer it.
-        var hitlState = new HitlModeState();
+        var hitlState = new HitlModeState { Enabled = !settings.Yolo };
+
+        // Sandbox root for FileSystem/Shell/Git — confines those plugins' filesystem/repo access
+        // to the launch directory by default, same as --yolo skips HITL. null (via --yolo) means
+        // fully unconstrained, matching pre-safety-default behavior.
+        string? sandboxRoot = settings.Yolo ? null : Directory.GetCurrentDirectory();
+
+        if (!jsonMode && settings.Yolo)
+            AnsiConsole.MarkupLine(
+                "[yellow]⚠ --yolo:[/] [dim]no /hitl approval prompts, no filesystem/shell/git sandbox — full unattended access enabled.[/]");
         // ctxForStdin is assigned once `ctx` exists below — captured by reference so the pump's
         // cancel callback always reaches the live session, even though the pump itself (and the
         // approval service that shares it) must be constructed before `ctx` is.
@@ -246,6 +260,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             ? new JsonBridgeHumanApprovalService(stdinPump!)
             : new ConsoleHumanApprovalService();
         using ShellPlugin? shellPlugin  = settings.NoTools ? null : new ShellPlugin(
+            sandboxRoot:    sandboxRoot,
             shellPolicy:    TryLoadDefaultShellPolicy(),
             approveCommand: cmd => hitlState.Enabled ? approvalService.PromptShellCommandAsync(cmd) : Task.FromResult(true));
 
@@ -268,12 +283,12 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         List<AIFunction>? gitFunctions   = null;
         if (!settings.NoTools)
         {
-            fsPluginForCategory = new FileSystemPlugin(approveAction: approveToolAction("FileSystem"));
+            fsPluginForCategory = new FileSystemPlugin(sandboxRoot: sandboxRoot, approveAction: approveToolAction("FileSystem"));
             fsFunctions    = PluginRegistry.GetFunctionsFromObject(fsPluginForCategory)
                 .Concat(PluginRegistry.GetFunctionsFromObject(new FileSystemManagementOps(fsPluginForCategory)))
                 .ToList();
             shellFunctions = PluginRegistry.GetFunctionsFromObject(shellPlugin!).ToList();
-            gitFunctions   = PluginRegistry.GetFunctionsFromObject(new GitPlugin(approveToolAction("Git"))).ToList();
+            gitFunctions   = PluginRegistry.GetFunctionsFromObject(new GitPlugin(approveToolAction("Git"), sandboxRoot)).ToList();
             toolsByCategory["Search"]     = PluginRegistry.GetFunctionsFromObject(new SearchPlugin()).ToList();
             todoPlugin                    = new TodoPlugin();
             toolsByCategory["Todo"]       = PluginRegistry.GetFunctionsFromObject(todoPlugin).ToList();
@@ -472,6 +487,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             tools_enabled = !settings.NoTools,
             tool_count    = initialTools.Count,
             resumed       = snapshot is not null,
+            yolo          = settings.Yolo,
+            hitl_default  = hitlState.Enabled,
         });
 
         var memoryStore   = MemoryStore.ForRepl();
@@ -525,7 +542,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // A persisted safe-mode default engages the real category-disable logic (not just the
         // bool) so it actually blocks Shell/Git/Http like a manual `/safe-mode on` would.
         // Skipped in the VS Code webview bridge, matching how NoBanner is jsonMode-gated above.
-        if (!jsonMode && userCfg?.Repl?.SafeModeDefault == true)
+        if (!jsonMode && !settings.Yolo && userCfg?.Repl?.SafeModeDefault == true)
             await ReplCommands.CmdSafeModeAsync(ctx, "on");
 
         if (!settings.NoTools)
