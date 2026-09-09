@@ -43,11 +43,12 @@ public static class EventTypes
     public const string ParallelBranchError  = "parallel_branch_error";
 
     // ── Tool use ─────────────────────────────────────────────────────────────
-    public const string ToolCall    = "tool_call";
-    public const string ToolBlocked = "tool_blocked";
-    public const string ToolResult  = "tool_result";
-    public const string ToolError   = "tool_error";
-    public const string ToolTimeout = "tool_timeout";
+    public const string ToolCall        = "tool_call";
+    public const string ToolBlocked     = "tool_blocked";
+    public const string ToolResult      = "tool_result";
+    public const string ToolError       = "tool_error";
+    public const string ToolTimeout     = "tool_timeout";
+    public const string ToolLoopWarning = "tool_loop_warning";
 
     // ── Validation / governance ──────────────────────────────────────────────
     public const string ValidationFail       = "validation_fail";

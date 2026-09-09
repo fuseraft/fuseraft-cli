@@ -425,8 +425,15 @@ public sealed class SubAgentPlugin(
                 getStreamingResponseFunc: StreamWithInTurnTrimAsync)
             .Build();
 
+        // AgentToolLoopGuard guards against a model looping on the exact same tool call forever —
+        // see its own doc comment for why this needs FunctionInvoker specifically.
+        var loopGuard  = new AgentToolLoopGuard(parentAgentName, eventEmitter);
         var loopClient = trimmedClient.AsBuilder()
-            .UseFunctionInvocation(configure: c => c.MaximumIterationsPerRequest = maxIterations)
+            .UseFunctionInvocation(configure: c =>
+            {
+                c.MaximumIterationsPerRequest = maxIterations;
+                c.FunctionInvoker = loopGuard.InvokeAsync;
+            })
             .Build();
 
         var options = new ChatOptions

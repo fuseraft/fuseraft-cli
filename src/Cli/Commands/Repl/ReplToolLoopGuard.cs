@@ -42,7 +42,7 @@ internal sealed class ReplToolLoopGuard
             _consecutiveIdentical  = 0;
         }
 
-        var signature = $"{context.CallContent.Name}|{ReplTurn.ToolCallSignature(context.Arguments)}";
+        var signature = $"{context.CallContent.Name}|{ToolCallSignature.Compute(context.Arguments)}";
         _consecutiveIdentical = signature == _lastCallSignature ? _consecutiveIdentical + 1 : 1;
         _lastCallSignature    = signature;
 
