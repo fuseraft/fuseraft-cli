@@ -123,4 +123,51 @@ public sealed class ReplAdaptiveTrimForcedCompactionTests : IDisposable
         Assert.True(ok);
         Assert.False(ctx.AdaptiveTrimTracker.ConsumeTrim(ReplFactory.ReplAgentName));
     }
+
+    /// <summary>
+    /// Regression test for a double-compaction bug: the 75 %-full check and the adaptive-trim-
+    /// forced check are independent conditions evaluated back to back in
+    /// <see cref="ReplTurn.ExecuteAsync"/>, and both can legitimately be true on the same turn
+    /// (a turn that pushes cumulative context past 75 % is very often the same turn whose own
+    /// provider call needed adaptive trimming). Before the fix, both branches called
+    /// <c>ReplCommands.CompactHistoryAsync</c> unconditionally, so the second call re-summarized
+    /// the summary the first one had just produced — a wasted LLM round-trip. This pins that only
+    /// one compaction runs, while the adaptive-trim flag is still consumed so it can't leak into
+    /// a later turn.
+    /// </summary>
+    [Fact]
+    public async Task TurnWithBothTriggers_CompactsOnlyOnce()
+    {
+        var ctx = NewContext();
+
+        // Force the 75 %-full check to fire via the char-based estimate: ctx.LastActualContextTokens
+        // gets overwritten from the (unset) stream usage before the check runs, so the estimate has
+        // to come from ctx.History itself. Pad with 10 synthetic prior turn-groups (~12,500 est.
+        // tokens each ⇒ ~125,000 total, well past 75% of the 80,000-token default budget) rather
+        // than one giant pair: CompactHistoryAsync's preserve-recent-tail logic keeps whole turn-
+        // groups verbatim, and with only one giant group the entire history would land inside the
+        // preserved tail, leaving nothing old enough to summarize (compaction would legitimately
+        // no-op). Many smaller groups guarantees a real old/recent split, same as production.
+        for (int i = 0; i < 10; i++)
+        {
+            ctx.History.Add(new ChatMessage(ChatRole.User, new string('a', 25_000)));
+            ctx.History.Add(new ChatMessage(ChatRole.Assistant, new string('b', 25_000)));
+        }
+
+        // Simulate this turn's own provider call also needing adaptive trim to survive.
+        ctx.AdaptiveTrimTracker.RecordTrim(ReplFactory.ReplAgentName);
+
+        var ok = await ReplTurn.ExecuteAsync(
+            ctx, "hello", isStepRequest: false, capturePlan: false, activeStep: null, CancellationToken.None);
+
+        Assert.True(ok);
+
+        // Flag must have been consumed (not left dangling for a future turn) even though the
+        // forced-compaction branch skipped its own call.
+        Assert.False(ctx.AdaptiveTrimTracker.ConsumeTrim(ReplFactory.ReplAgentName));
+
+        var events = await File.ReadAllLinesAsync(ctx.EventsPath);
+        var compactionCount = events.Count(l => l.Contains("\"event_type\":\"compaction\""));
+        Assert.Equal(1, compactionCount);
+    }
 }

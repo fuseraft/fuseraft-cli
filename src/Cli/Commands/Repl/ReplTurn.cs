@@ -652,6 +652,15 @@ internal static class ReplTurn
                 AnsiConsole.MarkupLine($"[dim yellow]  ⚠ {Markup.Escape(repeatMsg)}[/]");
         }
 
+        // Tracks whether either auto-compact branch below already replaced ctx.History this
+        // turn, so the second branch doesn't redundantly re-compact the summary the first one
+        // just produced. Unlike CompactionCoordinator's `_justCompacted` (fuseraft run), which
+        // suppresses re-firing across the *next* turn, this only needs to cover the two checks
+        // within a single post-turn pass — both call the same CompactHistoryAsync and can
+        // legitimately both be true on one turn (a turn that pushes cumulative context past 75%
+        // is very often the same turn whose own provider call needed adaptive trimming).
+        var alreadyCompactedThisTurn = false;
+
         // One-time 75 % context check. Fires on free-form turns only (not plan steps or
         // plan-capture) so it never interrupts /execute flow. Resets after a successful
         // compaction (manual or auto) or /clear so it can fire once per "fill cycle".
@@ -688,6 +697,7 @@ internal static class ReplTurn
                     if (compacted)
                     {
                         autoCompacted = true;
+                        alreadyCompactedThisTurn = true;
                         ctx.TurnIndex = 0;
                         ctx.LastExtractedTurnIndex = -1;
                         if (ctx.JsonMode)
@@ -730,7 +740,13 @@ internal static class ReplTurn
         // ctx.History — without this, the identical oversized history would be resent, untouched,
         // on the very next turn. Force a real compaction now instead, mirroring
         // CompactionCoordinator's ContextExceeded branch in the `fuseraft run` pipeline.
-        if (ctx.AdaptiveTrimTracker.ConsumeTrim(ReplFactory.ReplAgentName))
+        //
+        // Always consume the flag (even when skipping the compaction call below) so a stale hit
+        // never leaks into a future turn: if the 75 %-full check above already compacted this
+        // turn, ctx.History is already a small fresh summary and re-running CompactHistoryAsync
+        // on it would just re-summarize that summary for no benefit — see alreadyCompactedThisTurn.
+        var neededAdaptiveTrim = ctx.AdaptiveTrimTracker.ConsumeTrim(ReplFactory.ReplAgentName);
+        if (neededAdaptiveTrim && !alreadyCompactedThisTurn)
         {
             if (ctx.JsonMode)
                 ReplJsonBridge.Emit(new
