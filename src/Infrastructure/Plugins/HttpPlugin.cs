@@ -44,6 +44,8 @@ public sealed class HttpPlugin : IDisposable
     // Named API profiles — null when no profiles are configured.
     private readonly IReadOnlyDictionary<string, ApiProfileConfig>? _profiles;
 
+    private readonly Func<string, string, Task<bool>>? _approveAction;
+
     /// <summary>
     /// Creates a plugin with a shared external <see cref="HttpClient"/>, an optional
     /// host allowlist, optional named API profiles, and an optional flag that bypasses the
@@ -54,7 +56,8 @@ public sealed class HttpPlugin : IDisposable
         IReadOnlyList<string>? allowedHosts = null,
         IReadOnlyDictionary<string, ApiProfileConfig>? apiProfiles = null,
         bool allowPrivateHosts = false,
-        ILogger<HttpPlugin>? logger = null)
+        ILogger<HttpPlugin>? logger = null,
+        Func<string, string, Task<bool>>? approveAction = null)
     {
         _http               = httpClient;
         _ownsClient         = false;
@@ -62,18 +65,20 @@ public sealed class HttpPlugin : IDisposable
         _allowedHosts       = BuildAllowedHosts(allowedHosts);
         _profiles           = apiProfiles;
         _allowPrivateHosts  = allowPrivateHosts;
+        _approveAction      = approveAction;
     }
 
     /// <summary>
     /// Creates a plugin backed by the shared default <see cref="HttpClient"/> (no allowlist, no profiles).
     /// </summary>
-    public HttpPlugin()
+    public HttpPlugin(Func<string, string, Task<bool>>? approveAction = null)
     {
         _http         = _defaultHttp;
         _ownsClient   = false;
         _logger       = null;
         _allowedHosts = null;
         _profiles     = null;
+        _approveAction = approveAction;
     }
 
     // Request methods
@@ -109,6 +114,9 @@ public sealed class HttpPlugin : IDisposable
         var denial = await CheckUrlAsync(resolvedUrl);
         if (denial is not null) return denial;
 
+        if (_approveAction is not null && !await _approveAction("http_post", resolvedUrl))
+            return PluginResult.Denied("HTTP request blocked by user.");
+
         using var request = BuildRequest(HttpMethod.Post, resolvedUrl, mergedHeaders, out var headerError);
         if (headerError is not null) return PluginResult.Error(headerError);
         request.Content = new StringContent(body, Encoding.UTF8, contentType);
@@ -128,6 +136,9 @@ public sealed class HttpPlugin : IDisposable
         if (profileError is not null) return profileError;
         var denial = await CheckUrlAsync(resolvedUrl);
         if (denial is not null) return denial;
+
+        if (_approveAction is not null && !await _approveAction("http_put", resolvedUrl))
+            return PluginResult.Denied("HTTP request blocked by user.");
 
         using var request = BuildRequest(HttpMethod.Put, resolvedUrl, mergedHeaders, out var headerError);
         if (headerError is not null) return PluginResult.Error(headerError);
@@ -149,6 +160,9 @@ public sealed class HttpPlugin : IDisposable
         var denial = await CheckUrlAsync(resolvedUrl);
         if (denial is not null) return denial;
 
+        if (_approveAction is not null && !await _approveAction("http_patch", resolvedUrl))
+            return PluginResult.Denied("HTTP request blocked by user.");
+
         using var request = BuildRequest(HttpMethod.Patch, resolvedUrl, mergedHeaders, out var headerError);
         if (headerError is not null) return PluginResult.Error(headerError);
         request.Content = new StringContent(body, Encoding.UTF8, contentType);
@@ -166,6 +180,9 @@ public sealed class HttpPlugin : IDisposable
         if (profileError is not null) return profileError;
         var denial = await CheckUrlAsync(resolvedUrl);
         if (denial is not null) return denial;
+
+        if (_approveAction is not null && !await _approveAction("http_delete", resolvedUrl))
+            return PluginResult.Denied("HTTP request blocked by user.");
 
         using var request = BuildRequest(HttpMethod.Delete, resolvedUrl, mergedHeaders, out var headerError);
         if (headerError is not null) return PluginResult.Error(headerError);

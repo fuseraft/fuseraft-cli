@@ -107,8 +107,8 @@ internal static partial class ReplCommands
                 - `/safe-mode on` — Block Shell, Git, Http tools (by owning plugin, including Extended-bucket tools)
                 - `/safe-mode off` — Restore prior category disables
                 - `/hitl` — Show HITL (human-in-the-loop) mode status
-                - `/hitl on` — Require y/N approval before each shell command
-                - `/hitl off` — Run shell commands without approval
+                - `/hitl on` — Require y/N approval before each shell command, and before each FileSystem write/delete, Git write, or write-ish Http call
+                - `/hitl off` — Run those calls without approval
                 - `/adversarial` — Show adversarial mode status
                 - `/adversarial on` — Enable critic agent to review each `/execute` step
                 - `/adversarial off` — Disable critic agent
@@ -215,8 +215,8 @@ internal static partial class ReplCommands
         tools.AddRow("[bold cyan]/safe-mode on[/]",                "Block Shell, Git, Http tools (incl. Extended-bucket)");
         tools.AddRow("[bold cyan]/safe-mode off[/]",               "Restore prior category disables");
         tools.AddRow("[bold cyan]/hitl[/]",                        "Show HITL (human-in-the-loop) mode status");
-        tools.AddRow("[bold cyan]/hitl on[/]",                     "Require y/N approval before each shell command");
-        tools.AddRow("[bold cyan]/hitl off[/]",                    "Run shell commands without approval");
+        tools.AddRow("[bold cyan]/hitl on[/]",                     "Require y/N approval before each shell command, FileSystem write/delete, Git write, or write-ish Http call");
+        tools.AddRow("[bold cyan]/hitl off[/]",                    "Run those calls without approval");
         tools.AddRow("[bold cyan]/adversarial[/]",                 "Show adversarial mode status");
         tools.AddRow("[bold cyan]/adversarial on[/]",              "Enable critic agent to review each /execute step");
         tools.AddRow("[bold cyan]/adversarial off[/]",             "Disable critic agent");

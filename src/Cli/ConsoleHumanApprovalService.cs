@@ -88,6 +88,19 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
         return Task.FromResult(allowed);
     }
 
+    public Task<bool> PromptToolActionAsync(string plugin, string action, string detail)
+    {
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine($"[{ThemeDetector.Warning}]⏸ {Markup.Escape(plugin)} action requested:[/]");
+        AnsiConsole.MarkupLine($"  [dim]{Markup.Escape(action)} — {Markup.Escape(detail)}[/]");
+        AnsiConsole.Markup("[dim]Allow? (y/N):[/]  ");
+        var input = Console.ReadLine()?.Trim() ?? string.Empty;
+        var allowed = input.Equals("y", StringComparison.OrdinalIgnoreCase) ||
+                      input.Equals("yes", StringComparison.OrdinalIgnoreCase);
+        AnsiConsole.MarkupLine(allowed ? "[dim]Action allowed.[/]" : "[dim]Action blocked.[/]");
+        return Task.FromResult(allowed);
+    }
+
     public Task<string?> PromptPostSessionAsync()
     {
         AnsiConsole.WriteLine();

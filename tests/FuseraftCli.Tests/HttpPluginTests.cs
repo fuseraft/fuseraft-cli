@@ -339,6 +339,82 @@ public sealed class HttpPluginTests : IDisposable
     }
 
     // -----------------------------------------------------------------------
+    // approveAction — the HITL gate `/hitl on` (REPL) and `fuseraft run --hitl`
+    // (orchestration) wire into the write-ish verbs (post/put/patch/delete), generalizing
+    // ShellPlugin's approveCommand gate (see ShellPluginTests). get/head are never gated.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task PostAsync_ApproveActionReturnsFalse_BlocksAndDoesNotSend()
+    {
+        var plugin = new HttpPlugin(_client, allowedHosts: [TestHost], approveAction: (_, _) => Task.FromResult(false));
+
+        var result = await plugin.PostAsync($"https://{TestHost}/api", body: "{}");
+
+        Assert.Contains("[DENIED]", result);
+        Assert.Null(_handler.LastRequest);
+    }
+
+    [Fact]
+    public async Task PostAsync_ApproveActionReturnsTrue_SendsNormally()
+    {
+        var plugin = new HttpPlugin(_client, allowedHosts: [TestHost], approveAction: (_, _) => Task.FromResult(true));
+
+        var result = await plugin.PostAsync($"https://{TestHost}/api", body: "{}");
+
+        Assert.DoesNotContain("[DENIED]", result);
+        Assert.NotNull(_handler.LastRequest);
+    }
+
+    [Fact]
+    public async Task PostAsync_ApproveActionSeesActionNameAndResolvedUrl()
+    {
+        (string Action, string Detail)? seen = null;
+        var plugin = new HttpPlugin(_client, allowedHosts: [TestHost], approveAction: (action, detail) =>
+        {
+            seen = (action, detail);
+            return Task.FromResult(true);
+        });
+
+        await plugin.PostAsync($"https://{TestHost}/api", body: "{}");
+
+        Assert.Equal("http_post", seen?.Action);
+        Assert.Equal($"https://{TestHost}/api", seen?.Detail);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_ApproveActionReturnsFalse_BlocksAndDoesNotSend()
+    {
+        var plugin = new HttpPlugin(_client, allowedHosts: [TestHost], approveAction: (_, _) => Task.FromResult(false));
+
+        var result = await plugin.DeleteAsync($"https://{TestHost}/api/1");
+
+        Assert.Contains("[DENIED]", result);
+        Assert.Null(_handler.LastRequest);
+    }
+
+    [Fact]
+    public async Task GetAsync_ApproveActionNeverCalled_ReadsAreUngated()
+    {
+        var plugin = new HttpPlugin(_client, allowedHosts: [TestHost], approveAction: (_, _) => Task.FromResult(false));
+
+        var result = await plugin.GetAsync($"https://{TestHost}/api");
+
+        Assert.DoesNotContain("[DENIED]", result);
+        Assert.NotNull(_handler.LastRequest);
+    }
+
+    [Fact]
+    public async Task PostAsync_NoApproveAction_ExecutesWithoutBlocking()
+    {
+        var plugin = MakePlugin(allowedHosts: [TestHost]);
+
+        var result = await plugin.PostAsync($"https://{TestHost}/api", body: "{}");
+
+        Assert.DoesNotContain("[DENIED]", result);
+    }
+
+    // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 

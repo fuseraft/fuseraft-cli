@@ -152,7 +152,7 @@ public static class OrchestratorBuilder
         var (config, projectSlug) = await OrchestratorConfigLoader.LoadAndExpandConfig(
             configPath, loggerFactory, sessionId, noReplan, cancellationToken);
 
-        var (configAfterSecurity, profiles, shellApprover) = ResolveSecurityConfig(
+        var (configAfterSecurity, profiles, shellApprover, toolActionApprover) = ResolveSecurityConfig(
             config, pluginRegistry, hitlMode, humanApprovalService, loggerFactory);
         config = configAfterSecurity;
 
@@ -161,7 +161,7 @@ public static class OrchestratorBuilder
 
         var infra = await InitInfrastructure(
             config, pluginRegistry, loggerFactory, sessionId, projectSlug,
-            profiles, shellApprover, cancellationToken);
+            profiles, shellApprover, toolActionApprover, cancellationToken);
         config = infra.Config;
 
         var (governanceKernel, chatClientFactory, identityRegistry, dependencyPlanner) =
@@ -212,7 +212,7 @@ public static class OrchestratorBuilder
     // ResolveSecurityConfig
     // -------------------------------------------------------------------------
 
-    private static (OrchestrationConfig Config, IReadOnlyDictionary<string, ApiProfileConfig>? Profiles, Func<string, Task<bool>>? ShellApprover) ResolveSecurityConfig(
+    private static (OrchestrationConfig Config, IReadOnlyDictionary<string, ApiProfileConfig>? Profiles, Func<string, Task<bool>>? ShellApprover, Func<string, string, string, Task<bool>>? ToolActionApprover) ResolveSecurityConfig(
         OrchestrationConfig config,
         PluginRegistry pluginRegistry,
         bool hitlMode,
@@ -226,8 +226,11 @@ public static class OrchestratorBuilder
         Func<string, Task<bool>>? shellApprover = hitlMode && humanApprovalService is not null
             ? humanApprovalService.PromptShellCommandAsync
             : null;
+        Func<string, string, string, Task<bool>>? toolActionApprover = hitlMode && humanApprovalService is not null
+            ? humanApprovalService.PromptToolActionAsync
+            : null;
 
-        pluginRegistry.Configure(config.Security, profiles, shellApprover);
+        pluginRegistry.Configure(config.Security, profiles, shellApprover, toolActionApprover: toolActionApprover);
 
         // When a filesystem sandbox is configured, resolve relative validation and
         // change-tracking paths against the sandbox root so that validators and
@@ -291,7 +294,7 @@ public static class OrchestratorBuilder
                     $"Update one of them to match the other.");
         }
 
-        return (config, profiles, shellApprover);
+        return (config, profiles, shellApprover, toolActionApprover);
     }
 
     // -------------------------------------------------------------------------
@@ -323,6 +326,7 @@ public static class OrchestratorBuilder
         string projectSlug,
         IReadOnlyDictionary<string, ApiProfileConfig>? profiles,
         Func<string, Task<bool>>? shellApprover,
+        Func<string, string, string, Task<bool>>? toolActionApprover,
         CancellationToken cancellationToken)
     {
         // Connect to MCP servers and register their tools before building agents.
@@ -423,7 +427,7 @@ public static class OrchestratorBuilder
         // so write_file, get_file_info, and read_file participate in version-aware conflict
         // detection and cross-turn read deduplication. Thread the cache-hit callback so
         // SessionMetrics can count duplicate reads across the session.
-        pluginRegistry.Configure(config.Security ?? new SecurityConfig(), profiles, shellApprover, fileVersionStore, sessionReadCache, onCacheHit: sessionMetrics.RecordCacheHit, eventSink: stateProjector);
+        pluginRegistry.Configure(config.Security ?? new SecurityConfig(), profiles, shellApprover, fileVersionStore, sessionReadCache, onCacheHit: sessionMetrics.RecordCacheHit, eventSink: stateProjector, toolActionApprover: toolActionApprover);
 
         // Session context plugin: shared handoff notes that agents write before routing
         // and read on re-entry. Stored in the global session directory.

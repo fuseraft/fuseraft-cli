@@ -143,7 +143,7 @@ After the termination condition fires (e.g. `TASK_COMPLETE`), the session does n
 
 This lets you keep interacting with the agent after a task completes without needing to restart or resume.
 
-**Shell command approval in `--hitl` mode**
+**Shell/FileSystem/Git/Http write approval in `--hitl` mode**
 
 When `--hitl` is active, every `shell_run`, `shell_run_script`, and `shell_run_background` call pauses for approval before executing:
 
@@ -156,9 +156,19 @@ Allow? (y/N):
 - **y / yes** — the command runs normally
 - **Enter / anything else** — the command is blocked; the agent receives `[DENIED]` and can try an alternative or ask you what to do
 
-Shell command approval only applies in `--hitl` mode. In normal runs, shell commands execute without prompting.
+The same gate also covers every FileSystem write/delete tool (`write_file`, `patch_file`, `delete_file`, `delete_directory`, `copy_file`, `move_file`, `create_directory`, `set_permissions`, `save_file_summary`), every Git write operation (`git_add`, `git_commit`, `git_push`, `git_reset`, `git_rebase`, …), and the write-ish HTTP verbs (`http_post`, `http_put`, `http_patch`, `http_delete`):
 
-The REPL has its own toggle for the same shell-approval gate — see `/hitl` under `fuseraft repl` below. It's scoped to shell commands only and, unlike this flag, has no "pause after every turn" behavior.
+```
+⏸ FileSystem action requested:
+  write_file — /repo/src/app.py
+Allow? (y/N):
+```
+
+Read-only tools (`read_file`, `git_status`, `http_get`, …) are never gated.
+
+This approval gate only applies in `--hitl` mode. In normal runs, these calls execute without prompting.
+
+The REPL has its own toggle for the same approval gate — see `/hitl` under `fuseraft repl` below. Unlike this flag, it has no "pause after every turn" behavior.
 
 **2. Per-route approval gates — before a specific route fires**
 
@@ -312,7 +322,7 @@ The session ID is shown on every startup so you can note it down for later resum
 > | CLI → VS Code | `ready` | `sessionId`, `model` |
 > | CLI → VS Code | `token` | `text` (streaming chunk) |
 > | CLI → VS Code | `tool_call` | `name`, `args?` |
-> | CLI → VS Code | `approval_request` | `kind`, `command` (HITL shell-command gate — see below) |
+> | CLI → VS Code | `approval_request` | `kind`, plus `command` for `kind: "shell_command"` or `plugin`/`action`/`detail` for `kind: "tool_action"` (HITL approval gate — see below) |
 > | CLI → VS Code | `message_end` | `turnIndex`, `toolCalls[]` |
 > | CLI → VS Code | `cancelled` | — (turn was interrupted; see below) |
 > | CLI → VS Code | `retrying` | `attempt`, `max` (transient stream disconnect, auto-retrying) |
@@ -457,8 +467,8 @@ Use `/tools` to see the full list at runtime.
 | `/safe-mode on` | Block Shell, Git, and Http tools by owning plugin (including those in the Extended bucket) |
 | `/safe-mode off` | Restore tool categories to their state before safe mode was enabled |
 | `/hitl` | Show current HITL (human-in-the-loop) mode status |
-| `/hitl on` | Require y/N approval before each `shell_run`, `shell_run_script`, or `shell_run_background` call |
-| `/hitl off` | Run shell commands without approval again |
+| `/hitl on` | Require y/N approval before each shell run, and before every FileSystem write/delete, Git write, or write-ish Http call |
+| `/hitl off` | Run those calls without approval again |
 | `/adversarial` | Show adversarial mode status |
 | `/adversarial on` | Enable a critic agent that reviews each `/execute` step after postconditions pass, and every free-form response. The critic judges whether the response was correct, grounded in actual tool output, and complete — halting the plan on a step rejection, or injecting one correction turn on a free-form rejection. |
 | `/adversarial off` | Disable the critic agent |
@@ -536,9 +546,9 @@ After each response a compact status line is printed showing the turn number, es
   ── turn 1 · ~3,200 tok · 2 tools
 ```
 
-**Shell command approval (`/hitl`)**
+**Shell/FileSystem/Git/Http write approval (`/hitl`)**
 
-`/hitl on` gates every `shell_run`, `shell_run_script`, and `shell_run_background` call behind the same y/N approval prompt `fuseraft run --hitl` uses for shell commands (see [Shell command approval in `--hitl` mode](#human-in-the-loop-controls)):
+`/hitl on` gates every `shell_run`, `shell_run_script`, and `shell_run_background` call, every FileSystem write/delete tool, every Git write operation, and the write-ish HTTP verbs behind the same y/N approval prompt `fuseraft run --hitl` uses (see [Shell/FileSystem/Git/Http write approval in `--hitl` mode](#human-in-the-loop-controls)):
 
 ```
 [hitl] 2> delete the build artifacts and rerun the tests
@@ -548,10 +558,18 @@ Allow? (y/N):  n
 Command blocked.
 ```
 
-- **y / yes** — the command runs normally
-- **Enter / anything else** — the command is blocked; the agent receives `[DENIED]` and can try an alternative or ask what to do
+```
+[hitl] 3> update the config file
+⏸ FileSystem action requested:
+  write_file — /repo/config.json
+Allow? (y/N):  y
+Action allowed.
+```
 
-HITL mode is off by default and toggles instantly — no need to restart the session or wait for the next tool-schema rebuild. Unlike `--hitl` in `fuseraft run`, the REPL's `/hitl` only gates shell commands; it has no "pause after every turn" behavior, since the REPL is already interactive turn-by-turn. It also only covers `Shell` — `FileSystem` (`write_file`, `patch_file`, `delete_file`, …), `Git` (`git_commit`, `git_push`, …), and `Http` writes are not gated by any approval prompt; use `/safe-mode` to disable those categories outright, or `/tools restrict` below for a finer-grained lock.
+- **y / yes** — the call runs normally
+- **Enter / anything else** — the call is blocked; the agent receives `[DENIED]` and can try an alternative or ask what to do
+
+HITL mode is off by default and toggles instantly — no need to restart the session or wait for the next tool-schema rebuild. Unlike `--hitl` in `fuseraft run`, the REPL's `/hitl` has no "pause after every turn" behavior, since the REPL is already interactive turn-by-turn. Read-only tools (`read_file`, `git_status`, `http_get`, …) are never gated; use `/safe-mode` to disable whole categories outright, or `/tools restrict` below for a finer-grained lock.
 
 Safe mode is off by default; engage it on every REPL launch with `fuseraft settings set repl.safeMode true` (skipped in VS Code/JSON-bridge mode) instead of typing `/safe-mode on` each session.
 

@@ -42,6 +42,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     private readonly Action?            _onWrite;
     private readonly Action?            _onCacheHit;
     private readonly UndoSnapshotStore  _undoStore = new();
+    private readonly Func<string, string, Task<bool>>? _approveAction;
 
     // Per-turn read cache: cleared at the start of each agent turn so re-reading the same
     // file within a single turn is caught and short-circuited before dumping redundant
@@ -75,7 +76,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     // maxLines: 99999 is asking for everything and should be gated the same as omitting it.
     private const int LargeFileColdReadLines  = 500;
 
-    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null, Action? onWrite = null, Action? onCacheHit = null, IReadOnlyList<string>? exemptedPaths = null)
+    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null, Action? onWrite = null, Action? onCacheHit = null, IReadOnlyList<string>? exemptedPaths = null, Func<string, string, Task<bool>>? approveAction = null)
     {
         _sandboxRoot       = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _exemptedPrefixes  = (exemptedPaths ?? [])
@@ -89,6 +90,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         _sessionCache      = sessionCache;
         _onWrite           = onWrite;
         _onCacheHit        = onCacheHit;
+        _approveAction     = approveAction;
     }
 
     /// <inheritdoc cref="ITurnResettable.BeginTurn"/>
@@ -113,6 +115,11 @@ public sealed class FileSystemPlugin : ITurnResettable
     // (see ReplCommand.cs, where FileSystemPlugin is built ~70 lines before the session ID is).
     internal UndoSnapshotStore UndoStore => _undoStore;
     internal void EnableUndoSnapshots(string snapshotDir) => _undoStore.Enable(snapshotDir);
+
+    // Shared with FileSystemManagementOps so its own mutating ops (delete/copy/move/etc.) are
+    // gated by the same --hitl approval hook as this class's write_file/patch_file, without
+    // requiring every caller that constructs both objects to remember to pass it twice.
+    internal Func<string, string, Task<bool>>? ApproveAction => _approveAction;
 
     [Description("Read text file content. Use startLine+maxLines for large files. Binary files rejected.")]
     public async Task<string> ReadFileAsync(
@@ -356,6 +363,9 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (!File.Exists(resolved))
             return PluginResult.Error($"File not found: {resolved}");
 
+        if (_approveAction is not null && !await _approveAction("patch_file", resolved))
+            return PluginResult.Denied("File patch blocked by user.");
+
         var encoding = DetectEncoding(resolved);
         var content = await File.ReadAllTextAsync(resolved, encoding);
         var ext     = Path.GetExtension(resolved).ToLowerInvariant();
@@ -473,6 +483,9 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         var pathDenial = ValidateWritePath(path, out var resolved);
         if (pathDenial is not null) return pathDenial;
+
+        if (_approveAction is not null && !await _approveAction("write_file", resolved!))
+            return PluginResult.Denied("File write blocked by user.");
 
         var versionDenial = await CheckVersionConflictAsync(resolved!, baseVersion);
         if (versionDenial is not null) return versionDenial;

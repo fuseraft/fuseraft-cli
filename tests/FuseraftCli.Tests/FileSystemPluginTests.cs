@@ -612,4 +612,80 @@ public sealed class FileSystemPluginTests : IDisposable
         Assert.Contains("TRUNCATED", result);
     }
 
+    // approveAction — the HITL gate `/hitl on` (REPL) and `fuseraft run --hitl` (orchestration)
+    // both wire into write_file/patch_file, generalizing ShellPlugin's approveCommand gate
+    // (see ShellPluginTests) to FileSystem's mutating tools.
+
+    [Fact]
+    public async Task WriteFile_ApproveActionReturnsFalse_BlocksAndDoesNotWrite()
+    {
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (_, _) => Task.FromResult(false));
+
+        var result = await plugin.WriteFileAsync(TempPath("blocked.txt"), "content");
+
+        Assert.Contains("[DENIED]", result);
+        Assert.False(File.Exists(TempPath("blocked.txt")));
+    }
+
+    [Fact]
+    public async Task WriteFile_ApproveActionReturnsTrue_WritesNormally()
+    {
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (_, _) => Task.FromResult(true));
+
+        var result = await plugin.WriteFileAsync(TempPath("allowed.txt"), "content");
+
+        Assert.Contains("Written", result);
+        Assert.Equal("content", await File.ReadAllTextAsync(TempPath("allowed.txt")));
+    }
+
+    [Fact]
+    public async Task WriteFile_ApproveActionSeesActionNameAndResolvedPath()
+    {
+        (string Action, string Detail)? seen = null;
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (action, detail) =>
+        {
+            seen = (action, detail);
+            return Task.FromResult(true);
+        });
+
+        await plugin.WriteFileAsync(TempPath("seen.txt"), "content");
+
+        Assert.Equal("write_file", seen?.Action);
+        Assert.Equal(TempPath("seen.txt"), seen?.Detail);
+    }
+
+    [Fact]
+    public async Task PatchFile_ApproveActionReturnsFalse_BlocksAndDoesNotPatch()
+    {
+        await File.WriteAllTextAsync(TempPath("patch-target.txt"), "before");
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (_, _) => Task.FromResult(false));
+
+        var result = await plugin.PatchFileAsync(TempPath("patch-target.txt"), "before", "after");
+
+        Assert.Contains("[DENIED]", result);
+        Assert.Equal("before", await File.ReadAllTextAsync(TempPath("patch-target.txt")));
+    }
+
+    [Fact]
+    public async Task PatchFile_ApproveActionReturnsTrue_PatchesNormally()
+    {
+        await File.WriteAllTextAsync(TempPath("patch-target2.txt"), "before");
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (_, _) => Task.FromResult(true));
+
+        var result = await plugin.PatchFileAsync(TempPath("patch-target2.txt"), "before", "after");
+
+        Assert.Contains("Patched", result);
+        Assert.Equal("after", await File.ReadAllTextAsync(TempPath("patch-target2.txt")));
+    }
+
+    [Fact]
+    public async Task WriteFile_NoApproveAction_ExecutesWithoutBlocking()
+    {
+        // Default construction (no approver) — the REPL's pre-/hitl behavior, and still the
+        // behavior once /hitl is off — must keep working unprompted.
+        var result = await _plugin.WriteFileAsync(TempPath("unprompted.txt"), "content");
+
+        Assert.Contains("Written", result);
+    }
+
 }

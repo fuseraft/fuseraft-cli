@@ -158,11 +158,13 @@ internal sealed class ReplSessionContext
     public bool             SafeMode;
     public HashSet<string>? PreSafeDisabled;
 
-    // HITL (human-in-the-loop) mode — when on, every shell command asks for y/N approval via
-    // the same IHumanApprovalService.PromptShellCommandAsync gate `fuseraft run --hitl` already
-    // uses (see OrchestratorBuilder.ResolveSecurityConfig). The flag lives in a separate shared
-    // object rather than a plain bool here because ShellPlugin is constructed before this
-    // ReplSessionContext exists (see ReplCommand.cs) — its approver closure captures Hitl
+    // HITL (human-in-the-loop) mode — when on, every shell command, FileSystem write/delete,
+    // Git write, and write-ish Http call asks for y/N approval via the same
+    // IHumanApprovalService.PromptShellCommandAsync/PromptToolActionAsync gates
+    // `fuseraft run --hitl` already uses (see OrchestratorBuilder.ResolveSecurityConfig). The
+    // flag lives in a separate shared object rather than a plain bool here because
+    // ShellPlugin/FileSystemPlugin/GitPlugin/HttpPlugin are constructed before this
+    // ReplSessionContext exists (see ReplCommand.cs) — their approver closures capture Hitl
     // directly, and this property just proxies to the same storage so /hitl can toggle it live.
     public readonly HitlModeState Hitl;
     public bool HitlMode

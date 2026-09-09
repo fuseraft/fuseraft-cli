@@ -281,7 +281,7 @@ internal static partial class ReplCommands
         if (string.IsNullOrEmpty(arg))
         {
             AnsiConsole.MarkupLine(ctx.HitlMode
-                ? "[dim]HITL mode:[/] [green]on[/]  [dim](shell commands ask for y/N approval before running)[/]"
+                ? "[dim]HITL mode:[/] [green]on[/]  [dim](shell commands, FileSystem writes/deletes, Git writes, and Http write-ish calls ask for y/N approval before running)[/]"
                 : "[dim]HITL mode:[/] [dim]off[/]");
             AnsiConsole.MarkupLine("[dim]Run[/] [bold]/hitl on[/] [dim]or[/] [bold]/hitl off[/][dim].[/]");
             return CommandResult.Continue;
@@ -296,7 +296,7 @@ internal static partial class ReplCommands
             else
             {
                 ctx.HitlMode = true;
-                AnsiConsole.MarkupLine("[dim]HITL mode[/] [green]on[/][dim]: shell commands will ask for y/N approval before running.[/]");
+                AnsiConsole.MarkupLine("[dim]HITL mode[/] [green]on[/][dim]: shell commands, FileSystem writes/deletes, Git writes, and Http write-ish calls will ask for y/N approval before running.[/]");
                 await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/hitl on" });
             }
         }
@@ -309,7 +309,7 @@ internal static partial class ReplCommands
             else
             {
                 ctx.HitlMode = false;
-                AnsiConsole.MarkupLine("[dim]HITL mode[/] [dim]off[/][dim]: shell commands run without approval again.[/]");
+                AnsiConsole.MarkupLine("[dim]HITL mode[/] [dim]off[/][dim]: those calls run without approval again.[/]");
                 await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/hitl off" });
             }
         }
@@ -317,8 +317,8 @@ internal static partial class ReplCommands
         {
             AnsiConsole.MarkupLine($"[yellow]Unknown /hitl argument:[/] {Markup.Escape(arg)}");
             AnsiConsole.MarkupLine("[dim]Usage: /hitl     — show current status[/]");
-            AnsiConsole.MarkupLine("[dim]       /hitl on  — require y/N approval before each shell command[/]");
-            AnsiConsole.MarkupLine("[dim]       /hitl off — run shell commands without approval[/]");
+            AnsiConsole.MarkupLine("[dim]       /hitl on  — require y/N approval before each shell command, FileSystem write/delete, Git write, or write-ish Http call[/]");
+            AnsiConsole.MarkupLine("[dim]       /hitl off — run those calls without approval[/]");
         }
         return CommandResult.Continue;
     }

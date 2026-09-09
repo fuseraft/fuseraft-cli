@@ -284,4 +284,113 @@ public sealed class FileSystemManagementOpsTests : IDisposable
         Assert.DoesNotContain("[INFO]", result);
         Assert.Contains("recreated", result);
     }
+
+    // -----------------------------------------------------------------------
+    // approveAction — borrowed from the owning FileSystemPlugin (see
+    // FileSystemPlugin.ApproveAction) so /hitl on and `fuseraft run --hitl` gate this
+    // class's mutating tools the same way they gate write_file/patch_file. Each test builds
+    // its own plugin+ops pair since _plugin/_ops in the fixture have no approver attached.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task DeleteFile_ApproveActionReturnsFalse_BlocksAndDoesNotDelete()
+    {
+        await File.WriteAllTextAsync(TempPath("keep.txt"), "content");
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (_, _) => Task.FromResult(false));
+        var ops    = new FileSystemManagementOps(plugin, sandboxRoot: _dir);
+
+        var result = await ops.DeleteFileAsync(TempPath("keep.txt"));
+
+        Assert.Contains("[DENIED]", result);
+        Assert.True(File.Exists(TempPath("keep.txt")));
+    }
+
+    [Fact]
+    public async Task DeleteDirectory_ApproveActionReturnsFalse_BlocksAndDoesNotDelete()
+    {
+        Directory.CreateDirectory(TempPath("keepdir"));
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (_, _) => Task.FromResult(false));
+        var ops    = new FileSystemManagementOps(plugin, sandboxRoot: _dir);
+
+        var result = await ops.DeleteDirectoryAsync(TempPath("keepdir"));
+
+        Assert.Contains("[DENIED]", result);
+        Assert.True(Directory.Exists(TempPath("keepdir")));
+    }
+
+    [Fact]
+    public async Task CopyFile_ApproveActionReturnsFalse_BlocksAndDoesNotCopy()
+    {
+        await File.WriteAllTextAsync(TempPath("copysrc.txt"), "content");
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (_, _) => Task.FromResult(false));
+        var ops    = new FileSystemManagementOps(plugin, sandboxRoot: _dir);
+
+        var result = await ops.CopyFileAsync(TempPath("copysrc.txt"), TempPath("copydst.txt"));
+
+        Assert.Contains("[DENIED]", result);
+        Assert.False(File.Exists(TempPath("copydst.txt")));
+    }
+
+    [Fact]
+    public async Task MoveFile_ApproveActionReturnsFalse_BlocksAndDoesNotMove()
+    {
+        await File.WriteAllTextAsync(TempPath("movesrc.txt"), "content");
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (_, _) => Task.FromResult(false));
+        var ops    = new FileSystemManagementOps(plugin, sandboxRoot: _dir);
+
+        var result = await ops.MoveFileAsync(TempPath("movesrc.txt"), TempPath("movedst.txt"));
+
+        Assert.Contains("[DENIED]", result);
+        Assert.True(File.Exists(TempPath("movesrc.txt")));
+        Assert.False(File.Exists(TempPath("movedst.txt")));
+    }
+
+    [Fact]
+    public async Task CreateDirectory_ApproveActionReturnsFalse_BlocksAndDoesNotCreate()
+    {
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (_, _) => Task.FromResult(false));
+        var ops    = new FileSystemManagementOps(plugin, sandboxRoot: _dir);
+
+        var result = await ops.CreateDirectoryAsync(TempPath("newdir"));
+
+        Assert.Contains("[DENIED]", result);
+        Assert.False(Directory.Exists(TempPath("newdir")));
+    }
+
+    [Fact]
+    public async Task SaveFileSummary_ApproveActionReturnsFalse_BlocksAndDoesNotSave()
+    {
+        await File.WriteAllTextAsync(TempPath("summarized.py"), "code");
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (_, _) => Task.FromResult(false));
+        var ops    = new FileSystemManagementOps(plugin, sandboxRoot: _dir);
+
+        var result = await ops.SaveFileSummaryAsync(TempPath("summarized.py"), "A summary.");
+
+        Assert.Contains("[DENIED]", result);
+    }
+
+    [Fact]
+    public async Task DeleteFile_ApproveActionReturnsTrue_DeletesNormally()
+    {
+        await File.WriteAllTextAsync(TempPath("gone.txt"), "content");
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (_, _) => Task.FromResult(true));
+        var ops    = new FileSystemManagementOps(plugin, sandboxRoot: _dir);
+
+        var result = await ops.DeleteFileAsync(TempPath("gone.txt"));
+
+        Assert.Contains("Deleted", result);
+        Assert.False(File.Exists(TempPath("gone.txt")));
+    }
+
+    [Fact]
+    public async Task DeleteFile_NoApproveAction_ExecutesWithoutBlocking()
+    {
+        // Default fixture _ops has no approver — /hitl off (or never enabled) must keep
+        // working unprompted, same contract as ShellPluginTests' no-approver coverage.
+        await File.WriteAllTextAsync(TempPath("unprompted-del.txt"), "content");
+
+        var result = await _ops.DeleteFileAsync(TempPath("unprompted-del.txt"));
+
+        Assert.Contains("Deleted", result);
+    }
 }
