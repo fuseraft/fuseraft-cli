@@ -48,6 +48,10 @@ public sealed class ReplTurnIterationCapTests : IDisposable
     // plus one trailing UsageContent per underlying LLM call, with no text chunk in between —
     // then finally responds with plain text once no tools remain (mirrors the streaming shape
     // observed when FunctionInvokingChatClient's MaximumIterationsPerRequest is hit).
+    // Each round's arguments include the round index — these rounds are meant to exercise
+    // toolRounds/hit_iteration_cap accounting, decoupled from MaxConsecutiveIdenticalToolCalls
+    // (ReplTurnRepeatedToolCallTests covers that mechanism separately with genuinely identical
+    // calls); a fixed no-args call repeated this many times would trip that cutoff instead.
     private static async IAsyncEnumerable<ChatResponseUpdate> ConsecutiveToolCallsThenTextAsync(int rounds)
     {
         for (var i = 0; i < rounds; i++)
@@ -57,7 +61,7 @@ public sealed class ReplTurnIterationCapTests : IDisposable
                 Role = ChatRole.Assistant,
                 Contents =
                 [
-                    new FunctionCallContent($"call-{i}", "shell_run"),
+                    new FunctionCallContent($"call-{i}", "shell_run", new Dictionary<string, object?> { ["i"] = i }),
                     new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 5 }),
                 ],
             };
@@ -87,7 +91,7 @@ public sealed class ReplTurnIterationCapTests : IDisposable
             {
                 Role         = ChatRole.Assistant,
                 FinishReason = ChatFinishReason.ToolCalls,
-                Contents     = [new FunctionCallContent($"call-{i}", "shell_run")],
+                Contents     = [new FunctionCallContent($"call-{i}", "shell_run", new Dictionary<string, object?> { ["i"] = i })],
             };
             await Task.Yield();
         }
@@ -170,20 +174,26 @@ public sealed class ReplTurnIterationCapTests : IDisposable
         return ctx;
     }
 
+    // ChatIterationLimit is now an effectively-unbounded sentinel (int.MaxValue) — the free-form
+    // chat cap was intentionally removed (MaxConsecutiveToolFailures is the real backstop now),
+    // so there is no reachable round count that pins the old `>=` boundary. This instead asserts
+    // the removal itself: a round count far beyond the old flat cap (50) must never trip
+    // hit_iteration_cap.
     [Fact]
-    public async Task ConsecutiveToolCallsAtCap_EmitsHitIterationCapWarning()
+    public async Task ManyConsecutiveToolCalls_NeverEmitsIterationCapWarning()
     {
         var eventsPath = Path.Combine(Path.GetTempPath(), $"fuseraft-test-events-{Guid.NewGuid():N}.jsonl");
-        // rounds = ChatIterationLimit - 1 tool-call rounds, plus the stub's own trailing text
-        // round, lands toolRounds exactly on ChatIterationLimit — pinning the >= boundary
-        // itself rather than overshooting it, so a future `>=` -> `>` regression would be caught.
-        var ctx = NewContext(new StubChatClient(ReplTurn.ChatIterationLimit - 1), eventsPath);
+        var ctx = NewContext(new StubChatClient(200), eventsPath);
 
         await ReplTurn.ExecuteAsync(
             ctx, "fix it", isStepRequest: false, capturePlan: false, activeStep: null, CancellationToken.None);
 
         var events = await File.ReadAllLinesAsync(eventsPath);
-        Assert.Contains(events, l => l.Contains("\"hit_iteration_cap\":true"));
+        Assert.DoesNotContain(events, l => l.Contains("\"hit_iteration_cap\":true"));
+        // Each of these 200 calls carries a distinct argument (see ConsecutiveToolCallsThenTextAsync),
+        // so this also confirms MaxConsecutiveIdenticalToolCalls doesn't false-positive on many
+        // legitimately-varied calls — ReplTurnRepeatedToolCallTests covers that cutoff directly.
+        Assert.DoesNotContain(events, l => l.Contains("\"hit_repeated_tool_call_limit\""));
     }
 
     [Fact]
@@ -201,19 +211,22 @@ public sealed class ReplTurnIterationCapTests : IDisposable
 
     // Regression coverage for providers that never emit UsageContent on streaming responses
     // (e.g. Ollama) — see ReplSessionContext's usage-tracking comment. toolRounds must still
-    // advance from FinishReason alone, or hit_iteration_cap silently stops firing for these
-    // providers no matter how many tool rounds actually run.
+    // advance from FinishReason alone. Asserted directly against turn_end's tool_rounds rather
+    // than via hit_iteration_cap (now unreachable in practice, see above) since that's the
+    // actual behavior this test protects.
     [Fact]
-    public async Task ConsecutiveToolCallsAtCap_NoUsageContent_StillEmitsHitIterationCapWarning()
+    public async Task ConsecutiveToolCallsNoUsageContent_ToolRoundsStillAdvanceViaFinishReason()
     {
         var eventsPath = Path.Combine(Path.GetTempPath(), $"fuseraft-test-events-{Guid.NewGuid():N}.jsonl");
-        var ctx = NewContext(new StubChatClient(ReplTurn.ChatIterationLimit - 1, withUsage: false), eventsPath);
+        const int rounds = 5;
+        var ctx = NewContext(new StubChatClient(rounds, withUsage: false), eventsPath);
 
         await ReplTurn.ExecuteAsync(
             ctx, "fix it", isStepRequest: false, capturePlan: false, activeStep: null, CancellationToken.None);
 
-        var events = await File.ReadAllLinesAsync(eventsPath);
-        Assert.Contains(events, l => l.Contains("\"hit_iteration_cap\":true"));
+        // rounds tool-call chunks (each carrying its own FinishReason) plus the stub's trailing
+        // text chunk.
+        Assert.Equal(rounds + 1, await ReadTurnEndToolRoundsAsync(eventsPath));
     }
 
     // Regression coverage for the run-together-narration bug: 78edb6b inserted a paragraph
@@ -252,12 +265,30 @@ public sealed class ReplTurnIterationCapTests : IDisposable
         return string.Empty;
     }
 
+    private static async Task<int?> ReadTurnEndToolRoundsAsync(string eventsPath)
+    {
+        foreach (var line in await File.ReadAllLinesAsync(eventsPath))
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            using var doc = JsonDocument.Parse(line);
+            if (doc.RootElement.TryGetProperty("event_type", out var et) &&
+                et.GetString() == fuseraft.Core.Events.EventTypes.TurnEnd &&
+                doc.RootElement.TryGetProperty("payload", out var payload) &&
+                payload.TryGetProperty("tool_rounds", out var toolRounds))
+                return toolRounds.GetInt32();
+        }
+        return null;
+    }
+
     // Round 0 is pure narration (no tool call) so responseText ends up non-empty and the
     // consecutive-failure warning block — gated on responseText.Length > 0, same as
     // hit_iteration_cap — actually fires, mirroring how a real model narrates before acting.
     // Rounds 1..N are FunctionCallContent+FunctionResultContent pairs whose result string is
     // given verbatim by `results`; a "[ERROR]"/"[FAIL]"/etc.-prefixed one counts as a tool
-    // failure per ReplTurn.IsToolFailure, anything else resets the streak.
+    // failure per ReplTurn.IsToolFailure, anything else resets the streak. Each call's
+    // arguments include the round index so these rounds stay decoupled from
+    // MaxConsecutiveIdenticalToolCalls (a fixed no-args call repeated 5+ times would trip that
+    // cutoff instead of exercising MaxConsecutiveToolFailures as intended).
     private static async IAsyncEnumerable<ChatResponseUpdate> ToolCallResultRoundsAsync(
         List<int> roundsStarted, params string[] results)
     {
@@ -274,7 +305,7 @@ public sealed class ReplTurnIterationCapTests : IDisposable
             yield return new ChatResponseUpdate
             {
                 Role     = ChatRole.Assistant,
-                Contents = [new FunctionCallContent($"call-{i}", "shell_run")],
+                Contents = [new FunctionCallContent($"call-{i}", "shell_run", new Dictionary<string, object?> { ["i"] = i })],
             };
             await Task.Yield();
             yield return new ChatResponseUpdate
