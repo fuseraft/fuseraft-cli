@@ -150,17 +150,15 @@ internal static class AgentContextCompactionFilters
     // (e.g. reconstructing a prior write_file's `content` from its own truncated history when
     // asked to move/duplicate the file), writing the placeholder itself to disk. The wording
     // must make clear this is not reusable content, not just that it was shortened.
+    // FileSystemPlugin.WriteFileAsync/PatchFileAsync also guard against this directly — see
+    // ElisionMarkers.PlaceholderTail — but the wording here is the first line of defense.
     private static object? TruncateArgValue(object? value) => value switch
     {
-        string s                                                                   => ElisionNote(s.Length),
+        string s                                                                   => ElisionMarkers.ArgValueNote(s.Length),
         System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.String
-            => ElisionNote(je.GetString()?.Length ?? 0),
+            => ElisionMarkers.ArgValueNote(je.GetString()?.Length ?? 0),
         _ => value
     };
-
-    private static string ElisionNote(int originalChars) =>
-        $"[ELIDED — {originalChars:N0} chars, NOT the real value. Do not reuse this placeholder as " +
-        "content; re-read the file or regenerate the value if you need it again.]";
 
     /// <summary>
     /// For <c>shell_run</c> calls with identical <c>command</c> + <c>workingDirectory</c>
@@ -545,12 +543,11 @@ internal static class AgentContextCompactionFilters
             if (IsTrimmableMessage(list[i])) trimCandidates.Enqueue(i);
 
         // Phase 1: replace oldest tool results with a tiny placeholder until under budget.
-        // Wording mirrors AgentContextCompactionFilters.ElisionNote: not just "shortened" but
-        // explicitly not the real output, so the model doesn't reuse it as data (e.g. treating
-        // an elided read_file result as the actual file contents when writing it elsewhere).
+        // Wording mirrors ElisionMarkers.ArgValueNote: not just "shortened" but explicitly not
+        // the real output, so the model doesn't reuse it as data (e.g. treating an elided
+        // read_file result as the actual file contents when writing it elsewhere).
         var result = new List<ChatMessage>(list);
-        const string Placeholder =
-            "[RESULT ELIDED — not the real output, do not reuse this as data. Re-run the tool if you need this result again.]";
+        const string Placeholder = ElisionMarkers.ResultNote;
         while (total > maxChars && trimCandidates.Count > 0)
         {
             int idx = trimCandidates.Dequeue();

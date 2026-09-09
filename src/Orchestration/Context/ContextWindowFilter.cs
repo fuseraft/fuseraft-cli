@@ -268,9 +268,7 @@ public static class ContextWindowFilter
                         // Consumed read: a downstream write/patch to this file exists, so the
                         // content is stale. Keep a small structural preview and elide the rest.
                         truncated = s[..ConsumedReadCapChars] +
-                            $"\n[...{s.Length - ConsumedReadCapChars:N0} chars elided — " +
-                            $"file was written or patched later this session; " +
-                            $"call read_file again if current content is needed]";
+                            ElisionMarkers.ConsumedReadTail(s.Length - ConsumedReadCapChars);
                     }
                     else
                     {

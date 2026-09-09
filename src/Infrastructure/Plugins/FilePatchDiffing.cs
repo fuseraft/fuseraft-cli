@@ -180,6 +180,24 @@ internal static class FilePatchDiffing
     // Threshold: if the existing file is > 50 lines AND the new content has fewer than
     // 60 % of the existing line count, reject the write.
     // Returns an error string when the truncation guard fires, or null to proceed.
+    // Detects a model reusing a context-compaction placeholder (see ElisionMarkers) as if it
+    // were real file content — e.g. reconstructing a prior write_file's `content` from its own
+    // truncated history when asked to move/duplicate the file, and writing the literal
+    // "[ELIDED — ...]" note to disk instead of re-reading the source. Checked before the write
+    // actually lands so the corruption never reaches the file. Returns an error string when the
+    // guard fires, or null to proceed.
+    internal static string? DetectElisionPlaceholder(string content)
+    {
+        if (!ElisionMarkers.PlaceholderTail.IsMatch(content)) return null;
+
+        return PluginResult.Error(
+            "WRITE BLOCKED — this content ends with a context-compaction placeholder note " +
+            "(e.g. \"[ELIDED — ... NOT the real value ...]\"), not real data. That marker was " +
+            "injected when older tool output aged out of context — it is NOT the file's actual " +
+            "content. Re-read the source file with read_file (or re-run the tool that produced " +
+            "the value) to get the real content, then retry with that.");
+    }
+
     internal static async Task<string?> EnsureFileExistsAsync(string resolved, string content)
     {
         if (File.Exists(resolved))

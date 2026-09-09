@@ -420,6 +420,60 @@ public sealed class FileSystemPluginTests : IDisposable
         Assert.Equal("println(\"world\")\n", await ReadBack("norm.kiwi"));
     }
 
+    // -----------------------------------------------------------------------
+    // Elision-placeholder guard: reject a model reusing a compaction note as real content
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task WriteFile_ContentEndsWithArgValueElisionNote_ReturnsError()
+    {
+        var content = "some reconstructed text\n" + ElisionMarkers.ArgValueNote(1234);
+        var result = await _plugin.WriteFileAsync(TempPath("elided.txt"), content);
+        Assert.StartsWith("[ERROR]", result);
+        Assert.Contains("WRITE BLOCKED", result);
+        Assert.False(File.Exists(TempPath("elided.txt")));
+    }
+
+    [Fact]
+    public async Task WriteFile_ContentIsEntirelyResultElisionNote_ReturnsError()
+    {
+        var result = await _plugin.WriteFileAsync(TempPath("elided2.txt"), ElisionMarkers.ResultNote);
+        Assert.StartsWith("[ERROR]", result);
+        Assert.False(File.Exists(TempPath("elided2.txt")));
+    }
+
+    [Fact]
+    public async Task WriteFile_ContentEndsWithConsumedReadTail_ReturnsError()
+    {
+        // The realistic failure mode: a truncated read_file preview plus its tail note, copied
+        // verbatim into a write_file call for a "duplicate/move this file" request.
+        var content = "public class Foo\n{\n" + ElisionMarkers.ConsumedReadTail(5000);
+        var result = await _plugin.WriteFileAsync(TempPath("elided3.cs"), content);
+        Assert.StartsWith("[ERROR]", result);
+        Assert.False(File.Exists(TempPath("elided3.cs")));
+    }
+
+    [Fact]
+    public async Task WriteFile_ContentMerelyContainsWordElided_IsAllowed()
+    {
+        // Legitimate content that happens to use the word "elided" mid-document (e.g. editing
+        // this codebase's own compaction source) must not be blocked — only a trailing note
+        // matching the exact placeholder wording should trip the guard.
+        var content = "// The rest is elided for brevity in this comment.\nclass Foo {}\n";
+        var result = await _plugin.WriteFileAsync(TempPath("legit.cs"), content);
+        Assert.StartsWith("[OK]", result);
+    }
+
+    [Fact]
+    public async Task PatchFile_NewTextEndsWithElisionNote_ReturnsError()
+    {
+        await File.WriteAllTextAsync(TempPath("patch_elide.py"), "def foo():\n    return 1\n");
+        var badNewText = "def foo():\n    " + ElisionMarkers.ArgValueNote(42);
+        var result = await _plugin.PatchFileAsync(TempPath("patch_elide.py"), "return 1", badNewText);
+        Assert.StartsWith("[ERROR]", result);
+        Assert.Equal("def foo():\n    return 1\n", await ReadBack("patch_elide.py"));
+    }
+
     [Fact]
     public async Task PatchFile_KiwiExtension_OverEscapedQuoteInNewText_WritesNormalizedContent()
     {
