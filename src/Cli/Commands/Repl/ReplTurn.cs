@@ -33,29 +33,47 @@ internal static class ReplTurn
 {
     internal const int StepIterationLimit = 5;
 
-    // Tool-call round-trip cap for free-form turns (ctx.Client) — mirrors StepIterationLimit
-    // but far more permissive since a chat turn isn't scoped to one action. Named so
+    // Tool-call round-trip cap for free-form turns (ctx.Client). Named so
     // ReplFactory.BuildClient's default and the hit-cap check below can't drift apart.
     //
-    // This is a backstop, not the primary cutoff — MaxConsecutiveToolFailures below is what
-    // actually catches a turn that's stuck. Both Cline (MistakeTracker, resets on any success)
-    // and Codex (guardian consecutive-denial cap) stop on a short streak of consecutive
-    // failures rather than a flat round count, precisely because a long chain of *successful*
-    // tool calls — a big scaffold-and-test task, say — shouldn't trip an arbitrary ceiling.
-    // Raised from the old 20 (which fired routinely on exactly that kind of task) now that it
-    // only needs to catch a turn that keeps succeeding at small, unproductive calls forever
-    // without ever failing (so the failure-streak check below never engages).
-    internal const int ChatIterationLimit = 50;
+    // Effectively unbounded: MaxConsecutiveToolFailures below is what actually catches a
+    // turn that's stuck. Both Cline (MistakeTracker, resets on any success) and Codex
+    // (guardian consecutive-denial cap) stop on a short streak of consecutive failures
+    // rather than a flat round count, precisely because a long chain of *successful* tool
+    // calls — a big scaffold-and-test task, say — shouldn't trip an arbitrary ceiling. This
+    // was previously a flat 50 (raised from 20 for the same reason), but any fixed ceiling
+    // still fires on long, entirely legitimate turns, so it's now a sentinel rather than a
+    // real cap. Kept as a named constant rather than removed outright because
+    // FunctionInvokingChatClient.MaximumIterationsPerRequest has no "no limit" value of its
+    // own — the framework's own un-set default is 40, not unlimited (see
+    // AgentMiddlewareBuilder) — so this is what keeps this REPL client's cap out of the way.
+    internal const int ChatIterationLimit = int.MaxValue;
 
-    // Stop the round-trip loop after this many *consecutive* tool-call failures — mirrors
-    // Cline's MistakeTracker default (3, resets to 0 on any success) and Codex's guardian
-    // consecutive-denial cap (also 3). Checked against each FunctionResultContent's own
-    // content (see IsToolFailure) rather than relying solely on
+    // Stop the round-trip loop after this many *consecutive* tool-call failures — same spirit
+    // as Cline's MistakeTracker (default 6, resets to 0 on any turn with a success — see
+    // sdk/packages/core/src/runtime/safety/mistake-tracker.ts) and Codex's guardian
+    // consecutive-denial cap, though not the same unit: Cline counts consecutive *turns* with
+    // no successful tool call at all, ours counts consecutive failing tool-call *results*
+    // one at a time (see IsToolFailure below) rather than relying solely on
     // FunctionInvokingChatClient.MaximumConsecutiveErrorsPerRequest, which only ever sees a
     // hard .NET exception during invocation — most tool failures in this codebase are business-
     // logic failures a plugin catches and returns as a normal string (see PluginResult in
     // ProcessHelper.cs), which the SDK's own counter never observes.
     internal const int MaxConsecutiveToolFailures = 3;
+
+    // Stop the round-trip loop after this many *consecutive* tool calls with the same name and
+    // arguments — a model stuck re-running one call verbatim (e.g. re-reading the same file
+    // forever) produces no failure signal at all, since each call can "succeed" every time, so
+    // MaxConsecutiveToolFailures above never engages for this failure mode, and neither would
+    // ChatIterationLimit even when it was a real flat cap. Mirrors Cline's LoopDetectionTracker
+    // hard-escalation threshold (5 identical calls — see
+    // sdk/packages/core/src/runtime/safety/loop-detection.ts), minus its softer 3-call warning
+    // tier: Cline's tracker can nudge the model between rounds because it owns its runtime loop
+    // outright (a `beforeTool` hook); this REPL's round loop lives inside
+    // FunctionInvokingChatClient, so — like the failure cutoff above — the earliest this can
+    // react is to stop enumerating once the Nth identical call itself streams in, with no
+    // earlier soft-warning point available to hook into.
+    internal const int MaxConsecutiveIdenticalToolCalls = 5;
 
     // Maximum times a transient streaming error (ResponseEnded, IOException, TimeoutException)
     // is retried automatically before surfacing the failure to the user.
@@ -453,6 +471,8 @@ internal static class ReplTurn
         var turnOutputTokens  = stream.TurnOutputTokens;
         var hitConsecutiveFailureLimit = stream.HitConsecutiveFailureLimit;
         var lastToolFailureDetail      = stream.LastToolFailureDetail;
+        var hitRepeatedToolCallLimit   = stream.HitRepeatedToolCallLimit;
+        var lastRepeatedToolCallDetail = stream.LastRepeatedToolCallDetail;
 
         responseText = SanitizeAssistantResponse(responseText, out var warningMessage);
         if (!capturePlan && responseText.Length == 0)
@@ -598,6 +618,27 @@ internal static class ReplTurn
                 ReplJsonBridge.Emit(new { type = "warning", text = failMsg });
             else
                 AnsiConsole.MarkupLine($"[dim yellow]  ⚠ {Markup.Escape(failMsg)}[/]");
+        }
+
+        // Repeated-identical-tool-call cutoff — mirrors Cline's LoopDetectionTracker hard
+        // escalation (see MaxConsecutiveIdenticalToolCalls above): a model re-running the same
+        // call verbatim produces no failure signal at all, so the consecutive-failure cutoff
+        // above never engages for this failure mode, and neither would ChatIterationLimit even
+        // when it was a real flat cap.
+        if (!isStepRequest && hitRepeatedToolCallLimit && responseText.Length > 0)
+        {
+            await ctx.Emitter.EmitAsync(EventTypes.ReplWarning, turn: ctx.TurnIndex, payload: new
+            {
+                message = "hit_repeated_tool_call_limit",
+                limit   = MaxConsecutiveIdenticalToolCalls,
+                detail  = lastRepeatedToolCallDetail,
+            });
+            var repeatMsg = $"Stopped after {lastRepeatedToolCallDetail ?? $"{MaxConsecutiveIdenticalToolCalls} identical tool calls in a row"} " +
+                            "— the model may be stuck in a loop. Progress so far was kept — send a follow-up to try a different approach.";
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new { type = "warning", text = repeatMsg });
+            else
+                AnsiConsole.MarkupLine($"[dim yellow]  ⚠ {Markup.Escape(repeatMsg)}[/]");
         }
 
         // One-time 75 % context check. Fires on free-form turns only (not plan steps or
@@ -934,13 +975,15 @@ internal static class ReplTurn
         int? TurnFirstInputTokens,
         List<ChatResponseUpdate> RawUpdates,
         bool HitConsecutiveFailureLimit,
-        string? LastToolFailureDetail)
+        string? LastToolFailureDetail,
+        bool HitRepeatedToolCallLimit,
+        string? LastRepeatedToolCallDetail)
     {
         // toolCallsThisTurn is preserved from the aborted attempt (not always empty) so a
         // step halted mid-stream can still report which tools it managed to call before
         // failing — see ReplTurnOutcome.HaltStepOnStreamFailure.
         internal static TurnStreamResult MakeFailed(List<string> toolCallsThisTurn) =>
-            new(false, "", toolCallsThisTurn, [], 0, null, 0, 0, null, [], false, null);
+            new(false, "", toolCallsThisTurn, [], 0, null, 0, 0, null, [], false, null, false, null);
     }
 
     /// <summary>
@@ -985,6 +1028,13 @@ internal static class ReplTurn
         var consecutiveToolFailures    = 0;
         var hitConsecutiveFailureLimit = false;
         string? lastToolFailureDetail  = null;
+        // See MaxConsecutiveIdenticalToolCalls — resets whenever a call's name or arguments
+        // differ from the immediately preceding call.
+        var lastToolCallName               = string.Empty;
+        var lastToolCallSignature          = string.Empty;
+        var consecutiveIdenticalToolCalls  = 0;
+        var hitRepeatedToolCallLimit       = false;
+        string? lastRepeatedToolCallDetail = null;
 
         var reqCts    = new CancellationTokenSource();
         ctx.ActiveCts = reqCts;
@@ -1074,6 +1124,13 @@ internal static class ReplTurn
                     if (callIdToName is not null && funcCall.CallId is not null)
                         callIdToName[funcCall.CallId] = funcCall.Name;
 
+                    var callSignature = ToolCallSignature(funcCall.Arguments);
+                    consecutiveIdenticalToolCalls =
+                        funcCall.Name == lastToolCallName && callSignature == lastToolCallSignature
+                            ? consecutiveIdenticalToolCalls + 1 : 1;
+                    lastToolCallName      = funcCall.Name;
+                    lastToolCallSignature = callSignature;
+
                     if (ctx.JsonMode)
                     {
                         // Include arguments so the webview can show them on hover/expand.
@@ -1098,6 +1155,18 @@ internal static class ReplTurn
                         var verb = toolCallsThisTurn.Count % 2 == 0 ? "fusing" : "rafting";
                         spinTask = ReplConsole.RunSpinnerAsync($"{verb}…  {chain}", spinCts.Token, turnStart);
                         spinning = true;
+                    }
+
+                    // Stop enumerating now, before the automatic-invocation loop ever requests
+                    // another round — same early-break technique as the consecutive-failure
+                    // cutoff below (a dangling call with no result is repaired by
+                    // RepairDanglingToolCalls, so breaking mid-call here is safe).
+                    if (consecutiveIdenticalToolCalls >= MaxConsecutiveIdenticalToolCalls)
+                    {
+                        hitRepeatedToolCallLimit = true;
+                        lastRepeatedToolCallDetail =
+                            $"{consecutiveIdenticalToolCalls} consecutive identical calls to '{funcCall.Name}'";
+                        break;
                     }
                     continue;
                 }
@@ -1208,6 +1277,8 @@ internal static class ReplTurn
             toolRounds = 0; usageRounds = 0; finishRounds = 0;
             turnInputTokens = 0; turnOutputTokens = 0; turnFirstInputTokens = null;
             consecutiveToolFailures = 0; hitConsecutiveFailureLimit = false; lastToolFailureDetail = null;
+            lastToolCallName = string.Empty; lastToolCallSignature = string.Empty;
+            consecutiveIdenticalToolCalls = 0; hitRepeatedToolCallLimit = false; lastRepeatedToolCallDetail = null;
 
             // Restart spinner for the fresh attempt.
             spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
@@ -1263,7 +1334,8 @@ internal static class ReplTurn
         return new TurnStreamResult(
             true, sb.ToString(), toolCallsThisTurn, fileChanges, toolRounds, capturedResults,
             turnInputTokens, turnOutputTokens, turnFirstInputTokens, rawUpdates,
-            hitConsecutiveFailureLimit, lastToolFailureDetail);
+            hitConsecutiveFailureLimit, lastToolFailureDetail,
+            hitRepeatedToolCallLimit, lastRepeatedToolCallDetail);
     }
 
     internal static async Task ExtractMemoriesOnExitAsync(ReplSessionContext ctx)
@@ -1461,6 +1533,22 @@ internal static class ReplTurn
         if (funcResult.Exception is not null) return true;
         var text = funcResult.Result?.ToString();
         return text is not null && ToolFailurePrefixes.Any(p => text.StartsWith(p, StringComparison.Ordinal));
+    }
+
+    // Stable signature for MaxConsecutiveIdenticalToolCalls comparison — sorted so the model
+    // varying key order between two otherwise-identical calls doesn't defeat detection. Tool
+    // name is compared separately by the caller, so this covers arguments only.
+    private static string ToolCallSignature(IDictionary<string, object?>? args)
+    {
+        if (args is null || args.Count == 0) return string.Empty;
+        var sb = new StringBuilder();
+        foreach (var key in args.Keys.OrderBy(k => k, StringComparer.Ordinal))
+        {
+            var value = args[key];
+            var s = value is JsonElement je ? je.ToString() : value?.ToString() ?? "null";
+            sb.Append(key).Append('=').Append(s).Append(';');
+        }
+        return sb.ToString();
     }
 
     private static string? GetArg(IDictionary<string, object?>? args, string key)
