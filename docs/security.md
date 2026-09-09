@@ -13,6 +13,8 @@ Security:
   FileSystemSandboxPath: /home/user/projects/myapp
 ```
 
+**`fuseraft repl` applies this automatically** — no config needed. The launch directory is used as the sandbox root by default; pass `--yolo` to disable it (along with `/hitl`'s default-on approval gate — see [`fuseraft repl`](cli-reference.md#fuseraft-repl)). `fuseraft run` has no equivalent default; `Security.FileSystemSandboxPath` must be set explicitly in the orchestration config.
+
 ### What is checked
 
 | Plugin | Functions / Argument | Check type |
