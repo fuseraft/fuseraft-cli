@@ -63,6 +63,19 @@ public interface IHumanApprovalService
     Task<bool> PromptToolActionAsync(string plugin, string action, string detail);
 
     /// <summary>
+    /// Called before a FileSystem <c>write_file</c> or <c>patch_file</c> call executes in
+    /// --hitl mode, once the final content that will be written is known (after
+    /// normalization/validation) — the write/patch-specific counterpart to
+    /// <see cref="PromptToolActionAsync"/>, carrying the actual before/after content so
+    /// implementations can render a diff instead of a bare path. <paramref name="action"/>
+    /// is "write_file" or "patch_file", <paramref name="path"/> the resolved file path,
+    /// <paramref name="oldContent"/> the file's current content (empty string for a new
+    /// file), and <paramref name="newContent"/> the content about to be written.
+    /// Returns true to allow the call, false to block it (the plugin returns [DENIED]).
+    /// </summary>
+    Task<bool> PromptFileWriteAsync(string action, string path, string oldContent, string newContent);
+
+    /// <summary>
     /// Prompts the human operator to review a Magentic manager-generated plan.
     /// Called when <c>Selection.Magentic.EnablePlanReview</c> is true.
     /// Returns null to approve the plan as-is, or a non-empty string as revision feedback

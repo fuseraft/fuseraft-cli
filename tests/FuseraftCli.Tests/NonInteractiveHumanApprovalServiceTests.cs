@@ -40,6 +40,10 @@ public sealed class NonInteractiveHumanApprovalServiceTests
         => Assert.True(await _svc.PromptToolActionAsync("FileSystem", "write_file", "/tmp/scratch.txt"));
 
     [Fact]
+    public async Task PromptFileWriteAsync_ReturnsTrue()
+        => Assert.True(await _svc.PromptFileWriteAsync("write_file", "/tmp/scratch.txt", "old", "new"));
+
+    [Fact]
     public async Task PromptPostSessionAsync_ReturnsNull()
         => Assert.Null(await _svc.PromptPostSessionAsync());
 
