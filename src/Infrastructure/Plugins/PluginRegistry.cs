@@ -199,7 +199,8 @@ public sealed class PluginRegistry : IDisposable
         SessionReadCache? sessionReadCache = null,
         Action? onCacheHit = null,
         IEventSink? eventSink = null,
-        Func<string, string, string, Task<bool>>? toolActionApprover = null)
+        Func<string, string, string, Task<bool>>? toolActionApprover = null,
+        Func<string, string, string, string, Task<bool>>? fileWriteApprover = null)
     {
         var sandboxRoot       = security.FileSystemSandboxPath;
         var allowedHosts      = security.HttpAllowedHosts is { Count: > 0 } h ? (IReadOnlyList<string>)h : null;
@@ -218,7 +219,7 @@ public sealed class PluginRegistry : IDisposable
 
         // Same eager-construction-plus-shared-closure pattern as RegisterDefaults — both
         // "FileSystem" registrations must share one FileSystemPlugin instance's per-turn state.
-        var fsPlugin = new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore, sessionCache: sessionReadCache, onWrite: shellInstance.InvalidateRunCache, onCacheHit: onCacheHit, exemptedPaths: ["~/.fuseraft/"], approveAction: BindApprover("FileSystem"));
+        var fsPlugin = new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore, sessionCache: sessionReadCache, onWrite: shellInstance.InvalidateRunCache, onCacheHit: onCacheHit, exemptedPaths: ["~/.fuseraft/"], approveAction: BindApprover("FileSystem"), approveWrite: fileWriteApprover);
         Register("FileSystem", () => fsPlugin);
         RegisterAdditional("FileSystem", () => new FileSystemManagementOps(
             fsPlugin, sandboxRoot, sessionCache: sessionReadCache, versionStore: fileVersionStore, exemptedPaths: ["~/.fuseraft/"]));

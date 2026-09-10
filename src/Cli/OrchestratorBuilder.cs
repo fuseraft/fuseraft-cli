@@ -152,7 +152,7 @@ public static class OrchestratorBuilder
         var (config, projectSlug) = await OrchestratorConfigLoader.LoadAndExpandConfig(
             configPath, loggerFactory, sessionId, noReplan, cancellationToken);
 
-        var (configAfterSecurity, profiles, shellApprover, toolActionApprover) = ResolveSecurityConfig(
+        var (configAfterSecurity, profiles, shellApprover, toolActionApprover, fileWriteApprover) = ResolveSecurityConfig(
             config, pluginRegistry, hitlMode, humanApprovalService, loggerFactory);
         config = configAfterSecurity;
 
@@ -161,7 +161,7 @@ public static class OrchestratorBuilder
 
         var infra = await InitInfrastructure(
             config, pluginRegistry, loggerFactory, sessionId, projectSlug,
-            profiles, shellApprover, toolActionApprover, cancellationToken);
+            profiles, shellApprover, toolActionApprover, fileWriteApprover, cancellationToken);
         config = infra.Config;
 
         var (governanceKernel, chatClientFactory, identityRegistry, dependencyPlanner) =
@@ -212,7 +212,7 @@ public static class OrchestratorBuilder
     // ResolveSecurityConfig
     // -------------------------------------------------------------------------
 
-    private static (OrchestrationConfig Config, IReadOnlyDictionary<string, ApiProfileConfig>? Profiles, Func<string, Task<bool>>? ShellApprover, Func<string, string, string, Task<bool>>? ToolActionApprover) ResolveSecurityConfig(
+    private static (OrchestrationConfig Config, IReadOnlyDictionary<string, ApiProfileConfig>? Profiles, Func<string, Task<bool>>? ShellApprover, Func<string, string, string, Task<bool>>? ToolActionApprover, Func<string, string, string, string, Task<bool>>? FileWriteApprover) ResolveSecurityConfig(
         OrchestrationConfig config,
         PluginRegistry pluginRegistry,
         bool hitlMode,
@@ -229,8 +229,14 @@ public static class OrchestratorBuilder
         Func<string, string, string, Task<bool>>? toolActionApprover = hitlMode && humanApprovalService is not null
             ? humanApprovalService.PromptToolActionAsync
             : null;
+        // Diff-aware counterpart to toolActionApprover, used only by write_file/patch_file —
+        // see IHumanApprovalService.PromptFileWriteAsync and ReplCommand.cs's approveFileWrite
+        // closure, kept in parity here for `fuseraft run --hitl`.
+        Func<string, string, string, string, Task<bool>>? fileWriteApprover = hitlMode && humanApprovalService is not null
+            ? humanApprovalService.PromptFileWriteAsync
+            : null;
 
-        pluginRegistry.Configure(config.Security, profiles, shellApprover, toolActionApprover: toolActionApprover);
+        pluginRegistry.Configure(config.Security, profiles, shellApprover, toolActionApprover: toolActionApprover, fileWriteApprover: fileWriteApprover);
 
         // When a filesystem sandbox is configured, resolve relative validation and
         // change-tracking paths against the sandbox root so that validators and
@@ -294,7 +300,7 @@ public static class OrchestratorBuilder
                     $"Update one of them to match the other.");
         }
 
-        return (config, profiles, shellApprover, toolActionApprover);
+        return (config, profiles, shellApprover, toolActionApprover, fileWriteApprover);
     }
 
     // -------------------------------------------------------------------------
@@ -327,6 +333,7 @@ public static class OrchestratorBuilder
         IReadOnlyDictionary<string, ApiProfileConfig>? profiles,
         Func<string, Task<bool>>? shellApprover,
         Func<string, string, string, Task<bool>>? toolActionApprover,
+        Func<string, string, string, string, Task<bool>>? fileWriteApprover,
         CancellationToken cancellationToken)
     {
         // Connect to MCP servers and register their tools before building agents.
@@ -427,7 +434,7 @@ public static class OrchestratorBuilder
         // so write_file, get_file_info, and read_file participate in version-aware conflict
         // detection and cross-turn read deduplication. Thread the cache-hit callback so
         // SessionMetrics can count duplicate reads across the session.
-        pluginRegistry.Configure(config.Security ?? new SecurityConfig(), profiles, shellApprover, fileVersionStore, sessionReadCache, onCacheHit: sessionMetrics.RecordCacheHit, eventSink: stateProjector, toolActionApprover: toolActionApprover);
+        pluginRegistry.Configure(config.Security ?? new SecurityConfig(), profiles, shellApprover, fileVersionStore, sessionReadCache, onCacheHit: sessionMetrics.RecordCacheHit, eventSink: stateProjector, toolActionApprover: toolActionApprover, fileWriteApprover: fileWriteApprover);
 
         // Session context plugin: shared handoff notes that agents write before routing
         // and read on re-entry. Stored in the global session directory.
