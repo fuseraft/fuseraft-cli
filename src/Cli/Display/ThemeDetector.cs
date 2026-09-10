@@ -21,6 +21,11 @@ public static class ThemeDetector
     public static string Warning => IsLightBackground ? "olive"  : "yellow";
     public static string Human   => IsLightBackground ? "black"  : "white";
 
+    // Diff view colours — added/removed line foregrounds, tuned for contrast on both
+    // light and dark terminal backgrounds.
+    public static string DiffAdd    => IsLightBackground ? "green"  : "green3";
+    public static string DiffRemove => IsLightBackground ? "red"    : "red3";
+
     /// <summary>
     /// Returns a light-mode <see cref="HelpProviderStyle"/> when a light terminal
     /// background is detected, otherwise <c>null</c> (use Spectre's defaults).

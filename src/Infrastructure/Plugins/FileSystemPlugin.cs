@@ -43,6 +43,11 @@ public sealed class FileSystemPlugin : ITurnResettable
     private readonly Action?            _onCacheHit;
     private readonly UndoSnapshotStore  _undoStore = new();
     private readonly Func<string, string, Task<bool>>? _approveAction;
+    // Diff-aware approval hook for write_file/patch_file specifically — carries the actual
+    // before/after content (action, path, oldContent, newContent) so the approver can render
+    // a diff instead of just the bare path _approveAction gets. Fired once the final content
+    // is known (post-normalization), right before the write lands on disk.
+    private readonly Func<string, string, string, string, Task<bool>>? _approveWrite;
 
     // Per-turn read cache: cleared at the start of each agent turn so re-reading the same
     // file within a single turn is caught and short-circuited before dumping redundant
@@ -76,7 +81,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     // maxLines: 99999 is asking for everything and should be gated the same as omitting it.
     private const int LargeFileColdReadLines  = 500;
 
-    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null, Action? onWrite = null, Action? onCacheHit = null, IReadOnlyList<string>? exemptedPaths = null, Func<string, string, Task<bool>>? approveAction = null)
+    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null, Action? onWrite = null, Action? onCacheHit = null, IReadOnlyList<string>? exemptedPaths = null, Func<string, string, Task<bool>>? approveAction = null, Func<string, string, string, string, Task<bool>>? approveWrite = null)
     {
         _sandboxRoot       = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _exemptedPrefixes  = (exemptedPaths ?? [])
@@ -91,6 +96,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         _onWrite           = onWrite;
         _onCacheHit        = onCacheHit;
         _approveAction     = approveAction;
+        _approveWrite      = approveWrite;
     }
 
     /// <inheritdoc cref="ITurnResettable.BeginTurn"/>
@@ -363,9 +369,6 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (!File.Exists(resolved))
             return PluginResult.Error($"File not found: {resolved}");
 
-        if (_approveAction is not null && !await _approveAction("patch_file", resolved))
-            return PluginResult.Denied("File patch blocked by user.");
-
         var encoding = DetectEncoding(resolved);
         var content = await File.ReadAllTextAsync(resolved, encoding);
         var ext     = Path.GetExtension(resolved).ToLowerInvariant();
@@ -430,6 +433,12 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (content.Contains("\r\n"))
             patched = patched.Replace("\n", "\r\n");
 
+        // Approval fires here — once `patched` (the exact content that will be written) is
+        // known — rather than up front, so the approver sees the real diff and the user is
+        // never prompted for a patch that would go on to fail oldText matching anyway.
+        if (_approveWrite is not null && !await _approveWrite("patch_file", resolved, content, patched))
+            return PluginResult.Denied("File patch blocked by user.");
+
         await _undoStore.RecordBeforeMutationAsync(resolved, knownContent: content);
         await File.WriteAllTextAsync(resolved, patched, encoding);
 
@@ -490,9 +499,6 @@ public sealed class FileSystemPlugin : ITurnResettable
         var pathDenial = ValidateWritePath(path, out var resolved);
         if (pathDenial is not null) return pathDenial;
 
-        if (_approveAction is not null && !await _approveAction("write_file", resolved!))
-            return PluginResult.Denied("File write blocked by user.");
-
         var versionDenial = await CheckVersionConflictAsync(resolved!, baseVersion);
         if (versionDenial is not null) return versionDenial;
 
@@ -503,6 +509,18 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         var diffDenial = FilePatchDiffing.ComputeAndReportDiff(resolved!, content, ext, raw, out content, out bool normalised);
         if (diffDenial is not null) return diffDenial;
+
+        // Approval fires here — once `content` is the exact, final, normalised text that will
+        // be written — rather than up front, so the approver sees the real diff and the user is
+        // never prompted for a write that would go on to fail version/truncation validation anyway.
+        if (_approveWrite is not null)
+        {
+            var oldContent = File.Exists(resolved!)
+                ? await File.ReadAllTextAsync(resolved!, DetectEncoding(resolved!))
+                : string.Empty;
+            if (!await _approveWrite("write_file", resolved!, oldContent, content))
+                return PluginResult.Denied("File write blocked by user.");
+        }
 
         return await CommitWriteAsync(resolved!, content, normalised);
     }
