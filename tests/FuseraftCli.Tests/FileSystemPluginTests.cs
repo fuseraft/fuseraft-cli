@@ -666,14 +666,16 @@ public sealed class FileSystemPluginTests : IDisposable
         Assert.Contains("TRUNCATED", result);
     }
 
-    // approveAction — the HITL gate `/hitl on` (REPL) and `fuseraft run --hitl` (orchestration)
+    // approveWrite — the HITL gate `/hitl on` (REPL) and `fuseraft run --hitl` (orchestration)
     // both wire into write_file/patch_file, generalizing ShellPlugin's approveCommand gate
-    // (see ShellPluginTests) to FileSystem's mutating tools.
+    // (see ShellPluginTests) to FileSystem's mutating tools. Distinct from approveAction
+    // (FileSystemManagementOpsTests) because it carries old/new content for a diff preview
+    // — see IHumanApprovalService.PromptFileWriteAsync.
 
     [Fact]
-    public async Task WriteFile_ApproveActionReturnsFalse_BlocksAndDoesNotWrite()
+    public async Task WriteFile_ApproveWriteReturnsFalse_BlocksAndDoesNotWrite()
     {
-        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (_, _) => Task.FromResult(false));
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveWrite: (_, _, _, _) => Task.FromResult(false));
 
         var result = await plugin.WriteFileAsync(TempPath("blocked.txt"), "content");
 
@@ -682,9 +684,9 @@ public sealed class FileSystemPluginTests : IDisposable
     }
 
     [Fact]
-    public async Task WriteFile_ApproveActionReturnsTrue_WritesNormally()
+    public async Task WriteFile_ApproveWriteReturnsTrue_WritesNormally()
     {
-        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (_, _) => Task.FromResult(true));
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveWrite: (_, _, _, _) => Task.FromResult(true));
 
         var result = await plugin.WriteFileAsync(TempPath("allowed.txt"), "content");
 
@@ -693,26 +695,28 @@ public sealed class FileSystemPluginTests : IDisposable
     }
 
     [Fact]
-    public async Task WriteFile_ApproveActionSeesActionNameAndResolvedPath()
+    public async Task WriteFile_ApproveWriteSeesActionPathAndContent()
     {
-        (string Action, string Detail)? seen = null;
-        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (action, detail) =>
+        (string Action, string Path, string OldContent, string NewContent)? seen = null;
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveWrite: (action, path, oldContent, newContent) =>
         {
-            seen = (action, detail);
+            seen = (action, path, oldContent, newContent);
             return Task.FromResult(true);
         });
 
         await plugin.WriteFileAsync(TempPath("seen.txt"), "content");
 
         Assert.Equal("write_file", seen?.Action);
-        Assert.Equal(TempPath("seen.txt"), seen?.Detail);
+        Assert.Equal(TempPath("seen.txt"), seen?.Path);
+        Assert.Equal("", seen?.OldContent);
+        Assert.Equal("content", seen?.NewContent);
     }
 
     [Fact]
-    public async Task PatchFile_ApproveActionReturnsFalse_BlocksAndDoesNotPatch()
+    public async Task PatchFile_ApproveWriteReturnsFalse_BlocksAndDoesNotPatch()
     {
         await File.WriteAllTextAsync(TempPath("patch-target.txt"), "before");
-        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (_, _) => Task.FromResult(false));
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveWrite: (_, _, _, _) => Task.FromResult(false));
 
         var result = await plugin.PatchFileAsync(TempPath("patch-target.txt"), "before", "after");
 
@@ -721,15 +725,32 @@ public sealed class FileSystemPluginTests : IDisposable
     }
 
     [Fact]
-    public async Task PatchFile_ApproveActionReturnsTrue_PatchesNormally()
+    public async Task PatchFile_ApproveWriteReturnsTrue_PatchesNormally()
     {
         await File.WriteAllTextAsync(TempPath("patch-target2.txt"), "before");
-        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (_, _) => Task.FromResult(true));
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveWrite: (_, _, _, _) => Task.FromResult(true));
 
         var result = await plugin.PatchFileAsync(TempPath("patch-target2.txt"), "before", "after");
 
         Assert.Contains("Patched", result);
         Assert.Equal("after", await File.ReadAllTextAsync(TempPath("patch-target2.txt")));
+    }
+
+    [Fact]
+    public async Task PatchFile_ApproveWriteSeesOldAndNewFullFileContent()
+    {
+        await File.WriteAllTextAsync(TempPath("patch-target3.txt"), "line1\nbefore\nline3");
+        (string OldContent, string NewContent)? seen = null;
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveWrite: (_, _, oldContent, newContent) =>
+        {
+            seen = (oldContent, newContent);
+            return Task.FromResult(true);
+        });
+
+        await plugin.PatchFileAsync(TempPath("patch-target3.txt"), "before", "after");
+
+        Assert.Equal("line1\nbefore\nline3", seen?.OldContent);
+        Assert.Equal("line1\nafter\nline3", seen?.NewContent);
     }
 
     [Fact]

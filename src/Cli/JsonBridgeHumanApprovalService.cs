@@ -27,6 +27,21 @@ public sealed class JsonBridgeHumanApprovalService(ReplStdinPump stdinPump) : IH
         return await stdinPump.ReadApprovalResponseAsync();
     }
 
+    public async Task<bool> PromptFileWriteAsync(string action, string path, string oldContent, string newContent)
+    {
+        ReplJsonBridge.Emit(new
+        {
+            type = "approval_request",
+            kind = "file_write",
+            plugin = "FileSystem",
+            action,
+            path,
+            oldContent,
+            newContent,
+        });
+        return await stdinPump.ReadApprovalResponseAsync();
+    }
+
     // The REPL's /hitl mode only gates Shell/FileSystem/Git/Http mutating calls (see
     // ShellPlugin's approveCommand hook and FileSystemPlugin/GitPlugin/HttpPlugin's
     // approveAction hook in ReplCommand.cs) — none of the prompts below are reachable from the

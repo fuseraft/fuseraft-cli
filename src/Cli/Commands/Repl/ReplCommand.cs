@@ -270,6 +270,14 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             (action, detail) => hitlState.Enabled
                 ? approvalService.PromptToolActionAsync(pluginName, action, detail)
                 : Task.FromResult(true);
+
+        // Diff-aware counterpart to approveToolAction, used only by write_file/patch_file
+        // (see IHumanApprovalService.PromptFileWriteAsync) so the approval prompt can render
+        // the actual before/after content instead of just the resolved path.
+        Func<string, string, string, string, Task<bool>> approveFileWrite =
+            (action, path, oldContent, newContent) => hitlState.Enabled
+                ? approvalService.PromptFileWriteAsync(action, path, oldContent, newContent)
+                : Task.FromResult(true);
         SubAgentPlugin? subAgent        = null;
         IReadOnlyList<AgentSkill> discoveredSkills = [];
         string?         skillsCatalog   = null;
@@ -283,7 +291,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         List<AIFunction>? gitFunctions   = null;
         if (!settings.NoTools)
         {
-            fsPluginForCategory = new FileSystemPlugin(sandboxRoot: sandboxRoot, approveAction: approveToolAction("FileSystem"));
+            fsPluginForCategory = new FileSystemPlugin(sandboxRoot: sandboxRoot, approveAction: approveToolAction("FileSystem"), approveWrite: approveFileWrite);
             fsFunctions    = PluginRegistry.GetFunctionsFromObject(fsPluginForCategory)
                 .Concat(PluginRegistry.GetFunctionsFromObject(new FileSystemManagementOps(fsPluginForCategory)))
                 .ToList();

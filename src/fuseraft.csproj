@@ -55,6 +55,9 @@
     <!-- Rich CLI: brings in Spectre.Console transitively -->
     <PackageReference Include="Spectre.Console.Cli" Version="0.55.0" />
 
+    <!-- Line diffing for REPL diff views (HITL write/patch approval previews) -->
+    <PackageReference Include="DiffPlex" Version="1.7.2" />
+
     <!-- MCP client SDK -->
     <PackageReference Include="ModelContextProtocol" Version="2.1.0" />
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
