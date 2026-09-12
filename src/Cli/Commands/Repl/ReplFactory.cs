@@ -36,7 +36,8 @@ internal static class ReplFactory
     internal static IChatClient BuildClient(
         ModelConfig config, ChatClientFactory factory, bool addFunctionInvocation,
         AdaptiveTrimTracker adaptiveTrimTracker, EventEmitter? emitter = null,
-        int maxIterations = ReplTurn.ChatIterationLimit)
+        int maxIterations = ReplTurn.ChatIterationLimit,
+        IReadOnlyList<AIFunction>? tools = null)
     {
         var client = factory.Create(config);
         if (addFunctionInvocation)
@@ -61,15 +62,21 @@ internal static class ReplFactory
 
             // Routes through the same context-trim/adaptive-retry middleware AgentFactory wraps
             // every orchestration agent with. chatOptions is null because the REPL's tool list
-            // is supplied per-call via ChatOptions, not fixed at construction like an agent's.
+            // is supplied per-call via ChatOptions, not fixed at construction like an agent's —
+            // toolSchemaChars is instead estimated from the caller's current tool set (whatever
+            // is active at the moment this client is (re)built by /tools, /safe-mode, /model,
+            // /mcp, etc.) so pre-flight budget checks and the inner_call_context/model_call
+            // telemetry account for schema overhead instead of treating it as zero.
             var middleware = new AgentMiddlewareBuilder(
                 logger: NullLogger.Instance, changeTracker: null, securityConfig: null,
                 governanceKernel: null, adaptiveTrimTracker: adaptiveTrimTracker);
+            var toolSchemaChars = AgentMiddlewareBuilder.EstimateToolSchemaChars(
+                tools?.Cast<AITool>().ToList());
 
             client = middleware.BuildMiddlewareChain(
                 chatClient: client, config: agentConfig, chatOptions: null,
                 maxContextChars: maxContextChars, maxInTurnChars: 0, maxInTurnToolPairs: InTurnToolPairLimit,
-                toolSchemaChars: 0, maxPayloadBytes: resolved.MaxPayloadBytes,
+                toolSchemaChars: toolSchemaChars, maxPayloadBytes: resolved.MaxPayloadBytes,
                 hasHandoff: false, emitter: emitter);
 
             // ReplToolLoopGuard's soft repeated-call nudge only makes sense for free-form turns

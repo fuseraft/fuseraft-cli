@@ -24,6 +24,29 @@ internal static class AgentContextCompactionFilters
     // call frame, causing O(N) growth per step that compounds across N steps to O(N²) total.
     private const int MaxIntermediateArgValueChars = 500;
 
+    // Ratio of the reference budget at which KeepLastToolPairs actually engages inside
+    // ApplyInTurnFilters — mirrors Cline's COMPACTION_TRIGGER_RATIO (sdk/packages/core/src/
+    // extensions/context/compaction-shared.ts). Below this, the pair sequence is left
+    // untouched so the request prefix stays byte-identical to the previous round's and a
+    // provider's prompt cache can still serve it; only once a turn is actually approaching
+    // its budget does the window start evicting the oldest pairs.
+    internal const double CompactionTriggerRatio = 0.9;
+
+    // Reference budget for CompactionTriggerRatio when the caller has no better number (e.g.
+    // a REPL session with no configured MaxContextTokens). Matches AgentFactory's own
+    // DefaultMaxInTurnChars fallback tier.
+    internal const int DefaultTriggerChars = 200_000;
+
+    // Minimum accumulated size of superseded content before DropSupersededWritePairs/
+    // DropSupersededObservationalPairs actually rewrite it. Mirrors Cline's
+    // DEFAULT_MIN_OUTDATED_REWRITE_BYTES (sdk/packages/core/src/session/services/
+    // message-builder.ts): rewriting a stale tool result the instant it's superseded changes
+    // a message in the middle of the transcript on every single re-read, which invalidates a
+    // provider's prefix cache for everything after it on every call. Batching the rewrite
+    // means most calls resend an identical prefix and hit the cache; only once enough
+    // staleness has piled up is it worth paying the one-time cache miss to reclaim the space.
+    internal const int DefaultMinSupersededDropChars = 65_536;
+
     /// <summary>
     /// Truncates verbose content in intermediate (tool-calling) assistant messages:
     /// <list type="bullet">
@@ -255,13 +278,37 @@ internal static class AgentContextCompactionFilters
         "changes_read_latest", "git_status", "git_diff",
     };
 
+    // Sums the current (pre-rewrite) size of every tool result whose CallId is in
+    // `supersededCallIds` — shared by DropSupersededObservationalPairs and
+    // DropSupersededWritePairs to decide whether accumulated staleness clears their batch
+    // threshold yet.
+    private static int SupersededResultChars(IList<ChatMessage> messages, HashSet<string> supersededCallIds)
+    {
+        int total = 0;
+        foreach (var msg in messages)
+        {
+            if (msg.Role != ChatRole.Tool) continue;
+            foreach (var fr in msg.Contents.OfType<FunctionResultContent>())
+                if (fr.CallId is not null && supersededCallIds.Contains(fr.CallId))
+                    total += EstimateContentChars(fr);
+        }
+        return total;
+    }
+
     /// <summary>
     /// Replaces observational tool-call/result pairs that are superseded by a later call
     /// with identical arguments. Only the freshest result for each (tool, args) combination
     /// is preserved; earlier identical calls are stubbed out.
     /// </summary>
+    /// <param name="minBatchChars">
+    /// Skip the rewrite entirely unless the superseded results found this pass total at
+    /// least this many chars — see <see cref="DefaultMinSupersededDropChars"/>'s doc comment.
+    /// 0 (the default) rewrites as soon as anything is superseded, matching the previous
+    /// unconditional behavior; direct callers other than <see cref="ApplyInTurnFilters"/> get
+    /// that behavior unless they opt into batching explicitly.
+    /// </param>
     internal static IEnumerable<ChatMessage> DropSupersededObservationalPairs(
-        IEnumerable<ChatMessage> messages)
+        IEnumerable<ChatMessage> messages, int minBatchChars = 0)
     {
         var list = messages as IList<ChatMessage> ?? messages.ToList();
 
@@ -290,6 +337,9 @@ internal static class AgentContextCompactionFilters
                 superseded.Add(callId);
 
         if (superseded.Count == 0) return list;
+
+        if (minBatchChars > 0 && SupersededResultChars(list, superseded) < minBatchChars)
+            return list;
 
         const string FcNote   = "[superseded — repeated call with same arguments]";
         const string ToolNote = "[omitted — superseded by later identical call]";
@@ -362,8 +412,13 @@ internal static class AgentContextCompactionFilters
     /// A call is superseded when a subsequent <c>write_file</c> overwrites the same path
     /// entirely, making the earlier write irrelevant to context.
     /// </summary>
+    /// <param name="minBatchChars">
+    /// Skip the rewrite entirely unless the superseded results found this pass total at
+    /// least this many chars — see <see cref="DropSupersededObservationalPairs"/>'s parameter
+    /// of the same name and <see cref="DefaultMinSupersededDropChars"/>'s doc comment.
+    /// </param>
     internal static IEnumerable<ChatMessage> DropSupersededWritePairs(
-        IEnumerable<ChatMessage> messages)
+        IEnumerable<ChatMessage> messages, int minBatchChars = 0)
     {
         var list = messages as IList<ChatMessage> ?? messages.ToList();
 
@@ -395,6 +450,9 @@ internal static class AgentContextCompactionFilters
                 superseded.Add(callId);
 
         if (superseded.Count == 0) return list;
+
+        if (minBatchChars > 0 && SupersededResultChars(list, superseded) < minBatchChars)
+            return list;
 
         const string FcNote      = "[superseded — later write_file for same path]";
         const string ToolNote    = "[omitted — superseded by later write_file]";
@@ -529,11 +587,7 @@ internal static class AgentContextCompactionFilters
     {
         var list = messages as IList<ChatMessage> ?? messages.ToList();
 
-        // Count chars across all messages.
-        int total = 0;
-        foreach (var m in list)
-            foreach (var c in m.Contents)
-                total += EstimateContentChars(c);
+        int total = EstimateTotalChars(list);
 
         if (total <= maxChars) return list;
 
@@ -637,24 +691,54 @@ internal static class AgentContextCompactionFilters
     /// <paramref name="maxInTurnChars"/> of 0 skip that step, matching the
     /// <c>if (max... &gt; 0)</c> convention each caller used before this was consolidated.
     /// </summary>
+    /// <param name="triggerChars">
+    /// Reference budget for <see cref="CompactionTriggerRatio"/>: the sliding tool-pair
+    /// window (<see cref="KeepLastToolPairs"/>) is only invoked once the current message
+    /// list's estimated size reaches <see cref="CompactionTriggerRatio"/> of this number.
+    /// Below that, the pair sequence — and therefore the request prefix a provider would
+    /// cache — is left exactly as the previous call produced it. 0 (the default) disables
+    /// the gate and collapses on every call regardless of size, matching the previous
+    /// unconditional behavior, for any caller that hasn't been updated to supply a budget.
+    /// The superseded-pair drops above are always batched via
+    /// <see cref="DefaultMinSupersededDropChars"/> regardless of this parameter — that
+    /// batching is a fixed policy, not something callers opt into per-call.
+    /// </param>
     internal static async Task<IEnumerable<ChatMessage>> ApplyInTurnFilters(
         IEnumerable<ChatMessage> messages,
         int maxInTurnToolPairs,
         int maxInTurnChars,
+        int triggerChars = 0,
         CancellationToken cancellationToken = default)
     {
-        messages = DropSupersededWritePairs(messages);
-        messages = DropSupersededObservationalPairs(messages);
+        messages = DropSupersededWritePairs(messages, DefaultMinSupersededDropChars);
+        messages = DropSupersededObservationalPairs(messages, DefaultMinSupersededDropChars);
         messages = CompressSupersededShellPairs(messages);
         messages = TruncateIntermediateAssistantReasoning(messages);
 
         if (maxInTurnToolPairs > 0)
-            messages = await KeepLastToolPairs(messages, maxInTurnToolPairs, cancellationToken);
+        {
+            var list = messages as IList<ChatMessage> ?? messages.ToList();
+            var shouldCollapse = triggerChars <= 0
+                || EstimateTotalChars(list) >= triggerChars * CompactionTriggerRatio;
+            messages = shouldCollapse
+                ? await KeepLastToolPairs(list, maxInTurnToolPairs, cancellationToken)
+                : list;
+        }
 
         if (maxInTurnChars > 0)
             messages = TrimInTurnContext(messages, maxInTurnChars);
 
         return messages;
+    }
+
+    /// <summary>Sums <see cref="EstimateContentChars"/> across every content item in every message.</summary>
+    internal static int EstimateTotalChars(IEnumerable<ChatMessage> messages)
+    {
+        int total = 0;
+        foreach (var m in messages)
+            foreach (var c in m.Contents)
+                total += EstimateContentChars(c);
+        return total;
     }
 
     internal static int EstimateContentChars(AIContent content) => content switch

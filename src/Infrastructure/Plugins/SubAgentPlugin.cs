@@ -67,13 +67,15 @@ public sealed class SubAgentPlugin(
     private const int DelegateMaxOutputTokens   = 4096;
 
     // In-turn context trim applied before every inner LLM call inside RunLoopAsync's tool
-    // loop — mirrors AgentFactory's always-on sliding-window cap for regular agents (see
+    // loop — mirrors AgentFactory's sliding-window cap for regular agents (see
     // AgentFactory.cs: "O(N² ) tool-result accumulation is never desirable"). Without this,
     // the loop's own message list grows every round and FunctionInvokingChatClient resends
     // the entire thing on every iteration; a 40-iteration DelegateAsync run editing several
     // files can otherwise burn 7-figure cumulative input tokens for what should be a bounded
     // task. Sized smaller than AgentFactory's defaults (12 pairs / 200k chars) because these
-    // are meant to stay lightweight relative to the parent agent.
+    // are meant to stay lightweight relative to the parent agent. The pair window itself only
+    // actually collapses once CompactionTriggerRatio of SubAgentMaxInTurnChars is reached
+    // (see ApplyInTurnFilters' triggerChars) — below that, calls resend an identical prefix.
     private const int SubAgentMaxInTurnToolPairs = 10;
     private const int SubAgentMaxInTurnChars     = 100_000;
 
@@ -418,8 +420,12 @@ public sealed class SubAgentPlugin(
             .Use(
                 getResponseFunc: async (msgs, opts, inner, ct) =>
                 {
+                    // triggerChars uses the same budget as the hard char cap — the pair
+                    // window engages at CompactionTriggerRatio of it, slightly before
+                    // TrimInTurnContext would kick in at 100%.
                     var trimmed = await AgentContextCompactionFilters.ApplyInTurnFilters(
-                        msgs, SubAgentMaxInTurnToolPairs, SubAgentMaxInTurnChars, ct);
+                        msgs, SubAgentMaxInTurnToolPairs, SubAgentMaxInTurnChars,
+                        triggerChars: SubAgentMaxInTurnChars, cancellationToken: ct);
                     return await inner.GetResponseAsync(trimmed, opts, ct);
                 },
                 getStreamingResponseFunc: StreamWithInTurnTrimAsync)
@@ -528,7 +534,8 @@ public sealed class SubAgentPlugin(
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var trimmed = await AgentContextCompactionFilters.ApplyInTurnFilters(
-            messages, SubAgentMaxInTurnToolPairs, SubAgentMaxInTurnChars, cancellationToken);
+            messages, SubAgentMaxInTurnToolPairs, SubAgentMaxInTurnChars,
+            triggerChars: SubAgentMaxInTurnChars, cancellationToken: cancellationToken);
         await foreach (var update in inner.GetStreamingResponseAsync(trimmed, options, cancellationToken))
             yield return update;
     }

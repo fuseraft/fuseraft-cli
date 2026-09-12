@@ -101,7 +101,7 @@ internal sealed class ReplSessionContext
     {
         get => _stepClient ??= ReplFactory.BuildClient(
                    ModelConfig, Factory, ToolsByCategory.Count > 0,
-                   AdaptiveTrimTracker, Emitter, ReplTurn.StepIterationLimit);
+                   AdaptiveTrimTracker, Emitter, ReplTurn.StepIterationLimit, GetActiveTools());
         set => _stepClient = value;
     }
 
