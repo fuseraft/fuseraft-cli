@@ -1,0 +1,203 @@
+/* ─── fuseraft.com "Light Editorial" palette ────────────────────────────────
+   Mirrors site.css from fuseraft.com exactly.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --fr-bg:            #faf8f5;
+  --fr-surface:       #ffffff;
+  --fr-surface2:      #f1ebe1;
+  --fr-border:        #e6ddd0;
+  --fr-text:          #1a1a18;
+  --fr-muted:         #6b6356;
+  --fr-dimmer:        #9c9486;
+  --fr-primary:       #c4452e;
+  --fr-primary-light: #e0784f;
+  --fr-primary-dim:   rgba(196, 69, 46, 0.08);
+  --fr-on-primary:    #fff8f4;
+  --fr-accent:        #2a5c4a;
+}
+
+/* ─── Hero ──────────────────────────────────────────────────────────────────── */
+
+.fuseraft-hero {
+  background: var(--fr-bg);
+  padding: 5.5rem 1.5rem 5rem;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid var(--fr-border);
+}
+
+.fuseraft-hero::before {
+  content: '';
+  position: absolute;
+  top: -220px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1000px;
+  height: 700px;
+  background: radial-gradient(ellipse at center, rgba(196, 69, 46, 0.06) 0%, transparent 65%);
+  pointer-events: none;
+}
+
+.fuseraft-hero__inner {
+  position: relative;
+  z-index: 1;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.fuseraft-hero__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--fr-primary-dim);
+  border: 1px solid rgba(196, 69, 46, 0.22);
+  border-radius: 2rem;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.73rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fr-primary);
+  margin-bottom: 2rem;
+}
+
+.fuseraft-hero__badge-dot {
+  width: 7px;
+  height: 7px;
+  background: var(--fr-accent);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.fuseraft-hero__banner {
+  width: 100%;
+  max-width: 720px;
+  height: auto;
+  margin-bottom: 1.5rem;
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(26, 20, 15, 0.14);
+}
+
+.fuseraft-hero__subtitle {
+  font-size: 1.05rem;
+  color: var(--fr-muted);
+  max-width: 480px;
+  margin: 0 auto 2.25rem;
+  line-height: 1.8;
+}
+
+.fuseraft-hero__actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* ─── Hero buttons ──────────────────────────────────────────────────────────── */
+
+.fuseraft-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 11px 22px;
+  border-radius: 8px;
+  font-size: 0.925rem;
+  font-weight: 600;
+  text-decoration: none !important;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.fuseraft-btn--primary {
+  background: var(--fr-primary);
+  color: var(--fr-on-primary) !important;
+}
+
+.fuseraft-btn--primary:hover {
+  background: var(--fr-primary-light);
+}
+
+.fuseraft-btn--secondary {
+  background: transparent;
+  color: var(--fr-text) !important;
+  border: 1px solid var(--fr-border);
+}
+
+.fuseraft-btn--secondary:hover {
+  border-color: var(--fr-dimmer);
+  background: var(--fr-surface2);
+}
+
+/* ─── Landing page content ──────────────────────────────────────────────────── */
+
+.fuseraft-section {
+  padding: 3.5rem 0 1rem;
+}
+
+.fuseraft-section-title {
+  font-size: 1.65rem;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 0.4rem;
+}
+
+.fuseraft-section-lead {
+  text-align: center;
+  color: var(--md-default-fg-color--light);
+  margin-bottom: 2.5rem;
+  font-size: 1rem;
+}
+
+/* ─── Grid card icon sizing ─────────────────────────────────────────────────── */
+
+.md-typeset .grid.cards .lg {
+  font-size: 2rem;
+}
+
+/* ─── Dark mode (slate) overrides ───────────────────────────────────────────── */
+
+[data-md-color-scheme="slate"] .fuseraft-hero {
+  background: var(--md-default-bg-color);
+  border-bottom-color: var(--md-default-fg-color--lightest);
+}
+
+[data-md-color-scheme="slate"] .fuseraft-hero::before {
+  background: radial-gradient(ellipse at center, rgba(196, 69, 46, 0.12) 0%, transparent 65%);
+}
+
+[data-md-color-scheme="slate"] .fuseraft-hero__badge {
+  background: rgba(196, 69, 46, 0.12);
+  border-color: rgba(196, 69, 46, 0.3);
+}
+
+[data-md-color-scheme="slate"] .fuseraft-hero__subtitle {
+  color: var(--md-default-fg-color--light);
+}
+
+[data-md-color-scheme="slate"] .fuseraft-btn--secondary {
+  color: var(--md-default-fg-color) !important;
+  border-color: var(--md-default-fg-color--lightest);
+}
+
+[data-md-color-scheme="slate"] .fuseraft-btn--secondary:hover {
+  background: var(--md-default-fg-color--lightest);
+  border-color: var(--md-default-fg-color--light);
+}
+
+/* ─── Responsive ────────────────────────────────────────────────────────────── */
+
+@media screen and (max-width: 600px) {
+  .fuseraft-hero {
+    padding: 4rem 1rem 3.5rem;
+  }
+
+  .fuseraft-hero__title {
+    font-size: 2.2rem;
+  }
+
+  .fuseraft-hero__banner {
+    border-radius: 10px;
+  }
+}

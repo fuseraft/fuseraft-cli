@@ -1,0 +1,2334 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Multi-agent orchestration CLI built on Microsoft Agent Framework">
+      
+      
+      
+        <link rel="canonical" href="https://fuseraft.ai/knowledge/">
+      
+      
+        <link rel="prev" href="../context-store/">
+      
+      
+        <link rel="next" href="../examples/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Knowledge Layer - fuseraft-cli</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#knowledge-layer" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="fuseraft-cli" class="md-header__button md-logo" aria-label="fuseraft-cli" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            fuseraft-cli
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Knowledge Layer
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fuseraft/fuseraft-cli" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fuseraft/fuseraft-cli
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../writing-tasks/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Writing Tasks
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../spec-driven/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Spec-Driven Development
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../cli-reference/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Reference
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../scripting/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Scripting & Automation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../configuration/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Configuration
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../models/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Models & Providers
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../plugins/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Plugins
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../skills/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Skills
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../strategies/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Strategies
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../validators/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Validators
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../harness-engineering/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Harness Engineering
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../mcp/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  MCP
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../security/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Security
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../governance/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Governance
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../evals/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evals
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../sessions/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Sessions
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../context-management/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Context Management
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../context-store/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Context Store
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Knowledge Layer
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../examples/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Examples
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../design/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Design
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="fuseraft-cli" class="md-nav__button md-logo" aria-label="fuseraft-cli" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    fuseraft-cli
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fuseraft/fuseraft-cli" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fuseraft/fuseraft-cli
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../writing-tasks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing Tasks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../spec-driven/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spec-Driven Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scripting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scripting & Automation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models & Providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../skills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skills
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../strategies/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Strategies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../validators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Validators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../harness-engineering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harness Engineering
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../governance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Governance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../context-management/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../context-store/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Store
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Layer
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#subsystems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subsystems
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Subsystems">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#architecture-decision-registry-adr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture Decision Registry (ADR)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#repository-semantic-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repository Semantic Graph
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#provenance-and-confidence-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provenance and Confidence Tracking
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#repository-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repository Memory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#architecture-drift-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture Drift Detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dependency-planner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependency Planner
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#objective-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Objective Tracking
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session-knowledge-findings-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session Knowledge Findings Store
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#context-assembly-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context Assembly Pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adaptive-context-pipeline-formerly-context-broker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adaptive Context Pipeline (formerly Context Broker)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#knowledge-lifecycle-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Knowledge Lifecycle Management
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#directory-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Directory Layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent-plugin-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent Plugin Tools
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#subsystems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subsystems
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Subsystems">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#architecture-decision-registry-adr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture Decision Registry (ADR)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#repository-semantic-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repository Semantic Graph
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#provenance-and-confidence-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provenance and Confidence Tracking
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#repository-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repository Memory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#architecture-drift-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture Drift Detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dependency-planner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependency Planner
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#objective-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Objective Tracking
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session-knowledge-findings-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session Knowledge Findings Store
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#context-assembly-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context Assembly Pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adaptive-context-pipeline-formerly-context-broker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adaptive Context Pipeline (formerly Context Broker)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#knowledge-lifecycle-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Knowledge Lifecycle Management
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#directory-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Directory Layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent-plugin-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent Plugin Tools
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/fuseraft/fuseraft-cli/edit/main/docs/knowledge.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="knowledge-layer">Knowledge Layer<a class="headerlink" href="#knowledge-layer" title="Permanent link">&para;</a></h1>
+<p>The knowledge layer is a set of persistent, cross-session subsystems that let agents accumulate and query durable knowledge about a codebase — architectural decisions, structural symbols, verified claims, recurring patterns, long-horizon objectives, and session-discovered findings. All subsystems share a single <code>IKnowledgeLayer</code> interface and are queried automatically on every agent turn by the <code>ContextAssemblyPipeline</code>.</p>
+<h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Each agent turn
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>        │
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>        ▼
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  IntentAnalyzer      → extract keywords, PascalCase symbols, failure patterns
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        │
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        ▼
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>  KnowledgeRetriever  → query ADR registry, repository graph, repository memory,
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>        │                 knowledge findings store (entity-driven, cross-session)
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        │
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>        ▼
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>  ContextBudgeter     → rank by confidence tier, trim to 6 000-char budget
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>        │
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>        ▼
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>  ContextAssemblyPipeline → inject as [Pipeline Knowledge] user message
+</code></pre></div>
+<p>Knowledge retrieval is <strong>always on</strong> — no per-agent config is required. Use <code>KnowledgeWeight</code>
+on an agent config to control retrieval depth:</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>None</code></td>
+<td>Skip retrieval entirely</td>
+</tr>
+<tr>
+<td><code>Low</code></td>
+<td><code>Verified</code> and <code>Inferred</code> items only</td>
+</tr>
+<tr>
+<td><code>Default</code></td>
+<td>All non-expired items (default for all agents)</td>
+</tr>
+<tr>
+<td><code>High</code></td>
+<td>Default + one-hop graph expansion on seed symbols</td>
+</tr>
+</tbody>
+</table>
+<p>Agents interact with the knowledge layer through plugin tools (<code>decision_*</code>, <code>graph_*</code>, <code>objective_*</code>). Validators write provenance claims after successful checks. The lifecycle manager (<code>fuseraft knowledge gc</code>) periodically archives stale artifacts.</p>
+<hr />
+<h2 id="subsystems">Subsystems<a class="headerlink" href="#subsystems" title="Permanent link">&para;</a></h2>
+<h3 id="architecture-decision-registry-adr">Architecture Decision Registry (ADR)<a class="headerlink" href="#architecture-decision-registry-adr" title="Permanent link">&para;</a></h3>
+<p>Stores and indexes architecture decision records (ADRs) as JSON files under <code>.fuseraft/knowledge/decisions/</code>. Each ADR records the context, decision text, alternatives, consequences, and the symbols or files it governs.</p>
+<p>Agents use the <code>decision_search</code>, <code>decision_read</code>, <code>decision_create</code>, and <code>decision_supersede</code> plugin tools to interact with ADRs. ADRs are automatically linked into the repository semantic graph via <code>adr_governs</code> edges when their <code>Governs</code> list is populated.</p>
+<p><strong>Lifecycle:</strong> Superseded ADRs are archived to <code>.fuseraft/knowledge/decisions/archive/</code> by <code>fuseraft knowledge gc</code>. They remain queryable via <code>decision_search</code> but are excluded from default injection.</p>
+<hr />
+<h3 id="repository-semantic-graph">Repository Semantic Graph<a class="headerlink" href="#repository-semantic-graph" title="Permanent link">&para;</a></h3>
+<p>A structural index of every file, namespace/package, type, interface, method, property, and field in the project, plus ADR nodes linked via <code>adr_governs</code> edges. Persisted as a single JSON file at <code>~/.fuseraft/state/{project_slug}/repository.graph</code>. Scanning is per-language via a pluggable <code>IRepositoryGraphStrategy</code> — C#, Go, and Python are supported out of the box, and a repo can mix all three.</p>
+<p>Build the graph with:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>fuseraft<span class="w"> </span>graph<span class="w"> </span>build
+</code></pre></div>
+<p>The harness rebuilds affected nodes incrementally after every <code>FileWrite</code> tool call. Agents query the graph via <code>graph_search</code> (find nodes by name/type), <code>graph_refs</code> (what references this symbol), and <code>graph_dependents</code> (transitive dependents).</p>
+<p><strong>SymbolId scheme</strong> — node identities are stable, fully-qualified strings:</p>
+<table>
+<thead>
+<tr>
+<th>Prefix</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>file:</code></td>
+<td><code>file:src/Core/Models/AdrEntry.cs</code></td>
+</tr>
+<tr>
+<td><code>namespace:</code></td>
+<td><code>namespace:fuseraft.Core.Models</code> (C#)</td>
+</tr>
+<tr>
+<td><code>package:</code></td>
+<td><code>package:mathutil</code> (Go package) · <code>package:app.models</code> (Python module)</td>
+</tr>
+<tr>
+<td><code>type:</code></td>
+<td><code>type:fuseraft.Core.Models.AdrEntry</code></td>
+</tr>
+<tr>
+<td><code>interface:</code></td>
+<td><code>interface:fuseraft.Core.IKnowledgeLayer</code></td>
+</tr>
+<tr>
+<td><code>method:</code></td>
+<td><code>method:fuseraft.Core.Models.AdrEntry.SomeMethod</code></td>
+</tr>
+<tr>
+<td><code>property:</code></td>
+<td><code>property:fuseraft.Core.Models.AdrEntry.Title</code></td>
+</tr>
+<tr>
+<td><code>adr:</code></td>
+<td><code>adr:ADR-0042</code></td>
+</tr>
+</tbody>
+</table>
+<p>Go and Python have no formal interface keyword: Go embedding resolves to <code>inherits</code>/<code>implements</code> heuristically (checking known nodes first, then an <code>-er</code>/<code>-or</code> naming convention), while Python emits <code>inherits</code> only — every base class, abstract or not.</p>
+<p><strong>Edge types:</strong> <code>defines</code>, <code>imports</code>, <code>inherits</code>, <code>implements</code>, <code>references</code>, <code>depends_on</code>, <code>adr_governs</code>.</p>
+<hr />
+<h3 id="provenance-and-confidence-tracking">Provenance and Confidence Tracking<a class="headerlink" href="#provenance-and-confidence-tracking" title="Permanent link">&para;</a></h3>
+<p>Every verifiable claim made during a session can be recorded with supporting evidence in the provenance registry (<code>~/.fuseraft/state/{project_slug}/provenance.json</code>). Validators emit <code>ClaimRecord</code> entries when they pass; downstream agents and the Context Broker use the registry to determine whether evidence supports a given artifact.</p>
+<p><strong>Confidence tiers</strong> are computed mechanically from the evidence composition — never from API response text:</p>
+<table>
+<thead>
+<tr>
+<th>Tier</th>
+<th>Evidence required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Verified</code></td>
+<td>Two or more of: <code>TestResult</code>, <code>ExitCode</code>, <code>Validator</code>, <code>GitHistory</code></td>
+</tr>
+<tr>
+<td><code>Inferred</code></td>
+<td>One hard evidence source, or <code>ADR</code>/<code>RepositoryMemory</code> backing</td>
+</tr>
+<tr>
+<td><code>Assumed</code></td>
+<td><code>AgentAssertion</code> only, no corroborating hard evidence</td>
+</tr>
+<tr>
+<td><code>Guessed</code></td>
+<td>No support at all</td>
+</tr>
+</tbody>
+</table>
+<p>Claims carry an optional <code>ExpiresAt</code> timestamp set by the caller based on the volatility of the claim. Claims past their <code>ExpiresAt</code> are excluded from broker output and archived by <code>fuseraft knowledge gc</code>.</p>
+<hr />
+<h3 id="repository-memory">Repository Memory<a class="headerlink" href="#repository-memory" title="Permanent link">&para;</a></h3>
+<p>Cross-session patterns extracted from the evidence graph and change log after each session closes. Entries start as <code>Candidate</code> and are never injected into agent prompts until a human approves them via <code>fuseraft memory review</code> or an automated reviewer agent promotes them.</p>
+<p>Once approved, repository memories are prepended to every agent session's system prompt.</p>
+<p><strong>Pattern sources</strong> — extraction is deterministic; no LLM call is made:</p>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Pattern prefix</th>
+<th>Evidence class</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Shell commands that exited 0</td>
+<td><code>Shell command succeeds: …</code></td>
+<td><code>ExitCode</code></td>
+</tr>
+<tr>
+<td>Test results that passed</td>
+<td><code>Test passes: …</code></td>
+<td><code>TestResult</code>, <code>ExitCode</code></td>
+</tr>
+<tr>
+<td>Files written more than once in a session</td>
+<td><code>File is modified repeatedly in sessions: …</code></td>
+<td><code>EvidenceGraph</code></td>
+</tr>
+<tr>
+<td>Shell commands that exited non-zero more than once</td>
+<td><code>Shell command fails repeatedly: …</code></td>
+<td><code>ExitCode</code></td>
+</tr>
+</tbody>
+</table>
+<p>Failure patterns flag commands with unstable preconditions — missing dependencies, write-block loops, or brittle invocations — so future agents verify the environment before relying on them.</p>
+<p><strong>Reinforcement</strong> — when the same pattern recurs in a later session, <code>ReinforcementCount</code> is incremented regardless of whether the entry is <code>Approved</code> or still <code>Candidate</code>. This does not promote a Candidate; promotion requires explicit review. It does make high-reinforcement candidates surface first in <code>MEMORY.md</code> and in <code>fuseraft memory review</code> output, so the most reliably observed patterns are easiest to approve.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Review pending candidates (sorted by reinforcement count descending)</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>fuseraft<span class="w"> </span>memory<span class="w"> </span>review
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Browse all entries</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>fuseraft<span class="w"> </span>memory<span class="w"> </span>review<span class="w"> </span>--all
+</code></pre></div>
+<p><strong>Lifecycle:</strong> Approved memories not reinforced within the <code>MemoryReinforceWindowDays</code> window (default 90 days) are demoted back to <code>Candidate</code> by <code>fuseraft knowledge gc</code>.</p>
+<hr />
+<h3 id="architecture-drift-detection">Architecture Drift Detection<a class="headerlink" href="#architecture-drift-detection" title="Permanent link">&para;</a></h3>
+<p>Compares <code>using</code> directives in every <code>.cs</code> source file against the layer manifest in <code>.fuseraft/architecture.yaml</code> and reports violations. A violation is a source file in one layer importing a namespace owned by a layer it is not permitted to depend on.</p>
+<p><code>fuseraft init</code> writes a default <code>architecture.yaml</code> on first run. Edit its <code>Layers</code> and <code>MayDependOn</code> lists to match your project structure.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># .fuseraft/architecture.yaml</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nt">Layers</span><span class="p">:</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Core</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="nt">Paths</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">src/Core/</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="nt">MayDependOn</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Infrastructure</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span><span class="nt">Paths</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">src/Infrastructure/</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">    </span><span class="nt">MayDependOn</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Core</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Orchestration</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="w">    </span><span class="nt">Paths</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">src/Orchestration/</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="w">    </span><span class="nt">MayDependOn</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Core</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Infrastructure</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">Name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Cli</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="w">    </span><span class="nt">Paths</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">src/Cli/</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="w">    </span><span class="nt">MayDependOn</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">Core</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Infrastructure</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">Orchestration</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>fuseraft<span class="w"> </span>arch<span class="w"> </span>check<span class="w">          </span><span class="c1"># exits 0 if clean, 1 if violations found</span>
+</code></pre></div>
+<p>Violations are also emitted as <code>Violation</code> nodes in the evidence graph so they carry provenance and are queryable.</p>
+<hr />
+<h3 id="dependency-planner">Dependency Planner<a class="headerlink" href="#dependency-planner" title="Permanent link">&para;</a></h3>
+<p>When agents declare <code>Produces</code> and <code>Requires</code> tokens in their <code>AgentConfig</code>, the <code>DependencyPlanner</code> builds an execution DAG, detects cycles (reported as config errors at startup), and schedules agents in parallel whenever their dependencies are already fulfilled. This is activated automatically when any agent in the config declares <code>Produces</code> or <code>Requires</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">Produces</span><span class="p">:</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">artifact:session-persistence</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">file:src/SessionManager.cs</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="nt">Requires</span><span class="p">:</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">symbol:ISessionStore</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">artifact:repository-graph</span>
+</code></pre></div>
+<hr />
+<h3 id="objective-tracking">Objective Tracking<a class="headerlink" href="#objective-tracking" title="Permanent link">&para;</a></h3>
+<p>Long-horizon objectives span multiple sessions. Active objectives are summarised in every agent system prompt and in compaction summaries so the team always has the big picture in view.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>fuseraft<span class="w"> </span>objective<span class="w"> </span>create<span class="w"> </span>--title<span class="w"> </span><span class="s2">"Ship auth refactor"</span><span class="w"> </span>--tasks<span class="w"> </span><span class="s2">"Design,Implement,Test"</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>fuseraft<span class="w"> </span>objective<span class="w"> </span>list
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>fuseraft<span class="w"> </span>objective<span class="w"> </span>status<span class="w"> </span>OBJ-0001
+</code></pre></div>
+<p>Progress is computed on demand from <code>CompletedTasks.Count / (CompletedTasks.Count + RemainingTasks.Count)</code>. The <code>objective_link_task</code> plugin tool lets agents update task status within a session.</p>
+<hr />
+<h3 id="session-knowledge-findings-store">Session Knowledge Findings Store<a class="headerlink" href="#session-knowledge-findings-store" title="Permanent link">&para;</a></h3>
+<p>Factual discoveries made during agent tool calls are persisted to <code>~/.fuseraft/state/{project_slug}/knowledge_findings.json</code> after every turn and surfaced in future sessions without any embedding index.</p>
+<p>After each agent turn, <code>ObservationExtractor</code> inspects the turn's tool call results and creates an <code>Observation</code> for each discovery or state-change tool. The entity is derived from the tool's arguments — the file path for <code>read_file</code>, the search pattern for <code>grep_file</code>, etc. Observations with a non-null entity are written to <code>RepositoryKnowledgeStore</code> as <code>RepositoryKnowledgeFinding</code> records.</p>
+<p><strong>Example finding:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="p">{</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"a3f29c1e8b4d7f20"</span><span class="p">,</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">"entity"</span><span class="p">:</span><span class="w"> </span><span class="s2">"src/Infrastructure/AgentFactory.cs"</span><span class="p">,</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span><span class="nt">"finding"</span><span class="p">:</span><span class="w"> </span><span class="s2">"File content: ..."</span><span class="p">,</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">  </span><span class="nt">"source"</span><span class="p">:</span><span class="w"> </span><span class="s2">"session-20260603-1"</span><span class="p">,</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">  </span><span class="nt">"confidence"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.85</span><span class="p">,</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">  </span><span class="nt">"agentName"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Developer"</span><span class="p">,</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">  </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"observation"</span><span class="p">,</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="w">  </span><span class="nt">"recordedAt"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-06-03T14:22:11Z"</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="p">}</span>
+</code></pre></div></p>
+<p><strong>Finding kinds:</strong> <code>observation</code> (read/search), <code>change</code> (write/patch/delete), <code>ownership</code>, <code>architectural_decision</code>, <code>dependency</code>, <code>pitfall</code>.</p>
+<p><code>KnowledgeRetriever</code> queries the store during the retrieval phase by matching entity names against the current intent signals. This makes knowledge cumulative across sessions: an agent that reads <code>AuthService.cs</code> in session 1 leaves a finding; an agent working on auth in session 2 retrieves that finding automatically.</p>
+<hr />
+<h3 id="context-assembly-pipeline">Context Assembly Pipeline<a class="headerlink" href="#context-assembly-pipeline" title="Permanent link">&para;</a></h3>
+<p>The <code>ContextAssemblyPipeline</code> is the unified entry point for all agent context construction. Every invocation — sequential, parallel, and verifier agents — goes through the same pipeline stages. The pipeline emits a <code>context_assembly</code> event via <code>EventEmitter</code> after each turn with the following fields:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>What it measures</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>knowledge_retrieved</code></td>
+<td>Items returned by <code>KnowledgeRetriever</code> before budget trimming</td>
+</tr>
+<tr>
+<td><code>knowledge_included</code></td>
+<td>Items that survived the 6 000-char budget and were injected</td>
+</tr>
+<tr>
+<td><code>memory_loaded</code></td>
+<td>Memory entries loaded from the agent's store</td>
+</tr>
+<tr>
+<td><code>memory_included</code></td>
+<td>Entries that fit within the 8 000-char memory block budget</td>
+</tr>
+<tr>
+<td><code>artifacts</code></td>
+<td>Typed context artifacts assembled (knowledge + session_context)</td>
+</tr>
+<tr>
+<td><code>context_chars</code></td>
+<td>Total character count of all messages in the assembled context</td>
+</tr>
+<tr>
+<td><code>system_prompt_chars</code></td>
+<td>Character length of the system prompt</td>
+</tr>
+<tr>
+<td><code>assembly_ms</code></td>
+<td>Wall-clock time spent in <code>AssembleAsync</code></td>
+</tr>
+<tr>
+<td><code>context_chars_breakdown</code></td>
+<td>Per-source char breakdown: <code>system_prompt</code>, <code>memory</code>, <code>session_context</code>, <code>knowledge</code>, <code>history</code>. Use this to identify which source dominates startup context cost.</td>
+</tr>
+<tr>
+<td><code>tool_count</code></td>
+<td>Number of tool schemas included in the API <code>tools</code> parameter</td>
+</tr>
+<tr>
+<td><code>tool_schema_est_tokens</code></td>
+<td>Estimated token cost of tool schemas (<code>tool_count × 450</code>). Tool schemas are sent as the API <code>tools</code> parameter, not as messages, so they are invisible to <code>context_chars</code>. This estimate closes the gap between <code>context_chars</code> and actual input tokens reported by the provider.</td>
+</tr>
+</tbody>
+</table>
+<p>These events are written to <code>~/.fuseraft/logs/sessions/{project_slug}/{session_id}/events.jsonl</code> alongside <code>turn_end</code> and <code>reasoning</code> events and can be consumed by dashboards or CI pipelines to track context utilization over time.</p>
+<hr />
+<h3 id="adaptive-context-pipeline-formerly-context-broker">Adaptive Context Pipeline (formerly Context Broker)<a class="headerlink" href="#adaptive-context-pipeline-formerly-context-broker" title="Permanent link">&para;</a></h3>
+<p>The pipeline ties all subsystems together. Retrieval runs automatically before every agent turn:</p>
+<ol>
+<li><strong>IntentAnalyzer</strong> — extracts keywords, PascalCase symbols, and failure patterns from the task description.</li>
+<li><strong>KnowledgeRetriever</strong> — queries the ADR registry, repository graph, approved repository memories, and the session knowledge findings store for each signal.</li>
+<li><strong>ContextBudgeter</strong> — ranks results by confidence tier (<code>Verified</code> &gt; <code>Inferred</code> &gt; <code>Assumed</code> &gt; <code>Guessed</code>), excludes expired claims, and trims to the 6 000-character budget (~1 500 tokens).</li>
+<li><strong>Prompt assembly</strong> — formats the surviving items into a <code>[Pipeline Knowledge]</code> user message appended to the context.</li>
+</ol>
+<p>When retrieval produces no results the pipeline proceeds without a knowledge block — there is no fallback needed because the agent's instructions and memory block are always present.</p>
+<hr />
+<h3 id="knowledge-lifecycle-management">Knowledge Lifecycle Management<a class="headerlink" href="#knowledge-lifecycle-management" title="Permanent link">&para;</a></h3>
+<p>Without periodic maintenance, every knowledge subsystem accumulates stale data. The lifecycle manager runs all retention policies in one command:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>fuseraft<span class="w"> </span>knowledge<span class="w"> </span>gc<span class="w">          </span><span class="c1"># dry-run: shows what would change</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>fuseraft<span class="w"> </span>knowledge<span class="w"> </span>gc<span class="w"> </span>--apply<span class="w">  </span><span class="c1"># applies all policies</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Policy</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Archive superseded ADRs</td>
+<td>Moves <code>Superseded</code> ADRs to <code>.fuseraft/knowledge/decisions/archive/</code></td>
+</tr>
+<tr>
+<td>Demote aged memories</td>
+<td>Demotes <code>Approved</code> memories not reinforced within the window back to <code>Candidate</code> (does not affect <code>Candidate</code> entries — their counts accumulate indefinitely until reviewed)</td>
+</tr>
+<tr>
+<td>Decay provenance confidence</td>
+<td>Downgrades <code>Verified</code> claims older than <code>ConfidenceDecayDays</code> to <code>Inferred</code></td>
+</tr>
+<tr>
+<td>Prune orphaned graph nodes</td>
+<td>Removes nodes with no edges and no recent file touch</td>
+</tr>
+<tr>
+<td>Compact provenance registry</td>
+<td>Archives expired <code>ClaimRecord</code> entries to <code>~/.fuseraft/state/{project_slug}/provenance.archive.json</code></td>
+</tr>
+<tr>
+<td>Delete ephemeral state files</td>
+<td>When <code>.fuseraft/.fuseraftignore</code> is present, deletes state files marked ephemeral (e.g. <code>knowledge_findings.json</code>). <code>provenance.archive.json</code> is never deleted — gc writes to it.</td>
+</tr>
+<tr>
+<td>Delete ephemeral log files</td>
+<td>When <code>.fuseraft/.fuseraftignore</code> is present, deletes files under <code>~/.fuseraft/logs/{project_slug}/</code> (recursively) marked ephemeral (e.g. <code>app.log</code>, <code>repl_events/*.jsonl</code>).</td>
+</tr>
+</tbody>
+</table>
+<p>Configure retention windows in <code>.fuseraft/knowledge/lifecycle.yaml</code> (created by <code>fuseraft init</code>).</p>
+<p><strong><code>--nuclear</code></strong> is the extreme end of <code>gc</code>: on top of the policies above, it clears every reproducible,
+machine-generated file under the global <code>~/.fuseraft/</code> home — logs, memories (REPL/agent memory and the
+repository memory graph), session checkpoints/snapshots, orchestration run state, crash dumps, and
+scratchpad — for <strong>every project</strong>, not just the current one. Provider config, API keys, schedule
+definitions, and installed skills are never touched, and a project's own <code>.fuseraft/</code> directory (the
+one you're standing in) is untouched too.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>fuseraft<span class="w"> </span>knowledge<span class="w"> </span>gc<span class="w"> </span>--nuclear<span class="w">                </span><span class="c1"># dry-run: reports what would be cleared, globally</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>fuseraft<span class="w"> </span>knowledge<span class="w"> </span>gc<span class="w"> </span>--nuclear<span class="w"> </span>--apply<span class="w">        </span><span class="c1"># prompts for an extra confirmation, then clears it</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>fuseraft<span class="w"> </span>knowledge<span class="w"> </span>gc<span class="w"> </span>--nuclear<span class="w"> </span>--apply<span class="w"> </span>--yes<span class="w">  </span><span class="c1"># skips the confirmation (for scripts)</span>
+</code></pre></div>
+<p><code>--nuclear</code> requires <code>--apply</code> to actually delete anything, and — unlike the rest of <code>gc</code> — always
+asks for an extra interactive confirmation first (since it isn't scoped to one project), unless <code>--yes</code>
+is also passed. In a non-interactive session without <code>--yes</code> it refuses and exits non-zero.</p>
+<hr />
+<h2 id="directory-layout">Directory Layout<a class="headerlink" href="#directory-layout" title="Permanent link">&para;</a></h2>
+<p>Most knowledge artifacts are project-local (<code>.fuseraft/</code>), but a few — repository graph, repository memory, provenance, and session knowledge findings — live in the global <code>~/.fuseraft/</code> home directory, keyed by <code>{project_slug}</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>.fuseraft/                                (project-local)
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>├── architecture.yaml                   ← layer manifest (user-authored)
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>└── knowledge/
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    ├── lifecycle.yaml                  ← lifecycle policy
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    ├── decisions/
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    │   ├── ADR-0001.json               ← architecture decision records
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>    │   └── archive/                    ← superseded ADRs (still queryable)
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    └── objectives/
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>        └── OBJ-0001.yaml               ← long-horizon objectives
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>~/.fuseraft/                             (global, keyed by {project_slug})
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>├── knowledge/{project_slug}/repository/
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>│   ├── &lt;id&gt;.json                       ← repository memory entries
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>│   └── MEMORY.md                       ← human-readable index
+<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>└── state/{project_slug}/
+<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>    ├── repository.graph                ← repository semantic graph
+<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a>    ├── knowledge_findings.json         ← entity-scoped findings from all sessions
+<a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a>    ├── provenance.json                 ← active claim records
+<a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a>    └── provenance.archive.json         ← archived (expired) claim records
+</code></pre></div>
+<h2 id="agent-plugin-tools">Agent Plugin Tools<a class="headerlink" href="#agent-plugin-tools" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Plugin</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>decision_search</code></td>
+<td>Decision</td>
+<td>Search ADRs by keyword, tag, or status</td>
+</tr>
+<tr>
+<td><code>decision_read</code></td>
+<td>Decision</td>
+<td>Read a specific ADR by ID</td>
+</tr>
+<tr>
+<td><code>decision_create</code></td>
+<td>Decision</td>
+<td>Create a new ADR (requires write capability)</td>
+</tr>
+<tr>
+<td><code>decision_supersede</code></td>
+<td>Decision</td>
+<td>Mark an ADR as superseded by a newer one</td>
+</tr>
+<tr>
+<td><code>graph_search</code></td>
+<td>Graph</td>
+<td>Find graph nodes by name or type</td>
+</tr>
+<tr>
+<td><code>graph_refs</code></td>
+<td>Graph</td>
+<td>What symbols reference a given node</td>
+</tr>
+<tr>
+<td><code>graph_dependents</code></td>
+<td>Graph</td>
+<td>Transitive dependents of a node</td>
+</tr>
+<tr>
+<td><code>objective_create</code></td>
+<td>Objective</td>
+<td>Create a new objective</td>
+</tr>
+<tr>
+<td><code>objective_read</code></td>
+<td>Objective</td>
+<td>Read an objective by ID</td>
+</tr>
+<tr>
+<td><code>objective_update</code></td>
+<td>Objective</td>
+<td>Update objective status or task lists</td>
+</tr>
+<tr>
+<td><code>objective_list</code></td>
+<td>Objective</td>
+<td>List objectives</td>
+</tr>
+<tr>
+<td><code>objective_link_task</code></td>
+<td>Objective</td>
+<td>Mark a task complete or add a remaining task</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../context-store/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Context Store">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Context Store
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../examples/" class="md-footer__link md-footer__link--next" aria-label="Next: Examples">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Examples
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.footer", "search.highlight", "search.suggest", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
