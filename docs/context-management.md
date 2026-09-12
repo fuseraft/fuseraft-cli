@@ -590,11 +590,20 @@ Agents:
     MaxInTurnToolPairs: 12   # keep only the last 12 tool call/result pairs in full
 ```
 
+**Trigger-gated, not unconditional:** the window only actually collapses anything once the
+turn's estimated size reaches `CompactionTriggerRatio` (90%) of a reference budget — the
+agent's `MaxContextTokens` when configured, otherwise a 200k-char fallback. Below that
+threshold every call resends the exact same tool-pair sequence as the previous one, so a
+provider's prompt-cache prefix stays intact across the turn instead of being rewritten (and
+the cache invalidated) on every single round once the pair count merely exceeds N. This
+mirrors how Cline's own context-compaction pipeline only triggers past ~90% of usable input
+rather than reshaping the transcript on every call.
+
 **Deterministic vs. budget-reactive:**
 
 | Field | When it fires | Guarantee |
 |-------|--------------|-----------|
-| `MaxInTurnToolPairs` | Every inner LLM call, unconditionally | O(N) tool-result footprint always |
+| `MaxInTurnToolPairs` | Once the turn crosses the size trigger above | O(N) tool-result footprint once triggered |
 | `MaxInTurnContextTokens` | Only when total in-turn chars exceed the budget | Fires only after the budget is exceeded |
 
 Use `MaxInTurnToolPairs` when you want a hard bound regardless of result sizes. Use
@@ -607,6 +616,21 @@ valid for strict providers. The agent can re-read a file or re-run a command if 
 the full content again.
 
 **Recommended values:** 8–16 for high-volume action agents (Developer, Tester, Operator).
+
+### Superseded-pair batching
+
+Independently of the sliding window, fuseraft also drops tool-call/result pairs that a later
+call has made redundant: an earlier `write_file`/`patch_file` superseded by a later write to
+the same path, an earlier observational read (`read_file`, `grep_file`, `list_files`, `git_status`,
+etc.) superseded by a later identical call, and repeated `shell_run` invocations of the same
+command (whose earlier results collapse to a one-line outcome).
+
+This rewrite is batched rather than applied the instant something is superseded: it only fires
+once the superseded content across a filter's candidates totals at least 64k characters. A
+single stale re-read is left alone — rewriting it would change a message in the middle of the
+transcript and break the provider's prompt-cache prefix from that point forward for no real
+savings; batching means most calls still resend an identical prefix, and the rewrite only
+happens once enough staleness has piled up to be worth the one-time cache miss.
 
 ---
 
@@ -628,7 +652,7 @@ When the cumulative estimated token cost of all tool-result messages in the cont
 
 When evictions occur, a `[Context Manifest]` message is also appended at the end of the context slice listing active tool results still in context alongside the superseded (evicted) ones, so the agent knows which reads are still available and which must be re-issued with targeted ranges.
 
-**Key difference from `MaxInTurnToolPairs`:** `MaxInTurnToolPairs` is an agent-level count-based cap applied unconditionally before every inner LLM call. `MaxToolResultTokens` is a session-level token-budget cap applied at the `ContextBudget` layer — it only fires when the total tool-result token footprint actually exceeds the threshold, preserving full context for turns with few or small results.
+**Key difference from `MaxInTurnToolPairs`:** `MaxInTurnToolPairs` is an agent-level count-based cap that engages once a turn crosses the size trigger described above (see [In-turn tool-result sliding window](#in-turn-tool-result-sliding-window)). `MaxToolResultTokens` is a session-level token-budget cap applied at the `ContextBudget` layer — it only fires when the total tool-result token footprint actually exceeds the threshold, preserving full context for turns with few or small results.
 
 **Audit trail:** the full tool results remain in the shared conversation history and on-disk artifacts. Only the slice passed to the model is trimmed — compaction and session replay are unaffected.
 
