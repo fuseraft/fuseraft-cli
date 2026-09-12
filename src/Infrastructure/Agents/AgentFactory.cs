@@ -233,11 +233,14 @@ public sealed class AgentFactory(
                 ? TokenEstimator.EstimateChars(sessionBudget.MaxSingleTurnInputTokens / 3)
                 : (maxContextChars > 0 ? maxContextChars : DefaultMaxInTurnChars);
 
-        // Deterministic sliding-window cap: always keep only the last N tool call/result
-        // pairs in full, replacing older ones with placeholders unconditionally.
+        // Deterministic sliding-window cap: keep only the last N tool call/result pairs in
+        // full once it actually engages, replacing older ones with placeholders.
         // Applied before the budget-reactive trim so the window runs first.
-        // Default unconditionally — O(N²) tool-result accumulation is never desirable
-        // regardless of whether MaxContextTokens is configured.
+        // Default unconditionally (not gated behind whether MaxContextTokens is configured) —
+        // O(N²) tool-result accumulation is never desirable. The window itself only collapses
+        // once BuildMiddlewareChain's triggerChars gate (AgentContextCompactionFilters.
+        // CompactionTriggerRatio) says the turn is actually approaching its budget; below
+        // that it's a no-op so the request prefix stays cache-stable across rounds.
         const int DefaultToolPairsWhenBudgeted = 12;
         var maxInTurnToolPairs = config.MaxInTurnToolPairs > 0
             ? config.MaxInTurnToolPairs

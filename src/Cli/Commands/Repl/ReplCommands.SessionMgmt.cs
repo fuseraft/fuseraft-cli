@@ -155,12 +155,13 @@ internal static partial class ReplCommands
         // Switch model when the target session used a different one.
         if (!snapshot.ModelId.Equals(ctx.ModelId, StringComparison.OrdinalIgnoreCase))
         {
-            var hasTools  = ctx.GetActiveTools().Count > 0;
+            var activeTools = ctx.GetActiveTools();
+            var hasTools  = activeTools.Count > 0;
             var newConfig = ReplFactory.BuildModelConfig(snapshot.ModelId, ctx.UserCfg);
             try
             {
-                var newClient     = ReplFactory.BuildClient(newConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter);
-                var newStepClient = ReplFactory.BuildClient(newConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, ReplTurn.StepIterationLimit);
+                var newClient     = ReplFactory.BuildClient(newConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, tools: activeTools);
+                var newStepClient = ReplFactory.BuildClient(newConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, ReplTurn.StepIterationLimit, activeTools);
                 ctx.ModelId     = snapshot.ModelId;
                 ctx.ModelConfig = newConfig;
                 ctx.Client      = newClient;

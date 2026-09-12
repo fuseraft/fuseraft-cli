@@ -50,6 +50,13 @@ internal sealed class AgentMiddlewareBuilder(
         // Lets us correlate inner_call_context events with http_reasoning events in the log.
         int innerCallSeq = 0;
 
+        // Reference budget for AgentContextCompactionFilters.CompactionTriggerRatio — gates
+        // the sliding tool-pair window so it only engages once a turn is actually
+        // approaching its budget, keeping the request prefix (and a provider's prompt cache)
+        // stable below that. Falls back to DefaultTriggerChars when the caller has no
+        // configured context-window size (e.g. a REPL session with no MaxContextTokens set).
+        var triggerChars = maxContextChars > 0 ? maxContextChars : AgentContextCompactionFilters.DefaultTriggerChars;
+
         return chatClient.AsBuilder()
             .Use(
                 getResponseFunc: async (messages, options, inner, ct) =>
@@ -58,7 +65,7 @@ internal sealed class AgentMiddlewareBuilder(
                     // cap the sliding tool-pair window and char budget — see
                     // AgentContextCompactionFilters.ApplyInTurnFilters for the full rationale.
                     messages = await AgentContextCompactionFilters.ApplyInTurnFilters(
-                        messages, maxInTurnToolPairs, maxInTurnChars, ct);
+                        messages, maxInTurnToolPairs, maxInTurnChars, triggerChars, ct);
 
                     // Stop the FunctionInvokingChatClient loop immediately after handoff —
                     // no follow-up LLM call is made, so the agent cannot call more tools.
@@ -183,7 +190,7 @@ internal sealed class AgentMiddlewareBuilder(
             [EnumeratorCancellation] CancellationToken ct)
         {
             messages = await AgentContextCompactionFilters.ApplyInTurnFilters(
-                messages, maxInTurnToolPairs, maxInTurnChars, ct);
+                messages, maxInTurnToolPairs, maxInTurnChars, triggerChars, ct);
             if (hasHandoff && HandoffWasInvoked(messages))
                 yield break;
 
@@ -194,12 +201,18 @@ internal sealed class AgentMiddlewareBuilder(
                 messages = ProactivelyTrimIfNeeded(
                     config.Name, messages, maxContextChars, maxPayloadBytes, toolSchemaChars, logger);
 
-            if (emitter is not null)
-                _ = emitter.EmitAsync(EventTypes.ModelCall,
-                    agent: config.Name, turn: null,
-                    payload: new { model = config.Model.ModelId, streaming = true });
-
             var baseMsg = messages as IReadOnlyList<ChatMessage> ?? messages.ToList();
+
+            // Same per-inner-call context snapshot as the non-streaming path above — see its
+            // comment for the full rationale. One call_seq per inner call (shared across
+            // retry attempts below), not per attempt — matches the non-streaming path so the
+            // two are directly comparable in the event log.
+            var callSeq = Interlocked.Increment(ref innerCallSeq);
+            InnerCallId.Current.Value = callSeq;
+            if (emitter is not null)
+                _ = emitter.EmitAsync(EventTypes.InnerCallContext,
+                    agent: config.Name, turn: null,
+                    payload: BuildInnerCallContextPayload(baseMsg, toolSchemaChars, callSeq));
 
             // Reactive adaptive-trim retry — same stages as the non-streaming path above,
             // but only viable before the first update reaches the caller. A context-limit
@@ -212,6 +225,19 @@ internal sealed class AgentMiddlewareBuilder(
             for (int attempt = 0; ; attempt++)
             {
                 var ctxMsgs = attempt == 0 ? (IEnumerable<ChatMessage>)baseMsg : AdaptiveTrimMessages(baseMsg, attempt);
+
+                if (emitter is not null)
+                    _ = emitter.EmitAsync(EventTypes.ModelCall,
+                        agent: config.Name, turn: null,
+                        payload: new
+                        {
+                            model         = config.Model.ModelId,
+                            attempt,
+                            message_count = baseMsg.Count,
+                            call_seq      = callSeq,
+                            streaming     = true,
+                        });
+
                 var enumerator = inner.GetStreamingResponseAsync(ctxMsgs, merged, ct).GetAsyncEnumerator(ct);
                 try
                 {
@@ -234,10 +260,41 @@ internal sealed class AgentMiddlewareBuilder(
                     }
 
                     if (!moved) yield break;
+
+                    // Usage/finish-reason typically land only on the final update, but track
+                    // "last non-null wins" across every chunk in case a provider streams them
+                    // earlier or progressively — mirrors SubAgentPlugin's streaming variant.
+                    ChatFinishReason? finishReason = enumerator.Current.FinishReason;
+                    long? inputTok = null, outputTok = null;
+                    foreach (var usage in enumerator.Current.Contents.OfType<UsageContent>())
+                    {
+                        inputTok  = usage.Details.InputTokenCount  ?? inputTok;
+                        outputTok = usage.Details.OutputTokenCount ?? outputTok;
+                    }
                     yield return enumerator.Current;
 
                     while (await enumerator.MoveNextAsync())
+                    {
+                        finishReason = enumerator.Current.FinishReason ?? finishReason;
+                        foreach (var usage in enumerator.Current.Contents.OfType<UsageContent>())
+                        {
+                            inputTok  = usage.Details.InputTokenCount  ?? inputTok;
+                            outputTok = usage.Details.OutputTokenCount ?? outputTok;
+                        }
                         yield return enumerator.Current;
+                    }
+
+                    if (emitter is not null)
+                        _ = emitter.EmitAsync(EventTypes.ModelResponse,
+                            agent: config.Name, turn: null,
+                            payload: new
+                            {
+                                model         = config.Model.ModelId,
+                                finish_reason = finishReason?.Value,
+                                input_tokens  = inputTok,
+                                output_tokens = outputTok,
+                                call_seq      = callSeq,
+                            });
                     yield break;
                 }
                 finally

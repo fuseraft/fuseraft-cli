@@ -322,30 +322,6 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // visible to ReplTurn's post-turn forced-compaction check — see ReplSessionContext.
         var adaptiveTrimTracker = new AdaptiveTrimTracker();
 
-        IChatClient client;
-        try
-        {
-            client = ReplFactory.BuildClient(modelConfig, factory, initialTools.Count > 0, adaptiveTrimTracker);
-        }
-        catch (Exception ex)
-        {
-            AnsiConsole.MarkupLine($"[red]✗ Could not create chat client:[/] {Markup.Escape(ex.Message)}");
-            return 1;
-        }
-
-        if (!settings.NoTools)
-        {
-            // Skill discovery/parsing/validation and the load_skill/read_skill_resource/
-            // run_skill_script tools all come from Microsoft.Agents.AI's AgentFileSkillsSource/
-            // AgentSkillsProvider — the same classes orchestration uses — via a throwaway
-            // ChatClientAgent wrapping the client just built above.
-            var skillsResult = await ReplSkillsLoader.BuildAsync(client, loggerFactory, cancellationToken);
-            discoveredSkills = skillsResult.Skills;
-            skillsCatalog    = skillsResult.CatalogInstructions;
-            if (skillsResult.Tools.Count > 0)
-                toolsByCategory["Skills"] = skillsResult.Tools.ToList();
-        }
-
         var cwd = Directory.GetCurrentDirectory();
 
         // Load snapshot when --resume is specified.
@@ -365,6 +341,40 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         var startedAt  = snapshot?.StartedAt  ?? DateTime.UtcNow;
         var eventsPath = FuseraftPaths.ExpandSessionPaths(
             FuseraftPaths.LocalReplEventsLog, sessionId, FuseraftPaths.ProjectSlug(cwd));
+
+        // Constructed here — earlier than everything else that depends on sessionId/cwd below —
+        // specifically so the very first client this session builds can receive it. Every other
+        // ReplFactory.BuildClient call site (/provider, /model, sub-agent rebuilds) already
+        // passes ctx.Emitter; this was the one gap, since ctx doesn't exist yet this early in
+        // startup. Without it, inner_call_context/model_call/model_response are never emitted
+        // for the session's main client — only tool_call/tool_result (which ReplTurn emits
+        // directly) show up in the event log.
+        using var emitter = new EventEmitter(eventsPath);
+        emitter.SetSessionId(sessionId);
+
+        IChatClient client;
+        try
+        {
+            client = ReplFactory.BuildClient(modelConfig, factory, initialTools.Count > 0, adaptiveTrimTracker, emitter, tools: initialTools);
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]✗ Could not create chat client:[/] {Markup.Escape(ex.Message)}");
+            return 1;
+        }
+
+        if (!settings.NoTools)
+        {
+            // Skill discovery/parsing/validation and the load_skill/read_skill_resource/
+            // run_skill_script tools all come from Microsoft.Agents.AI's AgentFileSkillsSource/
+            // AgentSkillsProvider — the same classes orchestration uses — via a throwaway
+            // ChatClientAgent wrapping the client just built above.
+            var skillsResult = await ReplSkillsLoader.BuildAsync(client, loggerFactory, cancellationToken);
+            discoveredSkills = skillsResult.Skills;
+            skillsCatalog    = skillsResult.CatalogInstructions;
+            if (skillsResult.Tools.Count > 0)
+                toolsByCategory["Skills"] = skillsResult.Tools.ToList();
+        }
 
         ReplSessionPlugin? replSessionPlugin = null;
         List<IHasArtifact>  activePlugins    = [];
@@ -435,9 +445,6 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             }
         }
 
-        using var emitter = new EventEmitter(eventsPath);
-        emitter.SetSessionId(sessionId);
-
         // Built before the wrap loop below so sub_agent_explore/sub_agent_locate/sub_agent_delegate
         // get the same ToolResultLoggingFilter/ToolResultOffloadFilter treatment as every other
         // REPL tool, and so the model can call them directly instead of only via /explore, /locate,
@@ -462,7 +469,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             }
 
             subAgent = new SubAgentPlugin(
-                ReplFactory.BuildClient(modelConfig, factory, explorerTools.Count > 0, adaptiveTrimTracker, emitter),
+                ReplFactory.BuildClient(modelConfig, factory, explorerTools.Count > 0, adaptiveTrimTracker, emitter, tools: explorerTools),
                 explorerTools,
                 eventEmitter:     emitter,
                 parentAgentName:  "repl",

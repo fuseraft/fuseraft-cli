@@ -129,9 +129,10 @@ internal static partial class ReplCommands
         // Rebuild the client so function-invocation middleware is attached even if this REPL
         // session started with zero tool categories (e.g. --no-tools) — same pattern /model
         // already uses when switching to a model with a different tool-availability state.
-        var hasTools = ctx.GetActiveTools().Count > 0;
-        ctx.Client     = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter);
-        ctx.StepClient = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, ReplTurn.StepIterationLimit);
+        var activeTools = ctx.GetActiveTools();
+        var hasTools = activeTools.Count > 0;
+        ctx.Client     = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, tools: activeTools);
+        ctx.StepClient = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, ReplTurn.StepIterationLimit, activeTools);
         ctx.ChatOptions = ctx.BuildChatOptions();
 
         AnsiConsole.MarkupLine($"[green]Connected '{Markup.Escape(name)}' — {tools.Count} tool(s) available.[/]");
