@@ -24,7 +24,7 @@ fuseraft uses a progressive-disclosure pattern to keep context lean:
 
 1. **Catalog injection** — At session start, the names and descriptions of all discovered skills are appended to the system prompt so the model knows what is available without loading every full body.
 2. **On-demand load** — When the model decides a skill is relevant, it calls `load_skill("<slug>")` to retrieve the full `SKILL.md` content, then follows those step-by-step instructions using its other tools.
-3. **Resource reading** — If a skill ships supplementary reference material (e.g. under `references/`), the model reads it with `read_skill_resource("<slug>", "<path>")`, e.g. `read_skill_resource("build-docx", "references/python-docx-patterns.md")`.
+3. **Resource reading** — If a skill ships supplementary reference material (e.g. under `references/`), the model reads it with `read_skill_resource("<slug>", "<path>")`, e.g. `read_skill_resource("craft-orchestration", "references/schema-cheatsheet.md")`.
 4. **Script execution** — If a skill bundles executable scripts alongside its `SKILL.md`, the model can run them with `run_skill_script("<slug>", "<filename>")`.
 5. **Direct invocation** — Type `$<slug>` at the REPL prompt to invoke a skill immediately without describing what you want. The `SKILL.md` content is loaded directly into the turn so the model applies the skill right away. Append arguments after the slug to pass context: `$commit fix typo in readme`. Tab completion cycles through matching skill slugs.
 
@@ -46,44 +46,17 @@ If `--no-tools` is passed, skills are disabled for that session.
 
 ## Shipped skills
 
-fuseraft ships with the following built-in skills. Install any of them globally with `fuseraft skills add`:
+fuseraft ships with the following built-in skills, all specific to building and operating fuseraft itself. Install any of them globally with `fuseraft skills add`:
 
 ```bash
-fuseraft skills add path/to/fuseraft/skills/sandbox-test
+fuseraft skills add path/to/fuseraft/skills/craft-orchestration
 ```
 
----
+General-purpose productivity skills (not specific to fuseraft) live in the separate [fuseraft/skills](https://github.com/fuseraft/skills) repository — e.g. `commit`, `sandbox-test`, and `build-docx`. Clone that repo and install from it the same way:
 
-### `commit`
-
-Stages and commits changes using the conventional commit format. Triggers when an agent finishes implementing, after a fix, or when a Developer or Tester instruction says to commit.
-
-When it triggers, the agent will:
-
-1. Run `git status` and `git diff HEAD` to see what changed.
-2. Choose the right commit type (`feat`, `fix`, `refactor`, `docs`, `chore`, etc.).
-3. Write a subject line in imperative mood, ≤ 72 characters, lowercase after the colon.
-4. Add a body with `why` bullets when the change is non-trivial.
-5. Stage only the relevant files (never `git add -A`).
-6. Commit and verify with `git log --oneline -1`.
-
-Does not push to remote or amend prior commits — use `shell_run` for those directly.
-
----
-
-### `sandbox-test`
-
-Activates automatically when the agent needs to verify logic before touching real source files — for example, when debugging a defect, testing an edge case, or confirming a behavioral hypothesis.
-
-When it triggers, the agent will:
-
-1. Detect your project stack (.NET, Go, Rust, Python, TypeScript, Node.js, or Java).
-2. Create a throwaway harness in the system temp directory.
-3. Write and run harness code with debug output at key boundaries.
-4. Iterate until the behavior is understood (up to 5 runs).
-5. Apply the confirmed change to your real files and remove the harness.
-
-You don't need to invoke this skill explicitly — it activates on its own when appropriate.
+```bash
+fuseraft skills add path/to/skills/commit
+```
 
 ---
 
@@ -124,14 +97,6 @@ The skill verifies the server command or endpoint, adds the `McpServers` entry t
 Guides the agent through writing a new fuseraft skill from scratch. Triggers when the user wants to create a skill, capture a reusable procedure, or understand how to structure a `SKILL.md` file.
 
 The skill gathers requirements (what it does, when it triggers, where it lives), writes the frontmatter and body, decides whether reference files or bundled scripts are needed, installs the skill at the chosen scope, and verifies it appears in the catalog.
-
----
-
-### `build-docx`
-
-Generates a DOCX file from structured content, a template, or a description. Triggers when the user wants to produce a Word document, export content to `.docx`, fill in a DOCX template, or convert Markdown/JSON/outline data to a formatted document.
-
-The skill detects the project stack, selects the appropriate library (`python-docx`, `docx` npm, or `DocumentFormat.OpenXml`/`DocX`), gathers content requirements, writes a self-contained builder script, runs it, and reports the output path. Reference files for each library's common patterns are loaded on demand to keep context lean.
 
 ---
 
