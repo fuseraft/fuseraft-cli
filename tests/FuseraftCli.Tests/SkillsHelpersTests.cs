@@ -96,6 +96,42 @@ public sealed class SkillsHelpersTests : IDisposable
         Assert.True(Directory.Exists(_destDir));
     }
 
+    [Fact]
+    public void CopySkillDirectory_FileRemovedFromSource_IsPrunedFromDest()
+    {
+        // Simulate re-running `fuseraft skills add` after the skill author deleted a
+        // bundled reference doc: the stale copy must not survive the update, or
+        // read_skill_resource keeps serving content the source no longer has.
+        Directory.CreateDirectory(Path.Combine(_destDir, "references"));
+        File.WriteAllText(Path.Combine(_destDir, "SKILL.md"), "old body");
+        File.WriteAllText(Path.Combine(_destDir, "references", "removed.md"), "stale content");
+
+        File.WriteAllText(Path.Combine(_sourceDir, "SKILL.md"), "new body");
+
+        SkillsHelpers.CopySkillDirectory(_sourceDir, _destDir);
+
+        Assert.False(File.Exists(Path.Combine(_destDir, "references", "removed.md")));
+        Assert.Equal("new body", File.ReadAllText(Path.Combine(_destDir, "SKILL.md")));
+    }
+
+    [Fact]
+    public void CopySkillDirectory_FileStillInSource_SurvivesAlongsideRemovedOne()
+    {
+        Directory.CreateDirectory(Path.Combine(_destDir, "references"));
+        File.WriteAllText(Path.Combine(_destDir, "SKILL.md"), "old body");
+        File.WriteAllText(Path.Combine(_destDir, "references", "keep.md"), "old kept content");
+        File.WriteAllText(Path.Combine(_destDir, "references", "removed.md"), "stale content");
+
+        Directory.CreateDirectory(Path.Combine(_sourceDir, "references"));
+        File.WriteAllText(Path.Combine(_sourceDir, "SKILL.md"), "new body");
+        File.WriteAllText(Path.Combine(_sourceDir, "references", "keep.md"), "new kept content");
+
+        SkillsHelpers.CopySkillDirectory(_sourceDir, _destDir);
+
+        Assert.False(File.Exists(Path.Combine(_destDir, "references", "removed.md")));
+        Assert.Equal("new kept content", File.ReadAllText(Path.Combine(_destDir, "references", "keep.md")));
+    }
+
     // ── ExtractSlug / ExtractDescription / CanonicalizeName ────────────────────
 
     [Fact]

@@ -66,21 +66,37 @@ internal static class SkillsHelpers
     }
 
     /// <summary>
-    /// Recursively copies every file under <paramref name="sourceDir"/> into
-    /// <paramref name="destDir"/>, preserving relative subdirectory structure and creating
-    /// <paramref name="destDir"/> if needed. Existing files at the destination are overwritten.
-    /// Used by <c>fuseraft skills add</c> so bundled <c>references/</c> and <c>scripts/</c>
-    /// files travel with SKILL.md instead of being silently dropped.
+    /// Mirrors every file under <paramref name="sourceDir"/> into <paramref name="destDir"/>,
+    /// preserving relative subdirectory structure and creating <paramref name="destDir"/> if
+    /// needed. Existing files at the destination are overwritten, and — critically for
+    /// <c>fuseraft skills add</c> re-installing an already-installed skill — any file present
+    /// in <paramref name="destDir"/> that no longer exists in <paramref name="sourceDir"/> is
+    /// deleted. Without this, updating a skill whose author removed or renamed a bundled file
+    /// (a <c>references/</c> doc, a <c>scripts/</c> file) leaves the stale copy behind forever:
+    /// <c>read_skill_resource</c> would keep returning its old content indefinitely, since it
+    /// reads straight from the installed directory with no knowledge the source ever changed.
     /// </summary>
     internal static void CopySkillDirectory(string sourceDir, string destDir)
     {
         Directory.CreateDirectory(destDir);
+
+        var sourceRelativePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var filePath in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
         {
             var relative = Path.GetRelativePath(sourceDir, filePath);
+            sourceRelativePaths.Add(relative);
             var destFile = Path.Combine(destDir, relative);
             Directory.CreateDirectory(Path.GetDirectoryName(destFile)!);
             File.Copy(filePath, destFile, overwrite: true);
+        }
+
+        foreach (var existingFile in Directory.EnumerateFiles(destDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(destDir, existingFile);
+            if (!sourceRelativePaths.Contains(relative))
+            {
+                File.Delete(existingFile);
+            }
         }
     }
 }
