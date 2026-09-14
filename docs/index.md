@@ -9,10 +9,18 @@ hide:
 
 ## What it does
 
-Define teams of AI agents in YAML. fuseraft-cli drives them through a coordinated pipeline — from planning to implementation to review — until the task is done.
+Run `fuseraft` and start chatting with a model that can read and edit files, run shell commands, search your codebase, and use git — no config file needed. When one agent isn't enough, fuseraft scales into declarative, multi-agent pipelines defined in YAML, where routing validators mechanically enforce that each agent did what it claimed before the pipeline advances.
 {: .fuseraft-section-lead }
 
 <div class="grid cards" markdown>
+
+-   :material-console-line:{ .lg .middle } **Terminal AI assistant**
+
+    ---
+
+    `fuseraft repl` is an interactive chat session with a single model — safe by default (HITL approval, filesystem/shell/git sandbox), resumable, with ~50 slash commands and a `!<command>` shell escape for running things yourself without leaving the chat.
+
+    [:octicons-arrow-right-24: REPL](repl.md)
 
 -   :material-robot-outline:{ .lg .middle } **Agent teams as YAML**
 
@@ -97,6 +105,8 @@ Define teams of AI agents in YAML. fuseraft-cli drives them through a coordinate
     >
     ```
 
+    That's it — you're chatting, with file, shell, search, and git tools already available.
+
 === "Windows"
 
     ```powershell
@@ -109,14 +119,14 @@ Define teams of AI agents in YAML. fuseraft-cli drives them through a coordinate
     fuseraft
     ```
 
-Generate a team config and run your first task:
+When one agent isn't enough, generate a team config and run a multi-agent pipeline instead:
 
 ```bash
 fuseraft init
 fuseraft run -c .fuseraft/config/orchestration.yaml "Add a hello-world endpoint to this project"
 ```
 
-[:octicons-arrow-right-24: Full installation guide](getting-started.md)
+[:octicons-arrow-right-24: Full installation guide](getting-started.md) · [:octicons-arrow-right-24: REPL walkthrough](repl.md)
 
 ---
 
@@ -125,6 +135,7 @@ fuseraft run -c .fuseraft/config/orchestration.yaml "Add a hello-world endpoint 
 | Doc | What it covers |
 |-----|----------------|
 | [Getting Started](getting-started.md) | Prerequisites, installation, first run |
+| [REPL](repl.md) | Interactive terminal chat — tools, safety model, `!` shell escape, skills, sessions |
 | [Writing Effective Tasks](writing-tasks.md) | Task descriptions that produce correct, verifiable results |
 | [Spec-Driven Development](spec-driven.md) | Using `--spec` to anchor agents before implementation begins |
 | [CLI Reference](cli-reference.md) | All commands and flags |

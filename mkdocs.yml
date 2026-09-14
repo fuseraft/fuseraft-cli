@@ -37,6 +37,7 @@ theme:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - REPL: repl.md
   - Writing Tasks: writing-tasks.md
   - Spec-Driven Development: spec-driven.md
   - CLI Reference: cli-reference.md

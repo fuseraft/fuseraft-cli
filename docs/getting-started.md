@@ -224,6 +224,7 @@ On Linux and macOS the binary is replaced atomically in place. On Windows a sepa
 
 ## Next steps
 
+- Read [REPL](repl.md) for the full walkthrough of interactive chat sessions — tools, the safety model, the `!` shell escape, skills, memory
 - Edit `.fuseraft/config/orchestration.yaml` to change agent instructions, models, or plugins
 - Read [Writing Effective Tasks](writing-tasks.md) to learn how to write task descriptions that produce correct, verifiable results
 - Read [Configuration](configuration.md) for the complete schema reference
