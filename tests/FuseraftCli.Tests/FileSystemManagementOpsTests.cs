@@ -88,6 +88,35 @@ public sealed class FileSystemManagementOpsTests : IDisposable
         Assert.DoesNotContain("match 4", result);
     }
 
+    [Fact]
+    public async Task GrepFile_BinaryFile_ReturnsErrorInsteadOfReadingAsText()
+    {
+        // A NUL byte (never legal in text) alongside readable ASCII, like a symbol name
+        // embedded in a compiled assembly's metadata — see SearchPluginTests for the incident
+        // this mirrors: File.ReadAllLines/StreamReader don't throw on binary content, so
+        // without this guard the "match" would be read and returned as if it were text.
+        var bytes = new List<byte>();
+        bytes.AddRange("needle-marker"u8.ToArray());
+        bytes.Add(0);
+        bytes.AddRange(new byte[4000]);
+        await File.WriteAllBytesAsync(TempPath("binary.dll"), bytes.ToArray());
+
+        var result = await _ops.GrepFileAsync(TempPath("binary.dll"), "needle-marker");
+        Assert.StartsWith("[ERROR]", result);
+        Assert.Contains("binary", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GrepFile_AbnormallyLongLine_IsTruncated()
+    {
+        var longLine = "needle-marker " + new string('x', 5000);
+        await File.WriteAllTextAsync(TempPath("longline.txt"), longLine);
+
+        var result = await _ops.GrepFileAsync(TempPath("longline.txt"), "needle-marker");
+        Assert.Contains("chars truncated", result);
+        Assert.True(result.Length < 1000, $"Expected a bounded result, got {result.Length} chars.");
+    }
+
     // -----------------------------------------------------------------------
     // DeleteFile
     // -----------------------------------------------------------------------

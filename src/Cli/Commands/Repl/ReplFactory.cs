@@ -73,9 +73,19 @@ internal static class ReplFactory
             var toolSchemaChars = AgentMiddlewareBuilder.EstimateToolSchemaChars(
                 tools?.Cast<AITool>().ToList());
 
+            // Mirrors AgentFactory's fallback tier (3/4) for orchestration agents with no
+            // explicit per-agent/session override: fall back to the model's own context
+            // window, or DefaultMaxInTurnChars when that isn't known either (e.g. a
+            // manually typed model ID with no Models-registry entry, leaving maxContextChars
+            // at 0). Without this, a single oversized tool result — a directory-wide search
+            // that returns hundreds of KB, say — rides along unbounded for the rest of the
+            // turn instead of being caught by TrimInTurnContext's Phase 2 (which truncates
+            // even the most recent trimmable result once the turn is over budget).
+            var maxInTurnChars = maxContextChars > 0 ? maxContextChars : DefaultMaxInTurnChars;
+
             client = middleware.BuildMiddlewareChain(
                 chatClient: client, config: agentConfig, chatOptions: null,
-                maxContextChars: maxContextChars, maxInTurnChars: 0, maxInTurnToolPairs: InTurnToolPairLimit,
+                maxContextChars: maxContextChars, maxInTurnChars: maxInTurnChars, maxInTurnToolPairs: InTurnToolPairLimit,
                 toolSchemaChars: toolSchemaChars, maxPayloadBytes: resolved.MaxPayloadBytes,
                 hasHandoff: false, emitter: emitter);
 
@@ -102,6 +112,10 @@ internal static class ReplFactory
     // Matches AgentFactory.DefaultToolPairsWhenBudgeted — keeps at most this many
     // tool-call/result groups in full per inner LLM call within a single REPL turn.
     private const int InTurnToolPairLimit = 12;
+
+    // Matches AgentFactory.DefaultMaxInTurnChars — conservative floor for the in-turn char
+    // budget when the model's own context window isn't known (see BuildClient).
+    private const int DefaultMaxInTurnChars = 200_000;
 
     internal static async Task<(UserConfig? Config, string? ApiKey, bool SelectedFromList)> RunSetupWizardAsync(
         string? currentModelId, UserConfig? currentCfg)

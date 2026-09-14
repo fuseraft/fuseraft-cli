@@ -23,6 +23,18 @@ public class DirectoryFiltersTests
     }
 
     [Fact]
+    public void PackagesConfigStyleNuGetRestoreDirectory_IsExcluded()
+    {
+        // Classic (non-SDK-style) .NET Framework projects restore NuGet packages into a
+        // top-level "packages\" folder — distinct from ".nuget" (the global user cache) — and it
+        // commonly holds compiled .dll/.pdb files that a content search must not walk into.
+        var root = Path.Combine(Path.GetTempPath(), "repo");
+        var path = Path.Combine(root, "packages", "SomeLib.1.0.0", "lib", "net461", "SomeLib.dll");
+
+        Assert.True(DirectoryFilters.IsExcluded(path, root));
+    }
+
+    [Fact]
     public void NormalPathBelowRoot_IsNotExcluded()
     {
         var root = Path.Combine(Path.GetTempPath(), "repo");
