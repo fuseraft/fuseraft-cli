@@ -54,6 +54,8 @@ internal sealed class FileSystemManagementOps
         _approveAction    = owner.ApproveAction;
     }
 
+    private const int MaxGrepLineLength = 500;
+
     [Description("Search a file (grep). Cheaper than full read_file.")]
     public async Task<string> GrepFileAsync(
         [Description("File path.")] string path,
@@ -67,6 +69,13 @@ internal sealed class FileSystemManagementOps
 
         if (!File.Exists(resolved))
             return PluginResult.Error($"File not found: {resolved}");
+
+        // StreamReader.ReadLineAsync doesn't throw on binary content (invalid UTF-8 just
+        // becomes replacement characters), so a compiled .dll/.pdb would otherwise "match" and
+        // return a single line spanning hundreds of KB if it lacks a newline byte for a long
+        // stretch. Reject up front rather than read a possibly huge line into memory first.
+        if (BinaryFileSniffer.LooksBinary(resolved))
+            return PluginResult.Error($"'{resolved}' looks like a binary file — grep_file only searches text.");
 
         // Some models HTML-encode characters in tool arguments (e.g. &lt; for <).
         pattern = System.Net.WebUtility.HtmlDecode(pattern);
@@ -100,6 +109,11 @@ internal sealed class FileSystemManagementOps
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 lineNumber++;
+
+                // Caps one abnormally long line (a minified bundle, a data row, or anything
+                // that slipped past the binary sniff above) so it can't dominate the result.
+                if (line.Length > MaxGrepLineLength)
+                    line = line[..MaxGrepLineLength] + $"... [+{line.Length - MaxGrepLineLength} chars truncated]";
 
                 if (matches >= maxMatches) continue; // drain to count total lines
 

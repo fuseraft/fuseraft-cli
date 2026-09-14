@@ -60,8 +60,32 @@ public sealed class SearchPlugin
     // rather than "doesn't exist anywhere" — common dependency directories are skipped by
     // default during an unscoped walk, which otherwise looks identical to a genuine absence.
     private const string ScopeNote =
-        " Common dependency directories (node_modules, .nuget, vendor, bin, obj, .venv, __pycache__) " +
+        " Common dependency directories (node_modules, .nuget, packages, vendor, bin, obj, .venv, __pycache__) " +
         "are skipped by default — point 'directory' directly at one of those if the target lives in a dependency.";
+
+    private const int MaxMatchLineLength = 500;
+
+    private static bool TryReadLines(string file, out string[] lines)
+    {
+        lines = [];
+        if (BinaryFileSniffer.LooksBinary(file)) return false;
+        try
+        {
+            lines = File.ReadAllLines(file);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    // Caps an individual matched line so one abnormally long line — a minified bundle, a data
+    // row, or anything that slipped past the binary sniff — can't dominate a tool result on its own.
+    private static string TruncateMatch(string line)
+    {
+        line = line.Trim();
+        return line.Length > MaxMatchLineLength
+            ? line[..MaxMatchLineLength] + $"... [+{line.Length - MaxMatchLineLength} chars truncated]"
+            : line;
+    }
 
     // Content search
 
@@ -104,9 +128,7 @@ public sealed class SearchPlugin
         {
             if (totalMatches >= maxResults) break;
 
-            string[] lines;
-            try { lines = File.ReadAllLines(file); }
-            catch { skippedFiles++; continue; }  // skip unreadable files (binary, locked, etc.)
+            if (!TryReadLines(file, out var lines)) { skippedFiles++; continue; }  // skip unreadable/binary files
 
             var fileMatches = new List<string>();
 
@@ -114,7 +136,7 @@ public sealed class SearchPlugin
             {
                 if (regex.IsMatch(lines[i]))
                 {
-                    fileMatches.Add($"  L{i + 1}: {lines[i].Trim()}");
+                    fileMatches.Add($"  L{i + 1}: {TruncateMatch(lines[i])}");
                     totalMatches++;
                 }
             }
@@ -193,9 +215,7 @@ public sealed class SearchPlugin
         {
             if (totalMatches >= maxResults) break;
 
-            string[] lines;
-            try { lines = File.ReadAllLines(file); }
-            catch { skippedFiles++; continue; }
+            if (!TryReadLines(file, out var lines)) { skippedFiles++; continue; }
 
             for (int i = 0; i < lines.Length && totalMatches < maxResults; i++)
             {
@@ -203,7 +223,7 @@ public sealed class SearchPlugin
                 if (!callSiteRegex.IsMatch(line)) continue;
                 if (defRegex?.IsMatch(line) == true) continue;
 
-                sb.AppendLine($"{file}:L{i + 1}  {line.Trim()}");
+                sb.AppendLine($"{file}:L{i + 1}  {TruncateMatch(line)}");
                 totalMatches++;
             }
         }
@@ -264,15 +284,13 @@ public sealed class SearchPlugin
         {
             if (totalMatches >= maxResults) break;
 
-            string[] lines;
-            try { lines = File.ReadAllLines(file); }
-            catch { skippedFiles++; continue; }
+            if (!TryReadLines(file, out var lines)) { skippedFiles++; continue; }
 
             for (int i = 0; i < lines.Length && totalMatches < maxResults; i++)
             {
                 if (regex.IsMatch(lines[i]))
                 {
-                    sb.AppendLine($"{file}:L{i + 1}  {lines[i].Trim()}");
+                    sb.AppendLine($"{file}:L{i + 1}  {TruncateMatch(lines[i])}");
                     totalMatches++;
                 }
             }

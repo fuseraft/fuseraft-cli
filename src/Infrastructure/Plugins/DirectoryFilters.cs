@@ -9,7 +9,7 @@ namespace fuseraft.Infrastructure.Plugins;
 internal static class DirectoryFilters
 {
     internal static readonly string[] DefaultExcludedDirs =
-        [".git", "node_modules", "bin", "obj", ".vs", ".idea", ".nuget", ".venv", "__pycache__", ".fuseraft", "vendor"];
+        [".git", "node_modules", "bin", "obj", ".vs", ".idea", ".nuget", "packages", ".venv", "__pycache__", ".fuseraft", "vendor"];
 
     // Checks only path segments below `root`, not `root`'s own path. Without this, a caller
     // that explicitly points `root` at (or inside) an excluded tree — e.g. searching directly
