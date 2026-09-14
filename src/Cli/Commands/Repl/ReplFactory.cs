@@ -146,10 +146,10 @@ internal static class ReplFactory
         string provider;
         bool selectedFromList;
 
-        var (modelIds, isOllama) = await TryFetchModelsAsync(endpoint, apiKey);
+        var (modelIds, detectedProvider) = await TryFetchModelsAsync(endpoint, apiKey);
         if (modelIds is { Count: > 0 })
         {
-            provider = isOllama ? "ollama" : "openai";
+            provider = detectedProvider;
             var defaultModel = !string.IsNullOrEmpty(currentCfg?.ModelId) && modelIds.Contains(currentCfg.ModelId)
                 ? currentCfg.ModelId
                 : modelIds[0];
@@ -199,34 +199,43 @@ internal static class ReplFactory
         return (config, apiKey, selectedFromList);
     }
 
-    // Tries the OpenAI-compatible /models endpoint first, then falls back to Ollama's
-    // /api/tags. Returns a null model list (and prints a warning) when neither responds,
-    // so the caller can fall back to manual model-ID entry.
-    private static async Task<(List<string>? ModelIds, bool IsOllama)> TryFetchModelsAsync(string endpoint, string apiKey)
+    // Tries the OpenAI-compatible /models endpoint first, then Ollama's /api/tags, then
+    // Anthropic's native /v1/models — so typing Anthropic's bare endpoint (no /v1) here
+    // still lands on the "anthropic" provider and gets prompt caching, not "openai".
+    // Returns a null model list (and prints a warning) when nothing responds, so the
+    // caller can fall back to manual model-ID entry.
+    private static async Task<(List<string>? ModelIds, string Provider)> TryFetchModelsAsync(string endpoint, string apiKey)
     {
         try
         {
-            return (await ProviderModelsClient.FetchAsync(endpoint, apiKey, isOllama: false), false);
+            return (await ProviderModelsClient.FetchAsync(endpoint, apiKey, isOllama: false), "openai");
         }
         catch (ProviderConnectException ex)
         {
             // The host/port itself is unreachable — retrying a different path on the same
             // host would fail the same way, so don't bother and don't mask this error.
             ReportFetchFailure(endpoint, ex);
-            return (null, false);
+            return (null, "openai");
         }
         catch (Exception firstEx)
         {
             try
             {
-                return (await ProviderModelsClient.FetchAsync(endpoint, apiKey, isOllama: true), true);
+                return (await ProviderModelsClient.FetchAsync(endpoint, apiKey, isOllama: true), "ollama");
             }
             catch
             {
-                // Neither shape worked — report the /models failure since that's the
-                // standard endpoint; the /api/tags retry was just a guess.
-                ReportFetchFailure(endpoint, firstEx);
-                return (null, false);
+                try
+                {
+                    return (await ProviderModelsClient.FetchAnthropicAsync(endpoint, apiKey), "anthropic");
+                }
+                catch
+                {
+                    // Nothing worked — report the /models failure since that's the
+                    // standard endpoint; the other two retries were just guesses.
+                    ReportFetchFailure(endpoint, firstEx);
+                    return (null, "openai");
+                }
             }
         }
     }

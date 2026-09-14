@@ -75,11 +75,14 @@ public sealed class ModelsCommand : AsyncCommand
                 : Environment.GetEnvironmentVariable(resolved.ApiKeyEnvVar) ?? string.Empty;
 
         bool isOllama = resolved.Provider.Equals("ollama", StringComparison.OrdinalIgnoreCase);
+        bool isAnthropic = resolved.Provider.Equals("anthropic", StringComparison.OrdinalIgnoreCase);
 
         List<string> modelIds;
         try
         {
-            modelIds = await ProviderModelsClient.FetchAsync(endpoint, apiKey, isOllama, cancellationToken);
+            modelIds = isAnthropic
+                ? await ProviderModelsClient.FetchAnthropicAsync(endpoint, apiKey, cancellationToken)
+                : await ProviderModelsClient.FetchAsync(endpoint, apiKey, isOllama, cancellationToken);
         }
         catch (Exception ex)
         {

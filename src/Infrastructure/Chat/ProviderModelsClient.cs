@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
+using Anthropic.SDK;
 
 namespace fuseraft.Infrastructure.Chat;
 
@@ -65,5 +66,38 @@ public static class ProviderModelsClient
         {
             throw new InvalidOperationException($"Could not parse models response: {ex.Message}", ex);
         }
+    }
+
+    // Native Anthropic Messages API base — matches ChatClientFactory.AnthropicDefaultEndpoint.
+    private const string AnthropicDefaultEndpoint = "https://api.anthropic.com";
+
+    /// <summary>
+    /// Fetches available model IDs from Anthropic's native Models API (<c>GET /v1/models</c>,
+    /// authenticated with <c>x-api-key</c>) via <see cref="AnthropicClient"/>. The generic
+    /// OpenAI-compatible shape in <see cref="FetchAsync"/> does not apply here: the native
+    /// endpoint (<see cref="ChatClientFactory.AnthropicDefaultEndpoint"/> in normal use, no
+    /// trailing <c>/v1</c>) has no <c>/models</c> route, and could stop tolerating an
+    /// <c>Authorization: Bearer</c> header at any time even where it happens to today.
+    /// </summary>
+    public static async Task<List<string>> FetchAnthropicAsync(
+        string endpoint, string apiKey, CancellationToken cancellationToken = default)
+    {
+        using var http = new HttpClient();
+        var client = new AnthropicClient(apiKey, http);
+        var trimmed = endpoint.TrimEnd('/');
+        if (!string.IsNullOrEmpty(trimmed) && !trimmed.Equals(AnthropicDefaultEndpoint, StringComparison.OrdinalIgnoreCase))
+            client.ApiUrlFormat = trimmed + "/{0}/{1}";
+
+        Anthropic.SDK.Models.ModelList list;
+        try
+        {
+            list = await client.Models.ListModelsAsync(beforeId: null, afterId: null, limit: 1000, ctx: cancellationToken);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new ProviderConnectException($"Request to {trimmed}/v1/models failed: {ex.Message}", ex);
+        }
+
+        return [.. list.Models.Select(m => m.Id).Order()];
     }
 }
