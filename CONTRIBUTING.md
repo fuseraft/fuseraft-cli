@@ -53,7 +53,7 @@ src/
   Orchestration/  Orchestrators, strategies, validators, contracts, compaction, Saga
 
 tests/
-  FuseraftCli.Tests/   xUnit tests — one file per class under test (~323 tests, ~1s)
+  FuseraftCli.Tests/   xUnit tests — one file per class under test (~1,143 tests, ~1s)
 
 config/
   examples/       Runnable YAML/JSON examples; kept in sync with the schema
