@@ -446,7 +446,10 @@ internal static partial class ReplCommands
                 if (!ctx.JsonMode) AnsiConsole.Markup("[dim]extracting memories…[/]");
                 try
                 {
-                    var mc = ctx.Factory.Create(ctx.ModelConfig);
+                    var memoryModelCfg = ctx.UserCfg?.Memory?.Model is { Length: > 0 } mm
+                        ? ctx.Factory.Resolve(new ModelConfig { ModelId = mm })
+                        : ctx.ModelConfig;
+                    var mc = ctx.Factory.Create(memoryModelCfg);
                     using var _ = mc as IDisposable;
                     var existing             = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd, ctx.SessionId);
                     var (saved, parseFailed) = await new MemoryExtractor(mc).ExtractAsync([.. ctx.History], existing);

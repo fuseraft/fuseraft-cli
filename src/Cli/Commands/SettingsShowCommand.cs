@@ -84,6 +84,15 @@ public sealed class SettingsShowCommand : AsyncCommand
         AnsiConsole.Write(skills);
         AnsiConsole.WriteLine();
 
+        var modelOverrides = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey).Title("[bold]Model overrides[/]")
+            .AddColumn("Field").AddColumn("Value");
+        modelOverrides.AddRow("Memory extraction", string.IsNullOrEmpty(config.Memory?.Model)
+            ? "[dim](main chat model)[/]" : Markup.Escape(config.Memory!.Model!));
+        modelOverrides.AddRow("Sub-agents", string.IsNullOrEmpty(config.SubAgent?.Model)
+            ? "[dim](main chat model)[/]" : Markup.Escape(config.SubAgent!.Model!));
+        AnsiConsole.Write(modelOverrides);
+        AnsiConsole.WriteLine();
+
         AnsiConsole.MarkupLine(config.McpServers.Count > 0
             ? $"[bold]MCP servers:[/] {Markup.Escape(string.Join(", ", config.McpServers.Select(s => s.Name)))}"
             : "[bold]MCP servers:[/] [dim](none — add with /mcp add in the REPL)[/]");

@@ -19,6 +19,14 @@ public sealed class UserConfig
     [JsonPropertyName("skillCuration")]
     public SkillCurationConfig? SkillCuration { get; set; }
 
+    /// <summary>Model override for the REPL's end-of-session memory-extraction call.</summary>
+    [JsonPropertyName("memory")]
+    public MemoryExtractionConfig? Memory { get; set; }
+
+    /// <summary>Model override for the REPL's Explore/Locate/Delegate sub-agents.</summary>
+    [JsonPropertyName("subagent")]
+    public SubAgentConfig? SubAgent { get; set; }
+
     /// <summary>Persisted default sampling parameters for new REPL sessions.</summary>
     [JsonPropertyName("sampling")]
     public SamplingDefaultsConfig Sampling { get; set; } = new();

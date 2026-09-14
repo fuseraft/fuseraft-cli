@@ -468,8 +468,15 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 delegateTools.AddRange(gitFunctions!.Where(f => !CoreGitTools.Contains(f.Name)));
             }
 
+            // Allow sub-agent tool calls (/explore, /locate, /delegate) to run on a different,
+            // cheaper model than the main REPL chat — mirrors AgentConfig.SubAgentModel, which
+            // does the same for orchestration agents.
+            var subAgentModelCfg = userCfg?.SubAgent?.Model is { Length: > 0 } sam
+                ? factory.Resolve(new ModelConfig { ModelId = sam })
+                : modelConfig;
+
             subAgent = new SubAgentPlugin(
-                ReplFactory.BuildClient(modelConfig, factory, explorerTools.Count > 0, adaptiveTrimTracker, emitter, tools: explorerTools),
+                ReplFactory.BuildClient(subAgentModelCfg, factory, explorerTools.Count > 0, adaptiveTrimTracker, emitter, tools: explorerTools),
                 explorerTools,
                 eventEmitter:     emitter,
                 parentAgentName:  "repl",

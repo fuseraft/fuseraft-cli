@@ -46,6 +46,8 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
         ("telemetry.otlpEndpoint",  "OTLP endpoint URL, or \"\" to disable"),
         ("telemetry.serviceName",   "Requires telemetry.otlpEndpoint to already be set"),
         ("skillCuration.enabled",   "true/false"),
+        ("memory.model",            "Model ID for the end-of-session memory-extraction call (e.g. a cheap model), or \"\" to use the main chat model"),
+        ("subagent.model",          "Model ID for /explore, /locate, /delegate sub-agents (e.g. a cheap model), or \"\" to use the main chat model"),
     ];
 
     protected override int Execute(CommandContext context, SettingsSetSettings settings, CancellationToken cancellationToken)
@@ -97,6 +99,9 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
                 : Assign(() => config.Telemetry = config.Telemetry with { ServiceName = string.IsNullOrWhiteSpace(value) ? null : value }),
 
             "skillcuration.enabled"    => AssignBool(v => config.SkillCuration = (config.SkillCuration ?? new SkillCurationConfig()) with { Enabled = v }, value),
+
+            "memory.model"             => Assign(() => config.Memory = string.IsNullOrWhiteSpace(value) ? null : new MemoryExtractionConfig { Model = value }),
+            "subagent.model"           => Assign(() => config.SubAgent = string.IsNullOrWhiteSpace(value) ? null : new SubAgentConfig { Model = value }),
 
             _ => "unknown-key",
         };

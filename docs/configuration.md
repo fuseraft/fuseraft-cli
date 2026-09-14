@@ -355,6 +355,14 @@ Memories are **scoped to the working directory** where they were created. A file
 
 When the session ends, the model is asked to extract new memories from the conversation. Each saved entry is written to the global store and its GUID is registered in the local refs file. Use `/memory` commands to manage them. See [CLI Reference — `/memory`](cli-reference.md#memory-commands).
 
+By default this extraction call reuses the REPL's main chat model. Set `memory.model` in `~/.fuseraft/config` to run it on a different model instead — e.g. a smaller/cheaper one, since extraction doesn't need the same capability as the main conversation:
+
+```bash
+fuseraft settings set memory.model gpt-4o-mini
+```
+
+See [CLI Reference — `fuseraft settings`](cli-reference.md#fuseraft-settings).
+
 ---
 
 ## Pluggable memory provider
