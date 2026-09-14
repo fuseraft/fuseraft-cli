@@ -81,6 +81,8 @@ public static class UserConfigStore
                         McpServers    = onDisk.McpServers    ?? [],
                         Telemetry     = onDisk.Telemetry,
                         SkillCuration = onDisk.SkillCuration,
+                        Memory        = onDisk.Memory,
+                        SubAgent      = onDisk.SubAgent,
                     };
                     onDiskApiKey = null;
                 }
@@ -157,6 +159,8 @@ public static class UserConfigStore
             McpServers    = config.McpServers,
             Telemetry     = config.Telemetry,
             SkillCuration = config.SkillCuration,
+            Memory        = config.Memory,
+            SubAgent      = config.SubAgent,
         };
         File.WriteAllText(ConfigPath, JsonSerializer.Serialize(onDisk, JsonOptions));
     }
@@ -182,6 +186,12 @@ public static class UserConfigStore
 
         [JsonPropertyName("skillCuration")]
         public SkillCurationConfig? SkillCuration { get; set; }
+
+        [JsonPropertyName("memory")]
+        public MemoryExtractionConfig? Memory { get; set; }
+
+        [JsonPropertyName("subagent")]
+        public SubAgentConfig? SubAgent { get; set; }
     }
 
     private sealed class ProviderSection

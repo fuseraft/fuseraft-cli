@@ -525,6 +525,16 @@ Servers saved before this file was sectioned lived in a standalone `~/.fuseraft/
 
 This is the REPL's interactive alternative to hand-editing `McpServers` in an orchestration config — see [MCP Integration](mcp.md) for the config-file approach used by `fuseraft run`.
 
+**Sub-agent model (`/explore`, `/locate`, `/delegate`)**
+
+By default, `/explore`, `/locate`, and `/delegate` (and their model-callable equivalents, `sub_agent_explore` / `sub_agent_locate` / `sub_agent_delegate`) run on the same model as the main REPL chat. Set `subagent.model` in `~/.fuseraft/config` to run them on a different — e.g. cheaper or faster — model instead:
+
+```bash
+fuseraft settings set subagent.model gpt-4o-mini
+```
+
+See [`fuseraft settings`](#fuseraft-settings). This mirrors `SubAgentModel` in orchestration YAML (see [Agent configuration](configuration.md#agent-configuration)), which does the same for `fuseraft run` agents.
+
 **Prompt format**
 
 The prompt displays the current turn number followed by `>`:
@@ -881,6 +891,12 @@ The REPL automatically maintains a persistent memory store at `~/.fuseraft/memor
 When a memory is saved, the REPL writes the entry to the global store and registers its GUID in `~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json` for the current session. Repeated saves of the same-named memory reuse the existing GUID, so the entry is updated in-place rather than duplicated.
 
 At session start, scoped memories are injected into the system prompt. When the session ends (via `/exit` or Ctrl+C), the model is prompted to extract key facts and they are saved automatically.
+
+This extraction call uses the REPL's main chat model by default. Set `memory.model` (see [`fuseraft settings`](#fuseraft-settings)) to run it on a different — e.g. cheaper — model instead:
+
+```bash
+fuseraft settings set memory.model gpt-4o-mini
+```
 
 ```
 > /memory
@@ -2446,7 +2462,7 @@ fuseraft update
 
 ## `fuseraft settings`
 
-View or edit the global `~/.fuseraft/config` file — provider, sampling, REPL, telemetry, and skill-curation defaults shared by every project on the machine. For a project's own `orchestration.yaml`/`.json`, see [`fuseraft config`](#fuseraft-config) instead.
+View or edit the global `~/.fuseraft/config` file — provider, sampling, REPL, telemetry, skill-curation, and model-override defaults shared by every project on the machine. For a project's own `orchestration.yaml`/`.json`, see [`fuseraft config`](#fuseraft-config) instead.
 
 ```
 fuseraft settings show
@@ -2455,7 +2471,7 @@ fuseraft settings set <key> [value]
 
 ### `fuseraft settings show`
 
-Prints every section of the file as tables: Provider (including whether an API key is stored in the OS keychain — the key itself is never shown), Sampling defaults, REPL defaults, Telemetry default, Skill curation, and connected MCP server names. If no config exists yet, prints a pointer to `/provider setup` or `settings set` instead of erroring.
+Prints every section of the file as tables: Provider (including whether an API key is stored in the OS keychain — the key itself is never shown), Sampling defaults, REPL defaults, Telemetry default, Skill curation, Model overrides (memory extraction and sub-agent model), and connected MCP server names. If no config exists yet, prints a pointer to `/provider setup` or `settings set` instead of erroring.
 
 ```bash
 fuseraft settings show
@@ -2493,6 +2509,8 @@ Sets one field by a dotted, case-insensitive key. Loads the existing config (or 
 | `telemetry.otlpEndpoint` | OTLP endpoint URL, or `""` to disable |
 | `telemetry.serviceName` | Requires `telemetry.otlpEndpoint` to already be set |
 | `skillCuration.enabled` | `true`/`false` |
+| `memory.model` | Model ID for the REPL's end-of-session memory-extraction call, or `""` to use the main chat model |
+| `subagent.model` | Model ID for `/explore`, `/locate`, `/delegate` sub-agents, or `""` to use the main chat model |
 
 `provider.apiKey` is deliberately not a valid key — API keys are never written to this file. Set `FUSERAFT_API_KEY` and run `fuseraft keychain --set` instead. MCP servers (`/mcp add` in the REPL) and the rest of `skillCuration` (see [Skill curation](configuration.md#skill-curation)) also aren't exposed here yet — edit the file directly for those.
 
@@ -2508,6 +2526,10 @@ fuseraft settings set sampling.temperature 0.7
 
 # Always start with the banner suppressed
 fuseraft settings set repl.noBanner true
+
+# Run memory extraction and sub-agent tool calls on a cheaper model
+fuseraft settings set memory.model gpt-4o-mini
+fuseraft settings set subagent.model gpt-4o-mini
 
 # Clear a previously set value
 fuseraft settings set sampling.temperature ""

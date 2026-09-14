@@ -73,7 +73,7 @@ Model  (2 available from https://api.anthropic.com)
 >
 ```
 
-The config is saved after the first successful reply. Once saved, subsequent `fuseraft` invocations start immediately using those defaults. Use `/provider setup` inside the REPL to reconfigure the provider/model/key at any time, or `fuseraft settings show`/`fuseraft settings set <key> <value>` to view or tweak everything else the file holds (sampling defaults, REPL startup defaults, telemetry, skill curation) — see [CLI Reference — `fuseraft settings`](cli-reference.md#fuseraft-settings).
+The config is saved after the first successful reply. Once saved, subsequent `fuseraft` invocations start immediately using those defaults. Use `/provider setup` inside the REPL to reconfigure the provider/model/key at any time, or `fuseraft settings show`/`fuseraft settings set <key> <value>` to view or tweak everything else the file holds (sampling defaults, REPL startup defaults, telemetry, skill curation, model overrides) — see [CLI Reference — `fuseraft settings`](cli-reference.md#fuseraft-settings).
 
 Typing Anthropic's bare endpoint here (not its `/v1` OpenAI-compatible path) is what lands you on the native `anthropic` provider — see [Models & Providers — anthropic](models.md#anthropic-claude-via-the-native-messages-api) for why that's the one you want for Claude (it's what makes prompt caching available).
 
