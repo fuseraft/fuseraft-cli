@@ -345,13 +345,16 @@ public sealed class ChatClientFactory(
             {
                 InnerHandler = new FunctionStrictStripHandler
                 {
-                    InnerHandler = new ReasoningEffortInjectHandler(reasoningEfforts)
+                    InnerHandler = new AnthropicCacheControlInjectHandler
                     {
-                        InnerHandler = new FinishReasonNormalizerHandler
+                        InnerHandler = new ReasoningEffortInjectHandler(reasoningEfforts)
                         {
-                            InnerHandler = new RawReasoningCaptureHandler(eventEmitter)
+                            InnerHandler = new FinishReasonNormalizerHandler
                             {
-                                InnerHandler = new TransientRetryHandler(errorLogPath, retryLogger) { InnerHandler = new SocketsHttpHandler() }
+                                InnerHandler = new RawReasoningCaptureHandler(eventEmitter)
+                                {
+                                    InnerHandler = new TransientRetryHandler(errorLogPath, retryLogger) { InnerHandler = new SocketsHttpHandler() }
+                                }
                             }
                         }
                     }
@@ -363,12 +366,14 @@ public sealed class ChatClientFactory(
 }
 
 // Handler classes extracted to src/Infrastructure/Http/:
-//   TransientRetryHandler          — retry + SSE idle-timeout wrapping
-//   FunctionStrictStripHandler      — strips "strict" from tool definitions
-//   ReasoningEffortInjectHandler    — injects reasoning effort for xAI grok-4.3+
-//   RawReasoningCaptureHandler      — captures xAI reasoning_content field
-//   FinishReasonNormalizerHandler   — normalizes empty finish_reason values
-//   MessageNameStripHandler         — strips name field from non-user messages
-//   ToolsRequiredRetryHandler       — injects no-op tool for Bedrock/LiteLLM
-//   SseEventIdleTimeoutStream       — ping-aware SSE content idle timer
+//   TransientRetryHandler            — retry + SSE idle-timeout wrapping
+//   FunctionStrictStripHandler       — strips "strict" from tool definitions
+//   AnthropicCacheControlInjectHandler — adds cache_control breakpoints for claude-* over an
+//                                       OpenAI-compatible gateway (e.g. LiteLLM/Bedrock)
+//   ReasoningEffortInjectHandler     — injects reasoning effort for xAI grok-4.3+
+//   RawReasoningCaptureHandler       — captures xAI reasoning_content field
+//   FinishReasonNormalizerHandler    — normalizes empty finish_reason values
+//   MessageNameStripHandler          — strips name field from non-user messages
+//   ToolsRequiredRetryHandler        — injects no-op tool for Bedrock/LiteLLM
+//   SseEventIdleTimeoutStream        — ping-aware SSE content idle timer
 
