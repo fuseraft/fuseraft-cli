@@ -824,7 +824,16 @@ internal static class ReplTurn
                 ReplJsonBridge.Emit(new { type = "file_changes", changes = changeArray });
         }
         if (ctx.JsonMode)
-            ReplJsonBridge.Emit(new { type = "message_end", turnIndex = ctx.TurnIndex, toolCalls = toolCallsThisTurn.ToArray() });
+            ReplJsonBridge.Emit(new
+            {
+                type      = "message_end",
+                turnIndex = ctx.TurnIndex,
+                toolCalls = toolCallsThisTurn.ToArray(),
+                inputTokens                = turnInputTokens     > 0 ? turnInputTokens     : (long?)null,
+                outputTokens               = turnOutputTokens    > 0 ? turnOutputTokens    : (long?)null,
+                cachedInputTokens          = turnCacheReadTokens > 0 ? turnCacheReadTokens : (long?)null,
+                cumulativeCacheReadTokens  = ctx.CumulativeCacheReadTokens > 0 ? ctx.CumulativeCacheReadTokens : (long?)null,
+            });
 
         ctx.TurnIndex++;
 
