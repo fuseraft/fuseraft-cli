@@ -1,5 +1,5 @@
 site_name: fuseraft-cli
-site_description: Multi-agent orchestration CLI built on Microsoft Agent Framework
+site_description: A terminal AI assistant that scales into multi-agent pipelines — built on Microsoft Agent Framework
 site_url: https://fuseraft.ai/
 repo_url: https://github.com/fuseraft/fuseraft-cli
 repo_name: fuseraft/fuseraft-cli

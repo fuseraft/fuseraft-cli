@@ -9,7 +9,7 @@ hide:
 
 ## What it does
 
-Run `fuseraft` and start chatting with a model that can read and edit files, run shell commands, search your codebase, and use git — no config file needed. When one agent isn't enough, fuseraft scales into declarative, multi-agent pipelines defined in YAML, where routing validators mechanically enforce that each agent did what it claimed before the pipeline advances.
+Run `fuseraft` and start chatting with a model that can read and edit files, run shell commands, search your codebase, and use git — no config file needed. When one agent isn't enough, fuseraft scales into declarative, multi-agent pipelines defined in YAML, where routing validators mechanically enforce that each agent did what it claimed before the pipeline advances. Built on [Microsoft Agent Framework](https://github.com/microsoft/agent-framework).
 {: .fuseraft-section-lead }
 
 <div class="grid cards" markdown>

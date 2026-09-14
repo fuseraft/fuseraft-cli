@@ -57,10 +57,10 @@
   padding: 0.3rem 0.9rem;
   font-size: 0.73rem;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--fr-primary);
-  margin-bottom: 2rem;
+  margin-bottom: 1.1rem;
 }
 
 .fuseraft-hero__badge-dot {
@@ -71,13 +71,12 @@
   flex-shrink: 0;
 }
 
-.fuseraft-hero__banner {
-  width: 100%;
-  max-width: 720px;
-  height: auto;
-  margin-bottom: 1.5rem;
-  border-radius: 14px;
-  box-shadow: 0 8px 32px rgba(26, 20, 15, 0.14);
+.fuseraft-hero__title {
+  font-size: 3rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.75rem;
+  color: var(--fr-text);
 }
 
 .fuseraft-hero__subtitle {
@@ -86,6 +85,21 @@
   max-width: 480px;
   margin: 0 auto 2.25rem;
   line-height: 1.8;
+}
+
+/* ─── Hero terminal screenshot ──────────────────────────────────────────────── */
+/* A real fuseraft REPL session (see docs/assets/fuseraft-banner.png) — not a
+   mockup, so no light/slate override is needed here: the screenshot's own
+   colors are fixed regardless of page theme. */
+
+.fuseraft-hero__terminal {
+  display: block;
+  width: 100%;
+  max-width: 640px;
+  height: auto;
+  margin: 0 auto 2rem;
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgba(26, 20, 15, 0.28);
 }
 
 .fuseraft-hero__actions {
@@ -172,6 +186,10 @@
   border-color: rgba(196, 69, 46, 0.3);
 }
 
+[data-md-color-scheme="slate"] .fuseraft-hero__title {
+  color: var(--md-default-fg-color);
+}
+
 [data-md-color-scheme="slate"] .fuseraft-hero__subtitle {
   color: var(--md-default-fg-color--light);
 }
@@ -190,14 +208,18 @@
 
 @media screen and (max-width: 600px) {
   .fuseraft-hero {
-    padding: 4rem 1rem 3.5rem;
+    padding: 3rem 1rem 2.75rem;
   }
 
   .fuseraft-hero__title {
     font-size: 2.2rem;
   }
 
-  .fuseraft-hero__banner {
-    border-radius: 10px;
+  .fuseraft-hero__subtitle {
+    margin-bottom: 1.75rem;
+  }
+
+  .fuseraft-hero__terminal {
+    border-radius: 8px;
   }
 }
