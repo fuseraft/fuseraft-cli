@@ -416,6 +416,18 @@ assistant:
 
 Use `/tools` to see the full list at runtime.
 
+**Shell escape**
+
+Prefix any line with `!` to run it as a real shell command without leaving the REPL for another terminal — e.g. `!git status`, `!npm test`. The child process inherits the console's stdio directly, so interactive programs (`less`, `vim`, `ssh`, an installer prompt) and live-streaming output work exactly as they would in a real terminal, and a Ctrl+C during the command interrupts it without ending the REPL session. The command and its output are never added to conversation history — the model never sees it.
+
+| Command | Description |
+|---------|-------------|
+| `!<command>` | Run `<command>` in a shell. Not sandboxed, not gated by `/hitl` — this is you running a command directly, not the model. |
+| `!!` | Repeat the last `!` command |
+| `!cd <dir>` | Change the shell escape's working directory. Persists across later `!` commands (each still runs in its own process, so a plain `!cd` inside a compound command like `!cd foo && ls` would not persist — only a bare `cd` is special-cased). |
+| `!cd` | `cd` to your home directory |
+| `!cd -` | `cd` to the previous shell-escape directory |
+
 **Slash commands**
 
 | Command | Description |
