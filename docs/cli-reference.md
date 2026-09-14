@@ -311,7 +311,7 @@ On launch a compact header shows the model name, a single info line listing acti
 ```
 ── claude-sonnet-4-6 ─────────────────────────────────────
   FileSystem  Shell  Search  Git  ·  memory  ·  3 skills  ·  /help
-  session: a87569bcd7b0
+  session: a87569bc
 ```
 
 The session ID is shown on every startup so you can note it down for later resumption with `--resume`. The event log path is only shown with `--verbose`.

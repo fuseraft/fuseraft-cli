@@ -173,7 +173,7 @@ Every session is auto-saved after each turn. Resume a previous session at any ti
 /sessions
 
 # Resume by ID (shown in the header at startup)
-fuseraft repl --resume a87569bcd7b0
+fuseraft repl --resume a87569bc
 ```
 
 ---
