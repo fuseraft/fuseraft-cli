@@ -63,7 +63,7 @@ Any field left empty falls back to auto-detection.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `ModelId` | string | — | Model identifier sent to the API. |
-| `Provider` | string | auto | Connector type: `openai`, `azure`, `google`, `mistral`, `ollama`. Auto-detected from `ModelId` if omitted. |
+| `Provider` | string | auto | Connector type: `openai`, `anthropic`, `azure`, `google`, `mistral`, `ollama`. Auto-detected from `ModelId` if omitted. |
 | `Endpoint` | string | auto | API base URL. Auto-detected from provider if omitted. Required for `azure`. Falls back to `endpoint` in `~/.fuseraft/config` when blank. |
 | `ApiKeyEnvVar` | string | auto | Name of the environment variable holding the primary API key. Auto-detected from provider if omitted. Leave empty for `ollama`. Falls back to `apiKeyEnvVar` in `~/.fuseraft/config` when blank. |
 | `ApiKey` | string | — | Literal API key. Takes precedence over `ApiKeyEnvVar`. Used by the REPL wizard; not recommended in YAML configs. |
@@ -88,7 +88,7 @@ When `Endpoint` and `ApiKeyEnvVar` are not specified, they are filled in based o
 | `gpt-*` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `o1*`, `o3*`, `o4*` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `grok-*` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
-| `claude-*` | openai | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` |
+| `claude-*` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `gemini-*`, `learnlm-*` | google | `https://generativelanguage.googleapis.com/v1beta/openai` | `GOOGLE_AI_API_KEY` |
 | `mistral-*`, `mixtral-*` | mistral | `https://api.mistral.ai/v1` | `MISTRAL_API_KEY` |
 | `codestral-*`, `pixtral-*` | mistral | `https://api.mistral.ai/v1` | `MISTRAL_API_KEY` |
@@ -145,7 +145,7 @@ Per-agent values always win; global values only fill in empty fields.
 
 Uses `Microsoft.Extensions.AI` with the OpenAI connector. Works with any API that follows the OpenAI chat completions format.
 
-Compatible services include: OpenAI, xAI (Grok), Anthropic (via their OpenAI-compatible endpoint), DeepSeek, OpenRouter, Groq, Together AI, LM Studio, vLLM, and many others.
+Compatible services include: OpenAI, xAI (Grok), DeepSeek, OpenRouter, Groq, Together AI, LM Studio, vLLM, and many others. Anthropic also exposes an OpenAI-compatible endpoint, reachable this way with an explicit `Endpoint` override, but `claude-*` model IDs default to the native `anthropic` provider below instead — the OpenAI-compatible endpoint does not support prompt caching.
 
 ```bash
 export OPENAI_API_KEY=sk-...
@@ -154,6 +154,22 @@ export OPENAI_API_KEY=sk-...
 ```yaml
 Model: gpt-4o
 ```
+
+### anthropic — Claude via the native Messages API
+
+Uses `Anthropic.SDK` directly against `https://api.anthropic.com`, rather than the OpenAI-compatible endpoint the `openai` provider would use. This is required for prompt caching: requests are sent with a 3-breakpoint caching strategy (system prompt, tool definitions, and the tail of the conversation history), so the growing multi-turn history gets cached on the provider side too, not just the static prefix. Cache-read tokens are surfaced cumulatively in the REPL's `--verbose` per-turn line and in `/context`'s session usage summary (see [CLI Reference](cli-reference.md#fuseraft-repl)).
+
+`claude-*` model IDs auto-detect this provider — no explicit `Provider` needed.
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+```yaml
+Model: claude-sonnet-4-6
+```
+
+To route a Claude model through a custom proxy instead of `api.anthropic.com`, set `Endpoint` explicitly; anything other than the native default is passed to the SDK's URL formatter as-is (no `/v1` suffix — the SDK builds the full path itself).
 
 ### azure — Azure OpenAI Service
 

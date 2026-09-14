@@ -298,7 +298,7 @@ fuseraft repl [options]
 | `--resume <id>` | — | Resume a previous REPL session by its session ID. Use `/sessions` inside the REPL to list resumable sessions. |
 | `--no-banner` | off | Skip the ASCII banner. Persist as the default with `fuseraft settings set repl.noBanner true`. |
 | `--no-tools` | off | Disable all built-in tools and start a plain chat session. |
-| `--verbose` | off | Enable debug logging: prints per-turn detail (token estimate, tool-round count, total tool calls) and shows the event log path at startup. Persist as the default with `fuseraft settings set repl.verbose true`. |
+| `--verbose` | off | Enable debug logging: prints per-turn detail (token estimate, tool-round count, total tool calls, and cache-read tokens when the provider reports any) and shows the event log path at startup. Persist as the default with `fuseraft settings set repl.verbose true`. |
 | `--vscode` | off | VS Code mode. When stdin is also redirected (the process is spawned by the fuseraft VS Code extension's REPL panel), switches to JSON bridge mode: all output is emitted as JSONL events to stdout and input is read as JSONL from stdin. In this mode the ASCII banner, ANSI prompts, spinner, and status lines are suppressed; the API key is read from `FUSERAFT_API_KEY` instead of the OS keychain. Automatically passed by the extension — not intended for manual use. |
 | `--yolo` | off | Skip the REPL's default safety gates: HITL approval is off instead of on, FileSystem/Shell/Git are not sandboxed to the launch directory, and any `repl.safeMode` default from `fuseraft settings` is ignored. Restores the fully-open behavior for trusted, unattended sessions. Prints a warning banner when active. |
 
@@ -459,7 +459,7 @@ Use `/tools` to see the full list at runtime.
 | `/save` | Save a Markdown transcript to `repl-<sessionId>.md` in the current directory |
 | `/save <file>` | Save the transcript to a specific file |
 | `/snapshot` | Write a full debug snapshot of the current session state — metadata, active modes, context stats, tool inventory, plan state, and full message history — to a timestamped JSON file in `/tmp/fuseraft/`. Prints the file path on completion. |
-| `/context` | Show context window usage: token count vs. budget, explicit budget label, completed turn count, per-role message counts, per-category breakdown, delta since last check, and projected turns remaining after 2+ turns. The headline token count uses the real size the provider reported for the most recently completed turn's opening request when available, falling back to a char-based estimate before the first turn or when the provider never reports usage (e.g. Ollama); the per-category breakdown always stays estimated. Also shows cumulative session usage — actual input/output tokens reported by the provider across every LLM call so far, summed across tool-call round trips (not reset by `/clear`, `/rewind`, or `/compact`) |
+| `/context` | Show context window usage: token count vs. budget, explicit budget label, completed turn count, per-role message counts, per-category breakdown, delta since last check, and projected turns remaining after 2+ turns. The headline token count uses the real size the provider reported for the most recently completed turn's opening request when available, falling back to a char-based estimate before the first turn or when the provider never reports usage (e.g. Ollama); the per-category breakdown always stays estimated. Also shows cumulative session usage — actual input/output tokens reported by the provider across every LLM call so far, summed across tool-call round trips (not reset by `/clear`, `/rewind`, or `/compact`), plus a cumulative cache-read count when the provider reports prompt-cache hits (native Anthropic Messages API, and OpenAI-compatible providers that report `cached_tokens`) |
 | `/events` | Show event stats for the current session: turns, total tool calls, per-turn tool breakdown, top tools by frequency, and total plus per-turn actual input/output tokens (real provider-reported usage, shown only for turns where the provider reported it) |
 | `/events stats` | Same as `/events` |
 | `/explore <query>` | Run a sub-agent exploration loop over the codebase and return a prose summary. The sub-agent uses read-only tools and runs in an isolated context with no shared history from the main session. |
@@ -2153,7 +2153,7 @@ fuseraft skills add <source>
 |----------|-------------|
 | `<source>` | Path to a skill directory (containing `SKILL.md`) or directly to a `SKILL.md` file. Supports `~` expansion. |
 
-The slug is derived from the `name:` field in the `SKILL.md` frontmatter. If no `name:` field is present, the source directory name is used. If a skill with the same slug already exists it is updated in place.
+The slug is derived from the `name:` field in the `SKILL.md` frontmatter. If no `name:` field is present, the source directory name is used. If a skill with the same slug already exists it is updated in place — the installed copy is made to mirror the source exactly, so a file deleted or renamed at the source since the last `add` is pruned from `~/.fuseraft/skills/<slug>/` too, not just left behind.
 
 **Examples**
 
@@ -2379,7 +2379,7 @@ List all models available from the configured provider.
 fuseraft models
 ```
 
-Reads `~/.fuseraft/config` to resolve the provider endpoint and API key, then calls the provider's models listing endpoint (`GET {endpoint}/models` for OpenAI-compatible providers; `GET {endpoint}/api/tags` for Ollama). The currently configured model is highlighted.
+Reads `~/.fuseraft/config` to resolve the provider endpoint and API key, then calls the provider's models listing endpoint (`GET {endpoint}/models` for OpenAI-compatible providers; `GET {endpoint}/api/tags` for Ollama; `GET {endpoint}/v1/models` with `x-api-key` auth via `Anthropic.SDK` for the native `anthropic` provider). The currently configured model is highlighted.
 
 If `~/.fuseraft/config` is missing or incomplete, the command runs the same interactive setup wizard as `fuseraft repl` — prompting for a provider URL and API key, then a model picked from the live list — and saves the result before fetching the model list. Use `fuseraft settings show` to inspect the rest of the file (sampling, REPL, telemetry, and skill-curation defaults) without making a network call.
 
@@ -2392,7 +2392,7 @@ fuseraft models
 ```
 
 ```
-  Available models from https://api.anthropic.com/v1 (12)
+  Available models from https://api.anthropic.com (12)
 
   claude-3-5-haiku-20241022
   claude-3-5-sonnet-20241022

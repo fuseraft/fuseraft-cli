@@ -87,10 +87,10 @@ Define teams of AI agents in YAML. fuseraft-cli drives them through a coordinate
     Provider setup
     Configure your provider and API key, then pick a model.
 
-    Provider URL  (http://localhost:11434): https://api.anthropic.com/v1
+    Provider URL  (http://localhost:11434): https://api.anthropic.com
     API Key       (leave blank for Ollama): ••••••••
 
-    Model  (2 available from https://api.anthropic.com/v1)
+    Model  (2 available from https://api.anthropic.com)
     > claude-sonnet-4-6
       claude-opus-4-6
 

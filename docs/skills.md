@@ -153,7 +153,7 @@ fuseraft skills add ../skills/productivity/handoff
 fuseraft skills add ~/my-skills/triage
 ```
 
-The command accepts a path to a skill directory (containing `SKILL.md`) or directly to a `SKILL.md` file. The slug is derived from the `name:` field in the frontmatter; if no `name:` field is present, the directory name is used. If a skill with the same slug already exists it is updated in place.
+The command accepts a path to a skill directory (containing `SKILL.md`) or directly to a `SKILL.md` file. The slug is derived from the `name:` field in the frontmatter; if no `name:` field is present, the directory name is used. If a skill with the same slug already exists it is updated in place — the installed copy is made to mirror the source exactly, so files removed or renamed at the source are pruned from the installed copy too.
 
 You can also install skills by placing them directly under `~/.fuseraft/skills/` without using the CLI — skills are loaded from that directory at session start regardless of how they got there.
 

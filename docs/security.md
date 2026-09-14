@@ -377,8 +377,8 @@ This means even if a provider error response or debug trace contains an API key,
 {
   "provider": {
     "modelId": "claude-sonnet-4-6",
-    "endpoint": "https://api.anthropic.com/v1",
-    "type": "openai"
+    "endpoint": "https://api.anthropic.com",
+    "type": "anthropic"
   }
 }
 ```

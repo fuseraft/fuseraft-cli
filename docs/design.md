@@ -918,8 +918,7 @@ Fuseraft-cli is built on MAF (`Microsoft.Agents.AI`, `Microsoft.Agents.AI.Workfl
 | `OllamaSharp` | `5.4.25` | Replaces the deprecated `Microsoft.Extensions.AI.Ollama` package (frozen at `9.7.0-preview.1`, no GA planned). `OllamaApiClient` implements `IChatClient` directly — no `.AsIChatClient()` adapter required. |
 | `A2A` | `1.0.0-preview2` | Google's open A2A protocol client library. Used by `AgentFactory` for remote agent card discovery. |
 | `Microsoft.Agents.AI.A2A` | `1.3.0-preview.260423.1` | MAF bridge that wraps an A2A `AgentCard` as an `AIAgent`. Provides `A2ACardResolver.GetAIAgentAsync()` used in the remote agent short-circuit path. |
-
-There is no dedicated Anthropic connector package. Claude models (`claude-*` model ID prefix) are routed through the generic OpenAI-compatible client path in `ChatClientFactory`, pointed at `https://api.anthropic.com/v1` with the `ANTHROPIC_API_KEY` env var — not a native `Microsoft.Agents.AI.Anthropic` SDK.
+| `Anthropic.SDK` | `5.10.0` | Native Claude Messages API client (not a MAF/`Microsoft.Extensions.AI` package). Claude models (`claude-*` model ID prefix, `provider: anthropic`) are routed through this instead of the generic OpenAI-compatible client path — talking to `https://api.anthropic.com` directly is what makes prompt caching available (see `AnthropicPromptCachingChatClient`); Anthropic's own OpenAI-compatible endpoint does not support it. |
 
 **What we use:**
 
