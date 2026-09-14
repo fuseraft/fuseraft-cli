@@ -1,12 +1,10 @@
 # fuseraft
 
-<img src="docs/.assets/fuseraft-banner.png" alt="fuseraft — a multi-agent coordination framework">
+<img src="docs/.assets/fuseraft-banner.png" alt="fuseraft — an AI assistant for your terminal that scales into multi-agent pipelines">
 
-fuseraft runs teams of AI agents and mechanically enforces that they did what they claim before advancing the pipeline.
+fuseraft is a terminal AI assistant: run `fuseraft` and start chatting with a model that can read and edit files, run shell commands, search your codebase, and use git — resumable sessions, ~50 slash commands, and safety guardrails on by default. Bring your own key (BYOK) to Anthropic, xAI, OpenAI, Azure, Ollama, or any OpenAI-compatible provider.
 
-Validators inspect tool-call records, file presence, and shell exit codes — not agent assertions. Claims are not evidence; artifacts and command results are. This is runtime verification: observable behavior, not self-reported outcomes.
-
-Pipelines are declarative — agents, routing strategy, and evidence contracts, all defined in YAML. Bring your own key (BYOK) to Anthropic, xAI, OpenAI, Azure, Ollama, or any OpenAI-compatible provider. Built on [Microsoft Agent Framework](https://github.com/microsoft/agent-framework).
+When one agent isn't enough, fuseraft scales into declarative, multi-agent pipelines defined in YAML, where routing validators mechanically enforce that each agent did what it claimed — tool-call records, file presence, shell exit codes — before the pipeline advances. Claims are not evidence; artifacts and command results are. Built on [Microsoft Agent Framework](https://github.com/microsoft/agent-framework).
 
 ---
 
@@ -38,6 +36,22 @@ fuseraft run --resume
 # Validate a config — add --diagram for a Mermaid flowchart preview
 fuseraft validate .fuseraft/config/orchestration.yaml --diagram
 ```
+
+---
+
+## Chat in your terminal
+
+`fuseraft repl` (or just `fuseraft` with no subcommand) starts an interactive chat session with a single model — no config file needed:
+
+- **Safe by default** — HITL approval and a filesystem/shell/git sandbox scoped to your launch directory are on unless you pass `--yolo`
+- **Built-in tools** — file read/write/patch, shell, code search, git, HTTP, a self-directed todo list, and sub-agents (`/explore`, `/locate`) the model can call mid-turn
+- **Slash commands** — plan and execute multi-step work (`/plan`, `/execute`, `/recover`), manage context (`/compact`, `/rewind`, `/undo`), inspect usage (`/context`, `/events`), connect MCP servers (`/mcp add`), switch models and reasoning effort live (`/model`, `/models`, `/reasoning`) — `/help` lists all of them
+- **Resumable sessions** — every session is checkpointed; `fuseraft repl --resume <id>` or `/sessions` picks up where you left off, `/fork` branches one off without disturbing the original
+- **Cross-session memory & skills** — the assistant saves and recalls memories (`/memory`) and loads portable skill packages
+- **Any provider** — model auto-detected from whichever API key is in your environment, or set explicitly with `--model`
+- Also available as a chat panel in the [VS Code extension](#vs-code-extension)
+
+See the [CLI Reference](docs/cli-reference.md#fuseraft-repl) for the full flag and slash-command list.
 
 ---
 
@@ -93,7 +107,9 @@ The binary lands in `./bin/`.
 
 ---
 
-## Features
+## Multi-agent pipelines
+
+For work that benefits from more than one specialized agent, with mechanical verification that each did what it claimed:
 
 **Enforcement**
 - Routing validators block handoffs until evidence exists on disk (`RequireBrief`, `RequireWriteFile`, `RequireShellPass`, `TestReportValid`, etc.)
@@ -304,13 +320,22 @@ flowchart TD
 
 ## VS Code Extension
 
-The [fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) brings the full CLI experience into your editor.
+The [fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) brings the full CLI experience into your editor, with the REPL as the primary experience.
 
-**Activity bar panel** — four persistent views:
+**REPL Chat Panel** — `fuseraft: Open REPL` opens the same interactive chat session as the terminal REPL, in a panel beside your editor:
+- Live streaming responses, tool call badges, full markdown rendering with one-click code copy, per-turn token usage on hover
+- Model dropdown — switch models live, fetched from your provider
+- Slash commands (`/plan`, `/execute`, `/compact`, `/tools`, `/sessions`, and more), resumable sessions, stop button to interrupt mid-stream
+- File change summary after each response; write/patch approvals open as native VS Code diff tabs
+
+**Activity bar panel** — seven persistent views:
 - **Run Task** — compose a task, pick a config, set flags (`--hitl`, `--tools`, `--verbose`, `--devui`), and launch. Each task opens in its own named terminal; multiple tasks can run simultaneously.
 - **Sessions** — lists sessions scoped to your workspace with status, age, and task preview. Click to resume; preview icon opens a formatted transcript with per-turn token usage.
 - **Configs** — auto-discovers every fuseraft config in your workspace. Click to open, or hit **+** to run the Initialize Config wizard.
 - **Context** — manages reference material agents can access during sessions. Import files or folders; they're stored in `.fuseraft/context/` and available to any session in the workspace.
+- **Memory** — lists cross-session memories grouped by type. Click to open, right-click to delete.
+- **Skills** — lists installed skill packages. Click to open `SKILL.md`, **+** to add one.
+- **Objectives** — lists objectives with status and task-completion percentage. **+** to create one.
 
 **CodeLens on config files** — three inline actions appear above the first line of any config:
 
@@ -319,8 +344,6 @@ The [fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) br
 ```
 
 **Task files** — right-click any `.md` or `.txt` file in the explorer or editor to run it directly as a fuseraft task.
-
-**REPL** — `fuseraft: Open REPL` starts an interactive single-agent chat session without a config file.
 
 **YAML / JSON IntelliSense** — full JSON Schema for fuseraft configs ships with the extension. Autocomplete, inline docs, and validation for every field.
 
