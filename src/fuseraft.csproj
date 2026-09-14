@@ -60,7 +60,7 @@
     <PackageReference Include="Spectre.Console.Cli" Version="0.55.0" />
 
     <!-- Line diffing for REPL diff views (HITL write/patch approval previews) -->
-    <PackageReference Include="DiffPlex" Version="1.7.2" />
+    <PackageReference Include="DiffPlex" Version="1.9.0" />
 
     <!-- MCP client SDK -->
     <PackageReference Include="ModelContextProtocol" Version="2.1.0" />
