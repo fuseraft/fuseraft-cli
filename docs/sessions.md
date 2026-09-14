@@ -14,7 +14,7 @@ fuseraft repl
 /sessions
 
 # Resume a specific session by ID
-fuseraft repl --resume a87569bcd7b0
+fuseraft repl --resume a87569bc
 ```
 
 When resuming:

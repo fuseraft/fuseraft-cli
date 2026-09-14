@@ -18,7 +18,7 @@ If `~/.fuseraft/config` doesn't exist yet, a setup wizard asks for a provider UR
 
 ```bash
 fuseraft --model claude-sonnet-4-6      # override the model for this session
-fuseraft --resume a87569bcd7b0          # continue a previous session
+fuseraft --resume a87569bc              # continue a previous session
 fuseraft --no-tools                     # plain chat, no filesystem/shell/git/search
 ```
 
