@@ -237,6 +237,14 @@ internal sealed class ReplSessionContext
 
     // History-aware line reader (shared across turns so history persists)
     public readonly ReplLineReader LineReader = new();
+
+    // State for the `!<command>` shell escape (see ReplShellEscape). Starts at the REPL's
+    // launch directory and is tracked independently of Directory.GetCurrentDirectory() (which
+    // this process never changes) so a `!cd <dir>` persists across later `!` invocations the
+    // way a real shell's cwd would, even though each command still runs in its own process.
+    public string  ShellCwd         { get; set; }
+    public string? PrevShellCwd     { get; set; }
+    public string? LastShellCommand { get; set; }
     
     // Turn-scoped plugin state that must be cleared before each new REPL turn.
     public readonly List<ITurnResettable> TurnResettables = [];
@@ -253,6 +261,7 @@ internal sealed class ReplSessionContext
     {
         Hitl            = hitlState ?? new HitlModeState();
         Cwd             = cwd;
+        ShellCwd        = cwd;
         SessionId       = sessionId;
         StartedAt       = startedAt;
         UserCfg         = userCfg;

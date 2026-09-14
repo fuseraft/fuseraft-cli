@@ -364,6 +364,13 @@ internal static class ReplTurn
                 continue;
             }
 
+            if (ReplShellEscape.IsShellEscape(raw))
+            {
+                await ReplShellEscape.RunAsync(ctx, raw, cancellationToken);
+                if (!ctx.JsonMode) AnsiConsole.WriteLine();
+                continue;
+            }
+
             if (raw.StartsWith('$'))
             {
                 var parts = raw.Split(' ', 2, StringSplitOptions.TrimEntries);

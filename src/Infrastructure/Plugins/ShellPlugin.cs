@@ -19,18 +19,8 @@ namespace fuseraft.Infrastructure.Plugins;
 /// </summary>
 public sealed class ShellPlugin : IDisposable, ITurnResettable
 {
-    private static readonly string Shell     = OperatingSystem.IsWindows() ? "cmd"  : ResolveUnixShell();
-    private static readonly string ShellFlag = OperatingSystem.IsWindows() ? "/c"   : "-c";
-
-    // Resolve bash from common locations so this works on NixOS, Alpine, and other
-    // non-FHS distros where /bin/bash may not exist. Falls back to /bin/bash as a
-    // last resort so the error message at least names the expected path.
-    private static string ResolveUnixShell()
-    {
-        foreach (var candidate in new[] { "/bin/bash", "/usr/bin/bash", "/usr/local/bin/bash" })
-            if (File.Exists(candidate)) return candidate;
-        return "/bin/bash";
-    }
+    private static readonly string Shell     = ShellEnvironment.Shell;
+    private static readonly string ShellFlag = ShellEnvironment.ShellFlag;
 
     // Agents very commonly default to PowerShell syntax on Windows (Get-ChildItem, $env:,
     // Where-Object, ...) even though cmd.exe is the sandboxed default shell here. cmd.exe has

@@ -69,6 +69,11 @@ internal static partial class ReplCommands
             ReplJsonBridge.Emit(new { type = "text", text = """
                 ## REPL Commands
 
+                ### Shell
+                - `!<command>` — Run a shell command directly (e.g. `!git status`) — not sent to the model, not added to conversation history
+                - `!!` — Repeat the last `!` command
+                - `!cd <dir>` — Change the shell escape's working directory (persists across `!` commands); `!cd`, `!cd -`, and `!cd ~` also work
+
                 ### Session
                 - `/help` — Show this help
                 - `/sessions` — List resumable sessions with IDs and turn counts
@@ -166,6 +171,14 @@ internal static partial class ReplCommands
             g.AddColumn(new GridColumn().Padding(new Padding(0, 0, 0, 0)));
             return g;
         }
+
+        AnsiConsole.MarkupLine("  [dim]Shell[/]");
+        var shell = MakeGrid();
+        shell.AddRow("[bold cyan]!<command>[/]", "Run a shell command directly (e.g. !git status) — not sent to the model, not added to conversation history");
+        shell.AddRow("[bold cyan]!![/]",          "Repeat the last ! command");
+        shell.AddRow("[bold cyan]!cd <dir>[/]",   "Change the shell escape's working directory (persists across ! commands); !cd, !cd -, and !cd ~ also work");
+        AnsiConsole.Write(shell);
+        AnsiConsole.WriteLine();
 
         AnsiConsole.MarkupLine("  [dim]Session[/]");
         var session = MakeGrid();
