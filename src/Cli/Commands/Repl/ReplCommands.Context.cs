@@ -54,7 +54,8 @@ internal static partial class ReplCommands
                 $"assistant: {ctx.History.Count(m => m.Role == ChatRole.Assistant)})");
             if (ctx.CumulativeInputTokens > 0 || ctx.CumulativeOutputTokens > 0)
                 sb.AppendLine($"**Session usage (actual):** {ctx.CumulativeInputTokens:N0} in / " +
-                    $"{ctx.CumulativeOutputTokens:N0} out / {ctx.CumulativeInputTokens + ctx.CumulativeOutputTokens:N0} total tok");
+                    $"{ctx.CumulativeOutputTokens:N0} out / {ctx.CumulativeInputTokens + ctx.CumulativeOutputTokens:N0} total tok" +
+                    (ctx.CumulativeCacheReadTokens > 0 ? $" ({ctx.CumulativeCacheReadTokens:N0} cached)" : string.Empty));
             sb.AppendLine();
             sb.AppendLine("**Breakdown (estimated composition)**");
             if (sysTok > 0)
@@ -89,6 +90,7 @@ internal static partial class ReplCommands
                 breakdown = new { system = sysTok, tools = toolTok, user = userTok, assistant = asstTok, tool_results = toolResTok },
                 cumulative_input_tokens = ctx.CumulativeInputTokens,
                 cumulative_output_tokens = ctx.CumulativeOutputTokens,
+                cumulative_cache_read_tokens = ctx.CumulativeCacheReadTokens,
             });
             return;
         }
@@ -118,7 +120,9 @@ internal static partial class ReplCommands
             AnsiConsole.MarkupLine(
                 $"  [dim]Session usage:[/]   [bold]{ctx.CumulativeInputTokens:N0}[/] in / " +
                 $"[bold]{ctx.CumulativeOutputTokens:N0}[/] out  " +
-                $"[dim]({ctx.CumulativeInputTokens + ctx.CumulativeOutputTokens:N0} total tok, actual)[/]");
+                $"[dim]({ctx.CumulativeInputTokens + ctx.CumulativeOutputTokens:N0} total tok, actual" +
+                (ctx.CumulativeCacheReadTokens > 0 ? $", {ctx.CumulativeCacheReadTokens:N0} cached" : string.Empty) +
+                ")[/]");
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("  [dim]Breakdown (estimated composition):[/]");
         PrintContextRow("system prompt",  sysTok,  estTotal);
@@ -153,6 +157,7 @@ internal static partial class ReplCommands
             breakdown = new { system = sysTok, tools = toolTok, user = userTok, assistant = asstTok },
             cumulative_input_tokens = ctx.CumulativeInputTokens,
             cumulative_output_tokens = ctx.CumulativeOutputTokens,
+            cumulative_cache_read_tokens = ctx.CumulativeCacheReadTokens,
         });
     }
 

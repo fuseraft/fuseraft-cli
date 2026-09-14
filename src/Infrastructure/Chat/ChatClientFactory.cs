@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
+using Anthropic.SDK;
 using Azure.AI.OpenAI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -25,7 +26,8 @@ namespace fuseraft.Infrastructure.Chat;
 ///
 /// <para>Supported providers:</para>
 /// <list type="bullet">
-///   <item><b>openai</b> — OpenAI and any OpenAI-compatible API (xAI, Anthropic, DeepSeek, OpenRouter, …)</item>
+///   <item><b>openai</b> — OpenAI and any OpenAI-compatible API (xAI, DeepSeek, OpenRouter, …)</item>
+///   <item><b>anthropic</b> — Claude via the native Messages API (required for prompt caching — Anthropic's OpenAI-compatible endpoint doesn't support it)</item>
 ///   <item><b>azure</b> — Azure OpenAI Service</item>
 ///   <item><b>google</b> — Google AI Gemini (via OpenAI-compatible endpoint)</item>
 ///   <item><b>mistral</b> — Mistral AI (via OpenAI-compatible endpoint)</item>
@@ -64,15 +66,20 @@ public sealed class ChatClientFactory(
     private readonly record struct ProviderPreset(
         string Provider, string Endpoint, string ApiKeyEnvVar);
 
+    // Native Anthropic Messages API base — talking to this directly (rather than Anthropic's
+    // OpenAI-compatible endpoint) is what makes prompt caching available at all. See
+    // AnthropicPromptCachingChatClient for why.
+    private const string AnthropicDefaultEndpoint = "https://api.anthropic.com";
+
     // Checked in order — put more-specific prefixes first.
     private static readonly (string Prefix, ProviderPreset Defaults)[] ModelPrefixes =
     [
-        ("gpt-",        new("openai",  "https://api.openai.com/v1",                           "OPENAI_API_KEY")),
-        ("o1",          new("openai",  "https://api.openai.com/v1",                           "OPENAI_API_KEY")),
-        ("o3",          new("openai",  "https://api.openai.com/v1",                           "OPENAI_API_KEY")),
-        ("o4",          new("openai",  "https://api.openai.com/v1",                           "OPENAI_API_KEY")),
-        ("grok-",       new("openai",  "https://api.x.ai/v1",                                 "XAI_API_KEY")),
-        ("claude-",     new("openai",  "https://api.anthropic.com/v1",                        "ANTHROPIC_API_KEY")),
+        ("gpt-",        new("openai",     "https://api.openai.com/v1",                        "OPENAI_API_KEY")),
+        ("o1",          new("openai",     "https://api.openai.com/v1",                        "OPENAI_API_KEY")),
+        ("o3",          new("openai",     "https://api.openai.com/v1",                        "OPENAI_API_KEY")),
+        ("o4",          new("openai",     "https://api.openai.com/v1",                        "OPENAI_API_KEY")),
+        ("grok-",       new("openai",     "https://api.x.ai/v1",                              "XAI_API_KEY")),
+        ("claude-",     new("anthropic",  AnthropicDefaultEndpoint,                            "ANTHROPIC_API_KEY")),
         ("gemini-",     new("google",  "https://generativelanguage.googleapis.com/v1beta/openai", "GOOGLE_AI_API_KEY")),
         ("learnlm-",    new("google",  "https://generativelanguage.googleapis.com/v1beta/openai", "GOOGLE_AI_API_KEY")),
         ("mistral-",    new("mistral", "https://api.mistral.ai/v1",                           "MISTRAL_API_KEY")),
@@ -254,12 +261,12 @@ public sealed class ChatClientFactory(
                     throw new InvalidOperationException(
                         $"No API key available for Azure deployment '{config.ModelId}' at '{config.Endpoint}'. " +
                         $"Run 'fuseraft repl' and complete the setup wizard, or add \"apiKeyEnvVar\": \"<VAR>\" to ~/.fuseraft/config.");
-                return new AzureOpenAIClient(
+                return new CacheUsageBackfillChatClient(new AzureOpenAIClient(
                     new Uri(config.Endpoint),
                     new ApiKeyCredential(apiKey),
                     new AzureOpenAIClientOptions { Transport = transport, NetworkTimeout = HttpClientTimeout })
                     .GetChatClient(config.ModelId)
-                    .AsIChatClient();
+                    .AsIChatClient());
 
             case "ollama":
                 return new OllamaApiClient(
@@ -267,6 +274,16 @@ public sealed class ChatClientFactory(
                         ? new Uri("http://localhost:11434")
                         : new Uri(config.Endpoint),
                     config.ModelId);
+
+            case "anthropic":
+                if (string.IsNullOrEmpty(apiKey))
+                    throw new InvalidOperationException(
+                        $"No API key available for model '{config.ModelId}' (provider 'anthropic'). " +
+                        $"Run 'fuseraft repl' and complete the setup wizard, or add \"apiKeyEnvVar\": \"<VAR>\" to ~/.fuseraft/config.");
+                var anthropicClient = new AnthropicClient(apiKey, _components.Client);
+                if (!string.IsNullOrEmpty(config.Endpoint) && config.Endpoint != AnthropicDefaultEndpoint)
+                    anthropicClient.ApiUrlFormat = config.Endpoint.TrimEnd('/') + "/{0}/{1}";
+                return new AnthropicPromptCachingChatClient(anthropicClient);
 
             default: // "openai", "google", "mistral" + every other OpenAI-compatible endpoint
                 if (string.IsNullOrEmpty(config.Endpoint))
@@ -277,11 +294,11 @@ public sealed class ChatClientFactory(
                     throw new InvalidOperationException(
                         $"No API key available for model '{config.ModelId}' at '{config.Endpoint}'. " +
                         $"Run 'fuseraft repl' and complete the setup wizard, or add \"apiKeyEnvVar\": \"<VAR>\" to ~/.fuseraft/config.");
-                return new OpenAIClient(
+                return new CacheUsageBackfillChatClient(new OpenAIClient(
                     new ApiKeyCredential(apiKey),
                     new OpenAIClientOptions { Transport = transport, Endpoint = new Uri(config.Endpoint), NetworkTimeout = HttpClientTimeout })
                     .GetChatClient(config.ModelId)
-                    .AsIChatClient();
+                    .AsIChatClient());
         }
     }
 

@@ -16,7 +16,7 @@ namespace fuseraft.Core.Models.Config;
 /// <list type="bullet">
 ///   <item><c>gpt-*</c>, <c>o1*</c>, <c>o3*</c>, <c>o4*</c> → openai / <c>OPENAI_API_KEY</c></item>
 ///   <item><c>grok-*</c> → openai-compat xAI / <c>XAI_API_KEY</c></item>
-///   <item><c>claude-*</c> → openai-compat Anthropic / <c>ANTHROPIC_API_KEY</c></item>
+///   <item><c>claude-*</c> → native Anthropic Messages API (prompt caching) / <c>ANTHROPIC_API_KEY</c></item>
 ///   <item><c>gemini-*</c>, <c>learnlm-*</c> → google / <c>GOOGLE_AI_API_KEY</c></item>
 ///   <item><c>mistral-*</c>, <c>mixtral-*</c>, <c>codestral-*</c>, <c>pixtral-*</c> → mistral / <c>MISTRAL_API_KEY</c></item>
 ///   <item><c>deepseek-*</c> → openai-compat DeepSeek / <c>DEEPSEEK_API_KEY</c></item>
@@ -35,7 +35,8 @@ public record ModelConfig
     /// <summary>
     /// LLM provider. Auto-detected from <see cref="ModelId"/> when omitted.
     /// Supported values: <c>openai</c> (default, also for any OpenAI-compatible API),
-    /// <c>azure</c>, <c>google</c>, <c>mistral</c>, <c>ollama</c>.
+    /// <c>anthropic</c> (native Claude Messages API — needed for prompt caching), <c>azure</c>,
+    /// <c>google</c>, <c>mistral</c>, <c>ollama</c>.
     /// </summary>
     public string Provider { get; init; } = string.Empty;
 

@@ -200,6 +200,11 @@ internal sealed class ReplSessionContext
     public long CumulativeInputTokens;
     public long CumulativeOutputTokens;
 
+    // Prompt tokens served from cache, summed the same way as the two counters above. See
+    // AnthropicPromptCachingChatClient and CacheUsageBackfillChatClient for how each provider
+    // family reports this into UsageDetails.AdditionalCounts.
+    public long CumulativeCacheReadTokens;
+
     // Real input-token count reported by the provider for the *first* LLM call of the most
     // recently completed turn (i.e. before that turn's own tool round trips inflated the
     // request) — the exact size of everything sent to the model as that turn began. Set to

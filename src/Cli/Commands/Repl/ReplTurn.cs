@@ -480,6 +480,7 @@ internal static class ReplTurn
         var rawUpdates        = stream.RawUpdates;
         var turnInputTokens   = stream.TurnInputTokens;
         var turnOutputTokens  = stream.TurnOutputTokens;
+        var turnCacheReadTokens = stream.TurnCacheReadTokens;
         var hitConsecutiveFailureLimit = stream.HitConsecutiveFailureLimit;
         var lastToolFailureDetail      = stream.LastToolFailureDetail;
         var hitRepeatedToolCallLimit   = stream.HitRepeatedToolCallLimit;
@@ -784,7 +785,8 @@ internal static class ReplTurn
 
         if (!ctx.JsonMode && ctx.Verbose)
             AnsiConsole.MarkupLine(
-                $"[dim]  tokens (est.): {postEst:N0} / {ctx.ContextTokenBudget:N0}  rounds: {toolRounds}  tool calls: {toolCallsThisTurn.Count}[/]");
+                $"[dim]  tokens (est.): {postEst:N0} / {ctx.ContextTokenBudget:N0}  rounds: {toolRounds}  tool calls: {toolCallsThisTurn.Count}" +
+                (turnCacheReadTokens > 0 ? $"  cached: {turnCacheReadTokens:N0}[/]" : "[/]"));
 
         if (responseText.Length > 0)
             await ctx.Emitter.EmitAsync(EventTypes.AssistantResponse, turn: ctx.TurnIndex, payload: new { content = responseText });
@@ -794,6 +796,7 @@ internal static class ReplTurn
             estimated_tokens  = postEst,
             input_tokens      = turnInputTokens  > 0 ? turnInputTokens  : (long?)null,
             output_tokens     = turnOutputTokens > 0 ? turnOutputTokens : (long?)null,
+            cached_input_tokens = turnCacheReadTokens > 0 ? turnCacheReadTokens : (long?)null,
             tool_rounds       = toolRounds,
             tool_count        = toolCallsThisTurn.Count,
             hit_iteration_cap = hitIterationCap,
@@ -999,6 +1002,7 @@ internal static class ReplTurn
         List<(string ToolName, string Output)>? CapturedResults,
         long TurnInputTokens,
         long TurnOutputTokens,
+        long TurnCacheReadTokens,
         int? TurnFirstInputTokens,
         List<ChatResponseUpdate> RawUpdates,
         bool HitConsecutiveFailureLimit,
@@ -1010,7 +1014,7 @@ internal static class ReplTurn
         // step halted mid-stream can still report which tools it managed to call before
         // failing — see ReplTurnOutcome.HaltStepOnStreamFailure.
         internal static TurnStreamResult MakeFailed(List<string> toolCallsThisTurn) =>
-            new(false, "", toolCallsThisTurn, [], 0, null, 0, 0, null, [], false, null, false, null);
+            new(false, "", toolCallsThisTurn, [], 0, null, 0, 0, 0, null, [], false, null, false, null);
     }
 
     /// <summary>
@@ -1047,6 +1051,7 @@ internal static class ReplTurn
         var finishRounds      = 0;
         var turnInputTokens   = 0L;
         var turnOutputTokens  = 0L;
+        var turnCacheReadTokens = 0L;
         int? turnFirstInputTokens = null;
         // Captured tool outputs for inspect-step history injection (step execution only).
         List<(string ToolName, string Output)>? capturedResults = isStepRequest ? [] : null;
@@ -1121,6 +1126,7 @@ internal static class ReplTurn
                 {
                     turnInputTokens  += usage.Details.InputTokenCount  ?? 0;
                     turnOutputTokens += usage.Details.OutputTokenCount ?? 0;
+                    turnCacheReadTokens += usage.Details.CacheReadTokens();
                     turnFirstInputTokens ??= (int?)usage.Details.InputTokenCount;
                     sawUsageThisChunk = true;
                 }
@@ -1311,7 +1317,7 @@ internal static class ReplTurn
             fileChanges.Clear(); fileChangeSeen.Clear();
             capturedResults?.Clear(); callIdToName?.Clear();
             toolRounds = 0; usageRounds = 0; finishRounds = 0;
-            turnInputTokens = 0; turnOutputTokens = 0; turnFirstInputTokens = null;
+            turnInputTokens = 0; turnOutputTokens = 0; turnCacheReadTokens = 0; turnFirstInputTokens = null;
             consecutiveToolFailures = 0; hitConsecutiveFailureLimit = false; lastToolFailureDetail = null;
             lastToolCallName = string.Empty; lastToolCallSignature = string.Empty;
             consecutiveIdenticalToolCalls = 0; hitRepeatedToolCallLimit = false; lastRepeatedToolCallDetail = null;
@@ -1365,11 +1371,12 @@ internal static class ReplTurn
 
         ctx.CumulativeInputTokens  += turnInputTokens;
         ctx.CumulativeOutputTokens += turnOutputTokens;
+        ctx.CumulativeCacheReadTokens += turnCacheReadTokens;
         ctx.LastActualContextTokens = turnFirstInputTokens;
 
         return new TurnStreamResult(
             true, sb.ToString(), toolCallsThisTurn, fileChanges, toolRounds, capturedResults,
-            turnInputTokens, turnOutputTokens, turnFirstInputTokens, rawUpdates,
+            turnInputTokens, turnOutputTokens, turnCacheReadTokens, turnFirstInputTokens, rawUpdates,
             hitConsecutiveFailureLimit, lastToolFailureDetail,
             hitRepeatedToolCallLimit, lastRepeatedToolCallDetail);
     }
