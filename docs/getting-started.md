@@ -114,6 +114,36 @@ The [fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) st
 
 You do not need to set anything manually — configure your provider once via **fuseraft: Configure fuseraft** in the VS Code command palette and the key is available to all fuseraft commands run through the extension.
 
+## Start a REPL session
+
+For quick questions or single-model chat, run fuseraft with no subcommand:
+
+```bash
+fuseraft
+```
+
+No config file needed. The REPL auto-detects your provider from the API key stored in `~/.fuseraft/config` (or runs the setup wizard on first use). Type a message and press Enter. Use `/help` inside the session to see available commands.
+
+Every session is auto-saved after each turn. Resume a previous session at any time:
+
+```bash
+# List resumable sessions from inside the REPL
+/sessions
+
+# Resume by ID (shown in the header at startup)
+fuseraft repl --resume a87569bc
+```
+
+Working across more than one project tree in a session? Add `--include <dir>` (repeatable) for each extra root:
+
+```bash
+fuseraft repl --include ../shared-lib --include ../other-service
+```
+
+The launch directory and every `--include` root show up in the startup banner as `Included:`. See [REPL — The safety model](repl.md#the-safety-model) for how this interacts with sandboxing and `--yolo`.
+
+---
+
 ## Run your first session
 
 ### Option A — generate a config with `init`
@@ -155,28 +185,6 @@ fuseraft run -c .fuseraft/config/orchestration.yaml
 ```
 
 The orchestrator loads the config, prints a summary of the team, and streams agent responses as they arrive.
-
-## Start a REPL session
-
-For quick questions or single-model chat, run fuseraft with no subcommand:
-
-```bash
-fuseraft
-```
-
-No config file needed. The REPL auto-detects your provider from the API key stored in `~/.fuseraft/config` (or runs the setup wizard on first use). Type a message and press Enter. Use `/help` inside the session to see available commands.
-
-Every session is auto-saved after each turn. Resume a previous session at any time:
-
-```bash
-# List resumable sessions from inside the REPL
-/sessions
-
-# Resume by ID (shown in the header at startup)
-fuseraft repl --resume a87569bc
-```
-
----
 
 ## Understand the output
 
