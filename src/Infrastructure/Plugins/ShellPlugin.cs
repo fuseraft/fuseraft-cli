@@ -88,6 +88,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     }
 
     private readonly string? _sandboxRoot;
+    private readonly IncludedRootsState _includedRoots;
     private readonly Func<string, Task<bool>>? _approveCommand;
     private readonly ShellPolicy? _shellPolicy;
     private readonly IEventSink? _eventSink;
@@ -287,9 +288,10 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         try { originalProcess.Dispose(); } catch { /* already exited */ }
     }
 
-    public ShellPlugin(string? sandboxRoot = null, Func<string, Task<bool>>? approveCommand = null, ShellPolicy? shellPolicy = null, IEventSink? eventSink = null)
+    public ShellPlugin(string? sandboxRoot = null, Func<string, Task<bool>>? approveCommand = null, ShellPolicy? shellPolicy = null, IEventSink? eventSink = null, IncludedRootsState? includedRoots = null)
     {
         _sandboxRoot    = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
+        _includedRoots  = includedRoots ?? IncludedRootsState.Empty;
         _approveCommand = approveCommand;
         _shellPolicy    = shellPolicy;
         _eventSink      = eventSink;
@@ -764,6 +766,6 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     // so commands never run in an uncontrolled directory.
     // Returns a [DENIED] error string on violation, null when safe.
     private string? ValidateWorkingDirectory(string? workingDirectory, out string? resolved) =>
-        FileSystemSandbox.ResolveSafeDirectory(workingDirectory, _sandboxRoot, out resolved);
+        FileSystemSandbox.ResolveSafeDirectory(workingDirectory, _sandboxRoot, _includedRoots.Snapshot(), out resolved);
 
 }

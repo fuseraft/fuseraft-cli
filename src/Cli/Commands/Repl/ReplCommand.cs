@@ -59,6 +59,10 @@ public sealed class ReplSettings : CommandSettings
     [Description("Skip the default safety gates: no /hitl approval prompts and no filesystem/shell/git sandbox. Restores fully-open behavior for trusted, unattended sessions.")]
     public bool Yolo { get; set; }
 
+    [CommandOption("--include")]
+    [Description("Add an additional allowed root directory beyond the primary sandbox root (the launch directory). Repeatable. Ignored under --yolo (already unsandboxed).")]
+    public string[]? Include { get; set; }
+
     internal IReadOnlySet<string> EnabledPlugins =>
         Plugins is null
             ? (IReadOnlySet<string>)new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -249,6 +253,44 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         if (!jsonMode && settings.Yolo)
             AnsiConsole.MarkupLine(
                 "[yellow]⚠ --yolo:[/] [dim]no /hitl approval prompts, no filesystem/shell/git sandbox — full unattended access enabled.[/]");
+
+        // --include: additional allowed roots layered on top of sandboxRoot, shared by reference
+        // with every sandboxed plugin (see IncludedRootsState) so a HITL-approved sandbox-escape
+        // grant made through any one tool is immediately honored by the rest. Meaningless under
+        // --yolo (already fully unsandboxed) — warn rather than silently drop the flag.
+        var includedRoots = new IncludedRootsState();
+        if (settings.Include is { Length: > 0 } rawIncludes)
+        {
+            if (settings.Yolo)
+            {
+                if (!jsonMode)
+                    AnsiConsole.MarkupLine("[yellow]⚠ --include is ignored under --yolo[/] [dim](no sandbox is active).[/]");
+            }
+            else
+            {
+                var includeComparison = OperatingSystem.IsWindows()
+                    ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+                foreach (var raw in rawIncludes)
+                {
+                    var expanded = FuseraftPaths.ExpandPath(raw);
+                    if (!Directory.Exists(expanded))
+                    {
+                        var msg = $"--include directory not found: {expanded}";
+                        if (jsonMode) ReplJsonBridge.Emit(new { type = "error", text = msg });
+                        else AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(msg)}[/]");
+                        return 1;
+                    }
+                    // Skip a root already covered by the primary sandbox root — redundant, and
+                    // would otherwise add noise to the banner/system-prompt roots list.
+                    var sandboxPrefix = sandboxRoot!.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                    var expandedCheck = expanded.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                    if (expandedCheck.StartsWith(sandboxPrefix, includeComparison))
+                        continue;
+                    includedRoots.TryAdd(expanded);
+                }
+            }
+        }
+
         // ctxForStdin is assigned once `ctx` exists below — captured by reference so the pump's
         // cancel callback always reaches the live session, even though the pump itself (and the
         // approval service that shares it) must be constructed before `ctx` is.
@@ -262,7 +304,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         using ShellPlugin? shellPlugin  = settings.NoTools ? null : new ShellPlugin(
             sandboxRoot:    sandboxRoot,
             shellPolicy:    TryLoadDefaultShellPolicy(),
-            approveCommand: cmd => hitlState.Enabled ? approvalService.PromptShellCommandAsync(cmd) : Task.FromResult(true));
+            approveCommand: cmd => hitlState.Enabled ? approvalService.PromptShellCommandAsync(cmd) : Task.FromResult(true),
+            includedRoots:  includedRoots);
 
         // Same y/N gate as ShellPlugin's approveCommand above, generalized to the mutating
         // FileSystem/Git/Http tools — see IHumanApprovalService.PromptToolActionAsync.
@@ -291,13 +334,13 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         List<AIFunction>? gitFunctions   = null;
         if (!settings.NoTools)
         {
-            fsPluginForCategory = new FileSystemPlugin(sandboxRoot: sandboxRoot, approveAction: approveToolAction("FileSystem"), approveWrite: approveFileWrite);
+            fsPluginForCategory = new FileSystemPlugin(sandboxRoot: sandboxRoot, approveAction: approveToolAction("FileSystem"), approveWrite: approveFileWrite, includedRoots: includedRoots);
             fsFunctions    = PluginRegistry.GetFunctionsFromObject(fsPluginForCategory)
-                .Concat(PluginRegistry.GetFunctionsFromObject(new FileSystemManagementOps(fsPluginForCategory)))
+                .Concat(PluginRegistry.GetFunctionsFromObject(new FileSystemManagementOps(fsPluginForCategory, sandboxRoot: sandboxRoot, includedRoots: includedRoots)))
                 .ToList();
             shellFunctions = PluginRegistry.GetFunctionsFromObject(shellPlugin!).ToList();
-            gitFunctions   = PluginRegistry.GetFunctionsFromObject(new GitPlugin(approveToolAction("Git"), sandboxRoot)).ToList();
-            toolsByCategory["Search"]     = PluginRegistry.GetFunctionsFromObject(new SearchPlugin()).ToList();
+            gitFunctions   = PluginRegistry.GetFunctionsFromObject(new GitPlugin(approveToolAction("Git"), sandboxRoot, includedRoots)).ToList();
+            toolsByCategory["Search"]     = PluginRegistry.GetFunctionsFromObject(new SearchPlugin(sandboxRoot, includedRoots)).ToList();
             todoPlugin                    = new TodoPlugin();
             toolsByCategory["Todo"]       = PluginRegistry.GetFunctionsFromObject(todoPlugin).ToList();
 
@@ -522,6 +565,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             .AddIdentity(modelId, initialTools.Count, settings.SystemPrompt)
             .AddToolGuidance(initialTools.Count)
             .AddOsEnvironment()
+            .AddIncludedRoots(includedRoots.Snapshot())
             .AddSessionInfo(sessionId, startedAt, cwd, initialTools.Count, activePlugins)
             .AddProjectInstructions(cwd)
             .AddMemory(memoryBlock)
@@ -536,10 +580,11 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
             MessageRenderer.RenderReplHeader(
                 modelId, cwd, pluginNames, sessionId,
-                memoryCount: memoryEntries.Count,
-                skillCount:  discoveredSkills.Count,
-                branch:      TryGetGitBranch(cwd),
-                eventsPath:  verbose ? eventsPath : null);
+                memoryCount:   memoryEntries.Count,
+                skillCount:    discoveredSkills.Count,
+                branch:        TryGetGitBranch(cwd),
+                eventsPath:    verbose ? eventsPath : null,
+                includedRoots: includedRoots.Snapshot());
         }
 
         var ctx = new ReplSessionContext(

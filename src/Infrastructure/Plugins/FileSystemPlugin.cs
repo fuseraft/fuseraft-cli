@@ -35,6 +35,9 @@ public sealed class FileSystemPlugin : ITurnResettable
     // Absolute path prefixes that are always accessible even when sandboxed.
     // Used to allow fuseraft's own runtime state dir (~/.fuseraft/) regardless of the project sandbox.
     private readonly IReadOnlyList<string> _exemptedPrefixes;
+    // Session-wide additional allowed roots (--include, plus any HITL-approved sandbox-escape
+    // grants) — shared by reference with every other sandboxed plugin. See IncludedRootsState.
+    private readonly IncludedRootsState _includedRoots;
     private readonly int     _readFileSizeLimit;
     private readonly string  _summaryDir;
     private readonly FileVersionStore?  _versionStore;
@@ -81,12 +84,13 @@ public sealed class FileSystemPlugin : ITurnResettable
     // maxLines: 99999 is asking for everything and should be gated the same as omitting it.
     private const int LargeFileColdReadLines  = 500;
 
-    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null, Action? onWrite = null, Action? onCacheHit = null, IReadOnlyList<string>? exemptedPaths = null, Func<string, string, Task<bool>>? approveAction = null, Func<string, string, string, string, Task<bool>>? approveWrite = null)
+    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null, Action? onWrite = null, Action? onCacheHit = null, IReadOnlyList<string>? exemptedPaths = null, Func<string, string, Task<bool>>? approveAction = null, Func<string, string, string, string, Task<bool>>? approveWrite = null, IncludedRootsState? includedRoots = null)
     {
         _sandboxRoot       = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _exemptedPrefixes  = (exemptedPaths ?? [])
             .Select(p => FuseraftPaths.ExpandPath(p).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar)
             .ToList();
+        _includedRoots     = includedRoots ?? IncludedRootsState.Empty;
         _readFileSizeLimit = readFileSizeLimit > 0 ? readFileSizeLimit : 20_000;
         _readBudgetPerTurn = readBudgetPerTurn > 0 ? readBudgetPerTurn : 150_000;
         var baseDir        = _sandboxRoot ?? Directory.GetCurrentDirectory();
@@ -133,7 +137,8 @@ public sealed class FileSystemPlugin : ITurnResettable
         [Description("1-based start line.")] int startLine = 1,
         [Description("Max lines to return.")] int maxLines = 0)
     {
-        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved);
+        denial = await _includedRoots.DenyOrEscalateAsync(denial, resolved, "read_file", _approveAction);
         if (denial is not null) return denial;
 
         if (!File.Exists(resolved))
@@ -358,7 +363,8 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (string.IsNullOrEmpty(oldText))
             return PluginResult.Error("oldText must not be empty.");
 
-        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved);
+        denial = await _includedRoots.DenyOrEscalateAsync(denial, resolved, "patch_file", _approveAction);
         if (denial is not null) return denial;
 
         if (!File.Exists(resolved))
@@ -499,7 +505,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         var elisionDenial = FilePatchDiffing.DetectElisionPlaceholder(content);
         if (elisionDenial is not null) return elisionDenial;
 
-        var pathDenial = ValidateWritePath(path, out var resolved);
+        var (pathDenial, resolved) = await ValidateWritePathAsync(path);
         if (pathDenial is not null) return pathDenial;
 
         var versionDenial = await CheckVersionConflictAsync(resolved!, baseVersion);
@@ -530,35 +536,33 @@ public sealed class FileSystemPlugin : ITurnResettable
 
     // Validates the path argument: checks for embedded newlines, resolves through the sandbox,
     // and blocks writes to paths that were already patch_file'd this turn.
-    // Returns a denial string on failure, or null on success (resolved is set via out parameter).
-    private string? ValidateWritePath(string path, out string? resolved)
+    // Returns (denial, null) on failure, or (null, resolved) on success.
+    private async Task<(string? Denial, string? Resolved)> ValidateWritePathAsync(string path)
     {
-        resolved = null;
-
         // Guard against models that accidentally embed file content in the path argument
         // (e.g. passing "my/file.go\npackage main\n..." as the path). A valid path never
         // contains newline characters; anything after the first newline is almost certainly
         // file content that belongs in the content parameter instead.
         if (path.Contains('\n') || path.Contains('\r'))
-            return PluginResult.Error(
+            return (PluginResult.Error(
                 "The 'path' argument contains a newline character, which is not valid in a " +
                 "file path. Did you accidentally include file content in the path? " +
-                "Pass the file path as 'path' and the file text as 'content' separately.");
+                "Pass the file path as 'path' and the file text as 'content' separately."), null);
 
-        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var r);
-        if (denial is not null) return denial;
-        resolved = r;
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved);
+        denial = await _includedRoots.DenyOrEscalateAsync(denial, resolved, "write_file", _approveAction);
+        if (denial is not null) return (denial, null);
 
         // Block write_file on a path that was already patch_file'd this turn. The agent's
         // full-file content is derived from its pre-patch mental model and would silently
         // overwrite the patch that was just applied.
         if (_patchedThisTurn.Contains(resolved))
-            return PluginResult.Error(
+            return (PluginResult.Error(
                 $"WRITE BLOCKED — '{resolved}' was already patched this turn. " +
                 $"Calling write_file now would overwrite that patch with stale content. " +
-                $"Use patch_file again for any additional edits.");
+                $"Use patch_file again for any additional edits."), null);
 
-        return null;
+        return (null, resolved);
     }
 
     // Version conflict check: when baseVersion > 0, reject the write if the current

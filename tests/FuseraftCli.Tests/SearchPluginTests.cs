@@ -68,6 +68,109 @@ public class SearchPluginTests
     }
 
     [Fact]
+    public void SearchContent_DirectoryOutsideSandbox_ReturnsDenial()
+    {
+        var sandboxDir = CreateTempDir();
+        var outsideDir = CreateTempDir();
+        try
+        {
+            File.WriteAllText(Path.Combine(outsideDir, "secret.txt"), "needle-marker");
+
+            var plugin = new SearchPlugin(sandboxRoot: sandboxDir);
+            var result = plugin.SearchContent("needle-marker", outsideDir);
+
+            Assert.StartsWith("[DENIED]", result);
+        }
+        finally
+        {
+            Directory.Delete(sandboxDir, recursive: true);
+            Directory.Delete(outsideDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SearchCallers_DirectoryOutsideSandbox_ReturnsDenial()
+    {
+        var sandboxDir = CreateTempDir();
+        var outsideDir = CreateTempDir();
+        try
+        {
+            var plugin = new SearchPlugin(sandboxRoot: sandboxDir);
+            var result = plugin.SearchCallers("Widget", outsideDir);
+
+            Assert.StartsWith("[DENIED]", result);
+        }
+        finally
+        {
+            Directory.Delete(sandboxDir, recursive: true);
+            Directory.Delete(outsideDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SearchSymbol_DirectoryOutsideSandbox_ReturnsDenial()
+    {
+        var sandboxDir = CreateTempDir();
+        var outsideDir = CreateTempDir();
+        try
+        {
+            var plugin = new SearchPlugin(sandboxRoot: sandboxDir);
+            var result = plugin.SearchSymbol("Widget", outsideDir);
+
+            Assert.StartsWith("[DENIED]", result);
+        }
+        finally
+        {
+            Directory.Delete(sandboxDir, recursive: true);
+            Directory.Delete(outsideDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SearchContent_DirectoryUnderIncludedRoot_IsAllowed()
+    {
+        var sandboxDir = CreateTempDir();
+        var includedDir = CreateTempDir();
+        try
+        {
+            File.WriteAllText(Path.Combine(includedDir, "other.txt"), "needle-marker");
+
+            var included = new IncludedRootsState([includedDir]);
+            var plugin = new SearchPlugin(sandboxRoot: sandboxDir, includedRoots: included);
+            var result = plugin.SearchContent("needle-marker", includedDir);
+
+            Assert.Contains("[RESULTS]", result);
+            Assert.Contains("needle-marker", result);
+        }
+        finally
+        {
+            Directory.Delete(sandboxDir, recursive: true);
+            Directory.Delete(includedDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SearchContent_DefaultDirectory_ResolvesAgainstSandboxRoot_NotProcessCwd()
+    {
+        var sandboxDir = CreateTempDir();
+        try
+        {
+            File.WriteAllText(Path.Combine(sandboxDir, "here.txt"), "needle-marker");
+
+            var plugin = new SearchPlugin(sandboxRoot: sandboxDir);
+            // No 'directory' argument — must resolve against sandboxDir, not Directory.GetCurrentDirectory().
+            var result = plugin.SearchContent("needle-marker");
+
+            Assert.Contains("[RESULTS]", result);
+            Assert.Contains("here.txt", result);
+        }
+        finally
+        {
+            Directory.Delete(sandboxDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void SearchContent_TruncatesAbnormallyLongMatchLine()
     {
         var dir = CreateTempDir();

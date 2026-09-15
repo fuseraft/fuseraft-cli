@@ -23,6 +23,7 @@ internal sealed class FileSystemManagementOps
 {
     private readonly string? _sandboxRoot;
     private readonly IReadOnlyList<string> _exemptedPrefixes;
+    private readonly IncludedRootsState _includedRoots;
     private readonly string _summaryDir;
     private readonly SessionReadCache? _sessionCache;
     private readonly FileVersionStore? _versionStore;
@@ -37,12 +38,14 @@ internal sealed class FileSystemManagementOps
         string? sandboxRoot = null,
         SessionReadCache? sessionCache = null,
         FileVersionStore? versionStore = null,
-        IReadOnlyList<string>? exemptedPaths = null)
+        IReadOnlyList<string>? exemptedPaths = null,
+        IncludedRootsState? includedRoots = null)
     {
         _sandboxRoot      = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _exemptedPrefixes = (exemptedPaths ?? [])
             .Select(p => FuseraftPaths.ExpandPath(p).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar)
             .ToList();
+        _includedRoots    = includedRoots ?? IncludedRootsState.Empty;
         var baseDir       = _sandboxRoot ?? Directory.GetCurrentDirectory();
         _summaryDir       = Path.Combine(baseDir, ".fuseraft", "summaries");
         _sessionCache     = sessionCache;
@@ -64,7 +67,8 @@ internal sealed class FileSystemManagementOps
         [Description("Max matches.")] int maxMatches = 30,
         CancellationToken cancellationToken = default)
     {
-        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved);
+        denial = await _includedRoots.DenyOrEscalateAsync(denial, resolved, "grep_file", _approveAction);
         if (denial is not null) return denial;
 
         if (!File.Exists(resolved))
@@ -171,7 +175,7 @@ internal sealed class FileSystemManagementOps
         [Description("Glob pattern, e.g. '*.cs'. Pass an exact filename here to find a known file directly.")] string pattern = "*",
         [Description("Max results, clamped to 500. Raise it only if the default cuts off a search you know needs to see more.")] int maxResults = 100)
     {
-        var denial = FileSystemSandbox.ResolveSafe(directory, _sandboxRoot, _exemptedPrefixes, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(directory, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved);
         if (denial is not null) return denial;
 
         if (!Directory.Exists(resolved))
@@ -210,7 +214,8 @@ internal sealed class FileSystemManagementOps
     [Description("Delete a file.")]
     public async Task<string> DeleteFileAsync([Description("File path.")] string path)
     {
-        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved);
+        denial = await _includedRoots.DenyOrEscalateAsync(denial, resolved, "delete_file", _approveAction);
         if (denial is not null) return denial;
 
         if (!File.Exists(resolved))
@@ -229,7 +234,8 @@ internal sealed class FileSystemManagementOps
     [Description("Get file/directory metadata: size, timestamps, permissions, and (for files) the write-version counter. Cheaper than read_file when you only need to check existence or staleness. Version is NOT_TRACKED when the file exists but was never written through write_file.")]
     public async Task<string> GetFileInfoAsync([Description("File or directory path.")] string path)
     {
-        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved);
+        denial = await _includedRoots.DenyOrEscalateAsync(denial, resolved, "get_file_info", _approveAction);
         if (denial is not null) return denial;
 
         var isFile = File.Exists(resolved);
@@ -303,7 +309,8 @@ internal sealed class FileSystemManagementOps
         if (string.IsNullOrWhiteSpace(mode) || !System.Text.RegularExpressions.Regex.IsMatch(mode, @"^[0-7]{3,4}$"))
             return PluginResult.Error($"Invalid mode '{mode}'. Supply a 3- or 4-digit octal string such as '755' or '0644'.");
 
-        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved);
+        denial = await _includedRoots.DenyOrEscalateAsync(denial, resolved, "set_permissions", _approveAction);
         if (denial is not null) return denial;
 
         if (!File.Exists(resolved) && !Directory.Exists(resolved))
@@ -327,7 +334,8 @@ internal sealed class FileSystemManagementOps
     [Description("Create a directory (including parents).")]
     public async Task<string> CreateDirectoryAsync([Description("Directory path.")] string path)
     {
-        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved);
+        denial = await _includedRoots.DenyOrEscalateAsync(denial, resolved, "create_directory", _approveAction);
         if (denial is not null) return denial;
 
         if (_approveAction is not null && !await _approveAction("create_directory", resolved))
@@ -342,19 +350,23 @@ internal sealed class FileSystemManagementOps
         [Description("Directory path.")] string path,
         [Description("Delete non-empty directories recursively.")] bool recursive = false)
     {
-        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved);
+        denial = await _includedRoots.DenyOrEscalateAsync(denial, resolved, "delete_directory", _approveAction);
         if (denial is not null) return denial;
 
         if (!Directory.Exists(resolved))
             return PluginResult.Info($"Directory does not exist: {resolved}");
 
-        // Refuse to delete the sandbox root itself.
-        if (_sandboxRoot is not null)
+        // Refuse to delete the sandbox root itself, or any configured included (--include) root —
+        // an included root deserves the same protection as the primary one, otherwise --include
+        // introduces a strictly-worse-than-before failure mode (a whole extra project root
+        // becomes rm-able where the primary root never was).
         {
             var comparison    = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-            var sandboxCheck  = _sandboxRoot.TrimEnd(Path.DirectorySeparatorChar);
             var resolvedCheck = resolved.TrimEnd(Path.DirectorySeparatorChar);
-            if (string.Equals(sandboxCheck, resolvedCheck, comparison))
+            var protectedRoots = (_sandboxRoot is not null ? [_sandboxRoot] : Array.Empty<string>())
+                .Concat(_includedRoots.Snapshot());
+            if (protectedRoots.Any(r => string.Equals(r.TrimEnd(Path.DirectorySeparatorChar), resolvedCheck, comparison)))
                 return PluginResult.Denied("Cannot delete the sandbox root directory.");
         }
 
@@ -380,10 +392,12 @@ internal sealed class FileSystemManagementOps
         [Description("Destination path.")] string destination,
         [Description("Overwrite if destination exists.")] bool overwrite = false)
     {
-        var srcDenial = FileSystemSandbox.ResolveSafe(source, _sandboxRoot, _exemptedPrefixes, out var resolvedSrc);
+        var srcDenial = FileSystemSandbox.ResolveSafe(source, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolvedSrc);
+        srcDenial = await _includedRoots.DenyOrEscalateAsync(srcDenial, resolvedSrc, "copy_file", _approveAction);
         if (srcDenial is not null) return srcDenial;
 
-        var dstDenial = FileSystemSandbox.ResolveSafe(destination, _sandboxRoot, _exemptedPrefixes, out var resolvedDst);
+        var dstDenial = FileSystemSandbox.ResolveSafe(destination, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolvedDst);
+        dstDenial = await _includedRoots.DenyOrEscalateAsync(dstDenial, resolvedDst, "copy_file", _approveAction);
         if (dstDenial is not null) return dstDenial;
 
         if (!File.Exists(resolvedSrc))
@@ -414,10 +428,12 @@ internal sealed class FileSystemManagementOps
         [Description("Destination path.")] string destination,
         [Description("Overwrite if destination file exists.")] bool overwrite = false)
     {
-        var srcDenial = FileSystemSandbox.ResolveSafe(source, _sandboxRoot, _exemptedPrefixes, out var resolvedSrc);
+        var srcDenial = FileSystemSandbox.ResolveSafe(source, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolvedSrc);
+        srcDenial = await _includedRoots.DenyOrEscalateAsync(srcDenial, resolvedSrc, "move_file", _approveAction);
         if (srcDenial is not null) return srcDenial;
 
-        var dstDenial = FileSystemSandbox.ResolveSafe(destination, _sandboxRoot, _exemptedPrefixes, out var resolvedDst);
+        var dstDenial = FileSystemSandbox.ResolveSafe(destination, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolvedDst);
+        dstDenial = await _includedRoots.DenyOrEscalateAsync(dstDenial, resolvedDst, "move_file", _approveAction);
         if (dstDenial is not null) return dstDenial;
 
         if (_approveAction is not null && !await _approveAction("move_file", $"{resolvedSrc} → {resolvedDst}"))
@@ -477,7 +493,8 @@ internal sealed class FileSystemManagementOps
     public async Task<string> GetFileSummaryAsync(
         [Description("File path.")] string path)
     {
-        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved);
+        denial = await _includedRoots.DenyOrEscalateAsync(denial, resolved, "get_file_summary", _approveAction);
         if (denial is not null) return denial;
 
         if (!File.Exists(resolved))
@@ -537,7 +554,8 @@ internal sealed class FileSystemManagementOps
         if (string.IsNullOrWhiteSpace(summary))
             return PluginResult.Error("summary must not be empty.");
 
-        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved);
+        denial = await _includedRoots.DenyOrEscalateAsync(denial, resolved, "save_file_summary", _approveAction);
         if (denial is not null) return denial;
 
         if (_approveAction is not null && !await _approveAction("save_file_summary", resolved))
@@ -555,7 +573,7 @@ internal sealed class FileSystemManagementOps
         [Description("Directory path.")] string directory,
         [Description("Glob pattern, e.g. '*.cs'.")] string pattern = "*")
     {
-        var denial = FileSystemSandbox.ResolveSafe(directory, _sandboxRoot, _exemptedPrefixes, out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(directory, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved);
         if (denial is not null) return denial;
 
         if (!Directory.Exists(resolved))
