@@ -293,6 +293,23 @@ public sealed class FileSystemManagementOpsTests : IDisposable
         Assert.Contains("not found", result, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task GetFileSummary_BinaryFile_ReturnsErrorInsteadOfReadingAsText()
+    {
+        // Neither File.ReadAllLines nor StreamPreviewLinesAsync throws on binary content, so
+        // without this guard a "first 30 lines" auto-preview of a compiled file could come back
+        // as one huge line spanning most of the file — see SearchPluginTests for the incident.
+        var bytes = new List<byte>();
+        bytes.AddRange("needle-marker"u8.ToArray());
+        bytes.Add(0);
+        bytes.AddRange(new byte[4000]);
+        await File.WriteAllBytesAsync(TempPath("binary.dll"), bytes.ToArray());
+
+        var result = await _ops.GetFileSummaryAsync(TempPath("binary.dll"));
+        Assert.StartsWith("[ERROR]", result);
+        Assert.Contains("binary", result, StringComparison.OrdinalIgnoreCase);
+    }
+
     // -----------------------------------------------------------------------
     // Cross-object shared per-turn state: an invalidation from _ops must be visible
     // to _plugin's read/write pipeline, since both share the same HashSet instances.

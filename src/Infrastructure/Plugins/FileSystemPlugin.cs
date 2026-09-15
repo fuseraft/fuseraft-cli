@@ -145,15 +145,10 @@ public sealed class FileSystemPlugin : ITurnResettable
         var cacheResult = CheckSessionCache(resolved, fileInfo, startLine, maxLines);
         if (cacheResult is not null) return cacheResult;
 
-        // Reject binary files early by sniffing the first 8 KB for null bytes.
-        using (var probe = File.OpenRead(resolved))
-        {
-            var buf = new byte[Math.Min(8192, probe.Length)];
-            int read = await probe.ReadAsync(buf);
-            if (Array.IndexOf(buf, (byte)0, 0, read) >= 0)
-                return PluginResult.Error(
-                    $"'{resolved}' appears binary — cannot read as text. Use shell_run with 'file', 'strings', or 'xxd'.");
-        }
+        // Reject binary files early by sniffing the first few KB for null bytes.
+        if (BinaryFileSniffer.LooksBinary(resolved))
+            return PluginResult.Error(
+                $"'{resolved}' appears binary — cannot read as text. Use shell_run with 'file', 'strings', or 'xxd'.");
 
         var effectiveStart = Math.Max(1, startLine);
 
@@ -368,6 +363,14 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         if (!File.Exists(resolved))
             return PluginResult.Error($"File not found: {resolved}");
+
+        // Same binary-content risk as ReadFileAsync: File.ReadAllTextAsync doesn't throw on
+        // binary data (invalid UTF-8 just becomes replacement characters), and a mismatch below
+        // would hand the un-truncated, un-split "content" to ExtractExcerpt/FindFirstMismatchingLine,
+        // which have no per-line cap of their own — a compiled file with no newline byte for a
+        // long stretch would come back as one huge line in the mismatch hint.
+        if (BinaryFileSniffer.LooksBinary(resolved))
+            return PluginResult.Error($"'{resolved}' appears binary — cannot patch as text. Use shell_run with 'file', 'strings', or 'xxd'.");
 
         var encoding = DetectEncoding(resolved);
         var content = await File.ReadAllTextAsync(resolved, encoding);

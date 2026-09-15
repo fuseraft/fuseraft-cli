@@ -349,6 +349,23 @@ public sealed class FileSystemPluginTests : IDisposable
     }
 
     [Fact]
+    public async Task PatchFile_BinaryFile_ReturnsErrorInsteadOfReadingAsText()
+    {
+        // Mirrors SearchPluginTests' binary-file coverage: File.ReadAllTextAsync doesn't throw
+        // on binary content, so without this guard a mismatched oldText would fall through to
+        // ExtractExcerpt/FindFirstMismatchingLine, which have no per-line length cap of their own.
+        var bytes = new List<byte>();
+        bytes.AddRange("needle-marker"u8.ToArray());
+        bytes.Add(0);
+        bytes.AddRange(new byte[4000]);
+        await File.WriteAllBytesAsync(TempPath("binary.dll"), bytes.ToArray());
+
+        var result = await _plugin.PatchFileAsync(TempPath("binary.dll"), "needle-marker", "replacement");
+        Assert.StartsWith("[ERROR]", result);
+        Assert.Contains("binary", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task PatchFile_OldTextNotFound_ReturnsError()
     {
         await File.WriteAllTextAsync(TempPath("patch.py"), "line one\nline two\n");
