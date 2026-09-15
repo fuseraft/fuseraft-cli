@@ -224,6 +224,7 @@ public sealed class PluginRegistry : IDisposable
         RegisterAdditional("FileSystem", () => new FileSystemManagementOps(
             fsPlugin, sandboxRoot, sessionCache: sessionReadCache, versionStore: fileVersionStore, exemptedPaths: ["~/.fuseraft/"]));
         Register("Git",        () => new GitPlugin(BindApprover("Git"), sandboxRoot));
+        Register("Search",     () => new SearchPlugin(sandboxRoot));
         Register("Http",       () => new HttpPlugin(_sharedHttpClient, allowedHosts, apiProfiles, allowPrivateHosts, _loggerFactory?.CreateLogger<HttpPlugin>(), BindApprover("Http")));
         Register("Document",   () => new DocumentPlugin(sandboxRoot));
 

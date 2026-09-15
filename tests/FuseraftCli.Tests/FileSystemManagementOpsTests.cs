@@ -146,6 +146,29 @@ public sealed class FileSystemManagementOpsTests : IDisposable
         Assert.StartsWith("[DENIED]", result);
     }
 
+    // Regression guard: ReplCommand.cs previously constructed FileSystemManagementOps as
+    // `new FileSystemManagementOps(fsPluginForCategory)` — no sandboxRoot argument, so it
+    // defaulted to null and list_files/grep_file/get_file_info/get_file_summary/copy_file/
+    // move_file/create_directory/delete_directory/set_permissions were completely unsandboxed
+    // in the REPL regardless of --yolo. This pins the fixed call shape: sandboxRoot must be
+    // passed explicitly, matching FileSystemPlugin's own sandboxRoot (not left to default).
+    [Fact]
+    public async Task ConstructedWithoutExplicitSandboxRoot_IsUnsandboxed_DocumentingWhySandboxRootMustAlwaysBePassed()
+    {
+        var unsandboxedOps = new FileSystemManagementOps(_plugin);
+        var outside = Path.Combine(Path.GetTempPath(), $"outside_{Guid.NewGuid():N}.txt");
+        await File.WriteAllTextAsync(outside, "should be unreachable");
+        try
+        {
+            var result = unsandboxedOps.GetFileInfoAsync(outside);
+            Assert.DoesNotContain("[DENIED]", await result);
+        }
+        finally
+        {
+            File.Delete(outside);
+        }
+    }
+
     // -----------------------------------------------------------------------
     // ListFiles
     // -----------------------------------------------------------------------

@@ -38,7 +38,8 @@ public static class MessageRenderer
         int memoryCount,
         int skillCount,
         string? branch = null,
-        string? eventsPath = null)
+        string? eventsPath = null,
+        IReadOnlyList<string>? includedRoots = null)
     {
         var ver = typeof(MessageRenderer).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
@@ -47,9 +48,9 @@ public static class MessageRenderer
         var semver = ver.Contains('+') ? ver[..ver.IndexOf('+')] : ver;
 
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var displayPath = cwd.StartsWith(home, StringComparison.Ordinal)
-            ? "~" + cwd[home.Length..]
-            : cwd;
+        string ToDisplayPath(string p) =>
+            p.StartsWith(home, StringComparison.Ordinal) ? "~" + p[home.Length..] : p;
+        var displayPath = ToDisplayPath(cwd);
 
         var pluginList = string.Join(", ", pluginNames);
 
@@ -57,12 +58,16 @@ public static class MessageRenderer
         var branchLine = branch is not null
             ? $"[dim]Branch:[/]   {Markup.Escape(branch)}\n"
             : string.Empty;
+        var includedLine = includedRoots is { Count: > 0 }
+            ? $"[dim]Included:[/] {Markup.Escape(string.Join(", ", includedRoots.Select(ToDisplayPath)))}\n"
+            : string.Empty;
 
         var content = new Markup(
             $"[bold]fuseraft[/] [dim]- terminal AI assistant (v{Markup.Escape(semver)})[/]\n" +
             $"\n" +
             $"[dim]Model:[/]    {Markup.Escape(modelId)}\n" +
             $"[dim]Path:[/]     {Markup.Escape(displayPath)}\n" +
+            $"{includedLine}" +
             $"{branchLine}" +
             $"[dim]Plugins:[/]  {Markup.Escape(pluginList)}\n" +
             $"[dim]Session:[/]  {Markup.Escape(sessionId)}\n" +

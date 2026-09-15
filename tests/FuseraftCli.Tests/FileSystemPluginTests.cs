@@ -82,6 +82,108 @@ public sealed class FileSystemPluginTests : IDisposable
     }
 
     // -----------------------------------------------------------------------
+    // Sandbox escape: HITL-approved on-demand grant, via approveAction
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task ReadFile_OutsideSandbox_ApproveEscapeGrantsAccess_ReadSucceeds()
+    {
+        var outsideDir = Directory.CreateTempSubdirectory("fuseraft_escape_tests_").FullName;
+        try
+        {
+            var outsideFile = Path.Combine(outsideDir, "other.txt");
+            await File.WriteAllTextAsync(outsideFile, "hello from elsewhere");
+
+            var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (_, _) => Task.FromResult(true), includedRoots: new IncludedRootsState());
+            var result = await plugin.ReadFileAsync(outsideFile);
+
+            Assert.Contains("hello from elsewhere", result);
+        }
+        finally
+        {
+            Directory.Delete(outsideDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ReadFile_OutsideSandbox_RefuseEscape_StillDenied()
+    {
+        var outsideDir = Directory.CreateTempSubdirectory("fuseraft_escape_tests_").FullName;
+        try
+        {
+            var outsideFile = Path.Combine(outsideDir, "other.txt");
+            await File.WriteAllTextAsync(outsideFile, "hello from elsewhere");
+
+            var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (_, _) => Task.FromResult(false), includedRoots: new IncludedRootsState());
+            var result = await plugin.ReadFileAsync(outsideFile);
+
+            // Distinct from the generic sandbox-denial message: a human was actually asked and
+            // said no, matching this codebase's convention for every other HITL-declined action.
+            Assert.StartsWith("[DENIED]", result);
+            Assert.Contains("blocked by user", result, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(outsideDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ReadFile_OutsideSandbox_SecondReadOfSameGrantedDirectory_DoesNotPromptAgain()
+    {
+        var outsideDir = Directory.CreateTempSubdirectory("fuseraft_escape_tests_").FullName;
+        try
+        {
+            var fileA = Path.Combine(outsideDir, "a.txt");
+            var fileB = Path.Combine(outsideDir, "b.txt");
+            await File.WriteAllTextAsync(fileA, "content a");
+            await File.WriteAllTextAsync(fileB, "content b");
+
+            int promptCount = 0;
+            var plugin = new FileSystemPlugin(sandboxRoot: _dir, approveAction: (_, _) =>
+            {
+                promptCount++;
+                return Task.FromResult(true);
+            }, includedRoots: new IncludedRootsState());
+
+            var resultA = await plugin.ReadFileAsync(fileA);
+            var resultB = await plugin.ReadFileAsync(fileB);
+
+            Assert.Contains("content a", resultA);
+            Assert.Contains("content b", resultB);
+            Assert.Equal(1, promptCount); // the grant from reading fileA covers fileB's directory too
+        }
+        finally
+        {
+            Directory.Delete(outsideDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ReadFile_OutsideSandbox_NoApproveActionWired_DeniedWithoutPrompting()
+    {
+        var outsideDir = Directory.CreateTempSubdirectory("fuseraft_escape_tests_").FullName;
+        try
+        {
+            var outsideFile = Path.Combine(outsideDir, "other.txt");
+            await File.WriteAllTextAsync(outsideFile, "hello");
+
+            // No approveAction passed — matches an orchestration agent with no HITL configured.
+            var plugin = new FileSystemPlugin(sandboxRoot: _dir);
+            var result = await plugin.ReadFileAsync(outsideFile);
+
+            // The original sandbox message, not "blocked by user" — no human was ever asked.
+            Assert.StartsWith("[DENIED]", result);
+            Assert.Contains("outside the configured sandbox", result);
+            Assert.DoesNotContain("blocked by user", result, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(outsideDir, recursive: true);
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Truncation guard: write blocked when new content is much smaller than existing
     // -----------------------------------------------------------------------
 

@@ -133,6 +133,41 @@ internal sealed class SystemPromptBuilder
         return this;
     }
 
+    /// <summary>
+    /// Appends the session's additional allowed roots (--include). No-op when empty. Tools
+    /// scope one directory per call and never auto-discover disjoint roots, so the model must
+    /// be told these exist and pass one explicitly as directory/path/repoPath/workingDirectory
+    /// when it wants to look there.
+    ///
+    /// <para>
+    /// Deliberately says these roots aren't a hard ceiling: without that line, a model told
+    /// exactly where the walls are tends to refuse a path outside them from its own reasoning
+    /// alone, never actually calling the tool — verified live, where a request for a file
+    /// outside every listed root produced zero tool_call events, just a declined-up-front
+    /// text response. That defeats the sandbox's own on-demand escalation (a denied path
+    /// prompts the user to grant it, per-session, right there) before it ever gets a chance
+    /// to run.
+    /// </para>
+    /// </summary>
+    internal SystemPromptBuilder AddIncludedRoots(IReadOnlyList<string> includedRoots)
+    {
+        if (includedRoots.Count == 0) return this;
+        var list = string.Join("\n", includedRoots.Select(r => $"- {r}"));
+        _sb.Append(
+            "\n\n## Additional allowed root(s)\n" +
+            "In addition to the primary working directory above, this session also allows " +
+            "read/write/search access under the following root(s) (via --include). Tools scope " +
+            "one directory per call and do not search across roots automatically — pass the " +
+            "specific root explicitly as the directory/path/repoPath/workingDirectory argument " +
+            "when you need to look there:\n" + list +
+            "\n\nThese are the roots known in advance, not a hard ceiling. If the user asks about " +
+            "a specific path outside all of them, still make the tool call rather than refusing " +
+            "up front — a denied path prompts the user to approve access on the spot, and the " +
+            "grant then covers the rest of this session. Only decline without trying when the " +
+            "user hasn't named a specific path (e.g. an open-ended \"search everywhere\").");
+        return this;
+    }
+
     /// <summary>Appends the REPL memory block. No-op when <paramref name="memoryBlock"/> is null.</summary>
     internal SystemPromptBuilder AddMemory(string? memoryBlock)
     {

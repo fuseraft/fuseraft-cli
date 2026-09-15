@@ -19,11 +19,12 @@ Security:
 
 | Plugin | Functions / Argument | Check type |
 |--------|----------------------|-----------|
-| `FileSystem` | `read_file`, `write_file`, `delete_file`, `list_files` — `path` / `directory` | Hard deny if resolved path is outside sandbox |
+| `FileSystem` | `read_file`, `write_file`, `delete_file`, `list_files`, `grep_file`, `get_file_info`, `get_file_summary` — `path` / `directory` | Hard deny if resolved path is outside sandbox |
 | `FileSystem` | `patch_file`, `create_directory`, `delete_directory`, `set_permissions`, `copy_file`, `move_file` | Hard deny if resolved path is outside sandbox (always enforced, regardless of whether `FileSystemPermissions` globs are configured) |
 | `Shell` | `shell_run`, `shell_run_script` — `workingDirectory` | Hard deny if resolved path is outside sandbox |
 | `Shell` | `shell_run`, `shell_run_script` — `command` / `script` | Best-effort scan for absolute paths escaping sandbox |
 | `Git` | Every function — `repoPath` (`directory` for `git_init`) | Hard deny if resolved path is outside sandbox, including read-only queries (`git_status`, `git_log`, `git_show`, …); an unspecified `repoPath` defaults to the sandbox root |
+| `Search` | `search_content`, `search_callers`, `search_symbol` — `directory` | Hard deny if resolved path is outside sandbox; an unspecified `directory` resolves against the sandbox root, not the process's working directory |
 
 ### Path resolution
 
@@ -65,6 +66,23 @@ or use the CodeExecution plugin (Docker) for commands that require substitution.
 ```
 
 The agent sees these as tool errors and can respond accordingly (typically by staying within the sandbox).
+
+### Multi-root sessions
+
+The REPL sandbox above confines every `FileSystem`/`Shell`/`Git`/`Search` call to a single root by default — the launch directory. `--include <dir>` (repeatable) adds more allowed roots for the same session, so an agent can work across more than one project tree at once: `fuseraft repl --include ../shared-lib --include ../other-service`. The included roots are shown in the startup banner (`Included:`) and listed for the model in its system prompt, since tools scope one directory per call and don't search across roots automatically.
+
+A path outside every allowed root isn't only a hard deny in this case — `read_file`, `write_file`, `patch_file`, `grep_file`, `delete_file`, `get_file_info`, `get_file_summary`, `save_file_summary`, `set_permissions`, `create_directory`, `delete_directory`, `copy_file`, and `move_file` also offer a HITL prompt to grant it on the spot:
+
+```
+⏸ FileSystem action requested:
+  read_file — /path/outside/file.txt is outside the current sandbox — grants
+'/path/outside' for the rest of this session
+Allow? (y/N):
+```
+
+Approving grants the *containing directory* of the requested path (not the single file, and not some broader ancestor) for the rest of the session — a follow-up request for a sibling file in that same directory doesn't prompt again. The grant is session-only: never written to disk, gone on `/exit`. `search_content`/`search_callers`/`search_symbol`, `list_files`/`list_directory`, and `Shell`/`Git` path checks stay hard-deny-only for now — they don't offer this on-demand prompt.
+
+`--include` is ignored (with a warning) under `--yolo`, since there's no sandbox to add roots to.
 
 ---
 

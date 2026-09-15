@@ -84,10 +84,24 @@ internal static class FileSystemSandbox
         return trimmed;
     }
 
-    // Resolves 'path' to its canonical absolute form and checks it against the sandbox.
-    // Returns a [DENIED] error string when the path escapes the sandbox, null when safe.
+    // Case sensitivity for root/prefix comparisons: ignore case on Windows (where "Bin" and
+    // "bin" name the same directory), ordinal everywhere else.
+    private static readonly StringComparison RootComparison = OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
+
+    // Appends the OS separator so that "/sandbox" is not treated as a prefix of "/sandboxExtra",
+    // then checks whether resolvedCheck (itself already separator-terminated by the caller)
+    // falls under root.
+    private static bool IsUnderRoot(string resolvedCheck, string root) =>
+        resolvedCheck.StartsWith(root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, RootComparison);
+
+    // Resolves 'path' to its canonical absolute form and checks it against the sandbox: the
+    // primary root, any additional (--include) root, or an exempted prefix.
+    // Returns a [DENIED] error string when the path escapes all of them, null when safe.
     internal static string? ResolveSafe(
-        string path, string? sandboxRoot, IReadOnlyList<string> exemptedPrefixes, out string resolved)
+        string path, string? sandboxRoot, IReadOnlyList<string> exemptedPrefixes,
+        IReadOnlyList<string> additionalRoots, out string resolved)
     {
         var expandedPath = ProcessHelper.ExpandHome(StripWrappingQuotes(path));
         resolved = sandboxRoot is not null && !Path.IsPathRooted(expandedPath)
@@ -97,34 +111,31 @@ internal static class FileSystemSandbox
         if (sandboxRoot is null)
             return null;
 
-        // Append the OS separator so that "/sandbox" is not treated as a prefix of "/sandboxExtra".
-        var sandboxPrefix = sandboxRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         var resolvedCheck = resolved.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
 
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
+        if (IsUnderRoot(resolvedCheck, sandboxRoot) || additionalRoots.Any(r => IsUnderRoot(resolvedCheck, r)))
+            return null;
 
-        if (!resolvedCheck.StartsWith(sandboxPrefix, comparison))
-        {
-            // Allow paths explicitly exempted from the sandbox (e.g. fuseraft's own runtime state dir).
-            if (exemptedPrefixes.Any(ep => resolvedCheck.StartsWith(ep, comparison)))
-                return null;
+        // Allow paths explicitly exempted from the sandbox (e.g. fuseraft's own runtime state dir).
+        if (exemptedPrefixes.Any(ep => resolvedCheck.StartsWith(ep, RootComparison)))
+            return null;
 
-            return PluginResult.Denied($"Path '{resolved}' is outside the configured sandbox '{sandboxRoot}'.");
-        }
-
-        return null;
+        var rootsNote = additionalRoots.Count > 0
+            ? $"'{sandboxRoot}' (+ {additionalRoots.Count} included root(s))"
+            : $"'{sandboxRoot}'";
+        return PluginResult.Denied($"Path '{resolved}' is outside the configured sandbox {rootsNote}.");
     }
 
     // Validates that a directory argument (a shell working directory, a git repo path) stays
-    // within the sandbox. When a sandbox is active and no directory is specified, defaults to
-    // the sandbox root so commands never run in an uncontrolled directory. Unlike
-    // <see cref="ResolveSafe"/>, this never full-paths or checks the directory when no sandbox
-    // is configured — callers pass the argument straight through to a subprocess that resolves
-    // relative/null paths against its own working directory itself.
+    // within the sandbox: the primary root or any additional (--include) root. When a sandbox
+    // is active and no directory is specified, defaults to the primary sandbox root (never an
+    // additional one) so commands never run in an uncontrolled — or ambiguous — directory.
+    // Unlike <see cref="ResolveSafe"/>, this never full-paths or checks the directory when no
+    // sandbox is configured — callers pass the argument straight through to a subprocess that
+    // resolves relative/null paths against its own working directory itself.
     // Returns a [DENIED] error string on violation, null when safe.
-    internal static string? ResolveSafeDirectory(string? directory, string? sandboxRoot, out string? resolved)
+    internal static string? ResolveSafeDirectory(
+        string? directory, string? sandboxRoot, IReadOnlyList<string> additionalRoots, out string? resolved)
     {
         if (sandboxRoot is null)
         {
@@ -133,17 +144,14 @@ internal static class FileSystemSandbox
         }
 
         resolved = Path.GetFullPath(directory ?? sandboxRoot);
-
-        var sandboxPrefix = sandboxRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         var resolvedCheck = resolved.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
 
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
+        if (IsUnderRoot(resolvedCheck, sandboxRoot) || additionalRoots.Any(r => IsUnderRoot(resolvedCheck, r)))
+            return null;
 
-        if (!resolvedCheck.StartsWith(sandboxPrefix, comparison))
-            return PluginResult.Denied($"Directory '{resolved}' is outside the configured sandbox '{sandboxRoot}'.");
-
-        return null;
+        var rootsNote = additionalRoots.Count > 0
+            ? $"'{sandboxRoot}' (+ {additionalRoots.Count} included root(s))"
+            : $"'{sandboxRoot}'";
+        return PluginResult.Denied($"Directory '{resolved}' is outside the configured sandbox {rootsNote}.");
     }
 }

@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
+using fuseraft.Core;
 
 namespace fuseraft.Infrastructure.Plugins;
 
@@ -10,11 +11,25 @@ namespace fuseraft.Infrastructure.Plugins;
 /// Gives agents the ability to explore a codebase or directory tree: search file contents
 /// by pattern, and locate symbol definitions and usages (classes, functions, interfaces, etc.).
 /// Finding files by name is <see cref="FileSystemPlugin.ListFiles"/> — kept in FileSystem
-/// rather than duplicated here so it stays covered by <c>SandboxEnforcementFilter</c>'s
-/// path-based sandbox checks and the <c>PluginCapabilityMap</c> entry that already exist for it.
+/// rather than duplicated here so it shares <see cref="FileSystemManagementOps"/>'s tool surface.
+///
+/// <para>
+/// Sandboxed the same way <see cref="FileSystemPlugin"/> is (constrained to <c>sandboxRoot</c>
+/// plus any <c>includedRoots</c>) — a bare <c>SearchPlugin()</c> with no arguments is fully
+/// unsandboxed, matching how every other plugin here treats an absent sandbox root.
+/// </para>
 /// </summary>
 public sealed class SearchPlugin
 {
+    private readonly string? _sandboxRoot;
+    private readonly IncludedRootsState _includedRoots;
+
+    public SearchPlugin(string? sandboxRoot = null, IncludedRootsState? includedRoots = null)
+    {
+        _sandboxRoot   = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
+        _includedRoots = includedRoots ?? IncludedRootsState.Empty;
+    }
+
     // Compiled Regex instances are expensive to create and are safe to share across calls.
     // Keyed by (pattern, options) so different case-sensitivity settings stay independent.
     private static readonly ConcurrentDictionary<(string Pattern, RegexOptions Options), Regex> RegexCache = new();
@@ -100,8 +115,11 @@ public sealed class SearchPlugin
         var transpositionDenial = CheckArgumentTransposition(query, "search pattern", "query", "SearchContent");
         if (transpositionDenial is not null) return transpositionDenial;
 
-        if (!Directory.Exists(directory))
-            return PluginResult.Error($"Directory not found: {directory}");
+        var denial = FileSystemSandbox.ResolveSafe(directory, _sandboxRoot, exemptedPrefixes: [], _includedRoots.Snapshot(), out var resolved);
+        if (denial is not null) return denial;
+
+        if (!Directory.Exists(resolved))
+            return PluginResult.Error($"Directory not found: {resolved}");
 
         // Some models HTML-encode characters in tool arguments (e.g. &lt; for <).
         // Decode so that a query like "&lt;TargetFramework" still matches "<TargetFramework".
@@ -123,8 +141,8 @@ public sealed class SearchPlugin
         int filesWithMatches = 0;
         int skippedFiles = 0;
 
-        foreach (var file in Directory.EnumerateFiles(directory, filePattern, SearchOption.AllDirectories)
-                     .Where(f => !DirectoryFilters.IsExcluded(f, directory)))
+        foreach (var file in Directory.EnumerateFiles(resolved, filePattern, SearchOption.AllDirectories)
+                     .Where(f => !DirectoryFilters.IsExcluded(f, resolved)))
         {
             if (totalMatches >= maxResults) break;
 
@@ -153,7 +171,7 @@ public sealed class SearchPlugin
         if (totalMatches == 0)
         {
             var noMatchNote = skippedFiles > 0 ? $" ({skippedFiles} unreadable file(s) skipped)" : string.Empty;
-            return PluginResult.Info($"No matches found for '{query}' under {directory}{noMatchNote}.{ScopeNote}");
+            return PluginResult.Info($"No matches found for '{query}' under {resolved}{noMatchNote}.{ScopeNote}");
         }
 
         var header = $"[RESULTS] {totalMatches} match(es) in {filesWithMatches} file(s)";
@@ -177,8 +195,11 @@ public sealed class SearchPlugin
         var transpositionDenial = CheckArgumentTransposition(symbol, "symbol name", "symbol", "SearchCallers", requirePathSeparator: true);
         if (transpositionDenial is not null) return transpositionDenial;
 
-        if (!Directory.Exists(directory))
-            return PluginResult.Error($"Directory not found: {directory}");
+        var denial = FileSystemSandbox.ResolveSafe(directory, _sandboxRoot, exemptedPrefixes: [], _includedRoots.Snapshot(), out var resolved);
+        if (denial is not null) return denial;
+
+        if (!Directory.Exists(resolved))
+            return PluginResult.Error($"Directory not found: {resolved}");
 
         var escapedSymbol = Regex.Escape(symbol);
 
@@ -210,8 +231,8 @@ public sealed class SearchPlugin
         int totalMatches = 0;
         int skippedFiles = 0;
 
-        foreach (var file in Directory.EnumerateFiles(directory, filePattern, SearchOption.AllDirectories)
-                     .Where(f => !DirectoryFilters.IsExcluded(f, directory)))
+        foreach (var file in Directory.EnumerateFiles(resolved, filePattern, SearchOption.AllDirectories)
+                     .Where(f => !DirectoryFilters.IsExcluded(f, resolved)))
         {
             if (totalMatches >= maxResults) break;
 
@@ -231,7 +252,7 @@ public sealed class SearchPlugin
         if (totalMatches == 0)
         {
             var note = skippedFiles > 0 ? $" ({skippedFiles} unreadable file(s) skipped)" : string.Empty;
-            return PluginResult.Info($"No call sites found for '{symbol}' under {directory}{note}.{ScopeNote}");
+            return PluginResult.Info($"No call sites found for '{symbol}' under {resolved}{note}.{ScopeNote}");
         }
 
         var header = $"[RESULTS] {totalMatches} call site(s) found for '{symbol}'";
@@ -255,8 +276,11 @@ public sealed class SearchPlugin
         var transpositionDenial = CheckArgumentTransposition(symbol, "symbol name", "symbol", "SearchSymbol", requirePathSeparator: true);
         if (transpositionDenial is not null) return transpositionDenial;
 
-        if (!Directory.Exists(directory))
-            return PluginResult.Error($"Directory not found: {directory}");
+        var denial = FileSystemSandbox.ResolveSafe(directory, _sandboxRoot, exemptedPrefixes: [], _includedRoots.Snapshot(), out var resolved);
+        if (denial is not null) return denial;
+
+        if (!Directory.Exists(resolved))
+            return PluginResult.Error($"Directory not found: {resolved}");
 
         // Build a combined pattern that matches any known definition form.
         var escapedSymbol = Regex.Escape(symbol);
@@ -279,8 +303,8 @@ public sealed class SearchPlugin
         int totalMatches = 0;
         int skippedFiles = 0;
 
-        foreach (var file in Directory.EnumerateFiles(directory, filePattern, SearchOption.AllDirectories)
-                     .Where(f => !DirectoryFilters.IsExcluded(f, directory)))
+        foreach (var file in Directory.EnumerateFiles(resolved, filePattern, SearchOption.AllDirectories)
+                     .Where(f => !DirectoryFilters.IsExcluded(f, resolved)))
         {
             if (totalMatches >= maxResults) break;
 
@@ -299,7 +323,7 @@ public sealed class SearchPlugin
         if (totalMatches == 0)
         {
             var noMatchNote = skippedFiles > 0 ? $" ({skippedFiles} unreadable file(s) skipped)" : string.Empty;
-            return PluginResult.Info($"No definition found for '{symbol}' under {directory}{noMatchNote}.{ScopeNote}");
+            return PluginResult.Info($"No definition found for '{symbol}' under {resolved}{noMatchNote}.{ScopeNote}");
         }
 
         var header = $"[RESULTS] {totalMatches} definition(s) found for '{symbol}'";

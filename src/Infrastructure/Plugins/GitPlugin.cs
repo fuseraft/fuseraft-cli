@@ -19,11 +19,13 @@ public sealed class GitPlugin
 {
     private readonly Func<string, string, Task<bool>>? _approveAction;
     private readonly string? _sandboxRoot;
+    private readonly IncludedRootsState _includedRoots;
 
-    public GitPlugin(Func<string, string, Task<bool>>? approveAction = null, string? sandboxRoot = null)
+    public GitPlugin(Func<string, string, Task<bool>>? approveAction = null, string? sandboxRoot = null, IncludedRootsState? includedRoots = null)
     {
         _approveAction = approveAction;
         _sandboxRoot   = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
+        _includedRoots = includedRoots ?? IncludedRootsState.Empty;
     }
 
     // Validates that repoPath (or directory, for InitAsync) stays within the sandbox. When a
@@ -32,7 +34,7 @@ public sealed class GitPlugin
     // queries included — see the sandboxRoot doc comment above for why.
     // Returns a [DENIED] error string on violation, null when safe.
     private string? ValidateRepoPath(string? repoPath, out string? resolved) =>
-        FileSystemSandbox.ResolveSafeDirectory(repoPath, _sandboxRoot, out resolved);
+        FileSystemSandbox.ResolveSafeDirectory(repoPath, _sandboxRoot, _includedRoots.Snapshot(), out resolved);
 
     // Read-only queries
 
