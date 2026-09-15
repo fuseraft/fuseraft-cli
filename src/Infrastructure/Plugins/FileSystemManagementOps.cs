@@ -491,6 +491,13 @@ internal sealed class FileSystemManagementOps
             return $"[Cached summary for '{resolved}']\n{cached}";
         }
 
+        // Same binary-content risk as ReadFileAsync/SearchPlugin: neither File.ReadAllLines
+        // nor StreamPreviewLinesAsync throws on binary data, and a "first 30 lines" preview of
+        // a compiled file with no newline byte for a long stretch would come back as one huge
+        // line spanning most of the file.
+        if (BinaryFileSniffer.LooksBinary(resolved))
+            return PluginResult.Error($"'{resolved}' appears binary — cannot summarize as text. Use shell_run with 'file', 'strings', or 'xxd'.");
+
         // Auto-preview: first 30 lines + stats. For large files, stream rather than
         // allocating a full string array — same protection as ReadFileAsync's cold-read gate.
         var fileInfo = new FileInfo(resolved);

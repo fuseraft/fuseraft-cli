@@ -15,6 +15,21 @@ internal static class BinaryFileSniffer
 {
     private const int SniffBytes = 8000;
 
+    // UTF-16/UTF-32 text is exactly as "legal" as UTF-8 — Notepad's "Save As," PowerShell ISE,
+    // and various Visual Studio templates all default to it — but it puts a 0x00 byte after
+    // (or before) every ASCII character, which is indistinguishable from binary content under a
+    // bare NUL-byte scan. A byte-order mark is the standard, unambiguous signal that the bytes
+    // that follow are one of these wide-char text encodings, not binary — checked first so a
+    // real text file is never rejected as binary just because of how it encodes ASCII.
+    private static readonly byte[][] TextByteOrderMarks =
+    [
+        [0xEF, 0xBB, 0xBF],       // UTF-8
+        [0xFF, 0xFE, 0x00, 0x00], // UTF-32 LE (checked before UTF-16 LE — it's a superset prefix)
+        [0x00, 0x00, 0xFE, 0xFF], // UTF-32 BE
+        [0xFF, 0xFE],             // UTF-16 LE
+        [0xFE, 0xFF],             // UTF-16 BE
+    ];
+
     internal static bool LooksBinary(string path)
     {
         try
@@ -22,6 +37,10 @@ internal static class BinaryFileSniffer
             using var stream = File.OpenRead(path);
             var buffer = new byte[(int)Math.Min(SniffBytes, stream.Length)];
             var read = stream.Read(buffer, 0, buffer.Length);
+
+            if (TextByteOrderMarks.Any(bom => read >= bom.Length && buffer.AsSpan(0, bom.Length).SequenceEqual(bom)))
+                return false;
+
             return Array.IndexOf(buffer, (byte)0, 0, read) >= 0;
         }
         catch { return false; }
