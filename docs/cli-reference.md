@@ -456,7 +456,9 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/mcp` | List MCP servers connected this session and their tools |
 | `/mcp add` | Interactive wizard to connect an MCP server (stdio or HTTP). Persists to the `mcpServers` section of `~/.fuseraft/config` so it reconnects automatically on future REPL launches. |
 | `/mcp add --session-only` | Same as `/mcp add`, but don't persist past this session |
-| `/mcp remove <name>` | Stop offering a connected server's tools to the model. The underlying connection closes when the session ends, not immediately. |
+| `/mcp remove <name>` | Disconnect a server (closing its connection immediately, not just at session end), stop offering its tools, and delete it from `~/.fuseraft/config` — also clears any cached OAuth token for it. |
+| `/mcp login <name>` | (Re)connect a saved server by name — e.g. one that failed to auto-connect at REPL startup. Reuses a still-valid cached OAuth token if present; run `/mcp logout` first to force a fresh browser login. |
+| `/mcp logout <name>` | Clear a saved OAuth-configured server's cached token and disconnect it, without removing it from the saved config — `/mcp login <name>` (or the next REPL launch) will prompt for a fresh login. No-op message if the server isn't configured for OAuth. |
 | `/plan <task>` | Ask the model to produce a structured JSON plan (no tool calls). Each step has a description, an expected tool name, and an optional expected artifact path. |
 | `/plan` | Show the currently stored plan |
 | `/execute` | Run each plan step as a separate turn. After each step the REPL verifies postconditions (tool called, artifact created) and halts with a warning if a step fails. |
@@ -532,7 +534,9 @@ Connected 'filesystem' — 8 tool(s) available.
 Saved — will reconnect automatically on future REPL sessions.
 ```
 
-By default the server is saved to the `mcpServers` section of `~/.fuseraft/config` (`fuseraft settings show` lists connected server names) and reconnects automatically the next time you start `fuseraft repl` in any directory — pass `/mcp add --session-only` to skip persistence for a one-off connection. `/mcp` lists what's currently connected; `/mcp remove <name>` stops offering that server's tools (the connection itself closes when the session ends).
+By default the server is saved to the `mcpServers` section of `~/.fuseraft/config` (`fuseraft settings show` lists connected server names) and reconnects automatically the next time you start `fuseraft repl` in any directory — pass `/mcp add --session-only` to skip persistence for a one-off connection. `/mcp` lists what's currently connected; `/mcp remove <name>` disconnects a server immediately and deletes it from the saved config.
+
+For an `http` server, `/mcp add` also asks how to authenticate: a static header (API key or bearer token — supports `${ENV_VAR}` tokens) or OAuth (opens your browser to authorize; see [MCP Integration — OAuth login](mcp.md#oauth-login)). For an OAuth-configured server, `/mcp login <name>` reconnects it (e.g. after it failed to auto-connect at startup), reusing a cached token if one is still valid; `/mcp logout <name>` clears the cached token and disconnects without forgetting the server's config, so the next `/mcp login` (or REPL launch) prompts for a fresh login.
 
 Servers saved before this file was sectioned lived in a standalone `~/.fuseraft/repl-mcp-servers.json` — it's folded into `~/.fuseraft/config` and deleted automatically the next time any `fuseraft` command runs, no action needed.
 
