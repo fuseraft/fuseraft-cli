@@ -89,6 +89,15 @@ be prompted again next process run.
 In the REPL, `/mcp add` offers the same two options interactively — pick "Header" or "OAuth" when
 prompted for authentication after entering the URL.
 
+Once an OAuth server is saved, two more REPL commands manage its login state without needing to
+remove and re-add it:
+
+- `/mcp login <name>` — (re)connect it, e.g. after it failed to auto-connect at REPL startup.
+  Reuses a still-valid cached token silently; it does not by itself force a new browser prompt.
+- `/mcp logout <name>` — clears the cached token and disconnects it, without forgetting the saved
+  config. Use this before `/mcp login <name>` to force a fresh browser authorization (for example
+  after revoking access on the server side, or to switch which account you're authorized as).
+
 ---
 
 ## Stdio transport

@@ -27,12 +27,14 @@ internal static partial class ReplCommands
             ""       => CmdMcpList(ctx),
             "add"    => await CmdMcpAddAsync(ctx, rest, cancellationToken),
             "remove" => await CmdMcpRemoveAsync(ctx, rest),
+            "login"  => await CmdMcpLoginAsync(ctx, rest, cancellationToken),
+            "logout" => await CmdMcpLogoutAsync(ctx, rest),
             _        => Unknown(),
         };
 
         CommandResult Unknown()
         {
-            AnsiConsole.MarkupLine("[yellow]Usage:[/] /mcp | /mcp add [[--session-only]] | /mcp remove <name>");
+            AnsiConsole.MarkupLine("[yellow]Usage:[/] /mcp | /mcp add [[--session-only]] | /mcp remove <name> | /mcp login <name> | /mcp logout <name>");
             return CommandResult.Continue;
         }
     }
@@ -159,16 +161,7 @@ internal static partial class ReplCommands
             return CommandResult.Continue;
         }
 
-        ctx.ToolsByCategory[$"{McpCategoryPrefix}{name}"] = tools;
-
-        // Rebuild the client so function-invocation middleware is attached even if this REPL
-        // session started with zero tool categories (e.g. --no-tools) — same pattern /model
-        // already uses when switching to a model with a different tool-availability state.
-        var activeTools = ctx.GetActiveTools();
-        var hasTools = activeTools.Count > 0;
-        ctx.Client     = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, tools: activeTools);
-        ctx.StepClient = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, ReplTurn.StepIterationLimit, activeTools);
-        ctx.ChatOptions = ctx.BuildChatOptions();
+        ActivateMcpTools(ctx, $"{McpCategoryPrefix}{name}", tools);
 
         AnsiConsole.MarkupLine($"[green]Connected '{Markup.Escape(name)}' — {tools.Count} tool(s) available.[/]");
 
@@ -181,6 +174,124 @@ internal static partial class ReplCommands
             AnsiConsole.MarkupLine($"[dim]Saved — will reconnect automatically on future REPL sessions.[/]");
         }
 
+        return CommandResult.Continue;
+    }
+
+    // Registers a connected server's tools and rebuilds the client so function-invocation
+    // middleware is attached even if this REPL session started with zero tool categories (e.g.
+    // --no-tools) — same pattern /model already uses when switching to a model with a different
+    // tool-availability state. Shared by /mcp add and /mcp login.
+    private static void ActivateMcpTools(ReplSessionContext ctx, string category, List<AIFunction> tools)
+    {
+        ctx.ToolsByCategory[category] = tools;
+
+        var activeTools = ctx.GetActiveTools();
+        var hasTools = activeTools.Count > 0;
+        ctx.Client     = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, tools: activeTools);
+        ctx.StepClient = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, ReplTurn.StepIterationLimit, activeTools);
+        ctx.ChatOptions = ctx.BuildChatOptions();
+    }
+
+    private static async Task<CommandResult> CmdMcpLoginAsync(
+        ReplSessionContext ctx, string name, CancellationToken cancellationToken)
+    {
+        name = name.Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            AnsiConsole.MarkupLine("[yellow]Usage:[/] /mcp login <name>");
+            return CommandResult.Continue;
+        }
+
+        var config = ReplMcpServerStore.Load()
+            .FirstOrDefault(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (config is null)
+        {
+            AnsiConsole.MarkupLine(
+                $"[yellow]No saved MCP server named '{Markup.Escape(name)}'.[/] [dim]Use /mcp add to configure one.[/]");
+            return CommandResult.Continue;
+        }
+
+        var category = $"{McpCategoryPrefix}{config.Name}";
+        if (ctx.ToolsByCategory.ContainsKey(category))
+        {
+            AnsiConsole.MarkupLine(
+                $"[yellow]'{Markup.Escape(config.Name)}' is already connected.[/] " +
+                $"[dim]Use /mcp logout {Markup.Escape(config.Name)} first to force a fresh login.[/]");
+            return CommandResult.Continue;
+        }
+
+        // Reuses any still-valid cached token (e.g. a server that failed to auto-connect at
+        // startup for an unrelated reason) — it does not by itself force a new browser prompt.
+        // Run /mcp logout first for that.
+        AnsiConsole.MarkupLine($"[dim]Logging in to '{Markup.Escape(config.Name)}'…[/]");
+        List<AIFunction> tools;
+        try
+        {
+            ctx.McpManager ??= new McpSessionManager();
+            var (_, connectedTools) = await ctx.McpManager.ConnectSingleAsync(config, cancellationToken);
+            tools = connectedTools.ToList();
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]✗ Could not connect to '{Markup.Escape(config.Name)}':[/] {Markup.Escape(ex.Message)}");
+            return CommandResult.Continue;
+        }
+
+        ActivateMcpTools(ctx, category, tools);
+
+        AnsiConsole.MarkupLine($"[green]Connected '{Markup.Escape(config.Name)}' — {tools.Count} tool(s) available.[/]");
+        return CommandResult.Continue;
+    }
+
+    private static async Task<CommandResult> CmdMcpLogoutAsync(ReplSessionContext ctx, string name)
+    {
+        name = name.Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            AnsiConsole.MarkupLine("[yellow]Usage:[/] /mcp logout <name>");
+            return CommandResult.Continue;
+        }
+
+        var config = ReplMcpServerStore.Load()
+            .FirstOrDefault(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (config is null)
+        {
+            AnsiConsole.MarkupLine($"[yellow]No saved MCP server named '{Markup.Escape(name)}'.[/]");
+            return CommandResult.Continue;
+        }
+
+        if (config.OAuth is null || string.IsNullOrWhiteSpace(config.Url))
+        {
+            AnsiConsole.MarkupLine($"[yellow]'{Markup.Escape(name)}' isn't configured for OAuth — nothing to log out of.[/]");
+            return CommandResult.Continue;
+        }
+
+        try
+        {
+            await McpOAuthTokenCache.LogoutAsync(config.Name, config.Url, ApiKeyStoreFactory.Create());
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine(
+                $"[yellow]⚠ Could not clear the cached token for '{Markup.Escape(name)}':[/] {Markup.Escape(ex.Message)}");
+            return CommandResult.Continue;
+        }
+
+        // Also tear down the live connection, if any — continuing to use an already-established
+        // session after "logging out" would defeat the point of the command.
+        var category = $"{McpCategoryPrefix}{config.Name}";
+        var wasConnected = ctx.ToolsByCategory.Remove(category);
+        if (wasConnected)
+        {
+            ctx.DisabledCategories.Remove(category);
+            ctx.ChatOptions = ctx.BuildChatOptions();
+            try { if (ctx.McpManager is not null) await ctx.McpManager.RemoveAsync(config.Name); }
+            catch { /* best-effort — the cached token is already cleared, which is the point */ }
+        }
+
+        AnsiConsole.MarkupLine(
+            $"[green]Logged out of '{Markup.Escape(name)}'.[/] " +
+            $"[dim]{(wasConnected ? "Disconnected. " : "")}Use /mcp login {Markup.Escape(name)} to re-authenticate.[/]");
         return CommandResult.Continue;
     }
 
