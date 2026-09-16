@@ -17,13 +17,13 @@ internal sealed class UnavailableKeyStore : IApiKeyStore
 
     public bool IsAvailable => false;
 
-    public Task<string?> RetrieveAsync() => Task.FromResult<string?>(null);
+    public Task<string?> RetrieveAsync(string account = "default") => Task.FromResult<string?>(null);
 
-    public Task StoreAsync(string apiKey) =>
+    public Task StoreAsync(string apiKey, string account = "default") =>
         throw new KeyStoreUnavailableException(
             "No OS keychain is available on this system, and fuseraft does not store API keys " +
             "in plaintext on disk. Set your provider's API key via an environment variable " +
             "instead (e.g. ANTHROPIC_API_KEY) — see docs/security.md#api-key-storage.");
 
-    public Task DeleteAsync() => Task.CompletedTask;
+    public Task DeleteAsync(string account = "default") => Task.CompletedTask;
 }

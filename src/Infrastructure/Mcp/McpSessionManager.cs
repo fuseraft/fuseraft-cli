@@ -1,7 +1,9 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using ModelContextProtocol.Authentication;
 using ModelContextProtocol.Client;
 using fuseraft.Core.Models;
+using fuseraft.Infrastructure.KeyStore;
 using fuseraft.Infrastructure.Plugins;
 
 namespace fuseraft.Infrastructure.Mcp;
@@ -132,9 +134,42 @@ public sealed class McpSessionManager : IAsyncDisposable
                 throw new InvalidOperationException(
                     $"MCP server '{server.Name}': 'Url' is required for http transport.");
 
-            var options = new HttpClientTransportOptions { Endpoint = new Uri(server.Url) };
+            var url = ProcessHelper.ExpandEnvTokens(server.Url);
+            var options = new HttpClientTransportOptions
+            {
+                Endpoint      = new Uri(url),
+                TransportMode = ParseTransportMode(server.TransportMode, server.Name),
+            };
+
+            if (server.Headers.Count > 0)
+                options.AdditionalHeaders = server.Headers.ToDictionary(
+                    h => h.Key, h => ProcessHelper.ExpandEnvTokens(h.Value));
+
+            var clientOptions = new McpClientOptions();
+
+            if (server.OAuth is { } oauth)
+            {
+                options.OAuth = new ClientOAuthOptions
+                {
+                    RedirectUri = new Uri($"http://localhost:{oauth.CallbackPort}/callback"),
+                    ClientId     = oauth.ClientId,
+                    ClientSecret = oauth.ClientSecret is { } secret ? ProcessHelper.ExpandEnvTokens(secret) : null,
+                    Scopes       = oauth.Scopes.Count > 0 ? oauth.Scopes : null,
+                    AuthorizationCallbackHandler = new McpOAuthBrowserFlow(server.Name, _logger)
+                        .HandleAuthorizationUrlAsync,
+                    DynamicClientRegistration = new DynamicClientRegistrationOptions { ClientName = "fuseraft-cli" },
+                    TokenCache = new McpOAuthTokenCache(server.Name, url, ApiKeyStoreFactory.Create(), _logger),
+                };
+
+                // The default 60s initialization timeout is meant for a machine-speed handshake —
+                // an interactive browser login (the user reading a consent screen, picking an
+                // account, clicking "Allow") routinely takes longer, so a first-time OAuth
+                // connection would otherwise fail with a spurious timeout before the user finishes.
+                clientOptions.InitializationTimeout = TimeSpan.FromMinutes(5);
+            }
+
             var transport = new HttpClientTransport(options, _loggerFactory);
-            return await McpClient.CreateAsync(transport, new McpClientOptions(), _loggerFactory, ct);
+            return await McpClient.CreateAsync(transport, clientOptions, _loggerFactory, ct);
         }
         else // stdio (default)
         {
@@ -153,4 +188,15 @@ public sealed class McpSessionManager : IAsyncDisposable
             return await McpClient.CreateAsync(transport, new McpClientOptions(), _loggerFactory, ct);
         }
     }
+
+    private static HttpTransportMode ParseTransportMode(string mode, string serverName) =>
+        mode.Trim().ToLowerInvariant() switch
+        {
+            "" or "auto" or "autodetect" => HttpTransportMode.AutoDetect,
+            "streamable-http" or "streamablehttp" or "streamable" => HttpTransportMode.StreamableHttp,
+            "sse" => HttpTransportMode.Sse,
+            _ => throw new InvalidOperationException(
+                $"MCP server '{serverName}': unknown TransportMode '{mode}'. " +
+                "Valid values: auto, streamable-http, sse."),
+        };
 }

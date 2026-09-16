@@ -27,7 +27,67 @@ fuseraft-cli supports the [Model Context Protocol (MCP)](https://modelcontextpro
 | `Args` | array | `[]` | **stdio only.** Arguments passed to `Command`. |
 | `Env` | object | `{}` | **stdio only.** Additional environment variables for the child process. |
 | `WorkingDirectory` | string | — | **stdio only.** Working directory for the child process. |
-| `Url` | string | — | **http only.** SSE endpoint URL (e.g. `"http://localhost:3000/sse"`). |
+| `Url` | string | — | **http only.** Endpoint URL (e.g. `"https://mcp.example.com/mcp"`). Supports `${ENV_VAR}` tokens. |
+| `Headers` | object | `{}` | **http only.** Extra HTTP headers sent with every request — e.g. a static API key or bearer token. Values support `${ENV_VAR}` tokens. |
+| `TransportMode` | string | `"auto"` | **http only.** `"auto"`, `"streamable-http"`, or `"sse"`. Pin this for a server that only implements one, or when auto-detection is unreliable behind a proxy. |
+| `OAuth` | object | — | **http only.** Enables interactive OAuth 2.1 login. See [OAuth login](#oauth-login) below. |
+
+---
+
+## Connecting to a production / hosted server
+
+Most hosted MCP servers require authentication. fuseraft-cli supports the two common cases:
+
+### Static header (API key / bearer token)
+
+```yaml
+McpServers:
+  - Name: RemoteTools
+    Transport: http
+    Url: https://mcp.example.com/mcp
+    Headers:
+      Authorization: "Bearer ${MY_SERVER_TOKEN}"
+```
+
+`${ENV_VAR}` tokens in `Url` and `Headers` values are expanded at connect time (same syntax as
+`ApiProfiles`), so the secret itself never has to live in the config file — set
+`MY_SERVER_TOKEN` in your shell or a `.env` your process loads before running fuseraft.
+`fuseraft validate-config` warns if a referenced env var isn't set in the current shell.
+
+### OAuth login
+
+For a server that requires OAuth 2.1 (the MCP spec's native auth flow), set `OAuth` on the
+server entry — most fields are optional, since fuseraft-cli requests dynamic client registration
+automatically when the server supports it:
+
+```yaml
+McpServers:
+  - Name: HostedMcp
+    Transport: http
+    Url: https://mcp.example.com/mcp
+    OAuth: {}
+```
+
+The first time fuseraft connects, it opens your default browser to the server's consent page and
+listens on `http://localhost:1179/callback` (configurable via `OAuth.CallbackPort`) for the
+redirect. Once you approve, the resulting tokens are cached in your OS keychain (macOS Keychain,
+GNOME Keyring, or Windows Credential Manager — never plaintext on disk) keyed by server name, so
+later sessions reconnect silently until the token is revoked or expires with no refresh token.
+
+If no OS keychain is available, the login still works — the token just isn't persisted, so you'll
+be prompted again next process run.
+
+`McpOAuthConfig` fields, all optional:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `ClientId` | string | — | Pre-registered OAuth client ID. Omit to use dynamic client registration. |
+| `ClientSecret` | string | — | Pre-registered client secret, paired with `ClientId`. Supports `${ENV_VAR}`. |
+| `Scopes` | array | `[]` | OAuth scopes to request. Omit to accept the server's default scopes. |
+| `CallbackPort` | int | `1179` | Loopback port for the local redirect callback. Change only if it collides with something else. |
+
+In the REPL, `/mcp add` offers the same two options interactively — pick "Header" or "OAuth" when
+prompted for authentication after entering the URL.
 
 ---
 
@@ -73,14 +133,20 @@ McpServers:
 
 ## HTTP transport
 
-Connect to a running MCP server over HTTP (Server-Sent Events).
+Connect to a running MCP server over HTTP. By default fuseraft-cli probes the endpoint and picks
+the right wire protocol automatically — modern Streamable HTTP or legacy SSE. Set `TransportMode`
+to pin one explicitly if a server only implements one or auto-detection is unreliable behind a
+proxy.
 
 ```yaml
 McpServers:
   - Name: RemoteTools
     Transport: http
-    Url: http://localhost:8080/sse
+    Url: http://localhost:8080/mcp
 ```
+
+For a server that requires an API key, bearer token, or OAuth login, see
+[Connecting to a production / hosted server](#connecting-to-a-production--hosted-server) above.
 
 ---
 

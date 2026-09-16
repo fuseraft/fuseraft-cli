@@ -2,6 +2,8 @@ using System.Text;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
 using fuseraft.Core.Models.Config;
+using fuseraft.Infrastructure.KeyStore;
+using fuseraft.Infrastructure.Mcp;
 
 namespace fuseraft.Cli.Commands.Repl;
 
@@ -102,11 +104,44 @@ internal static partial class ReplCommands
         else
         {
             var url = AnsiConsole.Prompt(new TextPrompt<string>("[dim]URL[/]").PromptStyle("white"));
+
+            var auth = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("[dim]Authentication[/]")
+                    .AddChoices("None", "Header (API key / bearer token)", "OAuth (browser login)"));
+
+            Dictionary<string, string> headers = [];
+            McpOAuthConfig? oauth = null;
+
+            if (auth.StartsWith("Header", StringComparison.Ordinal))
+            {
+                var headerName = AnsiConsole.Prompt(
+                    new TextPrompt<string>("[dim]Header name[/]").DefaultValue("Authorization").PromptStyle("white"));
+                var headerValue = AnsiConsole.Prompt(
+                    new TextPrompt<string>("[dim]Header value[/] [dim](e.g. \"Bearer ${MY_TOKEN}\" — supports ${ENV_VAR})[/]")
+                        .PromptStyle("white"));
+                headers[headerName.Trim()] = headerValue.Trim();
+            }
+            else if (auth.StartsWith("OAuth", StringComparison.Ordinal))
+            {
+                var scopesLine = AnsiConsole.Prompt(
+                    new TextPrompt<string>("[dim]Scopes[/] [dim](space-separated, blank for server default)[/]")
+                        .AllowEmpty()
+                        .PromptStyle("white"));
+                oauth = new McpOAuthConfig
+                {
+                    Scopes = SplitStdioArgs(scopesLine),
+                };
+                AnsiConsole.MarkupLine("[dim]Your browser will open to authorize this server on connect.[/]");
+            }
+
             config = new McpServerConfig
             {
                 Name      = name,
                 Transport = "http",
                 Url       = url.Trim(),
+                Headers   = headers,
+                OAuth     = oauth,
             };
         }
 
@@ -203,9 +238,22 @@ internal static partial class ReplCommands
         ctx.DisabledCategories.Remove(category);
         ctx.ChatOptions = ctx.BuildChatOptions();
 
-        var saved = ReplMcpServerStore.Load();
-        if (saved.RemoveAll(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) > 0)
+        var saved   = ReplMcpServerStore.Load();
+        var removed = saved.Where(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (removed.Count > 0)
+        {
+            saved.RemoveAll(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
             ReplMcpServerStore.Save(saved);
+        }
+
+        // Drop any cached OAuth token along with the saved entry — otherwise re-adding a
+        // server later would silently reuse a stale/revoked token from the keychain.
+        foreach (var removedServer in removed)
+        {
+            if (removedServer.OAuth is null || string.IsNullOrWhiteSpace(removedServer.Url)) continue;
+            try { await McpOAuthTokenCache.LogoutAsync(removedServer.Name, removedServer.Url, ApiKeyStoreFactory.Create()); }
+            catch { /* best-effort cleanup — a stale keychain entry isn't worth failing /mcp remove over */ }
+        }
 
         // Actually tear down the connection (and, for stdio, its child process) instead of just
         // hiding the tools from the model — previously the connection stayed alive, orphaned,

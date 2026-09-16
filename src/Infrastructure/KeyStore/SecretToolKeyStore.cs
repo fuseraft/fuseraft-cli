@@ -6,22 +6,21 @@ namespace fuseraft.Infrastructure.KeyStore;
 internal sealed class SecretToolKeyStore : IApiKeyStore
 {
     private const string Service = "fuseraft-cli";
-    private const string Account = "default";
 
     public string StoreName => "GNOME Keyring (secret-tool)";
 
     public bool IsAvailable => _available ??= CheckAvailable();
     private bool? _available;
 
-    public async Task<string?> RetrieveAsync()
+    public async Task<string?> RetrieveAsync(string account = "default")
     {
-        var (exit, stdout, _) = await RunAsync("lookup", "service", Service, "account", Account);
+        var (exit, stdout, _) = await RunAsync("lookup", "service", Service, "account", account);
         return exit == 0 && !string.IsNullOrEmpty(stdout) ? stdout.Trim() : null;
     }
 
-    public async Task StoreAsync(string apiKey)
+    public async Task StoreAsync(string apiKey, string account = "default")
     {
-        var psi = new ProcessStartInfo("secret-tool", $"store --label \"fuseraft API key\" service {Service} account {Account}")
+        var psi = new ProcessStartInfo("secret-tool", $"store --label \"fuseraft API key\" service {Service} account {account}")
         {
             RedirectStandardInput  = true,
             RedirectStandardOutput = true,
@@ -40,9 +39,9 @@ internal sealed class SecretToolKeyStore : IApiKeyStore
             throw new InvalidOperationException($"secret-tool store failed: {(await stderrTask).Trim()}");
     }
 
-    public async Task DeleteAsync()
+    public async Task DeleteAsync(string account = "default")
     {
-        await RunAsync("clear", "service", Service, "account", Account);
+        await RunAsync("clear", "service", Service, "account", account);
     }
 
     private static bool CheckAvailable()

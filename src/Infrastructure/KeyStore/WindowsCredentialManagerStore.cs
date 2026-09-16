@@ -7,7 +7,7 @@ namespace fuseraft.Infrastructure.KeyStore;
 // Works in any Windows shell including Git Bash — no CLI tools required.
 internal sealed class WindowsCredentialManagerStore : IApiKeyStore
 {
-    private const string TargetName = "fuseraft-cli/default";
+    private const string TargetPrefix = "fuseraft-cli/";
     private const int    CredTypeGeneric = 1;
     private const int    CredPersistLocalMachine = 2;
 
@@ -15,9 +15,9 @@ internal sealed class WindowsCredentialManagerStore : IApiKeyStore
 
     public bool IsAvailable => OperatingSystem.IsWindows();
 
-    public Task<string?> RetrieveAsync()
+    public Task<string?> RetrieveAsync(string account = "default")
     {
-        if (!CredRead(TargetName, CredTypeGeneric, 0, out var ptr))
+        if (!CredRead(TargetPrefix + account, CredTypeGeneric, 0, out var ptr))
             return Task.FromResult<string?>(null);
         try
         {
@@ -34,11 +34,11 @@ internal sealed class WindowsCredentialManagerStore : IApiKeyStore
         }
     }
 
-    public Task StoreAsync(string apiKey)
+    public Task StoreAsync(string apiKey, string account = "default")
     {
         var blob = Encoding.Unicode.GetBytes(apiKey);
         var blobPtr = Marshal.AllocHGlobal(blob.Length);
-        var targetPtr = Marshal.StringToHGlobalUni(TargetName);
+        var targetPtr = Marshal.StringToHGlobalUni(TargetPrefix + account);
         var userPtr   = Marshal.StringToHGlobalUni("fuseraft");
         try
         {
@@ -65,9 +65,9 @@ internal sealed class WindowsCredentialManagerStore : IApiKeyStore
         return Task.CompletedTask;
     }
 
-    public Task DeleteAsync()
+    public Task DeleteAsync(string account = "default")
     {
-        CredDelete(TargetName, CredTypeGeneric, 0);
+        CredDelete(TargetPrefix + account, CredTypeGeneric, 0);
         return Task.CompletedTask;
     }
 
