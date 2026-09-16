@@ -138,6 +138,12 @@ For every filesystem function call, the three lists are checked in this order:
 [DENIED] 'src/auth/token.go': Path is outside the configured FileSystem write permissions.
 ```
 
+### REPL support and the default secrets deny list
+
+`FileSystemPermissions.Deny` is enforced in both `fuseraft run` orchestration and the REPL — the REPL loads it from `Security.FileSystemPermissions` in `.fuseraft/config/orchestration.yaml`, if that file exists, no orchestration session needs to actually run for it to apply.
+
+Both surfaces also always deny `.env` and `.env.*` for `read_file`, `grep_file`, and `get_file_summary` — even with no `Security` config declared anywhere, and even for a sub-agent's own `FileSystem` tool set — "don't leak secrets into context" shouldn't require opting in. Any `Deny` patterns from config are merged on top of this default, never replacing it. `run_skill_script` is intentionally exempt: a vetted, path-verified skill script may still `source .env` internally (see [Skills execution trust model](#skills-execution-trust-model)) — the point is stopping the *model* from reading the file's content directly, not stopping a trusted script from using it.
+
 ---
 
 ## Shell policy
@@ -179,6 +185,10 @@ The policy is enforced in `shell_run`, `shell_run_script`, and `shell_run_backgr
 [DENIED] Shell command blocked: not matched by any configured allow pattern.
          Allowed: 'go test', 'npm test', 'dotnet test'.
 ```
+
+### Default: `.env` always denied
+
+Like `FileSystemPermissions.Deny` above, both the REPL and orchestration merge a built-in `.env` deny pattern into `ShellPolicy.Deny` by default — even with no `Security` config at all — so `cat .env`, `echo $(cat .env)`, and similar are blocked regardless of project configuration. Any `Deny` patterns declared in config are added on top, never replaced.
 
 ---
 

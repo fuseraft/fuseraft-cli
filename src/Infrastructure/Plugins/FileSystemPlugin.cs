@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.FileSystemGlobbing;
 using fuseraft.Core;
 using fuseraft.Infrastructure;
 
@@ -52,6 +53,12 @@ public sealed class FileSystemPlugin : ITurnResettable
     // is known (post-normalization), right before the write lands on disk.
     private readonly Func<string, string, string, string, Task<bool>>? _approveWrite;
 
+    // Glob patterns that are hard-denied for every FileSystem operation (read, write, and
+    // metadata alike) — matched in FileSystemSandbox.ResolveSafe before any other check, so
+    // these paths never reach the model's context regardless of what tool is used to reach
+    // them. Null when no deny patterns are configured.
+    private readonly Matcher? _denyMatcher;
+
     // Per-turn read cache: cleared at the start of each agent turn so re-reading the same
     // file within a single turn is caught and short-circuited before dumping redundant
     // content into the model's context.
@@ -84,7 +91,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     // maxLines: 99999 is asking for everything and should be gated the same as omitting it.
     private const int LargeFileColdReadLines  = 500;
 
-    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null, Action? onWrite = null, Action? onCacheHit = null, IReadOnlyList<string>? exemptedPaths = null, Func<string, string, Task<bool>>? approveAction = null, Func<string, string, string, string, Task<bool>>? approveWrite = null, IncludedRootsState? includedRoots = null)
+    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null, Action? onWrite = null, Action? onCacheHit = null, IReadOnlyList<string>? exemptedPaths = null, Func<string, string, Task<bool>>? approveAction = null, Func<string, string, string, string, Task<bool>>? approveWrite = null, IncludedRootsState? includedRoots = null, IReadOnlyList<string>? denyPatterns = null)
     {
         _sandboxRoot       = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _exemptedPrefixes  = (exemptedPaths ?? [])
@@ -101,6 +108,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         _onCacheHit        = onCacheHit;
         _approveAction     = approveAction;
         _approveWrite      = approveWrite;
+        _denyMatcher       = FileSystemSandbox.BuildDenyMatcher(denyPatterns);
     }
 
     /// <inheritdoc cref="ITurnResettable.BeginTurn"/>
@@ -131,13 +139,17 @@ public sealed class FileSystemPlugin : ITurnResettable
     // requiring every caller that constructs both objects to remember to pass it twice.
     internal Func<string, string, Task<bool>>? ApproveAction => _approveAction;
 
+    // Exposed so FileSystemManagementOps enforces the exact same deny policy as this class's
+    // own read/write/patch pipeline, from one configured instance rather than two.
+    internal Matcher? DenyMatcher => _denyMatcher;
+
     [Description("Read text file content. Use startLine+maxLines for large files. Binary files rejected.")]
     public async Task<string> ReadFileAsync(
         [Description("File path.")] string path,
         [Description("1-based start line.")] int startLine = 1,
         [Description("Max lines to return.")] int maxLines = 0)
     {
-        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved, _denyMatcher);
         denial = await _includedRoots.DenyOrEscalateAsync(denial, resolved, "read_file", _approveAction);
         if (denial is not null) return denial;
 
@@ -363,7 +375,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (string.IsNullOrEmpty(oldText))
             return PluginResult.Error("oldText must not be empty.");
 
-        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved, _denyMatcher);
         denial = await _includedRoots.DenyOrEscalateAsync(denial, resolved, "patch_file", _approveAction);
         if (denial is not null) return denial;
 
@@ -549,7 +561,7 @@ public sealed class FileSystemPlugin : ITurnResettable
                 "file path. Did you accidentally include file content in the path? " +
                 "Pass the file path as 'path' and the file text as 'content' separately."), null);
 
-        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved);
+        var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved, _denyMatcher);
         denial = await _includedRoots.DenyOrEscalateAsync(denial, resolved, "write_file", _approveAction);
         if (denial is not null) return (denial, null);
 

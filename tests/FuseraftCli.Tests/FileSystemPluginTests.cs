@@ -882,4 +882,60 @@ public sealed class FileSystemPluginTests : IDisposable
         Assert.Contains("Written", result);
     }
 
+    // -----------------------------------------------------------------------
+    // denyPatterns: secrets protection (end-to-end through the plugin, not just
+    // FileSystemSandbox.ResolveSafe directly — see FileSystemSandboxTests for the primitive).
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task ReadFile_PathMatchesDenyPattern_Denied()
+    {
+        var denyPlugin = new FileSystemPlugin(sandboxRoot: _dir, denyPatterns: [".env", ".env.*"]);
+        await File.WriteAllTextAsync(TempPath(".env"), "BOOMI_API_TOKEN=super-secret");
+
+        var result = await denyPlugin.ReadFileAsync(TempPath(".env"));
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.DoesNotContain("super-secret", result);
+    }
+
+    [Fact]
+    public async Task ReadFile_DenyPatternConfigured_OtherFilesStillReadable()
+    {
+        var denyPlugin = new FileSystemPlugin(sandboxRoot: _dir, denyPatterns: [".env", ".env.*"]);
+        await File.WriteAllTextAsync(TempPath("config.json"), "{}");
+
+        var result = await denyPlugin.ReadFileAsync(TempPath("config.json"));
+
+        Assert.Equal("{}", result.TrimEnd('\n'));
+    }
+
+    [Fact]
+    public async Task WriteFile_PathMatchesDenyPattern_Denied()
+    {
+        // Deny is "for ALL operations (read and write)" per FileSystemPermissions — a deny
+        // rule must also stop an agent from overwriting a credentials file, not just reading it.
+        var denyPlugin = new FileSystemPlugin(sandboxRoot: _dir, denyPatterns: [".env"]);
+
+        var result = await denyPlugin.WriteFileAsync(TempPath(".env"), "OVERWRITTEN=1");
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.False(File.Exists(TempPath(".env")));
+    }
+
+    [Fact]
+    public async Task GrepFile_PathMatchesDenyPattern_Denied()
+    {
+        // FileSystemManagementOps (grep_file/get_file_summary/etc.) reads its deny matcher from
+        // the owning FileSystemPlugin (DenyMatcher) rather than taking its own — this proves
+        // that wiring actually reaches a real call, not just that the property is set.
+        var denyPlugin = new FileSystemPlugin(sandboxRoot: _dir, denyPatterns: [".env"]);
+        var ops = new FileSystemManagementOps(denyPlugin, sandboxRoot: _dir);
+        await File.WriteAllTextAsync(TempPath(".env"), "BOOMI_API_TOKEN=super-secret");
+
+        var result = await ops.GrepFileAsync(TempPath(".env"), "TOKEN");
+
+        Assert.StartsWith("[DENIED]", result);
+    }
+
 }

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.FileSystemGlobbing;
 using fuseraft.Infrastructure.Plugins;
 
 namespace FuseraftCli.Tests;
@@ -147,6 +148,71 @@ public sealed class FileSystemSandboxTests : IDisposable
         var denial = FileSystemSandbox.ResolveSafe(outside, _primary, [], [_includedA, _includedB], out _);
         Assert.NotNull(denial);
         Assert.Contains("2 included root(s)", denial);
+    }
+
+    // ---------------------------------------------------------------
+    // ResolveSafe — deny matcher (secrets protection)
+    // ---------------------------------------------------------------
+
+    [Fact]
+    public void BuildDenyMatcher_NullPatterns_ReturnsNull()
+    {
+        Assert.Null(FileSystemSandbox.BuildDenyMatcher(null));
+    }
+
+    [Fact]
+    public void BuildDenyMatcher_EmptyPatterns_ReturnsNull()
+    {
+        Assert.Null(FileSystemSandbox.BuildDenyMatcher([]));
+    }
+
+    [Fact]
+    public void ResolveSafe_DenyMatcherMatchesPath_Denied()
+    {
+        var matcher = FileSystemSandbox.BuildDenyMatcher([".env", ".env.*"]);
+        var path = Path.Combine(_primary, ".env");
+        var denial = FileSystemSandbox.ResolveSafe(path, _primary, [], [], out _, matcher);
+        Assert.NotNull(denial);
+        Assert.StartsWith("[DENIED]", denial);
+    }
+
+    [Fact]
+    public void ResolveSafe_DenyMatcherMatchesDottedVariant_Denied()
+    {
+        var matcher = FileSystemSandbox.BuildDenyMatcher([".env", ".env.*"]);
+        var path = Path.Combine(_primary, ".env.production");
+        var denial = FileSystemSandbox.ResolveSafe(path, _primary, [], [], out _, matcher);
+        Assert.NotNull(denial);
+    }
+
+    [Fact]
+    public void ResolveSafe_DenyMatcherDoesNotMatchOtherFiles_Allowed()
+    {
+        var matcher = FileSystemSandbox.BuildDenyMatcher([".env", ".env.*"]);
+        var path = Path.Combine(_primary, "config.json");
+        var denial = FileSystemSandbox.ResolveSafe(path, _primary, [], [], out _, matcher);
+        Assert.Null(denial);
+    }
+
+    [Fact]
+    public void ResolveSafe_DenyMatcher_AppliesEvenWithoutSandboxRoot()
+    {
+        // "Don't leak secrets into context" must hold in an unsandboxed (--yolo) session too,
+        // not just when a directory sandbox happens to be configured.
+        var matcher = FileSystemSandbox.BuildDenyMatcher([".env"]);
+        var path = Path.Combine(Path.GetTempPath(), $"anywhere_{Guid.NewGuid():N}", ".env");
+        var denial = FileSystemSandbox.ResolveSafe(path, null, [], [], out _, matcher);
+        Assert.NotNull(denial);
+    }
+
+    [Fact]
+    public void ResolveSafe_NoDenyMatcher_EnvFileAllowedThroughSandboxCheck()
+    {
+        // Baseline: without a deny matcher, .env is just an ordinary file subject only to the
+        // sandbox boundary — proves the deny check is additive, not a hidden always-on rule.
+        var path = Path.Combine(_primary, ".env");
+        var denial = FileSystemSandbox.ResolveSafe(path, _primary, [], [], out _);
+        Assert.Null(denial);
     }
 
     // ---------------------------------------------------------------

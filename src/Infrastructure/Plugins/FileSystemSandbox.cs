@@ -1,3 +1,4 @@
+using Microsoft.Extensions.FileSystemGlobbing;
 using fuseraft.Core;
 using fuseraft.Infrastructure;
 
@@ -96,17 +97,44 @@ internal static class FileSystemSandbox
     private static bool IsUnderRoot(string resolvedCheck, string root) =>
         resolvedCheck.StartsWith(root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, RootComparison);
 
+    // Builds a case-insensitive glob matcher from a deny pattern list, or null when the list is
+    // empty — callers can pass the result straight to ResolveSafe's denyMatcher parameter without
+    // a separate null check. Shared by FileSystemPlugin and FileSystemManagementOps so both read
+    // the same deny policy from a single FileSystemPlugin instance (see FileSystemPlugin.DenyMatcher).
+    internal static Matcher? BuildDenyMatcher(IReadOnlyList<string>? denyPatterns)
+    {
+        if (denyPatterns is not { Count: > 0 }) return null;
+        var matcher = new Matcher(StringComparison.OrdinalIgnoreCase);
+        foreach (var pattern in denyPatterns) matcher.AddInclude(pattern);
+        return matcher;
+    }
+
     // Resolves 'path' to its canonical absolute form and checks it against the sandbox: the
     // primary root, any additional (--include) root, or an exempted prefix.
     // Returns a [DENIED] error string when the path escapes all of them, null when safe.
+    //
+    // denyMatcher (optional) is checked before the sandbox-root early-return below, so a deny
+    // rule (e.g. blocking .env) applies even in an unsandboxed session — "don't leak secrets
+    // into context" shouldn't depend on whether a directory sandbox happens to be configured.
     internal static string? ResolveSafe(
         string path, string? sandboxRoot, IReadOnlyList<string> exemptedPrefixes,
-        IReadOnlyList<string> additionalRoots, out string resolved)
+        IReadOnlyList<string> additionalRoots, out string resolved, Matcher? denyMatcher = null)
     {
         var expandedPath = ProcessHelper.ExpandHome(StripWrappingQuotes(path));
         resolved = sandboxRoot is not null && !Path.IsPathRooted(expandedPath)
             ? Path.GetFullPath(expandedPath, sandboxRoot)
             : Path.GetFullPath(expandedPath);
+
+        if (denyMatcher is not null)
+        {
+            var relBase  = sandboxRoot ?? Path.GetDirectoryName(resolved) ?? resolved;
+            var relative = Path.GetRelativePath(relBase, resolved).Replace('\\', '/');
+            if (denyMatcher.Match(relative).HasMatches)
+                return PluginResult.Denied(
+                    $"Path '{resolved}' matches a FileSystem deny rule and is blocked for all operations " +
+                    "(likely a credentials file). Do not read, write, or inspect it directly — if a script " +
+                    "needs its values, let the script source it internally rather than surfacing its content.");
+        }
 
         if (sandboxRoot is null)
             return null;
