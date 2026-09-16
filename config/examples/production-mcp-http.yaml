@@ -1,0 +1,58 @@
+## Production MCP HTTP example: a single agent backed by a remote/hosted MCP server that
+## requires authentication, using each of the two auth styles fuseraft-cli supports.
+## Prerequisites:
+##   1. Ensure XAI_API_KEY is set in your environment (for the agent's model).
+##   2. Pick ONE of the two McpServers entries below and delete the other — they're shown
+##      together here only for reference. Set whatever env var your chosen entry references.
+## Run:      fuseraft run --config config/examples/production-mcp-http.yaml "List the available tools"
+## Validate: fuseraft validate config/examples/production-mcp-http.yaml
+
+Orchestration:
+  Name: ProductionMcpHttpExample
+  Description: >-
+    Single-agent setup that connects to a remote MCP server over HTTP with authentication —
+    demonstrates a static bearer-token header and, separately, OAuth 2.1 login.
+
+  McpServers:
+    # Option A: static header auth (API key / bearer token). ${ENV_VAR} tokens in Url and
+    # Headers values are expanded at connect time, so the secret itself never lives in this
+    # file — `fuseraft validate-config` warns if the referenced env var isn't set.
+    - Name: RemoteTools
+      Transport: http
+      Url: https://mcp.example.com/mcp
+      TransportMode: streamable-http   # pin this if the server doesn't support auto-detect
+      Headers:
+        Authorization: "Bearer ${REMOTE_MCP_TOKEN}"
+
+    # Option B: OAuth 2.1 login. First connection opens your browser to authorize; tokens are
+    # then cached in your OS keychain (never plaintext on disk) so later sessions reconnect
+    # silently. Most fields are optional — dynamic client registration handles the rest.
+    # - Name: RemoteTools
+    #   Transport: http
+    #   Url: https://mcp.example.com/mcp
+    #   OAuth: {}
+
+  Agents:
+    - Name: ToolAgent
+      Isolation: Shared
+      Description: Uses tools exposed by the remote MCP server.
+      Instructions: |
+        You have access to tools from a remote MCP server via the RemoteTools plugin.
+        Use them to complete the user's request. Be concise about what you did and observed.
+      Model:
+        ModelId: grok-4.3
+        Endpoint: https://api.x.ai/v1
+        ApiKeyEnvVar: XAI_API_KEY
+        MaxTokens: 4096
+      Plugins:
+        - RemoteTools
+
+  Selection:
+    Type: roundrobin
+
+  Termination:
+    Type: maxiterations
+    MaxIterations: 10
+
+  Events:
+    Path: .fuseraft/events.jsonl

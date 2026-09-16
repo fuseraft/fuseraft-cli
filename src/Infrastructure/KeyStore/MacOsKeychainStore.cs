@@ -6,31 +6,30 @@ namespace fuseraft.Infrastructure.KeyStore;
 internal sealed class MacOsKeychainStore : IApiKeyStore
 {
     private const string Service = "fuseraft-cli";
-    private const string Account = "default";
 
     public string StoreName => "macOS Keychain";
 
     public bool IsAvailable => OperatingSystem.IsMacOS();
 
-    public async Task<string?> RetrieveAsync()
+    public async Task<string?> RetrieveAsync(string account = "default")
     {
         var (exit, stdout, _) = await RunAsync(
-            "find-generic-password", "-s", Service, "-a", Account, "-w");
+            "find-generic-password", "-s", Service, "-a", account, "-w");
         return exit == 0 && !string.IsNullOrEmpty(stdout) ? stdout.Trim() : null;
     }
 
-    public async Task StoreAsync(string apiKey)
+    public async Task StoreAsync(string apiKey, string account = "default")
     {
         // -U updates if the entry already exists.
         var (exit, _, stderr) = await RunAsync(
-            "add-generic-password", "-s", Service, "-a", Account, "-w", apiKey, "-U");
+            "add-generic-password", "-s", Service, "-a", account, "-w", apiKey, "-U");
         if (exit != 0)
             throw new InvalidOperationException($"security store failed: {stderr.Trim()}");
     }
 
-    public async Task DeleteAsync()
+    public async Task DeleteAsync(string account = "default")
     {
-        await RunAsync("delete-generic-password", "-s", Service, "-a", Account);
+        await RunAsync("delete-generic-password", "-s", Service, "-a", account);
     }
 
     private static async Task<(int Exit, string Stdout, string Stderr)> RunAsync(params string[] args)

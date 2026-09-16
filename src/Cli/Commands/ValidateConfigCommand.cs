@@ -5,6 +5,7 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using fuseraft.Cli.Diagram;
 using fuseraft.Core.Models;
+using fuseraft.Core.Models.Config;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Plugins;
 using fuseraft.Orchestration;
@@ -208,6 +209,8 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
         ValidateMemoryLayer(config, issues);
 
+        ValidateMcpServers(config, issues);
+
         return await ReportResultsAsync(config, settings, issues);
     }
 
@@ -348,6 +351,92 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                 issues.Add(("error", $"Telemetry.OtlpEndpoint is not a valid URI: '{endpoint}'."));
         }
     }
+
+    private static void ValidateMcpServers(
+        OrchestrationConfig config,
+        List<(string Level, string Message)> issues)
+    {
+        if (config.McpServers.Count == 0) return;
+
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var server in config.McpServers)
+        {
+            var prefix = string.IsNullOrWhiteSpace(server.Name) ? "McpServers[?]" : $"McpServers['{server.Name}']";
+
+            if (string.IsNullOrWhiteSpace(server.Name))
+                issues.Add(("error", $"{prefix}: Name is required."));
+            else if (!names.Add(server.Name))
+                issues.Add(("error", $"{prefix}: Duplicate MCP server name."));
+
+            var transport = server.Transport.ToLowerInvariant();
+            if (transport is not ("stdio" or "http"))
+            {
+                issues.Add(("error", $"{prefix}: Unknown Transport '{server.Transport}'. Valid values: stdio, http."));
+                continue;
+            }
+
+            if (transport == "stdio")
+            {
+                if (string.IsNullOrWhiteSpace(server.Command))
+                    issues.Add(("error", $"{prefix}: Command is required for stdio transport."));
+
+                if (server.Headers.Count > 0)
+                    issues.Add(("warning", $"{prefix}: Headers is ignored for stdio transport (http only)."));
+                if (server.OAuth is not null)
+                    issues.Add(("error", $"{prefix}: OAuth requires Transport: http."));
+                if (!server.TransportMode.Equals("auto", StringComparison.OrdinalIgnoreCase))
+                    issues.Add(("warning", $"{prefix}: TransportMode is ignored for stdio transport (http only)."));
+            }
+            else // http
+            {
+                if (string.IsNullOrWhiteSpace(server.Url))
+                {
+                    issues.Add(("error", $"{prefix}: Url is required for http transport."));
+                }
+                else
+                {
+                    var expandedUrl = ProcessHelper.ExpandEnvTokens(server.Url);
+                    if (!Uri.TryCreate(expandedUrl, UriKind.Absolute, out _))
+                        issues.Add(("error", $"{prefix}: Url '{server.Url}' is not a valid absolute URL."));
+                }
+
+                var mode = server.TransportMode.Trim().ToLowerInvariant();
+                if (mode is not ("" or "auto" or "autodetect" or "streamable-http" or "streamablehttp" or "streamable" or "sse"))
+                    issues.Add(("error",
+                        $"{prefix}: Unknown TransportMode '{server.TransportMode}'. Valid values: auto, streamable-http, sse."));
+
+                foreach (var (header, value) in server.Headers)
+                    foreach (var envVar in ExtractEnvTokens(value))
+                        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(envVar)))
+                            issues.Add(("warning",
+                                $"{prefix}: Header '{header}' references env var '{envVar}', which is not set in this shell."));
+
+                if (server.Command is not null || server.Args.Count > 0 || server.Env.Count > 0 || server.WorkingDirectory is not null)
+                    issues.Add(("warning", $"{prefix}: Command/Args/Env/WorkingDirectory are ignored for http transport (stdio only)."));
+
+                if (server.OAuth is { } oauth)
+                {
+                    if (oauth.CallbackPort is <= 0 or > 65535)
+                        issues.Add(("error",
+                            $"{prefix}: OAuth.CallbackPort must be a valid TCP port (1-65535), got {oauth.CallbackPort}."));
+
+                    if (oauth.ClientSecret is { } secret)
+                        foreach (var envVar in ExtractEnvTokens(secret))
+                            if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(envVar)))
+                                issues.Add(("warning",
+                                    $"{prefix}: OAuth.ClientSecret references env var '{envVar}', which is not set in this shell."));
+
+                    if (!string.IsNullOrWhiteSpace(oauth.ClientSecret) && string.IsNullOrWhiteSpace(oauth.ClientId))
+                        issues.Add(("warning",
+                            $"{prefix}: OAuth.ClientSecret is set without ClientId — this is almost always a mistake."));
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<string> ExtractEnvTokens(string value) =>
+        System.Text.RegularExpressions.Regex.Matches(value, @"\$\{([^}]+)\}")
+            .Select(m => m.Groups[1].Value);
 
     private static async Task ValidateMcpConnectivityAsync(
         OrchestrationConfig config,

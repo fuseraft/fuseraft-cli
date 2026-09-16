@@ -73,6 +73,39 @@ public sealed class ReplMcpServerStoreTests : IDisposable
     }
 
     [Fact]
+    public void SaveThenLoad_RoundTripsHeadersAndOAuth()
+    {
+        var servers = new List<McpServerConfig>
+        {
+            new()
+            {
+                Name          = "remote",
+                Transport     = "http",
+                Url           = "https://example.com/mcp",
+                Headers       = new Dictionary<string, string> { ["Authorization"] = "Bearer ${MY_TOKEN}" },
+                TransportMode = "streamable-http",
+                OAuth = new McpOAuthConfig
+                {
+                    ClientId     = "client-123",
+                    Scopes       = ["read", "write"],
+                    CallbackPort = 54321,
+                },
+            },
+        };
+
+        ReplMcpServerStore.Save(servers);
+        var loaded = ReplMcpServerStore.Load();
+
+        Assert.Single(loaded);
+        Assert.Equal("Bearer ${MY_TOKEN}", loaded[0].Headers["Authorization"]);
+        Assert.Equal("streamable-http", loaded[0].TransportMode);
+        Assert.NotNull(loaded[0].OAuth);
+        Assert.Equal("client-123", loaded[0].OAuth!.ClientId);
+        Assert.Equal(["read", "write"], loaded[0].OAuth!.Scopes);
+        Assert.Equal(54321, loaded[0].OAuth!.CallbackPort);
+    }
+
+    [Fact]
     public void Save_OverwritesPreviousContent()
     {
         ReplMcpServerStore.Save([new McpServerConfig { Name = "first" }]);

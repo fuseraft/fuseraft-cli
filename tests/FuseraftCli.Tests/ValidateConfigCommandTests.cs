@@ -1533,6 +1533,227 @@ public class ValidateConfigCommandTests : IDisposable
     }
 
     // -----------------------------------------------------------------------
+    // McpServers validation tests
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task McpServers_HttpMissingUrl_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
+            "McpServers": [{"Name": "Remote", "Transport": "http"}]
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task McpServers_StdioMissingCommand_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
+            "McpServers": [{"Name": "Local", "Transport": "stdio"}]
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task McpServers_DuplicateNames_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
+            "McpServers": [
+              {"Name": "Dup", "Transport": "stdio", "Command": "npx"},
+              {"Name": "Dup", "Transport": "stdio", "Command": "python"}
+            ]
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task McpServers_OAuthOnStdioTransport_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
+            "McpServers": [
+              {"Name": "Local", "Transport": "stdio", "Command": "npx", "OAuth": {"CallbackPort": 1179}}
+            ]
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task McpServers_UnknownTransportMode_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
+            "McpServers": [
+              {"Name": "Remote", "Transport": "http", "Url": "https://example.com/mcp", "TransportMode": "bogus"}
+            ]
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task McpServers_ValidHttpWithHeadersAndOAuth_Returns0()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
+            "McpServers": [
+              {
+                "Name": "Remote",
+                "Transport": "http",
+                "Url": "https://example.com/mcp",
+                "TransportMode": "streamable-http",
+                "Headers": {"Authorization": "Bearer literal-value-not-an-env-token"},
+                "OAuth": {"ClientId": "abc123"}
+              }
+            ]
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(0, exitCode);
+    }
+
+    [Fact]
+    public async Task McpServers_ValidStdio_Returns0()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
+            "McpServers": [
+              {"Name": "Local", "Transport": "stdio", "Command": "npx", "Args": ["-y", "some-server"]}
+            ]
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(0, exitCode);
+    }
+
+    [Fact]
+    public async Task McpServers_UnsetEnvVarInHeader_WarnsButPasses()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
+            "McpServers": [
+              {
+                "Name": "Remote",
+                "Transport": "http",
+                "Url": "https://example.com/mcp",
+                "Headers": {"Authorization": "Bearer ${DEFINITELY_UNSET_TEST_VAR_XYZ}"}
+              }
+            ]
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(0, exitCode); // warning only, not an error
+    }
+
+    // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
