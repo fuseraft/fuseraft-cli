@@ -379,6 +379,15 @@ Detection is automatic — no configuration required.
 
 When you configure the REPL via the first-run wizard or `/provider setup`, the API key is stored in the OS-native credential store — never in `~/.fuseraft/config` on disk.
 
+**Updating or rotating a key.** When a key expires or you need to swap it out, either run `/provider setup` in the REPL (reconfigures provider/model/key interactively and rebuilds the session's chat client immediately), or outside the REPL:
+
+```bash
+export FUSERAFT_API_KEY=sk-...new-key...
+fuseraft keychain --set
+```
+
+`fuseraft keychain --set` overwrites whatever's currently in the keychain — see [CLI Reference — `fuseraft keychain`](cli-reference.md#fuseraft-keychain) for `--get` and the no-flag status check. `fuseraft settings set provider.apiKey` is deliberately not a valid way to do this — it's refused outright, pointing back to one of these two paths, so a key never ends up written to the config file even by accident.
+
 ### Secret masking in logs
 
 All log output (console, `~/.fuseraft/logs/app.log`, and any debug sidecar file) passes through a secret-masking text formatter before being written. The formatter applies three regex patterns:

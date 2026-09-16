@@ -2477,6 +2477,48 @@ fuseraft update
 
 ---
 
+## `fuseraft keychain`
+
+View or update the API key stored in the OS-native credential store — the same store `/provider setup` and the first-run wizard write to. See [Security — API key storage](security.md#api-key-storage) for the full storage model (no plaintext fallback, migration from older configs, the VS Code extension's separate path).
+
+```
+fuseraft keychain [options]
+```
+
+**Options**
+
+| Flag | Description |
+|------|-------------|
+| `--set` | Read `FUSERAFT_API_KEY` from the environment and store it, overwriting any existing entry. |
+| `--get` | Print the stored key to stdout. Exits 1 if none is stored. |
+
+With no flags, prints whether a key is currently stored (never the key itself).
+
+**Updating an expired or rotated key**
+
+```bash
+export FUSERAFT_API_KEY=sk-...new-key...
+fuseraft keychain --set
+```
+
+This is the mechanism `fuseraft settings set provider.apiKey` deliberately refuses to do inline — API keys are never written to `~/.fuseraft/config`. Inside the REPL, `/provider setup` does the equivalent interactively and rebuilds the session's chat client immediately, no restart needed.
+
+**Examples**
+
+```bash
+# Check whether a key is stored
+fuseraft keychain
+
+# Rotate the key after your provider issues a new one
+export FUSERAFT_API_KEY=sk-ant-...
+fuseraft keychain --set
+
+# Print the stored key, e.g. to export it into another tool's environment
+export SOME_OTHER_TOOL_KEY=$(fuseraft keychain --get)
+```
+
+---
+
 ## `fuseraft settings`
 
 View or edit the global `~/.fuseraft/config` file — provider, sampling, REPL, telemetry, skill-curation, and model-override defaults shared by every project on the machine. For a project's own `orchestration.yaml`/`.json`, see [`fuseraft config`](#fuseraft-config) instead.
