@@ -212,14 +212,21 @@ public sealed class PluginRegistry : IDisposable
         Func<string, string, Task<bool>>? BindApprover(string plugin) =>
             toolActionApprover is null ? null : (action, detail) => toolActionApprover(plugin, action, detail);
 
+        // Merged with DefaultSecurityPolicy's baseline (.env, .env.*) unconditionally, so
+        // orchestration sessions get the same "don't leak secrets into context" protection
+        // as the REPL even when the config declares no Security block at all — see
+        // docs/security.md and ReplCommand.cs's identical merge for the REPL side.
+        var effectiveShellPolicy = DefaultSecurityPolicy.MergeShellPolicy(security.ShellPolicy);
+        var fsDenyPatterns       = DefaultSecurityPolicy.MergeFileSystemDeny(security.FileSystemPermissions);
+
         // Create ShellPlugin once so FileSystemPlugin can reference its cache invalidator.
         // Both are registered as singletons — the factory lambda returns the same instance.
-        var shellInstance = new ShellPlugin(sandboxRoot, shellCommandApprover, security.ShellPolicy, eventSink);
+        var shellInstance = new ShellPlugin(sandboxRoot, shellCommandApprover, effectiveShellPolicy, eventSink);
         Register("Shell",      () => shellInstance);
 
         // Same eager-construction-plus-shared-closure pattern as RegisterDefaults — both
         // "FileSystem" registrations must share one FileSystemPlugin instance's per-turn state.
-        var fsPlugin = new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore, sessionCache: sessionReadCache, onWrite: shellInstance.InvalidateRunCache, onCacheHit: onCacheHit, exemptedPaths: ["~/.fuseraft/"], approveAction: BindApprover("FileSystem"), approveWrite: fileWriteApprover);
+        var fsPlugin = new FileSystemPlugin(sandboxRoot, security.ReadFileSizeLimit, versionStore: fileVersionStore, sessionCache: sessionReadCache, onWrite: shellInstance.InvalidateRunCache, onCacheHit: onCacheHit, exemptedPaths: ["~/.fuseraft/"], approveAction: BindApprover("FileSystem"), approveWrite: fileWriteApprover, denyPatterns: fsDenyPatterns);
         Register("FileSystem", () => fsPlugin);
         RegisterAdditional("FileSystem", () => new FileSystemManagementOps(
             fsPlugin, sandboxRoot, sessionCache: sessionReadCache, versionStore: fileVersionStore, exemptedPaths: ["~/.fuseraft/"]));

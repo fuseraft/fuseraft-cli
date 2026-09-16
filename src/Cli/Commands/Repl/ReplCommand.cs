@@ -301,9 +301,17 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         IHumanApprovalService approvalService = jsonMode
             ? new JsonBridgeHumanApprovalService(stdinPump!)
             : new ConsoleHumanApprovalService();
+        // Loaded once and reused below for both ShellPlugin and FileSystemPlugin so a single
+        // Security block in .fuseraft/config/orchestration.yaml governs both surfaces.
+        // DefaultSecurityPolicy is merged in unconditionally (not just when that file exists)
+        // so "don't leak secrets into context" holds even for a project with no security
+        // config at all — the same baseline PluginRegistry.Configure applies for orchestration.
+        var securityConfig       = TryLoadDefaultSecurityConfig();
+        var effectiveShellPolicy = DefaultSecurityPolicy.MergeShellPolicy(securityConfig?.ShellPolicy);
+        var fsDenyPatterns       = DefaultSecurityPolicy.MergeFileSystemDeny(securityConfig?.FileSystemPermissions);
         using ShellPlugin? shellPlugin  = settings.NoTools ? null : new ShellPlugin(
             sandboxRoot:    sandboxRoot,
-            shellPolicy:    TryLoadDefaultShellPolicy(),
+            shellPolicy:    effectiveShellPolicy,
             approveCommand: cmd => hitlState.Enabled ? approvalService.PromptShellCommandAsync(cmd) : Task.FromResult(true),
             includedRoots:  includedRoots);
 
@@ -334,7 +342,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         List<AIFunction>? gitFunctions   = null;
         if (!settings.NoTools)
         {
-            fsPluginForCategory = new FileSystemPlugin(sandboxRoot: sandboxRoot, approveAction: approveToolAction("FileSystem"), approveWrite: approveFileWrite, includedRoots: includedRoots);
+            fsPluginForCategory = new FileSystemPlugin(sandboxRoot: sandboxRoot, approveAction: approveToolAction("FileSystem"), approveWrite: approveFileWrite, includedRoots: includedRoots, denyPatterns: fsDenyPatterns);
             fsFunctions    = PluginRegistry.GetFunctionsFromObject(fsPluginForCategory)
                 .Concat(PluginRegistry.GetFunctionsFromObject(new FileSystemManagementOps(fsPluginForCategory, sandboxRoot: sandboxRoot, includedRoots: includedRoots)))
                 .ToList();
@@ -742,10 +750,11 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
     // Private setup helpers
     // -------------------------------------------------------------------------
 
-    // Loads ShellPolicy from the default orchestration config in the working directory, if one exists.
-    // Uses OrchestratorConfigLoader.LoadSecurityConfig which binds only Orchestration.Security and does
-    // NOT run ResolveAgentFiles — a missing agent file therefore cannot silently drop the policy.
-    private ShellPolicy? TryLoadDefaultShellPolicy()
+    // Loads Security (ShellPolicy + FileSystemPermissions, etc.) from the default orchestration
+    // config in the working directory, if one exists. Uses OrchestratorConfigLoader.LoadSecurityConfig
+    // which binds only Orchestration.Security and does NOT run ResolveAgentFiles — a missing agent
+    // file therefore cannot silently drop the policy.
+    private SecurityConfig? TryLoadDefaultSecurityConfig()
     {
         var candidates = new[]
         {
@@ -759,13 +768,13 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             try
             {
                 var security = OrchestratorConfigLoader.LoadSecurityConfig(path);
-                if (security?.ShellPolicy is { } policy)
-                    return policy;
+                if (security is not null)
+                    return security;
             }
             catch (Exception ex)
             {
                 loggerFactory.CreateLogger<ReplCommand>().LogDebug(
-                    ex, "Failed to load shell policy from '{Path}' — REPL will proceed without it.", path);
+                    ex, "Failed to load security config from '{Path}' — REPL will proceed without it.", path);
             }
         }
 

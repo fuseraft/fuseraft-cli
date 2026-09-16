@@ -202,7 +202,11 @@ internal sealed class AgentToolResolver(
         }
 
         // Default: expanded read-oriented set. FileSystem (sandboxed, read ops only).
-        var fsPlugin = new FileSystemPlugin(securityConfig?.FileSystemSandboxPath, exemptedPaths: ["~/.fuseraft/"]);
+        // denyPatterns applies DefaultSecurityPolicy's baseline (.env, .env.*) even here — a
+        // sub-agent's own FileSystemPlugin instance is separate from the parent's, and must
+        // not be a way around the parent's secrets protection.
+        var fsDenyPatterns = DefaultSecurityPolicy.MergeFileSystemDeny(securityConfig?.FileSystemPermissions);
+        var fsPlugin = new FileSystemPlugin(securityConfig?.FileSystemSandboxPath, exemptedPaths: ["~/.fuseraft/"], denyPatterns: fsDenyPatterns);
         var fsOps     = new FileSystemManagementOps(fsPlugin, securityConfig?.FileSystemSandboxPath, exemptedPaths: ["~/.fuseraft/"]);
         tools.AddRange(
             PluginRegistry.GetFunctionsFromObject(fsPlugin)
