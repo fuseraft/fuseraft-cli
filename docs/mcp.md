@@ -4,6 +4,8 @@ fuseraft-cli supports the [Model Context Protocol (MCP)](https://modelcontextpro
 
 > **REPL users:** everything below configures MCP servers for `fuseraft run` via a YAML/JSON config. If you're in `fuseraft repl`, use `/mcp add` instead for an interactive wizard that connects a server on the spot and persists it for future sessions — see [CLI Reference — Connecting an MCP server](cli-reference.md#fuseraft-repl).
 
+> **Looking for the other direction?** Everything below is about fuseraft connecting *out* to MCP servers as a client. If you want fuseraft itself to be callable as an MCP server — so another agent can dispatch tasks into a running fuseraft process — see [CLI Reference — `fuseraft serve`](cli-reference.md#fuseraft-serve).
+
 ---
 
 ## How it works
@@ -227,3 +229,5 @@ McpServers:
     Args:
       - path/to/my-server.dll
 ```
+
+This section is about building a *separate* MCP server for fuseraft to connect to as a client. If instead you want fuseraft itself to expose tools as an MCP server — no separate process to write — `fuseraft serve` already does this: it hosts `dispatch_task`/`get_status`/`get_result` over streamable HTTP so any MCP client (including another fuseraft instance) can hand it work. See [CLI Reference — `fuseraft serve`](cli-reference.md#fuseraft-serve).
