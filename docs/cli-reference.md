@@ -2166,6 +2166,114 @@ Jobs can be edited by hand — `fuseraft schedule run` reads the YAML fresh on e
 
 ---
 
+## `fuseraft serve`
+
+Starts a long-lived idle-mode daemon: the agent team is built once, then the process waits for a human (`fuseraft attach`) or another agent (over MCP) to dispatch a task, instead of exiting after a single run the way `fuseraft run`/`fuseraft schedule run` do. One daemon serves one working directory and one orchestration config for its whole lifetime; tasks are processed one at a time (fuseraft's orchestrators assume a single shared conversation history), so dispatching is fire-and-forget — poll for the result.
+
+```
+fuseraft serve [options]
+```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-c, --config <path>` | `.fuseraft/config/orchestration.yaml` | Orchestration config the daemon runs for its whole lifetime. |
+| `--work-dir <path>` | — | Working directory for the daemon's whole lifetime. |
+| `--http-port <port>` | `8137` | Fixed port for the MCP (streamable-HTTP) endpoint at `/mcp`. Fixed rather than OS-assigned because another agent needs a stable address to configure ahead of time, unlike a human who can read a printed URL. |
+| `--socket <path>` | `~/.fuseraft/run/<project-hash>.sock` | Unix domain socket `fuseraft attach` connects to. Lives in a short, flat directory (not under the per-project state tree) because AF_UNIX socket paths are capped at 108 bytes on Linux. |
+| `--unattended-policy <deny\|allow>` | `deny` | What happens to a mutating tool call (shell/write/git-push/etc.) when nobody is attached. `deny` — a task dispatched by another agent with no human watching is denied by default. `allow` — auto-approve, for trusted unattended pipelines. |
+| `--auto-objective <id>` | — | Objective ID (e.g. `OBJ-0001`, from `fuseraft objective list`) whose `RemainingTasks` the daemon pulls from and runs on its own whenever idle, instead of only running tasks it's explicitly dispatched. Repeatable. |
+
+Only one daemon may run per project at a time, enforced by a pidfile at `~/.fuseraft/state/{project}/serve.pid`; a second `fuseraft serve` in the same working directory refuses to start while the first is alive. `Ctrl+C` shuts the daemon down gracefully — it finishes the in-flight task (if any), then removes the pidfile and socket.
+
+**Autonomous objective work.** `--auto-objective` is opt-in and explicit — an objective sitting in `.fuseraft/knowledge/objectives/` never runs on its own just because it exists; you have to name it. Once named, whenever the daemon goes idle it checks that objective's `RemainingTasks` and, if there's an entry, runs it exactly like any other dispatched task (same queue, same live broadcast to attached observers as an `auto_dispatched` event, same checkpointing) — no external `dispatch_task` call or human involved. It keeps chugging through `RemainingTasks` until the list is empty, then goes back to idle. Two safety notes:
+- **No extra trust.** A self-picked task has no attach-connection origin, so its mutating tool calls are still gated by `--unattended-policy` exactly like an MCP-dispatched task — self-initiated work doesn't get a free pass. Pair `--auto-objective` with `--unattended-policy allow` if you actually want it to get things done unattended.
+- **Failure-skip, not infinite retry.** A task that fails 3 times in a row (in-memory count, reset on success, not persisted) stops being auto-picked — it's still visible in `RemainingTasks` for you to inspect, fix, or re-run explicitly via `dispatch_task`, but the daemon won't keep burning API calls retrying it unattended.
+
+**MCP tool surface** (at `http://localhost:<port>/mcp`, streamable-HTTP, localhost-only, unauthenticated — the same trust model as `--devui`):
+
+| Tool | Description |
+|------|-------------|
+| `dispatch_task(task, objectiveId?)` | Enqueues a task and returns immediately with `{ sessionId, status: "queued", position }`. `position` is how many tasks are ahead of it (running + earlier-queued) — `0` means it runs next. `objectiveId` (e.g. `OBJ-0001`) optionally links the task's progress to an existing `fuseraft objective`. |
+| `get_status(sessionId)` | Current status (`queued`/`running`/`completed`/`failed`), queue position (while queued), turn count, last agent, and a short excerpt of the last message. |
+| `get_result(sessionId)` | Final result once the task has finished: success flag, error message (if any), and the full message list. Returns `{ status: "queued" }`/`{ status: "running" }` if it hasn't finished yet — poll again. |
+
+A mutating tool call in an MCP-dispatched task is gated by `--unattended-policy` regardless of whether a human happens to be attached at the time — attaching doesn't retroactively make a bystander an approver for work they didn't ask for (see `fuseraft attach` below for what *is* shared with attached observers).
+
+**Examples**
+
+```bash
+# Start a daemon for the current project, deny unattended mutating actions (default)
+fuseraft serve
+
+# Point at a specific config, allow trusted unattended pipelines to skip approval
+fuseraft serve --config .fuseraft/config/devops-team.yaml --unattended-policy allow
+```
+
+```bash
+# From another agent/process, over MCP (any MCP client works — this is the
+# ModelContextProtocol C# client SDK's shape):
+dispatch_task(task: "Add input validation to the signup form")
+# → { "sessionId": "58440fde", "status": "queued" }
+get_result(sessionId: "58440fde")
+# → { "status": "completed", "succeeded": true, "messages": [...] }
+```
+
+**Not yet supported:** multiple concurrent working directories behind one daemon, an A2A agent-card front door, and a Windows named-pipe equivalent for `--socket` (Unix domain sockets only).
+
+---
+
+## `fuseraft attach`
+
+Connects to a running `fuseraft serve` daemon's socket and lets you dispatch tasks to it interactively — a human front door alongside the MCP one. Whatever you type is sent as a task; the daemon streams back a `queued` acknowledgement (with your queue position), live progress for *whatever task is currently running* (not just your own), and a final result, before prompting you for the next task.
+
+```
+fuseraft attach [options]
+```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--socket <path>` | `~/.fuseraft/run/<project-hash>.sock` | Path to the daemon's attach socket. Must match the daemon's actual socket (same project directory, or an explicit `--socket` passed to both). |
+
+Any number of clients may attach concurrently. Every attached connection sees the daemon's live progress (which agent is working, which tool it's calling) regardless of who dispatched the running task — it's a shared view, like several people watching one dashboard. Approval prompts for mutating tool calls, however, go only to the connection that actually dispatched the task in question; a connection that's just watching is never asked to approve someone else's (or an agent's) action.
+
+**Example** — two people attached at once; one dispatches, the other just watches:
+
+```bash
+fuseraft attach   # first terminal
+```
+
+```
+Attached → /home/user/.fuseraft/run/1f92641edb0442bd.sock. Type a task and press Enter. Ctrl+C to detach.
+> Run the test suite and tell me if anything fails
+queued → session a1b2c3d4 (running next)
+→ Assistant is working...
+  Assistant → shell_run(npm test)
+Approval requested (shell_command):
+{"type":"approval_request","kind":"shell_command","command":"npm test"}
+Approve? (y/N): y
+✓ done
+All 42 tests passed.
+>
+```
+
+```bash
+fuseraft attach   # second terminal, attached at the same time
+```
+
+```
+Attached → /home/user/.fuseraft/run/1f92641edb0442bd.sock. Type a task and press Enter. Ctrl+C to detach.
+> → Assistant is working...
+  Assistant → shell_run(npm test)
+```
+
+The second terminal sees the same `agent_starting`/`tool_calling` progress live, but never the `approval_request` — that went only to the terminal that dispatched the task.
+
+---
+
 ## `fuseraft skills`
 
 Install, list, remove, and validate global skills available to all agent sessions. Skills are stored in `~/.fuseraft/skills/` and registered in an FTS5 search index so fuseraft can automatically identify which ones are relevant to a given task.

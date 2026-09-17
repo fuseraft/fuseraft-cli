@@ -127,6 +127,8 @@ services.AddSingleton<ISessionStore, JsonSessionStore>();
 
 // Commands are resolved via DI, register them so Spectre can inject dependencies.
 services.AddTransient<RunCommand>();
+services.AddTransient<ServeCommand>();
+services.AddTransient<AttachCommand>();
 services.AddTransient<PluginsCommand>();
 services.AddTransient<ShowConfigCommand>();
 services.AddTransient<ValidateConfigCommand>();
@@ -229,6 +231,16 @@ app.Configure(cfg =>
         .WithDescription("Run an orchestration session with the agent team.")
         .WithExample(["run", "\"Build a REST API in Go with JWT auth\""])
         .WithExample(["run", "--config", "config/examples/devops-team.json", "\"Deploy to staging\""]);
+
+    cfg.AddCommand<ServeCommand>("serve")
+        .WithDescription("Start a long-lived idle-mode daemon that waits for a human (fuseraft attach) or another agent (MCP) to dispatch tasks.")
+        .WithExample(["serve"])
+        .WithExample(["serve", "--config", ".fuseraft/config/orchestration.yaml"])
+        .WithExample(["serve", "--unattended-policy", "allow"]);
+
+    cfg.AddCommand<AttachCommand>("attach")
+        .WithDescription("Attach to a running `fuseraft serve` daemon and dispatch tasks interactively.")
+        .WithExample(["attach"]);
 
     cfg.AddCommand<PluginsCommand>("plugins")
         .WithDescription("List all registered plugins and their functions.")
