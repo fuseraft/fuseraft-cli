@@ -2179,8 +2179,8 @@ fuseraft serve [options]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-c, --config <path>` | `.fuseraft/config/orchestration.yaml` | Orchestration config the daemon runs for its whole lifetime. |
-| `--work-dir <path>` | — | Working directory for the daemon's whole lifetime. |
-| `--http-port <port>` | `8137` | Fixed port for the MCP (streamable-HTTP) endpoint at `/mcp`. Fixed rather than OS-assigned because another agent needs a stable address to configure ahead of time, unlike a human who can read a printed URL. |
+| `--work-dir <path>` | config's `Security.FileSystemSandboxPath`, else current directory | Working directory for the daemon's whole lifetime. |
+| `--http-port <port>` | derived from the project path (like `--socket`) | Port for the MCP (streamable-HTTP) endpoint at `/mcp`. Fixed rather than OS-assigned because another agent needs a stable address to configure ahead of time, unlike a human who can read a printed URL — but per-project rather than one hardcoded number for every project, so two daemons for two different projects don't collide on the same default port. |
 | `--socket <path>` | `~/.fuseraft/run/<project-hash>.sock` | Unix domain socket `fuseraft attach` connects to. Lives in a short, flat directory (not under the per-project state tree) because AF_UNIX socket paths are capped at 108 bytes on Linux. |
 | `--unattended-policy <deny\|allow>` | `deny` | What happens to a mutating tool call (shell/write/git-push/etc.) when nobody is attached. `deny` — a task dispatched by another agent with no human watching is denied by default. `allow` — auto-approve, for trusted unattended pipelines. |
 | `--auto-objective <id>` | — | Objective ID (e.g. `OBJ-0001`, from `fuseraft objective list`) whose `RemainingTasks` the daemon pulls from and runs on its own whenever idle, instead of only running tasks it's explicitly dispatched. Repeatable. |

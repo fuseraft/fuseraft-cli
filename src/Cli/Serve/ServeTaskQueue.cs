@@ -74,6 +74,15 @@ public sealed class ServeTaskQueue
     private readonly Channel<ServeTaskRequest> _channel = Channel.CreateUnbounded<ServeTaskRequest>();
     private readonly ConcurrentDictionary<string, ServeTaskRecord> _records = new();
 
+    // Caps how many *terminal* (Completed/Failed) records stay in memory. Without this, a
+    // daemon left running for days under --auto-objective (a supported, documented use case —
+    // see docs/serve.md) would accumulate one full conversation-history record per completed
+    // task forever, on a process explicitly designed to stay resident indefinitely. Long-term
+    // history already survives durably via the session store; this dictionary only needs to
+    // hold enough recent results for get_status/get_result to still answer for them. Queued and
+    // Running records are never evicted regardless of count.
+    private const int MaxRetainedTerminalRecords = 500;
+
     public ChannelReader<ServeTaskRequest> Reader => _channel.Reader;
 
     /// <summary>
@@ -86,7 +95,20 @@ public sealed class ServeTaskQueue
         _records[sessionId] = new ServeTaskRecord(sessionId, task, objectiveId, originSink);
         // Unbounded channel — TryWrite never fails.
         _channel.Writer.TryWrite(new ServeTaskRequest(sessionId, task, objectiveId, originSink));
+        EvictOldestTerminalRecords();
         return sessionId;
+    }
+
+    private void EvictOldestTerminalRecords()
+    {
+        var terminal = _records.Values
+            .Where(r => r.Status is ServeTaskStatus.Completed or ServeTaskStatus.Failed)
+            .ToList();
+        var overflow = terminal.Count - MaxRetainedTerminalRecords;
+        if (overflow <= 0) return;
+
+        foreach (var r in terminal.OrderBy(r => r.CompletedAt ?? r.CreatedAt).Take(overflow))
+            _records.TryRemove(r.SessionId, out _);
     }
 
     public ServeTaskRecord? TryGet(string sessionId) =>

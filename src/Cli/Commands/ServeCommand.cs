@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using fuseraft.Cli.Serve;
+using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Infrastructure.Plugins;
 
@@ -15,13 +16,12 @@ public sealed class ServeSettings : CommandSettings
     public string? ConfigPath { get; set; }
 
     [CommandOption("--work-dir")]
-    [Description("Working directory for the daemon's whole lifetime (one daemon serves one project).")]
+    [Description("Working directory for the daemon's whole lifetime (one daemon serves one project). Falls back to the config's Security.FileSystemSandboxPath, then the current directory.")]
     public string? WorkDir { get; set; }
 
     [CommandOption("--http-port")]
-    [Description("Fixed port for the MCP (streamable-HTTP) endpoint. Other agents need a stable address to configure, unlike a human reading a printed URL, so this is a fixed default rather than an OS-assigned ephemeral port.")]
-    [DefaultValue(8137)]
-    public int HttpPort { get; set; } = 8137;
+    [Description("Port for the MCP (streamable-HTTP) endpoint. Other agents need a stable address to configure, unlike a human reading a printed URL, so this defaults to a fixed-per-project (not OS-assigned ephemeral) port derived from the project path, so two daemons for two different projects don't collide on the same default port.")]
+    public int? HttpPort { get; set; }
 
     [CommandOption("--socket")]
     [Description("Path to the Unix domain socket `fuseraft attach` connects to. Defaults to ~/.fuseraft/run/<project-hash>.sock.")]
@@ -55,14 +55,19 @@ public sealed class ServeCommand(ILoggerFactory loggerFactory, PluginRegistry pl
             return 1;
         }
 
-        if (settings.WorkDir is not null)
+        // Mirrors RunCommand's ResolveWorkDir: an explicit --work-dir wins, otherwise fall back
+        // to the config's own declared sandbox path rather than silently keeping the launch-time
+        // CWD, so a config's relative paths (checkpoint, validation, ChangeTracker) resolve the
+        // same way they would under `fuseraft run`.
+        var workDir = RunCommand.ResolveWorkDir(settings.WorkDir, configPath, loggerFactory.CreateLogger<ServeCommand>());
+        if (workDir is not null)
         {
-            if (!Directory.Exists(settings.WorkDir))
+            if (!Directory.Exists(workDir))
             {
-                AnsiConsole.MarkupLine($"[red]✗ Work directory not found:[/] {Markup.Escape(settings.WorkDir)}");
+                AnsiConsole.MarkupLine($"[red]✗ Work directory not found:[/] {Markup.Escape(workDir)}");
                 return 1;
             }
-            Directory.SetCurrentDirectory(settings.WorkDir);
+            Directory.SetCurrentDirectory(workDir);
         }
 
         var unattendedAllow = settings.UnattendedPolicy.Equals("allow", StringComparison.OrdinalIgnoreCase);
@@ -72,9 +77,31 @@ public sealed class ServeCommand(ILoggerFactory loggerFactory, PluginRegistry pl
             return 1;
         }
 
+        // Fail fast on a missing/invalid provider key — the same check `fuseraft run` makes —
+        // rather than letting the daemon report "Idle, ready" and only discovering the problem
+        // deep inside the first dispatched task.
+        try
+        {
+            var config = OrchestratorConfigLoader.LoadConfig(configPath);
+            await ApiKeyValidator.ValidateApiKeysAsync(config);
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]✗ API key validation failed:[/] {Markup.Escape(ex.Message)}");
+            return 1;
+        }
+
+        // Honor the config's Checkpoint.Mode/Path exactly like `fuseraft run` does — without
+        // this, a config that asks for in-memory-only sessions would still have every dispatched
+        // task's full history persisted to the global session store.
+        var activeStore = RunCommand.BuildActiveStore(configPath, loggerFactory, sessionStore);
+
+        var projectSlug = FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory());
+        var httpPort    = settings.HttpPort ?? FuseraftPaths.DefaultDaemonHttpPort(projectSlug);
+
         var host = new ServeHost(
-            loggerFactory, pluginRegistry, sessionStore,
-            configPath, settings.HttpPort, settings.Socket, unattendedAllow,
+            loggerFactory, pluginRegistry, activeStore,
+            configPath, httpPort, settings.Socket, unattendedAllow,
             settings.AutoObjective ?? []);
 
         try

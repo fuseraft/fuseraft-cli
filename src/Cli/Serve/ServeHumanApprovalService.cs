@@ -61,6 +61,17 @@ public sealed class ServeHumanApprovalService(bool allowWhenUnattended) : IHuman
     private readonly List<IServeAttachSink> _connections = [];
     private IServeAttachSink? _currentTaskOrigin;
 
+    // Serializes GateAsync's emit+read round-trip. IServeAttachSink's wire protocol has no
+    // per-request correlation ID — a response is just "the next line on the channel" — which was
+    // fine when only one mutating-action gate could ever be awaiting a response at a time. That
+    // stopped being true once orchestrators that run agent branches concurrently within a single
+    // task (ScatterGatherOrchestrator, MapReduceOrchestrator — both via Task.WhenAll) started
+    // calling GateAsync from more than one branch at once: two concurrent emit+read pairs racing
+    // on the same channel could deliver one branch's answer to a different branch's pending
+    // action. Holding this for the whole round-trip guarantees at most one request is ever
+    // outstanding against a sink, so a response can never be misdelivered.
+    private readonly SemaphoreSlim _gateLock = new(1, 1);
+
     /// <summary>
     /// Set once by <see cref="ServeHost"/> right after <c>OrchestratorBuilder.BuildAsync</c>
     /// returns — this service has to exist <em>before</em> that call (it's one of its own
@@ -132,8 +143,24 @@ public sealed class ServeHumanApprovalService(bool allowWhenUnattended) : IHuman
         var origin = _currentTaskOrigin;
         if (origin is not null)
         {
-            origin.Emit(requestPayload);
-            return await origin.ReadApprovalResponseAsync();
+            await _gateLock.WaitAsync();
+            try
+            {
+                origin.Emit(requestPayload);
+                return await origin.ReadApprovalResponseAsync();
+            }
+            catch (Exception)
+            {
+                // The originating connection died mid-approval (e.g. the client's terminal was
+                // killed) and can never answer — fall through to the unattended policy exactly as
+                // if there had been no origin at all, rather than letting a broken-pipe exception
+                // from Emit propagate up and fail the whole task.
+                UnregisterConnection(origin);
+            }
+            finally
+            {
+                _gateLock.Release();
+            }
         }
 
         if (!allowWhenUnattended)
@@ -155,8 +182,15 @@ public sealed class ServeHumanApprovalService(bool allowWhenUnattended) : IHuman
     public Task<string?> PromptBlockerResolutionAsync(string agentName, string blockerMessage) =>
         Task.FromResult<string?>(null);
 
-    public Task<bool> PromptRouteApprovalAsync(string keyword, string sourceAgent, string targetAgent) =>
-        Task.FromResult(true);
+    public async Task<bool> PromptRouteApprovalAsync(string keyword, string sourceAgent, string targetAgent) =>
+        await GateAsync(new
+        {
+            type = "approval_request",
+            kind = "route_approval",
+            keyword,
+            sourceAgent,
+            targetAgent,
+        }, "route_approval");
 
     public Task<string?> PromptPostSessionAsync() => Task.FromResult<string?>(null);
 

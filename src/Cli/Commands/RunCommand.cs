@@ -232,7 +232,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             return 1;
         }
 
-        var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, _, sessionMetrics, adaptiveTrimTracker) = built;
+        var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, _, sessionMetrics, adaptiveTrimTracker, _) = built;
 
         // The config can also request JSON mode (Output.Json: true) for orchestrations that are
         // always invoked by scripts. Apply the same stderr redirect if the CLI flag didn't
@@ -887,7 +887,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
     /// Performs a lightweight config load to read the Checkpoint section; falls back to
     /// the global injected store on any error or when no Checkpoint config is present.
     /// </summary>
-    private static ISessionStore BuildActiveStore(
+    internal static ISessionStore BuildActiveStore(
         string configPath,
         ILoggerFactory loggerFactory,
         ISessionStore globalStore)
@@ -1095,7 +1095,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         return names;
     }
 
-    private static string? ResolveWorkDir(string? flagValue, string absoluteConfigPath, ILogger? logger = null)
+    internal static string? ResolveWorkDir(string? flagValue, string absoluteConfigPath, ILogger? logger = null)
     {
         if (!string.IsNullOrWhiteSpace(flagValue))
             return FuseraftPaths.ExpandPath(flagValue);

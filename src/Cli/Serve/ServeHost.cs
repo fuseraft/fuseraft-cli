@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using AgentGovernance.Audit;
+using AgentGovernance.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.AI;
@@ -60,6 +62,7 @@ public sealed class ServeHost(
         OrchestratorBuildResult? built = null;
         WebApplication? mcpApp = null;
         ServeSocketListener? socketListener = null;
+        fuseraft.Cli.Telemetry.FuseraftTelemetry? telemetry = null;
         using var shutdownCts = new CancellationTokenSource();
 
         ConsoleCancelEventHandler onCancel = (_, e) =>
@@ -88,6 +91,12 @@ public sealed class ServeHost(
                 hitlMode: true);
             approvalService.EventEmitter = built.EventEmitter;
 
+            // One telemetry instance for the daemon's whole lifetime, exactly like the
+            // orchestrator itself — OTel's exporters are meant to live for a process's duration,
+            // not be spun up and torn down per dispatched task, and every counter/histogram call
+            // already tags itself with the current session ID at the call site.
+            telemetry = fuseraft.Cli.Telemetry.FuseraftTelemetry.Create(built.Config.Telemetry, built.Config.Name);
+
             var queue = new ServeTaskQueue();
             var objectiveManager = new ObjectiveManager(new ObjectiveStore(FuseraftPaths.LocalObjectives));
 
@@ -108,22 +117,40 @@ public sealed class ServeHost(
                 : "[dim]  Auto-dispatch: off (--auto-objective)[/]");
             AnsiConsole.MarkupLine("[dim]  Idle — waiting for a task. Ctrl+C to stop.[/]");
 
-            await WorkerLoopAsync(queue, built, approvalService, objectiveManager, shutdownCts.Token);
+            await WorkerLoopAsync(queue, built, approvalService, objectiveManager, telemetry, shutdownCts.Token);
             return 0;
         }
         finally
         {
             Console.CancelKeyPress -= onCancel;
-            socketListener?.Stop();
-            if (mcpApp is not null) await mcpApp.DisposeAsync();
+
+            // Each teardown step is independent best-effort cleanup — one throwing (e.g. an MCP
+            // server's child process refusing to terminate cleanly) must never skip the rest,
+            // especially ReleasePidFile: skipping it leaks the pidfile and blocks every future
+            // `fuseraft serve` invocation for this project.
+            TryCleanup(() => socketListener?.Stop());
+            if (mcpApp is not null) await TryCleanupAsync(() => mcpApp.DisposeAsync().AsTask());
             if (built is not null)
             {
-                await built.McpManager.DisposeAsync();
-                built.GovernanceKernel.Dispose();
-                built.ChatClientFactory.Dispose();
+                await TryCleanupAsync(() => built.McpManager.DisposeAsync().AsTask());
+                TryCleanup(built.GovernanceKernel.Dispose);
+                TryCleanup(built.ChatClientFactory.Dispose);
             }
+            TryCleanup(() => telemetry?.Dispose());
             ReleasePidFile(pidFilePath);
         }
+    }
+
+    private void TryCleanup(Action action)
+    {
+        try { action(); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Error during serve daemon shutdown"); }
+    }
+
+    private async Task TryCleanupAsync(Func<Task> action)
+    {
+        try { await action(); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Error during serve daemon shutdown"); }
     }
 
     // -------------------------------------------------------------------------
@@ -135,6 +162,7 @@ public sealed class ServeHost(
         OrchestratorBuildResult built,
         ServeHumanApprovalService approvalService,
         ObjectiveManager objectiveManager,
+        fuseraft.Cli.Telemetry.FuseraftTelemetry? telemetry,
         CancellationToken cancellationToken)
     {
         var modelIdByAgent = built.Config.Agents.ToDictionary(
@@ -146,38 +174,12 @@ public sealed class ServeHost(
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                if (!queue.Reader.TryRead(out var request))
-                {
-                    // Queue's empty right now — see if there's auto-dispatch work to self-enqueue
-                    // before falling through to the real blocking wait. This is the daemon's own
-                    // initiative: it becomes an ordinary queued request from here on, so every
-                    // existing mechanism (broadcast, queue position, get_status/get_result,
-                    // checkpointing) applies to it with zero special-casing below.
-                    var picked = autoObjectiveIds.Count > 0
-                        ? await TryPickAutoDispatchTaskAsync(objectiveManager, cancellationToken)
-                        : null;
-
-                    if (picked is { } p)
-                    {
-                        var sessionId = queue.Enqueue(p.Task, p.ObjectiveId);
-                        approvalService.BroadcastEvent(new
-                        {
-                            type = "auto_dispatched",
-                            sessionId,
-                            objectiveId = p.ObjectiveId,
-                            task = p.Task,
-                        });
-                        _ = (built.EventEmitter?.EmitAsync(EventTypes.AutoDispatch,
-                            payload: new { session = sessionId, objective = p.ObjectiveId }) ?? Task.CompletedTask);
-                        continue;
-                    }
-
-                    request = await queue.Reader.ReadAsync(cancellationToken);
-                }
+                var request = await NextRequestAsync(queue, built, approvalService, objectiveManager, cancellationToken);
+                if (request is null) continue; // nothing to process this tick — see NextRequestAsync
 
                 try
                 {
-                    await ProcessTaskAsync(request, queue, built, approvalService, objectiveManager, modelIdByAgent, cancellationToken);
+                    await ProcessTaskAsync(request, queue, built, approvalService, objectiveManager, telemetry, modelIdByAgent, cancellationToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -188,6 +190,7 @@ public sealed class ServeHost(
                     if (record is not null)
                     {
                         record.Status = ServeTaskStatus.Failed;
+                        record.Succeeded = false;
                         record.ErrorMessage = ex.Message;
                         record.CompletedAt = DateTimeOffset.UtcNow;
                         record.Done.TrySetResult(true);
@@ -196,6 +199,63 @@ public sealed class ServeHost(
             }
         }
         catch (OperationCanceledException) { /* shutdown */ }
+    }
+
+    /// <summary>
+    /// Returns the next task to process, or <c>null</c> if this idle tick had nothing to do
+    /// (either an auto-dispatch pick was just self-enqueued — it'll be picked up as an ordinary
+    /// request on the very next tick — or picking/enqueueing it failed unexpectedly). Isolating
+    /// this in its own method keeps that failure's try/catch from ever sharing a scope with
+    /// <c>ProcessTaskAsync</c>'s — a corrupted objective file must never take the whole daemon
+    /// down, but it also must never be confused for a specific task's failure, since no task was
+    /// ever picked or dispatched.
+    /// </summary>
+    private async Task<ServeTaskRequest?> NextRequestAsync(
+        ServeTaskQueue queue,
+        OrchestratorBuildResult built,
+        ServeHumanApprovalService approvalService,
+        ObjectiveManager objectiveManager,
+        CancellationToken cancellationToken)
+    {
+        if (queue.Reader.TryRead(out var request))
+            return request;
+
+        try
+        {
+            // Queue's empty right now — see if there's auto-dispatch work to self-enqueue before
+            // falling through to the real blocking wait. This is the daemon's own initiative: it
+            // becomes an ordinary queued request from here on, so every existing mechanism
+            // (broadcast, queue position, get_status/get_result, checkpointing) applies to it
+            // with zero special-casing below.
+            var picked = autoObjectiveIds.Count > 0
+                ? await TryPickAutoDispatchTaskAsync(objectiveManager, cancellationToken)
+                : null;
+
+            if (picked is { } p)
+            {
+                var sessionId = queue.Enqueue(p.Task, p.ObjectiveId);
+                approvalService.BroadcastEvent(new
+                {
+                    type = "auto_dispatched",
+                    sessionId,
+                    objectiveId = p.ObjectiveId,
+                    task = p.Task,
+                });
+                _ = (built.EventEmitter?.EmitAsync(EventTypes.AutoDispatch,
+                    payload: new { session = sessionId, objective = p.ObjectiveId }) ?? Task.CompletedTask);
+                return null;
+            }
+
+            return await queue.Reader.ReadAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Used to run outside any try/catch here and would take the whole daemon down,
+            // contradicting WorkerLoopAsync's own "one task's failure must never take the daemon
+            // down" guarantee. Log and retry on the next idle tick.
+            _logger.LogError(ex, "Auto-dispatch pick failed unexpectedly");
+            return null;
+        }
     }
 
     /// <summary>
@@ -231,15 +291,50 @@ public sealed class ServeHost(
         OrchestratorBuildResult built,
         ServeHumanApprovalService approvalService,
         ObjectiveManager objectiveManager,
+        fuseraft.Cli.Telemetry.FuseraftTelemetry? telemetry,
         IReadOnlyDictionary<string, string> modelIdByAgent,
         CancellationToken cancellationToken)
     {
         var record = queue.TryGet(request.SessionId)!;
         record.Status = ServeTaskStatus.Running;
 
+        // Screen dispatched task text for prompt injection exactly like RunCommand does for a
+        // new session's task — relevant here specifically because `dispatch_task` is an
+        // MCP-exposed entry point another, potentially adversarial agent can call, unlike a
+        // human typing a task at their own REPL prompt.
+        if (built.GovernanceKernel.InjectionDetector is { } detector)
+        {
+            var detection = detector.Detect(request.Task);
+            if (detection.IsInjection && detection.ThreatLevel >= ThreatLevel.High)
+            {
+                built.GovernanceKernel.AuditEmitter.Emit(
+                    GovernanceEventType.ToolCallBlocked,
+                    agentId:   "did:fuseraft:task-input",
+                    sessionId: request.SessionId,
+                    data:      new Dictionary<string, object>
+                    {
+                        ["injection_type"] = detection.InjectionType.ToString(),
+                        ["threat_level"]   = detection.ThreatLevel.ToString(),
+                        ["confidence"]     = detection.Confidence,
+                        ["input_hash"]     = detection.InputHash ?? string.Empty,
+                    });
+
+                record.Status       = ServeTaskStatus.Failed;
+                record.Succeeded    = false;
+                record.ErrorMessage = $"Task rejected: prompt injection detected ({detection.InjectionType}, confidence {detection.Confidence:P0}).";
+                record.CompletedAt  = DateTimeOffset.UtcNow;
+                record.Done.TrySetResult(true);
+                return;
+            }
+        }
+
         if (request.ObjectiveId is not null)
         {
-            try { await objectiveManager.LinkTaskAsync(request.ObjectiveId, request.Task, completed: false, sessionId: request.SessionId, cancellationToken); }
+            // addIfMissing: false — a task dispatched (by a human or an MCP caller) under an
+            // objective ID it wasn't actually planned under must not silently expand that
+            // objective's RemainingTasks; this call should only ever affirm/no-op on a task the
+            // objective already knows about (e.g. one TryPickAutoDispatchTaskAsync picked).
+            try { await objectiveManager.LinkTaskAsync(request.ObjectiveId, request.Task, completed: false, sessionId: request.SessionId, cancellationToken, addIfMissing: false); }
             catch (Exception ex) { _logger.LogWarning(ex, "Could not link task start to objective {ObjectiveId}", request.ObjectiveId); }
         }
 
@@ -260,11 +355,16 @@ public sealed class ServeHost(
         built.EventEmitter?.SetSessionId(request.SessionId);
         built.Orchestrator.SetSessionId(request.SessionId);
         built.Compactor?.SetSessionId(request.SessionId);
+        // Re-scopes SessionReadCache/ToolResultArtifactStore/SessionContextPlugin to this task's
+        // session — they were all built once, bound to whatever sessionId (none) was in scope at
+        // daemon startup, and would otherwise stay frozen there for every task the daemon ever
+        // runs. See OrchestratorBuilder's RebindSessionScopedState doc comment.
+        built.RebindSessionScopedState?.Invoke(request.SessionId);
         built.Orchestrator.SetStructuredTask(TaskModel.FromGoal(request.Task));
 
         var runner = new SessionRunner(
             built.Orchestrator, built.Compactor, sessionStore, approvalService,
-            built.EventEmitter, telemetry: null, modelIdByAgent,
+            built.EventEmitter, telemetry, modelIdByAgent,
             devUI: null, configPath: configPath,
             maxIterations: built.Config.Termination?.ResolveMaxIterations() ?? 0,
             contextBudget: built.Config.ContextBudget,
@@ -319,12 +419,26 @@ public sealed class ServeHost(
         if (result.Succeeded)
         {
             checkpoint.IsComplete = true;
-            await sessionStore.SaveAsync(checkpoint, CancellationToken.None);
+            try
+            {
+                await sessionStore.SaveAsync(checkpoint, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                // The task itself already succeeded — record.Status/Succeeded above already
+                // reflect that. A failure to persist the final checkpoint must not propagate out
+                // of here: WorkerLoopAsync's catch-all would otherwise flip record.Status back to
+                // Failed while record.Succeeded stayed true (an inconsistent result for
+                // get_result to report) and skip the objective-completion bookkeeping and
+                // failure-counter update below, letting --auto-objective retry a task that
+                // actually succeeded forever.
+                _logger.LogWarning(ex, "Could not persist final checkpoint for session {SessionId}", request.SessionId);
+            }
         }
 
         if (request.ObjectiveId is not null)
         {
-            try { await objectiveManager.LinkTaskAsync(request.ObjectiveId, request.Task, completed: result.Succeeded, sessionId: request.SessionId, CancellationToken.None); }
+            try { await objectiveManager.LinkTaskAsync(request.ObjectiveId, request.Task, completed: result.Succeeded, sessionId: request.SessionId, CancellationToken.None, addIfMissing: false); }
             catch (Exception ex) { _logger.LogWarning(ex, "Could not link task completion to objective {ObjectiveId}", request.ObjectiveId); }
 
             // Tracks whether the auto-dispatch picker should keep offering this task again —
@@ -336,6 +450,45 @@ public sealed class ServeHost(
                 _autoDispatchFailures.Remove(failureKey);
             else
                 _autoDispatchFailures[failureKey] = _autoDispatchFailures.GetValueOrDefault(failureKey) + 1;
+        }
+
+        // Post-task skill curation and repository memory extraction — mirrors RunCommand's own
+        // post-session steps exactly (best-effort, never fails the task). Without this, a
+        // project with SkillCuration.Enabled: true gets skills curated after every `fuseraft
+        // run` session but silently none after a `fuseraft serve`-dispatched task, with nothing
+        // logged to indicate the feature is inactive on this path.
+        if (built.SkillCurator is not null && result.Succeeded)
+        {
+            try
+            {
+                _ = (built.EventEmitter?.EmitAsync(EventTypes.SkillCurationStart,
+                    payload: new { session = request.SessionId, source = "serve" }) ?? Task.CompletedTask);
+
+                var curationResult = await built.SkillCurator.RunAsync(
+                    checkpoint, result.Messages, CancellationToken.None, source: "serve");
+
+                _ = (built.EventEmitter?.EmitAsync(EventTypes.SkillCurationComplete,
+                    payload: new
+                    {
+                        session        = request.SessionId,
+                        source         = "serve",
+                        outcome        = curationResult.Outcome.ToString().ToLowerInvariant(),
+                        slug           = curationResult.Slug,
+                        path           = curationResult.Path,
+                        turns_digested = curationResult.TurnsDigested,
+                        failure_reason = curationResult.FailureReason,
+                    }) ?? Task.CompletedTask);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Skill curation failed for session {SessionId}", request.SessionId);
+            }
+        }
+
+        if (built.RepositoryMemoryExtractor is not null && result.Succeeded)
+        {
+            try { await built.RepositoryMemoryExtractor.ExtractAsync(sessionId: request.SessionId, CancellationToken.None); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Repository memory extraction failed for session {SessionId}", request.SessionId); }
         }
 
         record.Done.TrySetResult(true);

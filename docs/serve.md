@@ -14,12 +14,14 @@ fuseraft serve
 
 ```
 fuseraft serve — MyProject
-  MCP (dispatch_task/get_status/get_result) → http://localhost:8137/mcp
+  MCP (dispatch_task/get_status/get_result) → http://localhost:24601/mcp
   Attach socket → /home/user/.fuseraft/run/1f92641edb0442bd.sock  (fuseraft attach)
   Unattended mutating actions: denied (--unattended-policy)
   Auto-dispatch: off (--auto-objective)
   Idle — waiting for a task. Ctrl+C to stop.
 ```
+
+The MCP port, like the attach socket path, defaults to one deterministically derived from the project's directory (`--http-port` to pin a specific one instead) — so two daemons for two different projects can both be started with no flags and never collide on the same default port.
 
 One daemon serves one working directory and one orchestration config for its whole lifetime — the agent team, MCP server connections, and governance state (circuit breaker, audit chain) are all built once at startup and reused for every task, rather than rebuilt per dispatch. A pidfile enforces one daemon per project: a second `fuseraft serve` in the same directory refuses to start while the first is alive. `Ctrl+C` shuts it down gracefully, finishing any in-flight task first.
 
