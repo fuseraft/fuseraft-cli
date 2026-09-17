@@ -62,8 +62,10 @@
     <!-- Line diffing for REPL diff views (HITL write/patch approval previews) -->
     <PackageReference Include="DiffPlex" Version="1.7.2" />
 
-    <!-- MCP client SDK -->
+    <!-- MCP client SDK, plus the ASP.NET Core hosting extensions (MapMcp/WithHttpTransport)
+         used by `fuseraft serve` to expose fuseraft itself as an MCP server. -->
     <PackageReference Include="ModelContextProtocol" Version="2.1.0" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.1.0" />
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
 
     <!-- SQLite — skill index FTS5 -->

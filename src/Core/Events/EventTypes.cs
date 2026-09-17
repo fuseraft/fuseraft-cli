@@ -141,6 +141,9 @@ public static class EventTypes
     public const string EventReplayComplete     = "event_replay_complete";
     public const string EventCorruptionDetected = "event_corruption_detected";
 
+    // ── Serve / daemon ───────────────────────────────────────────────────────
+    public const string AutoDispatch = "auto_dispatch";
+
     // ── REPL ─────────────────────────────────────────────────────────────────
     public const string UserInput             = "user_input";
     public const string AssistantResponse     = "assistant_response";
