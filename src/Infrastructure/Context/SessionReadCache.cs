@@ -28,7 +28,7 @@ public sealed class SessionReadCache
 {
     private readonly Dictionary<string, SessionCacheEntry> _entries =
         new(StringComparer.OrdinalIgnoreCase);
-    private readonly string? _persistPath;
+    private string? _persistPath;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -38,6 +38,23 @@ public sealed class SessionReadCache
 
     public SessionReadCache(string? persistPath = null)
     {
+        _persistPath = persistPath;
+        if (persistPath is not null && File.Exists(persistPath))
+            TryLoad();
+    }
+
+    /// <summary>
+    /// Re-scopes this cache to a different session's persist path, discarding every in-memory
+    /// entry from whatever session it was previously bound to (and loading the new path's
+    /// entries, if any already exist on disk). Needed because <c>fuseraft serve</c> builds one
+    /// orchestrator — and therefore one <see cref="SessionReadCache"/> instance — for the whole
+    /// daemon's lifetime and reuses it across every dispatched task; without this, a later
+    /// task's cold read of a file an earlier, unrelated task happened to read would incorrectly
+    /// report a cache hit.
+    /// </summary>
+    public void Rebind(string? persistPath)
+    {
+        _entries.Clear();
         _persistPath = persistPath;
         if (persistPath is not null && File.Exists(persistPath))
             TryLoad();

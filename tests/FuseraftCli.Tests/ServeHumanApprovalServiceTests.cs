@@ -130,6 +130,74 @@ public sealed class ServeHumanApprovalServiceTests
         Assert.Null(await service.PromptBlockerResolutionAsync("Agent", "blocked"));
         Assert.Null(await service.PromptPostSessionAsync());
         Assert.Null(await service.PromptPlanReviewAsync("plan"));
+    }
+
+    // PromptRouteApprovalAsync gates RequireHumanApproval route/edge decisions — unlike the
+    // prompts above (which have no human-attended surface to route to at all), it must follow
+    // the same origin-routed / fail-closed-when-unattended convention as the three mutating-
+    // action gates, not silently auto-approve regardless of policy or who's attached.
+
+    [Fact]
+    public async Task RouteApproval_NoOrigin_DenyPolicy_Denies()
+    {
+        var service = new ServeHumanApprovalService(allowWhenUnattended: false);
+
+        Assert.False(await service.PromptRouteApprovalAsync("KEYWORD", "A", "B"));
+    }
+
+    [Fact]
+    public async Task RouteApproval_NoOrigin_AllowPolicy_Approves()
+    {
+        var service = new ServeHumanApprovalService(allowWhenUnattended: true);
+
         Assert.True(await service.PromptRouteApprovalAsync("KEYWORD", "A", "B"));
+    }
+
+    [Fact]
+    public async Task RouteApproval_CurrentTaskOrigin_ReceivesTheRequest_AndItsAnswerWins()
+    {
+        var service = new ServeHumanApprovalService(allowWhenUnattended: false);
+        var origin = new FakeSink { ResponseToReturn = false };
+        service.RegisterConnection(origin);
+        service.SetCurrentTaskOrigin(origin);
+
+        Assert.False(await service.PromptRouteApprovalAsync("KEYWORD", "A", "B"));
+        Assert.Single(origin.Emitted);
+    }
+
+    [Fact]
+    public async Task ConcurrentGateCalls_AgainstTheSameOrigin_DoNotCrossAnswers()
+    {
+        // Regression coverage for GateAsync's serialization: two concurrent gate calls (e.g.
+        // from a ScatterGather/MapReduce orchestrator's parallel branches) must never have their
+        // answers swapped, since IServeAttachSink's wire protocol has no per-request correlation.
+        var service = new ServeHumanApprovalService(allowWhenUnattended: false);
+        var origin = new SequencedSink([true, false]);
+        service.RegisterConnection(origin);
+        service.SetCurrentTaskOrigin(origin);
+
+        var t1 = service.PromptShellCommandAsync("echo one");
+        var t2 = service.PromptShellCommandAsync("echo two");
+        var results = await Task.WhenAll(t1, t2);
+
+        // Order isn't guaranteed, but every call must get exactly one of the two scripted
+        // answers, and both scripted answers must be consumed exactly once each.
+        Assert.Equal(new[] { false, true }, results.OrderBy(r => r));
+        Assert.Equal(2, origin.Emitted.Count);
+    }
+
+    /// <summary>A sink whose <see cref="ReadApprovalResponseAsync"/> hands out scripted answers one at a time, in call order.</summary>
+    private sealed class SequencedSink(IReadOnlyList<bool> responses) : IServeAttachSink
+    {
+        private int _next;
+        public readonly List<object> Emitted = [];
+
+        public void Emit(object payload) => Emitted.Add(payload);
+
+        public Task<bool> ReadApprovalResponseAsync()
+        {
+            var index = Interlocked.Increment(ref _next) - 1;
+            return Task.FromResult(responses[index]);
+        }
     }
 }

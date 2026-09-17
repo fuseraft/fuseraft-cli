@@ -171,6 +171,28 @@ public static class FuseraftPaths
     public static string DaemonSocketPath(string projectSlug) =>
         Path.Combine(GlobalRunRoot, $"{ShortHash(projectSlug)}.sock");
 
+    // Wide enough to make an accidental same-port collision between two unrelated projects
+    // vanishingly unlikely, while staying comfortably clear of both the well-known port range
+    // and the ephemeral range the OS hands out for outbound connections.
+    private const int DaemonHttpPortRangeStart = 20_000;
+    private const int DaemonHttpPortRangeSize  = 20_000;
+
+    /// <summary>
+    /// Deterministic per-project default for <c>fuseraft serve</c>'s MCP HTTP port, derived the
+    /// same way as <see cref="DaemonSocketPath"/> so two daemons for two different projects can
+    /// run concurrently without a fixed port colliding between them — a single hardcoded default
+    /// (the previous behavior) meant starting a second `fuseraft serve` for a different project
+    /// while one was already running elsewhere failed with an address-in-use error. Still
+    /// overridable via <c>--http-port</c> for anyone who wants a stable, memorable address for a
+    /// specific project.
+    /// </summary>
+    public static int DefaultDaemonHttpPort(string projectSlug)
+    {
+        var bytes  = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(projectSlug));
+        var offset = BitConverter.ToUInt16(bytes, 0) % DaemonHttpPortRangeSize;
+        return DaemonHttpPortRangeStart + offset;
+    }
+
     private static string ShortHash(string input)
     {
         var bytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(input));

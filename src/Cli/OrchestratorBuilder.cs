@@ -43,7 +43,8 @@ public sealed record OrchestratorBuildResult(
     ChatClientFactory            ChatClientFactory,
     fuseraft.Orchestration.DependencyPlanner? DependencyPlanner = null,
     fuseraft.Cli.Telemetry.SessionMetrics?    SessionMetrics    = null,
-    AdaptiveTrimTracker?          AdaptiveTrimTracker = null);
+    AdaptiveTrimTracker?          AdaptiveTrimTracker = null,
+    Action<string?>?              RebindSessionScopedState = null);
 
 /// <summary>
 /// Which orchestrator kind <c>Selection.Type</c> resolved to, bundled so
@@ -205,7 +206,7 @@ public static class OrchestratorBuilder
         var (orchestrator, repoMemoryExtractor) = CreateOrchestrator(
             config, kindFlags, infraServices, knowledgeServices, sessionPaths, humanApprovalService);
 
-        return new OrchestratorBuildResult(orchestrator, config, infra.McpManager, compactor, infra.ChangeTracker, infra.EventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, dependencyPlanner, infra.SessionMetrics, adaptiveTrimTracker);
+        return new OrchestratorBuildResult(orchestrator, config, infra.McpManager, compactor, infra.ChangeTracker, infra.EventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, dependencyPlanner, infra.SessionMetrics, adaptiveTrimTracker, infra.RebindSessionScopedState);
     }
 
     // -------------------------------------------------------------------------
@@ -322,7 +323,8 @@ public static class OrchestratorBuilder
         fuseraft.Cli.Telemetry.SessionMetrics SessionMetrics,
         fuseraft.Infrastructure.Objectives.ObjectiveManager ObjectiveManager,
         string KnowledgeSandbox,
-        string? ReadCachePath);
+        string? ReadCachePath,
+        Action<string?> RebindSessionScopedState);
 
     private static async Task<InfrastructureResult> InitInfrastructure(
         OrchestrationConfig config,
@@ -441,7 +443,33 @@ public static class OrchestratorBuilder
         var ctxSummaryPath = sessionId is { Length: > 0 }
             ? FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionContext, sessionId,  projectSlug)
             : FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionContext, "default", projectSlug);
-        pluginRegistry.Register("SessionContext", () => new fuseraft.Infrastructure.Plugins.SessionContextPlugin(ctxSummaryPath));
+        var sessionContextPlugin = new fuseraft.Infrastructure.Plugins.SessionContextPlugin(ctxSummaryPath);
+        pluginRegistry.Register("SessionContext", () => sessionContextPlugin);
+
+        // Rebinds every session-scoped collaborator built above to a different session ID's
+        // paths in place, without touching PluginRegistry's cached plugin instances or
+        // rebuilding the orchestrator. `fuseraft run` never needs this (one process = one
+        // session, sessionId is fixed for BuildAsync's whole lifetime); `fuseraft serve` calls
+        // it once per dispatched task — see ServeHost.ProcessTaskAsync — because it builds this
+        // orchestrator exactly once and reuses it, and everything above was otherwise
+        // permanently bound to whichever sessionId (or none) was in scope at daemon startup.
+        void RebindSessionScopedState(string? newSessionId)
+        {
+            var newReadCachePath = newSessionId is { Length: > 0 }
+                ? FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionReadCache, newSessionId, projectSlug)
+                : null;
+            sessionReadCache.Rebind(newReadCachePath);
+
+            var newToolArtifactsDir = newSessionId is { Length: > 0 }
+                ? FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionToolArtifacts, newSessionId, projectSlug)
+                : null;
+            toolArtifactStore.Rebind(newToolArtifactsDir);
+
+            var newCtxSummaryPath = newSessionId is { Length: > 0 }
+                ? FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionContext, newSessionId, projectSlug)
+                : FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionContext, "default", projectSlug);
+            sessionContextPlugin.Rebind(newCtxSummaryPath);
+        }
 
         // Narrow, fixed-path artifact writers for recon/planning-style agents (brownfield's
         // Archaeologist, greenfield/swe's Preflight, every template's Planner, swe's
@@ -500,7 +528,8 @@ public static class OrchestratorBuilder
         return new InfrastructureResult(
             config, mcpManager, eventEmitter, evidenceStore, knowledgeLayer,
             changeTracker, intentLog, stateProjector, executionStatePath, investigationLogPath,
-            toolArtifactStore, sessionMetrics, objectiveManager, knowledgeSandbox, readCachePath);
+            toolArtifactStore, sessionMetrics, objectiveManager, knowledgeSandbox, readCachePath,
+            RebindSessionScopedState);
     }
 
     // -------------------------------------------------------------------------
