@@ -483,6 +483,18 @@ If `fuseraft run --work-dir` points at a directory you did not author, any skill
 
 ---
 
+## `fuseraft serve` trust model
+
+`fuseraft serve` (see [CLI Reference](cli-reference.md#fuseraft-serve)) starts a resident daemon with two front doors: an MCP server over HTTP for other agents, and a Unix domain socket for a human (`fuseraft attach`).
+
+**The MCP endpoint is unauthenticated and localhost-only** — the same trust model as `--devui`. Any process on the same machine that can reach `localhost:<port>` can call `dispatch_task` and enqueue work; there is no token, API key, or additional access control layer. This is a deliberate scope decision for a local development tool, not an oversight, but it means `fuseraft serve` is not currently suitable for exposure beyond one machine's own local processes — do not put it behind a reverse proxy or port-forward it without adding your own authentication in front of it.
+
+**Unattended mutating actions deny by default.** A task with no attached human (dispatched over MCP, or self-picked via `--auto-objective`) has any shell/write/git-push tool call denied unless `--unattended-policy allow` is set — the same default-deny posture as `.env` file access and the REPL's `--yolo`-gated sandbox elsewhere in this document. Self-initiated work (`--auto-objective`) gets no special trust either: it is gated identically to an MCP-dispatched task, not a separate, more-permissive tier.
+
+**Approval is scoped to whoever dispatched the task, not to everyone attached.** Multiple humans may `fuseraft attach` concurrently; all of them see live progress for whatever task is currently running, but only the connection that actually dispatched a given task is ever asked to approve its mutating tool calls. A bystander who is merely watching cannot be prompted into approving a stranger's or an agent's action.
+
+---
+
 ## Security notes
 
 - The path sandbox and ring system are enforced at the agent middleware layer, not at the OS level. A compromised plugin bypass (e.g. a malicious MCP server) could potentially circumvent them.

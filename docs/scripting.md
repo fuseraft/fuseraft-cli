@@ -106,6 +106,23 @@ This ignores the job's schedule and `enabled` flag and runs it immediately, whil
 
 For anything else — a webhook payload, a message off a queue, a file landing in a watched directory — the pattern is the same regardless of trigger source: your event handler builds a task (usually naming the specific input/output the event refers to) and shells out to `fuseraft run --json --ci`. See the worked example below.
 
+### Or: dispatch into a resident `fuseraft serve` daemon
+
+Shelling out to `fuseraft run` per event is simple, but it pays the cost of rebuilding the whole agent team — including reconnecting every configured MCP server — on every single event. If events arrive frequently enough for that to matter, start `fuseraft serve` once and dispatch into it instead: it builds the orchestrator a single time and stays resident, so each event becomes a cheap `dispatch_task` MCP call (or a line written to its Unix socket) rather than a new process.
+
+```bash
+fuseraft serve --config .fuseraft/config/orchestration.yaml &
+```
+
+```python
+# Any MCP client works — this is the shape regardless of library.
+result = await mcp_client.call_tool("dispatch_task", {"task": f"Process {event['path']}"})
+session_id = result["sessionId"]
+# Poll get_status/get_result, or fire-and-forget if you don't need the outcome.
+```
+
+This is also the natural target for a message-queue consumer (RabbitMQ, SQS, etc.): the consumer holds no fuseraft-specific dependency itself — it just calls `dispatch_task` over MCP (or writes a line to the attach socket) for each message it pulls off the queue, and fuseraft never needs to know the queue technology exists. See [CLI Reference → `fuseraft serve`](cli-reference.md#fuseraft-serve).
+
 ---
 
 ## Worked example: an event-driven ETL pipeline
