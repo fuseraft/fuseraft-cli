@@ -59,6 +59,24 @@ See the [CLI Reference](docs/cli-reference.md#fuseraft-repl) for the full flag a
 
 ---
 
+## Run as a resident daemon
+
+`fuseraft serve` builds the agent team once and stays running, waiting to be dispatched into instead of exiting after a single task:
+
+- **Two front doors** — an MCP server (`dispatch_task`/`get_status`/`get_result` over streamable HTTP) for other agents, and a Unix socket (`fuseraft attach`) for a human
+- **Safe by default** — mutating tool calls from an unattended dispatch deny by default (`--unattended-policy allow` to opt in); approval for a task routes only to whoever actually dispatched it, never to a bystander who's just watching
+- **Live progress** — every attached connection sees what's currently running, regardless of who dispatched it
+- **Objective-driven autonomy** — `--auto-objective <id>` lets the daemon pull its own next task off an objective's backlog when idle, instead of only running what it's told
+
+```bash
+fuseraft serve --auto-objective OBJ-0001 --unattended-policy allow
+fuseraft attach   # from another terminal
+```
+
+See the [CLI Reference](docs/cli-reference.md#fuseraft-serve) for the full flag and MCP tool list.
+
+---
+
 ## Install
 
 Prebuilt binaries are self-contained — no .NET installation required.
@@ -146,6 +164,7 @@ For work that benefits from more than one specialized agent, with mechanical ver
 |-----|--------|
 | [Getting Started](docs/getting-started.md) | Prerequisites, first run |
 | [CLI Reference](docs/cli-reference.md) | Commands and flags |
+| [Serve (Daemon Mode)](docs/serve.md) | Resident agent process dispatchable via MCP or a human attach session, objective-driven auto-dispatch |
 | [Scripting & Automation](docs/scripting.md) | Running fuseraft from bash/Python, `--json` output, event-driven pipelines |
 | [Configuration](docs/configuration.md) | YAML/JSON schema |
 | [Models & Providers](docs/models.md) | Model configuration and provider auto-detection |

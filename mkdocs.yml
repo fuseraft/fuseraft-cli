@@ -38,6 +38,7 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - REPL: repl.md
+  - Serve (Daemon Mode): serve.md
   - Writing Tasks: writing-tasks.md
   - Spec-Driven Development: spec-driven.md
   - CLI Reference: cli-reference.md

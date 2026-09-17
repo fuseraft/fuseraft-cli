@@ -213,6 +213,7 @@ The [Fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) ho
 ## See also
 
 - [CLI Reference — `fuseraft repl`](cli-reference.md#fuseraft-repl) — every flag, slash command, and prompt example
+- [Serve (Daemon Mode)](serve.md) — a resident, dispatchable alternative when a task shouldn't wait for you to launch a session
 - [Getting Started](getting-started.md) — installation and first-time setup
 - [Sessions](sessions.md) — resuming, forking, rewinding, session file format
 - [Skills](skills.md) — installing and writing skill packages
