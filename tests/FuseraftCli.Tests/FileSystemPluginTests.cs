@@ -938,4 +938,24 @@ public sealed class FileSystemPluginTests : IDisposable
         Assert.StartsWith("[DENIED]", result);
     }
 
+    // -----------------------------------------------------------------------
+    // Path guard: quoted path argument (issue #117)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task WriteFile_QuotedPath_UnwrapsInsteadOfCreatingBogusDuplicate()
+    {
+        // Regression for #117: a model that wraps a path argument in literal quote characters
+        // (the JSON string value itself starts/ends with `"`, e.g. from a "\"MainForm.cs\""
+        // tool call) must resolve to the real file, not a distinct one named with the quotes
+        // baked in. FileSystemSandbox.ResolveSafe already strips this (StripWrappingQuotes) —
+        // this pins that behavior at the WriteFileAsync call site specifically.
+        var quotedPath = "\"MainForm.Designer.cs\"";
+        var result = await _plugin.WriteFileAsync(quotedPath, "public partial class MainForm {}");
+
+        Assert.StartsWith("[OK]", result);
+        Assert.True(File.Exists(TempPath("MainForm.Designer.cs")));
+        Assert.False(File.Exists(TempPath("\"MainForm.Designer.cs\"")));
+    }
+
 }
