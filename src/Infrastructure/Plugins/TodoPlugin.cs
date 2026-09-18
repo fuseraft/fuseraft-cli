@@ -51,7 +51,9 @@ public sealed class TodoPlugin
         }
         catch (JsonException ex)
         {
-            return $"[ERROR] Could not parse itemsJson as a JSON array: {ex.Message}. Pass only a JSON array like [{{\"content\":\"Example\",\"status\":\"pending\"}}].";
+            parsed = TryRecoverDoubleEscapedJson(candidateJson);
+            if (parsed is null)
+                return $"[ERROR] Could not parse itemsJson as a JSON array: {ex.Message}. Pass only a JSON array like [{{\"content\":\"Example\",\"status\":\"pending\"}}].";
         }
         if (parsed is null)
             return "[ERROR] itemsJson must be a JSON array of todo items.";
@@ -102,6 +104,27 @@ public sealed class TodoPlugin
             sb.AppendLine($"{box} {item.Content}");
         }
         return sb.ToString().TrimEnd();
+    }
+
+    // Recovers the dominant real-world Write() failure mode: a model passing itemsJson with
+    // its inner quotes already backslash-escaped, as though the array were nested one level
+    // deeper than it actually is (e.g. `[{\"content\":...}]` instead of `[{"content":...}]`).
+    // A correctly-formed JSON array never contains a literal `\"`, so collapsing every
+    // occurrence and retrying once is a safe, cheap recovery — it only runs after the first
+    // parse already failed, and genuinely malformed input just fails the same way again,
+    // surfacing the original error. Returns null when collapsing doesn't help.
+    private static List<TodoItem>? TryRecoverDoubleEscapedJson(string candidateJson)
+    {
+        if (!candidateJson.Contains("\\\"", StringComparison.Ordinal))
+            return null;
+        try
+        {
+            return JsonSerializer.Deserialize<List<TodoItem>>(candidateJson.Replace("\\\"", "\""), JsonOpts);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static string ExtractJsonArray(string itemsJson)

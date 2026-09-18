@@ -74,6 +74,50 @@ public sealed class TodoPluginTests
         Assert.StartsWith("[ERROR]", result);
     }
 
+    // ── Double-escaped JSON recovery (#118) ─────────────────────────────────
+
+    [Fact]
+    public void Write_DoubleEscapedJson_RecoversInsteadOfErroring()
+    {
+        // Regression for #118: a model sometimes passes itemsJson with its inner quotes
+        // already backslash-escaped, as if the array were nested one level deeper than it
+        // actually is — the dominant real-world todo_write failure mode.
+        var plugin = new TodoPlugin();
+        var doubleEscaped = "[{\\\"content\\\":\\\"Explore patterns\\\",\\\"status\\\":\\\"completed\\\"}]";
+
+        var result = plugin.Write(doubleEscaped);
+
+        Assert.DoesNotContain("[ERROR]", result);
+        Assert.Contains("[x] Explore patterns", result);
+    }
+
+    [Fact]
+    public void Write_DoubleEscapedJson_MultipleItems_RecoversAll()
+    {
+        var plugin = new TodoPlugin();
+        var doubleEscaped = "[{\\\"content\\\":\\\"First\\\",\\\"status\\\":\\\"completed\\\"}," +
+                             "{\\\"content\\\":\\\"Second\\\",\\\"status\\\":\\\"pending\\\"}]";
+
+        var result = plugin.Write(doubleEscaped);
+
+        Assert.Contains("[x] First", result);
+        Assert.Contains("[ ] Second", result);
+    }
+
+    [Fact]
+    public void Write_GenuinelyMalformedJsonContainingBackslashQuote_StillReturnsOriginalError()
+    {
+        // Truncated mid-property, and still invalid even after collapsing \" → " — proves
+        // the recovery attempt fails closed: it doesn't mask a genuinely broken payload or
+        // swap in a confusing second error, the original JsonException message surfaces.
+        var plugin = new TodoPlugin();
+        var truncatedAfterCollapse = "[{\\\"content\\\":]";
+
+        var result = plugin.Write(truncatedAfterCollapse);
+
+        Assert.StartsWith("[ERROR]", result);
+    }
+
     [Fact]
     public void Write_InvalidStatus_ReturnsError()
     {
