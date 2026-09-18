@@ -539,7 +539,7 @@ public sealed class WorkflowOrchestrator(
                     return;
                 }
 
-                consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
+                consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries);
                 RecordGovernanceViolation(agentName, validatorName!, consecutiveFails, maxRetries);
 
                 if (consecutiveFails >= maxRetries)

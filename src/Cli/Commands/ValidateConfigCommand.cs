@@ -946,6 +946,8 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
         var agentNames = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var stateNames = sm.States.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var benchmarkUsages = OrchestratorConfigLoader.FindBenchmarkMergeStrategyUsages(config)
+            .ToHashSet();
 
         // Initial state must exist.
         if (string.IsNullOrWhiteSpace(sm.Initial))
@@ -1016,6 +1018,16 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                             issues.Add(("error",
                                 $"{tpfx}: Merge.Agent '{t.Merge.Agent}' is not defined in Agents."));
                     }
+
+                    // Benchmark is a selectable enum value with no implementation — MergeEngine
+                    // throws unconditionally for it. OrchestratorConfigLoader runs the same
+                    // FindBenchmarkMergeStrategyUsages check as a hard load-time failure;
+                    // flagged here too (from the same shared helper) so `fuseraft validate-config`
+                    // catches it without a run.
+                    if (benchmarkUsages.Contains((name, ti)))
+                        issues.Add(("error",
+                            $"{tpfx}: Merge.Strategy 'Benchmark' is not implemented and always throws at " +
+                            "runtime. Use Union, Consensus, Vote, Ranked, or SemanticDiff instead."));
 
                     // RecoveryAgent is meaningless on a parallel transition (no contract evaluation).
                     if (!string.IsNullOrWhiteSpace(t.RecoveryAgent))
