@@ -41,7 +41,7 @@ internal sealed class ReplLineReader
         ["/fork"]        = ["switch"],
         ["/hitl"]        = ["off", "on"],
         ["/max-tokens"]  = ["reset"],
-        ["/mcp"]         = ["add", "remove"],
+        ["/mcp"]         = ["add", "login", "logout", "remove"],
         ["/memory"]      = ["delete", "list", "save", "show"],
         ["/provider"]    = ["setup"],
         ["/safe-mode"]   = ["off", "on"],
