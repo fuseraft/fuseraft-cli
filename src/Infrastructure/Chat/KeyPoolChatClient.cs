@@ -20,8 +20,13 @@ internal sealed class KeyPoolChatClient(IChatClient[] slots) : IChatClient
 {
     private static readonly TimeSpan CooldownDuration = TimeSpan.FromSeconds(60);
 
-    // Per-slot cooldown expiry — written only under the 429 path (rare), read on every call.
-    private readonly DateTimeOffset[] _cooldownUntil = new DateTimeOffset[slots.Length];
+    // Per-slot cooldown expiry, stored as UTC ticks rather than DateTimeOffset — written only
+    // under the 429 path (rare) but read on every call, from any thread issuing a concurrent
+    // request. DateTimeOffset is a multi-field struct; an unsynchronized array write/read of one
+    // is not guaranteed atomic and could observe a torn value. A `long` read/write is atomic on
+    // its own, and Volatile.Read/Write additionally ensures the write from one thread is visible
+    // to a read on another without needing a full lock around the hot read path.
+    private readonly long[] _cooldownUntilTicks = new long[slots.Length];
 
     // Tracks the last successful slot so subsequent calls start close to it, reducing
     // unnecessary rotation when the pool is healthy.
@@ -42,7 +47,7 @@ internal sealed class KeyPoolChatClient(IChatClient[] slots) : IChatClient
         for (int tried = 0; tried < slots.Length; tried++)
         {
             var idx = (start + tried) % slots.Length;
-            if (DateTimeOffset.UtcNow < _cooldownUntil[idx]) continue;
+            if (DateTimeOffset.UtcNow.UtcTicks < Volatile.Read(ref _cooldownUntilTicks[idx])) continue;
 
             try
             {
@@ -52,7 +57,7 @@ internal sealed class KeyPoolChatClient(IChatClient[] slots) : IChatClient
             }
             catch (ClientResultException ex) when (ex.Status == 429)
             {
-                _cooldownUntil[idx] = DateTimeOffset.UtcNow + CooldownDuration;
+                Volatile.Write(ref _cooldownUntilTicks[idx], (DateTimeOffset.UtcNow + CooldownDuration).UtcTicks);
                 lastRateLimit = ex;
                 Console.Error.WriteLine(
                     $"[key-pool] Slot {idx + 1}/{slots.Length} rate-limited (429). " +
@@ -77,7 +82,7 @@ internal sealed class KeyPoolChatClient(IChatClient[] slots) : IChatClient
         for (int tried = 0; tried < slots.Length; tried++)
         {
             var idx = (start + tried) % slots.Length;
-            if (DateTimeOffset.UtcNow < _cooldownUntil[idx]) continue;
+            if (DateTimeOffset.UtcNow.UtcTicks < Volatile.Read(ref _cooldownUntilTicks[idx])) continue;
 
             bool slot429 = false;
             var en = slots[idx]
@@ -95,7 +100,7 @@ internal sealed class KeyPoolChatClient(IChatClient[] slots) : IChatClient
                 {
                     slot429 = true;
                     lastRateLimit = ex;
-                    _cooldownUntil[idx] = DateTimeOffset.UtcNow + CooldownDuration;
+                    Volatile.Write(ref _cooldownUntilTicks[idx], (DateTimeOffset.UtcNow + CooldownDuration).UtcTicks);
                     Console.Error.WriteLine(
                         $"[key-pool] Slot {idx + 1}/{slots.Length} rate-limited (429, streaming). " +
                         $"Cooling down for {CooldownDuration.TotalSeconds:0}s, rotating to next key.");

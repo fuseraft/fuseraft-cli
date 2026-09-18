@@ -62,229 +62,139 @@ internal static partial class ReplCommands
     // Help
     // -------------------------------------------------------------------------
 
+    // Single source of truth for both the console (Grid) and VS Code JSON-bridge (Markdown)
+    // renderings of /help — previously two hand-maintained copies that had already drifted
+    // (the JSON copy was missing /paste, /provider setup, and /events stats). One list, two
+    // renderers below, means a command added to one surface can no longer be forgotten on
+    // the other.
+    private readonly record struct HelpEntry(string Command, string Description);
+    private readonly record struct HelpSection(string Title, HelpEntry[] Entries);
+
+    private static readonly HelpSection[] HelpSections =
+    [
+        new("Shell", [
+            new("!<command>", "Run a shell command directly (e.g. !git status) — not sent to the model, not added to conversation history"),
+            new("!!", "Repeat the last ! command"),
+            new("!cd <dir>", "Change the shell escape's working directory (persists across ! commands); !cd, !cd -, and !cd ~ also work"),
+        ]),
+        new("Session", [
+            new("/help", "Show this help"),
+            new("/sessions", "List resumable sessions with IDs and turn counts"),
+            new("/fork", "Snapshot the current session to a new ID so you can branch from this point"),
+            new("/fork switch", "Fork and immediately become the fork (continue under the new ID)"),
+            new("/switch <id>", "Save the current session and load another saved session in its place"),
+            new("/conversation", "List all turns with numbers so you can pick a rewind point"),
+            new("/rewind <n>", "Keep turns 1…n and discard the rest"),
+            new("/rewind -<n>", "Step back n turns from the current position"),
+            new("/retry", "Resend the last message (useful when the response was poor)"),
+            new("/last", "Re-print the last assistant response"),
+            new("/clear", "Clear conversation history (keeps system prompt)"),
+            new("/history", "Show condensed conversation history"),
+            new("/assist", "Diagnose the conversation and inject a corrective message"),
+            new("/exit", "Exit the REPL (auto-saves memories)"),
+        ]),
+        new("Orchestration", [
+            new("/run <task>", "Run a task using fuseraft run and inject the result as conversation context"),
+            new("/run <file>", "Load task from a file and run it (prompts for config if multiple exist)"),
+        ]),
+        new("Planning", [
+            new("/plan <task>", "Create a structured plan (JSON steps, no tool calls)"),
+            new("/plan", "Show the current stored plan"),
+            new("/execute", "Run each plan step sequentially with postcondition checks"),
+            new("/resume", "Retry the halted step and continue remaining steps"),
+            new("/recover", "Inject failure context and retry the halted step with agent awareness"),
+        ]),
+        new("Tools & modes", [
+            new("/tools", "List active tools by category"),
+            new("/tools disable <category>", "Disable a tool category (FileSystem Shell Search Git Http)"),
+            new("/tools enable <category>", "Re-enable a disabled tool category"),
+            new("/tools restrict <plugin> <tag…>", "Allow only tools tagged with one of <tag…> for that plugin (e.g. /tools restrict Git read), using the same capability vocabulary as orchestration's AgentConfig.Capabilities"),
+            new("/tools unrestrict <plugin>", "Remove a plugin's capability restriction"),
+            new("/undo", "Revert files written, patched, copied, moved, or deleted in the most recent turn (repeatable; walks back one turn at a time — not the same as /rewind, which only affects conversation history)"),
+            new("/safe-mode", "Show safe mode status"),
+            new("/safe-mode on", "Block Shell, Git, Http tools (by owning plugin, including Extended-bucket tools)"),
+            new("/safe-mode off", "Restore prior category disables"),
+            new("/hitl", "Show HITL (human-in-the-loop) mode status"),
+            new("/hitl on", "Require y/N approval before each shell command, and before each FileSystem write/delete, Git write, or write-ish Http call"),
+            new("/hitl off", "Run those calls without approval"),
+            new("/adversarial", "Show adversarial mode status"),
+            new("/adversarial on", "Enable critic agent to review each /execute step"),
+            new("/adversarial off", "Disable critic agent"),
+            new("/mcp", "List connected MCP servers and their tools"),
+            new("/mcp add", "Interactive wizard to connect an MCP server (persists for future sessions)"),
+            new("/mcp add --session-only", "Same, but don't persist past this session"),
+            new("/mcp remove <name>", "Stop offering a connected server's tools to the model"),
+        ]),
+        new("Context & model", [
+            new("/context", "Show context window usage (actual once a turn has run, else estimated), per-category breakdown, and cumulative session token usage"),
+            new("/compact", "Summarise conversation into a handoff doc and reset history"),
+            new("/compact <focus>", "Same, but tailor the summary toward the next session's focus"),
+            new("/model", "Show current model and reasoning effort"),
+            new("/model <id> [effort]", "Switch model; optional effort is provider-specific, e.g. none, low, medium, high, xhigh, max"),
+            new("/models", "List models available from the current provider"),
+            new("/reasoning", "Show current reasoning effort"),
+            new("/reasoning <effort>", "Set reasoning effort for the current model (provider-specific)"),
+            new("/max-tokens <n>", "Set max output tokens for each response"),
+            new("/max-tokens reset", "Restore provider default max output tokens"),
+            new("/temperature <n>", "Set sampling temperature (0.0–2.0, lower = more deterministic)"),
+            new("/temperature reset", "Restore provider default temperature"),
+            new("/top-p <n>", "Set nucleus sampling top-p (0.0–1.0)"),
+            new("/top-p reset", "Restore provider default top-p"),
+            new("/seed <n>", "Fix the sampling seed for reproducible output (provider support varies)"),
+            new("/seed reset", "Clear the sampling seed"),
+            new("/system", "Show current system prompt"),
+            new("/system <prompt>", "Set a new system prompt"),
+            new("/provider", "Show current provider, model, and API key"),
+            new("/provider setup", "Reconfigure provider, model, and API key"),
+        ]),
+        new("Memory", [
+            new("/memory", "List all stored memories"),
+            new("/memory show <name>", "Show full body of a memory"),
+            new("/memory delete <name>", "Delete a stored memory"),
+            new("/memory save", "Extract and save memories from the current session now"),
+        ]),
+        new("I/O & events", [
+            new("/paste", "Enter paste mode (multi-line input; type .done or press Ctrl+D to finish)"),
+            new("/save", "Save transcript to repl-<id>.md in the current directory"),
+            new("/save <file>", "Save transcript to the specified file"),
+            new("/snapshot", "Write a full debug snapshot (context, tools, history, plan) to a temp file"),
+            new("/events", "Show session event stats (turns, tool calls, top tools, per-turn actual input/output tokens)"),
+            new("/events stats", "Same as /events"),
+            new("/explore <query>", "Run a sub-agent exploration loop and return a prose summary"),
+            new("/locate <symbol>", "Run a sub-agent symbol lookup; returns path:line result"),
+            new("/delegate <task>", "Hand a self-contained subtask to a write-capable sub-agent (files, shell, git) and return its summary"),
+        ]),
+    ];
+
     private static void PrintHelp(bool jsonMode = false)
     {
         if (jsonMode)
         {
-            ReplJsonBridge.Emit(new { type = "text", text = """
-                ## REPL Commands
-
-                ### Shell
-                - `!<command>` — Run a shell command directly (e.g. `!git status`) — not sent to the model, not added to conversation history
-                - `!!` — Repeat the last `!` command
-                - `!cd <dir>` — Change the shell escape's working directory (persists across `!` commands); `!cd`, `!cd -`, and `!cd ~` also work
-
-                ### Session
-                - `/help` — Show this help
-                - `/sessions` — List resumable sessions with IDs and turn counts
-                - `/fork` — Snapshot the current session to a new ID so you can branch from this point
-                - `/fork switch` — Fork and immediately become the fork (continue under the new ID)
-                - `/switch <id>` — Save the current session and load another saved session in its place
-                - `/conversation` — List all turns with numbers so you can pick a rewind point
-                - `/rewind <n>` — Keep turns 1…n and discard the rest
-                - `/rewind -<n>` — Step back n turns from the current position
-                - `/retry` — Resend the last message (useful when the response was poor)
-                - `/last` — Re-print the last assistant response
-                - `/clear` — Clear conversation history (keeps system prompt)
-                - `/history` — Show condensed conversation history
-                - `/assist` — Diagnose the conversation and inject a corrective message
-                - `/exit` — Exit the REPL (auto-saves memories)
-
-                ### Orchestration
-                - `/run <task>` — Run a task using `fuseraft run` and inject the result as context
-                - `/run <file>` — Load task from a file and run it (prompts for config if multiple exist)
-
-                ### Planning
-                - `/plan <task>` — Create a structured plan (JSON steps, no tool calls)
-                - `/plan` — Show the current stored plan
-                - `/execute` — Run each plan step sequentially with postcondition checks
-                - `/resume` — Retry the halted step and continue remaining steps
-                - `/recover` — Inject failure context and retry the halted step with agent awareness
-
-                ### Tools & modes
-                - `/tools` — List active tools by category
-                - `/tools disable <category>` — Disable a tool category (FileSystem Shell Search Git Http)
-                - `/tools enable <category>` — Re-enable a disabled tool category
-                - `/tools restrict <plugin> <tag…>` — Allow only tools tagged with one of `<tag…>` for that plugin (e.g. `/tools restrict Git read`), using the same capability vocabulary as orchestration's `AgentConfig.Capabilities`
-                - `/tools unrestrict <plugin>` — Remove a plugin's capability restriction
-                - `/undo` — Revert files written, patched, copied, moved, or deleted in the most recent turn (repeatable; walks back one turn at a time — not the same as `/rewind`, which only affects conversation history)
-                - `/safe-mode` — Show safe mode status
-                - `/safe-mode on` — Block Shell, Git, Http tools (by owning plugin, including Extended-bucket tools)
-                - `/safe-mode off` — Restore prior category disables
-                - `/hitl` — Show HITL (human-in-the-loop) mode status
-                - `/hitl on` — Require y/N approval before each shell command, and before each FileSystem write/delete, Git write, or write-ish Http call
-                - `/hitl off` — Run those calls without approval
-                - `/adversarial` — Show adversarial mode status
-                - `/adversarial on` — Enable critic agent to review each `/execute` step
-                - `/adversarial off` — Disable critic agent
-                - `/mcp` — List connected MCP servers and their tools
-                - `/mcp add` — Interactive wizard to connect an MCP server (persists for future sessions)
-                - `/mcp add --session-only` — Same, but don't persist past this session
-                - `/mcp remove <name>` — Stop offering a connected server's tools to the model
-
-                ### Context & model
-                - `/context` — Show context window usage (actual once a turn has run, else estimated), per-category breakdown, and cumulative session token usage
-                - `/compact` — Summarise conversation into a handoff doc and reset history
-                - `/compact <focus>` — Same, but tailor the summary toward the next session's focus
-                - `/model` — Show current model and reasoning effort
-                - `/model <id> [effort]` — Switch model; optional effort is provider-specific, e.g. none, low, medium, high, xhigh, max
-                - `/models` — List models available from the current provider
-                - `/reasoning` — Show current reasoning effort
-                - `/reasoning <effort>` — Set reasoning effort for the current model (provider-specific)
-                - `/max-tokens <n>` — Set max output tokens for each response
-                - `/max-tokens reset` — Restore provider default max output tokens
-                - `/temperature <n>` — Set sampling temperature (0.0–2.0, lower = more deterministic)
-                - `/temperature reset` — Restore provider default temperature
-                - `/top-p <n>` — Set nucleus sampling top-p (0.0–1.0)
-                - `/top-p reset` — Restore provider default top-p
-                - `/seed <n>` — Fix the sampling seed for reproducible output (provider support varies)
-                - `/seed reset` — Clear the sampling seed
-                - `/system` — Show current system prompt
-                - `/system <prompt>` — Set a new system prompt
-                - `/provider` — Show current provider, model, and API key
-
-                ### Memory
-                - `/memory` — List all stored memories
-                - `/memory show <name>` — Show full body of a memory
-                - `/memory delete <name>` — Delete a stored memory
-                - `/memory save` — Extract and save memories from the current session now
-
-                ### I/O & events
-                - `/save` — Save transcript to `repl-<id>.md` in the current directory
-                - `/save <file>` — Save transcript to the specified file
-                - `/snapshot` — Write a full debug snapshot (context, tools, history, plan) to a temp file
-                - `/events` — Show session event stats (turns, tool calls, top tools, per-turn actual input/output tokens)
-                - `/explore <query>` — Run a sub-agent exploration loop and return a prose summary
-                - `/locate <symbol>` — Run a sub-agent symbol lookup; returns `path:line` result
-                - `/delegate <task>` — Hand a self-contained subtask to a write-capable sub-agent (files, shell, git) and return its summary
-                """ });
+            var sb = new System.Text.StringBuilder("## REPL Commands\n");
+            foreach (var section in HelpSections)
+            {
+                sb.Append("\n### ").Append(section.Title).Append('\n');
+                foreach (var entry in section.Entries)
+                    sb.Append("- `").Append(entry.Command).Append("` — ").Append(entry.Description).Append('\n');
+            }
+            ReplJsonBridge.Emit(new { type = "text", text = sb.ToString().TrimEnd() });
             return;
         }
 
         AnsiConsole.MarkupLine("[bold]REPL commands[/]");
         AnsiConsole.WriteLine();
 
-        static Grid MakeGrid()
+        foreach (var section in HelpSections)
         {
-            var g = new Grid();
-            g.AddColumn(new GridColumn().NoWrap().Padding(new Padding(2, 0, 4, 0)));
-            g.AddColumn(new GridColumn().Padding(new Padding(0, 0, 0, 0)));
-            return g;
+            AnsiConsole.MarkupLine($"  [dim]{Markup.Escape(section.Title)}[/]");
+
+            var grid = new Grid();
+            grid.AddColumn(new GridColumn().NoWrap().Padding(new Padding(2, 0, 4, 0)));
+            grid.AddColumn(new GridColumn().Padding(new Padding(0, 0, 0, 0)));
+            foreach (var entry in section.Entries)
+                grid.AddRow($"[bold cyan]{Markup.Escape(entry.Command)}[/]", Markup.Escape(entry.Description));
+            AnsiConsole.Write(grid);
+            AnsiConsole.WriteLine();
         }
-
-        AnsiConsole.MarkupLine("  [dim]Shell[/]");
-        var shell = MakeGrid();
-        shell.AddRow("[bold cyan]!<command>[/]", "Run a shell command directly (e.g. !git status) — not sent to the model, not added to conversation history");
-        shell.AddRow("[bold cyan]!![/]",          "Repeat the last ! command");
-        shell.AddRow("[bold cyan]!cd <dir>[/]",   "Change the shell escape's working directory (persists across ! commands); !cd, !cd -, and !cd ~ also work");
-        AnsiConsole.Write(shell);
-        AnsiConsole.WriteLine();
-
-        AnsiConsole.MarkupLine("  [dim]Session[/]");
-        var session = MakeGrid();
-        session.AddRow("[bold cyan]/help[/]",          "Show this help");
-        session.AddRow("[bold cyan]/sessions[/]",      "List resumable sessions with IDs and turn counts");
-        session.AddRow("[bold cyan]/fork[/]",           "Snapshot the current session to a new ID (branch from this point)");
-        session.AddRow("[bold cyan]/fork switch[/]",    "Fork and immediately become the fork (continue under the new ID)");
-        session.AddRow("[bold cyan]/switch <id>[/]",    "Save the current session and load another saved session in its place");
-        session.AddRow("[bold cyan]/conversation[/]",   "List all turns with numbers so you can pick a rewind point");
-        session.AddRow("[bold cyan]/rewind <n>[/]",     "Keep turns 1…n and discard the rest");
-        session.AddRow("[bold cyan]/rewind -<n>[/]",    "Step back n turns from the current position");
-        session.AddRow("[bold cyan]/retry[/]",           "Resend the last message (useful when the response was poor)");
-        session.AddRow("[bold cyan]/last[/]",            "Re-print the last assistant response");
-        session.AddRow("[bold cyan]/clear[/]",          "Clear conversation history (keeps system prompt)");
-        session.AddRow("[bold cyan]/history[/]",        "Show condensed conversation history");
-        session.AddRow("[bold cyan]/assist[/]",         "Diagnose the conversation and inject a corrective message");
-        session.AddRow("[bold cyan]/exit[/]",           "Exit the REPL (auto-saves memories)");
-        AnsiConsole.Write(session);
-        AnsiConsole.WriteLine();
-
-        AnsiConsole.MarkupLine("  [dim]Orchestration[/]");
-        var orch = MakeGrid();
-        orch.AddRow("[bold cyan]/run <task>[/]",  "Run a task via `fuseraft run`; injects result as conversation context");
-        orch.AddRow("[bold cyan]/run <file>[/]",  "Load task from a file and run it (prompts for config if multiple exist)");
-        AnsiConsole.Write(orch);
-        AnsiConsole.WriteLine();
-
-        AnsiConsole.MarkupLine("  [dim]Planning[/]");
-        var planning = MakeGrid();
-        planning.AddRow("[bold cyan]/plan <task>[/]", "Create a structured plan (JSON steps, no tool calls)");
-        planning.AddRow("[bold cyan]/plan[/]",         "Show the current stored plan");
-        planning.AddRow("[bold cyan]/execute[/]",      "Run each plan step sequentially with postcondition checks");
-        planning.AddRow("[bold cyan]/resume[/]",       "Retry the halted step and continue remaining steps");
-        planning.AddRow("[bold cyan]/recover[/]",      "Inject failure context and retry the halted step with agent awareness");
-        AnsiConsole.Write(planning);
-        AnsiConsole.WriteLine();
-
-        AnsiConsole.MarkupLine("  [dim]Tools & modes[/]");
-        var tools = MakeGrid();
-        tools.AddRow("[bold cyan]/tools[/]",                       "List active tools by category");
-        tools.AddRow("[bold cyan]/tools disable <category>[/]",    "Disable a tool category (FileSystem Shell Search Git Http)");
-        tools.AddRow("[bold cyan]/tools enable <category>[/]",     "Re-enable a disabled tool category");
-        tools.AddRow("[bold cyan]/tools restrict <plugin> <tag…>[/]", "Allow only tools tagged <tag> for that plugin (e.g. Git read)");
-        tools.AddRow("[bold cyan]/tools unrestrict <plugin>[/]",   "Remove a plugin's capability restriction");
-        tools.AddRow("[bold cyan]/undo[/]",                        "Revert files written/patched/copied/moved/deleted in the most recent turn (repeatable; files only — see /rewind for conversation history)");
-        tools.AddRow("[bold cyan]/safe-mode[/]",                   "Show safe mode status");
-        tools.AddRow("[bold cyan]/safe-mode on[/]",                "Block Shell, Git, Http tools (incl. Extended-bucket)");
-        tools.AddRow("[bold cyan]/safe-mode off[/]",               "Restore prior category disables");
-        tools.AddRow("[bold cyan]/hitl[/]",                        "Show HITL (human-in-the-loop) mode status");
-        tools.AddRow("[bold cyan]/hitl on[/]",                     "Require y/N approval before each shell command, FileSystem write/delete, Git write, or write-ish Http call");
-        tools.AddRow("[bold cyan]/hitl off[/]",                    "Run those calls without approval");
-        tools.AddRow("[bold cyan]/adversarial[/]",                 "Show adversarial mode status");
-        tools.AddRow("[bold cyan]/adversarial on[/]",              "Enable critic agent to review each /execute step");
-        tools.AddRow("[bold cyan]/adversarial off[/]",             "Disable critic agent");
-        tools.AddRow("[bold cyan]/mcp[/]",                         "List connected MCP servers and their tools");
-        tools.AddRow("[bold cyan]/mcp add[/]",                     "Interactive wizard to connect an MCP server (persists for future sessions)");
-        tools.AddRow("[bold cyan]/mcp add --session-only[/]",      "Same, but don't persist past this session");
-        tools.AddRow("[bold cyan]/mcp remove <name>[/]",           "Stop offering a connected server's tools to the model");
-        AnsiConsole.Write(tools);
-        AnsiConsole.WriteLine();
-
-        AnsiConsole.MarkupLine("  [dim]Context & model[/]");
-        var ctx = MakeGrid();
-        ctx.AddRow("[bold cyan]/context[/]",           "Show context window usage (actual once a turn has run, else estimated), per-category breakdown, and cumulative session token usage");
-        ctx.AddRow("[bold cyan]/compact[/]",            "Summarise conversation into a handoff doc and reset history");
-        ctx.AddRow("[bold cyan]/compact <focus>[/]",    "Same, but tailor the summary toward the next session's focus");
-        ctx.AddRow("[bold cyan]/model[/]",                          "Show current model and reasoning effort");
-        ctx.AddRow("[bold cyan]/model <id> [[effort]][/]",          "Switch model; effort is provider-specific, e.g. none, low, medium, high, xhigh, max");
-        ctx.AddRow("[bold cyan]/models[/]",                         "List models available from the current provider");
-        ctx.AddRow("[bold cyan]/reasoning[/]",                     "Show current reasoning effort");
-        ctx.AddRow("[bold cyan]/reasoning <effort>[/]",            "Set reasoning effort for the current model (provider-specific)");
-        ctx.AddRow("[bold cyan]/max-tokens <n>[/]",     "Set max output tokens for each response");
-        ctx.AddRow("[bold cyan]/max-tokens reset[/]",   "Restore provider default max output tokens");
-        ctx.AddRow("[bold cyan]/temperature <n>[/]",    "Set sampling temperature (0.0–2.0, lower = more deterministic)");
-        ctx.AddRow("[bold cyan]/temperature reset[/]",  "Restore provider default temperature");
-        ctx.AddRow("[bold cyan]/top-p <n>[/]",          "Set nucleus sampling top-p (0.0–1.0)");
-        ctx.AddRow("[bold cyan]/top-p reset[/]",        "Restore provider default top-p");
-        ctx.AddRow("[bold cyan]/seed <n>[/]",           "Fix the sampling seed for reproducible output (provider support varies)");
-        ctx.AddRow("[bold cyan]/seed reset[/]",         "Clear the sampling seed");
-        ctx.AddRow("[bold cyan]/system[/]",             "Show current system prompt");
-        ctx.AddRow("[bold cyan]/system <prompt>[/]",    "Set a new system prompt");
-        ctx.AddRow("[bold cyan]/provider[/]",           "Show current provider, model, and API key");
-        ctx.AddRow("[bold cyan]/provider setup[/]",     "Reconfigure provider, model, and API key");
-        AnsiConsole.Write(ctx);
-        AnsiConsole.WriteLine();
-
-        AnsiConsole.MarkupLine("  [dim]Memory[/]");
-        var mem = MakeGrid();
-        mem.AddRow("[bold cyan]/memory[/]",               "List all stored memories");
-        mem.AddRow("[bold cyan]/memory show <name>[/]",   "Show full body of a memory");
-        mem.AddRow("[bold cyan]/memory delete <name>[/]", "Delete a stored memory");
-        mem.AddRow("[bold cyan]/memory save[/]",          "Extract and save memories from the current session now");
-        AnsiConsole.Write(mem);
-        AnsiConsole.WriteLine();
-
-        AnsiConsole.MarkupLine("  [dim]I/O & events[/]");
-        var io = MakeGrid();
-        io.AddRow("[bold cyan]/paste[/]",           "Enter paste mode (multi-line input; type .done or press Ctrl+D to finish)");
-        io.AddRow("[bold cyan]/save[/]",             "Save transcript to repl-<id>.md in the current directory");
-        io.AddRow("[bold cyan]/save <file>[/]",      "Save transcript to the specified file");
-        io.AddRow("[bold cyan]/snapshot[/]",          "Write a full debug snapshot (context, tools, history, plan) to a temp file");
-        io.AddRow("[bold cyan]/events[/]",           "Show session event stats (turns, tool calls, top tools, per-turn actual input/output tokens)");
-        io.AddRow("[bold cyan]/events stats[/]",     "Same as /events");
-        io.AddRow("[bold cyan]/explore <query>[/]",  "Run a sub-agent exploration loop and return a prose summary");
-        io.AddRow("[bold cyan]/locate <symbol>[/]",  "Run a sub-agent symbol lookup; returns path:line result");
-        io.AddRow("[bold cyan]/delegate <task>[/]",  "Hand a self-contained subtask to a write-capable sub-agent (files, shell, git)");
-        AnsiConsole.Write(io);
     }
 }
