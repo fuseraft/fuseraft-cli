@@ -54,11 +54,8 @@ internal sealed class ParallelFanOutExecutor(TurnServices services)
 
         if (!pgOk)
         {
-            consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-            TurnExecutionHelpers.RecordGovernanceViolation(agentName, pgValidator!, consecutiveFails, maxRetries, sessionId, services);
-
-            if (consecutiveFails >= maxRetries)
-                throw new ValidatorStuckException(agentName, pgValidator!, consecutiveFails, pgErr!);
+            consecutiveFails = TurnExecutionHelpers.BumpFailureCountOrThrow(
+                consecutiveFails, maxRetries, agentName, pgValidator!, pgErr!, sessionId, services);
 
             await TurnExecutionHelpers.EmitAndInjectValidationFailureAsync(
                 agentName, foundKeyword, pgValidator!, pgErr!, responseText, consecutiveFails, maxRetries, ctx, ct, services);
@@ -97,6 +94,21 @@ internal sealed class ParallelFanOutExecutor(TurnServices services)
                 Fork:         ForkContext(ctx, branchIndex));
         }).ToList();
 
+        // Cancels sibling branches as soon as one genuinely fails, instead of letting every
+        // branch run (and bill) to completion only to have the whole fan-out's output
+        // discarded once the exception propagates. branchCts is linked to (not a replacement
+        // for) the caller's ct, so an external cancellation still propagates exactly as before.
+        //
+        // A sibling that faults with OperationCanceledException purely as a *side effect* of
+        // that cancellation is deliberately swallowed rather than left to fault its own task:
+        // Task.WhenAll rethrows only the first exception in task-ARRAY order, not the first one
+        // in TIME, so an unrelated sibling's resulting cancellation exception could otherwise
+        // outrank — and hide — the real failure that triggered the cancellation in the first
+        // place. Suppressing it here leaves only the real failure's task faulted, so
+        // Task.WhenAll's default unwrapping surfaces the right exception with no extra code.
+        using var branchCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        Exception? primaryFailure = null;
+
         var parallelTasks = forkPairs
             .Select(async fp =>
             {
@@ -108,15 +120,22 @@ internal sealed class ParallelFanOutExecutor(TurnServices services)
                 {
                     await RunSingleBranchAsync(
                         fp.NodeId, fp.AgentName, fp.Agent, fp.Instructions, fp.AgentCfg,
-                        fp.RouteTable, fp.Fork, ct, agents, agentInstructions, agentConfigs,
+                        fp.RouteTable, fp.Fork, branchCts.Token, agents, agentInstructions, agentConfigs,
                         recoveryActivated, sessionId, task);
                     if (eventEmitter is not null)
                         _ = eventEmitter.EmitAsync(EventTypes.ParallelBranchEnd,
                             agent:   fp.AgentName,
                             payload: new { node = fp.NodeId });
                 }
+                catch (OperationCanceledException) when (primaryFailure is not null)
+                {
+                    // Side effect of another branch's failure below, not this branch's own —
+                    // see this method's cancellation comment above.
+                }
                 catch (Exception branchEx)
                 {
+                    Interlocked.CompareExchange(ref primaryFailure, branchEx, null);
+                    branchCts.Cancel();
                     if (eventEmitter is not null)
                         _ = eventEmitter.EmitAsync(EventTypes.ParallelBranchError,
                             agent:   fp.AgentName,
@@ -331,11 +350,8 @@ internal sealed class ParallelFanOutExecutor(TurnServices services)
                     return; // fan-out complete for this worker; parent merges results
                 }
 
-                consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-                TurnExecutionHelpers.RecordGovernanceViolation(agentName, failingValidator!, consecutiveFails, maxRetries, sessionId, services);
-
-                if (consecutiveFails >= maxRetries)
-                    throw new ValidatorStuckException(agentName, failingValidator!, consecutiveFails, errMsg!);
+                consecutiveFails = TurnExecutionHelpers.BumpFailureCountOrThrow(
+                    consecutiveFails, maxRetries, agentName, failingValidator!, errMsg!, sessionId, services);
 
                 var fwdEdgeKey = $"{nodeId}::{foundKeyword}::parallel";
                 if (consecutiveFails >= 2

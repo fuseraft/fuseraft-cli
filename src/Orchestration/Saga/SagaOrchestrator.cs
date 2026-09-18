@@ -17,8 +17,10 @@ namespace fuseraft.Orchestration.Saga;
 /// </para>
 ///
 /// <para>
-/// Compensation failures are swallowed so that the stack always unwinds fully; the
-/// original exception is re-thrown after compensation completes.
+/// A failing <see cref="ICompensatingAgent.CompensateAsync"/> does not stop the unwind —
+/// the stack keeps popping so every remaining step still gets its chance — but the failure
+/// is reported via <see cref="EventTypes.SagaCompensationFailed"/> rather than swallowed.
+/// The original exception is re-thrown after compensation completes.
 /// </para>
 /// </summary>
 public sealed class SagaOrchestrator(
@@ -217,10 +219,28 @@ public sealed class SagaOrchestrator(
                         agent:   agentName,
                         payload: new { version = state.Version });
             }
-            catch
+            catch (Exception ex)
             {
-                // Compensation failures are swallowed; the original failure is re-thrown upstream.
+                // The step is not retried and the stack keeps unwinding — but unlike the
+                // success path, this failure must be observable. A silent catch here made
+                // "fully compensated" and "partially/never compensated" indistinguishable
+                // in the event stream.
+                if (eventEmitter is not null)
+                    await eventEmitter.EmitAsync(EventTypes.SagaCompensationFailed,
+                        agent:   agentName,
+                        payload: new { version = state.Version, error = ex.Message });
             }
         }
+
+        // Steps beyond MaxCompensationSteps are left un-compensated by design (a bound on
+        // rollback cost), but that must also be visible rather than just silently dropped.
+        if (executedSteps.Count > 0 && eventEmitter is not null)
+            await eventEmitter.EmitAsync(EventTypes.SagaCompensationSkipped,
+                payload: new
+                {
+                    remaining = executedSteps.Count,
+                    agents    = executedSteps.Select(s => s.AgentName).ToArray(),
+                    max       = sagaConfig.MaxCompensationSteps
+                });
     }
 }

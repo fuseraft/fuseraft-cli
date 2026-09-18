@@ -52,6 +52,7 @@ public static class OrchestratorConfigLoader
             throw new InvalidOperationException("Config must define at least one agent.");
 
         ValidateIsolationConstraints(config, loggerFactory);
+        ValidateMergeStrategies(config);
 
         // Expand ${ENV_VAR} tokens in security and API profile config before use.
         config = ExpandEnvVars(config);
@@ -512,6 +513,40 @@ public static class OrchestratorConfigLoader
                     "Context: block (session_context, brief_field:*, changes_recent:N, own_history:N, " +
                     "etc.) or set 'Isolation: Shared' if this agent needs the group transcript.",
                     agent.Name);
+        }
+    }
+
+    // MergeStrategy.Benchmark is a real, selectable enum value with no implementation —
+    // MergeEngine.Merge/MergeAsync throw NotSupportedException for it unconditionally (see
+    // MergeEngine.NotImplemented). Left unchecked, a config author only discovers this when a
+    // long-running session finally hits the one parallel transition that uses it. Reject at
+    // load time instead, same rationale as the Magentic/Fresh-isolation check above. Shared
+    // with ValidateConfigCommand's lint pass so the two checks can't drift out of sync.
+    internal static IReadOnlyList<(string StateName, int TransitionIndex)> FindBenchmarkMergeStrategyUsages(
+        OrchestrationConfig config)
+    {
+        var sm = config.Selection.StateMachine;
+        if (sm is null) return [];
+
+        var locations = new List<(string, int)>();
+        foreach (var (stateName, state) in sm.States)
+            for (int ti = 0; ti < state.Transitions.Count; ti++)
+                if (state.Transitions[ti].Merge?.Strategy == MergeStrategy.Benchmark)
+                    locations.Add((stateName, ti));
+
+        return locations;
+    }
+
+    private static void ValidateMergeStrategies(OrchestrationConfig config)
+    {
+        var benchmarkUsages = FindBenchmarkMergeStrategyUsages(config);
+        if (benchmarkUsages.Count > 0)
+        {
+            var where = string.Join(", ", benchmarkUsages.Select(u => $"States['{u.StateName}'].Transitions[{u.TransitionIndex}]"));
+            throw new InvalidOperationException(
+                $"Merge.Strategy 'Benchmark' is not implemented and always throws at runtime " +
+                $"(see MergeEngine.Merge/MergeAsync). Used at: {where}. " +
+                $"Configure a different Merge.Strategy instead: Union, Consensus, Vote, Ranked, or SemanticDiff.");
         }
     }
 }

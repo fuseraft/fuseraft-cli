@@ -99,8 +99,10 @@ public static class EventTypes
     public const string MagenticReplan   = "magentic_replan";
 
     // ── Saga orchestrator ────────────────────────────────────────────────────
-    public const string SagaCompensating = "saga_compensating";
-    public const string SagaCompensated  = "saga_compensated";
+    public const string SagaCompensating       = "saga_compensating";
+    public const string SagaCompensated        = "saga_compensated";
+    public const string SagaCompensationFailed = "saga_compensation_failed";
+    public const string SagaCompensationSkipped = "saga_compensation_skipped";
 
     // ── Adversarial orchestrator ─────────────────────────────────────────────
     public const string AdversarialStageStart   = "adversarial_stage_start";

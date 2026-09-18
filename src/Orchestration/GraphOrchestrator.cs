@@ -1093,11 +1093,8 @@ public sealed class GraphOrchestrator(
 
             if (!pbOk)
             {
-                consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-                TurnExecutionHelpers.RecordGovernanceViolation(agentName, pbValidator!, consecutiveFails, maxRetries, _sessionId, _services);
-
-                if (consecutiveFails >= maxRetries)
-                    throw new ValidatorStuckException(agentName, pbValidator!, consecutiveFails, pbErr!);
+                consecutiveFails = TurnExecutionHelpers.BumpFailureCountOrThrow(
+                    consecutiveFails, maxRetries, agentName, pbValidator!, pbErr!, _sessionId, _services);
 
                 // Recovery agent for back-edge validator failures.
                 var backEdgeKey = $"{nodeId}::{foundKeyword}::back";
@@ -1206,11 +1203,8 @@ public sealed class GraphOrchestrator(
                 return (true, true, consecutiveFails);
             }
 
-            consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-            TurnExecutionHelpers.RecordGovernanceViolation(agentName, autoValidator!, consecutiveFails, maxRetries, _sessionId, _services);
-
-            if (consecutiveFails >= maxRetries)
-                throw new ValidatorStuckException(agentName, autoValidator!, consecutiveFails, autoErr!);
+            consecutiveFails = TurnExecutionHelpers.BumpFailureCountOrThrow(
+                consecutiveFails, maxRetries, agentName, autoValidator!, autoErr!, _sessionId, _services);
 
             await TurnExecutionHelpers.EmitAndInjectValidationFailureAsync(
                 agentName, "(unconditional)", autoValidator!, autoErr!, responseText, consecutiveFails, maxRetries, ctx, ct, _services);
@@ -1227,11 +1221,8 @@ public sealed class GraphOrchestrator(
 
                 if (!ubOk)
                 {
-                    consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-                    TurnExecutionHelpers.RecordGovernanceViolation(agentName, ubValidator!, consecutiveFails, maxRetries, _sessionId, _services);
-
-                    if (consecutiveFails >= maxRetries)
-                        throw new ValidatorStuckException(agentName, ubValidator!, consecutiveFails, ubErr!);
+                    consecutiveFails = TurnExecutionHelpers.BumpFailureCountOrThrow(
+                        consecutiveFails, maxRetries, agentName, ubValidator!, ubErr!, _sessionId, _services);
 
                     await TurnExecutionHelpers.EmitAndInjectValidationFailureAsync(
                         agentName, "(unconditional-back)", ubValidator!, ubErr!, responseText, consecutiveFails, maxRetries, ctx, ct, _services);
@@ -1336,13 +1327,10 @@ public sealed class GraphOrchestrator(
             return (true, true, consecutiveFails);
         }
 
-        // Validator failed — clamp to maxRetries-1 so a single keyword find is not
-        // penalised as heavily as a missing keyword before injecting correction.
-        consecutiveFails = Math.Min(consecutiveFails + 1, maxRetries - 1);
-        TurnExecutionHelpers.RecordGovernanceViolation(agentName, failingValidator!, consecutiveFails, maxRetries, _sessionId, _services);
-
-        if (consecutiveFails >= maxRetries)
-            throw new ValidatorStuckException(agentName, failingValidator!, consecutiveFails, errMsg!);
+        // Validator failed for this keyword — same counter/circuit-breaker as a missing
+        // keyword; both must be able to reach maxRetries and trip ValidatorStuckException.
+        consecutiveFails = TurnExecutionHelpers.BumpFailureCountOrThrow(
+            consecutiveFails, maxRetries, agentName, failingValidator!, errMsg!, _sessionId, _services);
 
         // Recovery agent: activate on >= 2 consecutive failures, at most once per edge.
         var fwdEdgeKey = $"{nodeId}::{foundKeyword}";

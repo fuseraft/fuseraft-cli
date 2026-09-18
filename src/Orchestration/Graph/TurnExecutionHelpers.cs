@@ -193,6 +193,34 @@ internal static class TurnExecutionHelpers
     }
 
     /// <summary>
+    /// Increments <paramref name="consecutiveFails"/> (capped at <paramref name="maxRetries"/>),
+    /// records the governance violation, and throws <see cref="ValidatorStuckException"/> once
+    /// the cap is reached. This exact sequence was previously hand-copied at every
+    /// validator-failure call site in <c>GraphOrchestrator</c>/<c>ParallelFanOutExecutor</c>; one
+    /// copy clamped the counter one below <paramref name="maxRetries"/>, which made the throw
+    /// below it unreachable — at every site simultaneously, since they were all copies of the
+    /// same bug. Routing every call through here means that class of bug can only be
+    /// reintroduced once, not once per call site.
+    /// </summary>
+    public static int BumpFailureCountOrThrow(
+        int consecutiveFails,
+        int maxRetries,
+        string agentName,
+        string validatorName,
+        string errorMessage,
+        string sessionId,
+        TurnServices services)
+    {
+        var next = Math.Min(consecutiveFails + 1, maxRetries);
+        RecordGovernanceViolation(agentName, validatorName, next, maxRetries, sessionId, services);
+
+        if (next >= maxRetries)
+            throw new ValidatorStuckException(agentName, validatorName, next, errorMessage);
+
+        return next;
+    }
+
+    /// <summary>
     /// HITL approval prompt and approval branching. When the human-approval service rejects
     /// the route, injects a blocked-route message into history, persists it to the message
     /// sink, and resets <paramref name="consecutiveFails"/> to zero.
