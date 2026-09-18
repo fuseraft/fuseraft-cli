@@ -7,6 +7,7 @@ using Spectre.Console.Cli;
 using fuseraft.Cli;
 using fuseraft.Cli.Commands;
 using fuseraft.Cli.Display;
+using fuseraft.Cli.Telemetry;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
@@ -14,6 +15,7 @@ using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.KeyStore;
 using fuseraft.Infrastructure.Plugins;
 using fuseraft.Orchestration;
+using fuseraft.Orchestration.Hooks;
 
 namespace fuseraft.Cli.Commands.Repl;
 
@@ -258,7 +260,17 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // with every sandboxed plugin (see IncludedRootsState) so a HITL-approved sandbox-escape
         // grant made through any one tool is immediately honored by the rest. Meaningless under
         // --yolo (already fully unsandboxed) — warn rather than silently drop the flag.
-        var includedRoots = new IncludedRootsState();
+        //
+        // allowEscapeGrants is false whenever the approval service resolving this session's
+        // prompts is NonInteractiveHumanApprovalService (piped stdin, not the VS Code JSON
+        // bridge — see the approvalService assignment below, which this must stay in sync with).
+        // That service answers every ordinary HITL prompt permissively so a script doesn't hang
+        // — reasonable for "let this one shell command run" — but a sandbox-escape grant is a
+        // silent, PERMANENT widening of the sandbox boundary for the rest of the session, not
+        // one more disposable answer to one more prompt. Without this, hardening piped/served
+        // REPL sessions against hanging/corrupting stdin would otherwise make the sandbox
+        // boundary itself a standing no-op for those same sessions on the very first denial.
+        var includedRoots = new IncludedRootsState(allowEscapeGrants: jsonMode || !Console.IsInputRedirected);
         if (settings.Include is { Length: > 0 } rawIncludes)
         {
             if (settings.Yolo)
@@ -298,9 +310,15 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         ReplStdinPump? stdinPump = jsonMode
             ? new ReplStdinPump(Console.In, () => ctxForStdin?.ActiveCts)
             : null;
+        // Piped stdin with no --vscode bridge (jsonMode false) still hits ConsoleHumanApprovalService's
+        // blocking Console.ReadLine() otherwise: it either desyncs the session (a prompt's reply is
+        // read from what was meant to be the next piped REPL turn) or hangs outright. Fall back to the
+        // same non-interactive, permissive approval service EvalCommand uses for its own no-TTY case.
         IHumanApprovalService approvalService = jsonMode
             ? new JsonBridgeHumanApprovalService(stdinPump!)
-            : new ConsoleHumanApprovalService();
+            : Console.IsInputRedirected
+                ? new NonInteractiveHumanApprovalService()
+                : new ConsoleHumanApprovalService();
         // Loaded once and reused below for both ShellPlugin and FileSystemPlugin so a single
         // Security block in .fuseraft/config/orchestration.yaml governs both surfaces.
         // DefaultSecurityPolicy is merged in unconditionally (not just when that file exists)
@@ -402,6 +420,18 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // directly) show up in the event log.
         using var emitter = new EventEmitter(eventsPath);
         emitter.SetSessionId(sessionId);
+
+        // OTel export — off unless the user has set telemetry.otlpEndpoint (fuseraft settings
+        // set telemetry.otlpEndpoint <url>). `fuseraft run` has had this since FuseraftTelemetry
+        // was added; the REPL never did, despite several of the exported instruments
+        // (fuseraft.hitl.escalations/rejections, fuseraft.compaction.count,
+        // fuseraft.context_budget.warnings/cutovers) describing REPL-native concepts
+        // (/hitl, /compact, ContextBudgetManager) more than fuseraft run ones. TelemetryEventHook
+        // listens on the same EventEmitter every REPL subsystem already emits through, so no
+        // other call site needs to change.
+        using var telemetry = FuseraftTelemetry.Create(userCfg?.Telemetry, orchestrationName: "fuseraft-repl");
+        if (telemetry is not null)
+            emitter.RegisterHook(new TelemetryEventHook(telemetry));
 
         IChatClient client;
         try

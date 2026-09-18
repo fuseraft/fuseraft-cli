@@ -109,6 +109,37 @@ internal static class FileSystemSandbox
         return matcher;
     }
 
+    // Resolves 'path' to its canonical absolute form: expands ~, strips wrapping quotes, and
+    // resolves a relative path against sandboxRoot (or the process CWD when sandboxRoot is
+    // null). Shared by SandboxEnforcementFilter (the orchestration-side sandbox layer), which
+    // previously reimplemented this exact expand/resolve sequence inline at five separate call
+    // sites — see that class's history for why a single shared primitive matters here: a fix
+    // to path resolution (a Windows UNC edge case, a new escape technique) previously had to
+    // land in up to six places at once to actually take effect everywhere.
+    internal static string ResolveAgainstRoot(string path, string? sandboxRoot)
+    {
+        var expandedPath = ProcessHelper.ExpandHome(StripWrappingQuotes(path));
+        return sandboxRoot is not null && !Path.IsPathRooted(expandedPath)
+            ? Path.GetFullPath(expandedPath, sandboxRoot)
+            : Path.GetFullPath(expandedPath);
+    }
+
+    // True when 'resolved' falls outside sandboxRoot, every entry of additionalRoots, and every
+    // entry of exemptedPrefixes. 'resolved' must already be a canonical absolute path (e.g. via
+    // ResolveAgainstRoot) — this only compares prefixes, it does not resolve anything itself.
+    internal static bool IsOutsideSandbox(
+        string resolved, string sandboxRoot,
+        IReadOnlyList<string>? exemptedPrefixes = null, IReadOnlyList<string>? additionalRoots = null)
+    {
+        var resolvedCheck = resolved.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+        if (IsUnderRoot(resolvedCheck, sandboxRoot)) return false;
+        if (additionalRoots is not null && additionalRoots.Any(r => IsUnderRoot(resolvedCheck, r))) return false;
+        if (exemptedPrefixes is not null && exemptedPrefixes.Any(ep => resolvedCheck.StartsWith(ep, RootComparison))) return false;
+
+        return true;
+    }
+
     // Resolves 'path' to its canonical absolute form and checks it against the sandbox: the
     // primary root, any additional (--include) root, or an exempted prefix.
     // Returns a [DENIED] error string when the path escapes all of them, null when safe.
@@ -120,10 +151,7 @@ internal static class FileSystemSandbox
         string path, string? sandboxRoot, IReadOnlyList<string> exemptedPrefixes,
         IReadOnlyList<string> additionalRoots, out string resolved, Matcher? denyMatcher = null)
     {
-        var expandedPath = ProcessHelper.ExpandHome(StripWrappingQuotes(path));
-        resolved = sandboxRoot is not null && !Path.IsPathRooted(expandedPath)
-            ? Path.GetFullPath(expandedPath, sandboxRoot)
-            : Path.GetFullPath(expandedPath);
+        resolved = ResolveAgainstRoot(path, sandboxRoot);
 
         if (denyMatcher is not null)
         {
@@ -139,13 +167,7 @@ internal static class FileSystemSandbox
         if (sandboxRoot is null)
             return null;
 
-        var resolvedCheck = resolved.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-
-        if (IsUnderRoot(resolvedCheck, sandboxRoot) || additionalRoots.Any(r => IsUnderRoot(resolvedCheck, r)))
-            return null;
-
-        // Allow paths explicitly exempted from the sandbox (e.g. fuseraft's own runtime state dir).
-        if (exemptedPrefixes.Any(ep => resolvedCheck.StartsWith(ep, RootComparison)))
+        if (!IsOutsideSandbox(resolved, sandboxRoot, exemptedPrefixes, additionalRoots))
             return null;
 
         var rootsNote = additionalRoots.Count > 0
@@ -172,9 +194,8 @@ internal static class FileSystemSandbox
         }
 
         resolved = Path.GetFullPath(directory ?? sandboxRoot);
-        var resolvedCheck = resolved.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
 
-        if (IsUnderRoot(resolvedCheck, sandboxRoot) || additionalRoots.Any(r => IsUnderRoot(resolvedCheck, r)))
+        if (!IsOutsideSandbox(resolved, sandboxRoot, additionalRoots: additionalRoots))
             return null;
 
         var rootsNote = additionalRoots.Count > 0

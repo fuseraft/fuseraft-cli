@@ -49,9 +49,18 @@ public sealed class PluginRegistry : IDisposable
 {
     private readonly ILoggerFactory? _loggerFactory;
 
+    // Read live by _sharedHttpClient's SSRF-safe ConnectCallback (see BuildSharedHttpClient) on
+    // every connect — Configure() assigns this per-registry-instance field from
+    // security.AllowPrivateHosts, which runs after the client below is already built. Must stay
+    // an instance field, not static/shared: each PluginRegistry is one session's config (relevant
+    // once multiple sessions run in the same process, e.g. `fuseraft serve`), so a static field
+    // here would leak one session's AllowPrivateHosts setting into every other session's requests.
+    private volatile bool _httpAllowPrivateHosts;
+
     public PluginRegistry(ILoggerFactory? loggerFactory = null)
     {
-        _loggerFactory = loggerFactory;
+        _loggerFactory       = loggerFactory;
+        _sharedHttpClient    = BuildSharedHttpClient(() => _httpAllowPrivateHosts);
     }
 
     // Each plugin name maps to a list of factories — almost always one, except "FileSystem",
@@ -69,8 +78,9 @@ public sealed class PluginRegistry : IDisposable
     private readonly Dictionary<string, IReadOnlyList<AIFunction>> _aiFunctionSets =
         new(StringComparer.OrdinalIgnoreCase);
 
-    // Shared HttpClient (one instance per registry lifetime)
-    private readonly HttpClient _sharedHttpClient = BuildSharedHttpClient();
+    // Shared HttpClient (one instance per registry lifetime). Assigned in the constructor
+    // (not a field initializer) so it can close over the instance's _httpAllowPrivateHosts.
+    private readonly HttpClient _sharedHttpClient;
 
     // Registration
 
@@ -149,21 +159,7 @@ public sealed class PluginRegistry : IDisposable
             "write_file_brief_review", ReconDescriptions.BriefReview));
 
         // Stubs — Configure() replaces these with sandbox-rooted instances.
-        Register("AuditFindings", () => new ArtifactPlugin(
-            Path.Combine(Directory.GetCurrentDirectory(), FuseraftPaths.LocalAuditFindings), ArtifactFormat.Json,
-            "write_file_audit_findings", ReconDescriptions.AuditFindings));
-        Register("RemediationPlan", () => new ArtifactPlugin(
-            Path.Combine(Directory.GetCurrentDirectory(), FuseraftPaths.LocalRemediationPlan), ArtifactFormat.Json,
-            "write_file_remediation_plan", ReconDescriptions.RemediationPlan));
-        Register("OpsPlan", () => new ArtifactPlugin(
-            Path.Combine(Directory.GetCurrentDirectory(), FuseraftPaths.LocalOpsPlan), ArtifactFormat.Yaml,
-            "write_file_ops_plan", ReconDescriptions.OpsPlan));
-        Register("ResearchFindings", () => new ArtifactPlugin(
-            Path.Combine(Directory.GetCurrentDirectory(), FuseraftPaths.LocalResearchFindings), ArtifactFormat.Md,
-            "write_file_research_findings", ReconDescriptions.ResearchFindings));
-        Register("ResearchReview", () => new ArtifactPlugin(
-            Path.Combine(Directory.GetCurrentDirectory(), FuseraftPaths.LocalResearchReview), ArtifactFormat.Json,
-            "write_file_research_review", ReconDescriptions.ResearchReview));
+        RegisterSandboxScopedArtifactPlugins(Directory.GetCurrentDirectory());
 
         // Stub — ReplCommand replaces this with a real instance bound to the live session.
         Register("Session", () => new ReplSessionPlugin("stub", DateTime.UtcNow, "unknown", Directory.GetCurrentDirectory()));
@@ -205,6 +201,9 @@ public sealed class PluginRegistry : IDisposable
         var sandboxRoot       = security.FileSystemSandboxPath;
         var allowedHosts      = security.HttpAllowedHosts is { Count: > 0 } h ? (IReadOnlyList<string>)h : null;
         var allowPrivateHosts = security.AllowPrivateHosts;
+        // Read live by _sharedHttpClient's ConnectCallback (bound in the constructor, before
+        // this value is known) on every connect — see the field's own doc comment.
+        _httpAllowPrivateHosts = allowPrivateHosts;
 
         // Binds the 3-arg (plugin, action, detail) approver down to the 2-arg (action, detail)
         // shape each plugin constructor expects — same role as ReplCommand.cs's
@@ -241,22 +240,34 @@ public sealed class PluginRegistry : IDisposable
         // BriefReview registrations in OrchestratorBuilder — these four just have no
         // {session_id}/{project_slug} in their path, so they're sandbox- not session-scoped.
         var artifactBase = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : Directory.GetCurrentDirectory();
+        RegisterSandboxScopedArtifactPlugins(artifactBase);
+        return this;
+    }
+
+    /// <summary>
+    /// Registers the five <see cref="ArtifactPlugin"/> names that are scoped to a sandbox root
+    /// rather than a session (unlike Conventions/DiscoveryBrief/Preflight/Brief/BriefReview,
+    /// which OrchestratorBuilder re-scopes per-session). Shared by <see cref="RegisterDefaults"/>
+    /// (stub registrations, current-directory-rooted) and <see cref="Configure"/> (real,
+    /// sandbox-rooted) so the five names/paths/formats/tool-identities are defined once.
+    /// </summary>
+    private void RegisterSandboxScopedArtifactPlugins(string basePath)
+    {
         Register("AuditFindings", () => new ArtifactPlugin(
-            Path.Combine(artifactBase, FuseraftPaths.LocalAuditFindings), ArtifactFormat.Json,
+            Path.Combine(basePath, FuseraftPaths.LocalAuditFindings), ArtifactFormat.Json,
             "write_file_audit_findings", ReconDescriptions.AuditFindings));
         Register("RemediationPlan", () => new ArtifactPlugin(
-            Path.Combine(artifactBase, FuseraftPaths.LocalRemediationPlan), ArtifactFormat.Json,
+            Path.Combine(basePath, FuseraftPaths.LocalRemediationPlan), ArtifactFormat.Json,
             "write_file_remediation_plan", ReconDescriptions.RemediationPlan));
         Register("OpsPlan", () => new ArtifactPlugin(
-            Path.Combine(artifactBase, FuseraftPaths.LocalOpsPlan), ArtifactFormat.Yaml,
+            Path.Combine(basePath, FuseraftPaths.LocalOpsPlan), ArtifactFormat.Yaml,
             "write_file_ops_plan", ReconDescriptions.OpsPlan));
         Register("ResearchFindings", () => new ArtifactPlugin(
-            Path.Combine(artifactBase, FuseraftPaths.LocalResearchFindings), ArtifactFormat.Md,
+            Path.Combine(basePath, FuseraftPaths.LocalResearchFindings), ArtifactFormat.Md,
             "write_file_research_findings", ReconDescriptions.ResearchFindings));
         Register("ResearchReview", () => new ArtifactPlugin(
-            Path.Combine(artifactBase, FuseraftPaths.LocalResearchReview), ArtifactFormat.Json,
+            Path.Combine(basePath, FuseraftPaths.LocalResearchReview), ArtifactFormat.Json,
             "write_file_research_review", ReconDescriptions.ResearchReview));
-        return this;
     }
 
     /// <summary>
@@ -436,11 +447,18 @@ public sealed class PluginRegistry : IDisposable
         _instances.Clear();
     }
 
-    private static HttpClient BuildSharedHttpClient()
+    private static HttpClient BuildSharedHttpClient(Func<bool> allowPrivateHosts)
     {
+        // ConnectCallback closes the DNS-rebinding TOCTOU window HttpPlugin's own pre-check
+        // (CheckUrlAsync) can't close on its own — see HttpPlugin.CreateSsrfSafeConnectCallback.
+        var handler = new SocketsHttpHandler
+        {
+            ConnectCallback = HttpPlugin.CreateSsrfSafeConnectCallback(allowPrivateHosts),
+        };
+
         // Timeout.InfiniteTimeSpan — per-request timeouts are enforced via CancellationTokenSource
         // inside HttpPlugin so agents can specify different timeouts per call.
-        var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("fuseraft/1.0");
         return client;
     }
