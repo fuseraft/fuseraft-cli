@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using fuseraft.Core;
 using fuseraft.Core.Models;
 
 namespace fuseraft.Orchestration.Context;
@@ -258,7 +259,7 @@ public static class ContextWindowFilter
             var newContents = new List<AIContent>(msg.Contents.Count);
             foreach (var content in msg.Contents)
             {
-                if (content is FunctionResultContent fr && fr.Result is string s)
+                if (content is FunctionResultContent fr && ToolResultText.AsStringOrNull(fr.Result) is { } s)
                 {
                     string? truncated = null;
 

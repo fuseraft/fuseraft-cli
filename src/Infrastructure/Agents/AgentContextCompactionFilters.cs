@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text;
 using Microsoft.Agents.AI.Compaction;
 using Microsoft.Extensions.AI;
+using fuseraft.Core;
 
 namespace fuseraft.Infrastructure.Agents;
 
@@ -657,7 +658,7 @@ internal static class AgentContextCompactionFilters
                     foreach (var content in old.Contents)
                     {
                         if (content is FunctionResultContent fr &&
-                            fr.Result is string s && s.Length > perResultMax)
+                            ToolResultText.AsStringOrNull(fr.Result) is { } s && s.Length > perResultMax)
                         {
                             rebuilt.Add(new FunctionResultContent(
                                 fr.CallId ?? string.Empty, s[..perResultMax] + TruncSuffix));
@@ -744,7 +745,7 @@ internal static class AgentContextCompactionFilters
     internal static int EstimateContentChars(AIContent content) => content switch
     {
         TextContent t           => t.Text?.Length ?? 0,
-        FunctionResultContent r => r.Result is string s ? s.Length : r.Result?.ToString()?.Length ?? 0,
+        FunctionResultContent r => ToolResultText.ToStringOrDefault(r.Result).Length,
         FunctionCallContent c   => (c.Name?.Length ?? 0) + (c.Arguments?.Values.Sum(v =>
                                       v is System.Text.Json.JsonElement je ? je.GetRawText().Length
                                       : v?.ToString()?.Length ?? 0) ?? 0),

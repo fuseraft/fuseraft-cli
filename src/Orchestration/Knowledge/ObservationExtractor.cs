@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.Extensions.AI;
+using fuseraft.Core;
 using fuseraft.Core.Models;
 
 namespace fuseraft.Orchestration.Knowledge;
@@ -72,7 +73,7 @@ public static class ObservationExtractor
                 if (c is not FunctionResultContent fr) continue;
 
                 var callId  = fr.CallId ?? string.Empty;
-                var rawText = fr.Result is string s ? s : fr.Result?.ToString() ?? string.Empty;
+                var rawText = ToolResultText.ToStringOrDefault(fr.Result);
 
                 if (string.IsNullOrWhiteSpace(rawText)) continue;
 

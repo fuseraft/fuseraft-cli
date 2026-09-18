@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using fuseraft.Core;
 
 namespace fuseraft.Infrastructure.Plugins;
 
@@ -36,7 +37,7 @@ internal sealed class ToolResultLoggingFilter(AIFunction inner, EventEmitter emi
             throw;
         }
 
-        EmitResult(Name, result as string ?? result?.ToString() ?? string.Empty);
+        EmitResult(Name, ToolResultText.ToStringOrDefault(result));
         return result;
     }
 

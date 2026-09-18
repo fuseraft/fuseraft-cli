@@ -30,18 +30,25 @@ public sealed class CodeExecutionPlugin
         string Command,
         bool SupportsRepl);
 
+    // Images are fully qualified (docker.io/library/...) rather than bare (e.g. "bash:5.2").
+    // A bare name is ambiguous under "short-name resolution" — Docker Engine defaults to
+    // Docker Hub, but a podman-backed `docker` CLI (the default `docker` on Fedora/RHEL-family
+    // hosts, and elsewhere via podman-docker) refuses to guess and fails outright without a TTY
+    // to prompt, even though `docker info`/check_docker reports the daemon as available. The
+    // fully-qualified form resolves identically on both, so it works everywhere real Docker does
+    // plus everywhere only podman does.
     private static readonly IReadOnlyDictionary<string, DockerLanguage> Languages =
         new Dictionary<string, DockerLanguage>(StringComparer.OrdinalIgnoreCase)
         {
-            ["python"]     = new("python:3.12-slim",    ".py", "python3 /code/script.py",                        true),
-            ["py"]         = new("python:3.12-slim",    ".py", "python3 /code/script.py",                        true),
-            ["node"]       = new("node:20-slim",        ".js", "node /code/script.js",                           true),
-            ["javascript"] = new("node:20-slim",        ".js", "node /code/script.js",                           true),
-            ["js"]         = new("node:20-slim",        ".js", "node /code/script.js",                           true),
-            ["bash"]       = new("bash:5.2",            ".sh", "bash /code/script.sh",                           false),
-            ["sh"]         = new("bash:5.2",            ".sh", "bash /code/script.sh",                           false),
-            ["go"]         = new("golang:1.23-alpine",  ".go", "go run /code/script.go",                         false),
-            ["rust"]       = new("rust:1-slim",         ".rs", "sh -c 'rustc /code/script.rs -o /tmp/p && /tmp/p'", false),
+            ["python"]     = new("docker.io/library/python:3.12-slim",   ".py", "python3 /code/script.py",                        true),
+            ["py"]         = new("docker.io/library/python:3.12-slim",   ".py", "python3 /code/script.py",                        true),
+            ["node"]       = new("docker.io/library/node:20-slim",       ".js", "node /code/script.js",                           true),
+            ["javascript"] = new("docker.io/library/node:20-slim",       ".js", "node /code/script.js",                           true),
+            ["js"]         = new("docker.io/library/node:20-slim",       ".js", "node /code/script.js",                           true),
+            ["bash"]       = new("docker.io/library/bash:5.2",           ".sh", "bash /code/script.sh",                           false),
+            ["sh"]         = new("docker.io/library/bash:5.2",           ".sh", "bash /code/script.sh",                           false),
+            ["go"]         = new("docker.io/library/golang:1.23-alpine", ".go", "go run /code/script.go",                         false),
+            ["rust"]       = new("docker.io/library/rust:1-slim",        ".rs", "sh -c 'rustc /code/script.rs -o /tmp/p && /tmp/p'", false),
         };
 
     // Docker resource limits applied to every container.
@@ -68,8 +75,14 @@ public sealed class CodeExecutionPlugin
         if (!which.Succeeded)
             return PluginResult.Fail("Docker CLI not found in PATH. Install Docker from https://docs.docker.com/get-docker/");
 
-        // Check the daemon is reachable.
-        var info = await ProcessHelper.RunAsync("docker", "info --format '{{.ServerVersion}}'", timeoutSeconds: 10);
+        // Check the daemon is reachable. `docker version --format '{{.Server.Version}}'` rather
+        // than `docker info --format '{{.ServerVersion}}'`: both are standard on real Docker
+        // Engine, but a podman-backed `docker` CLI (the default `docker` on Fedora/RHEL-family
+        // hosts) emits a differently-shaped `info` struct with no top-level ServerVersion field
+        // — that template fails outright (podman exits non-zero on the template error), so the
+        // Engine-only form misreports a genuinely-running daemon as unreachable. `version
+        // --format '{{.Server.Version}}'` resolves identically on both.
+        var info = await ProcessHelper.RunAsync("docker", "version --format '{{.Server.Version}}'", timeoutSeconds: 10);
 
         return info.Succeeded
             ? PluginResult.Ok($"Docker is available. Server version: {info.Stdout.Trim()}")
@@ -244,7 +257,14 @@ public sealed class CodeExecutionPlugin
             var hostPath = tempFile.Replace('\\', '/');
             var containerPath = $"/code/script{lang.Extension}";
 
-            var args = $"run --rm {DockerLimits} -v \"{hostPath}:{containerPath}:ro\" {lang.Image} {lang.Command}";
+            // :Z relabels the bind mount for exclusive use by this one container (each temp
+            // file is used by exactly one `docker run --rm` invocation and deleted right after,
+            // never shared across concurrent containers). Docker Engine on a non-SELinux host
+            // ignores the flag entirely — it's a no-op there — but a podman-backed `docker` CLI
+            // on an SELinux-enforcing host (the default on Fedora/RHEL — this project's own dev
+            // machine included) otherwise blocks the mount outright with a bare "Permission
+            // denied", not something CheckDockerAsync's up-front check would catch either.
+            var args = $"run --rm {DockerLimits} -v \"{hostPath}:{containerPath}:ro,Z\" {lang.Image} {lang.Command}";
             var result = await ProcessHelper.RunAsync("docker", args, timeoutSeconds: timeoutSeconds);
 
             return FormatResult(result);
