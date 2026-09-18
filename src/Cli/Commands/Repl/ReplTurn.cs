@@ -108,6 +108,14 @@ internal static class ReplTurn
     // proceed?" pause just because items are still open.
     private static readonly Regex TrailingQuestionPattern = new(@"\?\s*$", RegexOptions.Compiled);
 
+    // Matches a line that is (or starts with) fuseraft's own tool-result prefix — the exact
+    // convention ProcessHelper.Ok/Error and PluginResult use across every plugin in the
+    // codebase (see ProcessHelper.cs). A genuine natural-language answer essentially never
+    // organically produces this; when it dominates a response, the model is echoing a prior
+    // tool result back as the "answer" rather than actually answering (see #119) — a general,
+    // provider-agnostic signal rather than matching specific historical incident strings.
+    private static readonly Regex ToolResultLinePattern = new(@"^\s*-?\s*\[(OK|ERROR)\]", RegexOptions.Compiled);
+
     // Returns options forcing at least one tool call for this request when the input looks like
     // an identify/locate-style question and tools are actually available — never mutates the
     // shared ctx.ChatOptions instance, so the override applies to this turn only.
@@ -861,7 +869,7 @@ internal static class ReplTurn
         return stepPassed;
     }
 
-    private static string SanitizeAssistantResponse(string responseText, out string? warningMessage)
+    internal static string SanitizeAssistantResponse(string responseText, out string? warningMessage)
     {
         var trimmed = responseText.Trim();
         if (trimmed.Length == 0)
@@ -871,7 +879,8 @@ internal static class ReplTurn
         }
 
         if (trimmed.StartsWith("to=functions.", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.Contains("Wait must be valid JSON", StringComparison.OrdinalIgnoreCase))
+            trimmed.Contains("Wait must be valid JSON", StringComparison.OrdinalIgnoreCase) ||
+            IsDominatedByToolResultLines(trimmed))
         {
             warningMessage = "Model returned internal tool-call text instead of a user-facing answer. Try again.";
             return string.Empty;
@@ -879,6 +888,33 @@ internal static class ReplTurn
 
         warningMessage = null;
         return responseText;
+    }
+
+    // True when tool-result-prefixed lines (see ToolResultLinePattern) account for most of the
+    // response's non-blank content, by character count rather than raw line count — a leaked
+    // single tool result is often accompanied by a short structural wrapper (e.g. a "Tool
+    // Calls]" header or a bare tool name line) that would otherwise dilute a naive per-line
+    // majority check below the threshold that actually caught the real #119 incident.
+    private static bool IsDominatedByToolResultLines(string trimmed)
+    {
+        var totalChars   = 0;
+        var matchedChars = 0;
+        var hasMatch     = false;
+
+        foreach (var rawLine in trimmed.Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0) continue;
+
+            totalChars += line.Length;
+            if (ToolResultLinePattern.IsMatch(line))
+            {
+                hasMatch = true;
+                matchedChars += line.Length;
+            }
+        }
+
+        return hasMatch && matchedChars * 2 >= totalChars;
     }
 
     // Free-form turns: if the response claims a mutation but no write tool was called,
