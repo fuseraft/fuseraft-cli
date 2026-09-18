@@ -36,7 +36,7 @@
 
     <!-- A2A protocol — client-side agent federation -->
     <PackageReference Include="A2A" Version="1.0.0-preview2" />
-    <PackageReference Include="Microsoft.Agents.AI.A2A" Version="1.3.0-preview.260423.1" />
+    <PackageReference Include="Microsoft.Agents.AI.A2A" Version="1.17.0-preview.260804.1" />
 
     <!-- Azure OpenAI SDK + identity -->
     <PackageReference Include="Azure.AI.OpenAI" Version="2.1.0" />

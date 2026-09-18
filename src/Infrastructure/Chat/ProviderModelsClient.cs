@@ -14,6 +14,13 @@ public sealed class ProviderConnectException(string message, Exception inner) : 
 
 public static class ProviderModelsClient
 {
+    // Shared across calls — both FetchAsync and FetchAnthropicAsync used to open (and
+    // `using`-dispose) a fresh HttpClient per call, which under repeated `fuseraft models`
+    // invocations or REPL setup-wizard retries risks socket exhaustion and skips whatever
+    // retry/timeout policy a pooled client would apply. Per-call auth still varies (different
+    // API keys), so it's carried on each HttpRequestMessage rather than DefaultRequestHeaders.
+    private static readonly HttpClient _shared = new();
+
     /// <summary>
     /// Fetches available model IDs from the provider's models endpoint.
     /// Throws <see cref="ProviderConnectException"/> when the connection itself fails, or
@@ -24,14 +31,14 @@ public static class ProviderModelsClient
     {
         var url = isOllama ? $"{endpoint}/api/tags" : $"{endpoint}/models";
 
-        using var http = new HttpClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
         if (!string.IsNullOrEmpty(apiKey))
-            http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
         HttpResponseMessage response;
         try
         {
-            response = await http.GetAsync(url, cancellationToken);
+            response = await _shared.SendAsync(request, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -82,8 +89,7 @@ public static class ProviderModelsClient
     public static async Task<List<string>> FetchAnthropicAsync(
         string endpoint, string apiKey, CancellationToken cancellationToken = default)
     {
-        using var http = new HttpClient();
-        var client = new AnthropicClient(apiKey, http);
+        var client = new AnthropicClient(apiKey, _shared);
         var trimmed = endpoint.TrimEnd('/');
         if (!string.IsNullOrEmpty(trimmed) && !trimmed.Equals(AnthropicDefaultEndpoint, StringComparison.OrdinalIgnoreCase))
             client.ApiUrlFormat = trimmed + "/{0}/{1}";
