@@ -424,7 +424,11 @@ internal sealed class AgentMiddlewareBuilder(
             var newContents = new List<AIContent>(msg.Contents.Count);
             foreach (var content in msg.Contents)
             {
-                if (content is FunctionResultContent fr && ExtractResultText(fr.Result) is { } s)
+                // ToStringOrDefault (not AsStringOrNull) deliberately — this stage's original
+                // fix (see AdaptiveTrimMessagesTests) covers *any* non-string result via
+                // ToString(), not just JsON string elements, so a structured/non-string result
+                // still gets truncated for budget purposes rather than skipped.
+                if (content is FunctionResultContent fr && ToolResultText.ToStringOrDefault(fr.Result) is { Length: > 0 } s)
                 {
                     string? replacement = null;
 
@@ -459,20 +463,6 @@ internal sealed class AgentMiddlewareBuilder(
         }
         return result;
     }
-
-    // FunctionResultContent.Result is object? — a plain string only when the framework kept the
-    // raw CLR return value. It commonly arrives as a JsonElement instead (e.g. after any JSON
-    // round-trip, such as checkpoint persistence), which `is string` misses entirely, silently
-    // turning stages 1–2 of adaptive trim into no-ops (only stage 3's unconditional drop still
-    // worked). Mirrors the fallback AgentContextCompactionFilters.EstimateContentChars already
-    // uses to *measure* this same content correctly — this applies it when *truncating* too.
-    private static string? ExtractResultText(object? resultValue) => resultValue switch
-    {
-        null => null,
-        string s => s,
-        System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } je => je.GetString(),
-        _ => resultValue.ToString(),
-    };
 
     // Drops all ChatRole.Tool messages and strips FunctionCallContent from assistant messages.
     // Equivalent to ContextWindowConfig.TextOnly filtering — structurally valid for all providers.
@@ -581,7 +571,7 @@ internal sealed class AgentMiddlewareBuilder(
                                 : v?.ToString()?.Length ?? 0) ?? 0;
                         break;
                     case FunctionResultContent fr:
-                        fnResultChars += fr.Result is string s ? s.Length : fr.Result?.ToString()?.Length ?? 0;
+                        fnResultChars += ToolResultText.ToStringOrDefault(fr.Result).Length;
                         break;
                 }
             }
