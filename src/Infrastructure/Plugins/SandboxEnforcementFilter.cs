@@ -74,6 +74,11 @@ public sealed class SandboxEnforcementFilter
         FuseraftPaths.ExpandPath("~/.fuseraft").TrimEnd(Path.DirectorySeparatorChar)
         + Path.DirectorySeparatorChar;
 
+    // Exemption list passed to FileSystemSandbox.IsOutsideSandbox — this class supports exactly
+    // one fixed exemption (unlike FileSystemSandbox.ResolveSafe's caller-supplied list) and no
+    // --include-equivalent additional roots.
+    private static readonly IReadOnlyList<string> HomeExemption = [FuseraftHomePrefix];
+
     // Matches tokens that look like absolute paths inside a shell command string.
     private static readonly Regex AbsolutePathPattern = new(
         @"(?<![:\w])(/[^\s""'`;|&><(){}$\\]{2,}|[A-Za-z]:\\[^\s""'`;|&><(){}]+|\\\\[^\s""'`;|&><(){}]+)",
@@ -433,19 +438,10 @@ public sealed class SandboxEnforcementFilter
     private string? CheckPath(string rawPath)
     {
         string resolved;
-        try
-        {
-            var expandedPath = ProcessHelper.ExpandHome(rawPath);
-            resolved = Path.IsPathRooted(expandedPath)
-                ? Path.GetFullPath(expandedPath)
-                : Path.GetFullPath(expandedPath, _sandboxRoot);
-        }
-        catch
-        {
-            return null;
-        }
+        try { resolved = FileSystemSandbox.ResolveAgainstRoot(rawPath, _sandboxRoot); }
+        catch { return null; }
 
-        return IsOutsideSandbox(resolved)
+        return FileSystemSandbox.IsOutsideSandbox(resolved, _sandboxRoot, HomeExemption)
             ? PluginResult.Denied(
                 $"Path '{resolved}' is outside the configured sandbox '{_sandboxRoot}'. " +
                 $"All file operations must stay within the sandbox.")
@@ -463,10 +459,10 @@ public sealed class SandboxEnforcementFilter
             if (candidate.All(c => c == '.' || c == '/' || c == '\\')) continue;
 
             string resolved;
-            try { resolved = Path.GetFullPath(candidate); }
+            try { resolved = FileSystemSandbox.ResolveAgainstRoot(candidate, _sandboxRoot); }
             catch (Exception) { continue; } // Path.GetFullPath throws on invalid/rooted path strings
 
-            if (IsOutsideSandbox(resolved))
+            if (FileSystemSandbox.IsOutsideSandbox(resolved, _sandboxRoot, HomeExemption))
                 return PluginResult.Denied(
                     $"Shell command references path '{resolved}' which is outside the " +
                     $"configured sandbox '{_sandboxRoot}'. Move the file into the sandbox " +
@@ -505,19 +501,13 @@ public sealed class SandboxEnforcementFilter
         if (candidate.Length == 0) return null;
 
         string resolved;
-        try
-        {
-            var expanded = ProcessHelper.ExpandHome(candidate);
-            resolved = Path.IsPathRooted(expanded)
-                ? Path.GetFullPath(expanded)
-                : Path.GetFullPath(expanded, _sandboxRoot);
-        }
+        try { resolved = FileSystemSandbox.ResolveAgainstRoot(candidate, _sandboxRoot); }
         catch { return null; }
 
         // Outside the sandbox root entirely is already caught by ScanCommandString for
         // absolute paths; for relative paths that resolve outside (e.g. "../secrets"),
         // let the general boundary check below report it with its own message.
-        if (IsOutsideSandbox(resolved))
+        if (FileSystemSandbox.IsOutsideSandbox(resolved, _sandboxRoot, HomeExemption))
             return PluginResult.Denied(
                 $"Shell command '{command}' writes to '{resolved}' which is outside the " +
                 $"configured sandbox '{_sandboxRoot}'. Move the file into the sandbox " +
@@ -542,13 +532,7 @@ public sealed class SandboxEnforcementFilter
         bool allowAncestorOfWriteScope = false)
     {
         string resolved;
-        try
-        {
-            var expanded = ProcessHelper.ExpandHome(rawPath);
-            resolved = Path.IsPathRooted(expanded)
-                ? Path.GetFullPath(expanded)
-                : Path.GetFullPath(expanded, _sandboxRoot);
-        }
+        try { resolved = FileSystemSandbox.ResolveAgainstRoot(rawPath, _sandboxRoot); }
         catch { return null; }
 
         var relative = Path.GetRelativePath(_sandboxRoot, resolved).Replace('\\', '/');
@@ -602,13 +586,7 @@ public sealed class SandboxEnforcementFilter
     private string? CheckEnvelope(string rawPath)
     {
         string resolved;
-        try
-        {
-            var expanded = ProcessHelper.ExpandHome(rawPath);
-            resolved = Path.IsPathRooted(expanded)
-                ? Path.GetFullPath(expanded)
-                : Path.GetFullPath(expanded, _sandboxRoot);
-        }
+        try { resolved = FileSystemSandbox.ResolveAgainstRoot(rawPath, _sandboxRoot); }
         catch { return null; }
 
         var relative = Path.GetRelativePath(_sandboxRoot, resolved).Replace('\\', '/');
@@ -619,21 +597,6 @@ public sealed class SandboxEnforcementFilter
                 $"Ask the Planner to expand the scope if this file needs to change.");
 
         return null;
-    }
-
-    private bool IsOutsideSandbox(string resolved)
-    {
-        var sandboxPrefix = _sandboxRoot.TrimEnd(Path.DirectorySeparatorChar)
-                          + Path.DirectorySeparatorChar;
-        var resolvedCheck = resolved.TrimEnd(Path.DirectorySeparatorChar)
-                          + Path.DirectorySeparatorChar;
-
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-
-        return !resolvedCheck.StartsWith(sandboxPrefix, comparison)
-            && !resolvedCheck.StartsWith(FuseraftHomePrefix, comparison);
     }
 
     private static bool IsSystemPath(string path)

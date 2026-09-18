@@ -24,17 +24,40 @@ public sealed class IncludedRootsState
     private readonly List<string> _roots;
     private readonly Lock _lock = new();
     private readonly bool _mutable;
+    private readonly bool _allowEscapeGrants;
 
-    internal IncludedRootsState(IEnumerable<string>? seed = null)
+    /// <param name="allowEscapeGrants">
+    /// When <see langword="false"/>, <see cref="DenyOrEscalateAsync"/> never escalates — a
+    /// denial is always returned as-is, exactly as when no <c>approveEscape</c> callback was
+    /// supplied at all. Set this <see langword="false"/> for a non-interactive session (piped
+    /// stdin, no TTY): that session's approval service resolves every ordinary HITL prompt
+    /// permissively (see <c>NonInteractiveHumanApprovalService</c>'s doc comment — reasonable
+    /// for "let this one shell command run" so a script doesn't hang), but a sandbox-escape
+    /// grant is not one more permissive answer to one more prompt — <see cref="TryAdd"/> makes
+    /// it a silent, permanent widening of the sandbox boundary for the rest of the session, and
+    /// nothing in a piped/scripted invocation lets that ever come back for real review. Without
+    /// this flag, HITL-hardening piped/served REPL sessions against hanging/corrupting stdin
+    /// [see ReplCommand.cs/RunCommand.cs] would otherwise silently make the sandbox boundary
+    /// itself a no-op for those same sessions — worse than not sandboxing at all, since it looks
+    /// protected in logs/config while conceding on the very first denial.
+    /// </param>
+    internal IncludedRootsState(IEnumerable<string>? seed = null, bool allowEscapeGrants = true)
     {
-        _roots   = [.. seed ?? []];
-        _mutable = true;
+        _roots             = [.. seed ?? []];
+        _mutable           = true;
+        _allowEscapeGrants = allowEscapeGrants;
     }
 
     private IncludedRootsState(bool mutable)
     {
-        _roots   = [];
-        _mutable = mutable;
+        _roots             = [];
+        _mutable           = mutable;
+        // Preserves Empty's original behavior: escalation is still offered and can let the
+        // current call through (see TryGrantEscapeAsync's doc comment), it just never persists
+        // since TryAdd is a no-op here — unrelated to allowEscapeGrants, which exists to guard
+        // the REPL's real, mutable, persisting instance against a non-interactive approval
+        // service turning "no human available" into "permanently widen the sandbox."
+        _allowEscapeGrants = true;
     }
 
     /// <summary>
@@ -107,7 +130,7 @@ public sealed class IncludedRootsState
     private async Task<bool?> TryGrantEscapeAsync(
         string resolvedPath, string toolName, Func<string, string, Task<bool>>? approveEscape)
     {
-        if (approveEscape is null) return null;
+        if (approveEscape is null || !_allowEscapeGrants) return null;
 
         var grantDir = Directory.Exists(resolvedPath)
             ? resolvedPath

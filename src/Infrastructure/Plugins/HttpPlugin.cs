@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Net;
+using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
@@ -25,13 +26,91 @@ namespace fuseraft.Infrastructure.Plugins;
 public sealed class HttpPlugin : IDisposable
 {
     // Shared client for the no-arg constructor path — avoids a new socket per plugin instance.
+    // This constructor path never allows private hosts (see the ctor below), so the callback
+    // is wired to a fixed "never allow" policy rather than a live-read accessor.
     private static readonly HttpClient _defaultHttp = CreateDefaultClient();
     private static HttpClient CreateDefaultClient()
     {
-        var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        var handler = new SocketsHttpHandler
+        {
+            ConnectCallback = CreateSsrfSafeConnectCallback(static () => false),
+        };
+        var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("fuseraft/1.0");
         return client;
     }
+
+    /// <summary>
+    /// Builds a <see cref="SocketsHttpHandler.ConnectCallback"/> that resolves the target host
+    /// and validates it is not a private/loopback address in the same step as connecting to it.
+    ///
+    /// <para>
+    /// A separate pre-check (resolve, validate, then let <see cref="HttpClient"/> connect on its
+    /// own) leaves a DNS-rebinding TOCTOU window open: the attacker's DNS server can answer the
+    /// validation lookup with a public IP and the connection's own independent lookup — issued
+    /// moments later — with a private one, since nothing pins the two together. Overriding the
+    /// connect step to do its own single resolution and validate exactly the address it is about
+    /// to use closes that window; there is no second, independently-timed lookup for an attacker
+    /// to race.
+    /// </para>
+    ///
+    /// <para>
+    /// <paramref name="allowPrivateHosts"/> is invoked on every call, not captured once, so a
+    /// long-lived shared <see cref="HttpClient"/> can serve callers whose policy is only decided
+    /// after the client is built (e.g. <c>PluginRegistry.Configure</c> runs after its shared
+    /// client already exists).
+    /// </para>
+    /// </summary>
+    internal static Func<SocketsHttpConnectionContext, CancellationToken, ValueTask<Stream>> CreateSsrfSafeConnectCallback(
+        Func<bool> allowPrivateHosts) =>
+        async (context, cancellationToken) =>
+        {
+            var host = context.DnsEndPoint.Host;
+
+            IPAddress address;
+            if (IPAddress.TryParse(host, out var literal))
+            {
+                address = literal;
+            }
+            else
+            {
+                IPAddress[] resolved;
+                try
+                {
+                    resolved = await Dns.GetHostAddressesAsync(host, cancellationToken).ConfigureAwait(false);
+                }
+                catch (SocketException ex)
+                {
+                    throw new HttpRequestException($"Could not resolve host '{host}': {ex.Message}", ex);
+                }
+
+                // Fails closed on no addresses, same as ResolvesToPrivateAddressAsync's
+                // unresolvable-host case — the request would fail for the same reason anyway.
+                if (resolved.Length == 0)
+                    throw new HttpRequestException($"Host '{host}' did not resolve to any address.");
+
+                // First address only — deterministic and matches ordinary DNS-client behavior.
+                // Picking a *different* address than the one just validated would reopen exactly
+                // the gap this callback exists to close.
+                address = resolved[0];
+            }
+
+            if (!allowPrivateHosts() && IsPrivateIp(address))
+                throw new HttpRequestException(
+                    $"Host '{host}' resolved to a private or loopback address ({address}) and was blocked.");
+
+            var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+            try
+            {
+                await socket.ConnectAsync(address, context.DnsEndPoint.Port, cancellationToken).ConfigureAwait(false);
+                return new NetworkStream(socket, ownsSocket: true);
+            }
+            catch
+            {
+                socket.Dispose();
+                throw;
+            }
+        };
 
     private readonly HttpClient _http;
     private readonly bool _ownsClient;
@@ -83,6 +162,10 @@ public sealed class HttpPlugin : IDisposable
 
     // Request methods
 
+    // GetAsync/HeadAsync deliberately have no _approveAction gate, unlike Post/Put/Patch/Delete
+    // below: HITL approval is for actions with side effects, and read-only requests are never
+    // gated — see docs/repl.md's "Read-only tools ... are never gated" and cli-reference.md's
+    // matching HITL policy. Not an oversight; keep this asymmetry.
     [Description("HTTP GET request.")]
     public async Task<string> GetAsync(
         [Description("URL or profile-relative path.")] string url,
@@ -289,6 +372,13 @@ public sealed class HttpPlugin : IDisposable
     /// <summary>
     /// Returns a [DENIED] error when the URL host is not on the allowlist or resolves to a
     /// private/loopback address. Returns null when the request is permitted.
+    ///
+    /// This is a fast, friendly pre-check only — it gives agents a clear [DENIED] message
+    /// for the ordinary case instead of a raw connection error. It is not itself sufficient
+    /// against DNS rebinding (a second, later resolution could answer differently), so the
+    /// authoritative enforcement is <see cref="CreateSsrfSafeConnectCallback"/>, wired into
+    /// every <see cref="HttpClient"/> this plugin sends through, which re-validates atomically
+    /// at actual connect time.
     /// </summary>
     private async Task<string?> CheckUrlAsync(string url)
     {

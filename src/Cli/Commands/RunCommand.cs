@@ -218,7 +218,13 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             StderrConsole.MarkupLine($"[dim]Spec → {Markup.Escape(absSpec)}[/]");
         }
 
-        var approvalService = new ConsoleHumanApprovalService();
+        // On redirected stdin (scripted/CI invocation, no TTY) ConsoleHumanApprovalService's
+        // Console.ReadLine() either returns immediately (read as denial) or hangs — see
+        // NonInteractiveHumanApprovalService's doc comment for why SessionRunner's escalation
+        // is unconditional even without --hitl. Match EvalCommand's fallback for the same case.
+        IHumanApprovalService approvalService = Console.IsInputRedirected
+            ? new NonInteractiveHumanApprovalService()
+            : new ConsoleHumanApprovalService();
 
         OrchestratorBuildResult built;
         try
