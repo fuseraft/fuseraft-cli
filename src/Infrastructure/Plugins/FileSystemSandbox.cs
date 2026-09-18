@@ -69,7 +69,12 @@ internal static class FileSystemSandbox
     // path with spaces). A quote character is illegal in a Windows path and vanishingly rare
     // as an actual leading/trailing character in a Unix one, so unwrapping a matched pair is
     // safe and turns an opaque "invalid path" OS error into a working call.
-    private static string StripWrappingQuotes(string path)
+    //
+    // Internal (not private) so ResolveSafeDirectory can apply the same unwrapping to
+    // directory arguments (shell_run's workingDirectory, GitPlugin's repoPath) — those route
+    // through this method instead of ResolveAgainstRoot, so they'd otherwise miss the fix
+    // entirely. See https://github.com/fuseraft/fuseraft-cli/issues/117.
+    internal static string StripWrappingQuotes(string path)
     {
         var trimmed = path.Trim();
 
@@ -187,6 +192,14 @@ internal static class FileSystemSandbox
     internal static string? ResolveSafeDirectory(
         string? directory, string? sandboxRoot, IReadOnlyList<string> additionalRoots, out string? resolved)
     {
+        // Unwrap a literal quoted directory argument (e.g. `"C:\workspace\source\QG"`) before
+        // it reaches Path.GetFullPath or a subprocess — otherwise the quote characters end up
+        // baked into the resolved path, producing a malformed working directory instead of a
+        // clean sandbox denial or a working call. Applied even when unsandboxed (below), since
+        // the quotes break the raw argument for the subprocess either way.
+        if (directory is not null)
+            directory = StripWrappingQuotes(directory);
+
         if (sandboxRoot is null)
         {
             resolved = directory;

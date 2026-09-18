@@ -252,4 +252,26 @@ public sealed class FileSystemSandboxTests : IDisposable
         Assert.Null(denial);
         Assert.Equal("some/relative/dir", resolved);
     }
+
+    [Fact]
+    public void ResolveSafeDirectory_QuotedDirectory_UnwrapsBeforeResolving()
+    {
+        // Regression for #117: a model that wraps the workingDirectory argument in literal
+        // quote characters (e.g. `"C:\workspace\source\QG"` as the JSON string value itself)
+        // must not have those quotes baked into the resolved path.
+        var quoted = $"\"{_includedA}\"";
+        var denial = FileSystemSandbox.ResolveSafeDirectory(quoted, _primary, [_includedA], out var resolved);
+        Assert.Null(denial);
+        Assert.Equal(Path.GetFullPath(_includedA), resolved);
+    }
+
+    [Fact]
+    public void ResolveSafeDirectory_QuotedDirectory_NullSandboxRoot_StillUnwraps()
+    {
+        // Even unsandboxed, the quotes must be stripped — Process.Start would otherwise be
+        // handed a malformed working directory with the quote characters embedded.
+        var denial = FileSystemSandbox.ResolveSafeDirectory("\"some/relative/dir\"", null, [_includedA], out var resolved);
+        Assert.Null(denial);
+        Assert.Equal("some/relative/dir", resolved);
+    }
 }
