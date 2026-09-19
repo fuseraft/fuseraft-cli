@@ -689,4 +689,167 @@ public sealed class ShellPluginTests
             "and they will run it themselves.",
             result);
     }
+
+    // ShellPolicy.AllowMode — "substring" (default) vs "segments"
+
+    private static ShellPlugin SegmentsPlugin(params string[] allow) =>
+        new(shellPolicy: new ShellPolicy { Allow = [.. allow], AllowMode = ShellPolicy.AllowModeSegments });
+
+    [Fact]
+    public async Task AllowMode_Default_IsSubstring_SoAChainedCommandStillPassesAnAllowOfOnePhrase()
+    {
+        // Pins the documented weakness that segments mode exists to close: the text merely contains
+        // "echo hello", so everything after the `;` rides along.
+        var policy = new ShellPolicy { Allow = ["echo hello"] };
+        using var plugin = new ShellPlugin(shellPolicy: policy);
+
+        var result = await plugin.RunAsync("echo hello; echo smuggled");
+
+        Assert.DoesNotContain("[DENIED]", result);
+        Assert.Contains("smuggled", result);
+    }
+
+    [Fact]
+    public async Task AllowSegments_RejectsTheChainedCommandThatSubstringModeLetsThrough()
+    {
+        using var plugin = SegmentsPlugin("echo hello");
+
+        var result = await plugin.RunAsync("echo hello; echo smuggled");
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.Contains("echo smuggled", result);
+        Assert.Contains("AllowMode: segments", result);
+        Assert.DoesNotContain("smuggled\n", result.Replace("echo smuggled", ""));   // it never ran
+    }
+
+    [Theory]
+    [InlineData("echo hi")]
+    [InlineData("echo hi; echo bye")]
+    [InlineData("echo hi && echo bye")]
+    [InlineData("echo hi || echo bye")]
+    [InlineData("echo hi | cat")]
+    [InlineData("echo $(echo nested)")]
+    [InlineData("(echo a; echo b)")]
+    [InlineData("env FOO=1 echo wrapped")]
+    [InlineData("FOO=1 echo assigned")]
+    [InlineData("nice -n 5 echo niced")]
+    [InlineData("ECHO hi")]
+    public async Task AllowSegments_AllowsCommandsWhoseEverySegmentMatches(string command)
+    {
+        using var plugin = SegmentsPlugin("echo", "cat");
+
+        var result = await plugin.RunAsync(command);
+
+        Assert.DoesNotContain("[DENIED]", result);
+    }
+
+    [Theory]
+    [InlineData("echo hi; uname")]
+    [InlineData("echo hi && uname -a")]
+    [InlineData("echo hi || uname")]
+    [InlineData("echo hi | wc -c")]
+    [InlineData("echo $(uname)")]
+    [InlineData("(echo a; uname)")]
+    [InlineData("echo hi\nuname")]
+    [InlineData("sh -c 'echo hi; uname'")]
+    [InlineData("env FOO=1 uname")]
+    [InlineData("uname # echo hi")]
+    public async Task AllowSegments_RejectsWhenAnySegmentIsNotAllowed(string command)
+    {
+        using var plugin = SegmentsPlugin("echo", "cat");
+
+        var result = await plugin.RunAsync(command);
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.Contains("not matched by any configured allow pattern", result);
+    }
+
+    [Fact]
+    public async Task AllowSegments_MatchesOnAWordBoundary_NotAsARawPrefix()
+    {
+        using var plugin = SegmentsPlugin("ech");   // must not allow `echo`
+
+        var result = await plugin.RunAsync("echo hi");
+
+        Assert.StartsWith("[DENIED]", result);
+    }
+
+    [Fact]
+    public async Task AllowSegments_MultiWordPatternsMatchTheCommandStart()
+    {
+        using var plugin = SegmentsPlugin("echo hello");
+
+        Assert.DoesNotContain("[DENIED]", await plugin.RunAsync("echo hello world"));
+        Assert.StartsWith("[DENIED]", await plugin.RunAsync("echo goodbye"));
+    }
+
+    [Fact]
+    public async Task AllowSegments_SubstitutionHiddenInsideQuotes_IsRejectedAsUncheckable()
+    {
+        using var plugin = SegmentsPlugin("echo");
+
+        var result = await plugin.RunAsync("echo \"$(uname)\"");
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.Contains("command substitution", result);
+    }
+
+    [Fact]
+    public async Task AllowSegments_DenyStillAppliesToTheFullText()
+    {
+        var policy = new ShellPolicy { Allow = ["echo"], Deny = ["hello"], AllowMode = ShellPolicy.AllowModeSegments };
+        using var plugin = new ShellPlugin(shellPolicy: policy);
+
+        var result = await plugin.RunAsync("echo hello");
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.Contains("deny pattern 'hello'", result);
+    }
+
+    [Fact]
+    public async Task AllowSegments_NothingToRun_IsAllowed()
+    {
+        using var plugin = SegmentsPlugin("echo");
+
+        var result = await plugin.RunAsync("# only a comment");
+
+        Assert.DoesNotContain("[DENIED]", result);
+    }
+
+    [Fact]
+    public async Task AllowSegments_AppliesToScriptsAndBackgroundJobsToo()
+    {
+        using var plugin = SegmentsPlugin("echo");
+
+        var script = await plugin.RunScriptAsync("echo first\nuname\necho third");
+        var job    = await plugin.RunBackgroundAsync("echo ok; uname");
+
+        Assert.StartsWith("[DENIED]", script);
+        Assert.StartsWith("[DENIED]", job);
+        Assert.DoesNotContain("Job ID:", job);
+    }
+
+    [Fact]
+    public async Task AllowSegments_EmptyAllowList_MeansUnrestricted_LikeSubstringMode()
+    {
+        using var plugin = new ShellPlugin(shellPolicy: new ShellPolicy { AllowMode = ShellPolicy.AllowModeSegments });
+
+        var result = await plugin.RunAsync("echo anything; echo goes");
+
+        Assert.DoesNotContain("[DENIED]", result);
+    }
+
+    [Theory]
+    [InlineData("segments", true)]
+    [InlineData("SEGMENTS", true)]
+    [InlineData("Segments", true)]
+    [InlineData("substring", false)]
+    [InlineData("", false)]
+    [InlineData("bogus", false)]
+    public void ShellPolicy_AllowSegments_ReflectsTheModeCaseInsensitively(string mode, bool expected) =>
+        Assert.Equal(expected, new ShellPolicy { AllowMode = mode }.AllowSegments);
+
+    [Fact]
+    public void ShellPolicy_DefaultsToSubstringMode() =>
+        Assert.Equal(ShellPolicy.AllowModeSubstring, new ShellPolicy().AllowMode);
 }
