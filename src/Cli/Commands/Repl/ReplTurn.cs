@@ -1027,7 +1027,11 @@ internal static class ReplTurn
             var correctionMsg =
                 $"Your todo list still has {incomplete.Count} incomplete item(s):\n{remainingList}\n\n" +
                 "Continue working through them now. If an item genuinely no longer applies, call " +
-                "todo_write to update its status and say why in one sentence — do not just stop with it left open.";
+                "todo_write to update its status and say why in one sentence — do not just stop with it left open. " +
+                "When you do mark this checklist complete, state how you verified it against the original " +
+                "source (e.g. re-count the source list/data and report the matching total) — a mismatch " +
+                "between an expected and actual count is not resolved by asserting they're equivalent; " +
+                "name the specific missing items or re-check your work.";
             await ExecuteAsync(
                 ctx, correctionMsg,
                 isStepRequest: false, capturePlan: false, activeStep: null,
