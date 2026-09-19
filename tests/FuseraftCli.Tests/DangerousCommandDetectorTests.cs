@@ -250,4 +250,85 @@ public sealed class DangerousCommandDetectorTests
         Assert.NotNull(hit);
         Assert.False(string.IsNullOrWhiteSpace(hit.Value.Reason));
     }
+
+    // privilege-escalation — the spellings a `^sudo` regex misses
+
+    [Theory]
+    [InlineData("sudo -n true")]
+    [InlineData("ls; sudo -n true")]
+    [InlineData("echo hi && sudo -n true")]
+    [InlineData("false || sudo -n true")]
+    [InlineData("ls | sudo -n tee /etc/x")]
+    [InlineData("env sudo -n true")]
+    [InlineData("env FOO=1 sudo -n true")]
+    [InlineData("command sudo -n true")]
+    [InlineData("nice sudo -n true")]
+    [InlineData("nohup sudo -n true")]
+    [InlineData("timeout 10 sudo -n true")]
+    [InlineData("(sudo -n true)")]
+    [InlineData("echo $(sudo -n true)")]
+    [InlineData("echo `sudo -n true`")]
+    [InlineData("if true; then sudo -n true; fi")]
+    [InlineData("{ sudo -n true; }")]
+    [InlineData("'sudo' -n true")]
+    [InlineData("\\sudo -n true")]
+    [InlineData("/usr/bin/sudo -n true")]
+    [InlineData("\uFF53udo -n true")]                  // fullwidth 's'
+    [InlineData("bash -c 'sudo -n true'")]
+    [InlineData("eval \"sudo -n true\"")]
+    [InlineData("doas -n true")]
+    [InlineData("pkexec true")]
+    [InlineData("sudoedit /etc/hosts")]
+    [InlineData("echo x | xargs sudo -n tee")]
+    [InlineData("echo x | xargs -n 1 sudo -n tee")]
+    [InlineData("find . -name x -exec sudo -n rm {} \\;")]
+    [InlineData("find . -execdir /usr/bin/sudo -n rm {} +")]
+    public void Detect_PrivilegeEscalation_InAnySpelling_IsBlocked(string command)
+    {
+        var hit = DangerousCommandDetector.Detect(command);
+
+        Assert.Equal(DangerousCommandDetector.PrivilegeEscalation, hit?.RuleId);
+    }
+
+    [Theory]
+    [InlineData("sudo -n true", "sudo")]
+    [InlineData("/usr/bin/sudo -n true", "sudo")]
+    [InlineData("env doas -n true", "doas")]
+    [InlineData("pkexec true", "pkexec")]
+    [InlineData("echo x | xargs sudo tee", "sudo")]
+    [InlineData("find . -exec doas rm {} \\;", "doas")]
+    public void Detect_PrivilegeEscalation_NamesTheCommand(string command, string expected) =>
+        Assert.Equal(expected, DangerousCommandDetector.Detect(command)?.Detail);
+
+    [Theory]
+    [InlineData("echo sudo")]
+    [InlineData("echo \"run sudo apt install\"")]
+    [InlineData("grep sudo /etc/group")]
+    [InlineData("grep -r sudo .")]
+    [InlineData("man sudo")]
+    [InlineData("which sudo")]
+    [InlineData("ls /usr/bin/sudo")]
+    [InlineData("apt list --installed | grep sudo")]
+    [InlineData("git commit -m \"add sudo support\"")]
+    [InlineData("git log --grep sudo")]
+    [InlineData("cat sudoers.md")]
+    [InlineData("pseudo-random --seed 1")]
+    [InlineData("visudo --help")]
+    [InlineData("find / -name sudo")]
+    [InlineData("find . -name sudo -print")]
+    [InlineData("xargs grep sudo")]
+    [InlineData("xargs -n 1 echo sudo")]
+    [InlineData("echo x | xargs -I {} echo {} sudo")]
+    [InlineData("ssh host sudo systemctl restart x")]        // remote: not a local escalation
+    [InlineData("# sudo rm -rf /var")]
+    public void Detect_WordsThatOnlyMentionSudo_AreAllowed(string command) =>
+        Assert.Null(DangerousCommandDetector.Detect(command));
+
+    [Fact]
+    public void Detect_SudoInsideHeredocBody_IsData()
+    {
+        const string script = "cat > INSTALL.md <<'EOF'\nRun: sudo apt install foo\nEOF\necho done";
+
+        Assert.Null(DangerousCommandDetector.Detect(script));
+    }
 }

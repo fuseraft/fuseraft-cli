@@ -383,7 +383,15 @@ The guard is deliberately precise, because a hit is a hard deny. Ordinary work i
 
 ## `sudo` protection
 
-`sudo` is unconditionally blocked in the Shell plugin. Any command or script containing `sudo` — including in pipe chains (`cmd && sudo apt install ...`), semicolon sequences, or multi-line scripts — is caught before execution and the agent receives:
+`sudo` — along with `sudoedit`, `doas`, and `pkexec` — is unconditionally blocked in the Shell plugin. The command is parsed rather than pattern-matched, so it is caught in every form an agent might reach for it, before execution:
+
+- after pipes, `&&`, `||`, `;`, or newlines, and in multi-line scripts (`cmd && sudo apt install ...`)
+- behind a wrapper (`env sudo …`, `command sudo …`, `nice sudo …`, `nohup sudo …`, `timeout 10 sudo …`)
+- by path, quoted, or backslashed (`/usr/bin/sudo …`, `'sudo' …`, `\sudo …`), and with fullwidth look-alike letters
+- inside `(sudo …)`, `$(sudo …)`, backticks, `if … then sudo …`, `bash -c 'sudo …'`, or `eval "sudo …"`
+- as the command that `xargs` or `find -exec` runs (`… | xargs sudo tee`, `find . -exec sudo rm {} \;`)
+
+Merely *mentioning* the word is fine — `grep sudo /etc/group`, `man sudo`, `git commit -m "add sudo support"`, `find / -name sudo`, and `xargs grep sudo` all run — and so is `ssh host sudo …`, which escalates on the remote machine, not this one. A line-start `sudo` inside a heredoc or script body is still blocked, as it always was. The agent receives (with `doas` / `pkexec` / `sudoedit` named instead when that is what was used):
 
 ```
 [DENIED] sudo is not permitted. Prefer non-privileged alternatives: pip install --user,

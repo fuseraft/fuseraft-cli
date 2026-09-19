@@ -594,4 +594,99 @@ public sealed class ShellPluginTests
 
         Assert.DoesNotContain("[DENIED]", result);
     }
+
+    // sudo — every spelling is denied end to end. `sudo -n` never prompts, so each of these is
+    // harmless if the guard regressed and the command ran anyway.
+
+    [Theory]
+    [InlineData("sudo -n true")]
+    [InlineData("ls; sudo -n true")]
+    [InlineData("env sudo -n true")]
+    [InlineData("command sudo -n true")]
+    [InlineData("/usr/bin/sudo -n true")]
+    [InlineData("(sudo -n true)")]
+    [InlineData("echo $(sudo -n true)")]
+    [InlineData("if true; then sudo -n true; fi")]
+    [InlineData("'sudo' -n true")]
+    [InlineData("\\sudo -n true")]
+    public async Task RunAsync_Sudo_InAnySpelling_IsDenied(string command)
+    {
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunAsync(command, timeoutSeconds: 10);
+
+        Assert.StartsWith("[DENIED] sudo is not permitted.", result);
+        Assert.Contains("non-privileged alternatives", result);
+    }
+
+    [Fact]
+    public async Task RunAsync_Doas_IsDeniedByName()
+    {
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunAsync("env doas -n true", timeoutSeconds: 10);
+
+        Assert.StartsWith("[DENIED] doas is not permitted.", result);
+    }
+
+    [Fact]
+    public async Task RunScriptAsync_SudoBehindAWrapperInsideAScript_IsDenied()
+    {
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunScriptAsync("echo starting\nenv sudo -n true\necho done", timeoutSeconds: 10);
+
+        Assert.StartsWith("[DENIED] sudo is not permitted.", result);
+    }
+
+    [Fact]
+    public async Task RunBackgroundAsync_WrappedSudo_IsDeniedAndNoJobStarts()
+    {
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunBackgroundAsync("nohup /usr/bin/sudo -n true");
+
+        Assert.StartsWith("[DENIED] sudo is not permitted.", result);
+        Assert.DoesNotContain("Job ID:", result);
+    }
+
+    [Fact]
+    public async Task RunAsync_WrappedSudo_IsDeniedBeforeAskingTheUser()
+    {
+        var asked = false;
+        using var plugin = new ShellPlugin(approveCommand: _ => { asked = true; return Task.FromResult(true); });
+
+        var result = await plugin.RunAsync("env sudo -n true", timeoutSeconds: 10);
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.False(asked, "a hard-denied command must not reach the approval prompt");
+    }
+
+    [Fact]
+    public async Task RunAsync_CommandsThatOnlyMentionSudo_StillRun()
+    {
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunAsync("echo the word sudo appears here");
+
+        Assert.DoesNotContain("[DENIED]", result);
+        Assert.Contains("the word sudo appears here", result);
+    }
+
+    [Fact]
+    public async Task RunAsync_PlainSudo_KeepsItsOriginalDenialWording()
+    {
+        // The exact text agents (and any saved prompts/skills) have seen since sudo was first blocked.
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunAsync("sudo -n true", timeoutSeconds: 10);
+
+        Assert.Equal(
+            "[DENIED] sudo is not permitted. " +
+            "Prefer non-privileged alternatives: pip install --user, python -m pip install --user, " +
+            "pipx, or a virtual environment (python -m venv .venv && .venv/bin/pip install ...). " +
+            "If elevated privileges are truly required, tell the user exactly which command to run " +
+            "and they will run it themselves.",
+            result);
+    }
 }
