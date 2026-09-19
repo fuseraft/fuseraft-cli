@@ -42,7 +42,7 @@ public sealed class TodoPlugin
             "status is one of pending, in_progress, completed. Replaces the entire list.")]
         string itemsJson)
     {
-        var candidateJson = ExtractJsonArray(itemsJson);
+        var candidateJson = ExtractJsonArray(TryUnwrapJsonStringEncoding(itemsJson) ?? itemsJson);
 
         List<TodoItem>? parsed;
         try
@@ -120,6 +120,32 @@ public sealed class TodoPlugin
         try
         {
             return JsonSerializer.Deserialize<List<TodoItem>>(candidateJson.Replace("\\\"", "\""), JsonOpts);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    // Recovers the other real-world Write() failure mode: a model wrapping the entire array in
+    // an extra layer of JSON-string encoding (e.g. "[{\"content\":\"x\"}]" as a literal string
+    // value, not a bare array) instead of the double-escaped-but-unwrapped case
+    // TryRecoverDoubleEscapedJson handles. A leading '"' throws off ExtractJsonArray's
+    // string-tracking (it starts scanning mid-structure, so the escape/quote state desyncs) and
+    // TryRecoverDoubleEscapedJson's blanket unescape leaves the outer quotes in place, so both
+    // fail on this shape. Deserializing the whole payload as a JSON string first strips exactly
+    // that outer layer, using the real JSON grammar instead of another ad hoc scan.
+    private static string? TryUnwrapJsonStringEncoding(string itemsJson)
+    {
+        var trimmed = itemsJson.Trim();
+        if (trimmed.Length < 2 || trimmed[0] != '"')
+            return null;
+        try
+        {
+            var unwrapped = JsonSerializer.Deserialize<string>(trimmed);
+            return unwrapped is not null && unwrapped.TrimStart().StartsWith("[", StringComparison.Ordinal)
+                ? unwrapped
+                : null;
         }
         catch (JsonException)
         {

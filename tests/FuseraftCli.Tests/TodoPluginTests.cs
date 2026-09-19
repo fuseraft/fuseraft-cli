@@ -119,6 +119,23 @@ public sealed class TodoPluginTests
     }
 
     [Fact]
+    public void Write_WholeArrayWrappedInJsonStringEncoding_Recovers()
+    {
+        // A model sometimes sends the array as a JSON-string-encoded literal — a leading and
+        // trailing '"' around the whole payload, with every inner quote backslash-escaped
+        // (e.g. JSON.stringify'd twice). This desyncs ExtractJsonArray's naive string-tracking
+        // and TryRecoverDoubleEscapedJson's blanket unescape leaves the outer quotes in place,
+        // so both fail unless the outer JSON-string layer is stripped first.
+        var plugin = new TodoPlugin();
+        var wrapped = "\"[{\\\"content\\\":\\\"Explore patterns\\\",\\\"status\\\":\\\"completed\\\"}]\"";
+
+        var result = plugin.Write(wrapped);
+
+        Assert.DoesNotContain("[ERROR]", result);
+        Assert.Contains("[x] Explore patterns", result);
+    }
+
+    [Fact]
     public void Write_InvalidStatus_ReturnsError()
     {
         var plugin = new TodoPlugin();
