@@ -216,11 +216,11 @@ public sealed class PluginRegistry : IDisposable
         // as the REPL even when the config declares no Security block at all — see
         // docs/security.md and ReplCommand.cs's identical merge for the REPL side.
         var effectiveShellPolicy = DefaultSecurityPolicy.MergeShellPolicy(security.ShellPolicy);
-        var fsDenyPatterns       = DefaultSecurityPolicy.MergeFileSystemDeny(security.FileSystemPermissions);
+        var fsDenyPatterns       = DefaultSecurityPolicy.MergeFileSystemDeny(security.FileSystemPermissions, security.DenyCredentialFiles);
 
         // Create ShellPlugin once so FileSystemPlugin can reference its cache invalidator.
         // Both are registered as singletons — the factory lambda returns the same instance.
-        var shellInstance = new ShellPlugin(sandboxRoot, shellCommandApprover, effectiveShellPolicy, eventSink);
+        var shellInstance = new ShellPlugin(sandboxRoot, shellCommandApprover, effectiveShellPolicy, eventSink, blockCredentialFiles: security.DenyCredentialFiles);
         Register("Shell",      () => shellInstance);
 
         // Same eager-construction-plus-shared-closure pattern as RegisterDefaults — both
@@ -230,7 +230,7 @@ public sealed class PluginRegistry : IDisposable
         RegisterAdditional("FileSystem", () => new FileSystemManagementOps(
             fsPlugin, sandboxRoot, sessionCache: sessionReadCache, versionStore: fileVersionStore, exemptedPaths: ["~/.fuseraft/"]));
         Register("Git",        () => new GitPlugin(BindApprover("Git"), sandboxRoot));
-        Register("Search",     () => new SearchPlugin(sandboxRoot));
+        Register("Search",     () => new SearchPlugin(sandboxRoot, denyPatterns: fsDenyPatterns));
         Register("Http",       () => new HttpPlugin(_sharedHttpClient, allowedHosts, apiProfiles, allowPrivateHosts, _loggerFactory?.CreateLogger<HttpPlugin>(), BindApprover("Http")));
         Register("Document",   () => new DocumentPlugin(sandboxRoot));
 

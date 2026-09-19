@@ -8,6 +8,23 @@ namespace fuseraft.Infrastructure.Plugins;
 internal readonly record struct DangerousCommand(string RuleId, string Reason, string? Detail = null);
 
 /// <summary>
+/// One simple command out of a shell string, with wrappers (<c>env</c>, <c>nice</c>, ...) and
+/// assignment prefixes looked through. <c>Name</c> is the lower-cased basename of the command word,
+/// <c>Args</c> the words after it (quotes and escapes resolved), and <c>Text</c> the command word as
+/// written plus its arguments, space-joined — what a policy pattern should be matched against.
+/// <c>Prefix</c> is whatever preceded the command word and was looked through: <c>VAR=x</c>
+/// assignments and wrapper commands with their flags. A stage that is <i>only</i> a prefix
+/// (<c>PATH=./evil:$PATH</c>, a bare <c>env</c>) has an empty <c>Name</c> and no command, but is
+/// still reported, because it can change how the next command behaves.
+/// </summary>
+internal readonly record struct ParsedCommand(
+    string Name, IReadOnlyList<string> Args, string Text, IReadOnlyList<string> Prefix)
+{
+    /// <summary>True when an environment assignment (<c>LD_PRELOAD=…</c>, <c>PATH=…</c>) came first.</summary>
+    public bool HasEnvironmentAssignment => Prefix.Any(w => w.Length > 0 && (char.IsLetter(w[0]) || w[0] == '_') && w.Contains('='));
+}
+
+/// <summary>
 /// Recognises the handful of shell commands that are never a legitimate thing for an agent to
 /// run unattended — wiping the filesystem or a home directory, writing a raw block device,
 /// piping a download straight into an interpreter, and escalating privileges with
@@ -39,6 +56,7 @@ internal static class DangerousCommandDetector
     internal const string RawDiskOp          = "raw-disk-op";
     internal const string FetchToExec        = "fetch-to-exec";
     internal const string PrivilegeEscalation = "privilege-escalation";
+    internal const string CredentialFile      = "credential-file";
 
     // sh -c "sh -c 'sh -c ...'" — enough to see through real wrappers without letting a
     // pathological input recurse without bound.
@@ -56,6 +74,18 @@ internal static class DangerousCommandDetector
     // backslashed spellings; resolving the command word through the tokenizer does not.
     private static readonly HashSet<string> PrivilegeCommands =
         new(StringComparer.Ordinal) { "sudo", "sudoedit", "doas", "pkexec" };
+
+    // Files that exist to hold credentials. Matched on the last path component of a word, so
+    // `~/.ssh/id_rsa`, `./id_rsa`, `--identity=/k/id_ed25519` and a bare `id_rsa` all hit, while
+    // `id_rsa.pub` (a public key) does not. See DefaultSecurityPolicy.CredentialFileGlobs for the
+    // FileSystem-plugin counterpart.
+    private static readonly HashSet<string> CredentialFileNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", ".netrc", "_netrc", ".pgpass", ".git-credentials",
+    };
+
+    // Tools that take a key path only to authenticate with it, never to show or move its bytes.
+    private static readonly HashSet<string> KeyConsumers = new(StringComparer.Ordinal) { "ssh", "ssh-add", "git" };
 
     // Flags of xargs that consume the following argument, so it isn't mistaken for the command.
     private static readonly HashSet<string> XargsValueFlags =
@@ -105,7 +135,50 @@ internal static class DangerousCommandDetector
         LeadBoundary + @"(?:(?:(?:ba|z|da|k|a)?sh)\s+-\w*c\w*|eval)\s+[""']?(?:\$\(|`)" + FetcherWord,
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    internal static DangerousCommand? Detect(string? command) => Detect(command, 0);
+    /// <param name="command">The shell text to examine.</param>
+    /// <param name="credentialFiles">
+    /// Also deny naming a credentials file (<see cref="CredentialFile"/>). On by default; off when the
+    /// project opted out via <c>Security.DenyCredentialFiles</c>.
+    /// </param>
+    internal static DangerousCommand? Detect(string? command, bool credentialFiles = true) =>
+        DetectCore(command, 0, credentialFiles);
+
+    /// <summary>
+    /// Breaks <paramref name="command"/> into its simple commands — every stage of every pipeline,
+    /// including those inside <c>$( )</c>, backticks, <c>( )</c> and <c>{ }</c> — for callers that need
+    /// to judge each one (per-segment allow lists, read-only auto-approval). Returns an empty list for
+    /// a blank command (or one that is only a comment) and <c>null</c> when the text can't be enumerated with confidence: a
+    /// <c>$(</c> or backtick survives <i>inside</i> a quoted word (<c>echo "$(rm x)"</c>), where the
+    /// tokenizer can't see the command being run. Callers must treat <c>null</c> as "unknown".
+    /// </summary>
+    internal static List<ParsedCommand>? EnumerateCommands(string? command)
+    {
+        var commands = new List<ParsedCommand>();
+        if (string.IsNullOrWhiteSpace(command)) return commands;
+
+        foreach (var pipeline in Parse(Normalize(command), out _))
+        {
+            foreach (var stage in pipeline)
+            {
+                if (stage.Any(w => w.Contains("$(", StringComparison.Ordinal) || w.Contains('`')))
+                    return null;
+
+                if (Resolve(stage) is not { } r)
+                {
+                    // No command word — an assignment-only stage (`PATH=./x`) or a bare wrapper.
+                    commands.Add(new ParsedCommand(string.Empty, [], string.Join(' ', stage), stage));
+                    continue;
+                }
+
+                // Args are the trailing words of the stage, so the command word sits just before them
+                // and everything earlier is the looked-through prefix.
+                var commandIndex = stage.Count - r.Args.Count - 1;
+                commands.Add(new ParsedCommand(
+                    r.Cmd, r.Args, string.Join(' ', stage.Skip(commandIndex)), stage.Take(commandIndex).ToList()));
+            }
+        }
+        return commands;
+    }
 
     /// <summary>
     /// Folds compatibility forms (fullwidth letters etc.) and drops zero-width / other invisible
@@ -128,7 +201,7 @@ internal static class DangerousCommandDetector
         return sb.ToString();
     }
 
-    private static DangerousCommand? Detect(string? command, int depth)
+    private static DangerousCommand? DetectCore(string? command, int depth, bool credentialFiles)
     {
         if (depth > MaxNesting || string.IsNullOrWhiteSpace(command)) return null;
 
@@ -147,9 +220,15 @@ internal static class DangerousCommandDetector
 
                 var r = Resolve(stage);
                 resolved.Add(r);
+
+                if (credentialFiles
+                    && (r is not { } consumer || !KeyConsumers.Contains(consumer.Cmd))
+                    && stage.FirstOrDefault(IsCredentialPath) is { } credential)
+                    return new DangerousCommand(CredentialFile, "names a credentials file", credential);
+
                 if (r is not { } cmd) continue;
 
-                if (CheckStage(cmd.Cmd, cmd.Args, depth) is { } hit) return hit;
+                if (CheckStage(cmd.Cmd, cmd.Args, depth, credentialFiles) is { } hit) return hit;
             }
 
             if (CheckFetchToExec(resolved) is { } fetch) return fetch;
@@ -158,7 +237,7 @@ internal static class DangerousCommandDetector
         return null;
     }
 
-    private static DangerousCommand? CheckStage(string cmd, List<string> args, int depth)
+    private static DangerousCommand? CheckStage(string cmd, List<string> args, int depth, bool credentialFiles)
     {
         if (PrivilegeCommands.Contains(cmd))
             return Privileged(cmd);
@@ -180,7 +259,7 @@ internal static class DangerousCommandDetector
                 return Raw();
 
             case "eval":
-                return Detect(string.Join(' ', args), depth + 1);
+                return DetectCore(string.Join(' ', args), depth + 1, credentialFiles);
         }
 
         if (cmd.StartsWith("mkfs", StringComparison.Ordinal) || cmd == "mke2fs")
@@ -191,7 +270,7 @@ internal static class DangerousCommandDetector
         {
             var c = args.FindIndex(IsCommandFlag);
             if (c >= 0 && c + 1 < args.Count)
-                return Detect(args[c + 1], depth + 1);
+                return DetectCore(args[c + 1], depth + 1, credentialFiles);
         }
 
         return null;
@@ -202,6 +281,24 @@ internal static class DangerousCommandDetector
             new(CatastrophicDelete, "recursively deletes a system or home directory");
         static DangerousCommand Raw() =>
             new(RawDiskOp, "writes directly to a raw block device or formats a filesystem");
+    }
+
+    // True when a word names a credentials file: its last path component is one of
+    // CredentialFileNames, it ends in `.aws/credentials`, or it globs inside a `.ssh` directory
+    // (`~/.ssh/id_*`, `~/.ssh/*`). Looks at the part after `=` too, for `--identity=~/.ssh/id_rsa`.
+    private static bool IsCredentialPath(string word)
+    {
+        foreach (var candidate in word.Contains('=') ? [word, word[(word.IndexOf('=') + 1)..]] : new[] { word })
+        {
+            var path = candidate.Trim().Replace('\\', '/');
+            if (path.Length == 0) continue;
+
+            var name = path[(path.LastIndexOf('/') + 1)..];
+            if (CredentialFileNames.Contains(name)) return true;
+            if (path.EndsWith(".aws/credentials", StringComparison.OrdinalIgnoreCase)) return true;
+            if (path.Contains(".ssh/", StringComparison.Ordinal) && name.IndexOfAny(['*', '?', '[']) >= 0) return true;
+        }
+        return false;
     }
 
     // The privilege command (if any) that `xargs <cmd>` or `find … -exec <cmd>` would run. Only the
