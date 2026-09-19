@@ -57,6 +57,7 @@ public sealed class SettingsShowCommand : AsyncCommand
         repl.AddRow("Verbose",        config.Repl.Verbose        ? "[green]on[/]" : "[dim]off[/]");
         repl.AddRow("Safe mode",      config.Repl.SafeModeDefault ? "[green]on[/]" : "[dim]off[/]");
         repl.AddRow("Auto-compact",   config.Repl.AutoCompact     ? "[green]on[/]" : "[dim]off[/]");
+        repl.AddRow("HITL auto-approve read-only", config.Repl.HitlAutoApproveReadOnly ? "[green]on[/]" : "[dim]off[/]");
         repl.AddRow("Resume replay",  config.Repl.ResumeReplayTurns > 0
             ? $"last {config.Repl.ResumeReplayTurns} turn{(config.Repl.ResumeReplayTurns == 1 ? "" : "s")}"
             : "[dim]off[/]");
