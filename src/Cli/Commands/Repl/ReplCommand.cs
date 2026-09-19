@@ -245,7 +245,11 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // webview), the console-based prompt would write to stdout the extension can't parse and
         // block on a stdin reply it can never send — use the JSON-bridge approval service
         // instead so the webview can render and answer it.
-        var hitlState = new HitlModeState { Enabled = !settings.Yolo };
+        var hitlState = new HitlModeState
+        {
+            Enabled             = !settings.Yolo,
+            AutoApproveReadOnly = userCfg?.Repl?.HitlAutoApproveReadOnly ?? false,
+        };
 
         // Sandbox root for FileSystem/Shell/Git — confines those plugins' filesystem/repo access
         // to the launch directory by default, same as --yolo skips HITL. null (via --yolo) means
@@ -330,7 +334,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         using ShellPlugin? shellPlugin  = settings.NoTools ? null : new ShellPlugin(
             sandboxRoot:    sandboxRoot,
             shellPolicy:    effectiveShellPolicy,
-            approveCommand: cmd => hitlState.Enabled ? approvalService.PromptShellCommandAsync(cmd) : Task.FromResult(true),
+            approveCommand: cmd => hitlState.RequiresShellApproval(cmd) ? approvalService.PromptShellCommandAsync(cmd) : Task.FromResult(true),
             includedRoots:  includedRoots,
             blockCredentialFiles: securityConfig?.DenyCredentialFiles ?? true);
 

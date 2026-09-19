@@ -22,6 +22,17 @@ internal enum CommandOutcome { Continue, Exit, SendInput }
 internal sealed class HitlModeState
 {
     public bool Enabled;
+
+    /// <summary>
+    /// <c>/hitl auto</c>: while HITL is on, skip the y/N prompt for shell commands that are provably
+    /// read-only (see <see cref="ReadOnlyShellCommand"/>). Everything else — including every
+    /// FileSystem write, Git write, and write-ish Http call — still asks. Off by default.
+    /// </summary>
+    public bool AutoApproveReadOnly;
+
+    /// <summary>True when <paramref name="command"/> must be shown to the user for a y/N decision right now.</summary>
+    public bool RequiresShellApproval(string command) =>
+        Enabled && !(AutoApproveReadOnly && ReadOnlyShellCommand.IsReadOnly(command));
 }
 
 internal readonly record struct CommandResult(

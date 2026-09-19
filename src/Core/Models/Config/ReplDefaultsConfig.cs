@@ -46,4 +46,12 @@ public sealed class ReplDefaultsConfig
     /// </summary>
     [JsonPropertyName("resumeReplayTurns")]
     public int ResumeReplayTurns { get; set; } = 3;
+
+    /// <summary>
+    /// Start every session in <c>/hitl auto</c>: with HITL on, shell commands that are provably
+    /// read-only (<c>ls</c>, <c>git status</c>, <c>grep</c>, …) run without a y/N prompt, and
+    /// everything that can change something still asks. Default off — every shell command asks.
+    /// </summary>
+    [JsonPropertyName("hitlAutoApproveReadOnly")]
+    public bool HitlAutoApproveReadOnly { get; set; }
 }
