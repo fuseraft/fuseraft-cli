@@ -180,6 +180,38 @@ internal static partial class ReplCommands
     }
 
     // -------------------------------------------------------------------------
+    // /replay
+    // -------------------------------------------------------------------------
+
+    private static CommandResult CmdReplay(ReplSessionContext ctx, string arg)
+    {
+        var a = arg.Trim();
+        int count;
+        if (a.Length == 0)
+        {
+            // An explicit /replay always shows something, even if the resume-time replay is turned off.
+            var configured = ReplReplay.ConfiguredTurns(ctx);
+            count = configured > 0 ? configured : ReplReplay.DefaultTurns;
+        }
+        else if (a.Equals("all", StringComparison.OrdinalIgnoreCase))
+            count = int.MaxValue;
+        else if (!int.TryParse(a, out count) || count <= 0)
+        {
+            const string usage = "Usage: /replay [n|all]   — re-display the last n turns (default: repl.resumeReplayTurns, or 3)";
+            if (ctx.JsonMode) ReplJsonBridge.Emit(new { type = "text", text = usage });
+            else AnsiConsole.MarkupLine($"[dim]{Markup.Escape(usage)}[/]");
+            return CommandResult.Continue;
+        }
+
+        if (!ReplReplay.Show(ctx, count))
+        {
+            if (ctx.JsonMode) ReplJsonBridge.Emit(new { type = "text", text = "No previous turns to replay." });
+            else AnsiConsole.MarkupLine("[dim]No previous turns to replay.[/]");
+        }
+        return CommandResult.Continue;
+    }
+
+    // -------------------------------------------------------------------------
     // /conversation
     // -------------------------------------------------------------------------
 

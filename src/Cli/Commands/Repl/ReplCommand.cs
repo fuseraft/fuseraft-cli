@@ -699,6 +699,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                     $"started {Markup.Escape(snapshot.StartedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"))}[/]");
             }
 
+            ReplReplay.ShowOnRestore(ctx);
+
             // Restore plan execution state so a crash mid-plan is transparent on resume.
             if (snapshot.ExecutionQueue is { Length: > 0 })
             {

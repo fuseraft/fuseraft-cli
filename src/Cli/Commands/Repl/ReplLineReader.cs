@@ -29,7 +29,7 @@ internal sealed class ReplLineReader
         "/conversation", "/delegate", "/events", "/execute", "/exit", "/explore",
         "/fork", "/help", "/hitl", "/history", "/last", "/locate",
         "/max-tokens", "/mcp", "/memory", "/model", "/models", "/paste", "/plan",
-        "/provider", "/reasoning", "/recover", "/resume", "/retry", "/rewind",
+        "/provider", "/reasoning", "/recover", "/replay", "/resume", "/retry", "/rewind",
         "/run", "/safe-mode", "/save", "/seed", "/sessions", "/snapshot", "/switch",
         "/system", "/temperature", "/tools", "/top-p", "/undo",
     ];
@@ -44,6 +44,7 @@ internal sealed class ReplLineReader
         ["/mcp"]         = ["add", "login", "logout", "remove"],
         ["/memory"]      = ["delete", "list", "save", "show"],
         ["/provider"]    = ["setup"],
+        ["/replay"]      = ["all"],
         ["/safe-mode"]   = ["off", "on"],
         ["/seed"]        = ["reset"],
         ["/temperature"] = ["reset"],

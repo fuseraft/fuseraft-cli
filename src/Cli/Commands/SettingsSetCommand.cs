@@ -42,6 +42,7 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
         ("repl.verbose",            "true/false"),
         ("repl.safeMode",           "true/false — engage /safe-mode at startup"),
         ("repl.autoCompact",        "true/false — auto-compact at 75% context instead of only warning"),
+        ("repl.resumeReplayTurns",  "Integer >= 0 — recent turns to re-display when a session is resumed (0 disables; default 3)"),
         ("repl.plugins",            "Comma-separated plugin list, e.g. Scratchpad,Http"),
         ("telemetry.otlpEndpoint",  "OTLP endpoint URL, or \"\" to disable"),
         ("telemetry.serviceName",   "Requires telemetry.otlpEndpoint to already be set"),
@@ -87,6 +88,7 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
             "repl.verbose"             => AssignBool(v => config.Repl.Verbose = v, value),
             "repl.safemode"            => AssignBool(v => config.Repl.SafeModeDefault = v, value),
             "repl.autocompact"         => AssignBool(v => config.Repl.AutoCompact = v, value),
+            "repl.resumereplayturns"   => AssignNonNegativeInt(v => config.Repl.ResumeReplayTurns = v, value),
             "repl.plugins"             => Assign(() => config.Repl.Plugins = value
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .ToList()),
@@ -135,6 +137,14 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
     {
         if (!bool.TryParse(raw, out var v))
             return $"Expected true/false, got '{raw}'.";
+        assign(v);
+        return null;
+    }
+
+    private static string? AssignNonNegativeInt(Action<int> assign, string raw)
+    {
+        if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) || v < 0)
+            return $"Expected an integer >= 0, got '{raw}'.";
         assign(v);
         return null;
     }

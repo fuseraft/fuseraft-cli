@@ -192,7 +192,7 @@ See [CLI Reference — Memory commands](cli-reference.md#fuseraft-repl) for scop
 
 ## Sessions: resuming, forking, rewinding, undo
 
-Every session auto-saves and can be resumed with `--resume <id>` or picked up mid-conversation with `/switch`. `/fork` branches the conversation off to a new session ID without disturbing the original — handy for trying two approaches from the same starting point. `/rewind` truncates conversation history to an earlier turn; `/undo` is its filesystem counterpart, reverting whatever files the most recent turn wrote, patched, moved, or deleted.
+Every session auto-saves and can be resumed with `--resume <id>` or picked up mid-conversation with `/switch`. Resuming re-displays the last few turns so you can see where you left off (`/replay [n|all]` shows more, and `repl.resumeReplayTurns` sets the default; the VS Code panel shows them as ordinary chat messages). `/fork` branches the conversation off to a new session ID without disturbing the original — handy for trying two approaches from the same starting point. `/rewind` truncates conversation history to an earlier turn; `/undo` is its filesystem counterpart, reverting whatever files the most recent turn wrote, patched, moved, or deleted.
 
 This is covered in full in [Sessions — REPL sessions](sessions.md#repl-sessions), including the session file format and how forking/rewinding interact.
 
