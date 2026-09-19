@@ -7,6 +7,9 @@ namespace fuseraft.Cli.Commands.Repl;
 
 internal static partial class ReplCommands
 {
+    // Leads the synthetic user message /run injects with a finished run's output (ReplReplay skips it).
+    internal const string RunResultPrefix = "[Run result]";
+
     // -------------------------------------------------------------------------
     // /run
     // -------------------------------------------------------------------------
@@ -134,7 +137,7 @@ internal static partial class ReplCommands
         var status        = succeeded ? "succeeded" : $"failed (exit code {exitCode})";
 
         var context =
-            $"[Run result]\n" +
+            $"{RunResultPrefix}\n" +
             $"Config:  {configRel}\n" +
             $"Task:    {taskPreview}\n" +
             $"Status:  {status}\n" +

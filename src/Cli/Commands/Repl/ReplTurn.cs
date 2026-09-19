@@ -34,6 +34,21 @@ internal static class ReplTurn
 {
     internal const int StepIterationLimit = 5;
 
+    // Leading text of the canned user-role messages ExecuteAsync injects for its self-correction
+    // rounds. They land in ctx.History like real input, and nothing marks them as internal once
+    // the history round-trips through a session snapshot, so ReplReplay recognises them by these
+    // prefixes to keep them out of a resumed session's replayed turns.
+    internal const string EmptyReplyCorrectionPrefix   = "Your last reply was empty or contained internal tool-call text.";
+    internal const string NoWriteToolCorrectionPrefix  = "You described changes above but did not call any write tool.";
+    internal const string CriticRejectedCorrectionPrefix = "A critic reviewed ";
+    internal const string TodoOpenCorrectionPrefix     = "Your todo list still has ";
+
+    internal static bool IsInternalCorrectionMessage(string text) =>
+        text.StartsWith(EmptyReplyCorrectionPrefix,    StringComparison.Ordinal) ||
+        text.StartsWith(NoWriteToolCorrectionPrefix,   StringComparison.Ordinal) ||
+        text.StartsWith(CriticRejectedCorrectionPrefix, StringComparison.Ordinal) ||
+        text.StartsWith(TodoOpenCorrectionPrefix,      StringComparison.Ordinal);
+
     // Tool-call round-trip cap for free-form turns (ctx.Client). Named so
     // ReplFactory.BuildClient's default and the hit-cap check below can't drift apart.
     //
@@ -531,7 +546,7 @@ internal static class ReplTurn
             if (!emptyResponseRetried)
             {
                 const string correctionMsg =
-                    "Your last reply was empty or contained internal tool-call text. " +
+                    EmptyReplyCorrectionPrefix + " " +
                     "Respond to the user with a concise, user-facing answer. " +
                     "If you need tools, call them first and then provide the answer in the same turn.";
                 return await ExecuteAsync(
@@ -971,7 +986,7 @@ internal static class ReplTurn
                 if (!ctx.JsonMode)
                     AnsiConsole.MarkupLine("[dim]  ↺ mutation claimed without write tool — injecting correction[/]");
                 const string correctionMsg =
-                    "You described changes above but did not call any write tool. " +
+                    NoWriteToolCorrectionPrefix + " " +
                     "Please call write_file or patch_file now to actually apply the changes. " +
                     "Do not re-describe the changes — just call the tool.";
                 await ExecuteAsync(
@@ -1019,7 +1034,7 @@ internal static class ReplTurn
                 if (!ctx.JsonMode)
                     AnsiConsole.MarkupLine($"[yellow]  ✗ Critic: {Markup.Escape(reason ?? "no reason given")}[/]");
                 var correctionMsg =
-                    $"A critic reviewed your last response and rejected it: {reason}\n" +
+                    $"{CriticRejectedCorrectionPrefix}your last response and rejected it: {reason}\n" +
                     "Verify the disputed claim with a tool call and correct your answer. " +
                     "Do not just restate the same claim.";
                 await ExecuteAsync(
@@ -1069,7 +1084,7 @@ internal static class ReplTurn
                     $"[dim]  ↺ {incomplete.Count} todo item{(incomplete.Count == 1 ? "" : "s")} still open — injecting correction ({todoCorrectionRound + 1}/{MaxTodoCorrectionRounds})[/]");
             var remainingList = string.Join("\n", incomplete.Select(i => $"- [{i.Status}] {i.Content}"));
             var correctionMsg =
-                $"Your todo list still has {incomplete.Count} incomplete item(s):\n{remainingList}\n\n" +
+                $"{TodoOpenCorrectionPrefix}{incomplete.Count} incomplete item(s):\n{remainingList}\n\n" +
                 "Continue working through them now. If an item genuinely no longer applies, call " +
                 "todo_write to update its status and say why in one sentence — do not just stop with it left open. " +
                 "When you do mark this checklist complete, state how you verified it against the original " +
@@ -1141,7 +1156,7 @@ internal static class ReplTurn
         if (!ctx.JsonMode)
             AnsiConsole.MarkupLine($"[yellow]  ✗ critic: {Markup.Escape(reason ?? "no reason given")}[/]");
         var correctionMsg =
-            $"A critic reviewed the still-incomplete todo list and disagreed that it's reasonable to " +
+            $"{CriticRejectedCorrectionPrefix}the still-incomplete todo list and disagreed that it's reasonable to " +
             $"stop: {reason}\nAct on that feedback now.";
         await ExecuteAsync(
             ctx, correctionMsg,

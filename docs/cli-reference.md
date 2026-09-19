@@ -295,7 +295,7 @@ fuseraft repl [options]
 | `-m, --model <id>` | see below | Model ID to use (e.g. `gpt-4o`, `claude-sonnet-4-6`). Overrides `~/.fuseraft/config` when set. |
 | `--save` | off | Persist `--model` as the new default in `~/.fuseraft/config`. No effect without `--model`. |
 | `-s, --system <prompt>` | — | System prompt. Defaults to a coding/research prompt when tools are enabled. |
-| `--resume <id>` | — | Resume a previous REPL session by its session ID. Use `/sessions` inside the REPL to list resumable sessions. |
+| `--resume <id>` | — | Resume a previous REPL session by its session ID. The session's last few turns are re-displayed on startup (`repl.resumeReplayTurns`, default 3; `/replay` shows more). Use `/sessions` inside the REPL to list resumable sessions. |
 | `--no-banner` | off | Skip the ASCII banner. Persist as the default with `fuseraft settings set repl.noBanner true`. |
 | `--no-tools` | off | Disable all built-in tools and start a plain chat session. |
 | `--verbose` | off | Enable debug logging: prints per-turn detail (token estimate, tool-round count, total tool calls, and cache-read tokens when the provider reports any) and shows the event log path at startup. Persist as the default with `fuseraft settings set repl.verbose true`. |
@@ -437,7 +437,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/sessions` | List resumable REPL sessions with their IDs, model, turn count, and age. Resume with `fuseraft repl --resume <id>`. |
 | `/fork` | Snapshot the current session to a new ID. The snapshot is saved immediately; the current session continues unchanged. Use `fuseraft repl --resume <id>` to open the fork later. |
 | `/fork switch` | Fork and immediately become the fork. The original session is already checkpointed on disk; the live session continues under the new ID. |
-| `/switch <id>` | Save the current session and load another saved session in its place. History, turn counter, model (if different), and plan state are all restored. Use `/sessions` to find IDs. |
+| `/switch <id>` | Save the current session and load another saved session in its place. History, turn counter, model (if different), and plan state are all restored, and the session's most recent turns are re-displayed (see `repl.resumeReplayTurns`). Use `/sessions` to find IDs. |
 | `/conversation` | List all turns in memory with 1-based turn numbers and a one-line preview of each user message and assistant response. Use this to find the right turn number before running `/rewind`. |
 | `/rewind <n>` | Keep turns 1…n and discard all later turns. Turn count is the number of User messages currently in memory. Clamps safely — passing a number larger than the current turn count is a no-op. |
 | `/rewind -<n>` | Step back n turns from the current position (relative rewind). `/rewind -1` drops the last turn; `/rewind -99` clamps to 0 and clears all turns. |
@@ -445,6 +445,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/compact` | Ask the model to summarise everything older than a recent verbatim tail into a handoff document, then replace history with `[system, summary, ...recent turns]`. The system prompt, tools/skills catalog, and the most recent turns (~20% of the context budget, kept as whole turn-groups) are preserved as-is; only the older portion is folded into the summary. Declines with a message rather than mutating history if there's nothing old enough to summarise, or if the result wouldn't actually be smaller. Facts the assistant stated without a backing tool call are tombstoned as `[UNVERIFIED ASSUMPTION: ...]` rather than carried forward as established facts. Use this when context is filling up but you want to continue in the same session. The same logic fires automatically at 75% of the context budget unless disabled — see "Compacting a session" below. |
 | `/compact <focus>` | Same as `/compact`, but passes a focus hint to the model so the summary is tailored toward the next task (e.g. `/compact fix the auth bug next`) |
 | `/history` | Show a condensed view of the conversation (role + preview of each message) |
+| `/replay [n\|all]` | Re-display the last `n` turns in full — your message, a one-line summary of the tools used, and the agent's rendered reply. Defaults to `repl.resumeReplayTurns` (3 if unset or 0); `all` shows every turn still in memory. This is the same view shown automatically when a session is resumed. Internal messages (self-correction nudges, plan-step summaries, `/run` results, the `/compact` summary) are left out. |
 | `/system` | Print the current system prompt |
 | `/system <prompt>` | Replace the system prompt for the rest of the session |
 | `/tools` | List active tools grouped by category, with enabled/disabled status. Restricted tools are marked `(restricted)`; any active capability restrictions are listed underneath. |
@@ -2561,6 +2562,7 @@ Sets one field by a dotted, case-insensitive key. Loads the existing config (or 
 | `sampling.maxOutputTokens` | Integer, or `""` to clear |
 | `repl.contextBudget` | Token budget override, or `""` to clear |
 | `repl.autoCompact` | `true`/`false` — auto-compact at 75% context instead of only warning (default `true`) |
+| `repl.resumeReplayTurns` | Integer ≥ 0 — how many recent turns to re-display when a session is resumed with `--resume` or `/switch` (default `3`; `0` turns it off, and `/replay` still works on demand) |
 | `repl.noBanner` | `true`/`false` |
 | `repl.verbose` | `true`/`false` |
 | `repl.safeMode` | `true`/`false` — engage `/safe-mode` at startup |

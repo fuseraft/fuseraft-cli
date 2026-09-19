@@ -17,6 +17,7 @@ internal static partial class ReplCommands
             case "/paste":      return CmdPaste(ctx.JsonMode);
             case "/save":       return await CmdSaveAsync(ctx, arg);
             case "/history":    CmdHistory(ctx); return CommandResult.Continue;
+            case "/replay":     return CmdReplay(ctx, arg);
             case "/context":    await CmdContextAsync(ctx); return CommandResult.Continue;
             case "/provider":   return await CmdProviderAsync(ctx, arg);
             case "/plan":       return await CmdPlanAsync(ctx, arg);
@@ -90,6 +91,7 @@ internal static partial class ReplCommands
             new("/last", "Re-print the last assistant response"),
             new("/clear", "Clear conversation history (keeps system prompt)"),
             new("/history", "Show condensed conversation history"),
+            new("/replay [n|all]", "Re-display the last n turns in full (default 3) — the same view shown automatically when a session is resumed"),
             new("/assist", "Diagnose the conversation and inject a corrective message"),
             new("/exit", "Exit the REPL (auto-saves memories)"),
         ]),

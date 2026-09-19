@@ -22,6 +22,7 @@ When resuming:
 - The full conversation history (text, tool calls, tool results) is restored.
 - The system prompt is refreshed to pick up any new memories or `AGENTS.md` changes.
 - The turn counter continues from where it left off.
+- The last few turns are re-displayed (your messages, a summary of tools used, and the agent's replies) so you can see where you left off. Three turns by default; change it with `fuseraft settings set repl.resumeReplayTurns <n>` (`0` disables), or run `/replay [n|all]` at any time. The same applies to `/switch`, and the VS Code panel shows the replay as ordinary chat messages.
 
 **Branching sessions**
 

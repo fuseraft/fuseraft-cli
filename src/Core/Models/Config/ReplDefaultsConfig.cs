@@ -39,4 +39,11 @@ public sealed class ReplDefaultsConfig
     /// </summary>
     [JsonPropertyName("autoCompact")]
     public bool AutoCompact { get; set; } = true;
+
+    /// <summary>
+    /// How many of a resumed session's most recent turns to re-display when it is restored
+    /// (<c>--resume</c> or <c>/switch</c>). 0 disables the replay; <c>/replay</c> still works on demand.
+    /// </summary>
+    [JsonPropertyName("resumeReplayTurns")]
+    public int ResumeReplayTurns { get; set; } = 3;
 }
