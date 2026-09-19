@@ -125,4 +125,147 @@ public sealed class ReplToolLoopGuardTests
 
         Assert.Contains("SYSTEM NOTICE", r3?.ToString());
     }
+
+    // Alternation (A/B/A/B) and failure-streak notices
+
+    private static FunctionInvocationContext MakeContextWith(
+        AIFunction function, int iteration, string cmd) => new()
+    {
+        Iteration   = iteration,
+        Function    = function,
+        Arguments   = new AIFunctionArguments(new Dictionary<string, object?> { ["cmd"] = cmd }),
+        CallContent = new FunctionCallContent($"call-{iteration}", "shell_run",
+            new Dictionary<string, object?> { ["cmd"] = cmd }),
+    };
+
+    // "bad*" fails the way plugins report failure (a bracketed prefix); "throw*" throws; the rest succeed.
+    private static readonly AIFunction FlakyFunction = AIFunctionFactory.Create(
+        (string cmd) => cmd.StartsWith("throw", StringComparison.Ordinal)
+            ? throw new InvalidOperationException("boom")
+            : cmd.StartsWith("bad", StringComparison.Ordinal) ? "[ERROR] nope" : $"ran: {cmd}",
+        "shell_run");
+
+    [Fact]
+    public async Task AlternatingTwoCalls_SixthCallGetsNotice_ButNotBefore()
+    {
+        var guard = new ReplToolLoopGuard();
+        var results = new List<string>();
+        for (var i = 0; i < 6; i++)
+            results.Add((await guard.InvokeAsync(MakeContextWith(FlakyFunction, i, i % 2 == 0 ? "read" : "test"),
+                CancellationToken.None))?.ToString() ?? "");
+
+        Assert.All(results.Take(5), r => Assert.DoesNotContain("SYSTEM NOTICE", r));
+        Assert.Contains("ran: test", results[5]);            // real result preserved
+        Assert.Contains("alternated between the same two calls", results[5]);
+    }
+
+    [Fact]
+    public async Task AlternationNotice_FiresOncePerRun()
+    {
+        var guard = new ReplToolLoopGuard();
+        string? seventh = null;
+        for (var i = 0; i < 7; i++)
+            seventh = (await guard.InvokeAsync(MakeContextWith(FlakyFunction, i, i % 2 == 0 ? "read" : "test"),
+                CancellationToken.None))?.ToString();
+
+        Assert.DoesNotContain("SYSTEM NOTICE", seventh);
+    }
+
+    [Fact]
+    public async Task VariedCalls_NeverTriggerTheAlternationNotice()
+    {
+        var guard = new ReplToolLoopGuard();
+        for (var i = 0; i < 12; i++)
+        {
+            var r = await guard.InvokeAsync(MakeContextWith(FlakyFunction, i, $"step-{i}"), CancellationToken.None);
+            Assert.DoesNotContain("SYSTEM NOTICE", r?.ToString());
+        }
+    }
+
+    [Fact]
+    public async Task SecondConsecutiveFailure_GetsNudgeAppendedAfterTheRealError()
+    {
+        var guard = new ReplToolLoopGuard();
+
+        var r1 = (await guard.InvokeAsync(MakeContextWith(FlakyFunction, 0, "bad-1"), CancellationToken.None))?.ToString();
+        var r2 = (await guard.InvokeAsync(MakeContextWith(FlakyFunction, 1, "bad-2"), CancellationToken.None))?.ToString();
+
+        Assert.DoesNotContain("SYSTEM NOTICE", r1);
+        Assert.StartsWith("[ERROR] nope", r2);                       // still classified as a failure by ReplTurn
+        Assert.Contains("2 tool calls in a row have failed", r2);
+        Assert.Contains("one more failure will end this turn", r2);
+    }
+
+    [Fact]
+    public async Task FailureNudge_FiresOnce_NotAgainOnTheCutoffCall()
+    {
+        var guard = new ReplToolLoopGuard();
+        string? third = null;
+        for (var i = 0; i < 3; i++)
+            third = (await guard.InvokeAsync(MakeContextWith(FlakyFunction, i, $"bad-{i}"), CancellationToken.None))?.ToString();
+
+        Assert.DoesNotContain("SYSTEM NOTICE", third);
+    }
+
+    [Fact]
+    public async Task ASuccessBetweenFailures_ResetsTheFailureStreak()
+    {
+        var guard = new ReplToolLoopGuard();
+        await guard.InvokeAsync(MakeContextWith(FlakyFunction, 0, "bad-1"), CancellationToken.None);
+        await guard.InvokeAsync(MakeContextWith(FlakyFunction, 1, "fine"), CancellationToken.None);
+        var r = (await guard.InvokeAsync(MakeContextWith(FlakyFunction, 2, "bad-2"), CancellationToken.None))?.ToString();
+
+        Assert.DoesNotContain("SYSTEM NOTICE", r);   // the 2nd failure overall, but not 2 in a row
+    }
+
+    [Fact]
+    public async Task ThrownInvocation_CountsTowardTheStreak_AndStillPropagates()
+    {
+        var guard = new ReplToolLoopGuard();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await guard.InvokeAsync(MakeContextWith(FlakyFunction, 0, "throw-1"), CancellationToken.None));
+        var r = (await guard.InvokeAsync(MakeContextWith(FlakyFunction, 1, "bad-2"), CancellationToken.None))?.ToString();
+
+        Assert.Contains("2 tool calls in a row have failed", r);
+    }
+
+    [Fact]
+    public async Task IterationZero_ResetsTheFailureStreakForANewTurn()
+    {
+        var guard = new ReplToolLoopGuard();
+        await guard.InvokeAsync(MakeContextWith(FlakyFunction, 3, "bad-1"), CancellationToken.None);
+
+        var r = (await guard.InvokeAsync(MakeContextWith(FlakyFunction, 0, "bad-2"), CancellationToken.None))?.ToString();
+
+        Assert.DoesNotContain("SYSTEM NOTICE", r);   // first failure of the new turn, not the 2nd
+    }
+
+    [Fact]
+    public async Task IterationZero_ResetsTheAlternationRunForANewTurn()
+    {
+        var guard = new ReplToolLoopGuard();
+        for (var i = 1; i <= 5; i++)
+            await guard.InvokeAsync(MakeContextWith(FlakyFunction, i, i % 2 == 1 ? "read" : "test"), CancellationToken.None);
+
+        // Would be the 6th alternating call had the previous turn's run carried over.
+        var r = (await guard.InvokeAsync(MakeContextWith(FlakyFunction, 0, "test"), CancellationToken.None))?.ToString();
+
+        Assert.DoesNotContain("SYSTEM NOTICE", r);
+    }
+
+    [Theory]
+    [InlineData("[ERROR] x", true)]
+    [InlineData("[FAIL] x", true)]
+    [InlineData("[DENIED] x", true)]
+    [InlineData("[NOT FOUND] x", true)]
+    [InlineData("[TIMEOUT] x", true)]
+    [InlineData("[EXIT 2]\nstderr", true)]
+    [InlineData("[OK] done", false)]
+    [InlineData("[INFO] fyi", false)]
+    [InlineData("plain stdout", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void IsToolFailureText_RecognisesThePluginFailureConventions(string? text, bool expected) =>
+        Assert.Equal(expected, ReplTurn.IsToolFailureText(text));
 }

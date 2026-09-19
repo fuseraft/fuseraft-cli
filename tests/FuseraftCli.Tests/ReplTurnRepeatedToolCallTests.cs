@@ -140,6 +140,60 @@ public sealed class ReplTurnRepeatedToolCallTests : IDisposable
         public void Dispose() { }
     }
 
+    // Bounces between two different-but-repeating calls (read a.md / read b.md / read a.md ...),
+    // all succeeding. Every call differs from the one before it, so the identical-call counter
+    // resets to 1 each time — only the alternation cutoff can stop this.
+    private static async IAsyncEnumerable<ChatResponseUpdate> AlternatingToolCallRoundsAsync(
+        List<int> roundsStarted, int count)
+    {
+        // Narration first: a turn with no response text at all is retried as "empty" (and the
+        // cutoff warning is only emitted when there is text), which would re-run this stream.
+        yield return new ChatResponseUpdate
+        {
+            Role     = ChatRole.Assistant,
+            Contents = [new TextContent("Checking."), new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 5 })],
+        };
+        await Task.Yield();
+
+        for (var i = 0; i < count; i++)
+        {
+            roundsStarted.Add(i);
+            yield return new ChatResponseUpdate
+            {
+                Role     = ChatRole.Assistant,
+                Contents = [new FunctionCallContent($"call-{i}", "read_file",
+                    new Dictionary<string, object?> { ["path"] = i % 2 == 0 ? "a.md" : "b.md" })],
+            };
+            await Task.Yield();
+            yield return new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                Contents =
+                [
+                    new FunctionResultContent($"call-{i}", "[OK] file contents unchanged"),
+                    new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 5 }),
+                ],
+            };
+            await Task.Yield();
+        }
+    }
+
+    private sealed class AlternatingCallStubChatClient(List<int> roundsStarted, int count) : IChatClient
+    {
+        public ChatClientMetadata Metadata => new("test", null!, "stub");
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, string.Empty)));
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+            => AlternatingToolCallRoundsAsync(roundsStarted, count);
+
+        public object? GetService(Type serviceType, object? key = null) => null;
+        public void Dispose() { }
+    }
+
     private ReplSessionContext NewContext(IChatClient client, string eventsPath)
     {
         _eventsPaths.Add(eventsPath);
@@ -187,5 +241,44 @@ public sealed class ReplTurnRepeatedToolCallTests : IDisposable
 
         var events = await File.ReadAllLinesAsync(eventsPath);
         Assert.DoesNotContain(events, l => l.Contains("\"hit_repeated_tool_call_limit\""));
+    }
+
+    // Reads the payload of the (single) hit_repeated_tool_call_limit warning.
+    private static System.Text.Json.JsonElement RepeatedLimitPayload(string[] events)
+    {
+        var line = Assert.Single(events, l => l.Contains("\"hit_repeated_tool_call_limit\""));
+        return System.Text.Json.JsonDocument.Parse(line).RootElement.GetProperty("payload").Clone();
+    }
+
+    [Fact]
+    public async Task IdenticalToolCallCutoff_ReportsTheIdenticalCallLimit()
+    {
+        var eventsPath = Path.Combine(Path.GetTempPath(), $"fuseraft-test-events-{Guid.NewGuid():N}.jsonl");
+        var ctx = NewContext(new RepeatedCallStubChatClient([], count: 10), eventsPath);
+
+        await ReplTurn.ExecuteAsync(
+            ctx, "check the file", isStepRequest: false, capturePlan: false, activeStep: null, CancellationToken.None);
+
+        var payload = RepeatedLimitPayload(await File.ReadAllLinesAsync(eventsPath));
+        Assert.Equal(ReplTurn.MaxConsecutiveIdenticalToolCalls, payload.GetProperty("limit").GetInt32());
+        Assert.Contains("identical calls", payload.GetProperty("detail").GetString());
+    }
+
+    [Fact]
+    public async Task AlternatingToolCalls_StopAtCycleThreshold_AndReportTheCycleLimit()
+    {
+        var eventsPath = Path.Combine(Path.GetTempPath(), $"fuseraft-test-events-{Guid.NewGuid():N}.jsonl");
+        var roundsStarted = new List<int>();
+        // More rounds than the threshold, so a missing/late stop shows up as a wrong count.
+        var ctx = NewContext(new AlternatingCallStubChatClient(roundsStarted, count: 30), eventsPath);
+
+        await ReplTurn.ExecuteAsync(
+            ctx, "check the files", isStepRequest: false, capturePlan: false, activeStep: null, CancellationToken.None);
+
+        Assert.Equal(ToolCallCycleDetector.HardThreshold, roundsStarted.Count);
+
+        var payload = RepeatedLimitPayload(await File.ReadAllLinesAsync(eventsPath));
+        Assert.Equal(ToolCallCycleDetector.HardThreshold, payload.GetProperty("limit").GetInt32());
+        Assert.Contains("alternating", payload.GetProperty("detail").GetString());
     }
 }
