@@ -10,7 +10,7 @@ Guide for AI coding assistants working in this repository. Read this before maki
 ./build.sh            # full build + test + bin output (Linux/macOS)
 .\build.ps1           # full build + test + bin output (Windows)
 dotnet build          # build only
-dotnet test           # build + run all tests (681 tests, ~1s)
+dotnet test           # build + run all tests (a few seconds; no live LLM needed)
 ```
 
 All tests must pass before committing. There are no integration tests that require a live LLM — everything is unit-testable with fakes.
