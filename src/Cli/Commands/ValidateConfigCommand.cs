@@ -211,6 +211,8 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
         ValidateMcpServers(config, issues);
 
+        ValidateSecurity(config, issues);
+
         return await ReportResultsAsync(config, settings, issues);
     }
 
@@ -350,6 +352,25 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
             if (!Uri.TryCreate(endpoint, UriKind.Absolute, out _))
                 issues.Add(("error", $"Telemetry.OtlpEndpoint is not a valid URI: '{endpoint}'."));
         }
+    }
+
+    private static void ValidateSecurity(
+        OrchestrationConfig config,
+        List<(string Level, string Message)> issues)
+    {
+        if (config.Security.ShellPolicy is not { } policy) return;
+
+        var mode = policy.AllowMode;
+        if (!string.Equals(mode, ShellPolicy.AllowModeSubstring, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(mode, ShellPolicy.AllowModeSegments, StringComparison.OrdinalIgnoreCase))
+            issues.Add(("error",
+                $"Security.ShellPolicy.AllowMode '{mode}' is invalid. Valid values: " +
+                $"{ShellPolicy.AllowModeSubstring}, {ShellPolicy.AllowModeSegments}."));
+
+        if (policy.AllowSegments && policy.Allow.Count == 0)
+            issues.Add(("warning",
+                "Security.ShellPolicy.AllowMode is 'segments' but Allow is empty, so it has no effect " +
+                "(an empty Allow list means every command is allowed)."));
     }
 
     private static void ValidateMcpServers(
