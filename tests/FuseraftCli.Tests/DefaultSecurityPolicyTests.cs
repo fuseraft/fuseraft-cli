@@ -15,10 +15,53 @@ public sealed class DefaultSecurityPolicyTests
     {
         var result = DefaultSecurityPolicy.MergeFileSystemDeny(null);
 
-        Assert.Contains(".env", result);
-        Assert.Contains(".env.*", result);
-        Assert.Equal(2, result.Count);
+        Assert.Contains("**/.env", result);
+        Assert.Contains("**/.env.*", result);
+        Assert.Equal(DefaultSecurityPolicy.SecretFileGlobs.Count + DefaultSecurityPolicy.CredentialFileGlobs.Count, result.Count);
     }
+
+    [Fact]
+    public void MergeFileSystemDeny_Baseline_MatchesAtAnyDepth_NotJustTheSandboxRoot()
+    {
+        // The bug this pins: a bare ".env" glob only matches "<root>/.env", so backend/.env and
+        // apps/web/.env.local were readable. Every baseline glob must be recursive.
+        Assert.All(DefaultSecurityPolicy.SecretFileGlobs.Concat(DefaultSecurityPolicy.CredentialFileGlobs),
+            g => Assert.StartsWith("**/", g));
+    }
+
+    [Fact]
+    public void MergeFileSystemDeny_CredentialFiles_CoverThePlainTextSecretStores()
+    {
+        var result = DefaultSecurityPolicy.MergeFileSystemDeny(null);
+
+        foreach (var expected in new[]
+                 {
+                     "**/id_rsa", "**/id_dsa", "**/id_ecdsa", "**/id_ed25519",
+                     "**/.aws/credentials", "**/.netrc", "**/_netrc", "**/.pgpass", "**/.git-credentials",
+                 })
+            Assert.Contains(expected, result);
+    }
+
+    [Fact]
+    public void MergeFileSystemDeny_CredentialFiles_DoNotCoverPublicKeysOrMixedConfigFiles()
+    {
+        var result = DefaultSecurityPolicy.MergeFileSystemDeny(null);
+
+        Assert.DoesNotContain(result, p => p.Contains(".pub", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result, p => p.Contains(".npmrc") || p.Contains(".pem") || p.Contains("docker"));
+    }
+
+    [Fact]
+    public void MergeFileSystemDeny_OptedOut_DropsCredentialFilesButKeepsEnv()
+    {
+        var result = DefaultSecurityPolicy.MergeFileSystemDeny(null, denyCredentialFiles: false);
+
+        Assert.Equal(["**/.env", "**/.env.*"], result);
+    }
+
+    [Fact]
+    public void SecurityConfig_DenyCredentialFiles_DefaultsToTrue() =>
+        Assert.True(new SecurityConfig().DenyCredentialFiles);
 
     [Fact]
     public void MergeFileSystemDeny_ConfiguredDeny_MergesWithBaseline()
@@ -27,8 +70,8 @@ public sealed class DefaultSecurityPolicyTests
 
         var result = DefaultSecurityPolicy.MergeFileSystemDeny(configured);
 
-        Assert.Contains(".env", result);
-        Assert.Contains(".env.*", result);
+        Assert.Contains("**/.env", result);
+        Assert.Contains("**/.env.*", result);
         Assert.Contains("secrets/**", result);
     }
 
@@ -37,11 +80,11 @@ public sealed class DefaultSecurityPolicyTests
     {
         // Case-insensitive dedup — a project explicitly listing ".ENV" shouldn't produce two
         // near-identical glob entries.
-        var configured = new FileSystemPermissions { Deny = [".ENV"] };
+        var configured = new FileSystemPermissions { Deny = ["**/.ENV"] };
 
         var result = DefaultSecurityPolicy.MergeFileSystemDeny(configured);
 
-        Assert.Single(result, p => string.Equals(p, ".env", StringComparison.OrdinalIgnoreCase));
+        Assert.Single(result, p => string.Equals(p, "**/.env", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

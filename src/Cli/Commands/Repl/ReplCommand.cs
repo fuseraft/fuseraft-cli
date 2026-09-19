@@ -326,12 +326,13 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // config at all — the same baseline PluginRegistry.Configure applies for orchestration.
         var securityConfig       = TryLoadDefaultSecurityConfig();
         var effectiveShellPolicy = DefaultSecurityPolicy.MergeShellPolicy(securityConfig?.ShellPolicy);
-        var fsDenyPatterns       = DefaultSecurityPolicy.MergeFileSystemDeny(securityConfig?.FileSystemPermissions);
+        var fsDenyPatterns       = DefaultSecurityPolicy.MergeFileSystemDeny(securityConfig?.FileSystemPermissions, securityConfig?.DenyCredentialFiles ?? true);
         using ShellPlugin? shellPlugin  = settings.NoTools ? null : new ShellPlugin(
             sandboxRoot:    sandboxRoot,
             shellPolicy:    effectiveShellPolicy,
             approveCommand: cmd => hitlState.Enabled ? approvalService.PromptShellCommandAsync(cmd) : Task.FromResult(true),
-            includedRoots:  includedRoots);
+            includedRoots:  includedRoots,
+            blockCredentialFiles: securityConfig?.DenyCredentialFiles ?? true);
 
         // Same y/N gate as ShellPlugin's approveCommand above, generalized to the mutating
         // FileSystem/Git/Http tools — see IHumanApprovalService.PromptToolActionAsync.
@@ -366,7 +367,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 .ToList();
             shellFunctions = PluginRegistry.GetFunctionsFromObject(shellPlugin!).ToList();
             gitFunctions   = PluginRegistry.GetFunctionsFromObject(new GitPlugin(approveToolAction("Git"), sandboxRoot, includedRoots)).ToList();
-            toolsByCategory["Search"]     = PluginRegistry.GetFunctionsFromObject(new SearchPlugin(sandboxRoot, includedRoots)).ToList();
+            toolsByCategory["Search"]     = PluginRegistry.GetFunctionsFromObject(new SearchPlugin(sandboxRoot, includedRoots, fsDenyPatterns)).ToList();
             todoPlugin                    = new TodoPlugin();
             toolsByCategory["Todo"]       = PluginRegistry.GetFunctionsFromObject(todoPlugin).ToList();
 

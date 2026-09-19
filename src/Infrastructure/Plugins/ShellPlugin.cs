@@ -91,6 +91,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     private readonly IncludedRootsState _includedRoots;
     private readonly Func<string, Task<bool>>? _approveCommand;
     private readonly ShellPolicy? _shellPolicy;
+    private readonly bool _blockCredentialFiles;
     private readonly IEventSink? _eventSink;
     private readonly object _tempDirLock = new();
     private string? _sessionTempDir;
@@ -288,8 +289,9 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         try { originalProcess.Dispose(); } catch { /* already exited */ }
     }
 
-    public ShellPlugin(string? sandboxRoot = null, Func<string, Task<bool>>? approveCommand = null, ShellPolicy? shellPolicy = null, IEventSink? eventSink = null, IncludedRootsState? includedRoots = null)
+    public ShellPlugin(string? sandboxRoot = null, Func<string, Task<bool>>? approveCommand = null, ShellPolicy? shellPolicy = null, IEventSink? eventSink = null, IncludedRootsState? includedRoots = null, bool blockCredentialFiles = true)
     {
+        _blockCredentialFiles = blockCredentialFiles;
         _sandboxRoot    = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _includedRoots  = includedRoots ?? IncludedRootsState.Empty;
         _approveCommand = approveCommand;
@@ -795,12 +797,21 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     // (catastrophic recursive delete, raw block-device writes, download-and-execute) — see
     // DangerousCommandDetector. Same posture as the sudo denial above, and likewise not lifted
     // by --yolo or an empty ShellPolicy: those relax *approval*, not this.
-    private static string? CheckForDangerousCommand(string commandOrScript)
+    private string? CheckForDangerousCommand(string commandOrScript)
     {
-        if (DangerousCommandDetector.Detect(commandOrScript) is not { } danger) return null;
+        if (DangerousCommandDetector.Detect(commandOrScript, _blockCredentialFiles) is not { } danger) return null;
 
         if (danger.RuleId == DangerousCommandDetector.PrivilegeEscalation)
             return SudoDenied(danger.Detail ?? "sudo");
+
+        // Same guidance the FileSystem plugin gives for a denied credentials path.
+        if (danger.RuleId == DangerousCommandDetector.CredentialFile)
+            return PluginResult.Denied(
+                $"Shell command blocked: it names '{danger.Detail}', a credentials file " +
+                $"({DangerousCommandDetector.CredentialFile}). Do not read, copy, or inspect it directly — " +
+                "if a command needs its contents, let that command read the file itself " +
+                "(e.g. `ssh`/`git` pick up your keys on their own). If you truly need this file, " +
+                "tell the user which command to run and they will run it themselves.");
 
         return PluginResult.Denied(
             $"Shell command blocked: it {danger.Reason} ({danger.RuleId}). " +

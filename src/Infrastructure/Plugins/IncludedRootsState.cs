@@ -158,6 +158,13 @@ public sealed class IncludedRootsState
     {
         if (denial is null) return null;
 
+        // A deny rule is not a sandbox boundary. Before this check, ANY denial was offered as a
+        // "sandbox escape" (worded "… is outside the current sandbox — grants '<dir>'") and a single
+        // `y` returned null = proceed, so one approval read, overwrote or deleted a `.env` or a
+        // credentials file that the deny rule exists to protect — for every FileSystem tool. Deny
+        // rules stay denied, whatever the user is asked.
+        if (FileSystemSandbox.IsDenyRuleDenial(denial)) return denial;
+
         return await TryGrantEscapeAsync(resolvedPath, toolName, approveEscape) switch
         {
             true  => null,

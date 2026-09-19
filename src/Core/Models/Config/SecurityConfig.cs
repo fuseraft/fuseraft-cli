@@ -70,4 +70,14 @@ public record SecurityConfig
     /// Null means the shell is unrestricted (subject to the existing sudo block).
     /// </summary>
     public ShellPolicy? ShellPolicy { get; init; }
+
+    /// <summary>
+    /// Built-in protection for credential files — SSH private keys (<c>id_rsa</c>, <c>id_ed25519</c>, …),
+    /// <c>.aws/credentials</c>, <c>.netrc</c>, <c>.pgpass</c>, <c>.git-credentials</c> — on top of the
+    /// always-on <c>.env</c> protection: the FileSystem plugin denies them at any depth, and the Shell
+    /// plugin denies a command that names one (except <c>ssh</c>/<c>ssh-add</c>/<c>git</c>, which only
+    /// use a key to authenticate). Defaults to <c>true</c>. Set <c>false</c> for an agent whose job
+    /// legitimately includes managing those files; <c>.env</c> stays denied either way.
+    /// </summary>
+    public bool DenyCredentialFiles { get; init; } = true;
 }
