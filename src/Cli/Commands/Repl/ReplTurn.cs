@@ -9,6 +9,7 @@ using fuseraft.Core;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Chat;
+using fuseraft.Infrastructure.Plugins;
 using fuseraft.Orchestration;
 
 namespace fuseraft.Cli.Commands.Repl;
@@ -89,6 +90,14 @@ internal static class ReplTurn
     // Maximum times a transient streaming error (ResponseEnded, IOException, TimeoutException)
     // is retried automatically before surfacing the failure to the user.
     private const int MaxStreamRetries = 2;
+
+    // Number of automatic "todo list still incomplete" nudges (see
+    // TryApplyTodoCompletionCorrectionAsync) before handing the decision to a critic sub-agent
+    // instead of continuing to repeat the same canned nudge text. Previously this loop was
+    // capped at exactly one round via the shared isCorrectionTurn flag, which meant any
+    // multi-step task requiring more than one round of self-correction silently stalled and
+    // needed a manual "keep going" from the user for every remaining round.
+    internal const int MaxTodoCorrectionRounds = 5;
 
     // Matches identify/locate/find-style questions about the codebase so the turn can force a
     // grounding tool call instead of letting the model answer from (possibly fabricated) memory.
@@ -461,8 +470,18 @@ internal static class ReplTurn
         PlanStep? activeStep,
         CancellationToken cancellationToken,
         int stepTotal = 0,
-        bool isCorrectionTurn = false)
+        bool isCorrectionTurn = false,
+        string? originalInput = null,
+        int todoCorrectionRound = 0,
+        int todoCriticRound = 0,
+        bool emptyResponseRetried = false)
     {
+        // The true original user request, preserved across every level of recursive
+        // self-correction below — `input` itself becomes the injected correction text on
+        // recursive calls, but the todo-critic escalation needs the real task, not the last
+        // canned nudge.
+        var rootInput = originalInput ?? input;
+
         ctx.BeginTurn();
         ctx.Emitter.SetTurn(ctx.TurnIndex);
         await ctx.Emitter.EmitAsync(EventTypes.UserInput, turn: ctx.TurnIndex, payload: new { content = input });
@@ -504,7 +523,12 @@ internal static class ReplTurn
         responseText = SanitizeAssistantResponse(responseText, out var warningMessage);
         if (!capturePlan && responseText.Length == 0)
         {
-            if (!isCorrectionTurn)
+            // Gated on its own emptyResponseRetried flag rather than the shared isCorrectionTurn
+            // flag — an empty response can legitimately occur mid-way through an in-progress
+            // todo-correction chain (a nudge message can provoke a bare tool call with no
+            // trailing text), and that chain's own isCorrectionTurn=true must not starve this
+            // retry of its one shot.
+            if (!emptyResponseRetried)
             {
                 const string correctionMsg =
                     "Your last reply was empty or contained internal tool-call text. " +
@@ -513,7 +537,9 @@ internal static class ReplTurn
                 return await ExecuteAsync(
                     ctx, correctionMsg,
                     isStepRequest: false, capturePlan: false, activeStep: null,
-                    cancellationToken, isCorrectionTurn: true);
+                    cancellationToken, isCorrectionTurn: true,
+                    originalInput: rootInput, todoCorrectionRound: todoCorrectionRound,
+                    todoCriticRound: todoCriticRound, emptyResponseRetried: true);
             }
 
             warningMessage ??= "Model returned an empty response twice. Provide a real user-facing answer next turn.";
@@ -858,13 +884,16 @@ internal static class ReplTurn
         // TurnIndex++ and emits would otherwise land inside this turn's own tail and get
         // relabeled onto the wrong turn.
         await TryApplyMutationCorrectionAsync(
-            ctx, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn, cancellationToken);
+            ctx, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn,
+            rootInput, todoCorrectionRound, todoCriticRound, cancellationToken);
 
         await TryApplyCriticReviewAsync(
-            ctx, input, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn, cancellationToken);
+            ctx, input, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn,
+            rootInput, todoCorrectionRound, todoCriticRound, cancellationToken);
 
         await TryApplyTodoCompletionCorrectionAsync(
-            ctx, responseText, isStepRequest, capturePlan, isCorrectionTurn, cancellationToken);
+            ctx, responseText, isStepRequest, capturePlan, isCorrectionTurn,
+            rootInput, todoCorrectionRound, todoCriticRound, cancellationToken);
 
         return stepPassed;
     }
@@ -927,6 +956,9 @@ internal static class ReplTurn
         bool isStepRequest,
         bool capturePlan,
         bool isCorrectionTurn,
+        string rootInput,
+        int todoCorrectionRound,
+        int todoCriticRound,
         CancellationToken cancellationToken)
     {
         if (!isStepRequest && !capturePlan && responseText.Length > 0 &&
@@ -945,7 +977,9 @@ internal static class ReplTurn
                 await ExecuteAsync(
                     ctx, correctionMsg,
                     isStepRequest: false, capturePlan: false, activeStep: null,
-                    cancellationToken, isCorrectionTurn: true);
+                    cancellationToken, isCorrectionTurn: true,
+                    originalInput: rootInput, todoCorrectionRound: todoCorrectionRound,
+                    todoCriticRound: todoCriticRound);
             }
             else
             {
@@ -967,6 +1001,9 @@ internal static class ReplTurn
         bool isStepRequest,
         bool capturePlan,
         bool isCorrectionTurn,
+        string rootInput,
+        int todoCorrectionRound,
+        int todoCriticRound,
         CancellationToken cancellationToken)
     {
         if (ctx.AdversarialMode && ctx.SubAgent is not null &&
@@ -988,7 +1025,9 @@ internal static class ReplTurn
                 await ExecuteAsync(
                     ctx, correctionMsg,
                     isStepRequest: false, capturePlan: false, activeStep: null,
-                    cancellationToken, isCorrectionTurn: true);
+                    cancellationToken, isCorrectionTurn: true,
+                    originalInput: rootInput, todoCorrectionRound: todoCorrectionRound,
+                    todoCriticRound: todoCriticRound);
             }
         }
     }
@@ -998,14 +1037,19 @@ internal static class ReplTurn
     // keep going instead of silently abandoning the rest of the checklist — the system prompt
     // asks the model to track completeness itself, but nothing previously enforced it, unlike
     // /execute's per-step VerifyStepAsync. Skipped when the response ends in a question — the
-    // agent may legitimately be waiting on the user before it can continue. On the correction
-    // turn itself, only warn, so a task the agent genuinely can't finish doesn't loop forever.
+    // agent may legitimately be waiting on the user before it can continue. Retries up to
+    // MaxTodoCorrectionRounds times with the same canned nudge; once that budget is exhausted,
+    // hands the decision to TryApplyTodoCriticEscalationAsync instead of looping forever on a
+    // task the agent genuinely can't finish.
     private static async Task TryApplyTodoCompletionCorrectionAsync(
         ReplSessionContext ctx,
         string responseText,
         bool isStepRequest,
         bool capturePlan,
         bool isCorrectionTurn,
+        string rootInput,
+        int todoCorrectionRound,
+        int todoCriticRound,
         CancellationToken cancellationToken)
     {
         if (isStepRequest || capturePlan || responseText.Length == 0 || ctx.Todo is null) return;
@@ -1016,13 +1060,13 @@ internal static class ReplTurn
             .ToList();
         if (incomplete.Count == 0) return;
 
-        if (!isCorrectionTurn)
+        if (todoCorrectionRound < MaxTodoCorrectionRounds)
         {
             await ctx.Emitter.EmitAsync(EventTypes.CorrectionInjected, turn: ctx.TurnIndex,
-                payload: new { reason = "todo_incomplete", remaining = incomplete.Count });
+                payload: new { reason = "todo_incomplete", remaining = incomplete.Count, round = todoCorrectionRound + 1 });
             if (!ctx.JsonMode)
                 AnsiConsole.MarkupLine(
-                    $"[dim]  ↺ {incomplete.Count} todo item{(incomplete.Count == 1 ? "" : "s")} still open — injecting correction[/]");
+                    $"[dim]  ↺ {incomplete.Count} todo item{(incomplete.Count == 1 ? "" : "s")} still open — injecting correction ({todoCorrectionRound + 1}/{MaxTodoCorrectionRounds})[/]");
             var remainingList = string.Join("\n", incomplete.Select(i => $"- [{i.Status}] {i.Content}"));
             var correctionMsg =
                 $"Your todo list still has {incomplete.Count} incomplete item(s):\n{remainingList}\n\n" +
@@ -1035,14 +1079,76 @@ internal static class ReplTurn
             await ExecuteAsync(
                 ctx, correctionMsg,
                 isStepRequest: false, capturePlan: false, activeStep: null,
-                cancellationToken, isCorrectionTurn: true);
+                cancellationToken, isCorrectionTurn: true,
+                originalInput: rootInput, todoCorrectionRound: todoCorrectionRound + 1,
+                todoCriticRound: todoCriticRound);
         }
         else
+        {
+            await TryApplyTodoCriticEscalationAsync(
+                ctx, rootInput, incomplete, responseText, todoCriticRound, cancellationToken);
+        }
+    }
+
+    // Fires once TryApplyTodoCompletionCorrectionAsync's automatic-nudge budget is exhausted.
+    // Rather than keep repeating the same canned nudge text (which a model can start pattern-
+    // matching against and stall on), a critic sub-agent reviews the original task, the still-
+    // open items, and the agent's last response, and either agrees stopping is reasonable (e.g.
+    // genuinely blocked or ambiguous) or writes a fresh, specific correction itself. The critic
+    // gets exactly one shot at this — todoCriticRound caps it at one escalation round so a task
+    // the critic also can't unstick still terminates.
+    private static async Task TryApplyTodoCriticEscalationAsync(
+        ReplSessionContext ctx,
+        string rootInput,
+        List<TodoItem> incomplete,
+        string responseText,
+        int todoCriticRound,
+        CancellationToken cancellationToken)
+    {
+        if (ctx.SubAgent is null || todoCriticRound >= 1)
         {
             if (!ctx.JsonMode)
                 AnsiConsole.MarkupLine(
                     $"[yellow]  ⚠ {incomplete.Count} todo item(s) still open after correction — task may be incomplete.[/]");
+            return;
         }
+
+        var remainingList = string.Join("\n", incomplete.Select(i => $"- [{i.Status}] {i.Content}"));
+        var taskDescription =
+            $"The agent's todo list still has {incomplete.Count} incomplete item(s) after " +
+            $"{MaxTodoCorrectionRounds} automatic follow-up attempts:\n{remainingList}\n\n" +
+            "Decide whether it is reasonable for the agent to stop here (e.g. genuinely blocked, " +
+            "waiting on missing information, or the remaining items no longer apply) or whether " +
+            "it should keep working.";
+
+        if (!ctx.JsonMode) AnsiConsole.Markup("[dim]  critic reviewing todo completion…[/]");
+        var (approved, reason) = await ctx.SubAgent.CriticReviewAsync(
+            taskDescription, expectedTool: null, toolsCalled: [], responseText,
+            originalUserRequest: rootInput, cancellationToken: cancellationToken);
+        if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 48)}\r");
+
+        await ctx.Emitter.EmitAsync(EventTypes.CorrectionInjected, turn: ctx.TurnIndex,
+            payload: new { reason = "todo_critic_escalation", approved, detail = reason, remaining = incomplete.Count });
+
+        if (approved)
+        {
+            if (!ctx.JsonMode)
+                AnsiConsole.MarkupLine(
+                    $"[dim]  critic: OK to stop — {Markup.Escape(reason ?? "no further action needed")}[/]");
+            return;
+        }
+
+        if (!ctx.JsonMode)
+            AnsiConsole.MarkupLine($"[yellow]  ✗ critic: {Markup.Escape(reason ?? "no reason given")}[/]");
+        var correctionMsg =
+            $"A critic reviewed the still-incomplete todo list and disagreed that it's reasonable to " +
+            $"stop: {reason}\nAct on that feedback now.";
+        await ExecuteAsync(
+            ctx, correctionMsg,
+            isStepRequest: false, capturePlan: false, activeStep: null,
+            cancellationToken, isCorrectionTurn: true,
+            originalInput: rootInput, todoCorrectionRound: MaxTodoCorrectionRounds,
+            todoCriticRound: 1);
     }
 
     // Carrier for the outcome of streaming one turn's response, retrying on transient
