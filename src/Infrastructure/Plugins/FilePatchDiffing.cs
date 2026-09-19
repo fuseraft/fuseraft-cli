@@ -10,6 +10,39 @@ namespace fuseraft.Infrastructure.Plugins;
 /// </summary>
 internal static class FilePatchDiffing
 {
+    // 1-based line number of the character at <paramref name="index"/> in LF-normalised content.
+    internal static int LineNumberAt(string content, int index)
+    {
+        var line = 1;
+        for (var i = 0; i < index && i < content.Length; i++)
+            if (content[i] == '\n') line++;
+        return line;
+    }
+
+    // Distinct 1-based line numbers where <paramref name="search"/> starts, in order, stopping
+    // after <paramref name="max"/> matches. Overlapping matches count (same rule patch_file uses
+    // to decide a match is ambiguous). Lets an "appears more than once" error say *where*, so the
+    // caller can widen oldText enough to be unique instead of re-reading the whole file.
+    internal static List<int> OccurrenceLines(string content, string search, int max)
+    {
+        var lines = new List<int>();
+        if (search.Length == 0) return lines;
+
+        var line    = 1;
+        var scanned = 0;
+        var matches = 0;
+        for (var idx = content.IndexOf(search, StringComparison.Ordinal);
+             idx >= 0 && matches < max;
+             idx = content.IndexOf(search, idx + 1, StringComparison.Ordinal))
+        {
+            for (; scanned < idx; scanned++)
+                if (content[scanned] == '\n') line++;
+            if (lines.Count == 0 || lines[^1] != line) lines.Add(line);
+            matches++;
+        }
+        return lines;
+    }
+
     internal static string CountLines(string content, string searchText)
     {
         // Try to find the first line of the search text in the file for a useful hint.

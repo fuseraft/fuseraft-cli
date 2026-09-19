@@ -374,4 +374,50 @@ public sealed class FilePatchDiffingTests : IDisposable
         Assert.False(normalised);
         Assert.Equal(content, normalized);
     }
+
+    // LineNumberAt / OccurrenceLines
+
+    [Theory]
+    [InlineData("a\nb\nc", 0, 1)]
+    [InlineData("a\nb\nc", 1, 1)]   // the '\n' itself is still on line 1
+    [InlineData("a\nb\nc", 2, 2)]
+    [InlineData("a\nb\nc", 4, 3)]
+    [InlineData("", 0, 1)]
+    public void LineNumberAt_IsOneBased(string content, int index, int expected) =>
+        Assert.Equal(expected, FilePatchDiffing.LineNumberAt(content, index));
+
+    [Fact]
+    public void LineNumberAt_IndexPastEnd_ClampsToLastLine() =>
+        Assert.Equal(3, FilePatchDiffing.LineNumberAt("a\nb\nc", 999));
+
+    [Fact]
+    public void OccurrenceLines_ReturnsEachStartingLineInOrder()
+    {
+        var content = "foo\nbar\nfoo\nbaz\n\nfoo\n";
+
+        Assert.Equal([1, 3, 6], FilePatchDiffing.OccurrenceLines(content, "foo", max: 10));
+    }
+
+    [Fact]
+    public void OccurrenceLines_TwoMatchesOnOneLine_ListsThatLineOnce() =>
+        Assert.Equal([1, 2], FilePatchDiffing.OccurrenceLines("x = foo + foo\nfoo\n", "foo", max: 10));
+
+    [Fact]
+    public void OccurrenceLines_MultiLineSearch_ReportsWhereItStarts()
+    {
+        var content = "a\nb\nc\na\nb\nd\n";
+
+        Assert.Equal([1, 4], FilePatchDiffing.OccurrenceLines(content, "a\nb", max: 10));
+    }
+
+    [Fact]
+    public void OccurrenceLines_StopsAtMax() =>
+        Assert.Equal([1, 2, 3], FilePatchDiffing.OccurrenceLines("x\nx\nx\nx\nx\n", "x", max: 3));
+
+    [Fact]
+    public void OccurrenceLines_NoMatchOrEmptySearch_ReturnsEmpty()
+    {
+        Assert.Empty(FilePatchDiffing.OccurrenceLines("abc", "zzz", max: 5));
+        Assert.Empty(FilePatchDiffing.OccurrenceLines("abc", "", max: 5));
+    }
 }
