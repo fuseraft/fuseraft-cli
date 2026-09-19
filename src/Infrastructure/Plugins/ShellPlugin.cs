@@ -326,6 +326,9 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         var sudoDenial = CheckForSudo(command);
         if (sudoDenial is not null) return sudoDenial;
 
+        var dangerDenial = CheckForDangerousCommand(command);
+        if (dangerDenial is not null) return dangerDenial;
+
         var policyDenial = CheckShellPolicy(command);
         if (policyDenial is not null) return policyDenial;
 
@@ -477,6 +480,9 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         var sudoDenial = CheckForSudo(script);
         if (sudoDenial is not null) return sudoDenial;
 
+        var dangerDenial = CheckForDangerousCommand(script);
+        if (dangerDenial is not null) return dangerDenial;
+
         var policyDenial = CheckShellPolicy(script);
         if (policyDenial is not null) return policyDenial;
 
@@ -532,8 +538,14 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
 
     // Environment helpers
 
-    [Description("Get an environment variable value.")]
-    public string GetEnv([Description("Variable name.")] string name) => Environment.GetEnvironmentVariable(name) ?? string.Empty;
+    [Description("Get an environment variable value. Values of secret-looking variables (KEY/TOKEN/SECRET/PASSWORD names) are hidden — reference them as $NAME in commands instead.")]
+    public string GetEnv([Description("Variable name.")] string name)
+    {
+        var value = Environment.GetEnvironmentVariable(name) ?? string.Empty;
+        return value.Length > 0 && EnvSecretMasker.IsSensitiveName(name)
+            ? EnvSecretMasker.Placeholder
+            : EnvSecretMasker.Mask(value);
+    }
 
     [Description("Set an environment variable for this session.")]
     public string SetEnv(
@@ -595,6 +607,9 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         var sudoDenial = CheckForSudo(command);
         if (sudoDenial is not null) return sudoDenial;
 
+        var dangerDenial = CheckForDangerousCommand(command);
+        if (dangerDenial is not null) return dangerDenial;
+
         var policyDenial = CheckShellPolicy(command);
         if (policyDenial is not null) return policyDenial;
 
@@ -651,7 +666,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
 
         if (job.IsRunning)
         {
-            var recent = TailOutput(job.ReadOutput(), 500);
+            var recent = TailOutput(EnvSecretMasker.Mask(job.ReadOutput()), 500);
             return $"[RUNNING] Job {jobId}\n{(string.IsNullOrEmpty(recent) ? "(no output yet)" : $"Recent output:\n{recent}")}";
         }
 
@@ -659,7 +674,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
             return $"[KILLED] Job {jobId} was terminated.";
 
         var exitCode = job.ExitCode ?? -1;
-        var tail     = TailOutput(job.ReadOutput(), 1000);
+        var tail     = TailOutput(EnvSecretMasker.Mask(job.ReadOutput()), 1000);
         return exitCode == 0
             ? $"[COMPLETED] Job {jobId} exited 0 (success).\n{tail}"
             : $"[FAILED] Job {jobId} exited {exitCode}.\n{tail}";
@@ -674,7 +689,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
 
         await job.EnsureDrainedAsync(JobDrainTimeout);
 
-        var output = job.ReadOutput();
+        var output = EnvSecretMasker.Mask(job.ReadOutput());
         return string.IsNullOrEmpty(output)
             ? PluginResult.Info($"Job {jobId}: no output captured yet.")
             : output;
@@ -710,6 +725,12 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
 
     // Helpers
 
+    private static readonly Regex WhitespaceRun = new(@"\s+", RegexOptions.Compiled);
+
+    // Line continuations ("\<newline>") join lines in the shell, so they must not split a phrase.
+    private static string CollapseWhitespace(string s) =>
+        WhitespaceRun.Replace(DangerousCommandDetector.Normalize(s).Replace("\\\n", " "), " ");
+
     // Checks the command against the configured ShellPolicy allow/deny lists.
     // Deny is evaluated first; a matching deny pattern blocks the command regardless of allow.
     // Allow is only evaluated when the allow list is non-empty; the command must contain at
@@ -719,11 +740,17 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     {
         if (_shellPolicy is null) return null;
 
+        // Compared after folding typography and collapsing whitespace runs on both sides, so
+        // `rm  -rf` (two spaces), a tab, a line continuation or a zero-width character can't
+        // sidestep a pattern that reads `rm -rf`. Still a substring match — reordered flags
+        // (`rm -fr`) are what DangerousCommandDetector's tokenizer is for.
+        var text = CollapseWhitespace(commandOrScript);
+
         if (_shellPolicy.Deny is { Count: > 0 })
         {
             foreach (var pattern in _shellPolicy.Deny)
             {
-                if (commandOrScript.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                if (text.Contains(CollapseWhitespace(pattern), StringComparison.OrdinalIgnoreCase))
                     return PluginResult.Denied(
                         $"Shell command blocked: matches configured deny pattern '{pattern}'.");
             }
@@ -732,7 +759,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         if (_shellPolicy.Allow is { Count: > 0 })
         {
             bool allowed = _shellPolicy.Allow.Any(p =>
-                commandOrScript.Contains(p, StringComparison.OrdinalIgnoreCase));
+                text.Contains(CollapseWhitespace(p), StringComparison.OrdinalIgnoreCase));
             if (!allowed)
                 return PluginResult.Denied(
                     $"Shell command blocked: not matched by any configured allow pattern. " +
@@ -759,6 +786,20 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
                 "If elevated privileges are truly required, tell the user exactly which command to run " +
                 "and they will run it themselves.");
         return null;
+    }
+
+    // Hard-denies the few commands that are never a legitimate unattended agent action
+    // (catastrophic recursive delete, raw block-device writes, download-and-execute) — see
+    // DangerousCommandDetector. Same posture as the sudo denial above, and likewise not lifted
+    // by --yolo or an empty ShellPolicy: those relax *approval*, not this.
+    private static string? CheckForDangerousCommand(string commandOrScript)
+    {
+        if (DangerousCommandDetector.Detect(commandOrScript) is not { } danger) return null;
+
+        return PluginResult.Denied(
+            $"Shell command blocked: it {danger.Reason} ({danger.RuleId}). " +
+            "Use a narrower, targeted command instead. If this is genuinely what is needed, " +
+            "tell the user exactly which command to run and they will run it themselves.");
     }
 
     // Validates that the working directory stays within the sandbox.

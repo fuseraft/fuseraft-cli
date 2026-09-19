@@ -1,3 +1,4 @@
+using fuseraft.Core.Models.Config;
 using fuseraft.Infrastructure.Plugins;
 
 namespace FuseraftCli.Tests;
@@ -340,5 +341,257 @@ public sealed class ShellPluginTests
         {
             Directory.Delete(sandboxDir, recursive: true);
         }
+    }
+
+    // Secret masking — EnvSecretMasker wired into every shell output path
+
+    private static string EchoVar(string name) =>
+        OperatingSystem.IsWindows() ? $"echo %{name}%" : $"echo ${name}";
+
+    [Fact]
+    public async Task RunAsync_SecretEnvVarValue_IsMaskedInOutput()
+    {
+        const string name = "FUSERAFT_TEST_SHELL_API_KEY";
+        const string value = "sk-shell-0123456789abcdef";
+        Environment.SetEnvironmentVariable(name, value);
+        try
+        {
+            using var plugin = new ShellPlugin();
+
+            var result = await plugin.RunAsync(EchoVar(name));
+
+            Assert.DoesNotContain(value, result);
+            Assert.Contains(EnvSecretMasker.Placeholder, result);
+        }
+        finally { Environment.SetEnvironmentVariable(name, null); }
+    }
+
+    [Fact]
+    public async Task RunAsync_SecretEnvVarValue_IsMaskedInFailureOutputToo()
+    {
+        const string name = "FUSERAFT_TEST_SHELL_FAIL_TOKEN";
+        const string value = "tok-fail-0123456789abcdef";
+        Environment.SetEnvironmentVariable(name, value);
+        try
+        {
+            using var plugin = new ShellPlugin();
+
+            var result = await plugin.RunAsync($"{EchoVar(name)} && exit 3");
+
+            Assert.Contains("[EXIT 3]", result);
+            Assert.DoesNotContain(value, result);
+        }
+        finally { Environment.SetEnvironmentVariable(name, null); }
+    }
+
+    [Fact]
+    public async Task RunBackgroundAsync_SecretEnvVarValue_IsMaskedInJobOutputAndStatus()
+    {
+        const string name = "FUSERAFT_TEST_SHELL_JOB_SECRET";
+        const string value = "job-secret-0123456789abcdef";
+        Environment.SetEnvironmentVariable(name, value);
+        try
+        {
+            using var plugin = new ShellPlugin();
+            var started = await plugin.RunBackgroundAsync(EchoVar(name));
+            var jobId = started.Split("Job ID: ")[1].Split('\n')[0].Trim();
+
+            string status = "";
+            for (var i = 0; i < 100 && !status.Contains("COMPLETED"); i++)
+            {
+                status = await plugin.GetJobStatus(jobId);
+                if (!status.Contains("COMPLETED")) await Task.Delay(50);
+            }
+
+            var output = await plugin.GetJobOutput(jobId);
+
+            Assert.Contains("[COMPLETED]", status);
+            Assert.DoesNotContain(value, status);
+            Assert.DoesNotContain(value, output);
+            Assert.Contains(EnvSecretMasker.Placeholder, output);
+        }
+        finally { Environment.SetEnvironmentVariable(name, null); }
+    }
+
+    [Fact]
+    public void GetEnv_SecretLookingName_ReturnsPlaceholderNotValue()
+    {
+        const string name = "FUSERAFT_TEST_GETENV_API_KEY";
+        Environment.SetEnvironmentVariable(name, "abc");   // short on purpose: hidden by name, not by length
+        try
+        {
+            using var plugin = new ShellPlugin();
+
+            Assert.Equal(EnvSecretMasker.Placeholder, plugin.GetEnv(name));
+        }
+        finally { Environment.SetEnvironmentVariable(name, null); }
+    }
+
+    [Fact]
+    public void GetEnv_OrdinaryName_ReturnsValue()
+    {
+        const string name = "FUSERAFT_TEST_GETENV_PLAIN";
+        Environment.SetEnvironmentVariable(name, "plain-value");
+        try
+        {
+            using var plugin = new ShellPlugin();
+
+            Assert.Equal("plain-value", plugin.GetEnv(name));
+        }
+        finally { Environment.SetEnvironmentVariable(name, null); }
+    }
+
+    [Fact]
+    public void GetEnv_UnsetSecretLookingName_ReturnsEmptyNotPlaceholder()
+    {
+        using var plugin = new ShellPlugin();
+
+        Assert.Equal(string.Empty, plugin.GetEnv("FUSERAFT_TEST_GETENV_NEVER_SET_TOKEN"));
+    }
+
+    [Fact]
+    public void GetEnv_OrdinaryNameHoldingASecretValue_IsMaskedByValue()
+    {
+        const string secretName = "FUSERAFT_TEST_GETENV_HOLDER_SECRET";
+        const string plainName  = "FUSERAFT_TEST_GETENV_ALIAS";
+        const string value      = "aliased-secret-0123456789";
+        Environment.SetEnvironmentVariable(secretName, value);
+        Environment.SetEnvironmentVariable(plainName, value);
+        try
+        {
+            using var plugin = new ShellPlugin();
+
+            Assert.DoesNotContain(value, plugin.GetEnv(plainName));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(secretName, null);
+            Environment.SetEnvironmentVariable(plainName, null);
+        }
+    }
+
+    // Dangerous-command rails — hard-denied like sudo. Every command below is harmless if the
+    // guard regressed and it ran anyway (mkfs on a device that does not exist; `curl --version`
+    // piped to a shell that cannot parse it).
+
+    private const string HarmlessRawDiskCommand = "mkfs.ext4 /dev/fuseraft-test-nonexistent";
+    private const string HarmlessFetchToExecCommand = "curl --version | sh";
+
+    [Fact]
+    public async Task RunAsync_RawDiskOperation_IsDenied()
+    {
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunAsync(HarmlessRawDiskCommand);
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.Contains(DangerousCommandDetector.RawDiskOp, result);
+    }
+
+    [Fact]
+    public async Task RunAsync_FetchToExec_IsDenied()
+    {
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunAsync(HarmlessFetchToExecCommand);
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.Contains(DangerousCommandDetector.FetchToExec, result);
+    }
+
+    [Fact]
+    public async Task RunScriptAsync_DangerousCommandInsideScript_IsDenied()
+    {
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunScriptAsync($"echo starting\n{HarmlessRawDiskCommand}\necho done");
+
+        Assert.StartsWith("[DENIED]", result);
+    }
+
+    [Fact]
+    public async Task RunBackgroundAsync_DangerousCommand_IsDeniedAndNoJobStarts()
+    {
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunBackgroundAsync(HarmlessRawDiskCommand);
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.DoesNotContain("Job ID:", result);
+    }
+
+    [Fact]
+    public async Task RunAsync_DangerousCommand_IsDeniedBeforeAskingTheUser()
+    {
+        var asked = false;
+        using var plugin = new ShellPlugin(approveCommand: _ => { asked = true; return Task.FromResult(true); });
+
+        var result = await plugin.RunAsync(HarmlessRawDiskCommand);
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.False(asked, "a hard-denied command must not reach the approval prompt");
+    }
+
+    [Fact]
+    public async Task RunAsync_OrdinaryRecursiveDelete_StillRuns()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "fuseraft_shellplugin_rm_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(dir);
+        await File.WriteAllTextAsync(Path.Combine(dir, "f.txt"), "x");
+        try
+        {
+            using var plugin = new ShellPlugin();
+
+            var result = await plugin.RunAsync($"rm -rf \"{dir}\"");
+
+            Assert.DoesNotContain("[DENIED]", result);
+            Assert.False(Directory.Exists(dir));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    // ShellPolicy matching tolerance
+
+    [Theory]
+    [InlineData("rm    -rf /tmp/fuseraft-test-nonexistent")]              // whitespace run
+    [InlineData("rm\t-rf /tmp/fuseraft-test-nonexistent")]                // tab
+    [InlineData("rm \\\n-rf /tmp/fuseraft-test-nonexistent")]             // line continuation
+    [InlineData("r\u200Bm -rf /tmp/fuseraft-test-nonexistent")]           // zero-width character
+    public async Task RunAsync_DenyPattern_IsNotSidesteppedByWhitespaceOrInvisibleChars(string command)
+    {
+        var policy = new ShellPolicy { Deny = ["rm -rf"] };
+        using var plugin = new ShellPlugin(shellPolicy: policy);
+
+        var result = await plugin.RunAsync(command);
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.Contains("deny pattern", result);
+    }
+
+    [Fact]
+    public async Task RunAsync_AllowPattern_MatchesAcrossWhitespaceVariations()
+    {
+        var policy = new ShellPolicy { Allow = ["echo hello"] };
+        using var plugin = new ShellPlugin(shellPolicy: policy);
+
+        var result = await plugin.RunAsync("echo    hello");
+
+        Assert.DoesNotContain("[DENIED]", result);
+        Assert.Contains("hello", result);
+    }
+
+    [Fact]
+    public async Task RunAsync_DenyPatternWithIntentionalTrailingSpace_IsNotBroadened()
+    {
+        var policy = new ShellPolicy { Deny = ["ls "] };
+        using var plugin = new ShellPlugin(shellPolicy: policy);
+
+        // Trimmed to a bare "ls" the pattern would match the tail of "tools".
+        var result = await plugin.RunAsync("echo tools");
+
+        Assert.DoesNotContain("[DENIED]", result);
     }
 }
