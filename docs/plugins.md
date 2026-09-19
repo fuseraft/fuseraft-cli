@@ -50,7 +50,7 @@ Execute shell commands and scripts.
 |----------|-----------|-------------|
 | `shell_run` | `command`, `workingDirectory` (optional), `timeoutSeconds` (default 60), `quiet` (default false) | Run a shell command. Supports pipes, redirects, and chained commands. Captures stdout, stderr, and exit code. Pass `quiet: true` to get `OK` back on success instead of full output (e.g. scaffolding, `dotnet restore`, environment setup) — full output and exit code are still returned on failure regardless of `quiet`. |
 | `shell_run_script` | `script`, `workingDirectory` (optional), `timeoutSeconds` (default 120) | Write a multi-line script to a temp file and execute it. Useful for complex multi-command workflows. |
-| `shell_get_env` | `name` | Return an environment variable value (empty string if not set). |
+| `shell_get_env` | `name` | Return an environment variable value (empty string if not set). The value of a secret-looking variable (`*_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, …) is returned as `<secret-hidden>` — reference it as `$NAME` in a command instead. See [Security — Secret values in tool output](security.md#secret-values-in-tool-output). |
 | `shell_set_env` | `name`, `value` | Set an environment variable for the current session. Inherited by all subsequent `shell_run` calls. Pass an empty string to clear a variable. |
 | `shell_which` | `program` | Return the full path of a program (equivalent to `which` / `where`). |
 | `shell_get_working_directory` | — | Return the effective working directory. Returns the sandbox root if a sandbox is configured. |

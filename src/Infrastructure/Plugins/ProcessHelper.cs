@@ -209,8 +209,10 @@ internal readonly record struct ProcessResult(string Stdout, string Stderr, int 
 
     public string ToPluginOutput()
     {
-        var stdout = Stdout.TrimEnd();
-        var stderr = Stderr.TrimEnd();
+        // Masked before any truncation below so a secret straddling a cut point can't survive
+        // as a recognisable fragment. Covers every ShellPlugin and GitPlugin result.
+        var stdout = EnvSecretMasker.Mask(Stdout).TrimEnd();
+        var stderr = EnvSecretMasker.Mask(Stderr).TrimEnd();
 
         if (Succeeded)
         {
