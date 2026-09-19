@@ -4,13 +4,14 @@ using System.Text.RegularExpressions;
 
 namespace fuseraft.Infrastructure.Plugins;
 
-internal readonly record struct DangerousCommand(string RuleId, string Reason);
+// Detail: the offending command's name, for rules whose message is about a specific command.
+internal readonly record struct DangerousCommand(string RuleId, string Reason, string? Detail = null);
 
 /// <summary>
 /// Recognises the handful of shell commands that are never a legitimate thing for an agent to
-/// run unattended — wiping the filesystem or a home directory, writing a raw block device, and
-/// piping a download straight into an interpreter — so <see cref="ShellPlugin"/> can hard-deny
-/// them the same way it already denies <c>sudo</c>.
+/// run unattended — wiping the filesystem or a home directory, writing a raw block device,
+/// piping a download straight into an interpreter, and escalating privileges with
+/// <c>sudo</c>/<c>doas</c>/<c>pkexec</c> — so <see cref="ShellPlugin"/> can hard-deny them.
 ///
 /// <para>
 /// This is deliberately a tokenizer, not a substring list. A <c>ShellPolicy.Deny</c> entry of
@@ -37,6 +38,7 @@ internal static class DangerousCommandDetector
     internal const string CatastrophicDelete = "catastrophic-delete";
     internal const string RawDiskOp          = "raw-disk-op";
     internal const string FetchToExec        = "fetch-to-exec";
+    internal const string PrivilegeEscalation = "privilege-escalation";
 
     // sh -c "sh -c 'sh -c ...'" — enough to see through real wrappers without letting a
     // pathological input recurse without bound.
@@ -48,6 +50,16 @@ internal static class DangerousCommandDetector
     // Interpreters that only run stdin as a *script* when given no script/`-c`/`-m` argument.
     private static readonly HashSet<string> StdinInterpreters =
         new(StringComparer.Ordinal) { "python", "python2", "python3", "perl", "ruby", "node", "php" };
+
+    // Run a command as another user. A regex for `sudo` at the start of a command misses
+    // `/usr/bin/sudo`, `env sudo`, `command sudo`, `(sudo …)`, `$(sudo …)`, `then sudo` and quoted or
+    // backslashed spellings; resolving the command word through the tokenizer does not.
+    private static readonly HashSet<string> PrivilegeCommands =
+        new(StringComparer.Ordinal) { "sudo", "sudoedit", "doas", "pkexec" };
+
+    // Flags of xargs that consume the following argument, so it isn't mistaken for the command.
+    private static readonly HashSet<string> XargsValueFlags =
+        new(StringComparer.Ordinal) { "-n", "-I", "-L", "-P", "-s", "-d", "-E", "-a" };
 
     private static readonly HashSet<string> Fetchers =
         new(StringComparer.Ordinal) { "curl", "wget", "fetch" };
@@ -148,6 +160,11 @@ internal static class DangerousCommandDetector
 
     private static DangerousCommand? CheckStage(string cmd, List<string> args, int depth)
     {
+        if (PrivilegeCommands.Contains(cmd))
+            return Privileged(cmd);
+        if (CommandRunByXargsOrFind(cmd, args) is { } viaWrapper)
+            return Privileged(viaWrapper);
+
         switch (cmd)
         {
             case "rm" when IsRecursiveRm(args, out var targets) && targets.Any(IsCatastrophicTarget):
@@ -179,10 +196,40 @@ internal static class DangerousCommandDetector
 
         return null;
 
+        static DangerousCommand Privileged(string name) =>
+            new(PrivilegeEscalation, "runs a command with elevated privileges", name);
         static DangerousCommand Catastrophic() =>
             new(CatastrophicDelete, "recursively deletes a system or home directory");
         static DangerousCommand Raw() =>
             new(RawDiskOp, "writes directly to a raw block device or formats a filesystem");
+    }
+
+    // The privilege command (if any) that `xargs <cmd>` or `find … -exec <cmd>` would run. Only the
+    // command position counts: `xargs grep sudo` and `find / -name sudo` merely mention the word.
+    private static string? CommandRunByXargsOrFind(string cmd, List<string> args)
+    {
+        if (cmd == "xargs")
+        {
+            for (var i = 0; i < args.Count; i++)
+            {
+                if (XargsValueFlags.Contains(args[i])) { i++; continue; }
+                if (args[i].StartsWith('-')) continue;
+                var name = Basename(args[i]);
+                return PrivilegeCommands.Contains(name) ? name : null;
+            }
+            return null;
+        }
+
+        if (cmd == "find")
+        {
+            for (var i = 0; i + 1 < args.Count; i++)
+            {
+                if (args[i] is not ("-exec" or "-execdir" or "-ok" or "-okdir")) continue;
+                var name = Basename(args[i + 1]);
+                if (PrivilegeCommands.Contains(name)) return name;
+            }
+        }
+        return null;
     }
 
     private static DangerousCommand? CheckFetchToExec(List<(string Cmd, List<string> Args)?> stages)

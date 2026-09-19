@@ -776,17 +776,20 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
             System.Text.RegularExpressions.RegexOptions.Multiline |
             System.Text.RegularExpressions.RegexOptions.Compiled);
 
-    private static string? CheckForSudo(string commandOrScript)
-    {
-        if (SudoPattern.IsMatch(commandOrScript))
-            return PluginResult.Denied(
-                "sudo is not permitted. " +
-                "Prefer non-privileged alternatives: pip install --user, python -m pip install --user, " +
-                "pipx, or a virtual environment (python -m venv .venv && .venv/bin/pip install ...). " +
-                "If elevated privileges are truly required, tell the user exactly which command to run " +
-                "and they will run it themselves.");
-        return null;
-    }
+    // The regex is kept as a backstop (it also catches a `sudo` at the start of a line inside a
+    // heredoc or script body, which the tokenizer deliberately treats as data), so nothing that was
+    // blocked before is allowed now. DangerousCommandDetector's PrivilegeEscalation rule adds the
+    // spellings a regex can't see — see CheckForDangerousCommand.
+    private static string? CheckForSudo(string commandOrScript) =>
+        SudoPattern.IsMatch(commandOrScript) ? SudoDenied("sudo") : null;
+
+    private static string SudoDenied(string name) =>
+        PluginResult.Denied(
+            $"{name} is not permitted. " +
+            "Prefer non-privileged alternatives: pip install --user, python -m pip install --user, " +
+            "pipx, or a virtual environment (python -m venv .venv && .venv/bin/pip install ...). " +
+            "If elevated privileges are truly required, tell the user exactly which command to run " +
+            "and they will run it themselves.");
 
     // Hard-denies the few commands that are never a legitimate unattended agent action
     // (catastrophic recursive delete, raw block-device writes, download-and-execute) — see
@@ -795,6 +798,9 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     private static string? CheckForDangerousCommand(string commandOrScript)
     {
         if (DangerousCommandDetector.Detect(commandOrScript) is not { } danger) return null;
+
+        if (danger.RuleId == DangerousCommandDetector.PrivilegeEscalation)
+            return SudoDenied(danger.Detail ?? "sudo");
 
         return PluginResult.Denied(
             $"Shell command blocked: it {danger.Reason} ({danger.RuleId}). " +
