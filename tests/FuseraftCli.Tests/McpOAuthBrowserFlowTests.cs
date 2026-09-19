@@ -11,6 +11,7 @@ namespace FuseraftCli.Tests;
 /// registration). No real browser or OAuth server is involved: this simulates the browser's
 /// final redirect with a plain HTTP GET against the callback URI.
 /// </summary>
+[Collection("LoopbackPorts")]
 public sealed class McpOAuthBrowserFlowTests
 {
     [Fact]
@@ -86,5 +87,65 @@ public sealed class McpOAuthBrowserFlowTests
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
         return port;
+    }
+
+    // Regression: HttpListener.Close() re-binds the endpoint it just released while unregistering
+    // its prefix; if anything holds the port by then it throws "Address already in use". That
+    // used to escape HandleAuthorizationUrlAsync *after* the code was captured, failing a login
+    // that had actually succeeded. Reproduced deterministically here: stop the listener, take its
+    // port with raw sockets, then close it. Both loopback families are taken because "localhost"
+    // may resolve to either ::1 or 127.0.0.1 depending on the machine.
+    [Fact]
+    public void ListenerCloser_SwallowsTheRebindFailureThatCloseCanThrow()
+    {
+        var port = GetFreeLoopbackPort();
+        var listener = new HttpListener();
+        listener.Prefixes.Add($"http://localhost:{port}/");
+        listener.Start();
+        listener.Stop();
+
+        var squatters = new List<TcpListener>();
+        try
+        {
+            foreach (var address in new[] { IPAddress.Loopback, IPAddress.IPv6Loopback })
+            {
+                try
+                {
+                    var squatter = new TcpListener(address, port);
+                    squatter.Start();
+                    squatters.Add(squatter);
+                }
+                catch (SocketException) { /* that family isn't available here */ }
+            }
+            Assert.NotEmpty(squatters);
+
+            var closer = new McpOAuthBrowserFlow.ListenerCloser(listener);
+
+            var ex = Record.Exception(closer.Dispose);
+
+            Assert.Null(ex);
+        }
+        finally
+        {
+            foreach (var squatter in squatters) squatter.Stop();
+        }
+    }
+
+    [Fact]
+    public void ListenerCloser_IsSafeToDisposeTwiceAndOnAListenerThatNeverStarted()
+    {
+        var neverStarted = new McpOAuthBrowserFlow.ListenerCloser(new HttpListener());
+        neverStarted.Dispose();
+        neverStarted.Dispose();
+
+        var port = GetFreeLoopbackPort();
+        var listener = new HttpListener();
+        listener.Prefixes.Add($"http://localhost:{port}/");
+        listener.Start();
+        var closer = new McpOAuthBrowserFlow.ListenerCloser(listener);
+        closer.Dispose();
+        closer.Dispose();
+
+        Assert.False(listener.IsListening);
     }
 }

@@ -32,7 +32,8 @@ public sealed class McpOAuthBrowserFlow(string serverName, ILogger? logger = nul
         var listenerPrefix = redirectUri.GetLeftPart(UriPartial.Authority);
         if (!listenerPrefix.EndsWith('/')) listenerPrefix += "/";
 
-        using var listener = new HttpListener();
+        var listener = new HttpListener();
+        using var closer = new ListenerCloser(listener, logger);
         listener.Prefixes.Add(listenerPrefix);
 
         try
@@ -102,9 +103,34 @@ public sealed class McpOAuthBrowserFlow(string serverName, ILogger? logger = nul
             logger?.LogError(ex, "MCP server '{Name}': error waiting for the OAuth callback.", serverName);
             return null;
         }
-        finally
+        // No finally { listener.Stop() }: teardown is ListenerCloser's job, and it must not be able to
+        // throw over the result computed above.
+    }
+
+    /// <summary>
+    /// Stops and closes the callback listener, swallowing any failure. By the time this runs the
+    /// login outcome (a code, a denial, a cancellation) is already decided, so a teardown error
+    /// must never replace it. .NET's managed <see cref="HttpListener"/> can throw
+    /// "Address already in use" from <c>Stop()</c>/<c>Close()</c>: unregistering a prefix
+    /// re-creates the endpoint it just released, and that bind fails if anything took the port in
+    /// the meantime (or its just-served connection is still in TIME_WAIT). Left unhandled that
+    /// turned a successful authorization into a failed login right after the user clicked Allow.
+    /// </summary>
+    internal sealed class ListenerCloser(HttpListener listener, ILogger? logger = null) : IDisposable
+    {
+        public void Dispose()
         {
-            if (listener.IsListening) listener.Stop();
+            Try(() => { if (listener.IsListening) listener.Stop(); });
+            Try(listener.Close);
+        }
+
+        private void Try(Action teardown)
+        {
+            try { teardown(); }
+            catch (Exception ex)
+            {
+                logger?.LogDebug(ex, "OAuth callback listener teardown failed (ignored).");
+            }
         }
     }
 
