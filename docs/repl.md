@@ -160,6 +160,18 @@ When a step halts, `/resume` retries it as-is; `/recover` retries it with a cont
 
 When a session has stalled — repeating a mistake, stuck in a loop, drifted off-task — `/assist` has a sub-agent read the whole conversation, diagnose the root cause, and inject a corrective message addressed to the main agent, so you don't have to.
 
+### Loop and failure guards
+
+A turn has no fixed cap on tool-call rounds — a long run of *successful* calls is fine — so the REPL watches for a turn that is going nowhere instead. Each guard first nudges the model inside the tool result it is about to read, then stops the turn if it carries on. Progress made so far is always kept; send a follow-up to try a different approach.
+
+| Pattern | Nudge | Turn stops |
+|---------|-------|-----------|
+| The **same call** (same tool, same arguments) repeated back to back | on the 3rd | on the 5th |
+| Two calls **alternating** — `read a` / `run tests` / `read a` / `run tests` … — with nothing changing in between | after 6 calls | after 10 calls |
+| Consecutive tool **failures** (an `[ERROR]`, `[DENIED]`, non-zero exit, or thrown error) | on the 2nd | on the 3rd |
+
+Any call with different arguments — a different `patch_file` body, a different path — breaks a repeat or alternation, so a genuine edit-and-verify cycle never trips them, and a single success resets the failure count. Each nudge fires once per streak. In `fuseraft run`, orchestration agents get the same repeat and alternation checks and record them as `tool_loop_warning` events (`kind`: `soft` or `hard`; `pattern`: `identical` or `alternating`).
+
 ---
 
 ## A second opinion: adversarial mode

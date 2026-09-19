@@ -534,6 +534,7 @@ internal static class ReplTurn
         var lastToolFailureDetail      = stream.LastToolFailureDetail;
         var hitRepeatedToolCallLimit   = stream.HitRepeatedToolCallLimit;
         var lastRepeatedToolCallDetail = stream.LastRepeatedToolCallDetail;
+        var repeatedToolCallLimit      = stream.RepeatedToolCallLimit;
 
         responseText = SanitizeAssistantResponse(responseText, out var warningMessage);
         if (!capturePlan && responseText.Length == 0)
@@ -698,7 +699,7 @@ internal static class ReplTurn
             await ctx.Emitter.EmitAsync(EventTypes.ReplWarning, turn: ctx.TurnIndex, payload: new
             {
                 message = "hit_repeated_tool_call_limit",
-                limit   = MaxConsecutiveIdenticalToolCalls,
+                limit   = repeatedToolCallLimit,
                 detail  = lastRepeatedToolCallDetail,
             });
             var repeatMsg = $"Stopped after {lastRepeatedToolCallDetail ?? $"{MaxConsecutiveIdenticalToolCalls} identical tool calls in a row"} " +
@@ -1185,13 +1186,14 @@ internal static class ReplTurn
         bool HitConsecutiveFailureLimit,
         string? LastToolFailureDetail,
         bool HitRepeatedToolCallLimit,
-        string? LastRepeatedToolCallDetail)
+        string? LastRepeatedToolCallDetail,
+        int RepeatedToolCallLimit)
     {
         // toolCallsThisTurn is preserved from the aborted attempt (not always empty) so a
         // step halted mid-stream can still report which tools it managed to call before
         // failing — see ReplTurnOutcome.HaltStepOnStreamFailure.
         internal static TurnStreamResult MakeFailed(List<string> toolCallsThisTurn) =>
-            new(false, "", toolCallsThisTurn, [], 0, null, 0, 0, 0, null, [], false, null, false, null);
+            new(false, "", toolCallsThisTurn, [], 0, null, 0, 0, 0, null, [], false, null, false, null, MaxConsecutiveIdenticalToolCalls);
     }
 
     /// <summary>
@@ -1244,6 +1246,11 @@ internal static class ReplTurn
         var consecutiveIdenticalToolCalls  = 0;
         var hitRepeatedToolCallLimit       = false;
         string? lastRepeatedToolCallDetail = null;
+        // Which limit tripped hitRepeatedToolCallLimit — the identical-call cap, or the (longer)
+        // A/B/A/B alternation cap — so the warning event reports the one that actually fired.
+        var repeatedToolCallLimit          = MaxConsecutiveIdenticalToolCalls;
+        // Catches what the identical-call counter above cannot: read → test → read → test.
+        var toolCallCycles                 = new ToolCallCycleDetector();
 
         var reqCts    = new CancellationTokenSource();
         ctx.ActiveCts = reqCts;
@@ -1340,6 +1347,7 @@ internal static class ReplTurn
                             ? consecutiveIdenticalToolCalls + 1 : 1;
                     lastToolCallName      = funcCall.Name;
                     lastToolCallSignature = callSignature;
+                    var cycleVerdict      = toolCallCycles.Observe($"{funcCall.Name}|{callSignature}");
 
                     if (ctx.JsonMode)
                     {
@@ -1376,6 +1384,14 @@ internal static class ReplTurn
                         hitRepeatedToolCallLimit = true;
                         lastRepeatedToolCallDetail =
                             $"{consecutiveIdenticalToolCalls} consecutive identical calls to '{funcCall.Name}'";
+                        break;
+                    }
+                    if (cycleVerdict == ToolCallCycleVerdict.Hard)
+                    {
+                        hitRepeatedToolCallLimit   = true;
+                        repeatedToolCallLimit      = ToolCallCycleDetector.HardThreshold;
+                        lastRepeatedToolCallDetail =
+                            $"{toolCallCycles.LastLength} tool calls alternating between the same two calls";
                         break;
                     }
                     continue;
@@ -1498,6 +1514,7 @@ internal static class ReplTurn
             consecutiveToolFailures = 0; hitConsecutiveFailureLimit = false; lastToolFailureDetail = null;
             lastToolCallName = string.Empty; lastToolCallSignature = string.Empty;
             consecutiveIdenticalToolCalls = 0; hitRepeatedToolCallLimit = false; lastRepeatedToolCallDetail = null;
+            repeatedToolCallLimit = MaxConsecutiveIdenticalToolCalls; toolCallCycles.Reset();
 
             // Restart spinner for the fresh attempt.
             spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
@@ -1555,7 +1572,7 @@ internal static class ReplTurn
             true, sb.ToString(), toolCallsThisTurn, fileChanges, toolRounds, capturedResults,
             turnInputTokens, turnOutputTokens, turnCacheReadTokens, turnFirstInputTokens, rawUpdates,
             hitConsecutiveFailureLimit, lastToolFailureDetail,
-            hitRepeatedToolCallLimit, lastRepeatedToolCallDetail);
+            hitRepeatedToolCallLimit, lastRepeatedToolCallDetail, repeatedToolCallLimit);
     }
 
     internal static async Task ExtractMemoriesOnExitAsync(ReplSessionContext ctx)
@@ -1751,12 +1768,13 @@ internal static class ReplTurn
     private static readonly string[] ToolFailurePrefixes =
         ["[ERROR]", "[FAIL]", "[DENIED]", "[NOT FOUND]", "[TIMEOUT]", "[EXIT "];
 
-    private static bool IsToolFailure(FunctionResultContent funcResult)
-    {
-        if (funcResult.Exception is not null) return true;
-        var text = funcResult.Result?.ToString();
-        return text is not null && ToolFailurePrefixes.Any(p => text.StartsWith(p, StringComparison.Ordinal));
-    }
+    private static bool IsToolFailure(FunctionResultContent funcResult) =>
+        funcResult.Exception is not null || IsToolFailureText(funcResult.Result?.ToString());
+
+    // Shared with ReplToolLoopGuard so its "one failure from the cutoff" notice and this class's
+    // consecutive-failure counter can never disagree about what a failure is.
+    internal static bool IsToolFailureText(string? text) =>
+        text is not null && ToolFailurePrefixes.Any(p => text.StartsWith(p, StringComparison.Ordinal));
 
     // True when the turn's accumulated text so far ends inside an unclosed **bold**
     // span (an odd number of "**" markers). Only called right before a round-boundary
