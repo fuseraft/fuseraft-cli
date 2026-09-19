@@ -120,6 +120,11 @@ public static class FuseraftSkillsSources
                 startInfo.ArgumentList.Add(element.GetString()!);
             }
         }
+        else if (arguments is { ValueKind: JsonValueKind.Object } obj && TryFlattenArgumentsObject(obj, out var flattened))
+        {
+            foreach (var arg in flattened)
+                startInfo.ArgumentList.Add(arg);
+        }
         else if (arguments is not null && arguments.Value.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
         {
             throw new InvalidOperationException(
@@ -160,5 +165,40 @@ public static class FuseraftSkillsSources
         {
             process?.Dispose();
         }
+    }
+
+    // Recovers the dominant real-world RunScriptAsync failure mode: a model passing CLI
+    // arguments as a flag/value object (e.g. {"--type":"Bug","--verbose":true}) instead of the
+    // flat string array the tool actually expects, presumably by analogy to named-parameter
+    // tool-calling conventions used elsewhere. Flattens each property into "--flag value" pairs
+    // using CLI boolean-flag conventions (true → bare flag, false → omitted); refuses to guess
+    // on nested objects/arrays/null so a genuinely malformed payload still surfaces the original
+    // "expected an array" error instead of silently producing a wrong command line.
+    internal static bool TryFlattenArgumentsObject(JsonElement obj, out List<string> args)
+    {
+        args = [];
+        foreach (var property in obj.EnumerateObject())
+        {
+            switch (property.Value.ValueKind)
+            {
+                case JsonValueKind.String:
+                    args.Add(property.Name);
+                    args.Add(property.Value.GetString()!);
+                    break;
+                case JsonValueKind.Number:
+                    args.Add(property.Name);
+                    args.Add(property.Value.GetRawText());
+                    break;
+                case JsonValueKind.True:
+                    args.Add(property.Name);
+                    break;
+                case JsonValueKind.False:
+                    break;
+                default:
+                    args = [];
+                    return false;
+            }
+        }
+        return true;
     }
 }
