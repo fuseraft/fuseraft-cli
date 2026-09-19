@@ -54,6 +54,14 @@ McpServers:
 `MY_SERVER_TOKEN` in your shell or a `.env` your process loads before running fuseraft.
 `fuseraft validate-config` warns if a referenced env var isn't set in the current shell.
 
+**Headers stay on the server's origin.** fuseraft follows HTTP redirects from an MCP server (for
+example `/mcp` → `/mcp/`, or `http` → `https` on the same host), but a redirect to a *different*
+origin (scheme, host, or port) is followed **without** your configured `Headers` — nor
+`Authorization`, `Proxy-Authorization`, or `Cookie` — so a compromised server or an open redirect
+in front of it can't collect your API key. Once dropped, they aren't re-added if a later hop comes
+back to the original origin. Redirects that would downgrade `https` to `http` aren't followed, and
+at most 10 hops are followed.
+
 ### OAuth login
 
 For a server that requires OAuth 2.1 (the MCP spec's native auth flow), set `OAuth` on the
