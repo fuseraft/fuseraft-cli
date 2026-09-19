@@ -485,6 +485,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/safe-mode off` | Restore tool categories to their state before safe mode was enabled |
 | `/hitl` | Show current HITL (human-in-the-loop) mode status |
 | `/hitl on` | Require y/N approval before each shell run, and before every FileSystem write/delete, Git write, or write-ish Http call |
+| `/hitl auto` | Like `on`, but shell commands that are provably read-only (`ls`, `git status`, `grep`, `git log \| head`, …) run without asking. Everything that can change something — including every FileSystem write, Git write, and write-ish Http call — still asks. See [Read-only auto-approval](#read-only-auto-approval-hitl-auto) |
 | `/hitl off` | Run those calls without approval again |
 | `/adversarial` | Show adversarial mode status |
 | `/adversarial on` | Enable a critic agent that reviews each `/execute` step after postconditions pass, and every free-form response. The critic judges whether the response was correct, grounded in actual tool output, and complete — halting the plan on a step rejection, or injecting one correction turn on a free-form rejection. |
@@ -598,9 +599,21 @@ Action allowed.
 - **y / yes** — the call runs normally
 - **Enter / anything else** — the call is blocked; the agent receives `[DENIED]` and can try an alternative or ask what to do
 
+##### Read-only auto-approval (`/hitl auto`)
+
+Prompting for every `ls` and `git status` trains people to press `y` without reading, which is worse than a prompt that only appears when something can change. `/hitl auto` (or `fuseraft settings set repl.hitlAutoApproveReadOnly true` to make it the default) skips the prompt for a shell command only when it is **provably** read-only. The bar is high, and when in doubt it asks:
+
+- Every simple command in it must be on a fixed allowlist — `ls`, `cat`, `head`, `tail`, `wc`, `grep`/`rg`, `find`, `sort`, `diff`, `stat`, `du`, `df`, `which`, `echo`, `date`, `jq`, checksums, and the read-only `git` subcommands (`status`, `diff`, `log`, `show`, `blame`, `branch` (listing), `tag` (listing), `remote -v`, `config --get`, `rev-parse`, `ls-files`, …). Pipelines and `;`/`&&`/`||` chains qualify only if *every* segment does.
+- No flag may turn it into a writer or an executor: `find -exec`/`-delete`, `sort -o`, `rg --pre`, `git -c core.pager=…`, `git diff --output=…`, `date -s`, `uniq in out`.
+- Any redirection to a file disqualifies it (`ls > out.txt`); `2>&1` and `/dev/null` are fine.
+- An environment assignment disqualifies it (`LD_PRELOAD=… ls`, `PATH=./evil:$PATH; ls`), as does a command path that isn't a bare name or a system directory (`./ls` is not `ls`).
+- A command substitution hidden inside quotes (`echo "$(rm x)"`) can't be inspected, so it isn't auto-approved.
+
+"Read-only" is about side effects, not secrecy, and it is checked *after* the hard denials: a read-only command that names a `.env` or a credentials file, or that leaves the sandbox, is still denied first, so auto mode can't be used to read a key. `/hitl on` withdraws the auto-approval again. Auto mode is REPL-only; `fuseraft run --hitl` is unchanged.
+
 HITL mode is **on by default** and toggles instantly — no need to restart the session or wait for the next tool-schema rebuild. `/hitl off` disables it for the rest of the session, or launch with `--yolo` to start with it already off. Unlike `--hitl` in `fuseraft run`, the REPL's `/hitl` has no "pause after every turn" behavior, since the REPL is already interactive turn-by-turn. Read-only tools (`read_file`, `git_status`, `http_get`, …) are never gated; use `/safe-mode` to disable whole categories outright, or `/tools restrict` below for a finer-grained lock.
 
-The REPL also sandboxes FileSystem/Shell/Git/Search to the launch directory (plus any `--include` roots) by default. For most tools a path outside it is rejected outright; for the FileSystem read/write surface, a denied path instead offers a HITL prompt to grant it on the spot for the rest of the session — see [Filesystem sandbox](security.md#filesystem-sandbox) for exactly which tools and how the grant persists. `--yolo` removes this sandbox too.
+The REPL also sandboxes FileSystem/Shell/Git/Search to the launch directory (plus any `--include` roots) by default. (The grant prompt below is only for the *sandbox boundary*. A path that matches a [deny rule](security.md#a-deny-rule-is-never-a-prompt) — `.env`, a credentials file — is never offered for approval.) For most tools a path outside it is rejected outright; for the FileSystem read/write surface, a denied path instead offers a HITL prompt to grant it on the spot for the rest of the session — see [Filesystem sandbox](security.md#filesystem-sandbox) for exactly which tools and how the grant persists. `--yolo` removes this sandbox too.
 
 Safe mode itself (`/safe-mode`, distinct from HITL) is off by default; engage it on every REPL launch with `fuseraft settings set repl.safeMode true` (skipped in VS Code/JSON-bridge mode, and skipped under `--yolo`) instead of typing `/safe-mode on` each session.
 
@@ -2562,6 +2575,7 @@ Sets one field by a dotted, case-insensitive key. Loads the existing config (or 
 | `sampling.maxOutputTokens` | Integer, or `""` to clear |
 | `repl.contextBudget` | Token budget override, or `""` to clear |
 | `repl.autoCompact` | `true`/`false` — auto-compact at 75% context instead of only warning (default `true`) |
+| `repl.hitlAutoApproveReadOnly` | `true`/`false` — start every session in `/hitl auto`: with HITL on, provably read-only shell commands skip the y/N prompt (default `false` — every shell command asks) |
 | `repl.resumeReplayTurns` | Integer ≥ 0 — how many recent turns to re-display when a session is resumed with `--resume` or `/switch` (default `3`; `0` turns it off, and `/replay` still works on demand) |
 | `repl.noBanner` | `true`/`false` |
 | `repl.verbose` | `true`/`false` |

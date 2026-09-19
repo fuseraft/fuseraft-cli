@@ -176,7 +176,7 @@ Parse, transform, and query JSON data.
 
 ## Search
 
-Search file contents and locate symbols. Finding files by name is `list_files` in [FileSystem](#filesystem) — kept there rather than duplicated here since it's the one covered by sandbox path enforcement and the FileSystem capability map.
+Search file contents and locate symbols. Files protected by a [FileSystem deny rule](security.md#a-deny-rule-is-never-a-prompt) — `.env` at any depth, [credential files](security.md#credential-files), and any configured `FileSystemPermissions.Deny` glob — are skipped by every search tool, so a query for a secret's name or value can't return a line of a file `read_file` would refuse to open. Finding files by name is `list_files` in [FileSystem](#filesystem) — kept there rather than duplicated here since it's the one covered by sandbox path enforcement and the FileSystem capability map.
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
