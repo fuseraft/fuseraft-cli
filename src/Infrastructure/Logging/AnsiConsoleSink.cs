@@ -19,6 +19,16 @@ internal sealed class AnsiConsoleSink(ITextFormatter formatter) : ILogEventSink
         formatter.Format(logEvent, sw);
         // TrimEnd strips the trailing newline that the formatter appends; MarkupLine adds it back.
         // Markup.Escape prevents Spectre from misinterpreting brackets in log messages as markup.
-        AnsiConsole.MarkupLine(Markup.Escape(sw.ToString().TrimEnd('\r', '\n')));
+        var line = Markup.Escape(sw.ToString().TrimEnd('\r', '\n'));
+
+        // Error/Fatal and Warning get colored so an abnormal log line (e.g. a skill script
+        // crash) visually stands out from routine output instead of blending in as plain text.
+        var color = logEvent.Level switch
+        {
+            LogEventLevel.Fatal or LogEventLevel.Error => "red",
+            LogEventLevel.Warning => "yellow",
+            _ => null,
+        };
+        AnsiConsole.MarkupLine(color is null ? line : $"[{color}]{line}[/]");
     }
 }
