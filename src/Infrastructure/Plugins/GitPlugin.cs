@@ -42,6 +42,7 @@ public sealed class GitPlugin
         _sandboxRoot   = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _includedRoots = includedRoots ?? IncludedRootsState.Empty;
         _denyMatcher   = FileSystemSandbox.BuildDenyMatcher(denyPatterns);
+        KnownSecretFiles.Track(_sandboxRoot, denyPatterns, includeHomeCredentials: false);
     }
 
     // Validates that repoPath (or directory, for InitAsync) stays within the sandbox. When a
