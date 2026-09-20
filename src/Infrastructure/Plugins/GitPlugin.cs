@@ -88,9 +88,10 @@ public sealed class GitPlugin
         var denial = ValidateRepoPath(repoPath, out var resolved);
         if (denial is not null) return denial;
 
-        var refArg = string.IsNullOrWhiteSpace(@ref) ? string.Empty : $" {@ref}";
-        var result = await Git(
-            $"log --oneline --decorate -n {count}{refArg}", resolved);
+        if (!TryParseRevisionArguments(@ref, out var refArgs, out var refused))
+            return RefusedOption(refused!);
+
+        var result = await Git(["log", "--oneline", "--decorate", "-n", count.ToString(), .. refArgs], resolved);
         return result.ToPluginOutput();
     }
 
@@ -103,10 +104,13 @@ public sealed class GitPlugin
         var denial = ValidateRepoPath(repoPath, out var resolved);
         if (denial is not null) return denial;
 
+        if (!TryParseRevisionArguments(commitRef, out var showArgs, out var refused))
+            return RefusedOption(refused!);
+
         var blobDenial = await CheckShowTargetsAsync(commitRef, resolved);
         if (blobDenial is not null) return blobDenial;
 
-        var result = await Git($"show {commitRef}", resolved);
+        var result = await Git(["show", .. showArgs], resolved);
         return TruncateLines(result.ToPluginOutput(), maxLines);
     }
 
@@ -410,9 +414,15 @@ public sealed class GitPlugin
 
     // Every Git tool that shells out through here gets patch output scrubbed of denied files' contents,
     // whichever tool produced it (git_diff, git_show, or git_log given `-p` as its ref).
-    private async Task<ProcessResult> Git(string args, string? workingDirectory = null)
+    private async Task<ProcessResult> Git(string args, string? workingDirectory = null) =>
+        await HideDeniedContentAsync(await ProcessHelper.RunAsync("git", args, workingDirectory), workingDirectory);
+
+    // Each element reaches git as its own argument, so nothing the model wrote can be re-split into an option.
+    private async Task<ProcessResult> Git(IEnumerable<string> args, string? workingDirectory = null) =>
+        await HideDeniedContentAsync(await ProcessHelper.RunAsync("git", args, workingDirectory), workingDirectory);
+
+    private async Task<ProcessResult> HideDeniedContentAsync(ProcessResult result, string? workingDirectory)
     {
-        var result = await ProcessHelper.RunAsync("git", args, workingDirectory);
         if (_denyMatcher is null || !GitDeniedContentFilter.ContainsPatch(result.Stdout)) return result;
 
         var top = await TopLevelAsync(workingDirectory);
@@ -488,6 +498,52 @@ public sealed class GitPlugin
         path = rest;
         return path.Length > 0;
     }
+
+    // git_show's `commitRef` and git_log's `ref` are text the model wrote. They used to be spliced into the
+    // command line, so `HEAD --output=leak.txt` made git write the UNFILTERED patch — deny-ruled files
+    // included — to a file of the model's choosing (outside the sandbox, if it liked), which read_file could
+    // then open. Options are therefore an allowlist of display/selection flags; anything else is refused.
+    private static readonly HashSet<string> SafeRevisionOptions = new(StringComparer.Ordinal)
+    {
+        "--", "-p", "--patch", "-s", "--no-patch", "--stat", "--shortstat", "--numstat", "--raw", "--summary",
+        "--name-only", "--name-status", "--oneline", "--decorate", "--no-decorate", "--graph", "--all",
+        "--first-parent", "--merges", "--no-merges", "--reverse", "--no-color", "--follow", "--cc", "-m", "-c",
+        "--full-history", "--date-order", "--topo-order", "--abbrev-commit", "--no-abbrev-commit",
+        "--no-renames", "-M", "-C", "-n",
+    };
+
+    private static readonly Regex SafeRevisionOptionPattern = new(
+        @"^(-U\d+|--unified=\d+|--max-count=\d+|-n\d+|--diff-filter=[A-Za-z]+|--pretty=.*|--format=.*|" +
+        @"--author=.*|--grep=.*|--since=.*|--until=.*|--after=.*|--before=.*)$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    // Splits on whitespace (a ref can't contain any) and refuses the first option that isn't allowlisted.
+    // Tokens after `--` are pathspecs and are never options.
+    private static bool TryParseRevisionArguments(string? text, out List<string> args, out string? refusedOption)
+    {
+        args = [];
+        refusedOption = null;
+        var pathspecs = false;
+
+        foreach (var token in (text ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!pathspecs && token.StartsWith('-')
+                && !SafeRevisionOptions.Contains(token) && !SafeRevisionOptionPattern.IsMatch(token))
+            {
+                refusedOption = token;
+                return false;
+            }
+            if (token == "--") pathspecs = true;
+            args.Add(token);
+        }
+        return true;
+    }
+
+    private static string RefusedOption(string option) =>
+        PluginResult.Denied(
+            $"git option '{option}' is not accepted here — this argument takes a commit, ref, or path, plus display " +
+            "options such as --stat, -p, --name-only or --oneline. An option that can write a file or run a program " +
+            "(--output, --ext-diff, …) would get around the sandbox and the FileSystem deny rules.");
 
     private static string TruncateLines(string text, int maxLines)
     {
