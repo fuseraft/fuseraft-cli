@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
 using fuseraft.Cli.Display;
+using fuseraft.Core.Images;
 using fuseraft.Core.Models;
 
 namespace fuseraft.Cli.Commands.Repl;
@@ -405,7 +406,10 @@ internal static partial class ReplCommands
             return CommandResult.Continue;
         }
 
-        var lastUserText = ctx.History[idx].Text ?? string.Empty;
+        // The user's own words plus any image still attached — .Text alone would drop the picture and,
+        // once older images have been swapped for placeholders, would drag placeholder text along.
+        var lastUserText = ImageAttachments.UserText(ctx.History[idx]);
+        var lastImages   = ctx.History[idx].Contents.OfType<DataContent>().Where(ImageAttachments.IsImage).ToList();
 
         // Remove the last user message and any trailing assistant response.
         ctx.History.RemoveRange(idx, ctx.History.Count - idx);
@@ -419,7 +423,7 @@ internal static partial class ReplCommands
             AnsiConsole.MarkupLine("[dim]Retrying last message…[/]");
 
         _ = ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/retry" });
-        return CommandResult.Send(lastUserText);
+        return CommandResult.Send(lastUserText, attachments: lastImages);
     }
 
     // -------------------------------------------------------------------------

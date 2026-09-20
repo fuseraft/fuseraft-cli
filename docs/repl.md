@@ -187,6 +187,25 @@ Everything except `complete` can be picked up with `/goal resume` (a fresh budge
 
 Each round is a full agent turn plus one audit call, so a goal costs more than a single message — that is what it is for.
 
+### Images
+
+Attach a screenshot, diagram or photo to a message with `/image`, or mention it inline:
+
+```
+1> /image screenshot.png why is the Retry button misaligned?
+  attached: screenshot.png (image/png, 240 KB)
+
+2> compare @before.png with @"after v2.png" and list what changed
+```
+
+`/image <path>… [message]` attaches every leading path that names an image and sends the rest as the message (quote a path that contains spaces; with no message it asks the model to describe the image). An `@path` inside an ordinary message attaches the file **if it exists and is an image** — `@someone` or `@missing.png` are left alone as plain text. PNG, JPEG, GIF and WebP are supported; the file's *contents*, not its extension, decide (a text file renamed `.png` is refused with a reason). Up to 8 images per message, 20 MB each — providers cap lower (Anthropic: 5 MB), and a rejected message says so and suggests `/model`.
+
+You need a **vision-capable model**. If the provider refuses a message with an image, the image is dropped from history (so it is not resent every turn) and you get a hint rather than a bare `400`.
+
+Images are kept in context sparingly: only the **4 most recent** stay attached; older ones become a one-line text placeholder (`[image omitted from context: shot.png, image/png, 240 KB]`) so a long session does not resend — and pay for — every screenshot it ever saw. Each attached image counts as roughly 1,600 tokens toward the context budget. `/retry` resends the image with the message.
+
+Images survive `--resume`: session files store a short reference and keep the bytes once, content-addressed, in `~/.fuseraft/repl-sessions/images/`. The event log records only *how many* images a turn carried — never their bytes. In the VS Code panel, paste a screenshot straight into the message box, or attach an image file with the paperclip.
+
 ### Loop and failure guards
 
 A turn has no fixed cap on tool-call rounds — a long run of *successful* calls is fine — so the REPL watches for a turn that is going nowhere instead. Each guard first nudges the model inside the tool result it is about to read, then stops the turn if it carries on. Progress made so far is always kept; send a follow-up to try a different approach.

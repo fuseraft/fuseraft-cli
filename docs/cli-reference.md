@@ -468,6 +468,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/assist` | Diagnose a stalled or broken conversation. A sub-agent reads the history, identifies the root cause, and injects a corrective instruction to redirect the REPL agent. |
 | `/goal [--max N] <objective>` | Work until an independent audit confirms the objective is provably met. After each turn a separate tool-less model call reads the transcript, and anything the agent only *claims* counts as unverified; if something is missing the agent is re-prompted with exactly what. Stops on `complete`, `paused` (needs your input), `not verified` (budget of `N` audits, default 5, max 50), `stalled` (same gap 3 audits running), `interrupted` (Ctrl+C) or a failed audit. See [REPL — `/goal`](repl.md#working-until-its-really-done-goal). |
 | `/goal resume [--max N]` | Pick up the last goal that did not complete, with a fresh audit budget. |
+| `/image <path>… [message]` | Send one or more images (PNG, JPEG, GIF, WebP — up to 8, 20 MB each) with a message. Quote paths containing spaces; with no message the model is asked to describe the image. An inline `@shot.png` in an ordinary message attaches it too. Needs a vision-capable model. See [REPL — Images](repl.md#images). |
 | `/memory` | List all stored memories (name, type, description) |
 | `/memory list` | Same as `/memory` |
 | `/memory show <name>` | Show the full body of a stored memory |
