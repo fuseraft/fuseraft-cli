@@ -38,6 +38,8 @@ internal static partial class ReplCommands
             case "/explore":    return await CmdExploreAsync(ctx, arg, cancellationToken);
             case "/locate":     return await CmdLocateAsync(ctx, arg, cancellationToken);
             case "/delegate":   return await CmdDelegateAsync(ctx, arg, cancellationToken);
+            case "/agents":     return CmdAgents(ctx);
+            case "/agent":      return await CmdAgentAsync(ctx, arg, cancellationToken);
             case "/sessions":      await CmdSessionsAsync(ctx.JsonMode, cancellationToken); return CommandResult.Continue;
             case "/fork":          return await CmdForkAsync(ctx, arg, cancellationToken);
             case "/switch":        return await CmdSwitchAsync(ctx, arg, cancellationToken);
@@ -165,6 +167,8 @@ internal static partial class ReplCommands
             new("/explore <query>", "Run a sub-agent exploration loop and return a prose summary"),
             new("/locate <symbol>", "Run a sub-agent symbol lookup; returns path:line result"),
             new("/delegate <task>", "Hand a self-contained subtask to a write-capable sub-agent (files, shell, git) and return its summary"),
+            new("/agents", "List user-defined sub-agents (Markdown files in .fuseraft/agents/ or .agents/agents/) and any load problems"),
+            new("/agent <name> <task>", "Run one of your sub-agents directly on a task and show its report"),
         ]),
     ];
 

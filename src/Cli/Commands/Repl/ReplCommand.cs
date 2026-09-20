@@ -11,6 +11,7 @@ using fuseraft.Cli.Telemetry;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
+using fuseraft.Core.SubAgents;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.KeyStore;
 using fuseraft.Infrastructure.Plugins;
@@ -354,6 +355,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 ? approvalService.PromptFileWriteAsync(action, path, oldContent, newContent)
                 : Task.FromResult(true);
         SubAgentPlugin? subAgent        = null;
+        IReadOnlyList<string> agentProblems = [];
         IReadOnlyList<AgentSkill> discoveredSkills = [];
         string?         skillsCatalog   = null;
         List<AIFunction>? explorerTools = null;
@@ -562,14 +564,26 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 ? factory.Resolve(new ModelConfig { ModelId = sam })
                 : modelConfig;
 
+            // User-defined agents (.fuseraft/agents/*.md, .agents/agents/*.md, and the user-level
+            // equivalents). Loaded here rather than lazily so the model's tool list — which enumerates
+            // them — is complete from the first turn.
+            var agentLoad = SubAgentDefinitionLoader.LoadFromDirectories(SubAgentDefinitionLoader.DefaultSearchDirs(cwd));
+
             subAgent = new SubAgentPlugin(
                 ReplFactory.BuildClient(subAgentModelCfg, factory, explorerTools.Count > 0, adaptiveTrimTracker, emitter, tools: explorerTools),
                 explorerTools,
                 eventEmitter:     emitter,
                 parentAgentName:  "repl",
                 delegateTools:    delegateTools,
-                diagnosticTools:  sessionDiagnosticTools);
+                diagnosticTools:  sessionDiagnosticTools,
+                customAgents:     agentLoad.Definitions,
+                customAgentClientFactory: model => ReplFactory.BuildClient(
+                    factory.Resolve(new ModelConfig { ModelId = model }), factory,
+                    explorerTools.Count > 0, adaptiveTrimTracker, emitter, tools: explorerTools));
             toolsByCategory["SubAgent"] = PluginRegistry.GetFunctionsFromObject(subAgent).ToList();
+            if (subAgent.BuildRunAgentTool() is { } runAgentTool)
+                toolsByCategory["SubAgent"].Add(runAgentTool);
+            agentProblems = [.. agentLoad.Problems, .. subAgent.CustomAgentProblems];
         }
 
         // Wrap every tool category:
@@ -646,8 +660,13 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             MemoryCount = memoryEntries.Count,
             McpManager  = mcpManager,
             StdinPump   = stdinPump,
+            AgentProblems = agentProblems,
         };
         ctxForStdin = ctx;
+
+        // Sub-agents (built-in and user-defined) may only use what the session itself currently allows,
+        // so /safe-mode and /tools restrict cannot be sidestepped by delegating.
+        if (subAgent is not null) subAgent.ToolGate = ctx.IsToolAllowed;
         stdinPump?.Start();
 
         // A persisted safe-mode default engages the real category-disable logic (not just the

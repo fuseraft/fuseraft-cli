@@ -480,6 +480,8 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/events stats` | Same as `/events` |
 | `/explore <query>` | Run a sub-agent exploration loop over the codebase and return a prose summary. The sub-agent uses read-only tools and runs in an isolated context with no shared history from the main session. |
 | `/locate <symbol>` | Run a sub-agent symbol lookup and return a `path:line` result. Faster and more targeted than `/explore` for single-symbol lookups. |
+| `/agents` | List your [user-defined sub-agents](sub-agents.md) (Markdown files in `.fuseraft/agents/` or `.agents/agents/`) with scope, model and tools, plus any problems found loading them. |
+| `/agent <name> <task>` | Run one of your sub-agents directly on a task and show its report. The model can also call them itself through the `sub_agent_run` tool. |
 | `/safe-mode` | Show current safe mode status |
 | `/safe-mode on` | Block Shell, Git, and Http tools by owning plugin (including those in the Extended bucket) |
 | `/safe-mode off` | Restore tool categories to their state before safe mode was enabled |

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Microsoft.Extensions.AI;
+using fuseraft.Core.SubAgents;
 using fuseraft.Infrastructure.Agents;
 
 namespace fuseraft.Infrastructure.Plugins;
@@ -50,7 +51,9 @@ public sealed class SubAgentPlugin(
     int maxToolCalls = 0,
     string? workspaceRoot = null,
     IReadOnlyList<AIFunction>? delegateTools = null,
-    IReadOnlyList<AIFunction>? diagnosticTools = null)
+    IReadOnlyList<AIFunction>? diagnosticTools = null,
+    IReadOnlyList<SubAgentDefinition>? customAgents = null,
+    Func<string, IChatClient?>? customAgentClientFactory = null)
 {
     // Session-introspection tools (current session metadata, saved-session list, event/log
     // file reads) withheld from the REPL agent's own default tool set — they let a caller
@@ -118,8 +121,32 @@ public sealed class SubAgentPlugin(
                 ? WrapWithNotifiers(delegateTools, eventEmitter, parentAgentName)
                 : delegateTools;
 
+    // User-defined agents (Markdown files — see SubAgentDefinitionLoader), bound to this plugin's
+    // tool pool and, where they name one, their own model. Bound after _tools/_delegateTools so it
+    // draws from the same event-wrapped instances. Never contains this plugin's own tools, so a
+    // custom agent cannot spawn further sub-agents.
+    // Lazy because a field initializer cannot read the other instance fields it draws from; first
+    // touched at REPL startup (CustomAgents / BuildRunAgentTool), so model clients are built up front.
+    private CustomAgentBinding? _customBinding;
+    private CustomAgentBinding _custom =>
+        _customBinding ??= CustomAgentBinding.Bind(customAgents ?? [], customAgentClientFactory, _tools, _delegateTools);
+
     private readonly int _effectiveMaxToolCalls =
         maxToolCalls > 0 ? maxToolCalls : DefaultMaxToolCalls;
+
+    /// <summary>
+    /// Decides, per tool name and at run time, whether a sub-agent may use a tool. The REPL points this
+    /// at its session-wide gate (<c>/safe-mode</c>, <c>/tools restrict</c>) so a sub-agent can never do
+    /// what the parent has been told not to — without it, /safe-mode would still leave shell and git
+    /// reachable through <c>sub_agent_delegate</c>. <c>null</c> = no extra restriction.
+    /// </summary>
+    public Func<string, bool>? ToolGate { get; set; }
+
+    /// <summary>The user-defined agents that loaded and bound successfully.</summary>
+    public IReadOnlyList<CustomAgentInfo> CustomAgents => _custom.Infos;
+
+    /// <summary>Problems found while binding user-defined agents (unknown tools, unavailable models).</summary>
+    public IReadOnlyList<string> CustomAgentProblems => _custom.Problems;
 
     private readonly string _workspaceRoot =
         workspaceRoot ?? Directory.GetCurrentDirectory();
@@ -380,6 +407,175 @@ public sealed class SubAgentPlugin(
                 cancellationToken,
                 onChunk);
 
+    // --- User-defined agents ---
+
+    /// <summary>
+    /// The <c>sub_agent_run</c> model tool, or <c>null</c> when no user-defined agents exist (so an
+    /// unused feature costs no tool-schema tokens). Built by hand rather than by reflection because
+    /// its description enumerates the available agents.
+    /// </summary>
+    public AIFunction? BuildRunAgentTool()
+    {
+        if (_custom.Agents.Count == 0) return null;
+
+        return AIFunctionFactory.Create(
+            ([Description("Name of the sub-agent to run — one of the names listed in this tool's description.")] string agent,
+             [Description("Complete, self-contained task. Include file paths, requirements and acceptance criteria — the sub-agent cannot ask a clarifying question.")] string task,
+             CancellationToken cancellationToken) => RunAgentAsync(agent, task, cancellationToken),
+            new AIFunctionFactoryOptions
+            {
+                Name        = RunAgentToolName,
+                Description = BuildRunAgentDescription(),
+            });
+    }
+
+    /// <summary>Name of the model tool <see cref="BuildRunAgentTool"/> returns.</summary>
+    public const string RunAgentToolName = "sub_agent_run";
+
+    internal string BuildRunAgentDescription()
+    {
+        var sb = new StringBuilder(
+            "Run a user-defined specialist sub-agent on a self-contained task and get back its report. " +
+            "Prefer one of these over doing the work yourself when its description fits. " +
+            "The sub-agent cannot ask questions, so give it a complete task.\n\nAvailable agents:\n");
+        foreach (var a in _custom.Agents)
+        {
+            var d = a.Def.Description;
+            if (d.Length > 300) d = d[..300] + "…";
+            sb.Append("- ").Append(a.Def.Name).Append(": ").Append(d.ReplaceLineEndings(" ")).Append('\n');
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    public async Task<string> RunAgentAsync(string agent, string task, CancellationToken cancellationToken = default)
+    {
+        var (text, _, _) = await RunAgentStreamingAsync(agent, task, onChunk: null, cancellationToken);
+        return text;
+    }
+
+    /// <summary>Runs a user-defined agent by name; streams text to <paramref name="onChunk"/> when given.</summary>
+    public Task<(string Result, int? InputTokens, int? OutputTokens)> RunAgentStreamingAsync(
+        string agent,
+        string task,
+        Func<string, Task>? onChunk,
+        CancellationToken cancellationToken = default)
+    {
+        var bound = _custom.Find(agent);
+        if (bound is null)
+        {
+            var known = _custom.Agents.Count > 0 ? string.Join(", ", _custom.Agents.Select(a => a.Def.Name)) : "(none defined)";
+            return Task.FromResult<(string, int?, int?)>(($"[SubAgent] Unknown agent '{agent}'. Available: {known}.", null, null));
+        }
+
+        var tools = Gate(bound.Tools);
+        return RunLoopAsync(
+            tools,
+            BuildCustomAgentPrompt(bound.Def, tools, _workspaceRoot),
+            task,
+            bound.Def.MaxIterations,
+            DelegateMaxOutputTokens,
+            $"agent:{bound.Def.Name}",
+            DelegateTimeoutMinutes,
+            cancellationToken,
+            onChunk,
+            clientOverride: bound.Client);
+    }
+
+    private IReadOnlyList<AIFunction> Gate(IReadOnlyList<AIFunction> tools) =>
+        ToolGate is { } gate ? [.. tools.Where(t => gate(t.Name))] : tools;
+
+    private static string BuildCustomAgentPrompt(SubAgentDefinition def, IReadOnlyList<AIFunction> tools, string cwd)
+    {
+        var toolList = tools.Count > 0 ? string.Join(", ", tools.Select(t => t.Name)) : "(none — reason from the task text alone)";
+        return $"""
+            {def.Instructions}
+
+            ---
+            Runtime context: you are the '{def.Name}' sub-agent, invoked by another assistant to complete
+            one task and report back. You cannot ask the caller a clarifying question — make the most
+            reasonable interpretation of any ambiguity and proceed.
+            Working directory: {cwd}
+            Available tools: {toolList}
+            Skip .fuseraft/ — it is fuseraft-cli runtime metadata, not application code.
+            Avoid destructive or irreversible actions unless the task explicitly asks for them.
+            When finished, reply with a concise report: what you found or changed (with file paths),
+            commands run and their outcome, and anything the caller must follow up on. Summarize rather
+            than pasting full file contents or command output.
+            """;
+    }
+
+    /// <summary>What <c>/agents</c> shows for one bound agent.</summary>
+    public sealed record CustomAgentInfo(SubAgentDefinition Definition, IReadOnlyList<string> ToolNames, string? Model);
+
+    private sealed record BoundAgent(SubAgentDefinition Def, IReadOnlyList<AIFunction> Tools, IChatClient? Client);
+
+    private sealed class CustomAgentBinding
+    {
+        public List<BoundAgent>      Agents   { get; } = [];
+        public List<CustomAgentInfo> Infos    { get; } = [];
+        public List<string>          Problems { get; } = [];
+
+        public BoundAgent? Find(string name) =>
+            Agents.FirstOrDefault(a => a.Def.Name.Equals(name?.Trim(), StringComparison.OrdinalIgnoreCase));
+
+        public static CustomAgentBinding Bind(
+            IReadOnlyList<SubAgentDefinition> defs,
+            Func<string, IChatClient?>? clientFactory,
+            IReadOnlyList<AIFunction> readOnlyPool,
+            IReadOnlyList<AIFunction> writePool)
+        {
+            var result = new CustomAgentBinding();
+
+            // Name → tool. The write-capable set first so a name present in both keeps one instance.
+            var byName = new Dictionary<string, AIFunction>(StringComparer.OrdinalIgnoreCase);
+            foreach (var t in writePool.Concat(readOnlyPool)) byName.TryAdd(t.Name, t);
+
+            foreach (var def in defs)
+            {
+                IReadOnlyList<AIFunction> tools;
+                if (def.Tools is null)
+                {
+                    // "Read-only" has to mean it: the explorer pool includes shell_run, which is not.
+                    tools = [.. readOnlyPool.Where(t => !ExplorerToolSets.CanMutate.Contains(t.Name))];
+                }
+                else if (def.AllTools)
+                {
+                    tools = [.. byName.Values];
+                }
+                else
+                {
+                    var picked = new List<AIFunction>();
+                    foreach (var name in def.Tools)
+                    {
+                        if (byName.TryGetValue(name, out var t)) picked.Add(t);
+                        else result.Problems.Add(
+                            $"agent '{def.Name}': tool '{name}' is not available in this session and was ignored");
+                    }
+                    tools = picked;
+                }
+
+                IChatClient? client = null;
+                if (def.Model is not null && clientFactory is not null)
+                {
+                    try
+                    {
+                        client = clientFactory(def.Model);
+                        if (client is null)
+                            result.Problems.Add($"agent '{def.Name}': model '{def.Model}' is not available — using the session's sub-agent model");
+                    }
+                    catch (Exception ex)
+                    {
+                        result.Problems.Add($"agent '{def.Name}': model '{def.Model}' could not be created ({ex.Message}) — using the session's sub-agent model");
+                    }
+                }
+
+                result.Agents.Add(new BoundAgent(def, tools, client));
+                result.Infos.Add(new CustomAgentInfo(def, [.. tools.Select(t => t.Name)], client is null ? null : def.Model));
+            }
+            return result;
+        }
+    }
+
     // --- Core loop (shared by both tools) ---
 
     private async Task<(string Text, int? InputTokens, int? OutputTokens)> RunLoopAsync(
@@ -391,9 +587,11 @@ public sealed class SubAgentPlugin(
         string mode,
         double timeoutMinutes,
         CancellationToken cancellationToken,
-        Func<string, Task>? onChunk = null)
+        Func<string, Task>? onChunk = null,
+        IChatClient? clientOverride = null)
     {
-        if (chatClient is null)
+        var client = clientOverride ?? chatClient;
+        if (client is null)
             return ("[SubAgent] No chat client configured — this is a stub instance. " +
                     "Ensure AgentFactory created a real SubAgentPlugin for this agent.", null, null);
 
@@ -416,7 +614,7 @@ public sealed class SubAgentPlugin(
         // layering AgentFactory uses for regular agents: FunctionInvokingChatClient keeps
         // its own full message list for tool-call bookkeeping, but what actually goes out
         // over the wire each round is the trimmed view built fresh every call.
-        var trimmedClient = chatClient.AsBuilder()
+        var trimmedClient = client.AsBuilder()
             .Use(
                 getResponseFunc: async (msgs, opts, inner, ct) =>
                 {
@@ -442,10 +640,13 @@ public sealed class SubAgentPlugin(
             })
             .Build();
 
+        // Some providers reject an empty tools array outright, so a run whose tool set is empty
+        // (a pure-reasoning agent, or everything gated off) sends none rather than [].
+        var allowed = Gate(tools);
         var options = new ChatOptions
         {
-            Tools           = tools.Cast<AITool>().ToList(),
-            ToolMode        = ChatToolMode.Auto,
+            Tools           = allowed.Count > 0 ? allowed.Cast<AITool>().ToList() : null,
+            ToolMode        = allowed.Count > 0 ? ChatToolMode.Auto : null,
             MaxOutputTokens = outputTokens,
         };
 

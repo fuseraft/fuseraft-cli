@@ -157,6 +157,9 @@ internal sealed class ReplSessionContext
     public List<string>                               HaltedToolCalls = [];
     public string?                                    RecoveryHint;
 
+    // Non-fatal problems from loading user-defined sub-agent files, shown by /agents.
+    public IReadOnlyList<string> AgentProblems { get; set; } = [];
+
     // JSON bridge mode (set when running inside VS Code webview panel)
     public bool JsonMode;
 
