@@ -282,6 +282,14 @@ Like `FileSystemPermissions.Deny` above, both the REPL and orchestration merge a
 
 ---
 
+## Sub-agents obey the session's restrictions
+
+The REPL's sub-agents — the built-in `/explore`, `/locate`, `/delegate` and any [user-defined agent](sub-agents.md) — are built from the same sandboxed, deny-ruled, HITL-gated tool instances as the main agent, and every run is also filtered through the session's live tool gate. `/safe-mode on` and `/tools restrict` therefore reach delegated work: an agent cannot run a shell command or make a commit the session has closed off. The gate is read at run time, so toggling safe mode takes effect on the next run.
+
+A user-defined agent's *default* tool set is strictly read-only — it excludes `shell_run` even though the built-in explorer includes it — and an agent never receives the sub-agent tools, so agents cannot spawn agents.
+
+---
+
 ## Change envelope
 
 Restricts **write** operations (`write_file`, `patch_file`, `delete_file`) to files matching at least one declared glob pattern. Read operations (`read_file`, `list_files`) are never affected. Requires `FileSystemSandboxPath` to be set — patterns are evaluated relative to the sandbox root.
