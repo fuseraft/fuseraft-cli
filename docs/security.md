@@ -174,6 +174,32 @@ Leaving the sandbox is a boundary a human can choose to widen (the REPL offers a
 !!! note "Fixed in this version"
     Earlier versions routed a deny-rule denial through the sandbox-escape prompt, worded "… is outside the current sandbox — grants '<dir>'". In the default REPL (HITL on), answering `y` read, overwrote, or deleted the protected file. If you relied on `.env` protection with HITL on, this was reachable with a single approval.
 
+### Git output
+
+A diff is file content wearing a different hat, so the [Git plugin](plugins.md#git) applies the same deny rules to what it prints. Where a protected file's diff would appear — `git_diff`, `git_show`, or a patch requested through `git_log` — its body (index line, hunks, binary payload) is replaced by one line:
+
+```
+diff --git a/backend/.env b/backend/.env
+[content hidden: 'backend/.env' matches a FileSystem deny rule]
+```
+
+The header stays, so the agent can see that the file changed, and every other file in the same diff is shown as usual. In `git log -p` output the next commit's header is never swallowed with the file above it. `git_show <ref>:<path>` of a protected path is denied outright, and so is `git_show` of a bare blob hash, since a hash carries no path to check — `git show HEAD:<path>` is the supported way to show a file. Paths are resolved against the repository top-level (`HEAD:./x` against the working directory), quoted non-ASCII paths and paths with spaces are handled, and an ambiguous header is read every plausible way, so the failure mode is hiding an ordinary file, never showing a protected one. `git_status` lists protected files by *name*, which is not content, and is unchanged.
+
+The ref arguments of `git_show` and `git_log` accept display options from an allowlist only. Without that, `git_show` with `HEAD --output=leak.txt` made git write the *unfiltered* patch to a file — deny-ruled files included, at any path the agent named — which `read_file` could then open. Such an option is refused with `[DENIED] git option '--output=…' is not accepted here`.
+
+### Shell, Probe, and every other tool
+
+The rules above would be easy to walk around if the file tools were the only ones that honoured them. The other tools that can hand file content to the model do:
+
+- **Shell and Probe output** goes through the same patch filter as Git: a `git diff`, `git log -p`, or `git show` run through `shell_run`, `shell_run_script`, `shell_run_background`, or `probe_*` has a protected file's body replaced by the `[content hidden: …]` line. `shell_run "git diff"` names no protected file, so the [shell guard](#credential-files) has nothing to object to; the output filter is what stops it. The repository is found by walking up from the directory the command ran in, so `git -C <other-repo> diff` is filtered against the wrong top-level and can miss a pattern anchored to the sandbox root (`**/.env`-style patterns match at any depth and are unaffected). A `cat` of a saved patch file is filtered too.
+- **Values inside protected files are masked** wherever a command prints them — see [Secret values in tool output](#secret-values-in-tool-output). `cat .e*`, `grep -r API_KEY .`, and a Python one-liner that opens the file itself no longer print it, although none of them name `.env`.
+- **`Document`** (`document_extract_text`, `document_get_info`, `document_list_sheets`, `document_get_sheet`) applies the deny rules before opening a file, so a deny-ruled `.xlsx` or `.pdf` is not readable through it either.
+- **`Probe`** runs every command it starts through the shell guard: the [dangerous-command](#dangerous-command-guard) and `sudo` rules, `ShellPolicy`, the HITL prompt, and the sandbox working directory. Before this, `probe_code` was an alternative shell with none of those. For a non-shell language (`python`, `javascript`, …) only the credential-file rule, `ShellPolicy`, and approval apply — the snippet isn't shell syntax, so the `sudo` and fetch-to-exec parsers don't run on it.
+- **`Http`** follows redirects itself. Every hop is checked against `HttpAllowedHosts` and the private-address rules, exactly like the first request, so an allowlisted host can no longer bounce a request to a host that isn't. Credentials stay on their origin: once a redirect leaves the origin, every header except `Accept`, `Accept-Language`, `Accept-Encoding`, `Cache-Control`, and `Pragma` is dropped for the rest of the chain — .NET alone strips only `Authorization`, so an API profile's `X-Api-Key` used to follow a cross-host redirect. An `https` → `http` redirect is refused, and a chain is cut off after 10 hops. A refused hop returns `[DENIED] The server redirected to '<url>', which is not permitted: <reason>`.
+
+!!! warning "What the output filter and the masker cannot do"
+    Both work on text after the fact. They stop a command that prints a protected file *by accident or by an unnamed path*; they do not stop a model that deliberately re-encodes a value (`base64`, `rev`, splitting it across lines), and the file tools (`read_file`, `search_*`) are not masked — rewriting a file from text with `<secret-hidden>` substituted into it would corrupt the file, so those tools rely on the deny rules alone. If a tracked secret matters to you, keep it out of the repository (`.gitignore` it), or run in `/hitl on` and read the commands you approve.
+
 ---
 
 ## Shell policy
@@ -500,14 +526,18 @@ This means even if a provider error response or debug trace contains an API key,
 
 ### Secret values in tool output
 
-Shell children inherit fuseraft's environment, so `env`, `printenv`, `echo $GITHUB_TOKEN`, or a verbose CLI would otherwise hand a live credential to the model — and from there to the provider request and the saved session log. To prevent that, the values of **secret-looking environment variables** are replaced with `<secret-hidden>` in everything the Shell and Git plugins return (`shell_run`, `shell_run_script`, `shell_get_job_status`, `shell_get_job_output`, and every `git_*` result), and `shell_get_env` returns `<secret-hidden>` for such a variable instead of its value.
+Shell children inherit fuseraft's environment, so `env`, `printenv`, `echo $GITHUB_TOKEN`, or a verbose CLI would otherwise hand a live credential to the model — and from there to the provider request and the saved session log. To prevent that, the values of **secret-looking environment variables** are replaced with `<secret-hidden>` in everything the Shell, Git, and Probe plugins return (`shell_run`, `shell_run_script`, `shell_get_job_status`, `shell_get_job_output`, every `git_*` result, and every `probe_*` result) and in `http_*` response bodies, and `shell_get_env` returns `<secret-hidden>` for such a variable instead of its value.
 
 A variable counts as secret-looking when its name ends in, or contains as an `_`-delimited word, one of `KEY`, `API_KEY`, `ACCESS_KEY`, `SECRET_KEY`, `PRIVATE_KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`, `PASSPHRASE`, `CREDENTIAL(S)`, or `CONNECTION_STRING` (plus `MYSQL_PWD`) — so `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, `AWS_SECRET_ACCESS_KEY`, and `PGPASSWORD` match, while `PATH`, `SSH_AUTH_SOCK`, and `KEYBOARD_LAYOUT` do not. Names that point *to* a secret rather than hold one (`AWS_ACCESS_KEY_ID`, `GITHUB_TOKEN_FILE`, `TOKEN_URL`, `SSH_KEY_PATH`) are left alone. Values shorter than 8 characters are not masked in output, to avoid mangling ordinary words such as `true`.
 
 The agent never needs the value itself: a command can reference `$NAME` and the shell expands it. The environment is re-read on every call, so a variable added with `shell_set_env` mid-session is covered too.
 
+**Secrets inside protected files are masked too.** The [FileSystem deny rules](#filesystem-permissions-read-write-deny-globs) stop the file tools from reading `.env`, but `cat .e*` or `grep -r API_KEY .` doesn't name it. So the values in every file a deny rule matches under the sandbox root (and the well-known credential files in your home directory, unless `DenyCredentialFiles: false`) are masked the same way. What counts as a secret there: the value of a secret-named `KEY=VALUE` / `KEY: VALUE` line (the same name test as above, plus `PASS`, `PWD`, `DSN`, `BEARER`, `SALT`); a password inside a URL (`postgres://user:PASSWORD@host`, every `.git-credentials` line); the body of a PEM private key; a `.netrc` `password`; and the last field of a `.pgpass` line. `PORT=3000` and `NODE_ENV=production` are not secrets and stay readable.
+
+The scan skips dependency directories (`node_modules`, `bin`, `obj`, `.git`, `vendor`, …) and symlinked directories, looks at most 8 levels deep and 20,000 entries, reads files up to 256 KB, and is cached for 10 seconds — a `.env` created mid-session is picked up within that window. With no deny rules configured, nothing is scanned.
+
 !!! note "Limitations"
-    This is exact-value masking. It stops accidental exposure, not a model that deliberately re-encodes a secret (`echo $KEY | base64`). It only knows about variables in the process environment, and it applies to tool output — not to the `!<command>` REPL escape, which is yours, not the agent's. For the adversarial case use the filesystem sandbox and HITL approval.
+    This is exact-value masking. It stops accidental exposure, not a model that deliberately re-encodes a secret (`echo $KEY | base64`). It only knows about variables in the process environment and the files above, and it applies to tool output — not to the `!<command>` REPL escape, which is yours, not the agent's. For the adversarial case use the filesystem sandbox and HITL approval.
 
 | Platform | Store | Mechanism |
 |----------|-------|-----------|

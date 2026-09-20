@@ -83,7 +83,11 @@ Read and write a Git repository.
 | `git_status` | `repoPath` (default `"."`) | Show working-tree status: staged, unstaged, and untracked files. |
 | `git_diff` | `repoPath`, `staged` (default false), `maxLines` (default 200) | Show a unified diff. Pass `staged: true` for the index diff. |
 | `git_log` | `repoPath`, `count` (default 10), `ref` (optional) | Show recent commit history with hashes, authors, and messages. |
-| `git_show` | `commitRef`, `repoPath`, `maxLines` (default 300) | Show the content and diff of a specific commit. |
+| `git_show` | `commitRef`, `repoPath`, `maxLines` (default 300) | Show the content and diff of a specific commit. `<ref>:<path>` shows one file's contents at that ref. |
+
+**Protected files.** A diff is file content, so the Git read tools honour the same [FileSystem deny rules](security.md#a-deny-rule-is-never-a-prompt) as `read_file`: in `git_diff`, `git_show`, and any patch `git_log` is asked to print, the body of a protected file's section (a tracked `.env`, an SSH key, a [credentials file](security.md#credential-files), a configured `Deny` glob) is replaced by `[content hidden: '<path>' matches a FileSystem deny rule]` — the `diff --git` header stays, so the agent still sees *that* it changed. `git_show <ref>:<path>` of a protected path is denied, and so is `git_show` of a bare blob hash, which has no path to check (use `<ref>:<path>` instead). See [Security — Git output](security.md#git-output).
+
+**Options in `commitRef` / `ref`.** `git_show`'s `commitRef` and `git_log`'s `ref` take a commit, ref, or path plus display options — `--stat`, `-p`, `--name-only`, `--oneline`, `-U<n>`, `--pretty=…`, `--author=…`, `--since=…`, and similar. Any other option is refused with `[DENIED] git option '…' is not accepted here`: `--output=<file>` would otherwise make git write the unfiltered patch to a file of the agent's choosing, outside the sandbox if it liked, and `--ext-diff` runs a program. Each word reaches git as its own argument, and words after `--` are always pathspecs.
 | `git_branch_list` | `repoPath`, `includeRemotes` (default false) | List branches. |
 | `git_stash_list` | `repoPath` | List all stashed changesets. |
 | `git_is_inside_work_tree` | `repoPath` (optional) | Returns `"true"` if the path is inside a git working tree, `"false"` otherwise (exit codes 128 or 129 map to `"false"`). Use this to guard git operations when the sandbox may not be a git repository. |
@@ -122,6 +126,8 @@ Make HTTP requests to external APIs.
 | `http_patch` | `url`, `body`, `contentType` (default `"application/json"`), `headers`, `timeoutSeconds`, `profile` | PATCH request. Useful for partial updates (e.g. closing a ticket). |
 | `http_delete` | `url`, `headers`, `timeoutSeconds` (default 30), `profile` | DELETE request. |
 | `http_head` | `url`, `headers`, `timeoutSeconds` (default 30), `profile` | HEAD request. Returns response headers only, no body. |
+
+**Redirects.** Redirects are followed by the plugin, not the HTTP client: each hop is re-checked against `HttpAllowedHosts` and the private-address rules, credential headers are dropped once a hop leaves the original origin, an `https` → `http` redirect is refused, and a chain stops after 10 hops. Secret-looking environment variable values in a response body are replaced with `<secret-hidden>`. See [Security — Shell, Probe, and every other tool](security.md#shell-probe-and-every-other-tool).
 
 **Write approval:** When `fuseraft run --hitl` is active, `http_post`/`http_put`/`http_patch`/`http_delete` pause for approval before sending — `http_get`/`http_head` are never gated. See [CLI Reference — Shell/FileSystem/Git/Http write approval](cli-reference.md#human-in-the-loop-controls). The REPL has the same gate behind its own `/hitl on`/`/hitl off` toggle.
 
@@ -198,6 +204,8 @@ Structured hypothesis testing and assertion utilities. Useful for Tester agents 
 | `probe_assert_output` | `command`, `expected`, `matchType` (default `"contains"`), `directory`, `timeoutSeconds` | Run a command and assert its output. `matchType`: `contains`, `equals`, `regex`, `exitcode`. Returns PASS or FAIL with evidence. |
 | `probe_compare_outputs` | `commandA`, `commandB`, `directory`, `timeoutSeconds` | Run two commands and return their outputs side-by-side for comparison. |
 | `probe_run_hypothesis` | `hypothesis`, `command`, `expectedObservation`, `setupCommand` (optional), `directory`, `timeoutSeconds` | Given/When/Then structured test. |
+
+Every command Probe starts goes through the same guard as `shell_run` — dangerous-command and `sudo` rules, `ShellPolicy`, HITL approval, the sandbox working directory (`directory: "."` means the sandbox root) — and its output is masked for secret values and protected-file diffs. For a non-shell language only the credential-file rule, `ShellPolicy`, and approval apply. See [Security — Shell, Probe, and every other tool](security.md#shell-probe-and-every-other-tool).
 
 On Windows, `language: "powershell"` (or `"ps"`) resolves to `pwsh` if it's installed, otherwise falls back to the built-in Windows PowerShell 5.1 — it no longer fails outright on machines that only have the stock PowerShell.
 
@@ -541,7 +549,7 @@ Agents:
 
 ## Document
 
-Read rich document formats as plain text. All operations are read-only. Sandbox rules apply when `FileSystemSandboxPath` is configured.
+Read rich document formats as plain text. All operations are read-only. Sandbox rules apply when `FileSystemSandboxPath` is configured, and so do the [FileSystem deny rules](security.md#a-deny-rule-is-never-a-prompt) — a deny-ruled document is refused like any other protected file.
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
