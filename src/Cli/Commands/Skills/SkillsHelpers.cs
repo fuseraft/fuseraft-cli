@@ -75,13 +75,15 @@ internal static class SkillsHelpers
     /// (a <c>references/</c> doc, a <c>scripts/</c> file) leaves the stale copy behind forever:
     /// <c>read_skill_resource</c> would keep returning its old content indefinitely, since it
     /// reads straight from the installed directory with no knowledge the source ever changed.
+    /// Git metadata (a <c>.git</c> directory, or the <c>.git</c> pointer file of a worktree or
+    /// submodule) is never copied, so a stale one from an earlier install is pruned too.
     /// </summary>
     internal static void CopySkillDirectory(string sourceDir, string destDir)
     {
         Directory.CreateDirectory(destDir);
 
         var sourceRelativePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var filePath in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
+        foreach (var filePath in EnumerateSkillFiles(sourceDir))
         {
             var relative = Path.GetRelativePath(sourceDir, filePath);
             sourceRelativePaths.Add(relative);
@@ -99,4 +101,25 @@ internal static class SkillsHelpers
             }
         }
     }
+
+    // Walks manually rather than using SearchOption.AllDirectories so a large .git tree is never descended into.
+    private static IEnumerable<string> EnumerateSkillFiles(string dir)
+    {
+        foreach (var file in Directory.EnumerateFiles(dir))
+        {
+            if (!IsGitMetadata(file))
+                yield return file;
+        }
+
+        foreach (var subDir in Directory.EnumerateDirectories(dir))
+        {
+            if (IsGitMetadata(subDir))
+                continue;
+            foreach (var file in EnumerateSkillFiles(subDir))
+                yield return file;
+        }
+    }
+
+    private static bool IsGitMetadata(string path) =>
+        Path.GetFileName(path).Equals(".git", StringComparison.OrdinalIgnoreCase);
 }

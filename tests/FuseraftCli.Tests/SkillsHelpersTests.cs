@@ -132,6 +132,71 @@ public sealed class SkillsHelpersTests : IDisposable
         Assert.Equal("new kept content", File.ReadAllText(Path.Combine(_destDir, "references", "keep.md")));
     }
 
+    [Fact]
+    public void CopySkillDirectory_GitDirectory_IsNotCopied()
+    {
+        File.WriteAllText(Path.Combine(_sourceDir, "SKILL.md"), "body");
+        Directory.CreateDirectory(Path.Combine(_sourceDir, ".git", "objects"));
+        File.WriteAllText(Path.Combine(_sourceDir, ".git", "HEAD"), "ref: refs/heads/main");
+        File.WriteAllText(Path.Combine(_sourceDir, ".git", "objects", "pack"), "blob");
+
+        SkillsHelpers.CopySkillDirectory(_sourceDir, _destDir);
+
+        Assert.True(File.Exists(Path.Combine(_destDir, "SKILL.md")));
+        Assert.False(Directory.Exists(Path.Combine(_destDir, ".git")));
+    }
+
+    [Fact]
+    public void CopySkillDirectory_GitPointerFile_IsNotCopied()
+    {
+        // Worktrees and submodules have a .git *file* ("gitdir: ...") instead of a directory.
+        File.WriteAllText(Path.Combine(_sourceDir, "SKILL.md"), "body");
+        File.WriteAllText(Path.Combine(_sourceDir, ".git"), "gitdir: /elsewhere/.git/worktrees/x");
+
+        SkillsHelpers.CopySkillDirectory(_sourceDir, _destDir);
+
+        Assert.False(File.Exists(Path.Combine(_destDir, ".git")));
+    }
+
+    [Fact]
+    public void CopySkillDirectory_NestedGitDirectory_IsNotCopied()
+    {
+        Directory.CreateDirectory(Path.Combine(_sourceDir, "references", "vendor", ".git"));
+        File.WriteAllText(Path.Combine(_sourceDir, "references", "vendor", ".git", "HEAD"), "ref");
+        File.WriteAllText(Path.Combine(_sourceDir, "references", "vendor", "doc.md"), "vendored doc");
+
+        SkillsHelpers.CopySkillDirectory(_sourceDir, _destDir);
+
+        Assert.True(File.Exists(Path.Combine(_destDir, "references", "vendor", "doc.md")));
+        Assert.False(Directory.Exists(Path.Combine(_destDir, "references", "vendor", ".git")));
+    }
+
+    [Fact]
+    public void CopySkillDirectory_GitIgnoreAndSimilarlyNamedFiles_AreStillCopied()
+    {
+        File.WriteAllText(Path.Combine(_sourceDir, "SKILL.md"), "body");
+        File.WriteAllText(Path.Combine(_sourceDir, ".gitignore"), "bin/");
+        File.WriteAllText(Path.Combine(_sourceDir, ".gitattributes"), "* text=auto");
+
+        SkillsHelpers.CopySkillDirectory(_sourceDir, _destDir);
+
+        Assert.True(File.Exists(Path.Combine(_destDir, ".gitignore")));
+        Assert.True(File.Exists(Path.Combine(_destDir, ".gitattributes")));
+    }
+
+    [Fact]
+    public void CopySkillDirectory_StaleGitDirectoryInDest_IsPruned()
+    {
+        // A skill installed before .git was excluded must lose its copy on the next `skills add`.
+        Directory.CreateDirectory(Path.Combine(_destDir, ".git"));
+        File.WriteAllText(Path.Combine(_destDir, ".git", "HEAD"), "ref");
+        File.WriteAllText(Path.Combine(_sourceDir, "SKILL.md"), "body");
+
+        SkillsHelpers.CopySkillDirectory(_sourceDir, _destDir);
+
+        Assert.False(File.Exists(Path.Combine(_destDir, ".git", "HEAD")));
+    }
+
     // ── ExtractSlug / ExtractDescription / CanonicalizeName ────────────────────
 
     [Fact]
