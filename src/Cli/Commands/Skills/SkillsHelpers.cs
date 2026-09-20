@@ -75,6 +75,7 @@ internal static class SkillsHelpers
     /// (a <c>references/</c> doc, a <c>scripts/</c> file) leaves the stale copy behind forever:
     /// <c>read_skill_resource</c> would keep returning its old content indefinitely, since it
     /// reads straight from the installed directory with no knowledge the source ever changed.
+    /// Directories left empty by that pruning are removed too (never <paramref name="destDir"/> itself).
     /// Git metadata (a <c>.git</c> directory, or the <c>.git</c> pointer file of a worktree or
     /// submodule) is never copied, so a stale one from an earlier install is pruned too.
     /// </summary>
@@ -99,6 +100,16 @@ internal static class SkillsHelpers
             {
                 File.Delete(existingFile);
             }
+        }
+
+        // Longest paths first so a child directory is removed before the parent that only held it.
+        var subDirs = Directory.EnumerateDirectories(destDir, "*", SearchOption.AllDirectories)
+            .OrderByDescending(d => d.Length)
+            .ToList();
+        foreach (var dir in subDirs)
+        {
+            if (!Directory.EnumerateFileSystemEntries(dir).Any())
+                Directory.Delete(dir);
         }
     }
 

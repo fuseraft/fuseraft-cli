@@ -194,7 +194,59 @@ public sealed class SkillsHelpersTests : IDisposable
 
         SkillsHelpers.CopySkillDirectory(_sourceDir, _destDir);
 
-        Assert.False(File.Exists(Path.Combine(_destDir, ".git", "HEAD")));
+        Assert.False(Directory.Exists(Path.Combine(_destDir, ".git")));
+    }
+
+    [Fact]
+    public void CopySkillDirectory_DirectoryEmptiedByPruning_IsRemoved()
+    {
+        // The whole references/ folder was deleted from the source skill.
+        Directory.CreateDirectory(Path.Combine(_destDir, "references"));
+        File.WriteAllText(Path.Combine(_destDir, "references", "old.md"), "stale");
+        File.WriteAllText(Path.Combine(_sourceDir, "SKILL.md"), "body");
+
+        SkillsHelpers.CopySkillDirectory(_sourceDir, _destDir);
+
+        Assert.False(Directory.Exists(Path.Combine(_destDir, "references")));
+    }
+
+    [Fact]
+    public void CopySkillDirectory_NestedEmptiedDirectories_AreRemovedBottomUp()
+    {
+        var deep = Path.Combine(_destDir, "a", "b", "c");
+        Directory.CreateDirectory(deep);
+        File.WriteAllText(Path.Combine(deep, "old.md"), "stale");
+        File.WriteAllText(Path.Combine(_sourceDir, "SKILL.md"), "body");
+
+        SkillsHelpers.CopySkillDirectory(_sourceDir, _destDir);
+
+        Assert.False(Directory.Exists(Path.Combine(_destDir, "a")));
+    }
+
+    [Fact]
+    public void CopySkillDirectory_DirectoryStillHoldingSourceFile_IsKept()
+    {
+        Directory.CreateDirectory(Path.Combine(_destDir, "references", "sub"));
+        File.WriteAllText(Path.Combine(_destDir, "references", "sub", "old.md"), "stale");
+        Directory.CreateDirectory(Path.Combine(_sourceDir, "references"));
+        File.WriteAllText(Path.Combine(_sourceDir, "SKILL.md"), "body");
+        File.WriteAllText(Path.Combine(_sourceDir, "references", "keep.md"), "kept");
+
+        SkillsHelpers.CopySkillDirectory(_sourceDir, _destDir);
+
+        Assert.True(File.Exists(Path.Combine(_destDir, "references", "keep.md")));
+        Assert.False(Directory.Exists(Path.Combine(_destDir, "references", "sub")));
+    }
+
+    [Fact]
+    public void CopySkillDirectory_DestRoot_IsNeverRemoved()
+    {
+        Directory.CreateDirectory(_destDir);
+        File.WriteAllText(Path.Combine(_sourceDir, "SKILL.md"), "body");
+
+        SkillsHelpers.CopySkillDirectory(_sourceDir, _destDir);
+
+        Assert.True(Directory.Exists(_destDir));
     }
 
     // ── ExtractSlug / ExtractDescription / CanonicalizeName ────────────────────
