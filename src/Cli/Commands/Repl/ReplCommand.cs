@@ -336,7 +336,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             shellPolicy:    effectiveShellPolicy,
             approveCommand: cmd => hitlState.RequiresShellApproval(cmd) ? approvalService.PromptShellCommandAsync(cmd) : Task.FromResult(true),
             includedRoots:  includedRoots,
-            blockCredentialFiles: securityConfig?.DenyCredentialFiles ?? true);
+            blockCredentialFiles: securityConfig?.DenyCredentialFiles ?? true,
+            denyPatterns:   fsDenyPatterns);
 
         // Same y/N gate as ShellPlugin's approveCommand above, generalized to the mutating
         // FileSystem/Git/Http tools — see IHumanApprovalService.PromptToolActionAsync.

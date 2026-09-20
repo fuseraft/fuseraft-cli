@@ -220,7 +220,7 @@ public sealed class PluginRegistry : IDisposable
 
         // Create ShellPlugin once so FileSystemPlugin can reference its cache invalidator.
         // Both are registered as singletons — the factory lambda returns the same instance.
-        var shellInstance = new ShellPlugin(sandboxRoot, shellCommandApprover, effectiveShellPolicy, eventSink, blockCredentialFiles: security.DenyCredentialFiles);
+        var shellInstance = new ShellPlugin(sandboxRoot, shellCommandApprover, effectiveShellPolicy, eventSink, blockCredentialFiles: security.DenyCredentialFiles, denyPatterns: fsDenyPatterns);
         Register("Shell",      () => shellInstance);
 
         // Same eager-construction-plus-shared-closure pattern as RegisterDefaults — both

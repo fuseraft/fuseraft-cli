@@ -18,10 +18,16 @@ namespace fuseraft.Infrastructure.Plugins;
 /// </para>
 ///
 /// <para>
+/// Values found inside the files the FileSystem deny rules protect (<c>.env</c>, private keys, ...)
+/// are masked too — see <see cref="KnownSecretFiles"/> — so <c>cat .e*</c> or a script that opens
+/// the file itself doesn't print what the file tools refuse to read.
+/// </para>
+///
+/// <para>
 /// <b>Limitation:</b> this is exact-value masking. It stops accidental exposure, not a model that
 /// deliberately re-encodes a value (<c>echo $KEY | base64</c>); it also only knows about
-/// variables present in the process environment. Use a sandbox / HITL approval for the
-/// adversarial case.
+/// variables present in the process environment and the tracked deny-ruled files. Use a sandbox /
+/// HITL approval for the adversarial case.
 /// </para>
 /// </summary>
 internal static class EnvSecretMasker
@@ -71,7 +77,7 @@ internal static class EnvSecretMasker
     // tail of it exposed.
     private static List<string> CurrentSecretValues()
     {
-        var values = new HashSet<string>(StringComparer.Ordinal);
+        var values = new HashSet<string>(KnownSecretFiles.Values(), StringComparer.Ordinal);
         foreach (DictionaryEntry entry in Environment.GetEnvironmentVariables())
         {
             if (entry.Key is string name

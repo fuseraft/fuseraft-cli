@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.FileSystemGlobbing;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
@@ -92,6 +93,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     private readonly Func<string, Task<bool>>? _approveCommand;
     private readonly ShellPolicy? _shellPolicy;
     private readonly bool _blockCredentialFiles;
+    private readonly Matcher? _denyMatcher;
     private readonly IEventSink? _eventSink;
     private readonly object _tempDirLock = new();
     private string? _sessionTempDir;
@@ -125,9 +127,10 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     // Background job registry
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, BackgroundJob> _jobs = new();
 
-    private sealed class BackgroundJob(string jobId)
+    private sealed class BackgroundJob(string jobId, string? workingDirectory = null)
     {
         public string JobId { get; } = jobId;
+        public string? WorkingDirectory { get; } = workingDirectory;
         public System.Diagnostics.Process? Process { get; set; }
         public readonly System.Text.StringBuilder Output = new();
         public readonly object OutputLock = new();
@@ -289,14 +292,47 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         try { originalProcess.Dispose(); } catch { /* already exited */ }
     }
 
-    public ShellPlugin(string? sandboxRoot = null, Func<string, Task<bool>>? approveCommand = null, ShellPolicy? shellPolicy = null, IEventSink? eventSink = null, IncludedRootsState? includedRoots = null, bool blockCredentialFiles = true)
+    public ShellPlugin(string? sandboxRoot = null, Func<string, Task<bool>>? approveCommand = null, ShellPolicy? shellPolicy = null, IEventSink? eventSink = null, IncludedRootsState? includedRoots = null, bool blockCredentialFiles = true, IReadOnlyList<string>? denyPatterns = null)
     {
         _blockCredentialFiles = blockCredentialFiles;
         _sandboxRoot    = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
+        _denyMatcher    = FileSystemSandbox.BuildDenyMatcher(denyPatterns);
+        KnownSecretFiles.Track(_sandboxRoot, denyPatterns, includeHomeCredentials: blockCredentialFiles);
         _includedRoots  = includedRoots ?? IncludedRootsState.Empty;
         _approveCommand = approveCommand;
         _shellPolicy    = shellPolicy;
         _eventSink      = eventSink;
+    }
+
+    // What the model is allowed to see of a command's output: a denied file's patch body hidden (so
+    // `shell_run "git diff"` can't print a tracked .env that git_diff would refuse), then every known
+    // secret value masked. `workingDirectory` is where the command ran.
+    internal string ScrubOutput(string text, string? workingDirectory) =>
+        EnvSecretMasker.Mask(ScrubPatches(text, workingDirectory));
+
+    private string Present(ProcessResult result, string? workingDirectory) =>
+        (_denyMatcher is null ? result : result with
+        {
+            Stdout = ScrubPatches(result.Stdout, workingDirectory),
+            Stderr = ScrubPatches(result.Stderr, workingDirectory),
+        }).ToPluginOutput();
+
+    private string ScrubPatches(string text, string? workingDirectory) =>
+        _denyMatcher is not null && GitDeniedContentFilter.ContainsPatch(text)
+            ? GitDeniedContentFilter.HideDeniedSections(text, RepoTopLevel(workingDirectory), _denyMatcher, _sandboxRoot, out _)
+            : text;
+
+    // Diff paths are relative to the repository top-level. Walking up to the nearest `.git` finds it
+    // without spawning a process (and handles worktrees/submodules, where `.git` is a file).
+    private string RepoTopLevel(string? workingDirectory)
+    {
+        var start = workingDirectory ?? _sandboxRoot ?? Directory.GetCurrentDirectory();
+        for (var dir = new DirectoryInfo(start); dir is not null; dir = dir.Parent)
+        {
+            var git = Path.Combine(dir.FullName, ".git");
+            if (Directory.Exists(git) || File.Exists(git)) return dir.FullName;
+        }
+        return start;
     }
 
     public void Dispose()
@@ -387,7 +423,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
                 resolvedDir, timeoutSeconds);
         }
 
-        var output = result.ToPluginOutput();
+        var output = Present(result, resolvedDir);
         _lastRunKey    = cacheKey;
         _lastRunOutput = output;
 
@@ -530,7 +566,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
                 }
             });
 
-            return result.ToPluginOutput();
+            return Present(result, resolvedDir);
         }
         finally
         {
@@ -622,7 +658,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         if (denial is not null) return denial;
 
         var jobId      = Guid.NewGuid().ToString("N")[..8];
-        var job        = new BackgroundJob(jobId);
+        var job        = new BackgroundJob(jobId, resolvedDir);
         var workingDir = resolvedDir ?? Directory.GetCurrentDirectory();
 
         var script = string.Empty;
@@ -668,7 +704,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
 
         if (job.IsRunning)
         {
-            var recent = TailOutput(EnvSecretMasker.Mask(job.ReadOutput()), 500);
+            var recent = TailOutput(ScrubOutput(job.ReadOutput(), job.WorkingDirectory), 500);
             return $"[RUNNING] Job {jobId}\n{(string.IsNullOrEmpty(recent) ? "(no output yet)" : $"Recent output:\n{recent}")}";
         }
 
@@ -676,7 +712,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
             return $"[KILLED] Job {jobId} was terminated.";
 
         var exitCode = job.ExitCode ?? -1;
-        var tail     = TailOutput(EnvSecretMasker.Mask(job.ReadOutput()), 1000);
+        var tail     = TailOutput(ScrubOutput(job.ReadOutput(), job.WorkingDirectory), 1000);
         return exitCode == 0
             ? $"[COMPLETED] Job {jobId} exited 0 (success).\n{tail}"
             : $"[FAILED] Job {jobId} exited {exitCode}.\n{tail}";
@@ -691,7 +727,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
 
         await job.EnsureDrainedAsync(JobDrainTimeout);
 
-        var output = EnvSecretMasker.Mask(job.ReadOutput());
+        var output = ScrubOutput(job.ReadOutput(), job.WorkingDirectory);
         return string.IsNullOrEmpty(output)
             ? PluginResult.Info($"Job {jobId}: no output captured yet.")
             : output;

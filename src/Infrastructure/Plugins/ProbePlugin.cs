@@ -57,7 +57,7 @@ public sealed class ProbePlugin : IDisposable
         if (dirDenial is not null) return (default, dirDenial);
 
         var result = await run(resolvedDir);
-        return (result with { Stdout = EnvSecretMasker.Mask(result.Stdout), Stderr = EnvSecretMasker.Mask(result.Stderr) }, null);
+        return (result with { Stdout = _shell.ScrubOutput(result.Stdout, resolvedDir), Stderr = _shell.ScrubOutput(result.Stderr, resolvedDir) }, null);
     }
 
     // Probe's tools default `directory` to ".", but with a sandbox that would resolve against the
@@ -226,8 +226,8 @@ public sealed class ProbePlugin : IDisposable
         var taskA = ProcessHelper.RunAsync("bash", ["-c", commandA], resolvedDir, timeoutSeconds);
         var taskB = ProcessHelper.RunAsync("bash", ["-c", commandB], resolvedDir, timeoutSeconds);
         await Task.WhenAll(taskA, taskB);
-        var resultA = taskA.Result with { Stdout = EnvSecretMasker.Mask(taskA.Result.Stdout), Stderr = EnvSecretMasker.Mask(taskA.Result.Stderr) };
-        var resultB = taskB.Result with { Stdout = EnvSecretMasker.Mask(taskB.Result.Stdout), Stderr = EnvSecretMasker.Mask(taskB.Result.Stderr) };
+        var resultA = taskA.Result with { Stdout = _shell.ScrubOutput(taskA.Result.Stdout, resolvedDir), Stderr = _shell.ScrubOutput(taskA.Result.Stderr, resolvedDir) };
+        var resultB = taskB.Result with { Stdout = _shell.ScrubOutput(taskB.Result.Stdout, resolvedDir), Stderr = _shell.ScrubOutput(taskB.Result.Stderr, resolvedDir) };
 
         var sb = new StringBuilder();
         sb.AppendLine("=== A ===");
