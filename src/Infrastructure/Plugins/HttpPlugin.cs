@@ -34,6 +34,7 @@ public sealed class HttpPlugin : IDisposable
         var handler = new SocketsHttpHandler
         {
             ConnectCallback = CreateSsrfSafeConnectCallback(static () => false),
+            AllowAutoRedirect = false,   // HttpPlugin follows redirects itself — see SendFollowingRedirectsAsync
         };
         var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("fuseraft/1.0");
@@ -289,7 +290,10 @@ public sealed class HttpPlugin : IDisposable
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(effectiveTimeout));
         try
         {
-            using var response = await _http.SendAsync(request, cts.Token);
+            var (final, redirectDenial) = await SendFollowingRedirectsAsync(request, cts.Token);
+            if (redirectDenial is not null) return redirectDenial;
+
+            using var response = final!;
             return FormatHeaders(response);
         }
         catch (HttpRequestException ex)
@@ -469,6 +473,75 @@ public sealed class HttpPlugin : IDisposable
         return request;
     }
 
+    // Request headers that are safe to send to a host the caller never named: content negotiation only.
+    // Everything else — profile credentials (X-Api-Key, Authorization), per-call headers the model
+    // supplied, cookies, custom tokens — stays with the origin it was meant for.
+    private static readonly HashSet<string> CrossOriginSafeHeaders =
+        new(StringComparer.OrdinalIgnoreCase) { "Accept", "Accept-Language", "Accept-Encoding", "Cache-Control", "Pragma" };
+
+    /// <summary>
+    /// Sends <paramref name="request"/> and follows redirects itself instead of letting the
+    /// <see cref="HttpClient"/> do it, for two reasons the client can't handle:
+    /// <list type="bullet">
+    ///   <item><b>The allowlist and SSRF policy apply to every hop.</b> <see cref="CheckUrlAsync"/> used to run
+    ///   once, on the URL the agent asked for, so an allowlisted host could redirect the request anywhere
+    ///   and the agent got that host's response.</item>
+    ///   <item><b>Credentials stay on their origin.</b> .NET strips only <c>Authorization</c> when a redirect
+    ///   changes host, so an API profile's <c>X-Api-Key</c> (or any header the model supplied) was forwarded
+    ///   verbatim to whatever the server pointed at. Once a hop leaves the origin originally requested, every
+    ///   header outside <see cref="CrossOriginSafeHeaders"/> is dropped, and stays dropped.</item>
+    /// </list>
+    /// Method and body handling follow browsers and .NET's default (see
+    /// <see cref="fuseraft.Infrastructure.Mcp.OriginBoundRedirectHandler.BuildRedirect"/>); at most
+    /// <see cref="fuseraft.Infrastructure.Mcp.OriginBoundRedirectHandler.MaxRedirects"/> hops are followed and an
+    /// https → http downgrade is not. Returns the final response, or a [DENIED] message when a hop is refused.
+    /// </summary>
+    private async Task<(HttpResponseMessage? Response, string? Denial)> SendFollowingRedirectsAsync(
+        HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var origin = fuseraft.Infrastructure.Mcp.OriginBoundRedirectHandler.OriginOf(request.RequestUri!);
+
+        byte[]? body = null;
+        List<KeyValuePair<string, IEnumerable<string>>>? contentHeaders = null;
+        if (request.Content is not null)
+        {
+            body = await request.Content.ReadAsByteArrayAsync(cancellationToken);
+            contentHeaders = [.. request.Content.Headers];
+        }
+
+        var current = request;
+        for (var hop = 0; ; hop++)
+        {
+            var response = await _http.SendAsync(current, cancellationToken);
+
+            if (!fuseraft.Infrastructure.Mcp.OriginBoundRedirectHandler.IsRedirect(response.StatusCode)
+                || response.Headers.Location is not { } location
+                || hop >= fuseraft.Infrastructure.Mcp.OriginBoundRedirectHandler.MaxRedirects)
+                return (response, null);
+
+            var target = location.IsAbsoluteUri ? location : new Uri(current.RequestUri!, location);
+            if (fuseraft.Infrastructure.Mcp.OriginBoundRedirectHandler.IsSchemeDowngrade(current.RequestUri!, target))
+                return (response, null);
+
+            var denial = await CheckUrlAsync(target.ToString());
+            if (denial is not null)
+            {
+                response.Dispose();
+                var reason = denial.StartsWith("[DENIED] ", StringComparison.Ordinal) ? denial["[DENIED] ".Length..] : denial;
+                _logger?.LogDebug("HTTP redirect to {Target} refused: {Reason}", target, reason);
+                return (null, PluginResult.Denied($"The server redirected to '{target}', which is not permitted: {reason}"));
+            }
+
+            var status = response.StatusCode;
+            response.Dispose();
+            current = fuseraft.Infrastructure.Mcp.OriginBoundRedirectHandler.BuildRedirect(current, target, status, body, contentHeaders);
+
+            if (fuseraft.Infrastructure.Mcp.OriginBoundRedirectHandler.OriginOf(target) != origin)
+                foreach (var name in current.Headers.Select(h => h.Key).Where(k => !CrossOriginSafeHeaders.Contains(k)).ToList())
+                    current.Headers.Remove(name);
+        }
+    }
+
     private async Task<string> SendAsync(HttpRequestMessage request, int timeoutSeconds)
     {
         _logger?.LogDebug("HTTP {Method} {Url}", request.Method, request.RequestUri);
@@ -476,8 +549,13 @@ public sealed class HttpPlugin : IDisposable
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
         try
         {
-            using var response = await _http.SendAsync(request, cts.Token);
-            var body       = await response.Content.ReadAsStringAsync(cts.Token);
+            var (final, redirectDenial) = await SendFollowingRedirectsAsync(request, cts.Token);
+            if (redirectDenial is not null) return redirectDenial;
+
+            using var response = final!;
+            // A local debug endpoint (/actuator/env, /debug/vars) or an echo service can hand back a live
+            // credential; it is masked the same way shell output is.
+            var body       = EnvSecretMasker.Mask(await response.Content.ReadAsStringAsync(cts.Token));
             var statusLine = $"[HTTP {(int)response.StatusCode} {response.ReasonPhrase}]";
 
             _logger?.LogDebug("{StatusLine} {Url} ({ContentType})",
