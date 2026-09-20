@@ -454,6 +454,9 @@ public sealed class PluginRegistry : IDisposable
         var handler = new SocketsHttpHandler
         {
             ConnectCallback = HttpPlugin.CreateSsrfSafeConnectCallback(allowPrivateHosts),
+            // HttpPlugin follows redirects itself so it can re-check its allowlist on each hop and keep
+            // credentials on their origin — see HttpPlugin.SendFollowingRedirectsAsync.
+            AllowAutoRedirect = false,
         };
 
         // Timeout.InfiniteTimeSpan — per-request timeouts are enforced via CancellationTokenSource

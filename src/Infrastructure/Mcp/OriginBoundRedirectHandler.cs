@@ -88,7 +88,7 @@ internal sealed class OriginBoundRedirectHandler : DelegatingHandler
         }
     }
 
-    private static HttpRequestMessage BuildRedirect(
+    internal static HttpRequestMessage BuildRedirect(
         HttpRequestMessage previous,
         Uri target,
         HttpStatusCode status,
@@ -122,7 +122,7 @@ internal sealed class OriginBoundRedirectHandler : DelegatingHandler
         return next;
     }
 
-    private static bool IsRedirect(HttpStatusCode status) => status is
+    internal static bool IsRedirect(HttpStatusCode status) => status is
         HttpStatusCode.MovedPermanently or HttpStatusCode.Found or HttpStatusCode.SeeOther
         or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect;
 

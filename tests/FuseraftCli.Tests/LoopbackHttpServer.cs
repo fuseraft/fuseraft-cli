@@ -16,23 +16,30 @@ internal sealed class LoopbackHttpServer : IAsyncDisposable
     private readonly Task _loop;
 
     public int Port { get; }
-    public string BaseUrl => $"http://127.0.0.1:{Port}";
+    public string Host { get; }
+    public string BaseUrl => $"http://{Host}:{Port}";
     public List<Recorded> Requests { get; } = [];
 
-    public LoopbackHttpServer(Func<HttpListenerRequest, HttpListenerResponse, Task> handler)
+    /// <param name="host">
+    /// The loopback address to bind. The whole 127.0.0.0/8 range is loopback on Linux, so
+    /// <c>127.0.0.2</c> gives a second, distinct <i>host</i> — not just a second port — for tests
+    /// about host allowlists and cross-host redirects.
+    /// </param>
+    public LoopbackHttpServer(Func<HttpListenerRequest, HttpListenerResponse, Task> handler, string host = "127.0.0.1")
     {
+        Host = host;
         // Picking a free port and then binding it is inherently racy: xUnit runs test classes in
         // parallel, so another server can take the port between the probe releasing it and this
         // listener starting ("Address already in use"). Retry on a fresh port instead of failing.
         for (var attempt = 0; ; attempt++)
         {
-            var probe = new TcpListener(IPAddress.Loopback, 0);
+            var probe = new TcpListener(IPAddress.Parse(host), 0);
             probe.Start();
             var port = ((IPEndPoint)probe.LocalEndpoint).Port;
             probe.Stop();
 
             var listener = new HttpListener();
-            listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+            listener.Prefixes.Add($"http://{host}:{port}/");
             try
             {
                 listener.Start();
