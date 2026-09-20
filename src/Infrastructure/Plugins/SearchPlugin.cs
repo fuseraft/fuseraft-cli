@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Text;
+using Microsoft.Extensions.FileSystemGlobbing;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using fuseraft.Core;
@@ -23,12 +24,26 @@ public sealed class SearchPlugin
 {
     private readonly string? _sandboxRoot;
     private readonly IncludedRootsState _includedRoots;
+    private readonly Matcher? _denyMatcher;
 
-    public SearchPlugin(string? sandboxRoot = null, IncludedRootsState? includedRoots = null)
+    /// <param name="denyPatterns">
+    /// The same FileSystem deny globs the FileSystem plugin enforces (<c>.env</c>, credentials
+    /// files, configured <c>Deny</c> entries). A file that matches is skipped by every search, so a
+    /// query for a secret's name or value can't surface a line of a file that <c>read_file</c> would
+    /// refuse to open.
+    /// </param>
+    public SearchPlugin(string? sandboxRoot = null, IncludedRootsState? includedRoots = null, IReadOnlyList<string>? denyPatterns = null)
     {
         _sandboxRoot   = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _includedRoots = includedRoots ?? IncludedRootsState.Empty;
+        _denyMatcher   = FileSystemSandbox.BuildDenyMatcher(denyPatterns);
     }
+
+    // True for files the search must not read or report: build/VCS noise (DirectoryFilters) and
+    // anything a FileSystem deny rule protects.
+    private bool IsSkipped(string file, string searchRoot) =>
+        DirectoryFilters.IsExcluded(file, searchRoot)
+        || FileSystemSandbox.MatchesDenyRule(_denyMatcher, file, _sandboxRoot);
 
     // Compiled Regex instances are expensive to create and are safe to share across calls.
     // Keyed by (pattern, options) so different case-sensitivity settings stay independent.
@@ -142,7 +157,7 @@ public sealed class SearchPlugin
         int skippedFiles = 0;
 
         foreach (var file in Directory.EnumerateFiles(resolved, filePattern, SearchOption.AllDirectories)
-                     .Where(f => !DirectoryFilters.IsExcluded(f, resolved)))
+                     .Where(f => !IsSkipped(f, resolved)))
         {
             if (totalMatches >= maxResults) break;
 
@@ -232,7 +247,7 @@ public sealed class SearchPlugin
         int skippedFiles = 0;
 
         foreach (var file in Directory.EnumerateFiles(resolved, filePattern, SearchOption.AllDirectories)
-                     .Where(f => !DirectoryFilters.IsExcluded(f, resolved)))
+                     .Where(f => !IsSkipped(f, resolved)))
         {
             if (totalMatches >= maxResults) break;
 
@@ -304,7 +319,7 @@ public sealed class SearchPlugin
         int skippedFiles = 0;
 
         foreach (var file in Directory.EnumerateFiles(resolved, filePattern, SearchOption.AllDirectories)
-                     .Where(f => !DirectoryFilters.IsExcluded(f, resolved)))
+                     .Where(f => !IsSkipped(f, resolved)))
         {
             if (totalMatches >= maxResults) break;
 

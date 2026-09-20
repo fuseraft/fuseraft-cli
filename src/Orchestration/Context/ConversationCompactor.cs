@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
+using fuseraft.Infrastructure.Chat;
 
 namespace fuseraft.Orchestration.Context;
 
@@ -308,11 +309,10 @@ public sealed class ConversationCompactor(
 
         try
         {
-            var histText       = BuildHistoryText(filteredCompact, config.MaxCharsPerHistoryMessage);
             var clText         = ReadChangeLog();
             var hybridTrace    = ObservationExtractor.BuildToolTraceBlock(toCompact);
-            var (summText, summUsage) = await GenerateSummaryAsync(
-                task, histText, clText, hybridTrace, toCompact.Count, cancellationToken, executionStateNote);
+            var (summText, summUsage) = await GenerateSummaryShrinkingOnOverflowAsync(
+                task, filteredCompact, clText, hybridTrace, toCompact.Count, cancellationToken, executionStateNote);
 
             var hybridContent =
                 reconstructed.Content + "\n\n---\n\n" +
@@ -355,14 +355,13 @@ public sealed class ConversationCompactor(
         string? intentFallbackNotice,
         CancellationToken cancellationToken)
     {
-        var historyText   = BuildHistoryText(filteredCompact, config.MaxCharsPerHistoryMessage);
         var changeLogText = ReadChangeLog();
         var toolTrace     = ObservationExtractor.BuildToolTraceBlock(toCompact);
 
         try
         {
-            var (summaryText, summaryUsage) = await GenerateSummaryAsync(
-                task, historyText, changeLogText, toolTrace, toCompact.Count, cancellationToken, executionStateNote);
+            var (summaryText, summaryUsage) = await GenerateSummaryShrinkingOnOverflowAsync(
+                task, filteredCompact, changeLogText, toolTrace, toCompact.Count, cancellationToken, executionStateNote);
 
             var summary = new AgentMessage
             {
@@ -517,6 +516,56 @@ public sealed class ConversationCompactor(
                 "Compaction: failed to read change log at '{Path}' — summary will proceed without it.",
                 changeLogPath);
             return null;
+        }
+    }
+
+    // The summary call can itself overflow the provider's context — a long history of full-size
+    // messages plus the change log and tool trace. Rather than degrade straight to a fallback
+    // marker (losing the whole history), re-prune the history to a smaller per-message cap and
+    // try again: up to MaxSummaryShrinkRetries more attempts, each at SummaryShrinkFactor of the
+    // last cap. Same idea as OpenHands' LLMSummarizingCondenser.hard_context_reset. Only a
+    // context-exceeded failure is retried — anything else (auth, rate limit, empty response)
+    // wouldn't be helped by sending less, so it surfaces to the caller's fallback as before.
+    private const int    MaxSummaryShrinkRetries = 4;
+    private const double SummaryShrinkFactor     = 0.8;
+    private const int    MinSummaryMessageChars  = 200;
+
+    private async Task<(string Text, TokenUsage? Usage)> GenerateSummaryShrinkingOnOverflowAsync(
+        string task,
+        IReadOnlyList<AgentMessage> history,
+        string? changeLogText,
+        string? toolTraceText,
+        int turnCount,
+        CancellationToken cancellationToken,
+        string? executionStateNote = null)
+    {
+        var maxChars = config.MaxCharsPerHistoryMessage;
+
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return await GenerateSummaryAsync(
+                    task, BuildHistoryText(history, maxChars), changeLogText, toolTraceText,
+                    turnCount, cancellationToken, executionStateNote);
+            }
+            catch (Exception ex) when (attempt < MaxSummaryShrinkRetries
+                                       && ex is not OperationCanceledException
+                                       && ProviderErrorClassifier.Classify(ex) == FailoverReason.ContextExceeded)
+            {
+                // A cap of 0 means "no truncation", so start from the longest message actually sent.
+                var current = maxChars > 0
+                    ? maxChars
+                    : Math.Max(MinSummaryMessageChars, history.Select(m => m.Content?.Length ?? 0).DefaultIfEmpty(0).Max());
+                var next = Math.Max(MinSummaryMessageChars, (int)(current * SummaryShrinkFactor));
+                if (next >= current) throw;   // already at the floor — nothing left to shrink
+
+                logger.LogWarning(
+                    "Compaction summary call exceeded the provider's context; retrying with per-message cap " +
+                    "{Current} → {Next} chars (attempt {Attempt}/{Max}).",
+                    current, next, attempt + 1, MaxSummaryShrinkRetries);
+                maxChars = next;
+            }
         }
     }
 

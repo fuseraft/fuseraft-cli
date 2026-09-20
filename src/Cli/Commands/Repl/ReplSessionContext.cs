@@ -22,17 +22,29 @@ internal enum CommandOutcome { Continue, Exit, SendInput }
 internal sealed class HitlModeState
 {
     public bool Enabled;
+
+    /// <summary>
+    /// <c>/hitl auto</c>: while HITL is on, skip the y/N prompt for shell commands that are provably
+    /// read-only (see <see cref="ReadOnlyShellCommand"/>). Everything else — including every
+    /// FileSystem write, Git write, and write-ish Http call — still asks. Off by default.
+    /// </summary>
+    public bool AutoApproveReadOnly;
+
+    /// <summary>True when <paramref name="command"/> must be shown to the user for a y/N decision right now.</summary>
+    public bool RequiresShellApproval(string command) =>
+        Enabled && !(AutoApproveReadOnly && ReadOnlyShellCommand.IsReadOnly(command));
 }
 
 internal readonly record struct CommandResult(
-    CommandOutcome Outcome,
-    string?        InputOverride = null,
-    bool           CapturePlan   = false)
+    CommandOutcome                 Outcome,
+    string?                        InputOverride = null,
+    bool                           CapturePlan   = false,
+    IReadOnlyList<DataContent>?    Attachments   = null)
 {
     public static readonly CommandResult Continue = new(CommandOutcome.Continue);
     public static readonly CommandResult Exit     = new(CommandOutcome.Exit);
-    public static CommandResult Send(string input, bool capturePlan = false) =>
-        new(CommandOutcome.SendInput, input, capturePlan);
+    public static CommandResult Send(string input, bool capturePlan = false, IReadOnlyList<DataContent>? attachments = null) =>
+        new(CommandOutcome.SendInput, input, capturePlan, attachments);
 }
 
 /// <summary>
@@ -145,6 +157,13 @@ internal sealed class ReplSessionContext
     public readonly Queue<(PlanStep Step, int Total)> HaltedRemaining = new();
     public List<string>                               HaltedToolCalls = [];
     public string?                                    RecoveryHint;
+
+    // The most recent finished /goal run, so /goal resume can pick up where it stopped. Cleared
+    // alongside the conversation it belongs to (/clear, /rewind, session restore).
+    public GoalRecord? LastGoal;
+
+    // Non-fatal problems from loading user-defined sub-agent files, shown by /agents.
+    public IReadOnlyList<string> AgentProblems { get; set; } = [];
 
     // JSON bridge mode (set when running inside VS Code webview panel)
     public bool JsonMode;

@@ -4,6 +4,8 @@
 
 REPL sessions (`fuseraft repl`) are automatically saved after every user turn to `~/.fuseraft/repl-sessions/repl-<id>.json`. No configuration is needed — every session is resumable by default.
 
+Images attached to a message (`/image`, `@shot.png`) are not embedded in this file. It stores a short reference, and the bytes live once — content-addressed by SHA-256, so the same screenshot re-attached or carried through a fork is one file — under `~/.fuseraft/repl-sessions/images/`. If that folder is cleared, the message still restores, with the image replaced by `[image no longer available: <name>]`.
+
 **Starting and resuming**
 
 ```bash
@@ -22,6 +24,7 @@ When resuming:
 - The full conversation history (text, tool calls, tool results) is restored.
 - The system prompt is refreshed to pick up any new memories or `AGENTS.md` changes.
 - The turn counter continues from where it left off.
+- The last few turns are re-displayed (your messages, a summary of tools used, and the agent's replies) so you can see where you left off. Three turns by default; change it with `fuseraft settings set repl.resumeReplayTurns <n>` (`0` disables), or run `/replay [n|all]` at any time. The same applies to `/switch`, and the VS Code panel shows the replay as ordinary chat messages.
 
 **Branching sessions**
 
@@ -134,6 +137,8 @@ REPL agents can inspect their own session and diagnostic logs using the built-in
 | `compaction` | Context compacted (manual `/compact`, `compact_context` tool, or automatic 75% trigger) — payload: `before_tokens`, `after_tokens`, `source`, `focus` |
 | `cancelled` | Turn cancelled by Ctrl+C |
 | `context_warning` | Context exceeds 75% of the 80k token budget — payload: `estimated_tokens`, `is_actual`, `budget`, `pct`, `auto_compact` |
+| `goal_started` / `goal_audit` / `goal_ended` | A [`/goal`](repl.md#working-until-its-really-done-goal) run — payloads: the objective and audit budget; per audit `iteration`, `score`, `complete`, `blocked`, `missing`, `action`; and the final `end` (`Complete`, `Capped`, `Stalled`, `Blocked`, `Interrupted`, `JudgeFailed`). |
+| `user_input` images | A turn's `user_input` event carries `images` — how many were attached. The bytes are never logged. |
 | `repl_warning` | Non-fatal issue with a turn's response — payload: `message` (`empty_response`, `invalid_response_content`, `hit_iteration_cap`, or `hit_consecutive_failure_limit`), plus `tool_rounds`/`limit` for `hit_iteration_cap` or `failures`/`last_tool` for `hit_consecutive_failure_limit` |
 | `correction_injected` | Harness injects a write-tool correction after a mutation claim without a backing tool call — payload: `reason` |
 | `plan_captured` | `/plan` stores a new step plan — payload: `step_count` |

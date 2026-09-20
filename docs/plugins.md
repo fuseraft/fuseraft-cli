@@ -50,7 +50,7 @@ Execute shell commands and scripts.
 |----------|-----------|-------------|
 | `shell_run` | `command`, `workingDirectory` (optional), `timeoutSeconds` (default 60), `quiet` (default false) | Run a shell command. Supports pipes, redirects, and chained commands. Captures stdout, stderr, and exit code. Pass `quiet: true` to get `OK` back on success instead of full output (e.g. scaffolding, `dotnet restore`, environment setup) — full output and exit code are still returned on failure regardless of `quiet`. |
 | `shell_run_script` | `script`, `workingDirectory` (optional), `timeoutSeconds` (default 120) | Write a multi-line script to a temp file and execute it. Useful for complex multi-command workflows. |
-| `shell_get_env` | `name` | Return an environment variable value (empty string if not set). |
+| `shell_get_env` | `name` | Return an environment variable value (empty string if not set). The value of a secret-looking variable (`*_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, …) is returned as `<secret-hidden>` — reference it as `$NAME` in a command instead. See [Security — Secret values in tool output](security.md#secret-values-in-tool-output). |
 | `shell_set_env` | `name`, `value` | Set an environment variable for the current session. Inherited by all subsequent `shell_run` calls. Pass an empty string to clear a variable. |
 | `shell_which` | `program` | Return the full path of a program (equivalent to `which` / `where`). |
 | `shell_get_working_directory` | — | Return the effective working directory. Returns the sandbox root if a sandbox is configured. |
@@ -64,7 +64,7 @@ The shell used is `/bin/bash` on Unix and `cmd.exe` on Windows. The shell binary
 
 **Windows PowerShell fallback:** Agents commonly write PowerShell syntax (`Get-ChildItem`, `$env:`, `Where-Object`, ...) even though `cmd.exe` is the default shell here, since PowerShell is the modern norm on Windows. `cmd.exe` can't resolve any of that and always fails with the same `'X' is not recognized as an internal or external command` message. `shell_run` and `shell_run_script` detect that exact signature and transparently retry the command via PowerShell (preferring `pwsh` if installed, falling back to the built-in Windows PowerShell 5.1) before returning to the agent — so a PowerShell-flavored command succeeds on the first try instead of costing a wasted tool call. `shell_run_background` applies the same retry within a short grace window after starting the process, swapping in a PowerShell process before the job ID is ever handed back if the original exits immediately with that signature. If the command genuinely fails (in either shell), the original `cmd.exe` failure is what's returned — the fallback never masks a real error.
 
-**`sudo` protection:** `sudo` is always blocked. Any command or script containing `sudo` (including after pipes, `&&`, `;`, or newlines) is rejected before execution. The denial message instructs the agent to use non-privileged alternatives (`pip install --user`, `pipx`, virtualenvs) or, if elevated access is truly required, to tell the user what to run so they can do it themselves.
+**`sudo` protection:** `sudo` (and `doas`, `pkexec`, `sudoedit`) is always blocked, in any spelling — after pipes, `&&`, `;`, or newlines, behind `env`/`command`/`nice`, by full path or quoted, in `$(…)` or `bash -c`, and as the command `xargs` or `find -exec` runs — and rejected before execution. See [Security — `sudo` protection](security.md#sudo-protection). The denial message instructs the agent to use non-privileged alternatives (`pip install --user`, `pipx`, virtualenvs) or, if elevated access is truly required, to tell the user what to run so they can do it themselves.
 
 **Shell command approval:** When `fuseraft run --hitl` is active, every `shell_run`, `shell_run_script`, and `shell_run_background` call pauses and shows the command for approval before executing. See [CLI Reference — Shell/FileSystem/Git/Http write approval](cli-reference.md#human-in-the-loop-controls). The REPL has the same gate behind its own `/hitl on`/`/hitl off` toggle (see [CLI Reference — `fuseraft repl`](cli-reference.md#fuseraft-repl)).
 
@@ -83,7 +83,11 @@ Read and write a Git repository.
 | `git_status` | `repoPath` (default `"."`) | Show working-tree status: staged, unstaged, and untracked files. |
 | `git_diff` | `repoPath`, `staged` (default false), `maxLines` (default 200) | Show a unified diff. Pass `staged: true` for the index diff. |
 | `git_log` | `repoPath`, `count` (default 10), `ref` (optional) | Show recent commit history with hashes, authors, and messages. |
-| `git_show` | `commitRef`, `repoPath`, `maxLines` (default 300) | Show the content and diff of a specific commit. |
+| `git_show` | `commitRef`, `repoPath`, `maxLines` (default 300) | Show the content and diff of a specific commit. `<ref>:<path>` shows one file's contents at that ref. |
+
+**Protected files.** A diff is file content, so the Git read tools honour the same [FileSystem deny rules](security.md#a-deny-rule-is-never-a-prompt) as `read_file`: in `git_diff`, `git_show`, and any patch `git_log` is asked to print, the body of a protected file's section (a tracked `.env`, an SSH key, a [credentials file](security.md#credential-files), a configured `Deny` glob) is replaced by `[content hidden: '<path>' matches a FileSystem deny rule]` — the `diff --git` header stays, so the agent still sees *that* it changed. `git_show <ref>:<path>` of a protected path is denied, and so is `git_show` of a bare blob hash, which has no path to check (use `<ref>:<path>` instead). See [Security — Git output](security.md#git-output).
+
+**Options in `commitRef` / `ref`.** `git_show`'s `commitRef` and `git_log`'s `ref` take a commit, ref, or path plus display options — `--stat`, `-p`, `--name-only`, `--oneline`, `-U<n>`, `--pretty=…`, `--author=…`, `--since=…`, and similar. Any other option is refused with `[DENIED] git option '…' is not accepted here`: `--output=<file>` would otherwise make git write the unfiltered patch to a file of the agent's choosing, outside the sandbox if it liked, and `--ext-diff` runs a program. Each word reaches git as its own argument, and words after `--` are always pathspecs.
 | `git_branch_list` | `repoPath`, `includeRemotes` (default false) | List branches. |
 | `git_stash_list` | `repoPath` | List all stashed changesets. |
 | `git_is_inside_work_tree` | `repoPath` (optional) | Returns `"true"` if the path is inside a git working tree, `"false"` otherwise (exit codes 128 or 129 map to `"false"`). Use this to guard git operations when the sandbox may not be a git repository. |
@@ -122,6 +126,8 @@ Make HTTP requests to external APIs.
 | `http_patch` | `url`, `body`, `contentType` (default `"application/json"`), `headers`, `timeoutSeconds`, `profile` | PATCH request. Useful for partial updates (e.g. closing a ticket). |
 | `http_delete` | `url`, `headers`, `timeoutSeconds` (default 30), `profile` | DELETE request. |
 | `http_head` | `url`, `headers`, `timeoutSeconds` (default 30), `profile` | HEAD request. Returns response headers only, no body. |
+
+**Redirects.** Redirects are followed by the plugin, not the HTTP client: each hop is re-checked against `HttpAllowedHosts` and the private-address rules, credential headers are dropped once a hop leaves the original origin, an `https` → `http` redirect is refused, and a chain stops after 10 hops. Secret-looking environment variable values in a response body are replaced with `<secret-hidden>`. See [Security — Shell, Probe, and every other tool](security.md#shell-probe-and-every-other-tool).
 
 **Write approval:** When `fuseraft run --hitl` is active, `http_post`/`http_put`/`http_patch`/`http_delete` pause for approval before sending — `http_get`/`http_head` are never gated. See [CLI Reference — Shell/FileSystem/Git/Http write approval](cli-reference.md#human-in-the-loop-controls). The REPL has the same gate behind its own `/hitl on`/`/hitl off` toggle.
 
@@ -176,7 +182,7 @@ Parse, transform, and query JSON data.
 
 ## Search
 
-Search file contents and locate symbols. Finding files by name is `list_files` in [FileSystem](#filesystem) — kept there rather than duplicated here since it's the one covered by sandbox path enforcement and the FileSystem capability map.
+Search file contents and locate symbols. Files protected by a [FileSystem deny rule](security.md#a-deny-rule-is-never-a-prompt) — `.env` at any depth, [credential files](security.md#credential-files), and any configured `FileSystemPermissions.Deny` glob — are skipped by every search tool, so a query for a secret's name or value can't return a line of a file `read_file` would refuse to open. Finding files by name is `list_files` in [FileSystem](#filesystem) — kept there rather than duplicated here since it's the one covered by sandbox path enforcement and the FileSystem capability map.
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
@@ -198,6 +204,8 @@ Structured hypothesis testing and assertion utilities. Useful for Tester agents 
 | `probe_assert_output` | `command`, `expected`, `matchType` (default `"contains"`), `directory`, `timeoutSeconds` | Run a command and assert its output. `matchType`: `contains`, `equals`, `regex`, `exitcode`. Returns PASS or FAIL with evidence. |
 | `probe_compare_outputs` | `commandA`, `commandB`, `directory`, `timeoutSeconds` | Run two commands and return their outputs side-by-side for comparison. |
 | `probe_run_hypothesis` | `hypothesis`, `command`, `expectedObservation`, `setupCommand` (optional), `directory`, `timeoutSeconds` | Given/When/Then structured test. |
+
+Every command Probe starts goes through the same guard as `shell_run` — dangerous-command and `sudo` rules, `ShellPolicy`, HITL approval, the sandbox working directory (`directory: "."` means the sandbox root) — and its output is masked for secret values and protected-file diffs. For a non-shell language only the credential-file rule, `ShellPolicy`, and approval apply. See [Security — Shell, Probe, and every other tool](security.md#shell-probe-and-every-other-tool).
 
 On Windows, `language: "powershell"` (or `"ps"`) resolves to `pwsh` if it's installed, otherwise falls back to the built-in Windows PowerShell 5.1 — it no longer fails outright on machines that only have the stock PowerShell.
 
@@ -541,7 +549,7 @@ Agents:
 
 ## Document
 
-Read rich document formats as plain text. All operations are read-only. Sandbox rules apply when `FileSystemSandboxPath` is configured.
+Read rich document formats as plain text. All operations are read-only. Sandbox rules apply when `FileSystemSandboxPath` is configured, and so do the [FileSystem deny rules](security.md#a-deny-rule-is-never-a-prompt) — a deny-ruled document is refused like any other protected file.
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|

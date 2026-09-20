@@ -195,6 +195,7 @@ internal static partial class ReplCommands
         ctx.LastExtractedTurnIndex = -1;
         ctx.ContextWarningShown    = false;
         ctx.ResetPlanState();
+        ctx.LastGoal = null;
 
         if (snapshot.ExecutionQueue is { Length: > 0 })
             foreach (var e in snapshot.ExecutionQueue)
@@ -221,6 +222,7 @@ internal static partial class ReplCommands
                 $"Now running as: **`{snapshot.SessionId}`** (was `{prevId}`)\n\n" +
                 $"Model: {ctx.ModelId} · {snapshot.TurnIndex} turn{(snapshot.TurnIndex == 1 ? "" : "s")} · " +
                 $"started {snapshot.StartedAt.ToLocalTime():yyyy-MM-dd HH:mm}" });
+            ReplReplay.ShowOnRestore(ctx);
         }
         else
         {
@@ -233,6 +235,8 @@ internal static partial class ReplCommands
             AnsiConsole.MarkupLine(
                 $"[dim]{snapshot.TurnIndex} turn{(snapshot.TurnIndex == 1 ? "" : "s")} · " +
                 $"started {snapshot.StartedAt.ToLocalTime():yyyy-MM-dd HH:mm}[/]");
+
+            ReplReplay.ShowOnRestore(ctx);
 
             if (ctx.ExecutionQueue.Count > 0)
                 AnsiConsole.MarkupLine(

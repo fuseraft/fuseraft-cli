@@ -215,4 +215,147 @@ public sealed class AgentToolLoopGuardTests
             if (File.Exists(eventsPath)) File.Delete(eventsPath);
         }
     }
+
+    // Alternation (A/B/A/B)
+
+    private static FunctionInvocationContext MakeAlternating(int iteration, int call) =>
+        MakeContext(iteration, "shell_run", new() { ["cmd"] = call % 2 == 0 ? "read" : "test" });
+
+    [Fact]
+    public async Task AlternatingTwoCalls_TerminatesAtTheTenthCall_ButNotBefore()
+    {
+        var guard = new AgentToolLoopGuard("agent-a", emitter: null);
+
+        for (var i = 0; i < ToolCallCycleDetector.HardThreshold; i++)
+        {
+            var ctx = MakeAlternating(i, i);
+            await guard.InvokeAsync(ctx, CancellationToken.None);
+            Assert.Equal(i == ToolCallCycleDetector.HardThreshold - 1, ctx.Terminate);
+        }
+    }
+
+    [Fact]
+    public async Task AlternatingTwoCalls_KeepsTerminatingOnceHard()
+    {
+        var guard = new AgentToolLoopGuard("agent-a", emitter: null);
+        for (var i = 0; i < ToolCallCycleDetector.HardThreshold; i++)
+            await guard.InvokeAsync(MakeAlternating(i, i), CancellationToken.None);
+
+        var next = MakeAlternating(ToolCallCycleDetector.HardThreshold, ToolCallCycleDetector.HardThreshold);
+        await guard.InvokeAsync(next, CancellationToken.None);
+
+        Assert.True(next.Terminate);
+    }
+
+    [Fact]
+    public async Task AlternatingTwoCalls_NeverModifiesTheResult()
+    {
+        var guard = new AgentToolLoopGuard("agent-a", emitter: null);
+
+        for (var i = 0; i < ToolCallCycleDetector.HardThreshold; i++)
+        {
+            var r = await guard.InvokeAsync(MakeAlternating(i, i), CancellationToken.None);
+            Assert.Equal(i % 2 == 0 ? "ran: read" : "ran: test", r?.ToString());
+        }
+    }
+
+    [Fact]
+    public async Task VariedCalls_NeverTerminateViaTheAlternationRule()
+    {
+        var guard = new AgentToolLoopGuard("agent-a", emitter: null);
+
+        for (var i = 0; i < 20; i++)
+        {
+            var ctx = MakeContext(i, "shell_run", new() { ["cmd"] = $"step-{i}" });
+            await guard.InvokeAsync(ctx, CancellationToken.None);
+            Assert.False(ctx.Terminate);
+        }
+    }
+
+    [Fact]
+    public async Task IterationZero_ResetsTheAlternationRunForANewTurn()
+    {
+        var guard = new AgentToolLoopGuard("agent-a", emitter: null);
+        for (var i = 1; i < ToolCallCycleDetector.HardThreshold; i++)
+            await guard.InvokeAsync(MakeAlternating(i, i), CancellationToken.None);
+
+        // Would be the 10th alternating call — a hard stop — had the previous turn's run carried over.
+        var ctx = MakeAlternating(0, ToolCallCycleDetector.HardThreshold);
+        await guard.InvokeAsync(ctx, CancellationToken.None);
+
+        Assert.False(ctx.Terminate);
+    }
+
+    [Fact]
+    public async Task AlternationSoftThreshold_EmitsEvent_WithAlternatingPattern()
+    {
+        var eventsPath = Path.Combine(Path.GetTempPath(), $"fuseraft-test-events-{Guid.NewGuid():N}.jsonl");
+        using var emitter = new EventEmitter(eventsPath);
+        try
+        {
+            var guard = new AgentToolLoopGuard("agent-a", emitter);
+            for (var i = 0; i < ToolCallCycleDetector.SoftThreshold; i++)
+                await guard.InvokeAsync(MakeAlternating(i, i), CancellationToken.None);
+
+            var events = await File.ReadAllLinesAsync(eventsPath);
+            var line = Assert.Single(events, l => l.Contains("\"tool_loop_warning\""));
+            using var doc = JsonDocument.Parse(line);
+            var payload = doc.RootElement.GetProperty("payload");
+            Assert.Equal("soft", payload.GetProperty("kind").GetString());
+            Assert.Equal("alternating", payload.GetProperty("pattern").GetString());
+            Assert.Equal(ToolCallCycleDetector.SoftThreshold, payload.GetProperty("streak").GetInt32());
+            Assert.Equal(ToolCallCycleDetector.SoftThreshold, payload.GetProperty("threshold").GetInt32());
+        }
+        finally
+        {
+            if (File.Exists(eventsPath)) File.Delete(eventsPath);
+        }
+    }
+
+    [Fact]
+    public async Task AlternationHardThreshold_EmitsEvent_WithHardKindAndAlternatingPattern()
+    {
+        var eventsPath = Path.Combine(Path.GetTempPath(), $"fuseraft-test-events-{Guid.NewGuid():N}.jsonl");
+        using var emitter = new EventEmitter(eventsPath);
+        try
+        {
+            var guard = new AgentToolLoopGuard("agent-a", emitter);
+            for (var i = 0; i < ToolCallCycleDetector.HardThreshold; i++)
+                await guard.InvokeAsync(MakeAlternating(i, i), CancellationToken.None);
+
+            var events = await File.ReadAllLinesAsync(eventsPath);
+            var line = Assert.Single(events, l => l.Contains("\"kind\":\"hard\""));
+            using var doc = JsonDocument.Parse(line);
+            var payload = doc.RootElement.GetProperty("payload");
+            Assert.Equal("alternating", payload.GetProperty("pattern").GetString());
+            Assert.Equal(ToolCallCycleDetector.HardThreshold, payload.GetProperty("streak").GetInt32());
+        }
+        finally
+        {
+            if (File.Exists(eventsPath)) File.Delete(eventsPath);
+        }
+    }
+
+    [Fact]
+    public async Task IdenticalCallEvents_ReportTheIdenticalPattern()
+    {
+        var eventsPath = Path.Combine(Path.GetTempPath(), $"fuseraft-test-events-{Guid.NewGuid():N}.jsonl");
+        using var emitter = new EventEmitter(eventsPath);
+        try
+        {
+            var guard = new AgentToolLoopGuard("agent-a", emitter);
+            var args  = new Dictionary<string, object?> { ["cmd"] = "ls" };
+            for (var i = 0; i < 3; i++)
+                await guard.InvokeAsync(MakeContext(i, "shell_run", args), CancellationToken.None);
+
+            var events = await File.ReadAllLinesAsync(eventsPath);
+            var line = Assert.Single(events, l => l.Contains("\"tool_loop_warning\""));
+            using var doc = JsonDocument.Parse(line);
+            Assert.Equal("identical", doc.RootElement.GetProperty("payload").GetProperty("pattern").GetString());
+        }
+        finally
+        {
+            if (File.Exists(eventsPath)) File.Delete(eventsPath);
+        }
+    }
 }

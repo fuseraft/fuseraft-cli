@@ -216,11 +216,11 @@ public sealed class PluginRegistry : IDisposable
         // as the REPL even when the config declares no Security block at all — see
         // docs/security.md and ReplCommand.cs's identical merge for the REPL side.
         var effectiveShellPolicy = DefaultSecurityPolicy.MergeShellPolicy(security.ShellPolicy);
-        var fsDenyPatterns       = DefaultSecurityPolicy.MergeFileSystemDeny(security.FileSystemPermissions);
+        var fsDenyPatterns       = DefaultSecurityPolicy.MergeFileSystemDeny(security.FileSystemPermissions, security.DenyCredentialFiles);
 
         // Create ShellPlugin once so FileSystemPlugin can reference its cache invalidator.
         // Both are registered as singletons — the factory lambda returns the same instance.
-        var shellInstance = new ShellPlugin(sandboxRoot, shellCommandApprover, effectiveShellPolicy, eventSink);
+        var shellInstance = new ShellPlugin(sandboxRoot, shellCommandApprover, effectiveShellPolicy, eventSink, blockCredentialFiles: security.DenyCredentialFiles, denyPatterns: fsDenyPatterns);
         Register("Shell",      () => shellInstance);
 
         // Same eager-construction-plus-shared-closure pattern as RegisterDefaults — both
@@ -229,10 +229,12 @@ public sealed class PluginRegistry : IDisposable
         Register("FileSystem", () => fsPlugin);
         RegisterAdditional("FileSystem", () => new FileSystemManagementOps(
             fsPlugin, sandboxRoot, sessionCache: sessionReadCache, versionStore: fileVersionStore, exemptedPaths: ["~/.fuseraft/"]));
-        Register("Git",        () => new GitPlugin(BindApprover("Git"), sandboxRoot));
-        Register("Search",     () => new SearchPlugin(sandboxRoot));
+        Register("Git",        () => new GitPlugin(BindApprover("Git"), sandboxRoot, denyPatterns: fsDenyPatterns));
+        Register("Search",     () => new SearchPlugin(sandboxRoot, denyPatterns: fsDenyPatterns));
         Register("Http",       () => new HttpPlugin(_sharedHttpClient, allowedHosts, apiProfiles, allowPrivateHosts, _loggerFactory?.CreateLogger<HttpPlugin>(), BindApprover("Http")));
-        Register("Document",   () => new DocumentPlugin(sandboxRoot));
+        Register("Document",   () => new DocumentPlugin(sandboxRoot, fsDenyPatterns));
+        // Probe runs commands and snippets, so it shares the configured shell's guards, policy, approver and sandbox.
+        Register("Probe",      () => new ProbePlugin(shellInstance));
 
         // Resolve against the same root FileSystemPlugin uses, so each artifact lands exactly
         // where its downstream reader's read_file expects it regardless of sandbox configuration.
@@ -454,6 +456,9 @@ public sealed class PluginRegistry : IDisposable
         var handler = new SocketsHttpHandler
         {
             ConnectCallback = HttpPlugin.CreateSsrfSafeConnectCallback(allowPrivateHosts),
+            // HttpPlugin follows redirects itself so it can re-check its allowlist on each hop and keep
+            // credentials on their origin — see HttpPlugin.SendFollowingRedirectsAsync.
+            AllowAutoRedirect = false,
         };
 
         // Timeout.InfiniteTimeSpan — per-request timeouts are enforced via CancellationTokenSource

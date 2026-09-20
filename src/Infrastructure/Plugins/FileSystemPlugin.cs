@@ -437,9 +437,16 @@ public sealed class FileSystemPlugin : ITurnResettable
         // Reject ambiguous matches — require the search string to be unique.
         var secondIdx = normalContent.IndexOf(normalOld, idx + 1, StringComparison.Ordinal);
         if (secondIdx >= 0)
+        {
+            // Say where, so the caller can widen oldText to be unique without re-reading the file.
+            const int maxListed = 10;
+            var where = FilePatchDiffing.OccurrenceLines(normalContent, normalOld, maxListed + 1);
+            var listed = string.Join(", ", where.Take(maxListed));
+            var more   = where.Count > maxListed ? ", …" : string.Empty;
             return PluginResult.Error(
-                $"oldText appears more than once in '{resolved}'. " +
+                $"oldText appears more than once in '{resolved}' (matches start at lines {listed}{more}). " +
                 $"Include more surrounding lines in oldText to make it unique.");
+        }
 
         // Splice entirely in normalised (LF-only) space so that idx and normalOld.Length
         // stay in sync with the string being sliced.  Using the original CRLF content here
@@ -477,7 +484,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         var newLines = normalNew.Split('\n').Length;
         return PluginResult.Ok(
             $"Patched '{resolved}': replaced {oldLines}-line block with {newLines}-line block " +
-            $"at character offset {idx}.");
+            $"at line {FilePatchDiffing.LineNumberAt(normalContent, idx)}.");
     }
 
     // Sniffs the file's byte-order mark so patch_file/write_file round-trip the same encoding

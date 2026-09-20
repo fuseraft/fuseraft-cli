@@ -7,13 +7,18 @@ namespace fuseraft.Infrastructure.Plugins;
 /// <summary>
 /// Reads rich document formats (PDF, DOCX, PPTX, XLSX) as plain text.
 /// All operations are read-only. Path arguments are sandbox-checked when a
-/// sandbox root is configured.
+/// sandbox root is configured, and checked against the FileSystem deny rules when
+/// <c>denyPatterns</c> are supplied: a configured <c>Deny: ["secrets/**"]</c> that covers
+/// <c>secrets/passwords.xlsx</c> must stop <c>get_sheet</c> as surely as it stops <c>read_file</c>.
 /// </summary>
-public sealed class DocumentPlugin(string? sandboxRoot = null)
+public sealed class DocumentPlugin(string? sandboxRoot = null, IReadOnlyList<string>? denyPatterns = null)
 {
     private readonly string? _sandboxRoot = sandboxRoot is not null
         ? FuseraftPaths.ExpandPath(sandboxRoot)
         : null;
+
+    private readonly Microsoft.Extensions.FileSystemGlobbing.Matcher? _denyMatcher =
+        FileSystemSandbox.BuildDenyMatcher(denyPatterns);
 
     [Description("Extract plain text from a document. Supports PDF, DOCX, PPTX, XLSX.")]
     public string ExtractText([Description("Path to the document.")] string path)
@@ -126,6 +131,11 @@ public sealed class DocumentPlugin(string? sandboxRoot = null)
         resolved = _sandboxRoot is not null && !Path.IsPathRooted(expanded)
             ? Path.GetFullPath(expanded, _sandboxRoot)
             : Path.GetFullPath(expanded);
+
+        // Checked before the sandbox test, as in FileSystemSandbox.ResolveSafe: a deny rule is an
+        // explicit "never", whether or not the file is inside the sandbox.
+        if (FileSystemSandbox.MatchesDenyRule(_denyMatcher, resolved, _sandboxRoot))
+            return FileSystemSandbox.DenyRuleDenial(resolved);
 
         if (_sandboxRoot is null) return null;
 

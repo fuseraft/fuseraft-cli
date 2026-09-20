@@ -1,3 +1,4 @@
+using fuseraft.Core.Models.Config;
 using fuseraft.Infrastructure.Plugins;
 
 namespace FuseraftCli.Tests;
@@ -341,4 +342,514 @@ public sealed class ShellPluginTests
             Directory.Delete(sandboxDir, recursive: true);
         }
     }
+
+    // Secret masking — EnvSecretMasker wired into every shell output path
+
+    private static string EchoVar(string name) =>
+        OperatingSystem.IsWindows() ? $"echo %{name}%" : $"echo ${name}";
+
+    [Fact]
+    public async Task RunAsync_SecretEnvVarValue_IsMaskedInOutput()
+    {
+        const string name = "FUSERAFT_TEST_SHELL_API_KEY";
+        const string value = "sk-shell-0123456789abcdef";
+        Environment.SetEnvironmentVariable(name, value);
+        try
+        {
+            using var plugin = new ShellPlugin();
+
+            var result = await plugin.RunAsync(EchoVar(name));
+
+            Assert.DoesNotContain(value, result);
+            Assert.Contains(EnvSecretMasker.Placeholder, result);
+        }
+        finally { Environment.SetEnvironmentVariable(name, null); }
+    }
+
+    [Fact]
+    public async Task RunAsync_SecretEnvVarValue_IsMaskedInFailureOutputToo()
+    {
+        const string name = "FUSERAFT_TEST_SHELL_FAIL_TOKEN";
+        const string value = "tok-fail-0123456789abcdef";
+        Environment.SetEnvironmentVariable(name, value);
+        try
+        {
+            using var plugin = new ShellPlugin();
+
+            var result = await plugin.RunAsync($"{EchoVar(name)} && exit 3");
+
+            Assert.Contains("[EXIT 3]", result);
+            Assert.DoesNotContain(value, result);
+        }
+        finally { Environment.SetEnvironmentVariable(name, null); }
+    }
+
+    [Fact]
+    public async Task RunBackgroundAsync_SecretEnvVarValue_IsMaskedInJobOutputAndStatus()
+    {
+        const string name = "FUSERAFT_TEST_SHELL_JOB_SECRET";
+        const string value = "job-secret-0123456789abcdef";
+        Environment.SetEnvironmentVariable(name, value);
+        try
+        {
+            using var plugin = new ShellPlugin();
+            var started = await plugin.RunBackgroundAsync(EchoVar(name));
+            var jobId = started.Split("Job ID: ")[1].Split('\n')[0].Trim();
+
+            string status = "";
+            for (var i = 0; i < 100 && !status.Contains("COMPLETED"); i++)
+            {
+                status = await plugin.GetJobStatus(jobId);
+                if (!status.Contains("COMPLETED")) await Task.Delay(50);
+            }
+
+            var output = await plugin.GetJobOutput(jobId);
+
+            Assert.Contains("[COMPLETED]", status);
+            Assert.DoesNotContain(value, status);
+            Assert.DoesNotContain(value, output);
+            Assert.Contains(EnvSecretMasker.Placeholder, output);
+        }
+        finally { Environment.SetEnvironmentVariable(name, null); }
+    }
+
+    [Fact]
+    public void GetEnv_SecretLookingName_ReturnsPlaceholderNotValue()
+    {
+        const string name = "FUSERAFT_TEST_GETENV_API_KEY";
+        Environment.SetEnvironmentVariable(name, "abc");   // short on purpose: hidden by name, not by length
+        try
+        {
+            using var plugin = new ShellPlugin();
+
+            Assert.Equal(EnvSecretMasker.Placeholder, plugin.GetEnv(name));
+        }
+        finally { Environment.SetEnvironmentVariable(name, null); }
+    }
+
+    [Fact]
+    public void GetEnv_OrdinaryName_ReturnsValue()
+    {
+        const string name = "FUSERAFT_TEST_GETENV_PLAIN";
+        Environment.SetEnvironmentVariable(name, "plain-value");
+        try
+        {
+            using var plugin = new ShellPlugin();
+
+            Assert.Equal("plain-value", plugin.GetEnv(name));
+        }
+        finally { Environment.SetEnvironmentVariable(name, null); }
+    }
+
+    [Fact]
+    public void GetEnv_UnsetSecretLookingName_ReturnsEmptyNotPlaceholder()
+    {
+        using var plugin = new ShellPlugin();
+
+        Assert.Equal(string.Empty, plugin.GetEnv("FUSERAFT_TEST_GETENV_NEVER_SET_TOKEN"));
+    }
+
+    [Fact]
+    public void GetEnv_OrdinaryNameHoldingASecretValue_IsMaskedByValue()
+    {
+        const string secretName = "FUSERAFT_TEST_GETENV_HOLDER_SECRET";
+        const string plainName  = "FUSERAFT_TEST_GETENV_ALIAS";
+        const string value      = "aliased-secret-0123456789";
+        Environment.SetEnvironmentVariable(secretName, value);
+        Environment.SetEnvironmentVariable(plainName, value);
+        try
+        {
+            using var plugin = new ShellPlugin();
+
+            Assert.DoesNotContain(value, plugin.GetEnv(plainName));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(secretName, null);
+            Environment.SetEnvironmentVariable(plainName, null);
+        }
+    }
+
+    // Dangerous-command rails — hard-denied like sudo. Every command below is harmless if the
+    // guard regressed and it ran anyway (mkfs on a device that does not exist; `curl --version`
+    // piped to a shell that cannot parse it).
+
+    private const string HarmlessRawDiskCommand = "mkfs.ext4 /dev/fuseraft-test-nonexistent";
+    private const string HarmlessFetchToExecCommand = "curl --version | sh";
+
+    [Fact]
+    public async Task RunAsync_RawDiskOperation_IsDenied()
+    {
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunAsync(HarmlessRawDiskCommand);
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.Contains(DangerousCommandDetector.RawDiskOp, result);
+    }
+
+    [Fact]
+    public async Task RunAsync_FetchToExec_IsDenied()
+    {
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunAsync(HarmlessFetchToExecCommand);
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.Contains(DangerousCommandDetector.FetchToExec, result);
+    }
+
+    [Fact]
+    public async Task RunScriptAsync_DangerousCommandInsideScript_IsDenied()
+    {
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunScriptAsync($"echo starting\n{HarmlessRawDiskCommand}\necho done");
+
+        Assert.StartsWith("[DENIED]", result);
+    }
+
+    [Fact]
+    public async Task RunBackgroundAsync_DangerousCommand_IsDeniedAndNoJobStarts()
+    {
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunBackgroundAsync(HarmlessRawDiskCommand);
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.DoesNotContain("Job ID:", result);
+    }
+
+    [Fact]
+    public async Task RunAsync_DangerousCommand_IsDeniedBeforeAskingTheUser()
+    {
+        var asked = false;
+        using var plugin = new ShellPlugin(approveCommand: _ => { asked = true; return Task.FromResult(true); });
+
+        var result = await plugin.RunAsync(HarmlessRawDiskCommand);
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.False(asked, "a hard-denied command must not reach the approval prompt");
+    }
+
+    [Fact]
+    public async Task RunAsync_OrdinaryRecursiveDelete_StillRuns()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "fuseraft_shellplugin_rm_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(dir);
+        await File.WriteAllTextAsync(Path.Combine(dir, "f.txt"), "x");
+        try
+        {
+            using var plugin = new ShellPlugin();
+
+            var result = await plugin.RunAsync($"rm -rf \"{dir}\"");
+
+            Assert.DoesNotContain("[DENIED]", result);
+            Assert.False(Directory.Exists(dir));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    // ShellPolicy matching tolerance
+
+    [Theory]
+    [InlineData("rm    -rf /tmp/fuseraft-test-nonexistent")]              // whitespace run
+    [InlineData("rm\t-rf /tmp/fuseraft-test-nonexistent")]                // tab
+    [InlineData("rm \\\n-rf /tmp/fuseraft-test-nonexistent")]             // line continuation
+    [InlineData("r\u200Bm -rf /tmp/fuseraft-test-nonexistent")]           // zero-width character
+    public async Task RunAsync_DenyPattern_IsNotSidesteppedByWhitespaceOrInvisibleChars(string command)
+    {
+        var policy = new ShellPolicy { Deny = ["rm -rf"] };
+        using var plugin = new ShellPlugin(shellPolicy: policy);
+
+        var result = await plugin.RunAsync(command);
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.Contains("deny pattern", result);
+    }
+
+    [Fact]
+    public async Task RunAsync_AllowPattern_MatchesAcrossWhitespaceVariations()
+    {
+        var policy = new ShellPolicy { Allow = ["echo hello"] };
+        using var plugin = new ShellPlugin(shellPolicy: policy);
+
+        var result = await plugin.RunAsync("echo    hello");
+
+        Assert.DoesNotContain("[DENIED]", result);
+        Assert.Contains("hello", result);
+    }
+
+    [Fact]
+    public async Task RunAsync_DenyPatternWithIntentionalTrailingSpace_IsNotBroadened()
+    {
+        var policy = new ShellPolicy { Deny = ["ls "] };
+        using var plugin = new ShellPlugin(shellPolicy: policy);
+
+        // Trimmed to a bare "ls" the pattern would match the tail of "tools".
+        var result = await plugin.RunAsync("echo tools");
+
+        Assert.DoesNotContain("[DENIED]", result);
+    }
+
+    // sudo — every spelling is denied end to end. `sudo -n` never prompts, so each of these is
+    // harmless if the guard regressed and the command ran anyway.
+
+    [Theory]
+    [InlineData("sudo -n true")]
+    [InlineData("ls; sudo -n true")]
+    [InlineData("env sudo -n true")]
+    [InlineData("command sudo -n true")]
+    [InlineData("/usr/bin/sudo -n true")]
+    [InlineData("(sudo -n true)")]
+    [InlineData("echo $(sudo -n true)")]
+    [InlineData("if true; then sudo -n true; fi")]
+    [InlineData("'sudo' -n true")]
+    [InlineData("\\sudo -n true")]
+    public async Task RunAsync_Sudo_InAnySpelling_IsDenied(string command)
+    {
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunAsync(command, timeoutSeconds: 10);
+
+        Assert.StartsWith("[DENIED] sudo is not permitted.", result);
+        Assert.Contains("non-privileged alternatives", result);
+    }
+
+    [Fact]
+    public async Task RunAsync_Doas_IsDeniedByName()
+    {
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunAsync("env doas -n true", timeoutSeconds: 10);
+
+        Assert.StartsWith("[DENIED] doas is not permitted.", result);
+    }
+
+    [Fact]
+    public async Task RunScriptAsync_SudoBehindAWrapperInsideAScript_IsDenied()
+    {
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunScriptAsync("echo starting\nenv sudo -n true\necho done", timeoutSeconds: 10);
+
+        Assert.StartsWith("[DENIED] sudo is not permitted.", result);
+    }
+
+    [Fact]
+    public async Task RunBackgroundAsync_WrappedSudo_IsDeniedAndNoJobStarts()
+    {
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunBackgroundAsync("nohup /usr/bin/sudo -n true");
+
+        Assert.StartsWith("[DENIED] sudo is not permitted.", result);
+        Assert.DoesNotContain("Job ID:", result);
+    }
+
+    [Fact]
+    public async Task RunAsync_WrappedSudo_IsDeniedBeforeAskingTheUser()
+    {
+        var asked = false;
+        using var plugin = new ShellPlugin(approveCommand: _ => { asked = true; return Task.FromResult(true); });
+
+        var result = await plugin.RunAsync("env sudo -n true", timeoutSeconds: 10);
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.False(asked, "a hard-denied command must not reach the approval prompt");
+    }
+
+    [Fact]
+    public async Task RunAsync_CommandsThatOnlyMentionSudo_StillRun()
+    {
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunAsync("echo the word sudo appears here");
+
+        Assert.DoesNotContain("[DENIED]", result);
+        Assert.Contains("the word sudo appears here", result);
+    }
+
+    [Fact]
+    public async Task RunAsync_PlainSudo_KeepsItsOriginalDenialWording()
+    {
+        // The exact text agents (and any saved prompts/skills) have seen since sudo was first blocked.
+        using var plugin = new ShellPlugin();
+
+        var result = await plugin.RunAsync("sudo -n true", timeoutSeconds: 10);
+
+        Assert.Equal(
+            "[DENIED] sudo is not permitted. " +
+            "Prefer non-privileged alternatives: pip install --user, python -m pip install --user, " +
+            "pipx, or a virtual environment (python -m venv .venv && .venv/bin/pip install ...). " +
+            "If elevated privileges are truly required, tell the user exactly which command to run " +
+            "and they will run it themselves.",
+            result);
+    }
+
+    // ShellPolicy.AllowMode — "substring" (default) vs "segments"
+
+    private static ShellPlugin SegmentsPlugin(params string[] allow) =>
+        new(shellPolicy: new ShellPolicy { Allow = [.. allow], AllowMode = ShellPolicy.AllowModeSegments });
+
+    [Fact]
+    public async Task AllowMode_Default_IsSubstring_SoAChainedCommandStillPassesAnAllowOfOnePhrase()
+    {
+        // Pins the documented weakness that segments mode exists to close: the text merely contains
+        // "echo hello", so everything after the `;` rides along.
+        var policy = new ShellPolicy { Allow = ["echo hello"] };
+        using var plugin = new ShellPlugin(shellPolicy: policy);
+
+        var result = await plugin.RunAsync("echo hello; echo smuggled");
+
+        Assert.DoesNotContain("[DENIED]", result);
+        Assert.Contains("smuggled", result);
+    }
+
+    [Fact]
+    public async Task AllowSegments_RejectsTheChainedCommandThatSubstringModeLetsThrough()
+    {
+        using var plugin = SegmentsPlugin("echo hello");
+
+        var result = await plugin.RunAsync("echo hello; echo smuggled");
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.Contains("echo smuggled", result);
+        Assert.Contains("AllowMode: segments", result);
+        Assert.DoesNotContain("smuggled\n", result.Replace("echo smuggled", ""));   // it never ran
+    }
+
+    [Theory]
+    [InlineData("echo hi")]
+    [InlineData("echo hi; echo bye")]
+    [InlineData("echo hi && echo bye")]
+    [InlineData("echo hi || echo bye")]
+    [InlineData("echo hi | cat")]
+    [InlineData("echo $(echo nested)")]
+    [InlineData("(echo a; echo b)")]
+    [InlineData("env FOO=1 echo wrapped")]
+    [InlineData("FOO=1 echo assigned")]
+    [InlineData("nice -n 5 echo niced")]
+    [InlineData("ECHO hi")]
+    public async Task AllowSegments_AllowsCommandsWhoseEverySegmentMatches(string command)
+    {
+        using var plugin = SegmentsPlugin("echo", "cat");
+
+        var result = await plugin.RunAsync(command);
+
+        Assert.DoesNotContain("[DENIED]", result);
+    }
+
+    [Theory]
+    [InlineData("echo hi; uname")]
+    [InlineData("echo hi && uname -a")]
+    [InlineData("echo hi || uname")]
+    [InlineData("echo hi | wc -c")]
+    [InlineData("echo $(uname)")]
+    [InlineData("(echo a; uname)")]
+    [InlineData("echo hi\nuname")]
+    [InlineData("sh -c 'echo hi; uname'")]
+    [InlineData("env FOO=1 uname")]
+    [InlineData("uname # echo hi")]
+    public async Task AllowSegments_RejectsWhenAnySegmentIsNotAllowed(string command)
+    {
+        using var plugin = SegmentsPlugin("echo", "cat");
+
+        var result = await plugin.RunAsync(command);
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.Contains("not matched by any configured allow pattern", result);
+    }
+
+    [Fact]
+    public async Task AllowSegments_MatchesOnAWordBoundary_NotAsARawPrefix()
+    {
+        using var plugin = SegmentsPlugin("ech");   // must not allow `echo`
+
+        var result = await plugin.RunAsync("echo hi");
+
+        Assert.StartsWith("[DENIED]", result);
+    }
+
+    [Fact]
+    public async Task AllowSegments_MultiWordPatternsMatchTheCommandStart()
+    {
+        using var plugin = SegmentsPlugin("echo hello");
+
+        Assert.DoesNotContain("[DENIED]", await plugin.RunAsync("echo hello world"));
+        Assert.StartsWith("[DENIED]", await plugin.RunAsync("echo goodbye"));
+    }
+
+    [Fact]
+    public async Task AllowSegments_SubstitutionHiddenInsideQuotes_IsRejectedAsUncheckable()
+    {
+        using var plugin = SegmentsPlugin("echo");
+
+        var result = await plugin.RunAsync("echo \"$(uname)\"");
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.Contains("command substitution", result);
+    }
+
+    [Fact]
+    public async Task AllowSegments_DenyStillAppliesToTheFullText()
+    {
+        var policy = new ShellPolicy { Allow = ["echo"], Deny = ["hello"], AllowMode = ShellPolicy.AllowModeSegments };
+        using var plugin = new ShellPlugin(shellPolicy: policy);
+
+        var result = await plugin.RunAsync("echo hello");
+
+        Assert.StartsWith("[DENIED]", result);
+        Assert.Contains("deny pattern 'hello'", result);
+    }
+
+    [Fact]
+    public async Task AllowSegments_NothingToRun_IsAllowed()
+    {
+        using var plugin = SegmentsPlugin("echo");
+
+        var result = await plugin.RunAsync("# only a comment");
+
+        Assert.DoesNotContain("[DENIED]", result);
+    }
+
+    [Fact]
+    public async Task AllowSegments_AppliesToScriptsAndBackgroundJobsToo()
+    {
+        using var plugin = SegmentsPlugin("echo");
+
+        var script = await plugin.RunScriptAsync("echo first\nuname\necho third");
+        var job    = await plugin.RunBackgroundAsync("echo ok; uname");
+
+        Assert.StartsWith("[DENIED]", script);
+        Assert.StartsWith("[DENIED]", job);
+        Assert.DoesNotContain("Job ID:", job);
+    }
+
+    [Fact]
+    public async Task AllowSegments_EmptyAllowList_MeansUnrestricted_LikeSubstringMode()
+    {
+        using var plugin = new ShellPlugin(shellPolicy: new ShellPolicy { AllowMode = ShellPolicy.AllowModeSegments });
+
+        var result = await plugin.RunAsync("echo anything; echo goes");
+
+        Assert.DoesNotContain("[DENIED]", result);
+    }
+
+    [Theory]
+    [InlineData("segments", true)]
+    [InlineData("SEGMENTS", true)]
+    [InlineData("Segments", true)]
+    [InlineData("substring", false)]
+    [InlineData("", false)]
+    [InlineData("bogus", false)]
+    public void ShellPolicy_AllowSegments_ReflectsTheModeCaseInsensitively(string mode, bool expected) =>
+        Assert.Equal(expected, new ShellPolicy { AllowMode = mode }.AllowSegments);
+
+    [Fact]
+    public void ShellPolicy_DefaultsToSubstringMode() =>
+        Assert.Equal(ShellPolicy.AllowModeSubstring, new ShellPolicy().AllowMode);
 }

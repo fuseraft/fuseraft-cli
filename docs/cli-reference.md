@@ -295,7 +295,7 @@ fuseraft repl [options]
 | `-m, --model <id>` | see below | Model ID to use (e.g. `gpt-4o`, `claude-sonnet-4-6`). Overrides `~/.fuseraft/config` when set. |
 | `--save` | off | Persist `--model` as the new default in `~/.fuseraft/config`. No effect without `--model`. |
 | `-s, --system <prompt>` | — | System prompt. Defaults to a coding/research prompt when tools are enabled. |
-| `--resume <id>` | — | Resume a previous REPL session by its session ID. Use `/sessions` inside the REPL to list resumable sessions. |
+| `--resume <id>` | — | Resume a previous REPL session by its session ID. The session's last few turns are re-displayed on startup (`repl.resumeReplayTurns`, default 3; `/replay` shows more). Use `/sessions` inside the REPL to list resumable sessions. |
 | `--no-banner` | off | Skip the ASCII banner. Persist as the default with `fuseraft settings set repl.noBanner true`. |
 | `--no-tools` | off | Disable all built-in tools and start a plain chat session. |
 | `--verbose` | off | Enable debug logging: prints per-turn detail (token estimate, tool-round count, total tool calls, and cache-read tokens when the provider reports any) and shows the event log path at startup. Persist as the default with `fuseraft settings set repl.verbose true`. |
@@ -437,7 +437,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/sessions` | List resumable REPL sessions with their IDs, model, turn count, and age. Resume with `fuseraft repl --resume <id>`. |
 | `/fork` | Snapshot the current session to a new ID. The snapshot is saved immediately; the current session continues unchanged. Use `fuseraft repl --resume <id>` to open the fork later. |
 | `/fork switch` | Fork and immediately become the fork. The original session is already checkpointed on disk; the live session continues under the new ID. |
-| `/switch <id>` | Save the current session and load another saved session in its place. History, turn counter, model (if different), and plan state are all restored. Use `/sessions` to find IDs. |
+| `/switch <id>` | Save the current session and load another saved session in its place. History, turn counter, model (if different), and plan state are all restored, and the session's most recent turns are re-displayed (see `repl.resumeReplayTurns`). Use `/sessions` to find IDs. |
 | `/conversation` | List all turns in memory with 1-based turn numbers and a one-line preview of each user message and assistant response. Use this to find the right turn number before running `/rewind`. |
 | `/rewind <n>` | Keep turns 1…n and discard all later turns. Turn count is the number of User messages currently in memory. Clamps safely — passing a number larger than the current turn count is a no-op. |
 | `/rewind -<n>` | Step back n turns from the current position (relative rewind). `/rewind -1` drops the last turn; `/rewind -99` clamps to 0 and clears all turns. |
@@ -445,6 +445,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/compact` | Ask the model to summarise everything older than a recent verbatim tail into a handoff document, then replace history with `[system, summary, ...recent turns]`. The system prompt, tools/skills catalog, and the most recent turns (~20% of the context budget, kept as whole turn-groups) are preserved as-is; only the older portion is folded into the summary. Declines with a message rather than mutating history if there's nothing old enough to summarise, or if the result wouldn't actually be smaller. Facts the assistant stated without a backing tool call are tombstoned as `[UNVERIFIED ASSUMPTION: ...]` rather than carried forward as established facts. Use this when context is filling up but you want to continue in the same session. The same logic fires automatically at 75% of the context budget unless disabled — see "Compacting a session" below. |
 | `/compact <focus>` | Same as `/compact`, but passes a focus hint to the model so the summary is tailored toward the next task (e.g. `/compact fix the auth bug next`) |
 | `/history` | Show a condensed view of the conversation (role + preview of each message) |
+| `/replay [n\|all]` | Re-display the last `n` turns in full — your message, a one-line summary of the tools used, and the agent's rendered reply. Defaults to `repl.resumeReplayTurns` (3 if unset or 0); `all` shows every turn still in memory. This is the same view shown automatically when a session is resumed. Internal messages (self-correction nudges, plan-step summaries, `/run` results, the `/compact` summary) are left out. |
 | `/system` | Print the current system prompt |
 | `/system <prompt>` | Replace the system prompt for the rest of the session |
 | `/tools` | List active tools grouped by category, with enabled/disabled status. Restricted tools are marked `(restricted)`; any active capability restrictions are listed underneath. |
@@ -465,6 +466,9 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/resume` | Retry the halted step and continue the remaining steps as-is. Use this after manually fixing the issue. |
 | `/recover` | Inject a failure context hint into the step prompt and retry from the halted step. The agent is told which tool was expected, which tools were actually called, and why the step failed — giving it a better chance of self-correcting. |
 | `/assist` | Diagnose a stalled or broken conversation. A sub-agent reads the history, identifies the root cause, and injects a corrective instruction to redirect the REPL agent. |
+| `/goal [--max N] <objective>` | Work until an independent audit confirms the objective is provably met. After each turn a separate tool-less model call reads the transcript, and anything the agent only *claims* counts as unverified; if something is missing the agent is re-prompted with exactly what. Stops on `complete`, `paused` (needs your input), `not verified` (budget of `N` audits, default 5, max 50), `stalled` (same gap 3 audits running), `interrupted` (Ctrl+C) or a failed audit. See [REPL — `/goal`](repl.md#working-until-its-really-done-goal). |
+| `/goal resume [--max N]` | Pick up the last goal that did not complete, with a fresh audit budget. |
+| `/image <path>… [message]` | Send one or more images (PNG, JPEG, GIF, WebP — up to 8, 20 MB each) with a message. Quote paths containing spaces; with no message the model is asked to describe the image. An inline `@shot.png` in an ordinary message attaches it too. Needs a vision-capable model. See [REPL — Images](repl.md#images). |
 | `/memory` | List all stored memories (name, type, description) |
 | `/memory list` | Same as `/memory` |
 | `/memory show <name>` | Show the full body of a stored memory |
@@ -479,11 +483,14 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/events stats` | Same as `/events` |
 | `/explore <query>` | Run a sub-agent exploration loop over the codebase and return a prose summary. The sub-agent uses read-only tools and runs in an isolated context with no shared history from the main session. |
 | `/locate <symbol>` | Run a sub-agent symbol lookup and return a `path:line` result. Faster and more targeted than `/explore` for single-symbol lookups. |
+| `/agents` | List your [user-defined sub-agents](sub-agents.md) (Markdown files in `.fuseraft/agents/` or `.agents/agents/`) with scope, model and tools, plus any problems found loading them. |
+| `/agent <name> <task>` | Run one of your sub-agents directly on a task and show its report. The model can also call them itself through the `sub_agent_run` tool. |
 | `/safe-mode` | Show current safe mode status |
 | `/safe-mode on` | Block Shell, Git, and Http tools by owning plugin (including those in the Extended bucket) |
 | `/safe-mode off` | Restore tool categories to their state before safe mode was enabled |
 | `/hitl` | Show current HITL (human-in-the-loop) mode status |
 | `/hitl on` | Require y/N approval before each shell run, and before every FileSystem write/delete, Git write, or write-ish Http call |
+| `/hitl auto` | Like `on`, but shell commands that are provably read-only (`ls`, `git status`, `grep`, `git log \| head`, …) run without asking. Everything that can change something — including every FileSystem write, Git write, and write-ish Http call — still asks. See [Read-only auto-approval](#read-only-auto-approval-hitl-auto) |
 | `/hitl off` | Run those calls without approval again |
 | `/adversarial` | Show adversarial mode status |
 | `/adversarial on` | Enable a critic agent that reviews each `/execute` step after postconditions pass, and every free-form response. The critic judges whether the response was correct, grounded in actual tool output, and complete — halting the plan on a step rejection, or injecting one correction turn on a free-form rejection. |
@@ -597,9 +604,21 @@ Action allowed.
 - **y / yes** — the call runs normally
 - **Enter / anything else** — the call is blocked; the agent receives `[DENIED]` and can try an alternative or ask what to do
 
+##### Read-only auto-approval (`/hitl auto`)
+
+Prompting for every `ls` and `git status` trains people to press `y` without reading, which is worse than a prompt that only appears when something can change. `/hitl auto` (or `fuseraft settings set repl.hitlAutoApproveReadOnly true` to make it the default) skips the prompt for a shell command only when it is **provably** read-only. The bar is high, and when in doubt it asks:
+
+- Every simple command in it must be on a fixed allowlist — `ls`, `cat`, `head`, `tail`, `wc`, `grep`/`rg`, `find`, `sort`, `diff`, `stat`, `du`, `df`, `which`, `echo`, `date`, `jq`, checksums, and the read-only `git` subcommands (`status`, `diff`, `log`, `show`, `blame`, `branch` (listing), `tag` (listing), `remote -v`, `config --get`, `rev-parse`, `ls-files`, …). Pipelines and `;`/`&&`/`||` chains qualify only if *every* segment does.
+- No flag may turn it into a writer or an executor: `find -exec`/`-delete`, `sort -o`, `rg --pre`, `git -c core.pager=…`, `git diff --output=…`, `date -s`, `uniq in out`.
+- Any redirection to a file disqualifies it (`ls > out.txt`); `2>&1` and `/dev/null` are fine.
+- An environment assignment disqualifies it (`LD_PRELOAD=… ls`, `PATH=./evil:$PATH; ls`), as does a command path that isn't a bare name or a system directory (`./ls` is not `ls`).
+- A command substitution hidden inside quotes (`echo "$(rm x)"`) can't be inspected, so it isn't auto-approved.
+
+"Read-only" is about side effects, not secrecy, and it is checked *after* the hard denials: a read-only command that names a `.env` or a credentials file, or that leaves the sandbox, is still denied first, so auto mode can't be used to read a key. `/hitl on` withdraws the auto-approval again. Auto mode is REPL-only; `fuseraft run --hitl` is unchanged.
+
 HITL mode is **on by default** and toggles instantly — no need to restart the session or wait for the next tool-schema rebuild. `/hitl off` disables it for the rest of the session, or launch with `--yolo` to start with it already off. Unlike `--hitl` in `fuseraft run`, the REPL's `/hitl` has no "pause after every turn" behavior, since the REPL is already interactive turn-by-turn. Read-only tools (`read_file`, `git_status`, `http_get`, …) are never gated; use `/safe-mode` to disable whole categories outright, or `/tools restrict` below for a finer-grained lock.
 
-The REPL also sandboxes FileSystem/Shell/Git/Search to the launch directory (plus any `--include` roots) by default. For most tools a path outside it is rejected outright; for the FileSystem read/write surface, a denied path instead offers a HITL prompt to grant it on the spot for the rest of the session — see [Filesystem sandbox](security.md#filesystem-sandbox) for exactly which tools and how the grant persists. `--yolo` removes this sandbox too.
+The REPL also sandboxes FileSystem/Shell/Git/Search to the launch directory (plus any `--include` roots) by default. (The grant prompt below is only for the *sandbox boundary*. A path that matches a [deny rule](security.md#a-deny-rule-is-never-a-prompt) — `.env`, a credentials file — is never offered for approval.) For most tools a path outside it is rejected outright; for the FileSystem read/write surface, a denied path instead offers a HITL prompt to grant it on the spot for the rest of the session — see [Filesystem sandbox](security.md#filesystem-sandbox) for exactly which tools and how the grant persists. `--yolo` removes this sandbox too.
 
 Safe mode itself (`/safe-mode`, distinct from HITL) is off by default; engage it on every REPL launch with `fuseraft settings set repl.safeMode true` (skipped in VS Code/JSON-bridge mode, and skipped under `--yolo`) instead of typing `/safe-mode on` each session.
 
@@ -2561,6 +2580,8 @@ Sets one field by a dotted, case-insensitive key. Loads the existing config (or 
 | `sampling.maxOutputTokens` | Integer, or `""` to clear |
 | `repl.contextBudget` | Token budget override, or `""` to clear |
 | `repl.autoCompact` | `true`/`false` — auto-compact at 75% context instead of only warning (default `true`) |
+| `repl.hitlAutoApproveReadOnly` | `true`/`false` — start every session in `/hitl auto`: with HITL on, provably read-only shell commands skip the y/N prompt (default `false` — every shell command asks) |
+| `repl.resumeReplayTurns` | Integer ≥ 0 — how many recent turns to re-display when a session is resumed with `--resume` or `/switch` (default `3`; `0` turns it off, and `/replay` still works on demand) |
 | `repl.noBanner` | `true`/`false` |
 | `repl.verbose` | `true`/`false` |
 | `repl.safeMode` | `true`/`false` — engage `/safe-mode` at startup |

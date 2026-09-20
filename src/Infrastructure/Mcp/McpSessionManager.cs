@@ -168,7 +168,10 @@ public sealed class McpSessionManager : IAsyncDisposable
                 clientOptions.InitializationTimeout = TimeSpan.FromMinutes(5);
             }
 
-            var transport = new HttpClientTransport(options, _loggerFactory);
+            // The SDK's own HttpClient follows redirects with the configured headers attached; this
+            // one drops them when a redirect leaves the configured origin.
+            var httpClient = new HttpClient(new OriginBoundRedirectHandler(server.Headers.Keys));
+            var transport  = new HttpClientTransport(options, httpClient, _loggerFactory, ownsHttpClient: true);
             return await McpClient.CreateAsync(transport, clientOptions, _loggerFactory, ct);
         }
         else // stdio (default)

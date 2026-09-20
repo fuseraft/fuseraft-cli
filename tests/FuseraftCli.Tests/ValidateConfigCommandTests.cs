@@ -1772,4 +1772,124 @@ public class ValidateConfigCommandTests : IDisposable
         _tempFiles.Add(tempPath);
         return tempPath;
     }
+
+    [Fact]
+    public async Task ShellPolicy_UnknownAllowMode_Errors()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
+            "Security": { "ShellPolicy": {"Allow": ["go test"], "AllowMode": "bogus"} }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task ShellPolicy_SegmentsAllowMode_IsValid()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
+            "Security": { "ShellPolicy": {"Allow": ["go test"], "AllowMode": "segments"} }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(0, exitCode);
+    }
+
+    [Fact]
+    public async Task ShellPolicy_SegmentsAllowMode_IsCaseInsensitive()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
+            "Security": { "ShellPolicy": {"Allow": ["go test"], "AllowMode": "SEGMENTS"} }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(0, exitCode);
+    }
+
+    [Fact]
+    public async Task ShellPolicy_SubstringAllowMode_IsValid()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
+            "Security": { "ShellPolicy": {"Allow": ["go test"], "AllowMode": "substring"} }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(0, exitCode);
+    }
+
+    [Fact]
+    public async Task ShellPolicy_SegmentsWithEmptyAllow_WarnsButDoesNotFail()
+    {
+        var config = """
+        {
+          "Orchestration": {
+            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
+            "Security": { "ShellPolicy": {"AllowMode": "segments"} }
+          }
+        }
+        """;
+        var tempPath = CreateTempFile(config);
+        var settings = new ValidateConfigSettings { Path = tempPath };
+
+        var registry = new PluginRegistry();
+        registry.RegisterDefaults();
+        var command = new ValidateConfigCommand(registry);
+        var exitCode = await command.ExecuteAsync(null!, settings);
+
+        Assert.Equal(0, exitCode);
+    }
 }

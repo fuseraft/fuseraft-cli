@@ -22,6 +22,14 @@ internal static class ExplorerToolSets
     public static readonly IReadOnlySet<string> ShellRead = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         { "shell_run", "shell_get_env", "shell_which", "shell_get_working_directory" };
 
+    /// <summary>
+    /// Members of the explorer sets above that can nonetheless mutate state: <c>shell_run</c> runs arbitrary
+    /// commands (the built-in explore/locate loops keep it to "verify a hypothesis"). Anything that promises
+    /// to be strictly read-only — a user-defined sub-agent's default tool set — must leave these out.
+    /// </summary>
+    public static readonly IReadOnlySet<string> CanMutate = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        { "shell_run" };
+
     public static readonly IReadOnlySet<string> GitRead = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         { "git_status", "git_diff", "git_log", "git_show", "git_branch_list", "git_stash_list" };
 }

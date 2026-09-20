@@ -154,4 +154,7 @@ public static class EventTypes
     public const string ReplWarning           = "repl_warning";
     public const string FileChanges           = "file_changes";
     public const string HistoryTrimmed        = "history_trimmed";
+    public const string GoalStarted           = "goal_started";
+    public const string GoalAudit             = "goal_audit";
+    public const string GoalEnded             = "goal_ended";
 }

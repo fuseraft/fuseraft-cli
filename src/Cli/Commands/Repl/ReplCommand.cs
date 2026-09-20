@@ -11,6 +11,7 @@ using fuseraft.Cli.Telemetry;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
+using fuseraft.Core.SubAgents;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.KeyStore;
 using fuseraft.Infrastructure.Plugins;
@@ -245,7 +246,11 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // webview), the console-based prompt would write to stdout the extension can't parse and
         // block on a stdin reply it can never send — use the JSON-bridge approval service
         // instead so the webview can render and answer it.
-        var hitlState = new HitlModeState { Enabled = !settings.Yolo };
+        var hitlState = new HitlModeState
+        {
+            Enabled             = !settings.Yolo,
+            AutoApproveReadOnly = userCfg?.Repl?.HitlAutoApproveReadOnly ?? false,
+        };
 
         // Sandbox root for FileSystem/Shell/Git — confines those plugins' filesystem/repo access
         // to the launch directory by default, same as --yolo skips HITL. null (via --yolo) means
@@ -326,12 +331,14 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // config at all — the same baseline PluginRegistry.Configure applies for orchestration.
         var securityConfig       = TryLoadDefaultSecurityConfig();
         var effectiveShellPolicy = DefaultSecurityPolicy.MergeShellPolicy(securityConfig?.ShellPolicy);
-        var fsDenyPatterns       = DefaultSecurityPolicy.MergeFileSystemDeny(securityConfig?.FileSystemPermissions);
+        var fsDenyPatterns       = DefaultSecurityPolicy.MergeFileSystemDeny(securityConfig?.FileSystemPermissions, securityConfig?.DenyCredentialFiles ?? true);
         using ShellPlugin? shellPlugin  = settings.NoTools ? null : new ShellPlugin(
             sandboxRoot:    sandboxRoot,
             shellPolicy:    effectiveShellPolicy,
-            approveCommand: cmd => hitlState.Enabled ? approvalService.PromptShellCommandAsync(cmd) : Task.FromResult(true),
-            includedRoots:  includedRoots);
+            approveCommand: cmd => hitlState.RequiresShellApproval(cmd) ? approvalService.PromptShellCommandAsync(cmd) : Task.FromResult(true),
+            includedRoots:  includedRoots,
+            blockCredentialFiles: securityConfig?.DenyCredentialFiles ?? true,
+            denyPatterns:   fsDenyPatterns);
 
         // Same y/N gate as ShellPlugin's approveCommand above, generalized to the mutating
         // FileSystem/Git/Http tools — see IHumanApprovalService.PromptToolActionAsync.
@@ -348,6 +355,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 ? approvalService.PromptFileWriteAsync(action, path, oldContent, newContent)
                 : Task.FromResult(true);
         SubAgentPlugin? subAgent        = null;
+        IReadOnlyList<string> agentProblems = [];
         IReadOnlyList<AgentSkill> discoveredSkills = [];
         string?         skillsCatalog   = null;
         List<AIFunction>? explorerTools = null;
@@ -365,8 +373,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 .Concat(PluginRegistry.GetFunctionsFromObject(new FileSystemManagementOps(fsPluginForCategory, sandboxRoot: sandboxRoot, includedRoots: includedRoots)))
                 .ToList();
             shellFunctions = PluginRegistry.GetFunctionsFromObject(shellPlugin!).ToList();
-            gitFunctions   = PluginRegistry.GetFunctionsFromObject(new GitPlugin(approveToolAction("Git"), sandboxRoot, includedRoots)).ToList();
-            toolsByCategory["Search"]     = PluginRegistry.GetFunctionsFromObject(new SearchPlugin(sandboxRoot, includedRoots)).ToList();
+            gitFunctions   = PluginRegistry.GetFunctionsFromObject(new GitPlugin(approveToolAction("Git"), sandboxRoot, includedRoots, fsDenyPatterns)).ToList();
+            toolsByCategory["Search"]     = PluginRegistry.GetFunctionsFromObject(new SearchPlugin(sandboxRoot, includedRoots, fsDenyPatterns)).ToList();
             todoPlugin                    = new TodoPlugin();
             toolsByCategory["Todo"]       = PluginRegistry.GetFunctionsFromObject(todoPlugin).ToList();
 
@@ -556,14 +564,26 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 ? factory.Resolve(new ModelConfig { ModelId = sam })
                 : modelConfig;
 
+            // User-defined agents (.fuseraft/agents/*.md, .agents/agents/*.md, and the user-level
+            // equivalents). Loaded here rather than lazily so the model's tool list — which enumerates
+            // them — is complete from the first turn.
+            var agentLoad = SubAgentDefinitionLoader.LoadFromDirectories(SubAgentDefinitionLoader.DefaultSearchDirs(cwd));
+
             subAgent = new SubAgentPlugin(
                 ReplFactory.BuildClient(subAgentModelCfg, factory, explorerTools.Count > 0, adaptiveTrimTracker, emitter, tools: explorerTools),
                 explorerTools,
                 eventEmitter:     emitter,
                 parentAgentName:  "repl",
                 delegateTools:    delegateTools,
-                diagnosticTools:  sessionDiagnosticTools);
+                diagnosticTools:  sessionDiagnosticTools,
+                customAgents:     agentLoad.Definitions,
+                customAgentClientFactory: model => ReplFactory.BuildClient(
+                    factory.Resolve(new ModelConfig { ModelId = model }), factory,
+                    explorerTools.Count > 0, adaptiveTrimTracker, emitter, tools: explorerTools));
             toolsByCategory["SubAgent"] = PluginRegistry.GetFunctionsFromObject(subAgent).ToList();
+            if (subAgent.BuildRunAgentTool() is { } runAgentTool)
+                toolsByCategory["SubAgent"].Add(runAgentTool);
+            agentProblems = [.. agentLoad.Problems, .. subAgent.CustomAgentProblems];
         }
 
         // Wrap every tool category:
@@ -640,8 +660,13 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             MemoryCount = memoryEntries.Count,
             McpManager  = mcpManager,
             StdinPump   = stdinPump,
+            AgentProblems = agentProblems,
         };
         ctxForStdin = ctx;
+
+        // Sub-agents (built-in and user-defined) may only use what the session itself currently allows,
+        // so /safe-mode and /tools restrict cannot be sidestepped by delegating.
+        if (subAgent is not null) subAgent.ToolGate = ctx.IsToolAllowed;
         stdinPump?.Start();
 
         // A persisted safe-mode default engages the real category-disable logic (not just the
@@ -698,6 +723,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                     $"[dim]  Resuming session [bold]{Markup.Escape(sessionId)}[/] · {snapshot.TurnIndex} turn{(snapshot.TurnIndex == 1 ? "" : "s")} · " +
                     $"started {Markup.Escape(snapshot.StartedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"))}[/]");
             }
+
+            ReplReplay.ShowOnRestore(ctx);
 
             // Restore plan execution state so a crash mid-plan is transparent on resume.
             if (snapshot.ExecutionQueue is { Length: > 0 })

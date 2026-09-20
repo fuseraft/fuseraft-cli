@@ -1,5 +1,8 @@
+using System.Collections.Concurrent;
 using System.ComponentModel;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.FileSystemGlobbing;
 using fuseraft.Core;
 
 namespace fuseraft.Infrastructure.Plugins;
@@ -14,18 +17,32 @@ namespace fuseraft.Infrastructure.Plugins;
 /// rejected if it falls outside the sandbox tree — including read-only queries, since
 /// <c>git log</c>/<c>git show</c> against an arbitrary path outside the sandbox is an
 /// information-disclosure concern, not just a write-safety one.
+///
+/// <para>
+/// When <c>denyPatterns</c> are supplied (the same FileSystem deny globs the FileSystem plugin
+/// enforces), the contents of a protected file never come back through Git either: patch output has
+/// the body of a denied file's section replaced by a notice (<see cref="GitDeniedContentFilter"/>),
+/// and <c>git_show</c> refuses <c>&lt;ref&gt;:&lt;path&gt;</c> for a denied path and a bare blob hash
+/// (which has no path to check).
+/// </para>
 /// </summary>
 public sealed class GitPlugin
 {
     private readonly Func<string, string, Task<bool>>? _approveAction;
     private readonly string? _sandboxRoot;
     private readonly IncludedRootsState _includedRoots;
+    private readonly Matcher? _denyMatcher;
+    private readonly ConcurrentDictionary<string, string> _topLevels = new();
 
-    public GitPlugin(Func<string, string, Task<bool>>? approveAction = null, string? sandboxRoot = null, IncludedRootsState? includedRoots = null)
+    public GitPlugin(
+        Func<string, string, Task<bool>>? approveAction = null, string? sandboxRoot = null,
+        IncludedRootsState? includedRoots = null, IReadOnlyList<string>? denyPatterns = null)
     {
         _approveAction = approveAction;
         _sandboxRoot   = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _includedRoots = includedRoots ?? IncludedRootsState.Empty;
+        _denyMatcher   = FileSystemSandbox.BuildDenyMatcher(denyPatterns);
+        KnownSecretFiles.Track(_sandboxRoot, denyPatterns, includeHomeCredentials: false);
     }
 
     // Validates that repoPath (or directory, for InitAsync) stays within the sandbox. When a
@@ -71,9 +88,10 @@ public sealed class GitPlugin
         var denial = ValidateRepoPath(repoPath, out var resolved);
         if (denial is not null) return denial;
 
-        var refArg = string.IsNullOrWhiteSpace(@ref) ? string.Empty : $" {@ref}";
-        var result = await Git(
-            $"log --oneline --decorate -n {count}{refArg}", resolved);
+        if (!TryParseRevisionArguments(@ref, out var refArgs, out var refused))
+            return RefusedOption(refused!);
+
+        var result = await Git(["log", "--oneline", "--decorate", "-n", count.ToString(), .. refArgs], resolved);
         return result.ToPluginOutput();
     }
 
@@ -86,7 +104,13 @@ public sealed class GitPlugin
         var denial = ValidateRepoPath(repoPath, out var resolved);
         if (denial is not null) return denial;
 
-        var result = await Git($"show {commitRef}", resolved);
+        if (!TryParseRevisionArguments(commitRef, out var showArgs, out var refused))
+            return RefusedOption(refused!);
+
+        var blobDenial = await CheckShowTargetsAsync(commitRef, resolved);
+        if (blobDenial is not null) return blobDenial;
+
+        var result = await Git(["show", .. showArgs], resolved);
         return TruncateLines(result.ToPluginOutput(), maxLines);
     }
 
@@ -388,8 +412,138 @@ public sealed class GitPlugin
 
     // Helpers
 
-    private static Task<ProcessResult> Git(string args, string? workingDirectory = null) =>
-        ProcessHelper.RunAsync("git", args, workingDirectory);
+    // Every Git tool that shells out through here gets patch output scrubbed of denied files' contents,
+    // whichever tool produced it (git_diff, git_show, or git_log given `-p` as its ref).
+    private async Task<ProcessResult> Git(string args, string? workingDirectory = null) =>
+        await HideDeniedContentAsync(await ProcessHelper.RunAsync("git", args, workingDirectory), workingDirectory);
+
+    // Each element reaches git as its own argument, so nothing the model wrote can be re-split into an option.
+    private async Task<ProcessResult> Git(IEnumerable<string> args, string? workingDirectory = null) =>
+        await HideDeniedContentAsync(await ProcessHelper.RunAsync("git", args, workingDirectory), workingDirectory);
+
+    private async Task<ProcessResult> HideDeniedContentAsync(ProcessResult result, string? workingDirectory)
+    {
+        if (_denyMatcher is null || !GitDeniedContentFilter.ContainsPatch(result.Stdout)) return result;
+
+        var top = await TopLevelAsync(workingDirectory);
+        return result with
+        {
+            Stdout = GitDeniedContentFilter.HideDeniedSections(result.Stdout, top, _denyMatcher, _sandboxRoot, out _),
+        };
+    }
+
+    // Paths in a diff header, and in `<ref>:<path>`, are relative to the repository top-level.
+    private async Task<string> TopLevelAsync(string? workingDirectory)
+    {
+        var key = workingDirectory ?? Directory.GetCurrentDirectory();
+        if (_topLevels.TryGetValue(key, out var cached)) return cached;
+
+        var result = await ProcessHelper.RunAsync("git", "rev-parse --show-toplevel", workingDirectory);
+        var top = result.Succeeded && !string.IsNullOrWhiteSpace(result.Stdout) ? result.Stdout.Trim() : key;
+        return _topLevels[key] = top;
+    }
+
+    // `git show HEAD:.env` prints a raw blob — no `diff --git` header for the filter to see — so the
+    // path in a `<ref>:<path>` argument is checked up front. A bare blob hash (`git show 3f2a…`) has no
+    // path at all, so it can't be checked and is refused; `git show HEAD:<path>` is the way to show one.
+    // Arguments after `--` are pathspecs (they narrow a diff, whose output is filtered), and options
+    // are skipped.
+    private async Task<string?> CheckShowTargetsAsync(string commitRef, string? workingDirectory)
+    {
+        if (_denyMatcher is null) return null;
+
+        var cwd = workingDirectory ?? Directory.GetCurrentDirectory();
+        string? top = null;
+
+        foreach (var token in commitRef.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (token == "--") break;
+            if (token.StartsWith('-')) continue;
+
+            if (TryGetBlobPath(token, out var path))
+            {
+                top ??= await TopLevelAsync(workingDirectory);
+                foreach (var baseDir in new[] { top, cwd })   // `HEAD:./x` is relative to the cwd, `HEAD:x` to the top-level
+                {
+                    string full;
+                    try { full = Path.GetFullPath(Path.Combine(baseDir, path.Replace('\\', '/'))); }
+                    catch (ArgumentException) { continue; }
+
+                    if (FileSystemSandbox.MatchesDenyRule(_denyMatcher, full, _sandboxRoot))
+                        return FileSystemSandbox.DenyRuleDenial(full);
+                }
+                continue;
+            }
+
+            var type = await ProcessHelper.RunAsync("git", ["cat-file", "-t", token], workingDirectory);
+            if (type.Succeeded && type.Stdout.Trim() == "blob")
+                return PluginResult.Denied(
+                    "git show of a bare blob object can't be checked against FileSystem deny rules " +
+                    "(a blob hash has no path). Show it by path instead, e.g. `git show HEAD:<path>`.");
+        }
+        return null;
+    }
+
+    // `HEAD:path`, `v1.0:dir/file`, `:path` and `:0:path` (index stages) name a blob by path.
+    private static bool TryGetBlobPath(string token, out string path)
+    {
+        path = string.Empty;
+        var colon = token.IndexOf(':');
+        if (colon < 0) return false;
+
+        var rest = token[(colon + 1)..];
+        if (colon == 0 && Regex.Match(rest, @"^\d:(.*)$") is { Success: true } stage)
+            rest = stage.Groups[1].Value;
+
+        path = rest;
+        return path.Length > 0;
+    }
+
+    // git_show's `commitRef` and git_log's `ref` are text the model wrote. They used to be spliced into the
+    // command line, so `HEAD --output=leak.txt` made git write the UNFILTERED patch — deny-ruled files
+    // included — to a file of the model's choosing (outside the sandbox, if it liked), which read_file could
+    // then open. Options are therefore an allowlist of display/selection flags; anything else is refused.
+    private static readonly HashSet<string> SafeRevisionOptions = new(StringComparer.Ordinal)
+    {
+        "--", "-p", "--patch", "-s", "--no-patch", "--stat", "--shortstat", "--numstat", "--raw", "--summary",
+        "--name-only", "--name-status", "--oneline", "--decorate", "--no-decorate", "--graph", "--all",
+        "--first-parent", "--merges", "--no-merges", "--reverse", "--no-color", "--follow", "--cc", "-m", "-c",
+        "--full-history", "--date-order", "--topo-order", "--abbrev-commit", "--no-abbrev-commit",
+        "--no-renames", "-M", "-C", "-n",
+    };
+
+    private static readonly Regex SafeRevisionOptionPattern = new(
+        @"^(-U\d+|--unified=\d+|--max-count=\d+|-n\d+|--diff-filter=[A-Za-z]+|--pretty=.*|--format=.*|" +
+        @"--author=.*|--grep=.*|--since=.*|--until=.*|--after=.*|--before=.*)$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    // Splits on whitespace (a ref can't contain any) and refuses the first option that isn't allowlisted.
+    // Tokens after `--` are pathspecs and are never options.
+    private static bool TryParseRevisionArguments(string? text, out List<string> args, out string? refusedOption)
+    {
+        args = [];
+        refusedOption = null;
+        var pathspecs = false;
+
+        foreach (var token in (text ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!pathspecs && token.StartsWith('-')
+                && !SafeRevisionOptions.Contains(token) && !SafeRevisionOptionPattern.IsMatch(token))
+            {
+                refusedOption = token;
+                return false;
+            }
+            if (token == "--") pathspecs = true;
+            args.Add(token);
+        }
+        return true;
+    }
+
+    private static string RefusedOption(string option) =>
+        PluginResult.Denied(
+            $"git option '{option}' is not accepted here — this argument takes a commit, ref, or path, plus display " +
+            "options such as --stat, -p, --name-only or --oneline. An option that can write a file or run a program " +
+            "(--output, --ext-diff, …) would get around the sandbox and the FileSystem deny rules.");
 
     private static string TruncateLines(string text, int maxLines)
     {

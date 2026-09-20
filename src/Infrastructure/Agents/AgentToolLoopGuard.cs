@@ -7,7 +7,8 @@ namespace fuseraft.Infrastructure.Agents;
 /// <see cref="FunctionInvokingChatClient.FunctionInvoker"/> for every orchestration agent (see
 /// <see cref="AgentFactory.Create"/>) and for <c>SubAgentPlugin.RunLoopAsync</c>'s independent
 /// tool-calling loop, guarding against a model looping on the exact same tool call (same name +
-/// arguments) forever.
+/// arguments) forever, or bouncing between two identical calls (A/B/A/B — see
+/// <see cref="ToolCallCycleDetector"/>).
 ///
 /// <para>
 /// Unlike the REPL's guard (soft-nudge only — <c>ReplTurn.StreamTurnResponseAsync</c>'s own
@@ -46,6 +47,7 @@ internal sealed class AgentToolLoopGuard(string? agentName, EventEmitter? emitte
 
     private string _lastCallSignature = string.Empty;
     private int    _consecutiveIdentical;
+    private readonly ToolCallCycleDetector _cycles = new();
 
     public async ValueTask<object?> InvokeAsync(FunctionInvocationContext context, CancellationToken cancellationToken)
     {
@@ -53,11 +55,13 @@ internal sealed class AgentToolLoopGuard(string? agentName, EventEmitter? emitte
         {
             _lastCallSignature    = string.Empty;
             _consecutiveIdentical = 0;
+            _cycles.Reset();
         }
 
         var signature = $"{context.CallContent.Name}|{ToolCallSignature.Compute(context.Arguments)}";
         _consecutiveIdentical = signature == _lastCallSignature ? _consecutiveIdentical + 1 : 1;
         _lastCallSignature    = signature;
+        var cycle = _cycles.Observe(signature);
 
         var result = await context.Function.InvokeAsync(context.Arguments, cancellationToken);
 
@@ -65,11 +69,25 @@ internal sealed class AgentToolLoopGuard(string? agentName, EventEmitter? emitte
         // ReplToolLoopGuard's own convention (and Cline's LoopDetectionTracker softThreshold check).
         if (_consecutiveIdentical == SoftThreshold)
         {
-            await EmitAsync("soft", context.CallContent.Name, _consecutiveIdentical, SoftThreshold);
+            await EmitAsync("soft", "identical", context.CallContent.Name, _consecutiveIdentical, SoftThreshold);
         }
         else if (_consecutiveIdentical >= HardThreshold)
         {
-            await EmitAsync("hard", context.CallContent.Name, _consecutiveIdentical, HardThreshold);
+            await EmitAsync("hard", "identical", context.CallContent.Name, _consecutiveIdentical, HardThreshold);
+            context.Terminate = true;
+        }
+
+        // A/B/A/B — every call differs from the one before, so the identical-call streak above
+        // never climbs. See ToolCallCycleDetector.
+        if (cycle == ToolCallCycleVerdict.Soft)
+        {
+            await EmitAsync("soft", "alternating", context.CallContent.Name,
+                _cycles.LastLength, ToolCallCycleDetector.SoftThreshold);
+        }
+        else if (cycle == ToolCallCycleVerdict.Hard)
+        {
+            await EmitAsync("hard", "alternating", context.CallContent.Name,
+                _cycles.LastLength, ToolCallCycleDetector.HardThreshold);
             context.Terminate = true;
         }
 
@@ -79,10 +97,15 @@ internal sealed class AgentToolLoopGuard(string? agentName, EventEmitter? emitte
     // Awaited (not fire-and-forget like AgentMiddlewareBuilder's per-round events) — this fires
     // at most twice per turn, only when a loop is actually detected, so deterministic completion
     // is worth more than the negligible latency it costs on an already-stuck path.
-    private Task EmitAsync(string kind, string toolName, int streak, int threshold) =>
+    //
+    // "kind" (soft|hard) keeps its existing meaning for consumers; "pattern" says which detector
+    // fired — "identical" (same call N times in a row) or "alternating" (A/B/A/B, where "streak"
+    // is the number of calls in the alternating run and "tool" is the call that completed it).
+    private Task EmitAsync(string kind, string pattern, string toolName, int streak, int threshold) =>
         emitter?.EmitAsync(EventTypes.ToolLoopWarning, agent: agentName, turn: null, payload: new
         {
             kind,
+            pattern,
             tool = toolName,
             streak,
             threshold,

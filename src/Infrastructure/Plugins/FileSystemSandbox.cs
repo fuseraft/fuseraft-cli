@@ -102,6 +102,27 @@ internal static class FileSystemSandbox
     private static bool IsUnderRoot(string resolvedCheck, string root) =>
         resolvedCheck.StartsWith(root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, RootComparison);
 
+    // The wording ResolveSafe uses for a deny-rule denial, and the marker IsDenyRuleDenial looks for.
+    // One constant so the message and the check can't drift apart.
+    private const string DenyRulePhrase = "matches a FileSystem deny rule";
+
+    /// <summary>The standard denial for a path that matches a deny rule — shared so every tool words it alike.</summary>
+    internal static string DenyRuleDenial(string resolvedPath) =>
+        PluginResult.Denied(
+            $"Path '{resolvedPath}' {DenyRulePhrase} and is blocked for all operations " +
+            "(likely a credentials file). Do not read, write, or inspect it directly — if a script " +
+            "needs its values, let the script source it internally rather than surfacing its content.");
+
+    /// <summary>
+    /// True when <paramref name="denial"/> is a <c>FileSystem</c> deny-rule denial (a credentials
+    /// file, <c>.env</c>, a configured <c>Deny</c> glob) rather than a sandbox-boundary one. The two
+    /// must never be treated alike: leaving the sandbox is a boundary a human can widen with an
+    /// approval, but a deny rule is an explicit "never" — see
+    /// <see cref="IncludedRootsState.DenyOrEscalateAsync"/>.
+    /// </summary>
+    internal static bool IsDenyRuleDenial(string? denial) =>
+        denial is not null && denial.Contains(DenyRulePhrase, StringComparison.Ordinal);
+
     // Builds a case-insensitive glob matcher from a deny pattern list, or null when the list is
     // empty — callers can pass the result straight to ResolveSafe's denyMatcher parameter without
     // a separate null check. Shared by FileSystemPlugin and FileSystemManagementOps so both read
@@ -112,6 +133,31 @@ internal static class FileSystemSandbox
         var matcher = new Matcher(StringComparison.OrdinalIgnoreCase);
         foreach (var pattern in denyPatterns) matcher.AddInclude(pattern);
         return matcher;
+    }
+
+    /// <summary>
+    /// True when <paramref name="resolved"/> (an absolute path) matches <paramref name="denyMatcher"/>.
+    /// The single definition of "is this path deny-ruled", shared by <see cref="ResolveSafe"/> and by
+    /// tools that enumerate files themselves (the Search plugin) so they can't disagree.
+    /// </summary>
+    internal static bool MatchesDenyRule(Matcher? denyMatcher, string resolved, string? sandboxRoot)
+    {
+        if (denyMatcher is null) return false;
+
+        var relBase  = sandboxRoot ?? Path.GetDirectoryName(resolved) ?? resolved;
+        var relative = Path.GetRelativePath(relBase, resolved).Replace('\\', '/');
+        if (denyMatcher.Match(relative).HasMatches) return true;
+
+        // With no sandbox root the path above is just the file name, so a pattern that names a
+        // directory (`**/.aws/credentials`) could never match. The same goes for a path that has
+        // left the sandbox: its root-relative form is `../elsewhere/.env`, which no glob matches.
+        // Also try the path relative to the filesystem root; matching either way keeps every
+        // pattern that matched before.
+        var leftSandbox = sandboxRoot is null || relative == ".." || relative.StartsWith("../", StringComparison.Ordinal)
+                          || Path.IsPathRooted(relative);
+        return leftSandbox
+               && Path.GetPathRoot(resolved) is { Length: > 0 } fsRoot
+               && denyMatcher.Match(Path.GetRelativePath(fsRoot, resolved).Replace('\\', '/')).HasMatches;
     }
 
     // Resolves 'path' to its canonical absolute form: expands ~, strips wrapping quotes, and
@@ -158,16 +204,8 @@ internal static class FileSystemSandbox
     {
         resolved = ResolveAgainstRoot(path, sandboxRoot);
 
-        if (denyMatcher is not null)
-        {
-            var relBase  = sandboxRoot ?? Path.GetDirectoryName(resolved) ?? resolved;
-            var relative = Path.GetRelativePath(relBase, resolved).Replace('\\', '/');
-            if (denyMatcher.Match(relative).HasMatches)
-                return PluginResult.Denied(
-                    $"Path '{resolved}' matches a FileSystem deny rule and is blocked for all operations " +
-                    "(likely a credentials file). Do not read, write, or inspect it directly — if a script " +
-                    "needs its values, let the script source it internally rather than surfacing its content.");
-        }
+        if (MatchesDenyRule(denyMatcher, resolved, sandboxRoot))
+            return DenyRuleDenial(resolved);
 
         if (sandboxRoot is null)
             return null;

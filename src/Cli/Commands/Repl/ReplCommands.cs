@@ -17,6 +17,7 @@ internal static partial class ReplCommands
             case "/paste":      return CmdPaste(ctx.JsonMode);
             case "/save":       return await CmdSaveAsync(ctx, arg);
             case "/history":    CmdHistory(ctx); return CommandResult.Continue;
+            case "/replay":     return CmdReplay(ctx, arg);
             case "/context":    await CmdContextAsync(ctx); return CommandResult.Continue;
             case "/provider":   return await CmdProviderAsync(ctx, arg);
             case "/plan":       return await CmdPlanAsync(ctx, arg);
@@ -28,6 +29,8 @@ internal static partial class ReplCommands
             case "/hitl":         return await CmdHitlAsync(ctx, arg);
             case "/adversarial":  return CmdAdversarial(ctx, arg);
             case "/assist":       return await CmdAssistAsync(ctx, cancellationToken);
+            case "/goal":         return await CmdGoalAsync(ctx, arg, cancellationToken);
+            case "/image":        return CmdImage(ctx, arg);
             case "/memory":     return await CmdMemoryAsync(ctx, arg, cancellationToken);
             case "/max-tokens": return CmdMaxTokens(ctx, arg);
             case "/temperature": return CmdTemperature(ctx, arg);
@@ -37,6 +40,8 @@ internal static partial class ReplCommands
             case "/explore":    return await CmdExploreAsync(ctx, arg, cancellationToken);
             case "/locate":     return await CmdLocateAsync(ctx, arg, cancellationToken);
             case "/delegate":   return await CmdDelegateAsync(ctx, arg, cancellationToken);
+            case "/agents":     return CmdAgents(ctx);
+            case "/agent":      return await CmdAgentAsync(ctx, arg, cancellationToken);
             case "/sessions":      await CmdSessionsAsync(ctx.JsonMode, cancellationToken); return CommandResult.Continue;
             case "/fork":          return await CmdForkAsync(ctx, arg, cancellationToken);
             case "/switch":        return await CmdSwitchAsync(ctx, arg, cancellationToken);
@@ -87,10 +92,13 @@ internal static partial class ReplCommands
             new("/rewind <n>", "Keep turns 1…n and discard the rest"),
             new("/rewind -<n>", "Step back n turns from the current position"),
             new("/retry", "Resend the last message (useful when the response was poor)"),
+            new("/image <path> [message]", "Send an image (PNG, JPEG, GIF, WebP) with your message — or just mention it inline as @shot.png. Needs a vision-capable model"),
             new("/last", "Re-print the last assistant response"),
             new("/clear", "Clear conversation history (keeps system prompt)"),
             new("/history", "Show condensed conversation history"),
+            new("/replay [n|all]", "Re-display the last n turns in full (default 3) — the same view shown automatically when a session is resumed"),
             new("/assist", "Diagnose the conversation and inject a corrective message"),
+            new("/goal <objective>", "Work until an independent audit confirms the objective is met (--max N audits, default 5; /goal resume continues an unfinished one)"),
             new("/exit", "Exit the REPL (auto-saves memories)"),
         ]),
         new("Orchestration", [
@@ -163,6 +171,8 @@ internal static partial class ReplCommands
             new("/explore <query>", "Run a sub-agent exploration loop and return a prose summary"),
             new("/locate <symbol>", "Run a sub-agent symbol lookup; returns path:line result"),
             new("/delegate <task>", "Hand a self-contained subtask to a write-capable sub-agent (files, shell, git) and return its summary"),
+            new("/agents", "List user-defined sub-agents (Markdown files in .fuseraft/agents/ or .agents/agents/) and any load problems"),
+            new("/agent <name> <task>", "Run one of your sub-agents directly on a task and show its report"),
         ]),
     ];
 

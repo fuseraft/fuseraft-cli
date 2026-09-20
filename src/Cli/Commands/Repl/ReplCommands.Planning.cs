@@ -7,6 +7,10 @@ namespace fuseraft.Cli.Commands.Repl;
 
 internal static partial class ReplCommands
 {
+    // Leads the user-role message that /compact leaves in place of the summarised history;
+    // ReplReplay matches on it to know earlier turns were folded into a summary.
+    internal const string CompactedContextPrefix = "[Compacted context from previous session]";
+
     // -------------------------------------------------------------------------
     // /plan
     // -------------------------------------------------------------------------
@@ -279,7 +283,7 @@ internal static partial class ReplCommands
 
         var candidate = new List<ChatMessage>();
         if (sys is not null) candidate.Add(sys);
-        candidate.Add(new ChatMessage(ChatRole.User, $"[Compacted context from previous session]\n\n{summary}"));
+        candidate.Add(new ChatMessage(ChatRole.User, $"{CompactedContextPrefix}\n\n{summary}"));
         candidate.AddRange(preservedTail);
 
         // Acceptance bar (mirrors Cline's overflow-recovery contract): a compaction that

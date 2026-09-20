@@ -25,11 +25,11 @@ internal sealed class ReplLineReader
 
     private static readonly string[] SlashCommands =
     [
-        "/adversarial", "/assist", "/clear", "/compact", "/context",
+        "/adversarial", "/agent", "/agents", "/assist", "/clear", "/compact", "/context",
         "/conversation", "/delegate", "/events", "/execute", "/exit", "/explore",
-        "/fork", "/help", "/hitl", "/history", "/last", "/locate",
+        "/fork", "/goal", "/help", "/hitl", "/history", "/image", "/last", "/locate",
         "/max-tokens", "/mcp", "/memory", "/model", "/models", "/paste", "/plan",
-        "/provider", "/reasoning", "/recover", "/resume", "/retry", "/rewind",
+        "/provider", "/reasoning", "/recover", "/replay", "/resume", "/retry", "/rewind",
         "/run", "/safe-mode", "/save", "/seed", "/sessions", "/snapshot", "/switch",
         "/system", "/temperature", "/tools", "/top-p", "/undo",
     ];
@@ -39,11 +39,13 @@ internal sealed class ReplLineReader
     {
         ["/adversarial"] = ["off", "on"],
         ["/fork"]        = ["switch"],
+        ["/goal"]        = ["resume"],
         ["/hitl"]        = ["off", "on"],
         ["/max-tokens"]  = ["reset"],
         ["/mcp"]         = ["add", "login", "logout", "remove"],
         ["/memory"]      = ["delete", "list", "save", "show"],
         ["/provider"]    = ["setup"],
+        ["/replay"]      = ["all"],
         ["/safe-mode"]   = ["off", "on"],
         ["/seed"]        = ["reset"],
         ["/temperature"] = ["reset"],

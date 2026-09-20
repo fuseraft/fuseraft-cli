@@ -6,6 +6,7 @@ using Microsoft.Extensions.AI;
 using Spectre.Console;
 using fuseraft.Cli.Display;
 using fuseraft.Core;
+using fuseraft.Core.Images;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Chat;
@@ -33,6 +34,24 @@ namespace fuseraft.Cli.Commands.Repl;
 internal static class ReplTurn
 {
     internal const int StepIterationLimit = 5;
+
+    // Leading text of the canned user-role messages ExecuteAsync injects for its self-correction
+    // rounds. They land in ctx.History like real input, and nothing marks them as internal once
+    // the history round-trips through a session snapshot, so ReplReplay recognises them by these
+    // prefixes to keep them out of a resumed session's replayed turns.
+    internal const string EmptyReplyCorrectionPrefix   = "Your last reply was empty or contained internal tool-call text.";
+    internal const string NoWriteToolCorrectionPrefix  = "You described changes above but did not call any write tool.";
+    internal const string CriticRejectedCorrectionPrefix = "A critic reviewed ";
+    internal const string TodoOpenCorrectionPrefix     = "Your todo list still has ";
+    // /goal's follow-up and resume messages (see ReplGoal) are internal in the same sense.
+
+    internal static bool IsInternalCorrectionMessage(string text) =>
+        text.StartsWith(EmptyReplyCorrectionPrefix,    StringComparison.Ordinal) ||
+        text.StartsWith(NoWriteToolCorrectionPrefix,   StringComparison.Ordinal) ||
+        text.StartsWith(CriticRejectedCorrectionPrefix, StringComparison.Ordinal) ||
+        text.StartsWith(TodoOpenCorrectionPrefix,      StringComparison.Ordinal) ||
+        text.StartsWith(ReplGoal.FollowUpPrefix,       StringComparison.Ordinal) ||
+        text.StartsWith(ReplGoal.ResumePrefix,         StringComparison.Ordinal);
 
     // Tool-call round-trip cap for free-form turns (ctx.Client). Named so
     // ReplFactory.BuildClient's default and the hit-cap check below can't drift apart.
@@ -161,6 +180,44 @@ internal static class ReplTurn
             if (e is IOException or TimeoutException) return true;
         }
         return false;
+    }
+
+    /// <summary>The user message for a turn: plain text, or text followed by its image attachments.</summary>
+    internal static ChatMessage BuildUserMessage(string input, IReadOnlyList<DataContent>? attachments)
+    {
+        if (attachments is not { Count: > 0 }) return new ChatMessage(ChatRole.User, input);
+        var contents = new List<AIContent>(attachments.Count + 1) { new TextContent(input) };
+        contents.AddRange(attachments);
+        return new ChatMessage(ChatRole.User, contents);
+    }
+
+    /// <summary>
+    /// When a turn that carried images fails with a client-side rejection (or an error that names images), says
+    /// so — otherwise a model that simply cannot accept images produces a bare "400 Bad Request" that points
+    /// nowhere near the cause. <c>null</c> for anything else (auth, rate limits, timeouts, no images sent).
+    /// </summary>
+    internal static string? BuildImageRejectionHint(Exception ex, bool messageHadImages)
+    {
+        if (!messageHadImages) return null;
+
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            int? status = e switch
+            {
+                ClientResultException cre => cre.Status,
+                HttpRequestException { StatusCode: { } sc } => (int)sc,
+                _ => null,
+            };
+            var namesImages = e.Message.Contains("image", StringComparison.OrdinalIgnoreCase)
+                           || e.Message.Contains("vision", StringComparison.OrdinalIgnoreCase)
+                           || e.Message.Contains("multimodal", StringComparison.OrdinalIgnoreCase);
+            var clientRejection = status is >= 400 and < 500 and not 401 and not 403 and not 408 and not 429;
+            if (clientRejection || namesImages)
+                return "This message included an image. The current model or provider may not accept images, or the " +
+                       "image is too large (providers cap it at a few MB). Try /model with a vision-capable model, " +
+                       "or resend without the image.";
+        }
+        return null;
     }
 
     // Minimum active tool count above which a raw, unclassified 400/413 is plausibly a
@@ -312,12 +369,29 @@ internal static class ReplTurn
             }
 
             string? raw;
-            try   { raw = ctx.JsonMode ? await ctx.StdinPump!.ReadInputAsync() : ctx.LineReader.ReadLine(); }
+            IReadOnlyList<DataContent> bridgeImages = [];
+            try
+            {
+                if (ctx.JsonMode)
+                {
+                    var msg = await ctx.StdinPump!.ReadMessageAsync();
+                    raw = msg?.Text;
+                    if (msg is not null)
+                    {
+                        ReplImages.ReportErrors(ctx, msg.Errors);
+                        bridgeImages = msg.Images;
+                    }
+                }
+                else raw = ctx.LineReader.ReadLine();
+            }
             catch (OperationCanceledException) { break; }
 
             if (raw is null) break;
 
             raw = raw.Trim();
+            // A picture with no words is still a message.
+            if (raw.Length == 0 && bridgeImages.Count > 0)
+                raw = bridgeImages.Count == 1 ? "Describe this image." : "Describe these images.";
             if (string.IsNullOrEmpty(raw)) continue;
 
             if (raw.StartsWith('/'))
@@ -376,7 +450,8 @@ internal static class ReplTurn
                     isStepRequest: false,
                     capturePlan:   result.CapturePlan,
                     activeStep:    null,
-                    cancellationToken);
+                    cancellationToken,
+                    attachments:   result.Attachments);
                 _ = SaveSnapshotAsync(ctx);
                 continue;
             }
@@ -422,10 +497,16 @@ internal static class ReplTurn
                 raw.Equals("quit", StringComparison.OrdinalIgnoreCase))
                 break;
 
+            // `@shot.png` mentions attach the image; anything that merely looks like a mention is left alone.
+            var inline = ImageAttachments.ExtractInlineReferences(raw, ctx.Cwd);
+            ReplImages.ReportErrors(ctx, inline.Errors);
+            ReplImages.Announce(ctx, inline.Images);
+            var all = bridgeImages.Count == 0 ? inline.Images : [.. bridgeImages, .. inline.Images];
+
             await ExecuteAsync(
                 ctx, raw,
                 isStepRequest: false, capturePlan: false, activeStep: null,
-                cancellationToken);
+                cancellationToken, attachments: all);
             _ = SaveSnapshotAsync(ctx);
         }
     }
@@ -474,7 +555,8 @@ internal static class ReplTurn
         string? originalInput = null,
         int todoCorrectionRound = 0,
         int todoCriticRound = 0,
-        bool emptyResponseRetried = false)
+        bool emptyResponseRetried = false,
+        IReadOnlyList<DataContent>? attachments = null)
     {
         // The true original user request, preserved across every level of recursive
         // self-correction below — `input` itself becomes the injected correction text on
@@ -484,8 +566,17 @@ internal static class ReplTurn
 
         ctx.BeginTurn();
         ctx.Emitter.SetTurn(ctx.TurnIndex);
-        await ctx.Emitter.EmitAsync(EventTypes.UserInput, turn: ctx.TurnIndex, payload: new { content = input });
-        ctx.History.Add(new ChatMessage(ChatRole.User, input));
+        // Image bytes never go into the event log — only how many were attached.
+        await ctx.Emitter.EmitAsync(EventTypes.UserInput, turn: ctx.TurnIndex,
+            payload: new { content = input, images = attachments?.Count ?? 0 });
+        ctx.History.Add(BuildUserMessage(input, attachments));
+        if (attachments is { Count: > 0 })
+        {
+            var dropped = ImageAttachments.StripOlderImages(ctx.History);
+            if (dropped > 0 && !ctx.JsonMode)
+                AnsiConsole.MarkupLine(
+                    $"[dim]  ({dropped} older image{(dropped == 1 ? "" : "s")} dropped from context — only the last {ImageAttachments.KeepRecentImages} stay attached)[/]");
+        }
         await ctx.Emitter.EmitAsync(EventTypes.TurnStart, turn: ctx.TurnIndex, payload: new { is_step = isStepRequest, is_correction = isCorrectionTurn });
 
         // Preserve the user's input before the LLM call so a crash mid-turn still
@@ -519,6 +610,7 @@ internal static class ReplTurn
         var lastToolFailureDetail      = stream.LastToolFailureDetail;
         var hitRepeatedToolCallLimit   = stream.HitRepeatedToolCallLimit;
         var lastRepeatedToolCallDetail = stream.LastRepeatedToolCallDetail;
+        var repeatedToolCallLimit      = stream.RepeatedToolCallLimit;
 
         responseText = SanitizeAssistantResponse(responseText, out var warningMessage);
         if (!capturePlan && responseText.Length == 0)
@@ -531,7 +623,7 @@ internal static class ReplTurn
             if (!emptyResponseRetried)
             {
                 const string correctionMsg =
-                    "Your last reply was empty or contained internal tool-call text. " +
+                    EmptyReplyCorrectionPrefix + " " +
                     "Respond to the user with a concise, user-facing answer. " +
                     "If you need tools, call them first and then provide the answer in the same turn.";
                 return await ExecuteAsync(
@@ -683,7 +775,7 @@ internal static class ReplTurn
             await ctx.Emitter.EmitAsync(EventTypes.ReplWarning, turn: ctx.TurnIndex, payload: new
             {
                 message = "hit_repeated_tool_call_limit",
-                limit   = MaxConsecutiveIdenticalToolCalls,
+                limit   = repeatedToolCallLimit,
                 detail  = lastRepeatedToolCallDetail,
             });
             var repeatMsg = $"Stopped after {lastRepeatedToolCallDetail ?? $"{MaxConsecutiveIdenticalToolCalls} identical tool calls in a row"} " +
@@ -971,7 +1063,7 @@ internal static class ReplTurn
                 if (!ctx.JsonMode)
                     AnsiConsole.MarkupLine("[dim]  ↺ mutation claimed without write tool — injecting correction[/]");
                 const string correctionMsg =
-                    "You described changes above but did not call any write tool. " +
+                    NoWriteToolCorrectionPrefix + " " +
                     "Please call write_file or patch_file now to actually apply the changes. " +
                     "Do not re-describe the changes — just call the tool.";
                 await ExecuteAsync(
@@ -1019,7 +1111,7 @@ internal static class ReplTurn
                 if (!ctx.JsonMode)
                     AnsiConsole.MarkupLine($"[yellow]  ✗ Critic: {Markup.Escape(reason ?? "no reason given")}[/]");
                 var correctionMsg =
-                    $"A critic reviewed your last response and rejected it: {reason}\n" +
+                    $"{CriticRejectedCorrectionPrefix}your last response and rejected it: {reason}\n" +
                     "Verify the disputed claim with a tool call and correct your answer. " +
                     "Do not just restate the same claim.";
                 await ExecuteAsync(
@@ -1069,7 +1161,7 @@ internal static class ReplTurn
                     $"[dim]  ↺ {incomplete.Count} todo item{(incomplete.Count == 1 ? "" : "s")} still open — injecting correction ({todoCorrectionRound + 1}/{MaxTodoCorrectionRounds})[/]");
             var remainingList = string.Join("\n", incomplete.Select(i => $"- [{i.Status}] {i.Content}"));
             var correctionMsg =
-                $"Your todo list still has {incomplete.Count} incomplete item(s):\n{remainingList}\n\n" +
+                $"{TodoOpenCorrectionPrefix}{incomplete.Count} incomplete item(s):\n{remainingList}\n\n" +
                 "Continue working through them now. If an item genuinely no longer applies, call " +
                 "todo_write to update its status and say why in one sentence — do not just stop with it left open. " +
                 "When you do mark this checklist complete, state how you verified it against the original " +
@@ -1141,7 +1233,7 @@ internal static class ReplTurn
         if (!ctx.JsonMode)
             AnsiConsole.MarkupLine($"[yellow]  ✗ critic: {Markup.Escape(reason ?? "no reason given")}[/]");
         var correctionMsg =
-            $"A critic reviewed the still-incomplete todo list and disagreed that it's reasonable to " +
+            $"{CriticRejectedCorrectionPrefix}the still-incomplete todo list and disagreed that it's reasonable to " +
             $"stop: {reason}\nAct on that feedback now.";
         await ExecuteAsync(
             ctx, correctionMsg,
@@ -1170,13 +1262,14 @@ internal static class ReplTurn
         bool HitConsecutiveFailureLimit,
         string? LastToolFailureDetail,
         bool HitRepeatedToolCallLimit,
-        string? LastRepeatedToolCallDetail)
+        string? LastRepeatedToolCallDetail,
+        int RepeatedToolCallLimit)
     {
         // toolCallsThisTurn is preserved from the aborted attempt (not always empty) so a
         // step halted mid-stream can still report which tools it managed to call before
         // failing — see ReplTurnOutcome.HaltStepOnStreamFailure.
         internal static TurnStreamResult MakeFailed(List<string> toolCallsThisTurn) =>
-            new(false, "", toolCallsThisTurn, [], 0, null, 0, 0, 0, null, [], false, null, false, null);
+            new(false, "", toolCallsThisTurn, [], 0, null, 0, 0, 0, null, [], false, null, false, null, MaxConsecutiveIdenticalToolCalls);
     }
 
     /// <summary>
@@ -1208,6 +1301,10 @@ internal static class ReplTurn
         var toolCallsThisTurn = new List<string>();
         var fileChanges        = new List<(char Sigil, string Path)>();
         var fileChangeSeen     = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // A file-mutating call is only a *request* until its result arrives — a HITL denial, sandbox
+        // refusal or tool error means nothing changed. Held here by call id, committed to fileChanges
+        // (what the status line and file_changes event report) only when a non-failing result comes back.
+        var pendingFileChanges = new Dictionary<string, (char Sigil, string Path)>();
         var toolRounds        = 0;
         var usageRounds       = 0;
         var finishRounds      = 0;
@@ -1229,6 +1326,11 @@ internal static class ReplTurn
         var consecutiveIdenticalToolCalls  = 0;
         var hitRepeatedToolCallLimit       = false;
         string? lastRepeatedToolCallDetail = null;
+        // Which limit tripped hitRepeatedToolCallLimit — the identical-call cap, or the (longer)
+        // A/B/A/B alternation cap — so the warning event reports the one that actually fired.
+        var repeatedToolCallLimit          = MaxConsecutiveIdenticalToolCalls;
+        // Catches what the identical-call counter above cannot: read → test → read → test.
+        var toolCallCycles                 = new ToolCallCycleDetector();
 
         var reqCts    = new CancellationTokenSource();
         ctx.ActiveCts = reqCts;
@@ -1315,7 +1417,8 @@ internal static class ReplTurn
                 {
                     pendingParagraphBreak = true;
                     toolCallsThisTurn.Add(funcCall.Name);
-                    TrackFileChange(funcCall.Name, funcCall.Arguments, fileChanges, fileChangeSeen, ctx.Cwd);
+                    if (DescribeFileChange(funcCall.Name, funcCall.Arguments, ctx.Cwd) is { } requested)
+                        pendingFileChanges[funcCall.CallId ?? string.Empty] = requested;
                     if (callIdToName is not null && funcCall.CallId is not null)
                         callIdToName[funcCall.CallId] = funcCall.Name;
 
@@ -1325,6 +1428,7 @@ internal static class ReplTurn
                             ? consecutiveIdenticalToolCalls + 1 : 1;
                     lastToolCallName      = funcCall.Name;
                     lastToolCallSignature = callSignature;
+                    var cycleVerdict      = toolCallCycles.Observe($"{funcCall.Name}|{callSignature}");
 
                     if (ctx.JsonMode)
                     {
@@ -1363,12 +1467,22 @@ internal static class ReplTurn
                             $"{consecutiveIdenticalToolCalls} consecutive identical calls to '{funcCall.Name}'";
                         break;
                     }
+                    if (cycleVerdict == ToolCallCycleVerdict.Hard)
+                    {
+                        hitRepeatedToolCallLimit   = true;
+                        repeatedToolCallLimit      = ToolCallCycleDetector.HardThreshold;
+                        lastRepeatedToolCallDetail =
+                            $"{toolCallCycles.LastLength} tool calls alternating between the same two calls";
+                        break;
+                    }
                     continue;
                 }
 
                 var funcResult = chunk.Contents.OfType<FunctionResultContent>().FirstOrDefault();
                 if (funcResult is not null)
                 {
+                    CommitFileChange(pendingFileChanges, funcResult, fileChanges, fileChangeSeen);
+
                     if (IsToolFailure(funcResult))
                     {
                         consecutiveToolFailures++;
@@ -1476,13 +1590,14 @@ internal static class ReplTurn
             // Reset per-attempt accumulators before reissuing the request.
             sb.Clear(); rawUpdates.Clear(); toolCallsThisTurn.Clear();
             pendingParagraphBreak = false;
-            fileChanges.Clear(); fileChangeSeen.Clear();
+            fileChanges.Clear(); fileChangeSeen.Clear(); pendingFileChanges.Clear();
             capturedResults?.Clear(); callIdToName?.Clear();
             toolRounds = 0; usageRounds = 0; finishRounds = 0;
             turnInputTokens = 0; turnOutputTokens = 0; turnCacheReadTokens = 0; turnFirstInputTokens = null;
             consecutiveToolFailures = 0; hitConsecutiveFailureLimit = false; lastToolFailureDetail = null;
             lastToolCallName = string.Empty; lastToolCallSignature = string.Empty;
             consecutiveIdenticalToolCalls = 0; hitRepeatedToolCallLimit = false; lastRepeatedToolCallDetail = null;
+            repeatedToolCallLimit = MaxConsecutiveIdenticalToolCalls; toolCallCycles.Reset();
 
             // Restart spinner for the fresh attempt.
             spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
@@ -1505,7 +1620,9 @@ internal static class ReplTurn
                 final          = true,
             });
 
-            var toolSurfaceHint = BuildLargeToolSurfaceHint(ex, ctx.GetActiveTools().Count);
+            var toolSurfaceHint = BuildLargeToolSurfaceHint(ex, ctx.GetActiveTools().Count)
+                ?? BuildImageRejectionHint(ex, ctx.History.Count > 0 && ctx.History[^1] is { Role: var r } lastMsg
+                                               && r == ChatRole.User && ImageAttachments.CountImages(lastMsg) > 0);
             if (ctx.JsonMode)
                 ReplJsonBridge.Emit(new
                 {
@@ -1540,7 +1657,7 @@ internal static class ReplTurn
             true, sb.ToString(), toolCallsThisTurn, fileChanges, toolRounds, capturedResults,
             turnInputTokens, turnOutputTokens, turnCacheReadTokens, turnFirstInputTokens, rawUpdates,
             hitConsecutiveFailureLimit, lastToolFailureDetail,
-            hitRepeatedToolCallLimit, lastRepeatedToolCallDetail);
+            hitRepeatedToolCallLimit, lastRepeatedToolCallDetail, repeatedToolCallLimit);
     }
 
     internal static async Task ExtractMemoriesOnExitAsync(ReplSessionContext ctx)
@@ -1697,12 +1814,13 @@ internal static class ReplTurn
                lower.Contains(".vue") || lower.Contains(".kt")   || lower.Contains(".swift");
     }
 
-    private static void TrackFileChange(
-        string toolName,
-        IDictionary<string, object?>? args,
-        List<(char Sigil, string Path)> fileChanges,
-        HashSet<string> seen,
-        string cwd)
+    /// <summary>
+    /// What a file-mutating tool call would change — sigil (<c>A</c>dded / <c>M</c>odified / <c>D</c>eleted)
+    /// and display path — or <c>null</c> for any other tool. The A-vs-M decision is made here, at call time,
+    /// because that is before the write can have created the file.
+    /// </summary>
+    internal static (char Sigil, string Path)? DescribeFileChange(
+        string toolName, IDictionary<string, object?>? args, string cwd)
     {
         var n = toolName.Replace("_", "").ToLowerInvariant();
         string? rawPath;
@@ -1718,11 +1836,24 @@ internal static class ReplTurn
         else if (n is "deletefile" or "deletedirectory") { rawPath = GetArg(args, "path");                  sigil = 'D'; }
         else if (n is "copyfile")         { rawPath = GetArg(args, "destination") ?? GetArg(args, "path");  sigil = 'A'; }
         else if (n is "movefile")         { rawPath = GetArg(args, "destination");                          sigil = 'M'; }
-        else return;
-        if (string.IsNullOrWhiteSpace(rawPath)) return;
-        var display = MakeRelativePath(rawPath, cwd);
-        if (seen.Add(display))
-            fileChanges.Add((sigil, display));
+        else return null;
+        return string.IsNullOrWhiteSpace(rawPath) ? null : (sigil, MakeRelativePath(rawPath, cwd));
+    }
+
+    /// <summary>
+    /// Moves the pending change for <paramref name="result"/>'s call into <paramref name="fileChanges"/> — but only
+    /// when the tool did not fail. A denied or errored write leaves the file untouched, so reporting it as
+    /// changed would tell the user something false.
+    /// </summary>
+    internal static void CommitFileChange(
+        Dictionary<string, (char Sigil, string Path)> pending,
+        FunctionResultContent result,
+        List<(char Sigil, string Path)> fileChanges,
+        HashSet<string> seen)
+    {
+        if (!pending.Remove(result.CallId ?? string.Empty, out var change)) return;
+        if (IsToolFailure(result)) return;
+        if (seen.Add(change.Path)) fileChanges.Add(change);
     }
 
     // Recognises the codebase-wide failure-signalling conventions plugins use in their string
@@ -1736,12 +1867,13 @@ internal static class ReplTurn
     private static readonly string[] ToolFailurePrefixes =
         ["[ERROR]", "[FAIL]", "[DENIED]", "[NOT FOUND]", "[TIMEOUT]", "[EXIT "];
 
-    private static bool IsToolFailure(FunctionResultContent funcResult)
-    {
-        if (funcResult.Exception is not null) return true;
-        var text = funcResult.Result?.ToString();
-        return text is not null && ToolFailurePrefixes.Any(p => text.StartsWith(p, StringComparison.Ordinal));
-    }
+    private static bool IsToolFailure(FunctionResultContent funcResult) =>
+        funcResult.Exception is not null || IsToolFailureText(funcResult.Result?.ToString());
+
+    // Shared with ReplToolLoopGuard so its "one failure from the cutoff" notice and this class's
+    // consecutive-failure counter can never disagree about what a failure is.
+    internal static bool IsToolFailureText(string? text) =>
+        text is not null && ToolFailurePrefixes.Any(p => text.StartsWith(p, StringComparison.Ordinal));
 
     // True when the turn's accumulated text so far ends inside an unclosed **bold**
     // span (an odd number of "**" markers). Only called right before a round-boundary

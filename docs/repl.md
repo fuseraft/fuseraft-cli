@@ -85,11 +85,11 @@ Allow? (y/N):  n
 Command blocked.
 ```
 
-Toggle it with `/hitl on` / `/hitl off`, or skip it for the whole session with `--yolo` (which also drops the sandbox — full unattended access, for trusted use only).
+Toggle it with `/hitl on` / `/hitl off`, or run `/hitl auto` to stop being asked about commands that are provably read-only (`ls`, `git status`, `grep`, … — see [Read-only auto-approval](cli-reference.md#read-only-auto-approval-hitl-auto)). Or skip it for the whole session with `--yolo` (which also drops the sandbox — full unattended access, for trusted use only).
 
 Working across more than one project tree in a session? `--include <dir>` (repeatable) adds more allowed roots alongside the launch directory — shown in the banner as `Included:`. A path outside every allowed root isn't always a hard stop either: for the FileSystem read/write tools, a denied path offers a HITL prompt to grant it on the spot, and the grant covers the rest of the session. See [CLI Reference](cli-reference.md#fuseraft-repl) and [Security — Multi-root sessions](security.md#multi-root-sessions) for the full picture.
 
-**Capability restriction** — `/safe-mode on` blocks Shell/Git/Http outright; `/tools restrict <plugin> <tag…>` is finer-grained (e.g. `/tools restrict Git read` removes `git_commit`/`git_push` from the model's tool schema entirely, while leaving `git_status`/`git_diff` available).
+**Capability restriction** — `/safe-mode on` blocks Shell/Git/Http outright; `/tools restrict <plugin> <tag…>` is finer-grained (e.g. `/tools restrict Git read` removes `git_commit`/`git_push` from the model's tool schema entirely, while leaving `git_status`/`git_diff` available). Both also bind [sub-agents](sub-agents.md#safety): a delegated agent cannot use a tool the session has closed off.
 
 None of this touches read-only tools (`read_file`, `git_status`, `http_get`, ...) — approval gates are for actions with side effects. See [CLI Reference — Shell/FileSystem/Git/Http write approval](cli-reference.md#fuseraft-repl) for prompts, defaults, and how restriction reaches across the `Extended` tool bucket.
 
@@ -158,7 +158,65 @@ When a step halts, `/resume` retries it as-is; `/recover` retries it with a cont
 
 `/explore <query>` and `/locate <symbol>` hand a read-only investigation off to an isolated sub-agent and return a prose summary or a `path:line` result — useful when you want an answer without polluting the main conversation with a long tool-call chain. `/delegate <task>` does the same for a self-contained subtask that needs to actually make changes (files, shell, git).
 
+Need a specialist — a reviewer, a test writer, a docs agent — with its own instructions, tools and even model? Define it as a Markdown file in `.fuseraft/agents/` and the model can call it (or you can, with `/agent <name> <task>`). See [Sub-agents](sub-agents.md).
+
 When a session has stalled — repeating a mistake, stuck in a loop, drifted off-task — `/assist` has a sub-agent read the whole conversation, diagnose the root cause, and inject a corrective message addressed to the main agent, so you don't have to.
+
+### Working until it's really done: `/goal`
+
+Ask for something with several parts and a turn can end with the agent confidently saying "done" while a part is missing. `/goal` adds an independent check:
+
+```
+1> /goal make every test in tests/ pass and add a Usage section to the README
+```
+
+The agent works on it as an ordinary turn. When it stops, a **second, tool-less model call** — which sees only the transcript, never the agent's own system prompt — audits it against the objective. It looks for evidence in what the tools actually returned (file contents, command output, test results); an agent merely *saying* "tests pass" does not count. If something is unverified, the agent is re-prompted with exactly what is missing, and the cycle repeats.
+
+It ends in one of six ways:
+
+| Outcome | Meaning |
+|---------|---------|
+| `✓ complete` | The audit found every requirement provably met. |
+| `? paused` | The agent needs something only you can give (a decision, a credential, an approval you denied). Control returns to you instead of guessing. |
+| `⚠ not verified` | The audit budget ran out (default 5, `--max N` up to 50). |
+| `⚠ stalled` | The same work was reported missing three audits running — the agent is stuck, not progressing. |
+| `⚠ interrupted` | You pressed Ctrl+C. |
+| `⚠ audit could not run` | The provider failed during the audit. It never assumes success on a failed check. |
+
+Everything except `complete` can be picked up with `/goal resume` (a fresh budget, same objective). `--max 8` sets the budget: `/goal --max 8 <objective>`. HITL, the sandbox and safe mode apply to every turn exactly as usual, and Ctrl+C stops the loop. Each audit is recorded as a `goal_audit` event.
+
+Each round is a full agent turn plus one audit call, so a goal costs more than a single message — that is what it is for.
+
+### Images
+
+Attach a screenshot, diagram or photo to a message with `/image`, or mention it inline:
+
+```
+1> /image screenshot.png why is the Retry button misaligned?
+  attached: screenshot.png (image/png, 240 KB)
+
+2> compare @before.png with @"after v2.png" and list what changed
+```
+
+`/image <path>… [message]` attaches every leading path that names an image and sends the rest as the message (quote a path that contains spaces; with no message it asks the model to describe the image). An `@path` inside an ordinary message attaches the file **if it exists and is an image** — `@someone` or `@missing.png` are left alone as plain text. PNG, JPEG, GIF and WebP are supported; the file's *contents*, not its extension, decide (a text file renamed `.png` is refused with a reason). Up to 8 images per message, 20 MB each — providers cap lower (Anthropic: 5 MB), and a rejected message says so and suggests `/model`.
+
+You need a **vision-capable model**. If the provider refuses a message with an image, the image is dropped from history (so it is not resent every turn) and you get a hint rather than a bare `400`.
+
+Images are kept in context sparingly: only the **4 most recent** stay attached; older ones become a one-line text placeholder (`[image omitted from context: shot.png, image/png, 240 KB]`) so a long session does not resend — and pay for — every screenshot it ever saw. Each attached image counts as roughly 1,600 tokens toward the context budget. `/retry` resends the image with the message.
+
+Images survive `--resume`: session files store a short reference and keep the bytes once, content-addressed, in `~/.fuseraft/repl-sessions/images/`. The event log records only *how many* images a turn carried — never their bytes. In the VS Code panel, paste a screenshot straight into the message box, or attach an image file with the paperclip.
+
+### Loop and failure guards
+
+A turn has no fixed cap on tool-call rounds — a long run of *successful* calls is fine — so the REPL watches for a turn that is going nowhere instead. Each guard first nudges the model inside the tool result it is about to read, then stops the turn if it carries on. Progress made so far is always kept; send a follow-up to try a different approach.
+
+| Pattern | Nudge | Turn stops |
+|---------|-------|-----------|
+| The **same call** (same tool, same arguments) repeated back to back | on the 3rd | on the 5th |
+| Two calls **alternating** — `read a` / `run tests` / `read a` / `run tests` … — with nothing changing in between | after 6 calls | after 10 calls |
+| Consecutive tool **failures** (an `[ERROR]`, `[DENIED]`, non-zero exit, or thrown error) | on the 2nd | on the 3rd |
+
+Any call with different arguments — a different `patch_file` body, a different path — breaks a repeat or alternation, so a genuine edit-and-verify cycle never trips them, and a single success resets the failure count. Each nudge fires once per streak. In `fuseraft run`, orchestration agents get the same repeat and alternation checks and record them as `tool_loop_warning` events (`kind`: `soft` or `hard`; `pattern`: `identical` or `alternating`).
 
 ---
 
@@ -192,7 +250,7 @@ See [CLI Reference — Memory commands](cli-reference.md#fuseraft-repl) for scop
 
 ## Sessions: resuming, forking, rewinding, undo
 
-Every session auto-saves and can be resumed with `--resume <id>` or picked up mid-conversation with `/switch`. `/fork` branches the conversation off to a new session ID without disturbing the original — handy for trying two approaches from the same starting point. `/rewind` truncates conversation history to an earlier turn; `/undo` is its filesystem counterpart, reverting whatever files the most recent turn wrote, patched, moved, or deleted.
+Every session auto-saves and can be resumed with `--resume <id>` or picked up mid-conversation with `/switch`. Resuming re-displays the last few turns so you can see where you left off (`/replay [n|all]` shows more, and `repl.resumeReplayTurns` sets the default; the VS Code panel shows them as ordinary chat messages). `/fork` branches the conversation off to a new session ID without disturbing the original — handy for trying two approaches from the same starting point. `/rewind` truncates conversation history to an earlier turn; `/undo` is its filesystem counterpart, reverting whatever files the most recent turn wrote, patched, moved, or deleted.
 
 This is covered in full in [Sessions — REPL sessions](sessions.md#repl-sessions), including the session file format and how forking/rewinding interact.
 

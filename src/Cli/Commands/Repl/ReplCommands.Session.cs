@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
 using fuseraft.Cli.Display;
+using fuseraft.Core.Images;
 using fuseraft.Core.Models;
 
 namespace fuseraft.Cli.Commands.Repl;
@@ -23,6 +24,7 @@ internal static partial class ReplCommands
         ctx.TurnTokenDeltas.Clear();
         ctx.ContextWarningShown    = false;
         ctx.ResetPlanState();
+        ctx.LastGoal = null;
 
         if (!ctx.JsonMode && !ctx.NoBanner)
         {
@@ -177,6 +179,38 @@ internal static partial class ReplCommands
             var label = m.Role == ChatRole.User ? "[bold cyan]user[/]" : "[dim]assistant[/]";
             AnsiConsole.MarkupLine($"  {label}: {Markup.Escape(preview)}");
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // /replay
+    // -------------------------------------------------------------------------
+
+    private static CommandResult CmdReplay(ReplSessionContext ctx, string arg)
+    {
+        var a = arg.Trim();
+        int count;
+        if (a.Length == 0)
+        {
+            // An explicit /replay always shows something, even if the resume-time replay is turned off.
+            var configured = ReplReplay.ConfiguredTurns(ctx);
+            count = configured > 0 ? configured : ReplReplay.DefaultTurns;
+        }
+        else if (a.Equals("all", StringComparison.OrdinalIgnoreCase))
+            count = int.MaxValue;
+        else if (!int.TryParse(a, out count) || count <= 0)
+        {
+            const string usage = "Usage: /replay [n|all]   — re-display the last n turns (default: repl.resumeReplayTurns, or 3)";
+            if (ctx.JsonMode) ReplJsonBridge.Emit(new { type = "text", text = usage });
+            else AnsiConsole.MarkupLine($"[dim]{Markup.Escape(usage)}[/]");
+            return CommandResult.Continue;
+        }
+
+        if (!ReplReplay.Show(ctx, count))
+        {
+            if (ctx.JsonMode) ReplJsonBridge.Emit(new { type = "text", text = "No previous turns to replay." });
+            else AnsiConsole.MarkupLine("[dim]No previous turns to replay.[/]");
+        }
+        return CommandResult.Continue;
     }
 
     // -------------------------------------------------------------------------
@@ -339,6 +373,7 @@ internal static partial class ReplCommands
         if (ctx.TurnTokenDeltas.Count > targetTurn)
             ctx.TurnTokenDeltas.RemoveRange(targetTurn, ctx.TurnTokenDeltas.Count - targetTurn);
         ctx.ResetPlanState();
+        ctx.LastGoal = null;
 
         if (ctx.JsonMode)
         {
@@ -371,7 +406,10 @@ internal static partial class ReplCommands
             return CommandResult.Continue;
         }
 
-        var lastUserText = ctx.History[idx].Text ?? string.Empty;
+        // The user's own words plus any image still attached — .Text alone would drop the picture and,
+        // once older images have been swapped for placeholders, would drag placeholder text along.
+        var lastUserText = ImageAttachments.UserText(ctx.History[idx]);
+        var lastImages   = ctx.History[idx].Contents.OfType<DataContent>().Where(ImageAttachments.IsImage).ToList();
 
         // Remove the last user message and any trailing assistant response.
         ctx.History.RemoveRange(idx, ctx.History.Count - idx);
@@ -385,7 +423,7 @@ internal static partial class ReplCommands
             AnsiConsole.MarkupLine("[dim]Retrying last message…[/]");
 
         _ = ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/retry" });
-        return CommandResult.Send(lastUserText);
+        return CommandResult.Send(lastUserText, attachments: lastImages);
     }
 
     // -------------------------------------------------------------------------

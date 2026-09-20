@@ -486,6 +486,53 @@ public sealed class FileSystemPluginTests : IDisposable
     }
 
     [Fact]
+    public async Task PatchFile_AmbiguousOldText_ListsTheLinesItMatchesAt()
+    {
+        await File.WriteAllTextAsync(TempPath("ambig-lines.py"), "foo\nkeep\nfoo\nkeep\n\nfoo\n");
+
+        var result = await _plugin.PatchFileAsync(TempPath("ambig-lines.py"), "foo", "bar");
+
+        Assert.Contains("more than once", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("lines 1, 3, 6", result);
+        Assert.Equal("foo\nkeep\nfoo\nkeep\n\nfoo\n", await ReadBack("ambig-lines.py"));   // untouched
+    }
+
+    [Fact]
+    public async Task PatchFile_AmbiguousOldText_CapsTheListedLines()
+    {
+        await File.WriteAllTextAsync(TempPath("ambig-many.py"), string.Concat(Enumerable.Repeat("foo\n", 25)));
+
+        var result = await _plugin.PatchFileAsync(TempPath("ambig-many.py"), "foo", "bar");
+
+        Assert.Contains("lines 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, …", result);
+        // ", 11" not "11": the message embeds a random temp path whose GUID can contain "11".
+        Assert.DoesNotContain(", 11", result);
+    }
+
+    [Fact]
+    public async Task PatchFile_Success_ReportsTheLineNumberNotACharacterOffset()
+    {
+        await File.WriteAllTextAsync(TempPath("where.py"), "one\ntwo\nthree\nfour\n");
+
+        var result = await _plugin.PatchFileAsync(TempPath("where.py"), "three", "THREE");
+
+        Assert.StartsWith("[OK]", result);
+        Assert.Contains("at line 3", result);
+        Assert.DoesNotContain("character offset", result);
+        Assert.Equal("one\ntwo\nTHREE\nfour\n", await ReadBack("where.py"));
+    }
+
+    [Fact]
+    public async Task PatchFile_Success_LineNumberIsCorrectForCrlfFiles()
+    {
+        await File.WriteAllTextAsync(TempPath("crlf.py"), "one\r\ntwo\r\nthree\r\nfour\r\n");
+
+        var result = await _plugin.PatchFileAsync(TempPath("crlf.py"), "four", "FOUR");
+
+        Assert.Contains("at line 4", result);
+    }
+
+    [Fact]
     public async Task PatchFile_SandboxDenial_ReturnsDenial()
     {
         var outside = Path.Combine(Path.GetTempPath(), $"outside_{Guid.NewGuid():N}.py");
