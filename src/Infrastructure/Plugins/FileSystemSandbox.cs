@@ -106,6 +106,13 @@ internal static class FileSystemSandbox
     // One constant so the message and the check can't drift apart.
     private const string DenyRulePhrase = "matches a FileSystem deny rule";
 
+    /// <summary>The standard denial for a path that matches a deny rule — shared so every tool words it alike.</summary>
+    internal static string DenyRuleDenial(string resolvedPath) =>
+        PluginResult.Denied(
+            $"Path '{resolvedPath}' {DenyRulePhrase} and is blocked for all operations " +
+            "(likely a credentials file). Do not read, write, or inspect it directly — if a script " +
+            "needs its values, let the script source it internally rather than surfacing its content.");
+
     /// <summary>
     /// True when <paramref name="denial"/> is a <c>FileSystem</c> deny-rule denial (a credentials
     /// file, <c>.env</c>, a configured <c>Deny</c> glob) rather than a sandbox-boundary one. The two
@@ -198,10 +205,7 @@ internal static class FileSystemSandbox
         resolved = ResolveAgainstRoot(path, sandboxRoot);
 
         if (MatchesDenyRule(denyMatcher, resolved, sandboxRoot))
-            return PluginResult.Denied(
-                $"Path '{resolved}' {DenyRulePhrase} and is blocked for all operations " +
-                "(likely a credentials file). Do not read, write, or inspect it directly — if a script " +
-                "needs its values, let the script source it internally rather than surfacing its content.");
+            return DenyRuleDenial(resolved);
 
         if (sandboxRoot is null)
             return null;
