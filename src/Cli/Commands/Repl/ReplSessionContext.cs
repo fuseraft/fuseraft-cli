@@ -157,6 +157,10 @@ internal sealed class ReplSessionContext
     public List<string>                               HaltedToolCalls = [];
     public string?                                    RecoveryHint;
 
+    // The most recent finished /goal run, so /goal resume can pick up where it stopped. Cleared
+    // alongside the conversation it belongs to (/clear, /rewind, session restore).
+    public GoalRecord? LastGoal;
+
     // Non-fatal problems from loading user-defined sub-agent files, shown by /agents.
     public IReadOnlyList<string> AgentProblems { get; set; } = [];
 

@@ -162,6 +162,31 @@ Need a specialist — a reviewer, a test writer, a docs agent — with its own i
 
 When a session has stalled — repeating a mistake, stuck in a loop, drifted off-task — `/assist` has a sub-agent read the whole conversation, diagnose the root cause, and inject a corrective message addressed to the main agent, so you don't have to.
 
+### Working until it's really done: `/goal`
+
+Ask for something with several parts and a turn can end with the agent confidently saying "done" while a part is missing. `/goal` adds an independent check:
+
+```
+1> /goal make every test in tests/ pass and add a Usage section to the README
+```
+
+The agent works on it as an ordinary turn. When it stops, a **second, tool-less model call** — which sees only the transcript, never the agent's own system prompt — audits it against the objective. It looks for evidence in what the tools actually returned (file contents, command output, test results); an agent merely *saying* "tests pass" does not count. If something is unverified, the agent is re-prompted with exactly what is missing, and the cycle repeats.
+
+It ends in one of six ways:
+
+| Outcome | Meaning |
+|---------|---------|
+| `✓ complete` | The audit found every requirement provably met. |
+| `? paused` | The agent needs something only you can give (a decision, a credential, an approval you denied). Control returns to you instead of guessing. |
+| `⚠ not verified` | The audit budget ran out (default 5, `--max N` up to 50). |
+| `⚠ stalled` | The same work was reported missing three audits running — the agent is stuck, not progressing. |
+| `⚠ interrupted` | You pressed Ctrl+C. |
+| `⚠ audit could not run` | The provider failed during the audit. It never assumes success on a failed check. |
+
+Everything except `complete` can be picked up with `/goal resume` (a fresh budget, same objective). `--max 8` sets the budget: `/goal --max 8 <objective>`. HITL, the sandbox and safe mode apply to every turn exactly as usual, and Ctrl+C stops the loop. Each audit is recorded as a `goal_audit` event.
+
+Each round is a full agent turn plus one audit call, so a goal costs more than a single message — that is what it is for.
+
 ### Loop and failure guards
 
 A turn has no fixed cap on tool-call rounds — a long run of *successful* calls is fine — so the REPL watches for a turn that is going nowhere instead. Each guard first nudges the model inside the tool result it is about to read, then stops the turn if it carries on. Progress made so far is always kept; send a follow-up to try a different approach.
