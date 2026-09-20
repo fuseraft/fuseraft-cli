@@ -34,7 +34,7 @@ fuseraft-cli supports the [Model Context Protocol (MCP)](https://modelcontextpro
 
 ---
 
-## Connecting to a production / hosted server
+## Connecting to a production or hosted server
 
 Most hosted MCP servers require authentication. fuseraft-cli supports the two common cases:
 
@@ -163,7 +163,7 @@ McpServers:
 ```
 
 For a server that requires an API key, bearer token, or OAuth login, see
-[Connecting to a production / hosted server](#connecting-to-a-production--hosted-server) above.
+[Connecting to a production or hosted server](#connecting-to-a-production-or-hosted-server) above.
 
 ---
 
