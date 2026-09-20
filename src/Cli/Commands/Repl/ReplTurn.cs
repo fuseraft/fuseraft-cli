@@ -1225,6 +1225,10 @@ internal static class ReplTurn
         var toolCallsThisTurn = new List<string>();
         var fileChanges        = new List<(char Sigil, string Path)>();
         var fileChangeSeen     = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // A file-mutating call is only a *request* until its result arrives — a HITL denial, sandbox
+        // refusal or tool error means nothing changed. Held here by call id, committed to fileChanges
+        // (what the status line and file_changes event report) only when a non-failing result comes back.
+        var pendingFileChanges = new Dictionary<string, (char Sigil, string Path)>();
         var toolRounds        = 0;
         var usageRounds       = 0;
         var finishRounds      = 0;
@@ -1337,7 +1341,8 @@ internal static class ReplTurn
                 {
                     pendingParagraphBreak = true;
                     toolCallsThisTurn.Add(funcCall.Name);
-                    TrackFileChange(funcCall.Name, funcCall.Arguments, fileChanges, fileChangeSeen, ctx.Cwd);
+                    if (DescribeFileChange(funcCall.Name, funcCall.Arguments, ctx.Cwd) is { } requested)
+                        pendingFileChanges[funcCall.CallId ?? string.Empty] = requested;
                     if (callIdToName is not null && funcCall.CallId is not null)
                         callIdToName[funcCall.CallId] = funcCall.Name;
 
@@ -1400,6 +1405,8 @@ internal static class ReplTurn
                 var funcResult = chunk.Contents.OfType<FunctionResultContent>().FirstOrDefault();
                 if (funcResult is not null)
                 {
+                    CommitFileChange(pendingFileChanges, funcResult, fileChanges, fileChangeSeen);
+
                     if (IsToolFailure(funcResult))
                     {
                         consecutiveToolFailures++;
@@ -1507,7 +1514,7 @@ internal static class ReplTurn
             // Reset per-attempt accumulators before reissuing the request.
             sb.Clear(); rawUpdates.Clear(); toolCallsThisTurn.Clear();
             pendingParagraphBreak = false;
-            fileChanges.Clear(); fileChangeSeen.Clear();
+            fileChanges.Clear(); fileChangeSeen.Clear(); pendingFileChanges.Clear();
             capturedResults?.Clear(); callIdToName?.Clear();
             toolRounds = 0; usageRounds = 0; finishRounds = 0;
             turnInputTokens = 0; turnOutputTokens = 0; turnCacheReadTokens = 0; turnFirstInputTokens = null;
@@ -1729,12 +1736,13 @@ internal static class ReplTurn
                lower.Contains(".vue") || lower.Contains(".kt")   || lower.Contains(".swift");
     }
 
-    private static void TrackFileChange(
-        string toolName,
-        IDictionary<string, object?>? args,
-        List<(char Sigil, string Path)> fileChanges,
-        HashSet<string> seen,
-        string cwd)
+    /// <summary>
+    /// What a file-mutating tool call would change — sigil (<c>A</c>dded / <c>M</c>odified / <c>D</c>eleted)
+    /// and display path — or <c>null</c> for any other tool. The A-vs-M decision is made here, at call time,
+    /// because that is before the write can have created the file.
+    /// </summary>
+    internal static (char Sigil, string Path)? DescribeFileChange(
+        string toolName, IDictionary<string, object?>? args, string cwd)
     {
         var n = toolName.Replace("_", "").ToLowerInvariant();
         string? rawPath;
@@ -1750,11 +1758,24 @@ internal static class ReplTurn
         else if (n is "deletefile" or "deletedirectory") { rawPath = GetArg(args, "path");                  sigil = 'D'; }
         else if (n is "copyfile")         { rawPath = GetArg(args, "destination") ?? GetArg(args, "path");  sigil = 'A'; }
         else if (n is "movefile")         { rawPath = GetArg(args, "destination");                          sigil = 'M'; }
-        else return;
-        if (string.IsNullOrWhiteSpace(rawPath)) return;
-        var display = MakeRelativePath(rawPath, cwd);
-        if (seen.Add(display))
-            fileChanges.Add((sigil, display));
+        else return null;
+        return string.IsNullOrWhiteSpace(rawPath) ? null : (sigil, MakeRelativePath(rawPath, cwd));
+    }
+
+    /// <summary>
+    /// Moves the pending change for <paramref name="result"/>'s call into <paramref name="fileChanges"/> — but only
+    /// when the tool did not fail. A denied or errored write leaves the file untouched, so reporting it as
+    /// changed would tell the user something false.
+    /// </summary>
+    internal static void CommitFileChange(
+        Dictionary<string, (char Sigil, string Path)> pending,
+        FunctionResultContent result,
+        List<(char Sigil, string Path)> fileChanges,
+        HashSet<string> seen)
+    {
+        if (!pending.Remove(result.CallId ?? string.Empty, out var change)) return;
+        if (IsToolFailure(result)) return;
+        if (seen.Add(change.Path)) fileChanges.Add(change);
     }
 
     // Recognises the codebase-wide failure-signalling conventions plugins use in their string
