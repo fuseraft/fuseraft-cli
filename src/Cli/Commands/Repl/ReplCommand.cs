@@ -370,7 +370,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 .Concat(PluginRegistry.GetFunctionsFromObject(new FileSystemManagementOps(fsPluginForCategory, sandboxRoot: sandboxRoot, includedRoots: includedRoots)))
                 .ToList();
             shellFunctions = PluginRegistry.GetFunctionsFromObject(shellPlugin!).ToList();
-            gitFunctions   = PluginRegistry.GetFunctionsFromObject(new GitPlugin(approveToolAction("Git"), sandboxRoot, includedRoots)).ToList();
+            gitFunctions   = PluginRegistry.GetFunctionsFromObject(new GitPlugin(approveToolAction("Git"), sandboxRoot, includedRoots, fsDenyPatterns)).ToList();
             toolsByCategory["Search"]     = PluginRegistry.GetFunctionsFromObject(new SearchPlugin(sandboxRoot, includedRoots, fsDenyPatterns)).ToList();
             todoPlugin                    = new TodoPlugin();
             toolsByCategory["Todo"]       = PluginRegistry.GetFunctionsFromObject(todoPlugin).ToList();
