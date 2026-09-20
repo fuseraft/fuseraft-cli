@@ -23,6 +23,7 @@ internal static partial class ReplCommands
         ctx.TurnTokenDeltas.Clear();
         ctx.ContextWarningShown    = false;
         ctx.ResetPlanState();
+        ctx.LastGoal = null;
 
         if (!ctx.JsonMode && !ctx.NoBanner)
         {
@@ -371,6 +372,7 @@ internal static partial class ReplCommands
         if (ctx.TurnTokenDeltas.Count > targetTurn)
             ctx.TurnTokenDeltas.RemoveRange(targetTurn, ctx.TurnTokenDeltas.Count - targetTurn);
         ctx.ResetPlanState();
+        ctx.LastGoal = null;
 
         if (ctx.JsonMode)
         {

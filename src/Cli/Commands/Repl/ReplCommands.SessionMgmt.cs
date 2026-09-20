@@ -195,6 +195,7 @@ internal static partial class ReplCommands
         ctx.LastExtractedTurnIndex = -1;
         ctx.ContextWarningShown    = false;
         ctx.ResetPlanState();
+        ctx.LastGoal = null;
 
         if (snapshot.ExecutionQueue is { Length: > 0 })
             foreach (var e in snapshot.ExecutionQueue)

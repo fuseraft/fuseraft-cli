@@ -466,6 +466,8 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/resume` | Retry the halted step and continue the remaining steps as-is. Use this after manually fixing the issue. |
 | `/recover` | Inject a failure context hint into the step prompt and retry from the halted step. The agent is told which tool was expected, which tools were actually called, and why the step failed — giving it a better chance of self-correcting. |
 | `/assist` | Diagnose a stalled or broken conversation. A sub-agent reads the history, identifies the root cause, and injects a corrective instruction to redirect the REPL agent. |
+| `/goal [--max N] <objective>` | Work until an independent audit confirms the objective is provably met. After each turn a separate tool-less model call reads the transcript, and anything the agent only *claims* counts as unverified; if something is missing the agent is re-prompted with exactly what. Stops on `complete`, `paused` (needs your input), `not verified` (budget of `N` audits, default 5, max 50), `stalled` (same gap 3 audits running), `interrupted` (Ctrl+C) or a failed audit. See [REPL — `/goal`](repl.md#working-until-its-really-done-goal). |
+| `/goal resume [--max N]` | Pick up the last goal that did not complete, with a fresh audit budget. |
 | `/memory` | List all stored memories (name, type, description) |
 | `/memory list` | Same as `/memory` |
 | `/memory show <name>` | Show the full body of a stored memory |

@@ -42,12 +42,15 @@ internal static class ReplTurn
     internal const string NoWriteToolCorrectionPrefix  = "You described changes above but did not call any write tool.";
     internal const string CriticRejectedCorrectionPrefix = "A critic reviewed ";
     internal const string TodoOpenCorrectionPrefix     = "Your todo list still has ";
+    // /goal's follow-up and resume messages (see ReplGoal) are internal in the same sense.
 
     internal static bool IsInternalCorrectionMessage(string text) =>
         text.StartsWith(EmptyReplyCorrectionPrefix,    StringComparison.Ordinal) ||
         text.StartsWith(NoWriteToolCorrectionPrefix,   StringComparison.Ordinal) ||
         text.StartsWith(CriticRejectedCorrectionPrefix, StringComparison.Ordinal) ||
-        text.StartsWith(TodoOpenCorrectionPrefix,      StringComparison.Ordinal);
+        text.StartsWith(TodoOpenCorrectionPrefix,      StringComparison.Ordinal) ||
+        text.StartsWith(ReplGoal.FollowUpPrefix,       StringComparison.Ordinal) ||
+        text.StartsWith(ReplGoal.ResumePrefix,         StringComparison.Ordinal);
 
     // Tool-call round-trip cap for free-form turns (ctx.Client). Named so
     // ReplFactory.BuildClient's default and the hit-cap check below can't drift apart.
