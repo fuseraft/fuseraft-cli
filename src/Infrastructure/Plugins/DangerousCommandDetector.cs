@@ -140,8 +140,14 @@ internal static class DangerousCommandDetector
     /// Also deny naming a credentials file (<see cref="CredentialFile"/>). On by default; off when the
     /// project opted out via <c>Security.DenyCredentialFiles</c>.
     /// </param>
-    internal static DangerousCommand? Detect(string? command, bool credentialFiles = true) =>
-        DetectCore(command, 0, credentialFiles);
+    /// <param name="credentialFilesOnly">
+    /// Only look for a named credentials file — skip the shell-specific rules (catastrophic delete,
+    /// raw disk, fetch-to-exec, privilege escalation). For code in another language (a Python or Node
+    /// snippet), where "command position" means nothing but a quoted path to <c>~/.ssh/id_rsa</c> is
+    /// still a path to <c>~/.ssh/id_rsa</c>.
+    /// </param>
+    internal static DangerousCommand? Detect(string? command, bool credentialFiles = true, bool credentialFilesOnly = false) =>
+        DetectCore(command, 0, credentialFiles, credentialFilesOnly);
 
     /// <summary>
     /// Breaks <paramref name="command"/> into its simple commands — every stage of every pipeline,
@@ -201,13 +207,13 @@ internal static class DangerousCommandDetector
         return sb.ToString();
     }
 
-    private static DangerousCommand? DetectCore(string? command, int depth, bool credentialFiles)
+    private static DangerousCommand? DetectCore(string? command, int depth, bool credentialFiles, bool credentialFilesOnly = false)
     {
         if (depth > MaxNesting || string.IsNullOrWhiteSpace(command)) return null;
 
         var pipelines = Parse(Normalize(command), out var code);
 
-        if (ProcessSubstitutedFetch.IsMatch(code) || CommandSubstitutedFetch.IsMatch(code))
+        if (!credentialFilesOnly && (ProcessSubstitutedFetch.IsMatch(code) || CommandSubstitutedFetch.IsMatch(code)))
             return new DangerousCommand(FetchToExec, "downloads remote content and executes it directly");
 
         foreach (var pipeline in pipelines)
@@ -226,12 +232,12 @@ internal static class DangerousCommandDetector
                     && stage.FirstOrDefault(IsCredentialPath) is { } credential)
                     return new DangerousCommand(CredentialFile, "names a credentials file", credential);
 
-                if (r is not { } cmd) continue;
+                if (credentialFilesOnly || r is not { } cmd) continue;
 
                 if (CheckStage(cmd.Cmd, cmd.Args, depth, credentialFiles) is { } hit) return hit;
             }
 
-            if (CheckFetchToExec(resolved) is { } fetch) return fetch;
+            if (!credentialFilesOnly && CheckFetchToExec(resolved) is { } fetch) return fetch;
         }
 
         return null;

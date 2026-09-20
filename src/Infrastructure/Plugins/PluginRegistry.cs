@@ -232,7 +232,9 @@ public sealed class PluginRegistry : IDisposable
         Register("Git",        () => new GitPlugin(BindApprover("Git"), sandboxRoot, denyPatterns: fsDenyPatterns));
         Register("Search",     () => new SearchPlugin(sandboxRoot, denyPatterns: fsDenyPatterns));
         Register("Http",       () => new HttpPlugin(_sharedHttpClient, allowedHosts, apiProfiles, allowPrivateHosts, _loggerFactory?.CreateLogger<HttpPlugin>(), BindApprover("Http")));
-        Register("Document",   () => new DocumentPlugin(sandboxRoot));
+        Register("Document",   () => new DocumentPlugin(sandboxRoot, fsDenyPatterns));
+        // Probe runs commands and snippets, so it shares the configured shell's guards, policy, approver and sandbox.
+        Register("Probe",      () => new ProbePlugin(shellInstance));
 
         // Resolve against the same root FileSystemPlugin uses, so each artifact lands exactly
         // where its downstream reader's read_file expects it regardless of sandbox configuration.

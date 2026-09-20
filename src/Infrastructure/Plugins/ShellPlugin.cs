@@ -835,9 +835,9 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     // (catastrophic recursive delete, raw block-device writes, download-and-execute) — see
     // DangerousCommandDetector. Same posture as the sudo denial above, and likewise not lifted
     // by --yolo or an empty ShellPolicy: those relax *approval*, not this.
-    private string? CheckForDangerousCommand(string commandOrScript)
+    private string? CheckForDangerousCommand(string commandOrScript, bool credentialFilesOnly = false)
     {
-        if (DangerousCommandDetector.Detect(commandOrScript, _blockCredentialFiles) is not { } danger) return null;
+        if (DangerousCommandDetector.Detect(commandOrScript, _blockCredentialFiles, credentialFilesOnly) is not { } danger) return null;
 
         if (danger.RuleId == DangerousCommandDetector.PrivilegeEscalation)
             return SudoDenied(danger.Detail ?? "sudo");
@@ -856,6 +856,38 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
             "Use a narrower, targeted command instead. If this is genuinely what is needed, " +
             "tell the user exactly which command to run and they will run it themselves.");
     }
+
+    /// <summary>
+    /// The gate every command or snippet runs through before it may execute, for plugins that run
+    /// things on this plugin's behalf (<c>Probe</c>): the <c>sudo</c> block, the dangerous-command and
+    /// credential-file guards, <c>ShellPolicy</c> allow/deny, and HITL approval — in the same order
+    /// <see cref="RunAsync"/> applies them. Returns a <c>[DENIED]</c> message, or <c>null</c> to proceed.
+    /// </summary>
+    /// <param name="shellSyntax">
+    /// <c>true</c> for POSIX shell text. <c>false</c> for code in another language, where only the
+    /// credential-file check applies (the shell-specific rules don't parse Python) alongside the policy
+    /// and approval steps — an <c>Allow</c> list, which names shell commands, naturally rejects snippets.
+    /// </param>
+    internal async Task<string?> VetAsync(string commandOrScript, bool shellSyntax = true)
+    {
+        // The sudo check is a pattern over shell text; in a Python string "; sudo" is just characters.
+        if (shellSyntax && CheckForSudo(commandOrScript) is { } sudoDenial) return sudoDenial;
+
+        var dangerDenial = CheckForDangerousCommand(commandOrScript, credentialFilesOnly: !shellSyntax);
+        if (dangerDenial is not null) return dangerDenial;
+
+        var policyDenial = CheckShellPolicy(commandOrScript);
+        if (policyDenial is not null) return policyDenial;
+
+        if (_approveCommand is not null && !await _approveCommand(commandOrScript))
+            return PluginResult.Denied("Shell command blocked by user.");
+
+        return null;
+    }
+
+    /// <summary>The sandbox check <see cref="RunAsync"/> applies to <c>workingDirectory</c>, for sibling plugins.</summary>
+    internal string? ValidateDirectory(string? directory, out string? resolved) =>
+        ValidateWorkingDirectory(directory, out resolved);
 
     // Validates that the working directory stays within the sandbox.
     // When a sandbox is active and no directory is specified, defaults to the sandbox root
