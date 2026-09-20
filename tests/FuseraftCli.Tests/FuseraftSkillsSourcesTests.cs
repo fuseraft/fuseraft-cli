@@ -99,4 +99,40 @@ public sealed class FuseraftSkillsSourcesTests
         Assert.True(ok);
         Assert.Empty(args);
     }
+
+    [Theory]
+    [InlineData("/s/run.py", false, "python3", new[] { "/s/run.py" })]
+    [InlineData("C:\\s\\run.py", true, "python", new[] { "C:\\s\\run.py" })]
+    [InlineData("/s/run.js", false, "node", new[] { "/s/run.js" })]
+    [InlineData("/s/run.sh", false, "bash", new[] { "/s/run.sh" })]
+    [InlineData("/s/run.ps1", false, "pwsh", new[] { "/s/run.ps1" })]
+    public void ResolveCommand_KnownInterpreterExtensions_PrependInterpreter(string path, bool isWindows, string fileName, string[] leading)
+    {
+        var (file, args) = FuseraftSkillsSources.ResolveCommand(path, isWindows);
+
+        Assert.Equal(fileName, file);
+        Assert.Equal(leading, args);
+    }
+
+    [Fact]
+    public void ResolveCommand_CSharpFile_RunsThroughDotnetWithArgSeparator()
+    {
+        // The trailing "--" is what keeps a script's own --flags away from `dotnet run`.
+        var (file, args) = FuseraftSkillsSources.ResolveCommand("/skills/build-docx/scripts/md2docx.cs", isWindows: false);
+
+        Assert.Equal("dotnet", file);
+        Assert.Equal(["run", "/skills/build-docx/scripts/md2docx.cs", "--"], args);
+    }
+
+    [Theory]
+    [InlineData("/s/run")]
+    [InlineData("/s/run.csx")]
+    [InlineData("/s/run.rb")]
+    public void ResolveCommand_UnknownExtension_ExecutesScriptDirectly(string path)
+    {
+        var (file, args) = FuseraftSkillsSources.ResolveCommand(path, isWindows: false);
+
+        Assert.Equal(path, file);
+        Assert.Empty(args);
+    }
 }

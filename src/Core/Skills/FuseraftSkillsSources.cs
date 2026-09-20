@@ -80,35 +80,19 @@ public static class FuseraftSkillsSources
         if (!File.Exists(script.FullPath))
             return $"Error: Script file not found: {script.FullPath}";
 
-        var extension  = Path.GetExtension(script.FullPath);
-        var isWindows  = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-        string? interpreter = extension switch
-        {
-            ".py"  => isWindows ? "python" : "python3",
-            ".js"  => "node",
-            ".sh"  => "bash",
-            ".ps1" => "pwsh",
-            _      => null,
-        };
+        var (fileName, leadingArgs) = ResolveCommand(script.FullPath, RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
 
         var startInfo = new ProcessStartInfo
         {
+            FileName               = fileName,
             RedirectStandardOutput = true,
             RedirectStandardError  = true,
             UseShellExecute        = false,
             CreateNoWindow         = true,
             WorkingDirectory       = Path.GetDirectoryName(script.FullPath) ?? ".",
         };
-
-        if (interpreter is not null)
-        {
-            startInfo.FileName = interpreter;
-            startInfo.ArgumentList.Add(script.FullPath);
-        }
-        else
-        {
-            startInfo.FileName = script.FullPath;
-        }
+        foreach (var arg in leadingArgs)
+            startInfo.ArgumentList.Add(arg);
 
         if (arguments is { ValueKind: JsonValueKind.Array } json)
         {
@@ -166,6 +150,19 @@ public static class FuseraftSkillsSources
             process?.Dispose();
         }
     }
+
+    // Discovery lists .cs by default, so it must be runnable; the "--" keeps a script's own
+    // --flags from being parsed by `dotnet run` itself.
+    internal static (string FileName, string[] LeadingArgs) ResolveCommand(string scriptPath, bool isWindows) =>
+        Path.GetExtension(scriptPath) switch
+        {
+            ".py"  => (isWindows ? "python" : "python3", [scriptPath]),
+            ".js"  => ("node", [scriptPath]),
+            ".sh"  => ("bash", [scriptPath]),
+            ".ps1" => ("pwsh", [scriptPath]),
+            ".cs"  => ("dotnet", ["run", scriptPath, "--"]),
+            _      => (scriptPath, []),
+        };
 
     // Recovers the dominant real-world RunScriptAsync failure mode: a model passing CLI
     // arguments as a flag/value object (e.g. {"--type":"Bug","--verbose":true}) instead of the
