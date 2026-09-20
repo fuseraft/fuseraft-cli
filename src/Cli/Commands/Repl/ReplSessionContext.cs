@@ -36,14 +36,15 @@ internal sealed class HitlModeState
 }
 
 internal readonly record struct CommandResult(
-    CommandOutcome Outcome,
-    string?        InputOverride = null,
-    bool           CapturePlan   = false)
+    CommandOutcome                 Outcome,
+    string?                        InputOverride = null,
+    bool                           CapturePlan   = false,
+    IReadOnlyList<DataContent>?    Attachments   = null)
 {
     public static readonly CommandResult Continue = new(CommandOutcome.Continue);
     public static readonly CommandResult Exit     = new(CommandOutcome.Exit);
-    public static CommandResult Send(string input, bool capturePlan = false) =>
-        new(CommandOutcome.SendInput, input, capturePlan);
+    public static CommandResult Send(string input, bool capturePlan = false, IReadOnlyList<DataContent>? attachments = null) =>
+        new(CommandOutcome.SendInput, input, capturePlan, attachments);
 }
 
 /// <summary>

@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using fuseraft.Cli.Display;
+using fuseraft.Core.Images;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
 
@@ -82,7 +83,8 @@ internal static class ReplReplay
                 else
                 {
                     Close();
-                    user = t;
+                    var images = m.Contents.Count(ImageAttachments.IsImage);
+                    user = images > 0 ? $"{t}\n{ImageAttachments.TranscriptMarker(images)}" : t;
                 }
                 continue;
             }

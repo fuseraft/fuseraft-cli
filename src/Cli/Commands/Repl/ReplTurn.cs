@@ -6,6 +6,7 @@ using Microsoft.Extensions.AI;
 using Spectre.Console;
 using fuseraft.Cli.Display;
 using fuseraft.Core;
+using fuseraft.Core.Images;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Chat;
@@ -181,6 +182,44 @@ internal static class ReplTurn
         return false;
     }
 
+    /// <summary>The user message for a turn: plain text, or text followed by its image attachments.</summary>
+    internal static ChatMessage BuildUserMessage(string input, IReadOnlyList<DataContent>? attachments)
+    {
+        if (attachments is not { Count: > 0 }) return new ChatMessage(ChatRole.User, input);
+        var contents = new List<AIContent>(attachments.Count + 1) { new TextContent(input) };
+        contents.AddRange(attachments);
+        return new ChatMessage(ChatRole.User, contents);
+    }
+
+    /// <summary>
+    /// When a turn that carried images fails with a client-side rejection (or an error that names images), says
+    /// so — otherwise a model that simply cannot accept images produces a bare "400 Bad Request" that points
+    /// nowhere near the cause. <c>null</c> for anything else (auth, rate limits, timeouts, no images sent).
+    /// </summary>
+    internal static string? BuildImageRejectionHint(Exception ex, bool messageHadImages)
+    {
+        if (!messageHadImages) return null;
+
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            int? status = e switch
+            {
+                ClientResultException cre => cre.Status,
+                HttpRequestException { StatusCode: { } sc } => (int)sc,
+                _ => null,
+            };
+            var namesImages = e.Message.Contains("image", StringComparison.OrdinalIgnoreCase)
+                           || e.Message.Contains("vision", StringComparison.OrdinalIgnoreCase)
+                           || e.Message.Contains("multimodal", StringComparison.OrdinalIgnoreCase);
+            var clientRejection = status is >= 400 and < 500 and not 401 and not 403 and not 408 and not 429;
+            if (clientRejection || namesImages)
+                return "This message included an image. The current model or provider may not accept images, or the " +
+                       "image is too large (providers cap it at a few MB). Try /model with a vision-capable model, " +
+                       "or resend without the image.";
+        }
+        return null;
+    }
+
     // Minimum active tool count above which a raw, unclassified 400/413 is plausibly a
     // tool-schema or request-payload rejection rather than a genuine bad request — large
     // REPL tool surfaces (FileSystem + Shell + Search + Git + Session + SubAgent, ~50+
@@ -330,12 +369,29 @@ internal static class ReplTurn
             }
 
             string? raw;
-            try   { raw = ctx.JsonMode ? await ctx.StdinPump!.ReadInputAsync() : ctx.LineReader.ReadLine(); }
+            IReadOnlyList<DataContent> bridgeImages = [];
+            try
+            {
+                if (ctx.JsonMode)
+                {
+                    var msg = await ctx.StdinPump!.ReadMessageAsync();
+                    raw = msg?.Text;
+                    if (msg is not null)
+                    {
+                        ReplImages.ReportErrors(ctx, msg.Errors);
+                        bridgeImages = msg.Images;
+                    }
+                }
+                else raw = ctx.LineReader.ReadLine();
+            }
             catch (OperationCanceledException) { break; }
 
             if (raw is null) break;
 
             raw = raw.Trim();
+            // A picture with no words is still a message.
+            if (raw.Length == 0 && bridgeImages.Count > 0)
+                raw = bridgeImages.Count == 1 ? "Describe this image." : "Describe these images.";
             if (string.IsNullOrEmpty(raw)) continue;
 
             if (raw.StartsWith('/'))
@@ -394,7 +450,8 @@ internal static class ReplTurn
                     isStepRequest: false,
                     capturePlan:   result.CapturePlan,
                     activeStep:    null,
-                    cancellationToken);
+                    cancellationToken,
+                    attachments:   result.Attachments);
                 _ = SaveSnapshotAsync(ctx);
                 continue;
             }
@@ -440,10 +497,16 @@ internal static class ReplTurn
                 raw.Equals("quit", StringComparison.OrdinalIgnoreCase))
                 break;
 
+            // `@shot.png` mentions attach the image; anything that merely looks like a mention is left alone.
+            var inline = ImageAttachments.ExtractInlineReferences(raw, ctx.Cwd);
+            ReplImages.ReportErrors(ctx, inline.Errors);
+            ReplImages.Announce(ctx, inline.Images);
+            var all = bridgeImages.Count == 0 ? inline.Images : [.. bridgeImages, .. inline.Images];
+
             await ExecuteAsync(
                 ctx, raw,
                 isStepRequest: false, capturePlan: false, activeStep: null,
-                cancellationToken);
+                cancellationToken, attachments: all);
             _ = SaveSnapshotAsync(ctx);
         }
     }
@@ -492,7 +555,8 @@ internal static class ReplTurn
         string? originalInput = null,
         int todoCorrectionRound = 0,
         int todoCriticRound = 0,
-        bool emptyResponseRetried = false)
+        bool emptyResponseRetried = false,
+        IReadOnlyList<DataContent>? attachments = null)
     {
         // The true original user request, preserved across every level of recursive
         // self-correction below — `input` itself becomes the injected correction text on
@@ -502,8 +566,17 @@ internal static class ReplTurn
 
         ctx.BeginTurn();
         ctx.Emitter.SetTurn(ctx.TurnIndex);
-        await ctx.Emitter.EmitAsync(EventTypes.UserInput, turn: ctx.TurnIndex, payload: new { content = input });
-        ctx.History.Add(new ChatMessage(ChatRole.User, input));
+        // Image bytes never go into the event log — only how many were attached.
+        await ctx.Emitter.EmitAsync(EventTypes.UserInput, turn: ctx.TurnIndex,
+            payload: new { content = input, images = attachments?.Count ?? 0 });
+        ctx.History.Add(BuildUserMessage(input, attachments));
+        if (attachments is { Count: > 0 })
+        {
+            var dropped = ImageAttachments.StripOlderImages(ctx.History);
+            if (dropped > 0 && !ctx.JsonMode)
+                AnsiConsole.MarkupLine(
+                    $"[dim]  ({dropped} older image{(dropped == 1 ? "" : "s")} dropped from context — only the last {ImageAttachments.KeepRecentImages} stay attached)[/]");
+        }
         await ctx.Emitter.EmitAsync(EventTypes.TurnStart, turn: ctx.TurnIndex, payload: new { is_step = isStepRequest, is_correction = isCorrectionTurn });
 
         // Preserve the user's input before the LLM call so a crash mid-turn still
@@ -1547,7 +1620,9 @@ internal static class ReplTurn
                 final          = true,
             });
 
-            var toolSurfaceHint = BuildLargeToolSurfaceHint(ex, ctx.GetActiveTools().Count);
+            var toolSurfaceHint = BuildLargeToolSurfaceHint(ex, ctx.GetActiveTools().Count)
+                ?? BuildImageRejectionHint(ex, ctx.History.Count > 0 && ctx.History[^1] is { Role: var r } lastMsg
+                                               && r == ChatRole.User && ImageAttachments.CountImages(lastMsg) > 0);
             if (ctx.JsonMode)
                 ReplJsonBridge.Emit(new
                 {

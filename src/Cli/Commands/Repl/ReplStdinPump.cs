@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Threading.Channels;
+using Microsoft.Extensions.AI;
+using fuseraft.Core.Images;
 
 namespace fuseraft.Cli.Commands.Repl;
 
@@ -69,6 +71,79 @@ public sealed class ReplStdinPump
             return doc.RootElement.TryGetProperty("type", out var t) && t.GetString() is "interrupt";
         }
         catch { return false; }
+    }
+
+    /// <summary>One webview message: its text plus any images that came with it (already validated).</summary>
+    internal sealed record BridgeInput(string? Text, IReadOnlyList<DataContent> Images, IReadOnlyList<string> Errors);
+
+    /// <summary>Like <see cref="ReadInputAsync"/> but keeps attached images; null once stdin is closed.</summary>
+    internal async Task<BridgeInput?> ReadMessageAsync()
+    {
+        while (await _lines.Reader.WaitToReadAsync())
+            if (_lines.Reader.TryRead(out var line))
+                return ParseMessage(line);
+        return null;
+    }
+
+    /// <summary>
+    /// <c>{"text":"…","images":[{"data":"&lt;base64&gt;","name":"shot.png"}]}</c>. The declared media type is
+    /// ignored: the decoded bytes are sniffed exactly as a file's would be, so the webview cannot smuggle
+    /// a non-image (or an over-limit payload) through to the model by labelling it <c>image/png</c>.
+    /// </summary>
+    internal static BridgeInput ParseMessage(string line)
+    {
+        var text   = ExtractText(line);
+        var images = new List<DataContent>();
+        var errors = new List<string>();
+
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("images", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            {
+                var index = 0;
+                foreach (var item in arr.EnumerateArray())
+                {
+                    index++;
+                    var name = item.ValueKind == JsonValueKind.Object && item.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String
+                        ? n.GetString() ?? $"image-{index}" : $"image-{index}";
+
+                    if (images.Count >= ImageAttachments.MaxImagesPerMessage)
+                    {
+                        errors.Add($"at most {ImageAttachments.MaxImagesPerMessage} images per message");
+                        break;
+                    }
+                    if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("data", out var d) || d.ValueKind != JsonValueKind.String)
+                    {
+                        errors.Add($"{name}: missing image data");
+                        continue;
+                    }
+
+                    var b64 = d.GetString() ?? string.Empty;
+                    // A data: URL is what FileReader.readAsDataURL produces; accept it as well as bare base64.
+                    var comma = b64.IndexOf(',');
+                    if (b64.StartsWith("data:", StringComparison.OrdinalIgnoreCase) && comma > 0) b64 = b64[(comma + 1)..];
+
+                    // Reject before decoding what would decode to more than the limit (base64 is 4 chars per 3 bytes).
+                    if (b64.Length / 4L * 3 > ImageAttachments.MaxImageBytes + 3)
+                    {
+                        errors.Add($"{name}: over the {ImageAttachments.MaxImageBytes / 1024 / 1024} MB limit");
+                        continue;
+                    }
+
+                    byte[] bytes;
+                    try   { bytes = Convert.FromBase64String(b64); }
+                    catch (FormatException) { errors.Add($"{name}: the image data is not valid base64"); continue; }
+
+                    if (ImageAttachments.TryCreate(bytes, name, out var img, out var err)) images.Add(img!);
+                    else errors.Add(err!);
+                }
+            }
+        }
+        catch (JsonException) { /* not JSON: the whole line is the text, no images */ }
+
+        return new BridgeInput(text, images, errors);
     }
 
     /// <summary>Returns the next non-interrupt line's "text" field, or null once stdin is closed.</summary>

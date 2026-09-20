@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
+using fuseraft.Core.Images;
 using fuseraft.Infrastructure.Plugins;
 
 namespace fuseraft.Core.Models.Session;
@@ -191,10 +192,35 @@ public sealed record ReplSerializedContent
     public string? ArgumentsJson { get; init; }
     public string? ResultJson    { get; init; }
 
+    // Images: the bytes live in ReplImageStore (content-addressed); the snapshot keeps only a reference.
+    public string? MediaType     { get; init; }
+    public string? ImageId       { get; init; }
+    public string? ImageName     { get; init; }
+
     public static ReplSerializedContent From(AIContent content)
     {
         if (content is TextContent tc)
             return new() { Type = "text", Text = tc.Text };
+
+        if (content is DataContent dc && ImageAttachments.IsImage(dc))
+        {
+            var props = dc.AdditionalProperties ??= [];
+            var id    = props.TryGetValue(ImageAttachments.IdProperty, out var cached) ? cached as string : null;
+            if (!ReplImageStore.IsValidId(id) || ReplImageStore.Load(id) is null)
+            {
+                id = ReplImageStore.Save(dc.Data.ToArray(), dc.MediaType);
+                if (id is not null) props[ImageAttachments.IdProperty] = id;
+            }
+            // Could not be stored: fall through to "skip" rather than embedding megabytes in the snapshot.
+            if (id is not null)
+                return new()
+                {
+                    Type      = "image",
+                    MediaType = dc.MediaType,
+                    ImageId   = id,
+                    ImageName = props.TryGetValue(ImageAttachments.NameProperty, out var n) ? n as string : null,
+                };
+        }
 
         if (content is FunctionCallContent fc)
         {
@@ -231,8 +257,28 @@ public sealed record ReplSerializedContent
         "text"            => new TextContent(Text ?? ""),
         "function_call"   => RestoreFunctionCall(),
         "function_result" => new FunctionResultContent(CallId ?? "", RestoreResult()),
+        "image"           => RestoreImage(),
         _                 => null,
     };
+
+    // A snapshot outlives the store entry if someone clears ~/.fuseraft/repl-sessions/images; the message must
+    // still restore, so a missing image becomes an honest placeholder instead of disappearing.
+    private AIContent RestoreImage()
+    {
+        var name  = ImageName is { Length: > 0 } n ? n : "image";
+        var bytes = ReplImageStore.Load(ImageId);
+        if (bytes is null || MediaType is null)
+            return new TextContent($"[image no longer available: {name}]");
+
+        return new DataContent(bytes, MediaType)
+        {
+            AdditionalProperties = new AdditionalPropertiesDictionary
+            {
+                [ImageAttachments.NameProperty] = name,
+                [ImageAttachments.IdProperty]   = ImageId!,
+            },
+        };
+    }
 
     private FunctionCallContent RestoreFunctionCall()
     {

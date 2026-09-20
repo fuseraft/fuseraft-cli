@@ -753,6 +753,9 @@ internal static class AgentContextCompactionFilters
         // It must be included here or budget/trim checks are completely blind to thinking cost,
         // allowing it to accumulate unchecked across tool-call rounds.
         TextReasoningContent trc => (trc.Text?.Length ?? 0) + (trc.ProtectedData?.Length ?? 0),
+        // Images are billed by pixel area, not bytes; without a figure they would count as zero and the
+        // context budget would be blind to a screenshot-heavy session.
+        DataContent dc when Core.Images.ImageAttachments.IsImage(dc) => Core.Images.ImageAttachments.EstimatedCharsPerImage,
         _                       => 0,
     };
 }

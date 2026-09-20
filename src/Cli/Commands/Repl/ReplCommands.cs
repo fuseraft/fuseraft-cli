@@ -30,6 +30,7 @@ internal static partial class ReplCommands
             case "/adversarial":  return CmdAdversarial(ctx, arg);
             case "/assist":       return await CmdAssistAsync(ctx, cancellationToken);
             case "/goal":         return await CmdGoalAsync(ctx, arg, cancellationToken);
+            case "/image":        return CmdImage(ctx, arg);
             case "/memory":     return await CmdMemoryAsync(ctx, arg, cancellationToken);
             case "/max-tokens": return CmdMaxTokens(ctx, arg);
             case "/temperature": return CmdTemperature(ctx, arg);
@@ -91,6 +92,7 @@ internal static partial class ReplCommands
             new("/rewind <n>", "Keep turns 1…n and discard the rest"),
             new("/rewind -<n>", "Step back n turns from the current position"),
             new("/retry", "Resend the last message (useful when the response was poor)"),
+            new("/image <path> [message]", "Send an image (PNG, JPEG, GIF, WebP) with your message — or just mention it inline as @shot.png. Needs a vision-capable model"),
             new("/last", "Re-print the last assistant response"),
             new("/clear", "Clear conversation history (keeps system prompt)"),
             new("/history", "Show condensed conversation history"),
