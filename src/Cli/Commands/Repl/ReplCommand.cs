@@ -574,6 +574,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 explorerTools,
                 eventEmitter:     emitter,
                 parentAgentName:  "repl",
+                maxToolCalls:     userCfg?.SubAgent?.ExploreMaxIterations ?? 0,
+                delegateMaxToolCalls: userCfg?.SubAgent?.DelegateMaxIterations ?? 0,
                 delegateTools:    delegateTools,
                 diagnosticTools:  sessionDiagnosticTools,
                 customAgents:     agentLoad.Definitions,

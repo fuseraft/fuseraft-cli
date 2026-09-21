@@ -144,7 +144,7 @@ Each entry in `Agents` configures one participant in the group chat.
 | `ContextWindow` | object | — | no | Filters the conversation history before it reaches this agent. See [ContextWindow](#contextwindow). |
 | `SubAgentModel` | string | — | no | Model ID override for the sub-agent spawned by the `SubAgent` plugin. Defaults to the parent agent's model when unset. Useful for running a cheaper model (e.g. Haiku) for `subagent_explore` / `subagent_locate` calls. |
 | `SubAgentPlugins` | array | — | no | Explicit list of plugin names to load into the sub-agent. When unset the sub-agent receives the default read-only set: FileSystem read, Search, Shell read, Git read. Unknown names raise an error at session startup. |
-| `SubAgentMaxToolCalls` | int | `0` | no | Maximum tool-call iterations for `subagent_explore`. `0` uses the built-in default of 20. `subagent_locate` always uses a hard cap of 5 regardless of this setting. |
+| `SubAgentMaxToolCalls` | int | `0` | no | Maximum rounds (model calls; parallel tool calls in one round count once) for `subagent_explore`. `0` uses the built-in default of 20. `subagent_locate` always uses a hard cap of 5 regardless of this setting. |
 | `RemoteAgent` | object | — | no | Delegates this agent slot to a remote A2A agent. When set, `Model`, `Plugins`, `FunctionChoice`, and `Capabilities` are ignored. See [RemoteAgent](#remoteagent). |
 
 ### Capabilities
@@ -240,8 +240,8 @@ This means: to inherit a field from the file, simply omit it in the inline confi
 
 When the `SubAgent` plugin is listed in `Plugins`, the agent gains access to two tools:
 
-- **`subagent_explore`** — multi-hop exploration loop (up to `SubAgentMaxToolCalls` iterations, default 20). Accepts an optional `format` parameter: `"prose"` (default) or `"file_list"` (bulleted path list).
-- **`subagent_locate`** — single-target symbol/file lookup, hard-capped at 5 iterations and 512 output tokens.
+- **`subagent_explore`** — multi-hop exploration loop (up to `SubAgentMaxToolCalls` rounds, default 20). Accepts an optional `format` parameter: `"prose"` (default) or `"file_list"` (bulleted path list).
+- **`subagent_locate`** — single-target symbol/file lookup, hard-capped at 5 rounds and 512 output tokens.
 
 Both tools inject the current working directory into the sub-agent's system prompt and link the parent's cancellation token so interrupts propagate immediately. The sub-agent does not share the parent's conversation history.
 

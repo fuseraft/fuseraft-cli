@@ -24,7 +24,7 @@ public sealed class SubAgentPluginIterationLimitTests
 
         var result = await plugin.ExploreAsync("q");
 
-        Assert.Contains($"stopped after {Cap} tool calls", result);
+        Assert.Contains($"stopped after {Cap} rounds", result);
         Assert.DoesNotContain("no text output", result);
         Assert.DoesNotContain("Partial output", result);
     }
@@ -37,7 +37,7 @@ public sealed class SubAgentPluginIterationLimitTests
 
         var result = await plugin.ExploreAsync("q");
 
-        Assert.Contains($"stopped after {Cap} tool calls", result);
+        Assert.Contains($"stopped after {Cap} rounds", result);
         Assert.Contains("Partial output", result);
         Assert.Contains("looking at file-1", result);
     }
@@ -51,8 +51,8 @@ public sealed class SubAgentPluginIterationLimitTests
 
         var (result, _, _) = await plugin.ExploreStreamingAsync("q", c => { chunks.Add(c); return Task.CompletedTask; });
 
-        Assert.Contains($"stopped after {Cap} tool calls", string.Concat(chunks));
-        Assert.Contains($"stopped after {Cap} tool calls", result);
+        Assert.Contains($"stopped after {Cap} rounds", string.Concat(chunks));
+        Assert.Contains($"stopped after {Cap} rounds", result);
         Assert.Contains("looking at file-1", result);
     }
 
@@ -65,8 +65,30 @@ public sealed class SubAgentPluginIterationLimitTests
 
         var (result, _, _) = await plugin.ExploreStreamingAsync("q", c => { chunks.Add(c); return Task.CompletedTask; });
 
-        Assert.Contains($"stopped after {Cap} tool calls", string.Concat(chunks));
+        Assert.Contains($"stopped after {Cap} rounds", string.Concat(chunks));
         Assert.DoesNotContain("no text output", result);
+    }
+
+    [Fact]
+    public async Task Delegate_HitsItsConfiguredCap_ReportsIt()
+    {
+        var plugin = new SubAgentPlugin(new ToolLoopClient(answerAfterCalls: null, narrate: false),
+            explorerTools: [], delegateTools: [FakeTool], delegateMaxToolCalls: Cap);
+
+        var result = await plugin.DelegateAsync("do it");
+
+        Assert.Contains($"stopped after {Cap} rounds", result);
+    }
+
+    [Fact]
+    public async Task Explore_CapDoesNotAffectDelegate()
+    {
+        var plugin = new SubAgentPlugin(new ToolLoopClient(answerAfterCalls: 5, narrate: false),
+            explorerTools: [FakeTool], delegateTools: [FakeTool], maxToolCalls: Cap);
+
+        var result = await plugin.DelegateAsync("do it");
+
+        Assert.Equal("All done.", result);
     }
 
     [Fact]

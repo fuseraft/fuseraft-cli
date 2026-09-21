@@ -1,10 +1,12 @@
+using System.Text.Json.Serialization;
+
 namespace fuseraft.Core.Models.Config;
 
 /// <summary>
-/// Configures the model used by the REPL's Explore/Locate/Delegate sub-agents (see
+/// Configures the model and round caps of the REPL's Explore/Locate/Delegate sub-agents (see
 /// <c>fuseraft.Infrastructure.Plugins.SubAgentPlugin</c>). Mirrors
-/// <c>AgentConfig.SubAgentModel</c>, which does the same for orchestration agents
-/// declared in an <c>orchestration.yaml</c>.
+/// <c>AgentConfig.SubAgentModel</c> and <c>AgentConfig.SubAgentMaxToolCalls</c>, which do the
+/// same for orchestration agents declared in an <c>orchestration.yaml</c>.
 /// </summary>
 public record SubAgentConfig
 {
@@ -16,4 +18,17 @@ public record SubAgentConfig
     /// Defaults to the REPL's main chat model when null or empty.
     /// </summary>
     public string? Model { get; init; }
+
+    /// <summary>
+    /// Round cap for /explore (a round is one model call inside the sub-agent's loop; parallel tool
+    /// calls in the same round count once). Null uses the built-in default of 20.
+    /// </summary>
+    public int? ExploreMaxIterations { get; init; }
+
+    /// <summary>Round cap for /delegate. Null uses the built-in default of 40.</summary>
+    public int? DelegateMaxIterations { get; init; }
+
+    /// <summary>True when no field is set, so the whole section can be dropped from the config file.</summary>
+    [JsonIgnore]
+    public bool IsEmpty => string.IsNullOrWhiteSpace(Model) && ExploreMaxIterations is null && DelegateMaxIterations is null;
 }

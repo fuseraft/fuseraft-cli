@@ -53,7 +53,8 @@ public sealed class SubAgentPlugin(
     IReadOnlyList<AIFunction>? delegateTools = null,
     IReadOnlyList<AIFunction>? diagnosticTools = null,
     IReadOnlyList<SubAgentDefinition>? customAgents = null,
-    Func<string, IChatClient?>? customAgentClientFactory = null)
+    Func<string, IChatClient?>? customAgentClientFactory = null,
+    int delegateMaxToolCalls = 0)
 {
     // Session-introspection tools (current session metadata, saved-session list, event/log
     // file reads) withheld from the REPL agent's own default tool set — they let a caller
@@ -66,14 +67,14 @@ public sealed class SubAgentPlugin(
     private const int DefaultMaxToolCalls       = 20;
     private const int LocateMaxToolCalls        = 5;
     private const int LocateMaxOutputTokens     = 512;
-    private const int DelegateMaxToolCalls      = 40;
+    private const int DefaultDelegateMaxToolCalls = 40;
     private const int DelegateMaxOutputTokens   = 4096;
 
     // In-turn context trim applied before every inner LLM call inside RunLoopAsync's tool
     // loop — mirrors AgentFactory's sliding-window cap for regular agents (see
     // AgentFactory.cs: "O(N² ) tool-result accumulation is never desirable"). Without this,
     // the loop's own message list grows every round and FunctionInvokingChatClient resends
-    // the entire thing on every iteration; a 40-iteration DelegateAsync run editing several
+    // the entire thing on every iteration; a 40-round DelegateAsync run editing several
     // files can otherwise burn 7-figure cumulative input tokens for what should be a bounded
     // task. Sized smaller than AgentFactory's defaults (12 pairs / 200k chars) because these
     // are meant to stay lightweight relative to the parent agent. The pair window itself only
@@ -133,6 +134,9 @@ public sealed class SubAgentPlugin(
 
     private readonly int _effectiveMaxToolCalls =
         maxToolCalls > 0 ? maxToolCalls : DefaultMaxToolCalls;
+
+    private readonly int _effectiveDelegateMaxToolCalls =
+        delegateMaxToolCalls > 0 ? delegateMaxToolCalls : DefaultDelegateMaxToolCalls;
 
     /// <summary>
     /// Decides, per tool name and at run time, whether a sub-agent may use a tool. The REPL points this
@@ -207,7 +211,7 @@ public sealed class SubAgentPlugin(
             _delegateTools,
             BuildDelegatePrompt(_delegateTools, _workspaceRoot),
             task,
-            DelegateMaxToolCalls,
+            _effectiveDelegateMaxToolCalls,
             DelegateMaxOutputTokens,
             "delegate",
             DelegateTimeoutMinutes,
@@ -403,7 +407,7 @@ public sealed class SubAgentPlugin(
                 _delegateTools,
                 BuildDelegatePrompt(_delegateTools, _workspaceRoot),
                 task,
-                DelegateMaxToolCalls,
+                _effectiveDelegateMaxToolCalls,
                 DelegateMaxOutputTokens,
                 "delegate",
                 DelegateTimeoutMinutes,
@@ -762,7 +766,7 @@ public sealed class SubAgentPlugin(
     // last response, still ending on a tool call it never ran. Without this the caller would read an
     // unfinished run as an answer (or as "no output").
     private static string BuildIterationLimitNotice(int maxIterations) =>
-        $"[Sub-agent stopped after {maxIterations} tool calls without finishing — its work may be incomplete. " +
+        $"[Sub-agent stopped after {maxIterations} rounds without finishing — its work may be incomplete. " +
         "Re-run with a narrower task, or finish the remaining work yourself.]";
 
     private static string AppendPartialOutput(string notice, string? partial) =>

@@ -559,6 +559,17 @@ fuseraft settings set subagent.model gpt-4o-mini
 
 See [`fuseraft settings`](#fuseraft-settings). This mirrors `SubAgentModel` in orchestration YAML (see [Agent configuration](configuration.md#agent-configuration)), which does the same for `fuseraft run` agents.
 
+**Sub-agent round caps**
+
+A sub-agent's loop is capped in *rounds* — one model call each, so tools it fires in parallel count once. `/locate` is fixed at 5 rounds; `/explore` defaults to 20 and `/delegate` to 40. Raise (or reset) them in `~/.fuseraft/config`:
+
+```bash
+fuseraft settings set subagent.exploreMaxIterations 30
+fuseraft settings set subagent.delegateMaxIterations 60
+```
+
+Each accepts 1–100, or `""` to go back to the default. A run that hits its cap stops with a `stopped after N rounds without finishing` notice and any partial output rather than passing itself off as done. Custom sub-agents set their own cap with `max_iterations` ([Sub-agents](sub-agents.md)); the orchestration equivalent is `SubAgentMaxToolCalls`.
+
 **Prompt format**
 
 The prompt displays the current turn number followed by `>`:
@@ -2591,6 +2602,8 @@ Sets one field by a dotted, case-insensitive key. Loads the existing config (or 
 | `skillCuration.enabled` | `true`/`false` |
 | `memory.model` | Model ID for the REPL's end-of-session memory-extraction call, or `""` to use the main chat model |
 | `subagent.model` | Model ID for `/explore`, `/locate`, `/delegate` sub-agents, or `""` to use the main chat model |
+| `subagent.exploreMaxIterations` | Round cap for `/explore` and `subagent_explore`, 1–100 (default `20`), or `""` to reset |
+| `subagent.delegateMaxIterations` | Round cap for `/delegate` and `subagent_delegate`, 1–100 (default `40`), or `""` to reset |
 
 `provider.apiKey` is deliberately not a valid key — API keys are never written to this file. Set `FUSERAFT_API_KEY` and run `fuseraft keychain --set` instead. MCP servers (`/mcp add` in the REPL) and the rest of `skillCuration` (see [Skill curation](configuration.md#skill-curation)) also aren't exposed here yet — edit the file directly for those.
 

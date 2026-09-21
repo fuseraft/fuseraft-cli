@@ -4,6 +4,7 @@ using System.Linq;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using fuseraft.Core.Models.Config;
+using fuseraft.Core.SubAgents;
 using fuseraft.Infrastructure.Storage;
 
 namespace fuseraft.Cli.Commands;
@@ -50,6 +51,8 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
         ("skillCuration.enabled",   "true/false"),
         ("memory.model",            "Model ID for the end-of-session memory-extraction call (e.g. a cheap model), or \"\" to use the main chat model"),
         ("subagent.model",          "Model ID for /explore, /locate, /delegate sub-agents (e.g. a cheap model), or \"\" to use the main chat model"),
+        ("subagent.exploreMaxIterations",  "Round cap for /explore, 1-100 (default 20), or \"\" to reset"),
+        ("subagent.delegateMaxIterations", "Round cap for /delegate, 1-100 (default 40), or \"\" to reset"),
     ];
 
     protected override int Execute(CommandContext context, SettingsSetSettings settings, CancellationToken cancellationToken)
@@ -105,7 +108,9 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
             "skillcuration.enabled"    => AssignBool(v => config.SkillCuration = (config.SkillCuration ?? new SkillCurationConfig()) with { Enabled = v }, value),
 
             "memory.model"             => Assign(() => config.Memory = string.IsNullOrWhiteSpace(value) ? null : new MemoryExtractionConfig { Model = value }),
-            "subagent.model"           => Assign(() => config.SubAgent = string.IsNullOrWhiteSpace(value) ? null : new SubAgentConfig { Model = value }),
+            "subagent.model"           => Assign(() => config.SubAgent = NullIfEmpty((config.SubAgent ?? new SubAgentConfig()) with { Model = string.IsNullOrWhiteSpace(value) ? null : value })),
+            "subagent.exploremaxiterations"  => AssignIterationCap(v => config.SubAgent = NullIfEmpty((config.SubAgent ?? new SubAgentConfig()) with { ExploreMaxIterations = v }), value),
+            "subagent.delegatemaxiterations" => AssignIterationCap(v => config.SubAgent = NullIfEmpty((config.SubAgent ?? new SubAgentConfig()) with { DelegateMaxIterations = v }), value),
 
             _ => "unknown-key",
         };
@@ -147,6 +152,18 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
     {
         if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) || v < 0)
             return $"Expected an integer >= 0, got '{raw}'.";
+        assign(v);
+        return null;
+    }
+
+    private static SubAgentConfig? NullIfEmpty(SubAgentConfig c) => c.IsEmpty ? null : c;
+
+    private static string? AssignIterationCap(Action<int?> assign, string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) { assign(null); return null; }
+        if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v)
+            || v < 1 || v > SubAgentDefinitionLoader.MaxIterationsCeiling)
+            return $"Expected an integer from 1 to {SubAgentDefinitionLoader.MaxIterationsCeiling}, got '{raw}'.";
         assign(v);
         return null;
     }

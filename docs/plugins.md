@@ -462,8 +462,8 @@ Plugins:
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `subagent_explore` | `query`, `format` | Multi-hop exploration. Returns a prose summary (≤600 words) or a bulleted file list depending on `format`. Up to 20 iterations by default. |
-| `subagent_locate` | `target` | Single-target lookup. Finds where a symbol, type, method, interface, or file is defined. Returns `path:line — description`. Capped at 5 iterations and 512 output tokens — much cheaper than explore for targeted lookups. |
+| `subagent_explore` | `query`, `format` | Multi-hop exploration. Returns a prose summary (≤600 words) or a bulleted file list depending on `format`. Up to 20 rounds by default. |
+| `subagent_locate` | `target` | Single-target lookup. Finds where a symbol, type, method, interface, or file is defined. Returns `path:line — description`. Capped at 5 rounds and 512 output tokens — much cheaper than explore for targeted lookups. |
 
 **`format` values for `subagent_explore`:**
 
@@ -487,7 +487,7 @@ subagent_explore("Which files in src/Parsing/ handle string interpolation and ho
 # Need a list of paths — use file_list format
 subagent_explore("What files does AgentFactory depend on?", format="file_list")
 
-# Single target — use locate (5 iterations, much cheaper)
+# Single target — use locate (5 rounds, much cheaper)
 subagent_locate("IOrchestrationHook")
 subagent_locate("AgentFactory.Create")
 subagent_locate("EventEmitter.cs")
@@ -510,9 +510,9 @@ Agents:
 
 Any model alias or provider model ID accepted by the `Models` config section can be used here.
 
-### Sub-agent iteration cap (`SubAgentMaxToolCalls`)
+### Sub-agent round cap (`SubAgentMaxToolCalls`)
 
-Controls the maximum number of tool-call iterations inside the `subagent_explore` loop. `subagent_locate` always uses a hard cap of 5.
+Controls the maximum number of rounds inside the `subagent_explore` loop. A round is one model call in the sub-agent's loop: tool calls it fires in parallel count once, so a run can make more tool calls than it has rounds. `subagent_locate` always uses a hard cap of 5.
 
 ```yaml
 Agents:
@@ -522,7 +522,7 @@ Agents:
     SubAgentMaxToolCalls: 30   # allow deeper exploration for this agent
 ```
 
-`0` (default) uses the built-in default of 20. A sub-agent that runs out of iterations returns a `stopped after N tool calls without finishing` notice (with any partial output) rather than an answer, and its `sub_agent_end` event records `outcome: iteration_limit`.
+`0` (default) uses the built-in default of 20. A sub-agent that runs out of rounds returns a `stopped after N rounds without finishing` notice (with any partial output) rather than an answer, and its `sub_agent_end` event records `outcome: iteration_limit`.
 
 ### Custom sub-agent plugin list (`SubAgentPlugins`)
 

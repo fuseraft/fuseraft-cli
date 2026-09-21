@@ -97,6 +97,13 @@ public sealed class SettingsShowCommand : AsyncCommand
         AnsiConsole.Write(modelOverrides);
         AnsiConsole.WriteLine();
 
+        var subAgentLimits = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey).Title("[bold]Sub-agent round caps[/]")
+            .AddColumn("Field").AddColumn("Value");
+        subAgentLimits.AddRow("/explore",  config.SubAgent?.ExploreMaxIterations is { } e ? e.ToString() : "[dim](default 20)[/]");
+        subAgentLimits.AddRow("/delegate", config.SubAgent?.DelegateMaxIterations is { } d ? d.ToString() : "[dim](default 40)[/]");
+        AnsiConsole.Write(subAgentLimits);
+        AnsiConsole.WriteLine();
+
         AnsiConsole.MarkupLine(config.McpServers.Count > 0
             ? $"[bold]MCP servers:[/] {Markup.Escape(string.Join(", ", config.McpServers.Select(s => s.Name)))}"
             : "[bold]MCP servers:[/] [dim](none — add with /mcp add in the REPL)[/]");
