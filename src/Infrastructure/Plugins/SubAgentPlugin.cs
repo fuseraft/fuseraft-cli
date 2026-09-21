@@ -138,7 +138,7 @@ public sealed class SubAgentPlugin(
     /// Decides, per tool name and at run time, whether a sub-agent may use a tool. The REPL points this
     /// at its session-wide gate (<c>/safe-mode</c>, <c>/tools restrict</c>) so a sub-agent can never do
     /// what the parent has been told not to — without it, /safe-mode would still leave shell and git
-    /// reachable through <c>sub_agent_delegate</c>. <c>null</c> = no extra restriction.
+    /// reachable through <c>subagent_delegate</c>. <c>null</c> = no extra restriction.
     /// </summary>
     public Func<string, bool>? ToolGate { get; set; }
 
@@ -192,7 +192,7 @@ public sealed class SubAgentPlugin(
     }
 
     /// <summary>Tool name <see cref="DelegateAsync"/> is exposed under.</summary>
-    public const string DelegateToolName = "sub_agent_delegate";
+    public const string DelegateToolName = "subagent_delegate";
 
     [Description("Delegate a self-contained coding subtask to a sub-agent with read/write file, shell, and git tools. Use for well-scoped work you want done without spending your own tool calls and context — e.g. 'add a null check to X and a regression test', 'rename Y across the codebase', 'run the test suite and fix any failures in Z'. The sub-agent works autonomously to completion and reports back a summary; it cannot ask clarifying questions mid-task, so give it a complete, unambiguous task description.")]
     public async Task<string> DelegateAsync(
@@ -413,7 +413,7 @@ public sealed class SubAgentPlugin(
     // --- User-defined agents ---
 
     /// <summary>
-    /// The <c>sub_agent_run</c> model tool, or <c>null</c> when no user-defined agents exist (so an
+    /// The <c>subagent_run</c> model tool, or <c>null</c> when no user-defined agents exist (so an
     /// unused feature costs no tool-schema tokens). Built by hand rather than by reflection because
     /// its description enumerates the available agents.
     /// </summary>
@@ -433,7 +433,7 @@ public sealed class SubAgentPlugin(
     }
 
     /// <summary>Name of the model tool <see cref="BuildRunAgentTool"/> returns.</summary>
-    public const string RunAgentToolName = "sub_agent_run";
+    public const string RunAgentToolName = "subagent_run";
 
     internal string BuildRunAgentDescription()
     {

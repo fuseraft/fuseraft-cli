@@ -165,7 +165,7 @@ Orchestration:
         unless a manifest explicitly points deeper.
         ## ───────────────────────────────────────────────────────────────────────────────
 
-        Use sub_agent_explore for directory dives. Consult the context store entries
+        Use subagent_explore for directory dives. Consult the context store entries
         before making any tool calls — they may already answer your questions.
 
         Write a structured map to .fuseraft/recon.md with these sections:
@@ -247,7 +247,7 @@ Orchestration:
         Reference prior trace IDs instead of duplicating explanations.
         ## ───────────────────────────────────────────────────────────────────────────────
 
-        Use sub_agent_explore to read groups of related files without polluting main
+        Use subagent_explore to read groups of related files without polluting main
         context. Write precise findings to .fuseraft/sql-findings.md — include exact
         procedure names, parameter names, and table names. The Synthesizer cannot
         re-read source files, so be thorough.
@@ -325,7 +325,7 @@ Orchestration:
         Reference prior trace IDs instead of duplicating explanations.
         ## ───────────────────────────────────────────────────────────────────────────────
 
-        Use sub_agent_explore for deep reads. Write findings to .fuseraft/api-findings.md.
+        Use subagent_explore for deep reads. Write findings to .fuseraft/api-findings.md.
 
         When done, write on its own line: API ANALYSIS COMPLETE
       Model: heavy

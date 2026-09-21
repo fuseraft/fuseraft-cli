@@ -7,7 +7,7 @@ namespace fuseraft.Core.SubAgents;
 /// A user-defined sub-agent: a Markdown file whose YAML frontmatter says <em>when</em> to use it and
 /// <em>what it may touch</em>, and whose body is its system prompt.
 /// </summary>
-/// <param name="Name">Lowercase slug the parent model calls it by (<c>sub_agent_run agent=&lt;name&gt;</c>).</param>
+/// <param name="Name">Lowercase slug the parent model calls it by (<c>subagent_run agent=&lt;name&gt;</c>).</param>
 /// <param name="Description">What it is for — the only thing the parent model sees when deciding to delegate.</param>
 /// <param name="Instructions">The sub-agent's system prompt (the Markdown body).</param>
 /// <param name="Model">Optional model id; <c>null</c> = the session's sub-agent model.</param>

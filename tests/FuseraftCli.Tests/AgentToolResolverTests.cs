@@ -30,8 +30,8 @@ public sealed class AgentToolResolverTests : IDisposable
     {
         var names = ResolveToolNames("SubAgent");
 
-        Assert.Contains("sub_agent_explore", names);
-        Assert.Contains("sub_agent_locate", names);
+        Assert.Contains("subagent_explore", names);
+        Assert.Contains("subagent_locate", names);
         Assert.DoesNotContain(SubAgentPlugin.DelegateToolName, names);
     }
 

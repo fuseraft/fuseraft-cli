@@ -462,10 +462,10 @@ Plugins:
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `sub_agent_explore` | `query`, `format` | Multi-hop exploration. Returns a prose summary (≤600 words) or a bulleted file list depending on `format`. Up to 20 iterations by default. |
-| `sub_agent_locate` | `target` | Single-target lookup. Finds where a symbol, type, method, interface, or file is defined. Returns `path:line — description`. Capped at 5 iterations and 512 output tokens — much cheaper than explore for targeted lookups. |
+| `subagent_explore` | `query`, `format` | Multi-hop exploration. Returns a prose summary (≤600 words) or a bulleted file list depending on `format`. Up to 20 iterations by default. |
+| `subagent_locate` | `target` | Single-target lookup. Finds where a symbol, type, method, interface, or file is defined. Returns `path:line — description`. Capped at 5 iterations and 512 output tokens — much cheaper than explore for targeted lookups. |
 
-**`format` values for `sub_agent_explore`:**
+**`format` values for `subagent_explore`:**
 
 | Value | Output |
 |-------|--------|
@@ -482,15 +482,15 @@ The model is instructed to prefer earlier options when they suffice, reserving `
 
 ```
 # Broad question — use explore
-sub_agent_explore("Which files in src/Parsing/ handle string interpolation and how do they interact?")
+subagent_explore("Which files in src/Parsing/ handle string interpolation and how do they interact?")
 
 # Need a list of paths — use file_list format
-sub_agent_explore("What files does AgentFactory depend on?", format="file_list")
+subagent_explore("What files does AgentFactory depend on?", format="file_list")
 
 # Single target — use locate (5 iterations, much cheaper)
-sub_agent_locate("IOrchestrationHook")
-sub_agent_locate("AgentFactory.Create")
-sub_agent_locate("EventEmitter.cs")
+subagent_locate("IOrchestrationHook")
+subagent_locate("AgentFactory.Create")
+subagent_locate("EventEmitter.cs")
 ```
 
 ### Sub-agent model override (`SubAgentModel`)
@@ -512,7 +512,7 @@ Any model alias or provider model ID accepted by the `Models` config section can
 
 ### Sub-agent iteration cap (`SubAgentMaxToolCalls`)
 
-Controls the maximum number of tool-call iterations inside the `sub_agent_explore` loop. `sub_agent_locate` always uses a hard cap of 5.
+Controls the maximum number of tool-call iterations inside the `subagent_explore` loop. `subagent_locate` always uses a hard cap of 5.
 
 ```yaml
 Agents:

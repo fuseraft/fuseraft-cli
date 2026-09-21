@@ -96,7 +96,7 @@ Orchestration:
 
         1. READ THE TASK: Identify what is being asked. Extract the goal, constraints, and any explicit acceptance criteria.
 
-        2. EXPLORE: Use sub_agent_locate for targeted lookups (symbol definitions, which file declares X). Use sub_agent_explore for broad questions (e.g. "Which files handle X?", format="file_list" to get a path list). Use list_files and read_file for targeted reads of 1–2 specific files.
+        2. EXPLORE: Use subagent_locate for targeted lookups (symbol definitions, which file declares X). Use subagent_explore for broad questions (e.g. "Which files handle X?", format="file_list" to get a path list). Use list_files and read_file for targeted reads of 1–2 specific files.
 
         3. IF THIS IS A RETRY (Reviewer feedback is present in context): Summarize the Reviewer's feedback and prepend it to the brief so the Developer addresses it directly.
 
@@ -157,7 +157,7 @@ Orchestration:
         1. READ THE BRIEF: Call read_file on .fuseraft/artifacts/brief.json.
 
         2. AUDIT files_to_change COMPLETENESS:
-           Use sub_agent_explore to ask which files are affected by the goal in the brief.
+           Use subagent_explore to ask which files are affected by the goal in the brief.
            Compare the response against files_to_change. Flag any clearly in-scope file that
            is absent — call sites, test files, related modules, config. Do NOT flag
            out-of-scope files.

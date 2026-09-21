@@ -19,7 +19,7 @@ public static partial class InitTemplates
               You are a software architect. Your job is to:
               1. {ContextReadStep}
               2. Read and understand the task thoroughly.
-              3. Use sub_agent_explore for broad codebase questions without filling your context
+              3. Use subagent_explore for broad codebase questions without filling your context
                  with raw file contents. For any direct file reads: {LargeFileProtocol}
               4. Check if {FuseraftPaths.LocalBrief} already exists. If it does, read it — if it
                  still covers the current task, call handoff(route_keyword: "HANDOFF TO DEVELOPER")

@@ -106,7 +106,7 @@ Orchestration:
 
 In **REPL mode** the same folder orientation is injected (blocks 3 onward), but the log-file entries are omitted from the manifest because the session section of the REPL system prompt already lists them and directs the agent to the `repl_session_*` tools for log access.
 
-`SubAgentPlugin` (used by `sub_agent_explore` and `sub_agent_locate`) receives a single-line skip directive instead of the full manifest, since its system prompt is tightly budgeted.
+`SubAgentPlugin` (used by `subagent_explore` and `subagent_locate`) receives a single-line skip directive instead of the full manifest, since its system prompt is tightly budgeted.
 
 ---
 
@@ -142,9 +142,9 @@ Each entry in `Agents` configures one participant in the group chat.
 | `MaxInTurnToolPairs` | int | `0` | no | Deterministic sliding-window cap on the number of tool call/result pairs kept in full within a turn — but only engages once the turn's estimated size reaches ~90% of the agent's context budget (`MaxContextTokens`, or a 200k-char fallback when unset); below that, older pairs are left untouched so the request prefix a provider would cache stays stable across calls. Once triggered, all but the most-recent N pairs are replaced with placeholders. `0` means no limit. Recommended: 8–16 for high-volume action agents. |
 | `TrustScore` | number | `0.7` | no | Governance trust score (0.0–1.0) used to assign an execution ring. See [Governance](governance.md#execution-rings). |
 | `ContextWindow` | object | — | no | Filters the conversation history before it reaches this agent. See [ContextWindow](#contextwindow). |
-| `SubAgentModel` | string | — | no | Model ID override for the sub-agent spawned by the `SubAgent` plugin. Defaults to the parent agent's model when unset. Useful for running a cheaper model (e.g. Haiku) for `sub_agent_explore` / `sub_agent_locate` calls. |
+| `SubAgentModel` | string | — | no | Model ID override for the sub-agent spawned by the `SubAgent` plugin. Defaults to the parent agent's model when unset. Useful for running a cheaper model (e.g. Haiku) for `subagent_explore` / `subagent_locate` calls. |
 | `SubAgentPlugins` | array | — | no | Explicit list of plugin names to load into the sub-agent. When unset the sub-agent receives the default read-only set: FileSystem read, Search, Shell read, Git read. Unknown names raise an error at session startup. |
-| `SubAgentMaxToolCalls` | int | `0` | no | Maximum tool-call iterations for `sub_agent_explore`. `0` uses the built-in default of 20. `sub_agent_locate` always uses a hard cap of 5 regardless of this setting. |
+| `SubAgentMaxToolCalls` | int | `0` | no | Maximum tool-call iterations for `subagent_explore`. `0` uses the built-in default of 20. `subagent_locate` always uses a hard cap of 5 regardless of this setting. |
 | `RemoteAgent` | object | — | no | Delegates this agent slot to a remote A2A agent. When set, `Model`, `Plugins`, `FunctionChoice`, and `Capabilities` are ignored. See [RemoteAgent](#remoteagent). |
 
 ### Capabilities
@@ -240,8 +240,8 @@ This means: to inherit a field from the file, simply omit it in the inline confi
 
 When the `SubAgent` plugin is listed in `Plugins`, the agent gains access to two tools:
 
-- **`sub_agent_explore`** — multi-hop exploration loop (up to `SubAgentMaxToolCalls` iterations, default 20). Accepts an optional `format` parameter: `"prose"` (default) or `"file_list"` (bulleted path list).
-- **`sub_agent_locate`** — single-target symbol/file lookup, hard-capped at 5 iterations and 512 output tokens.
+- **`subagent_explore`** — multi-hop exploration loop (up to `SubAgentMaxToolCalls` iterations, default 20). Accepts an optional `format` parameter: `"prose"` (default) or `"file_list"` (bulleted path list).
+- **`subagent_locate`** — single-target symbol/file lookup, hard-capped at 5 iterations and 512 output tokens.
 
 Both tools inject the current working directory into the sub-agent's system prompt and link the parent's cancellation token so interrupts propagate immediately. The sub-agent does not share the parent's conversation history.
 

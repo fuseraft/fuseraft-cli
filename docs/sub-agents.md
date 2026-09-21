@@ -59,7 +59,7 @@ A tool name that does not exist in your session is dropped and reported. An agen
 
 ## Using your agents
 
-**The model calls them itself.** When at least one agent is defined, the model gets a `sub_agent_run` tool whose description lists every agent and its `description`. Ask naturally — *"have your doc-writer agent add docstrings to `textstats.py`"* — or just describe work an agent's description fits. With no agents defined, the tool does not exist and costs nothing.
+**The model calls them itself.** When at least one agent is defined, the model gets a `subagent_run` tool whose description lists every agent and its `description`. Ask naturally — *"have your doc-writer agent add docstrings to `textstats.py`"* — or just describe work an agent's description fits. With no agents defined, the tool does not exist and costs nothing.
 
 **You can run one directly:**
 

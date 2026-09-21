@@ -72,7 +72,7 @@ internal sealed class AgentToolResolver(
 
                 var explorerTools = BuildSubAgentTools(config, pluginRegistry, securityConfig);
 
-                // No delegateTools are passed here (delegate is REPL-only), so sub_agent_delegate
+                // No delegateTools are passed here (delegate is REPL-only), so subagent_delegate
                 // would always answer "not available" — keep it out of the agent's tool schema.
                 functions = PluginRegistry.GetFunctionsFromObject(
                         new SubAgentPlugin(subClient, explorerTools,

@@ -51,7 +51,7 @@ internal static partial class ReplCommands
                     Markup.Escape(Truncate(a.Definition.Description, 80)));
             }
             AnsiConsole.Write(table);
-            AnsiConsole.MarkupLine("[dim]The model can call them itself via sub_agent_run; run one directly with[/] [bold]/agent <name> <task>[/][dim].[/]");
+            AnsiConsole.MarkupLine("[dim]The model can call them itself via subagent_run; run one directly with[/] [bold]/agent <name> <task>[/][dim].[/]");
         }
 
         foreach (var p in problems)

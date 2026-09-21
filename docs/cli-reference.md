@@ -384,7 +384,7 @@ common, low-risk operations that cover a typical session (read, edit, search, st
 | Search | `search_content`, `search_symbol`, `search_callers` |
 | Git | `git_status`, `git_diff`, `git_log`, `git_show`, `git_branch_list`, `git_add`, `git_commit`, `git_stash_list` |
 | Todo | `todo_write`, `todo_read` — self-directed checklist the model uses to plan and track multi-step work within the session (in-memory only, not persisted). |
-| SubAgent | `sub_agent_explore`, `sub_agent_locate`, `sub_agent_delegate` — the same tools behind `/explore`, `/locate` and `/delegate` (see below), also callable by the model directly mid-turn; `sub_agent_run` appears too when [custom sub-agents](sub-agents.md) are defined. Explore/locate are built from the full, unfiltered FileSystem/Shell/Git read tools regardless of whether `Extended` is enabled; delegate gets the same write-capable tool set as the main REPL agent (never the SubAgent category, so it can't recurse). |
+| SubAgent | `subagent_explore`, `subagent_locate`, `subagent_delegate` — the same tools behind `/explore`, `/locate` and `/delegate` (see below), also callable by the model directly mid-turn; `subagent_run` appears too when [custom sub-agents](sub-agents.md) are defined. Explore/locate are built from the full, unfiltered FileSystem/Shell/Git read tools regardless of whether `Extended` is enabled; delegate gets the same write-capable tool set as the main REPL agent (never the SubAgent category, so it can't recurse). |
 | Session | `repl_session_current`, `repl_session_list`, `repl_session_read_event_log`, `repl_session_read_log`, `compact_context`, `get_context_status` |
 | Skills | `load_skill`, `run_skill_script` (only when skills are installed — see [Skills](skills.md)) |
 
@@ -484,7 +484,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/explore <query>` | Run a sub-agent exploration loop over the codebase and return a prose summary. The sub-agent uses read-only tools and runs in an isolated context with no shared history from the main session. |
 | `/locate <symbol>` | Run a sub-agent symbol lookup and return a `path:line` result. Faster and more targeted than `/explore` for single-symbol lookups. |
 | `/agents` | List your [user-defined sub-agents](sub-agents.md) (Markdown files in `.fuseraft/agents/` or `.agents/agents/`) with scope, model and tools, plus any problems found loading them. |
-| `/agent <name> <task>` | Run one of your sub-agents directly on a task and show its report. The model can also call them itself through the `sub_agent_run` tool. |
+| `/agent <name> <task>` | Run one of your sub-agents directly on a task and show its report. The model can also call them itself through the `subagent_run` tool. |
 | `/safe-mode` | Show current safe mode status |
 | `/safe-mode on` | Block Shell, Git, and Http tools by owning plugin (including those in the Extended bucket) |
 | `/safe-mode off` | Restore tool categories to their state before safe mode was enabled |
@@ -551,7 +551,7 @@ This is the REPL's interactive alternative to hand-editing `McpServers` in an or
 
 **Sub-agent model (`/explore`, `/locate`, `/delegate`)**
 
-By default, `/explore`, `/locate`, and `/delegate` (and their model-callable equivalents, `sub_agent_explore` / `sub_agent_locate` / `sub_agent_delegate`) run on the same model as the main REPL chat. Set `subagent.model` in `~/.fuseraft/config` to run them on a different — e.g. cheaper or faster — model instead:
+By default, `/explore`, `/locate`, and `/delegate` (and their model-callable equivalents, `subagent_explore` / `subagent_locate` / `subagent_delegate`) run on the same model as the main REPL chat. Set `subagent.model` in `~/.fuseraft/config` to run them on a different — e.g. cheaper or faster — model instead:
 
 ```bash
 fuseraft settings set subagent.model gpt-4o-mini

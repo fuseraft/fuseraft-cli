@@ -18,7 +18,7 @@ public static partial class InitTemplates
               You are a DevOps architect. Your job is to:
               1. {ContextReadStep}
               2. Understand the infrastructure or deployment task in full.
-              3. Use sub_agent_explore to survey relevant config files, scripts, and manifests.
+              3. Use subagent_explore to survey relevant config files, scripts, and manifests.
                  For any direct file reads: {LargeFileProtocol}
               4. Check if {FuseraftPaths.LocalOpsPlan} already exists. If it does, read it — if it
                  still covers the current task, call handoff(route_keyword: "PLAN READY") immediately.

@@ -26,8 +26,8 @@ public static partial class InitTemplates
                  already exist. If they do, call handoff(route_keyword: "RECON COMPLETE") immediately
                  without re-running recon.
               2. For any file you need to examine: {LargeFileProtocolArchaeologist}
-              3. Use list_files and sub_agent_explore to map the directory structure — do NOT
-                 read every file; prefer sub_agent_explore for structural questions.
+              3. Use list_files and subagent_explore to map the directory structure — do NOT
+                 read every file; prefer subagent_explore for structural questions.
               4. Identify: primary language and framework, naming conventions (snake_case vs camelCase),
                  import style, test framework, build system, and key architectural patterns.
               5. Call write_file_conventions(content: ..., format: "json"). content must be a JSON
@@ -102,7 +102,7 @@ public static partial class InitTemplates
                  immediately without rewriting it.
               3. Read {FuseraftPaths.LocalBrownfieldBrief} to understand the codebase shape and risks.
               4. Read {FuseraftPaths.LocalConventions} — follow the project's conventions exactly.
-              5. Use sub_agent_explore for additional targeted questions. For direct file reads:
+              5. Use subagent_explore for additional targeted questions. For direct file reads:
                  {LargeFileProtocol}
               6. Call write_file_brief(content: ..., format: "json"). content must be a JSON
                  object with exactly these top-level fields:

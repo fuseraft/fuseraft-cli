@@ -122,7 +122,7 @@ public static partial class InitTemplates
                  • Write a verify_command that matches the available runtime.
                  • Omit git steps from verify_command when git_repo is false.
               2. Read and understand the task thoroughly.
-              3. Use sub_agent_explore for broad codebase questions without filling your context
+              3. Use subagent_explore for broad codebase questions without filling your context
                  with raw file contents. For any direct file reads: {LargeFileProtocol}
               4. Check for a REPLAN signal: read changes_read_latest and look for failed
                  commands, test failures, or "REPLAN REQUIRED" in the session context.
@@ -172,7 +172,7 @@ public static partial class InitTemplates
                    acceptance_criteria — array of testable criteria the code must satisfy
               5b. SELF-CRITIQUE — run these checks against the brief you just wrote (or
                   the existing brief if you skipped step 5). Fix before continuing.
-                  a. files_to_change completeness: use sub_agent_explore to confirm no
+                  a. files_to_change completeness: use subagent_explore to confirm no
                      clearly in-scope file is missing (call sites, tests, config). Add any
                      missing files.
                   b. acceptance_criteria testability: every criterion must produce a binary
@@ -243,11 +243,11 @@ public static partial class InitTemplates
               1. READ THE BRIEF: Call read_file on {FuseraftPaths.LocalBrief}.
 
               2. AUDIT files_to_change COMPLETENESS (existing-code only):
-                 Use sub_agent_locate to check whether the files listed in files_to_change already
+                 Use subagent_locate to check whether the files listed in files_to_change already
                  exist in the codebase. If NONE of them exist yet, this is a greenfield project —
                  skip the rest of this step entirely; completeness cannot be audited via exploration
                  for code that has not been written yet.
-                 If SOME files already exist, use sub_agent_explore to find any existing file that
+                 If SOME files already exist, use subagent_explore to find any existing file that
                  is clearly in-scope but absent from files_to_change — call sites, tests for
                  existing symbols, related modules that must change. Flag only files that EXIST NOW
                  and need to be modified. Do NOT flag files that need to be created; new files are

@@ -147,7 +147,7 @@ public sealed class SubAgentPluginCustomAgentTests
 
         await p.RunAgentAsync("reviewer", "x");
 
-        Assert.DoesNotContain(client.LastToolNames, n => n.StartsWith("sub_agent_"));
+        Assert.DoesNotContain(client.LastToolNames, n => n.StartsWith("subagent_"));
     }
 
     // ── Prompt & options ────────────────────────────────────────────────────────
@@ -244,7 +244,7 @@ public sealed class SubAgentPluginCustomAgentTests
 
         var tool = p.BuildRunAgentTool()!;
 
-        Assert.Equal("sub_agent_run", tool.Name);
+        Assert.Equal("subagent_run", tool.Name);
         Assert.Contains("- reviewer: Reviews diffs.", tool.Description);
         Assert.Contains("- doc-writer: Writes docs. Second line.", tool.Description);   // newlines flattened
     }
@@ -335,7 +335,7 @@ public sealed class SubAgentPluginCustomAgentTests
     [Fact]
     public async Task ToolGate_AlsoRestrainsTheBuiltInDelegateSubAgent()
     {
-        // Regression: /safe-mode closed Shell/Git/Http for the parent but sub_agent_delegate still handed
+        // Regression: /safe-mode closed Shell/Git/Http for the parent but subagent_delegate still handed
         // its sub-agent shell_run and git_commit, because nothing consulted the session's gate.
         var client = new RecordingClient();
         var p = Plugin(client, []);

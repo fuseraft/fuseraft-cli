@@ -534,7 +534,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             }
         }
 
-        // Built before the wrap loop below so sub_agent_explore/sub_agent_locate/sub_agent_delegate
+        // Built before the wrap loop below so subagent_explore/subagent_locate/subagent_delegate
         // get the same ToolResultLoggingFilter/ToolResultOffloadFilter treatment as every other
         // REPL tool, and so the model can call them directly instead of only via /explore, /locate,
         // and /delegate.
@@ -544,7 +544,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         {
             // Delegate gets exactly the write-capable tool set the parent REPL agent itself has
             // (Core, plus Extended if the user opted in) — never more. It never receives the
-            // SubAgent category, so it cannot recursively call sub_agent_delegate.
+            // SubAgent category, so it cannot recursively call subagent_delegate.
             var delegateTools = fsFunctions!.Where(f => CoreFileSystemTools.Contains(f.Name))
                 .Concat(toolsByCategory["Search"])
                 .Concat(shellFunctions!.Where(f => CoreShellTools.Contains(f.Name)))

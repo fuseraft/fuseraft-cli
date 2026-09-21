@@ -199,7 +199,7 @@ assume they can see your reasoning.
 | `Scratchpad` | scratchpad_write, scratchpad_read, scratchpad_read_all, scratchpad_search |
 | `Chatroom` | chatroom_send, chatroom_read |
 | `Changes` | changes_read, changes_read_latest — requires `ChangeTracking` in config |
-| `SubAgent` | sub_agent_explore, sub_agent_locate |
+| `SubAgent` | subagent_explore, subagent_locate |
 | `Handoff` | handoff(route_keyword) — terminates tool loop immediately |
 | `Probe` | probe_code, probe_assert_output, probe_compare_outputs, probe_run_hypothesis |
 | `CodeExecution` | code_execution_sandbox_run, code_execution_repl_start/exec/stop |

@@ -27,7 +27,7 @@ public static partial class InitTemplates
                  duplication, complexity), correctness (type safety, null handling, error paths),
                  compliance (licence headers, deprecated APIs, dependency versions).
               2. Conduct the scan systematically. For each category:
-                 - Use grep_file / sub_agent_explore for pattern matching and structural analysis.
+                 - Use grep_file / subagent_explore for pattern matching and structural analysis.
                  - Use shell_run for static analysis tools (e.g. semgrep, bandit, eslint, clippy).
                  - Use read_file (with startLine/maxLines) to read relevant code sections in full.
               3. For each issue found, call investigation_record(summary, conclusion) so your
