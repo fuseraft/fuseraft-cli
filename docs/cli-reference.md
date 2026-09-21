@@ -384,7 +384,7 @@ common, low-risk operations that cover a typical session (read, edit, search, st
 | Search | `search_content`, `search_symbol`, `search_callers` |
 | Git | `git_status`, `git_diff`, `git_log`, `git_show`, `git_branch_list`, `git_add`, `git_commit`, `git_stash_list` |
 | Todo | `todo_write`, `todo_read` — self-directed checklist the model uses to plan and track multi-step work within the session (in-memory only, not persisted). |
-| SubAgent | `sub_agent_explore`, `sub_agent_locate` — the same tools behind `/explore` and `/locate` (see below), now also callable by the model directly mid-turn. Built from the full, unfiltered FileSystem/Shell/Git read tools regardless of whether `Extended` is enabled. |
+| SubAgent | `sub_agent_explore`, `sub_agent_locate`, `sub_agent_delegate` — the same tools behind `/explore`, `/locate` and `/delegate` (see below), also callable by the model directly mid-turn; `sub_agent_run` appears too when [custom sub-agents](sub-agents.md) are defined. Explore/locate are built from the full, unfiltered FileSystem/Shell/Git read tools regardless of whether `Extended` is enabled; delegate gets the same write-capable tool set as the main REPL agent (never the SubAgent category, so it can't recurse). |
 | Session | `repl_session_current`, `repl_session_list`, `repl_session_read_event_log`, `repl_session_read_log`, `compact_context`, `get_context_status` |
 | Skills | `load_skill`, `run_skill_script` (only when skills are installed — see [Skills](skills.md)) |
 

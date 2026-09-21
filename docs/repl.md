@@ -59,7 +59,7 @@ Unless `--no-tools` is passed, the model gets a curated core toolset by default:
 | Search | Search file content, find symbols, find callers |
 | Git | Status, diff, log, add, commit |
 | Todo | A self-directed checklist the model uses to plan and track multi-step work |
-| SubAgent | `sub_agent_explore` / `sub_agent_locate` — the same tools behind [`/explore` and `/locate`](#sub-agents-and-getting-unstuck), callable mid-turn |
+| SubAgent | `sub_agent_explore` / `sub_agent_locate` / `sub_agent_delegate` — the same tools behind [`/explore`, `/locate` and `/delegate`](#sub-agents-and-getting-unstuck), callable mid-turn; plus `sub_agent_run` when you've defined [custom sub-agents](sub-agents.md) |
 | Session | Context-budget self-management (`compact_context`, `get_context_status`) |
 | Skills | `load_skill` / `run_skill_script`, when [skills](#skills) are installed |
 
