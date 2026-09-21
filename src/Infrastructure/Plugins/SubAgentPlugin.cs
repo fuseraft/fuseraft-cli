@@ -191,6 +191,9 @@ public sealed class SubAgentPlugin(
         return text;
     }
 
+    /// <summary>Tool name <see cref="DelegateAsync"/> is exposed under.</summary>
+    public const string DelegateToolName = "sub_agent_delegate";
+
     [Description("Delegate a self-contained coding subtask to a sub-agent with read/write file, shell, and git tools. Use for well-scoped work you want done without spending your own tool calls and context — e.g. 'add a null check to X and a regression test', 'rename Y across the codebase', 'run the test suite and fix any failures in Z'. The sub-agent works autonomously to completion and reports back a summary; it cannot ask clarifying questions mid-task, so give it a complete, unambiguous task description.")]
     public async Task<string> DelegateAsync(
         [Description("Complete, self-contained task description. Include file paths, requirements, and acceptance criteria — enough context that the sub-agent never needs to ask a question.")]

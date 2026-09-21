@@ -72,11 +72,14 @@ internal sealed class AgentToolResolver(
 
                 var explorerTools = BuildSubAgentTools(config, pluginRegistry, securityConfig);
 
+                // No delegateTools are passed here (delegate is REPL-only), so sub_agent_delegate
+                // would always answer "not available" — keep it out of the agent's tool schema.
                 functions = PluginRegistry.GetFunctionsFromObject(
-                    new SubAgentPlugin(subClient, explorerTools,
-                        eventEmitter:    eventEmitter,
-                        parentAgentName: config.Name,
-                        maxToolCalls:    config.SubAgentMaxToolCalls));
+                        new SubAgentPlugin(subClient, explorerTools,
+                            eventEmitter:    eventEmitter,
+                            parentAgentName: config.Name,
+                            maxToolCalls:    config.SubAgentMaxToolCalls))
+                    .Where(f => f.Name != SubAgentPlugin.DelegateToolName);
             }
             // "Chatroom" is per-agent (own sender name) but all agents share the same file.
             else if (pluginName.Equals("Chatroom", StringComparison.OrdinalIgnoreCase))
