@@ -7,7 +7,7 @@ namespace fuseraft.Core.Models.Config;
 /// are merged on top of this baseline, never replaced by it.
 ///
 /// Single source of truth for the default pattern lists so REPL (<c>ReplCommand.cs</c>) and
-/// orchestration (<c>PluginRegistry.Configure</c>, <c>AgentToolResolver</c>'s sub-agent tool
+/// orchestration (<c>PluginRegistry.Configure</c>, <c>AgentToolResolver</c>'s subagent tool
 /// set) can't drift apart. See docs/security.md.
 /// </summary>
 internal static class DefaultSecurityPolicy

@@ -1,24 +1,24 @@
-using fuseraft.Core.SubAgents;
+using fuseraft.Core.Subagents;
 
 namespace FuseraftCli.Tests;
 
 /// <summary>
-/// Covers <see cref="SubAgentDefinitionLoader"/>: the Markdown-file format for user-defined
-/// sub-agents. The rule that matters most is that one bad file is reported and skipped, never
+/// Covers <see cref="SubagentDefinitionLoader"/>: the Markdown-file format for user-defined
+/// subagents. The rule that matters most is that one bad file is reported and skipped, never
 /// allowed to hide the good ones — and that anything the format does not honour is said out loud
 /// rather than silently ignored.
 /// </summary>
-public sealed class SubAgentDefinitionLoaderTests : IDisposable
+public sealed class SubagentDefinitionLoaderTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "fuseraft-agents-" + Guid.NewGuid().ToString("N"));
 
-    public SubAgentDefinitionLoaderTests() => Directory.CreateDirectory(_root);
+    public SubagentDefinitionLoaderTests() => Directory.CreateDirectory(_root);
     public void Dispose() { try { Directory.Delete(_root, recursive: true); } catch { /* best effort */ } }
 
-    private static (SubAgentDefinition? Def, List<string> Problems) Parse(string content, string path = "/x/reviewer.md", string scope = "project")
+    private static (SubagentDefinition? Def, List<string> Problems) Parse(string content, string path = "/x/reviewer.md", string scope = "project")
     {
         var problems = new List<string>();
-        SubAgentDefinitionLoader.TryParse(path, scope, content, out var def, problems);
+        SubagentDefinitionLoader.TryParse(path, scope, content, out var def, problems);
         return (def, problems);
     }
 
@@ -44,7 +44,7 @@ public sealed class SubAgentDefinitionLoaderTests : IDisposable
         Assert.Equal("You are a meticulous code reviewer.", def.Instructions);
         Assert.Null(def.Model);
         Assert.Null(def.Tools);
-        Assert.Equal(SubAgentDefinitionLoader.DefaultMaxIterations, def.MaxIterations);
+        Assert.Equal(SubagentDefinitionLoader.DefaultMaxIterations, def.MaxIterations);
         Assert.Equal("project", def.Scope);
     }
 
@@ -124,10 +124,10 @@ public sealed class SubAgentDefinitionLoaderTests : IDisposable
     [InlineData("12", 12, false)]
     [InlineData("1", 1, false)]
     [InlineData("100", 100, false)]
-    [InlineData("0", SubAgentDefinitionLoader.DefaultMaxIterations, true)]
-    [InlineData("101", SubAgentDefinitionLoader.DefaultMaxIterations, true)]
-    [InlineData("many", SubAgentDefinitionLoader.DefaultMaxIterations, true)]
-    [InlineData("-4", SubAgentDefinitionLoader.DefaultMaxIterations, true)]
+    [InlineData("0", SubagentDefinitionLoader.DefaultMaxIterations, true)]
+    [InlineData("101", SubagentDefinitionLoader.DefaultMaxIterations, true)]
+    [InlineData("many", SubagentDefinitionLoader.DefaultMaxIterations, true)]
+    [InlineData("-4", SubagentDefinitionLoader.DefaultMaxIterations, true)]
     public void MaxIterations_IsValidated_AndFallsBackWithAWarning(string raw, int expected, bool warns)
     {
         var (def, problems) = Parse($"---\nname: a\ndescription: d\nmax_iterations: {raw}\n---\nb");
@@ -205,7 +205,7 @@ public sealed class SubAgentDefinitionLoaderTests : IDisposable
         File.WriteAllText(Path.Combine(d, "bad.md"), "not an agent");
         WriteAgent(d, "also-good.md", "also-good");
 
-        var r = SubAgentDefinitionLoader.LoadFromDirectories([(d, "project")]);
+        var r = SubagentDefinitionLoader.LoadFromDirectories([(d, "project")]);
 
         Assert.Equal(["also-good", "good"], r.Definitions.Select(x => x.Name).OrderBy(x => x));
         Assert.Contains(r.Problems, p => p.Contains("bad.md"));
@@ -219,7 +219,7 @@ public sealed class SubAgentDefinitionLoaderTests : IDisposable
         WriteAgent(project, "reviewer.md", "reviewer", description: "project version");
         WriteAgent(user,    "reviewer.md", "reviewer", description: "user version");
 
-        var r = SubAgentDefinitionLoader.LoadFromDirectories([(project, "project"), (user, "user")]);
+        var r = SubagentDefinitionLoader.LoadFromDirectories([(project, "project"), (user, "user")]);
 
         var only = Assert.Single(r.Definitions);
         Assert.Equal("project version", only.Description);
@@ -234,7 +234,7 @@ public sealed class SubAgentDefinitionLoaderTests : IDisposable
         WriteAgent(a, "one.md", "helper");
         File.WriteAllText(Path.Combine(b, "two.md"), "---\nname: helper\ndescription: d\n---\nbody");
 
-        var r = SubAgentDefinitionLoader.LoadFromDirectories([(a, "project"), (b, "user")]);
+        var r = SubagentDefinitionLoader.LoadFromDirectories([(a, "project"), (b, "user")]);
 
         Assert.Single(r.Definitions);
     }
@@ -248,7 +248,7 @@ public sealed class SubAgentDefinitionLoaderTests : IDisposable
         File.WriteAllText(Path.Combine(d, "notes.txt"), "---\nname: txt\ndescription: d\n---\nbody");
         WriteAgent(Dir("agents/nested"), "deep.md", "deep");
 
-        var r = SubAgentDefinitionLoader.LoadFromDirectories([(d, "project")]);
+        var r = SubagentDefinitionLoader.LoadFromDirectories([(d, "project")]);
 
         Assert.Equal(["real"], r.Definitions.Select(x => x.Name));
         Assert.Empty(r.Problems);
@@ -261,7 +261,7 @@ public sealed class SubAgentDefinitionLoaderTests : IDisposable
         WriteAgent(d, "huge.md", "huge", body: new string('x', 70 * 1024));
         WriteAgent(d, "ok.md", "ok");
 
-        var r = SubAgentDefinitionLoader.LoadFromDirectories([(d, "project")]);
+        var r = SubagentDefinitionLoader.LoadFromDirectories([(d, "project")]);
 
         Assert.Equal(["ok"], r.Definitions.Select(x => x.Name));
         Assert.Contains(r.Problems, p => p.Contains("huge.md") && p.Contains("larger than"));
@@ -270,7 +270,7 @@ public sealed class SubAgentDefinitionLoaderTests : IDisposable
     [Fact]
     public void MissingDirectories_AreNotAnError()
     {
-        var r = SubAgentDefinitionLoader.LoadFromDirectories([(Path.Combine(_root, "nope"), "project")]);
+        var r = SubagentDefinitionLoader.LoadFromDirectories([(Path.Combine(_root, "nope"), "project")]);
 
         Assert.Empty(r.Definitions);
         Assert.Empty(r.Problems);
@@ -279,7 +279,7 @@ public sealed class SubAgentDefinitionLoaderTests : IDisposable
     [Fact]
     public void DefaultSearchDirs_ProjectBeforeUser_NativeBeforeShared_AndDeduplicated()
     {
-        var dirs = SubAgentDefinitionLoader.DefaultSearchDirs(_root);
+        var dirs = SubagentDefinitionLoader.DefaultSearchDirs(_root);
 
         Assert.Equal(Path.Combine(_root, ".fuseraft", "agents"), dirs[0].Directory);
         Assert.Equal(Path.Combine(_root, ".agents", "agents"),   dirs[1].Directory);
@@ -293,7 +293,7 @@ public sealed class SubAgentDefinitionLoaderTests : IDisposable
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-        var dirs = SubAgentDefinitionLoader.DefaultSearchDirs(home);
+        var dirs = SubagentDefinitionLoader.DefaultSearchDirs(home);
 
         Assert.Equal(dirs.Count, dirs.Select(d => d.Directory).Distinct().Count());
         Assert.Equal("project", dirs.Single(d => d.Directory == Path.Combine(home, ".agents", "agents")).Scope);   // first occurrence wins

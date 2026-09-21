@@ -220,37 +220,37 @@ public record AgentConfig
     public KnowledgeWeight KnowledgeWeight { get; init; } = KnowledgeWeight.Default;
 
     /// <summary>
-    /// Optional model override for the sub-agent spawned by the <c>SubAgent</c> plugin.
-    /// When set, the sub-agent uses this model instead of inheriting the parent agent's model.
+    /// Optional model override for the subagent spawned by the <c>Subagent</c> plugin.
+    /// When set, the subagent uses this model instead of inheriting the parent agent's model.
     /// Useful for cost control: a parent running on <c>claude-opus-4-7</c> can delegate
-    /// exploration tasks to a cheaper <c>claude-haiku-4-5-20251001</c> sub-agent.
+    /// exploration tasks to a cheaper <c>claude-haiku-4-5-20251001</c> subagent.
     ///
     /// <para>
     /// Accepts the same model identifier syntax as <see cref="ModelConfig.ModelId"/> — either
     /// a plain provider model ID or a named alias from the <c>Models</c> config section.
     /// </para>
     /// </summary>
-    public string? SubAgentModel { get; init; }
+    public string? SubagentModel { get; init; }
 
     /// <summary>
-    /// Plugin names to make available inside the sub-agent spawned by the <c>SubAgent</c> plugin.
-    /// When null or empty, the sub-agent receives the default expanded tool set:
+    /// Plugin names to make available inside the subagent spawned by the <c>Subagent</c> plugin.
+    /// When null or empty, the subagent receives the default expanded tool set:
     /// FileSystem (read), Search, Shell (run), and Git (read).
     /// When specified, only the listed plugins are provided; each name must be registered in
     /// <see cref="fuseraft.Infrastructure.Plugins.PluginRegistry"/>.
     /// Use <see cref="Capabilities"/> to further filter which tools within each plugin are exposed.
     /// </summary>
-    public List<string>? SubAgentPlugins { get; init; }
+    public List<string>? SubagentPlugins { get; init; }
 
     /// <summary>
-    /// Maximum tool-call iterations allowed inside the sub-agent loop spawned by the
-    /// <c>SubAgent</c> plugin. Maps to
+    /// Maximum tool-call iterations allowed inside the subagent loop spawned by the
+    /// <c>Subagent</c> plugin. Maps to
     /// <see cref="Microsoft.Extensions.AI.FunctionInvokingChatClient.MaximumIterationsPerRequest"/>
-    /// for the sub-agent's inner <c>FunctionInvokingChatClient</c>.
-    /// 0 (default) uses the sub-agent's built-in default of 20.
-    /// Mirrors <see cref="MaxToolCallsPerTurn"/> but applies only inside the sub-agent loop.
+    /// for the subagent's inner <c>FunctionInvokingChatClient</c>.
+    /// 0 (default) uses the subagent's built-in default of 20.
+    /// Mirrors <see cref="MaxToolCallsPerTurn"/> but applies only inside the subagent loop.
     /// </summary>
-    public int SubAgentMaxToolCalls { get; init; } = 0;
+    public int SubagentMaxToolCalls { get; init; } = 0;
 
     /// <summary>
     /// Tokens produced by this agent when its turn completes successfully.

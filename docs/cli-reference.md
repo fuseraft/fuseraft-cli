@@ -307,7 +307,7 @@ A `repl.*` default from `fuseraft settings` only ever *adds* to what a flag for 
 
 **Startup display**
 
-On launch a compact header shows the model name, a single info line listing active tool categories, loaded context (agents/memory/skills), and available sub-agent commands, and the session ID:
+On launch a compact header shows the model name, a single info line listing active tool categories, loaded context (agents/memory/skills), and available subagent commands, and the session ID:
 
 ```
 ── claude-sonnet-4-6 ─────────────────────────────────────
@@ -384,7 +384,7 @@ common, low-risk operations that cover a typical session (read, edit, search, st
 | Search | `search_content`, `search_symbol`, `search_callers` |
 | Git | `git_status`, `git_diff`, `git_log`, `git_show`, `git_branch_list`, `git_add`, `git_commit`, `git_stash_list` |
 | Todo | `todo_write`, `todo_read` — self-directed checklist the model uses to plan and track multi-step work within the session (in-memory only, not persisted). |
-| SubAgent | `subagent_explore`, `subagent_locate`, `subagent_delegate` — the same tools behind `/explore`, `/locate` and `/delegate` (see below), also callable by the model directly mid-turn; `subagent_run` appears too when [custom sub-agents](subagents.md) are defined. Explore/locate are built from the full, unfiltered FileSystem/Shell/Git read tools regardless of whether `Extended` is enabled; delegate gets the same write-capable tool set as the main REPL agent (never the SubAgent category, so it can't recurse). |
+| Subagent | `subagent_explore`, `subagent_locate`, `subagent_delegate` — the same tools behind `/explore`, `/locate` and `/delegate` (see below), also callable by the model directly mid-turn; `subagent_run` appears too when [custom subagents](subagents.md) are defined. Explore/locate are built from the full, unfiltered FileSystem/Shell/Git read tools regardless of whether `Extended` is enabled; delegate gets the same write-capable tool set as the main REPL agent (never the Subagent category, so it can't recurse). |
 | Session | `repl_session_current`, `repl_session_list`, `repl_session_read_event_log`, `repl_session_read_log`, `compact_context`, `get_context_status` |
 | Skills | `load_skill`, `run_skill_script` (only when skills are installed — see [Skills](skills.md)) |
 
@@ -465,7 +465,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/execute` | Run each plan step as a separate turn. After each step the REPL verifies postconditions (tool called, artifact created) and halts with a warning if a step fails. |
 | `/resume` | Retry the halted step and continue the remaining steps as-is. Use this after manually fixing the issue. |
 | `/recover` | Inject a failure context hint into the step prompt and retry from the halted step. The agent is told which tool was expected, which tools were actually called, and why the step failed — giving it a better chance of self-correcting. |
-| `/assist` | Diagnose a stalled or broken conversation. A sub-agent reads the history, identifies the root cause, and injects a corrective instruction to redirect the REPL agent. |
+| `/assist` | Diagnose a stalled or broken conversation. A subagent reads the history, identifies the root cause, and injects a corrective instruction to redirect the REPL agent. |
 | `/goal [--max N] <objective>` | Work until an independent audit confirms the objective is provably met. After each turn a separate tool-less model call reads the transcript, and anything the agent only *claims* counts as unverified; if something is missing the agent is re-prompted with exactly what. Stops on `complete`, `paused` (needs your input), `not verified` (budget of `N` audits, default 5, max 50), `stalled` (same gap 3 audits running), `interrupted` (Ctrl+C) or a failed audit. See [REPL — `/goal`](repl.md#working-until-its-really-done-goal). |
 | `/goal resume [--max N]` | Pick up the last goal that did not complete, with a fresh audit budget. |
 | `/image <path>… [message]` | Send one or more images (PNG, JPEG, GIF, WebP — up to 8, 20 MB each) with a message. Quote paths containing spaces; with no message the model is asked to describe the image. An inline `@shot.png` in an ordinary message attaches it too. Needs a vision-capable model. See [REPL — Images](repl.md#images). |
@@ -481,10 +481,10 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/context` | Show context window usage: token count vs. budget, explicit budget label, completed turn count, per-role message counts, per-category breakdown, delta since last check, and projected turns remaining after 2+ turns. The headline token count uses the real size the provider reported for the most recently completed turn's opening request when available, falling back to a char-based estimate before the first turn or when the provider never reports usage (e.g. Ollama); the per-category breakdown always stays estimated. Also shows cumulative session usage — actual input/output tokens reported by the provider across every LLM call so far, summed across tool-call round trips (not reset by `/clear`, `/rewind`, or `/compact`), plus a cumulative cache-read count when the provider reports prompt-cache hits (native Anthropic Messages API, and OpenAI-compatible providers that report `cached_tokens`) |
 | `/events` | Show event stats for the current session: turns, total tool calls, per-turn tool breakdown, top tools by frequency, and total plus per-turn actual input/output tokens (real provider-reported usage, shown only for turns where the provider reported it) |
 | `/events stats` | Same as `/events` |
-| `/explore <query>` | Run a sub-agent exploration loop over the codebase and return a prose summary. The sub-agent uses read-only tools and runs in an isolated context with no shared history from the main session. |
-| `/locate <symbol>` | Run a sub-agent symbol lookup and return a `path:line` result. Faster and more targeted than `/explore` for single-symbol lookups. |
-| `/agents` | List your [user-defined sub-agents](subagents.md) (Markdown files in `.fuseraft/agents/` or `.agents/agents/`) with scope, model and tools, plus any problems found loading them. |
-| `/agent <name> <task>` | Run one of your sub-agents directly on a task and show its report. The model can also call them itself through the `subagent_run` tool. |
+| `/explore <query>` | Run a subagent exploration loop over the codebase and return a prose summary. The subagent uses read-only tools and runs in an isolated context with no shared history from the main session. |
+| `/locate <symbol>` | Run a subagent symbol lookup and return a `path:line` result. Faster and more targeted than `/explore` for single-symbol lookups. |
+| `/agents` | List your [user-defined subagents](subagents.md) (Markdown files in `.fuseraft/agents/` or `.agents/agents/`) with scope, model and tools, plus any problems found loading them. |
+| `/agent <name> <task>` | Run one of your subagents directly on a task and show its report. The model can also call them itself through the `subagent_run` tool. |
 | `/safe-mode` | Show current safe mode status |
 | `/safe-mode on` | Block Shell, Git, and Http tools by owning plugin (including those in the Extended bucket) |
 | `/safe-mode off` | Restore tool categories to their state before safe mode was enabled |
@@ -549,7 +549,7 @@ Servers saved before this file was sectioned lived in a standalone `~/.fuseraft/
 
 This is the REPL's interactive alternative to hand-editing `McpServers` in an orchestration config — see [MCP Integration](mcp.md) for the config-file approach used by `fuseraft run`.
 
-**Sub-agent model (`/explore`, `/locate`, `/delegate`)**
+**Subagent model (`/explore`, `/locate`, `/delegate`)**
 
 By default, `/explore`, `/locate`, and `/delegate` (and their model-callable equivalents, `subagent_explore` / `subagent_locate` / `subagent_delegate`) run on the same model as the main REPL chat. Set `subagent.model` in `~/.fuseraft/config` to run them on a different — e.g. cheaper or faster — model instead:
 
@@ -557,18 +557,18 @@ By default, `/explore`, `/locate`, and `/delegate` (and their model-callable equ
 fuseraft settings set subagent.model gpt-4o-mini
 ```
 
-See [`fuseraft settings`](#fuseraft-settings). This mirrors `SubAgentModel` in orchestration YAML (see [Agent configuration](configuration.md#agent-configuration)), which does the same for `fuseraft run` agents.
+See [`fuseraft settings`](#fuseraft-settings). This mirrors `SubagentModel` in orchestration YAML (see [Agent configuration](configuration.md#agent-configuration)), which does the same for `fuseraft run` agents.
 
-**Sub-agent round caps**
+**Subagent round caps**
 
-A sub-agent's loop is capped in *rounds* — one model call each, so tools it fires in parallel count once. `/locate` is fixed at 5 rounds; `/explore` defaults to 20 and `/delegate` to 40. Raise (or reset) them in `~/.fuseraft/config`:
+A subagent's loop is capped in *rounds* — one model call each, so tools it fires in parallel count once. `/locate` is fixed at 5 rounds; `/explore` defaults to 20 and `/delegate` to 40. Raise (or reset) them in `~/.fuseraft/config`:
 
 ```bash
 fuseraft settings set subagent.exploreMaxIterations 30
 fuseraft settings set subagent.delegateMaxIterations 60
 ```
 
-Each accepts 1–100, or `""` to go back to the default. A run that hits its cap stops with a `stopped after N rounds without finishing` notice and any partial output rather than passing itself off as done. Custom sub-agents set their own cap with `max_iterations` ([Sub-agents](subagents.md)); the orchestration equivalent is `SubAgentMaxToolCalls`.
+Each accepts 1–100, or `""` to go back to the default. A run that hits its cap stops with a `stopped after N rounds without finishing` notice and any partial output rather than passing itself off as done. Custom subagents set their own cap with `max_iterations` ([Subagents](subagents.md)); the orchestration equivalent is `SubagentMaxToolCalls`.
 
 **Prompt format**
 
@@ -650,7 +650,7 @@ Restriction on Git removed.
 - `/tools restrict <plugin> <tag> [tag2 …]` — e.g. `/tools restrict Git read` leaves `git_status`/`git_diff`/`git_log`/… available but removes `git_commit`/`git_push`/`git_reset`/… from the model's tool schema entirely (not a runtime approval prompt — the tool is simply absent)
 - `/tools restrict` with no arguments shows active restrictions
 - `/tools unrestrict <plugin>` removes a plugin's restriction
-- Run `/tools restrict` with no arguments to see which plugin names have capability tags at all (`FileSystem`, `Shell`, `Git`, `Http`, `Json`, `Document`, `Search`, `Changes`, `Scratchpad`, `Chatroom`, `Probe`, `CodeExecution`, `Decision`, `Graph`) — plugins without fine-grained tags (`Todo`, `SubAgent`, MCP servers, …) can only be turned on or off via `/tools disable`/`/tools enable`, not restricted by tag
+- Run `/tools restrict` with no arguments to see which plugin names have capability tags at all (`FileSystem`, `Shell`, `Git`, `Http`, `Json`, `Document`, `Search`, `Changes`, `Scratchpad`, `Chatroom`, `Probe`, `CodeExecution`, `Decision`, `Graph`) — plugins without fine-grained tags (`Todo`, `Subagent`, MCP servers, …) can only be turned on or off via `/tools disable`/`/tools enable`, not restricted by tag
 
 **Owning-plugin filtering reaches across category buckets.** Both `/tools restrict` and `/safe-mode` filter per-tool by which plugin actually owns the tool (`PluginCapabilityMap.GetPlugin`), not only by which REPL tool-category dictionary key currently holds it. That distinction matters once `--plugins Extended` is enabled: `git_push` and `shell_run_background` live in the `Extended` category, not `Git`/`Shell`, but both commands still block them. `/safe-mode` leaves FileSystem-owned Extended tools (e.g. `delete_file`) alone; use `/tools restrict FileSystem …` when you need that lock too.
 
@@ -909,11 +909,11 @@ For ordinary chat turns (outside `/execute`): the critic reviews the question, t
   ↺ (correction turn) assistant: grep_file → MaxStreamRetries = 2 in ReplTurn.cs:20.
 ```
 
-The critic runs in an isolated context with no shared history from the main session — the same sub-agent infrastructure used by `/explore` and `/locate`. It requires tools to be active; `/adversarial on` will warn if `--no-tools` was set at startup. On timeout or error the critic degrades to approved so a transient failure never blocks execution. Every free-form turn under adversarial mode costs one extra LLM call for the critic review.
+The critic runs in an isolated context with no shared history from the main session — the same subagent infrastructure used by `/explore` and `/locate`. It requires tools to be active; `/adversarial on` will warn if `--no-tools` was set at startup. On timeout or error the critic degrades to approved so a transient failure never blocks execution. Every free-form turn under adversarial mode costs one extra LLM call for the critic review.
 
 **Getting unstuck with /assist**
 
-When a session has stalled — the agent keeps making the same mistake, misunderstood the task early on, or is caught in a loop — run `/assist`. A sub-agent reads the conversation history, identifies the root cause, and writes a corrective instruction addressed to the REPL agent. That instruction is shown to you and then injected into the conversation as a user message, redirecting the main agent without requiring you to diagnose the problem yourself.
+When a session has stalled — the agent keeps making the same mistake, misunderstood the task early on, or is caught in a loop — run `/assist`. A subagent reads the conversation history, identifies the root cause, and writes a corrective instruction addressed to the REPL agent. That instruction is shown to you and then injected into the conversation as a user message, redirecting the main agent without requiring you to diagnose the problem yourself.
 
 ```
 > /assist
@@ -2560,7 +2560,7 @@ fuseraft settings set <key> [value]
 
 ### `fuseraft settings show`
 
-Prints every section of the file as tables: Provider (including whether an API key is stored in the OS keychain — the key itself is never shown), Sampling defaults, REPL defaults, Telemetry default, Skill curation, Model overrides (memory extraction and sub-agent model), and connected MCP server names. If no config exists yet, prints a pointer to `/provider setup` or `settings set` instead of erroring.
+Prints every section of the file as tables: Provider (including whether an API key is stored in the OS keychain — the key itself is never shown), Sampling defaults, REPL defaults, Telemetry default, Skill curation, Model overrides (memory extraction and subagent model), and connected MCP server names. If no config exists yet, prints a pointer to `/provider setup` or `settings set` instead of erroring.
 
 ```bash
 fuseraft settings show
@@ -2601,7 +2601,7 @@ Sets one field by a dotted, case-insensitive key. Loads the existing config (or 
 | `telemetry.serviceName` | Requires `telemetry.otlpEndpoint` to already be set |
 | `skillCuration.enabled` | `true`/`false` |
 | `memory.model` | Model ID for the REPL's end-of-session memory-extraction call, or `""` to use the main chat model |
-| `subagent.model` | Model ID for `/explore`, `/locate`, `/delegate` sub-agents, or `""` to use the main chat model |
+| `subagent.model` | Model ID for `/explore`, `/locate`, `/delegate` subagents, or `""` to use the main chat model |
 | `subagent.exploreMaxIterations` | Round cap for `/explore` and `subagent_explore`, 1–100 (default `20`), or `""` to reset |
 | `subagent.delegateMaxIterations` | Round cap for `/delegate` and `subagent_delegate`, 1–100 (default `40`), or `""` to reset |
 
@@ -2620,7 +2620,7 @@ fuseraft settings set sampling.temperature 0.7
 # Always start with the banner suppressed
 fuseraft settings set repl.noBanner true
 
-# Run memory extraction and sub-agent tool calls on a cheaper model
+# Run memory extraction and subagent tool calls on a cheaper model
 fuseraft settings set memory.model gpt-4o-mini
 fuseraft settings set subagent.model gpt-4o-mini
 

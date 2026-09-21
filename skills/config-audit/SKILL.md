@@ -200,7 +200,7 @@ For each agent, read `Instructions` and flag:
 For any agent where `RemoteAgent` is set:
 
 1. Flag it as a **preview feature** — fuseraft-cli emits a `LogWarning` at session startup for every agent using `RemoteAgent` because the A2A SDK dependency (`1.0.0-preview2`) may have breaking changes in future releases.
-2. Verify that `Model`, `Plugins`, `FunctionChoice`, `Capabilities`, `SubAgentModel`, and `SubAgentPlugins` are **not** set on that agent — those fields are silently ignored when `RemoteAgent` is present, which can mislead readers into thinking tool access or model selection is in effect.
+2. Verify that `Model`, `Plugins`, `FunctionChoice`, `Capabilities`, `SubagentModel`, and `SubagentPlugins` are **not** set on that agent — those fields are silently ignored when `RemoteAgent` is present, which can mislead readers into thinking tool access or model selection is in effect.
 3. Confirm `RemoteAgent.Url` is set and reachable in the target environment.
 
 ---

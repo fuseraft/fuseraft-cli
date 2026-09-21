@@ -106,7 +106,7 @@ Orchestration:
 
 In **REPL mode** the same folder orientation is injected (blocks 3 onward), but the log-file entries are omitted from the manifest because the session section of the REPL system prompt already lists them and directs the agent to the `repl_session_*` tools for log access.
 
-`SubAgentPlugin` (used by `subagent_explore` and `subagent_locate`) receives a single-line skip directive instead of the full manifest, since its system prompt is tightly budgeted.
+`SubagentPlugin` (used by `subagent_explore` and `subagent_locate`) receives a single-line skip directive instead of the full manifest, since its system prompt is tightly budgeted.
 
 ---
 
@@ -142,9 +142,9 @@ Each entry in `Agents` configures one participant in the group chat.
 | `MaxInTurnToolPairs` | int | `0` | no | Deterministic sliding-window cap on the number of tool call/result pairs kept in full within a turn — but only engages once the turn's estimated size reaches ~90% of the agent's context budget (`MaxContextTokens`, or a 200k-char fallback when unset); below that, older pairs are left untouched so the request prefix a provider would cache stays stable across calls. Once triggered, all but the most-recent N pairs are replaced with placeholders. `0` means no limit. Recommended: 8–16 for high-volume action agents. |
 | `TrustScore` | number | `0.7` | no | Governance trust score (0.0–1.0) used to assign an execution ring. See [Governance](governance.md#execution-rings). |
 | `ContextWindow` | object | — | no | Filters the conversation history before it reaches this agent. See [ContextWindow](#contextwindow). |
-| `SubAgentModel` | string | — | no | Model ID override for the sub-agent spawned by the `SubAgent` plugin. Defaults to the parent agent's model when unset. Useful for running a cheaper model (e.g. Haiku) for `subagent_explore` / `subagent_locate` calls. |
-| `SubAgentPlugins` | array | — | no | Explicit list of plugin names to load into the sub-agent. When unset the sub-agent receives the default read-only set: FileSystem read, Search, Shell read, Git read. Unknown names raise an error at session startup. |
-| `SubAgentMaxToolCalls` | int | `0` | no | Maximum rounds (model calls; parallel tool calls in one round count once) for `subagent_explore`. `0` uses the built-in default of 20. `subagent_locate` always uses a hard cap of 5 regardless of this setting. |
+| `SubagentModel` | string | — | no | Model ID override for the subagent spawned by the `Subagent` plugin. Defaults to the parent agent's model when unset. Useful for running a cheaper model (e.g. Haiku) for `subagent_explore` / `subagent_locate` calls. |
+| `SubagentPlugins` | array | — | no | Explicit list of plugin names to load into the subagent. When unset the subagent receives the default read-only set: FileSystem read, Search, Shell read, Git read. Unknown names raise an error at session startup. |
+| `SubagentMaxToolCalls` | int | `0` | no | Maximum rounds (model calls; parallel tool calls in one round count once) for `subagent_explore`. `0` uses the built-in default of 20. `subagent_locate` always uses a hard cap of 5 regardless of this setting. |
 | `RemoteAgent` | object | — | no | Delegates this agent slot to a remote A2A agent. When set, `Model`, `Plugins`, `FunctionChoice`, and `Capabilities` are ignored. See [RemoteAgent](#remoteagent). |
 
 ### Capabilities
@@ -236,24 +236,24 @@ This means: to inherit a field from the file, simply omit it in the inline confi
 
 **Validation** — `fuseraft validate` resolves `AgentFile` paths and reports missing files as errors before the session starts.
 
-### SubAgent
+### Subagent
 
-When the `SubAgent` plugin is listed in `Plugins`, the agent gains access to two tools:
+When the `Subagent` plugin is listed in `Plugins`, the agent gains access to two tools:
 
-- **`subagent_explore`** — multi-hop exploration loop (up to `SubAgentMaxToolCalls` rounds, default 20). Accepts an optional `format` parameter: `"prose"` (default) or `"file_list"` (bulleted path list).
+- **`subagent_explore`** — multi-hop exploration loop (up to `SubagentMaxToolCalls` rounds, default 20). Accepts an optional `format` parameter: `"prose"` (default) or `"file_list"` (bulleted path list).
 - **`subagent_locate`** — single-target symbol/file lookup, hard-capped at 5 rounds and 512 output tokens.
 
-Both tools inject the current working directory into the sub-agent's system prompt and link the parent's cancellation token so interrupts propagate immediately. The sub-agent does not share the parent's conversation history.
+Both tools inject the current working directory into the subagent's system prompt and link the parent's cancellation token so interrupts propagate immediately. The subagent does not share the parent's conversation history.
 
 ```yaml
 - Name: Developer
   Plugins:
     - FileSystem
     - Shell
-    - SubAgent
-  SubAgentModel: claude-haiku-4-5-20251001   # cheaper model for sub-agent work
-  SubAgentMaxToolCalls: 25                   # allow deeper explore loops
-  SubAgentPlugins:
+    - Subagent
+  SubagentModel: claude-haiku-4-5-20251001   # cheaper model for subagent work
+  SubagentMaxToolCalls: 25                   # allow deeper explore loops
+  SubagentPlugins:
     - FileSystem
     - Search
     - Git
@@ -281,7 +281,7 @@ Delegates an agent slot to a remote process that implements the [A2A protocol](h
 
 **Fields that apply when `RemoteAgent` is set:** `Name`, `Instructions`, `TrustScore`, `ContextWindow`, `MaxToolCallsPerTurn`.
 
-**Fields that are ignored when `RemoteAgent` is set:** `Model`, `Plugins`, `FunctionChoice`, `Capabilities`, `SubAgentModel`, `SubAgentPlugins` — those are properties of the remote agent.
+**Fields that are ignored when `RemoteAgent` is set:** `Model`, `Plugins`, `FunctionChoice`, `Capabilities`, `SubagentModel`, `SubagentPlugins` — those are properties of the remote agent.
 
 ### FunctionChoice
 
@@ -688,7 +688,7 @@ Each line is a JSON object:
 | `session` | Session ID |
 | `agent` | Agent name (null for session-level events) |
 | `turn` | 1-based turn counter |
-| `event_type` | Event identifier. Session lifecycle: `session_start`, `session_end`, `session_summary`, `phase_start`, `phase_end`, `compaction`, `compaction_resume_candidate`, `session_error`. Per-turn: `turn_start`, `turn_end`, `turn_timeout`, `reasoning`, `context_assembly`. Routing: `keyword_detected`, `multi_keyword`, `no_keyword`, `keyword_not_found`, `agent_routed`, `state_advanced`, `back_edge_escalation`, `context_cap_warning`, `correction_injected`. Validation: `validation_fail`, `hitl_escalation`. Context budget: `context_budget_warn`, `context_budget_cutover`. Saga: `saga_compensating`, `saga_compensated`. Magentic: `magentic_plan`, `magentic_replan`, `magentic_complete`. Infrastructure: `tool_blocked`, `tool_call`, `circuit_breaker_open`, `http_reasoning`. Sub-agent: `sub_agent_start`, `sub_agent_tool_call`, `sub_agent_end`. |
+| `event_type` | Event identifier. Session lifecycle: `session_start`, `session_end`, `session_summary`, `phase_start`, `phase_end`, `compaction`, `compaction_resume_candidate`, `session_error`. Per-turn: `turn_start`, `turn_end`, `turn_timeout`, `reasoning`, `context_assembly`. Routing: `keyword_detected`, `multi_keyword`, `no_keyword`, `keyword_not_found`, `agent_routed`, `state_advanced`, `back_edge_escalation`, `context_cap_warning`, `correction_injected`. Validation: `validation_fail`, `hitl_escalation`. Context budget: `context_budget_warn`, `context_budget_cutover`. Saga: `saga_compensating`, `saga_compensated`. Magentic: `magentic_plan`, `magentic_replan`, `magentic_complete`. Infrastructure: `tool_blocked`, `tool_call`, `circuit_breaker_open`, `http_reasoning`. Subagent: `subagent_start`, `subagent_tool_call`, `subagent_end`. |
 | `payload` | Event-specific JSON object |
 
 **`session_start` payload:** `{ task, start_node, resume }` — `task` is the raw task string passed to the session (inline `--task` value or full contents of `--task-file`); `start_node` is the initial graph node; `resume` is true when replaying prior history.

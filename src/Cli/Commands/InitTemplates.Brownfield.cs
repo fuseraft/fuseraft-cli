@@ -67,7 +67,7 @@ public static partial class InitTemplates
             Plugins:
               - FileSystem
               - Search
-              - SubAgent
+              - Subagent
               - Investigation
               - Conventions
               - DiscoveryBrief
@@ -142,7 +142,7 @@ public static partial class InitTemplates
               - FileSystem
               - Search
               - SessionContext
-              - SubAgent
+              - Subagent
               - Brief
               - Handoff
               - Self

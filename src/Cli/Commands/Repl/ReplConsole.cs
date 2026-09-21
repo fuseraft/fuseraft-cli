@@ -4,10 +4,10 @@ namespace fuseraft.Cli.Commands.Repl;
 
 /// <summary>
 /// Terminal-presentation utilities (spinner, drip-print, ANSI stripping) used both by turn
-/// execution and by the sub-agent REPL commands. Extracted from <see cref="ReplTurn"/> — these
+/// execution and by the subagent REPL commands. Extracted from <see cref="ReplTurn"/> — these
 /// take no <see cref="ReplSessionContext"/> and were already independently consumed by
 /// <c>ReplCommands.Agents.cs</c> for <c>/diagnose</c>/<c>/explore</c>/<c>/locate</c>-style
-/// sub-agent commands, unrelated to turn execution.
+/// subagent commands, unrelated to turn execution.
 /// </summary>
 internal static class ReplConsole
 {

@@ -108,16 +108,16 @@ public sealed class PluginRegistry : IDisposable
         Register("Handoff",       () => new HandoffPlugin());
 
         // Stub registrations so `fuseraft plugins` can reflect function names and descriptions.
-        // At runtime, AgentFactory replaces Scratchpad, Chatroom, and SubAgent with per-agent
+        // At runtime, AgentFactory replaces Scratchpad, Chatroom, and Subagent with per-agent
         // instances, and OrchestratorBuilder replaces Changes with a real path-bound instance.
         Register("Scratchpad", () => new ScratchpadPlugin("agent", FuseraftPaths.GlobalScratchpad));
         var slug = FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory());
         Register("Chatroom",   () => new ChatroomPlugin("agent", FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalChatroom, "default")));
         Register("Changes",    () => new ChangesPlugin(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalChanges, slug)));
 
-        // SubAgent stub — AgentFactory replaces this with a real instance that has a
-        // live IChatClient and sandboxed FileSystem + Search tools for the sub-agent loop.
-        Register("SubAgent", () => new SubAgentPlugin(chatClient: null, explorerTools: []));
+        // Subagent stub — AgentFactory replaces this with a real instance that has a
+        // live IChatClient and sandboxed FileSystem + Search tools for the subagent loop.
+        Register("Subagent", () => new SubagentPlugin(chatClient: null, explorerTools: []));
 
         Register("Compaction", () => new CompactionPlugin());
 
@@ -386,11 +386,6 @@ public sealed class PluginRegistry : IDisposable
         new(StringComparer.OrdinalIgnoreCase)
             { "FileSystem", "FileSystemManagementOps", "Handoff", "Skills", "Compaction" };
 
-    // Plugins whose tool-name prefix differs from the snake_cased class name (SubAgent would
-    // otherwise become sub_agent_*).
-    private static readonly Dictionary<string, string> PrefixOverrides =
-        new(StringComparer.OrdinalIgnoreCase) { ["SubAgent"] = "subagent" };
-
     /// <summary>
     /// Builds <see cref="AIFunction"/> instances from a plugin object by reflecting over
     /// public instance methods decorated with <see cref="DescriptionAttribute"/>.
@@ -417,9 +412,7 @@ public sealed class PluginRegistry : IDisposable
 
         var className = plugin.GetType().Name;
         var rawPrefix = className.EndsWith("Plugin", StringComparison.Ordinal) ? className[..^6] : className;
-        var prefix    = NoPrefixPlugins.Contains(rawPrefix) ? null
-                      : PrefixOverrides.TryGetValue(rawPrefix, out var overridden) ? overridden
-                      : ToSnakeCase(rawPrefix);
+        var prefix    = NoPrefixPlugins.Contains(rawPrefix) ? null : ToSnakeCase(rawPrefix);
 
         return plugin.GetType()
             .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)

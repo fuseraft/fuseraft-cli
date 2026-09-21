@@ -82,7 +82,7 @@ public static class UserConfigStore
                         Telemetry     = onDisk.Telemetry,
                         SkillCuration = onDisk.SkillCuration,
                         Memory        = onDisk.Memory,
-                        SubAgent      = onDisk.SubAgent,
+                        Subagent      = onDisk.Subagent,
                     };
                     onDiskApiKey = null;
                 }
@@ -160,7 +160,7 @@ public static class UserConfigStore
             Telemetry     = config.Telemetry,
             SkillCuration = config.SkillCuration,
             Memory        = config.Memory,
-            SubAgent      = config.SubAgent,
+            Subagent      = config.Subagent,
         };
         File.WriteAllText(ConfigPath, JsonSerializer.Serialize(onDisk, JsonOptions));
     }
@@ -191,7 +191,7 @@ public static class UserConfigStore
         public MemoryExtractionConfig? Memory { get; set; }
 
         [JsonPropertyName("subagent")]
-        public SubAgentConfig? SubAgent { get; set; }
+        public SubagentConfig? Subagent { get; set; }
     }
 
     private sealed class ProviderSection

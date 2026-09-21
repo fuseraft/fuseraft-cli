@@ -137,7 +137,7 @@ internal sealed class RawReasoningCaptureHandler(EventEmitter? eventEmitter) : D
                     reasoning_tokens    = reasoningTokens,
                     host,
                     // Correlates this http_reasoning with the inner_call_context event that preceded
-                    // the HTTP call. Null for sub-agent HTTP calls (they inherit FunctionInvokingChatClient's
+                    // the HTTP call. Null for subagent HTTP calls (they inherit FunctionInvokingChatClient's
                     // execution context, which never had the main-agent's call-seq set).
                     call_seq            = InnerCallId.Current.Value,
                     // Request probes — answer: "does ProtectedData reach the wire?"

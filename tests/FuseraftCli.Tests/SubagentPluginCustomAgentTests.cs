@@ -1,15 +1,15 @@
 using Microsoft.Extensions.AI;
-using fuseraft.Core.SubAgents;
+using fuseraft.Core.Subagents;
 using fuseraft.Infrastructure.Plugins;
 
 namespace FuseraftCli.Tests;
 
 /// <summary>
-/// Covers how <see cref="SubAgentPlugin"/> binds user-defined agents to a tool pool and a model,
-/// and — the part with security weight — that the session's tool gate reaches every sub-agent run,
+/// Covers how <see cref="SubagentPlugin"/> binds user-defined agents to a tool pool and a model,
+/// and — the part with security weight — that the session's tool gate reaches every subagent run,
 /// built-in and custom alike.
 /// </summary>
-public sealed class SubAgentPluginCustomAgentTests
+public sealed class SubagentPluginCustomAgentTests
 {
     private static AIFunction Tool(string name) => AIFunctionFactory.Create(() => "ok", name);
 
@@ -17,7 +17,7 @@ public sealed class SubAgentPluginCustomAgentTests
     private static readonly AIFunction[] ReadOnly = [Tool("read_file"), Tool("list_files"), Tool("search_content"), Tool("shell_run")];
     private static readonly AIFunction[] Write    = [Tool("read_file"), Tool("write_file"), Tool("shell_run"), Tool("git_commit")];
 
-    private static SubAgentDefinition Def(
+    private static SubagentDefinition Def(
         string name = "reviewer", string description = "Reviews code.", string body = "You are a reviewer.",
         string? model = null, string[]? tools = null, int max = 12) =>
         new(name, description, body, model, tools, max, $"/agents/{name}.md", "project");
@@ -49,8 +49,8 @@ public sealed class SubAgentPluginCustomAgentTests
         public string LastSystemPrompt => Calls[^1].Messages.First(m => m.Role == ChatRole.System).Text!;
     }
 
-    private static SubAgentPlugin Plugin(
-        RecordingClient client, SubAgentDefinition[] defs, Func<string, IChatClient?>? clientFactory = null) =>
+    private static SubagentPlugin Plugin(
+        RecordingClient client, SubagentDefinition[] defs, Func<string, IChatClient?>? clientFactory = null) =>
         new(client, ReadOnly, delegateTools: Write, customAgents: defs, customAgentClientFactory: clientFactory);
 
     // ── Tool binding ────────────────────────────────────────────────────────────
@@ -161,7 +161,7 @@ public sealed class SubAgentPluginCustomAgentTests
         await p.RunAgentAsync("reviewer", "the task text");
 
         Assert.StartsWith("You only ever answer in haiku.", client.LastSystemPrompt);
-        Assert.Contains("'reviewer' sub-agent", client.LastSystemPrompt);
+        Assert.Contains("'reviewer' subagent", client.LastSystemPrompt);
         Assert.Contains("read_file", client.LastSystemPrompt);
         Assert.Equal("the task text", client.Calls[^1].Messages.Last().Text);
     }
@@ -333,10 +333,10 @@ public sealed class SubAgentPluginCustomAgentTests
     }
 
     [Fact]
-    public async Task ToolGate_AlsoRestrainsTheBuiltInDelegateSubAgent()
+    public async Task ToolGate_AlsoRestrainsTheBuiltInDelegateSubagent()
     {
         // Regression: /safe-mode closed Shell/Git/Http for the parent but subagent_delegate still handed
-        // its sub-agent shell_run and git_commit, because nothing consulted the session's gate.
+        // its subagent shell_run and git_commit, because nothing consulted the session's gate.
         var client = new RecordingClient();
         var p = Plugin(client, []);
         p.ToolGate = name => name is not ("shell_run" or "git_commit");

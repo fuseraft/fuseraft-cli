@@ -51,7 +51,7 @@ public static partial class InitTemplates
                 ModelId: worker
               Plugins:
                 - FileSystem
-                - SubAgent
+                - Subagent
                 - Scratchpad
 
             - Name: Developer

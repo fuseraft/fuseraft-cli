@@ -7,9 +7,9 @@ namespace fuseraft.Infrastructure.Plugins;
 ///
 /// <para>
 /// Single source of truth for two independent call sites that each assemble a read-only
-/// delegated agent: the REPL's <c>SubAgentPlugin</c> explorer/locate/delegate tools
-/// (<c>ReplCommand.cs</c>) and orchestration's <c>SubAgent</c> plugin default fallback
-/// (<c>AgentToolResolver.BuildSubAgentTools</c>). Both previously hand-copied the same three
+/// delegated agent: the REPL's <c>SubagentPlugin</c> explorer/locate/delegate tools
+/// (<c>ReplCommand.cs</c>) and orchestration's <c>Subagent</c> plugin default fallback
+/// (<c>AgentToolResolver.BuildSubagentTools</c>). Both previously hand-copied the same three
 /// tool-name sets with no reference between them — a tool added to one read-only set silently
 /// would not appear in the other.
 /// </para>
@@ -25,7 +25,7 @@ internal static class ExplorerToolSets
     /// <summary>
     /// Members of the explorer sets above that can nonetheless mutate state: <c>shell_run</c> runs arbitrary
     /// commands (the built-in explore/locate loops keep it to "verify a hypothesis"). Anything that promises
-    /// to be strictly read-only — a user-defined sub-agent's default tool set — must leave these out.
+    /// to be strictly read-only — a user-defined subagent's default tool set — must leave these out.
     /// </summary>
     public static readonly IReadOnlySet<string> CanMutate = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         { "shell_run" };

@@ -218,7 +218,7 @@ public static partial class InitTemplates
               - FileSystem
               - Search
               - SessionContext
-              - SubAgent
+              - Subagent
               - Decision
               - Objective
               - Brief
@@ -293,7 +293,7 @@ public static partial class InitTemplates
               ModelId: {model}{EpAgent(endpoint)}
             Plugins:
               - FileSystem
-              - SubAgent
+              - Subagent
               - BriefReview
               - Handoff
             Capabilities:

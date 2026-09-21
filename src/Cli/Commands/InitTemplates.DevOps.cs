@@ -42,7 +42,7 @@ public static partial class InitTemplates
             Plugins:
               - FileSystem
               - SessionContext
-              - SubAgent
+              - Subagent
               - OpsPlan
               - Handoff
             Capabilities:

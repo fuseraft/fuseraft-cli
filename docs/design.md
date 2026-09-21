@@ -100,7 +100,7 @@ A path-refactor (mid-2026) moved nearly all runtime session/state artifacts from
 
 | Path | Contents |
 |------|----------|
-| `~/.fuseraft/config` | Sectioned global config: provider (model ID, endpoint URL — no secrets), sampling defaults, REPL defaults, MCP servers, telemetry default, skill curation, memory/sub-agent model overrides. See [CLI Reference — `fuseraft settings`](cli-reference.md#fuseraft-settings). |
+| `~/.fuseraft/config` | Sectioned global config: provider (model ID, endpoint URL — no secrets), sampling defaults, REPL defaults, MCP servers, telemetry default, skill curation, memory/subagent model overrides. See [CLI Reference — `fuseraft settings`](cli-reference.md#fuseraft-settings). |
 | `~/.fuseraft/.key` | Plain-text fallback API key (mode 0600; used only when no keychain) |
 | `~/.fuseraft/sessions/` | Session checkpoint files (`<sessionId>.json`, mode 0600) — flat, not nested by `{project_slug}` |
 | `~/.fuseraft/sessions/index.json` | Lightweight session index (no message history) for fast listing |
@@ -138,7 +138,7 @@ Only a few artifacts remain project-local; everything session- or state-scoped n
 
 All paths are configurable via their corresponding config keys. The table above shows defaults.
 
-**Folder orientation for agents** — `FuseraftPaths.BuildFolderOrientationBlock()` generates a compact manifest of the runtime directory layout (both the local `.fuseraft/` artifacts and the global `~/.fuseraft/` session/state paths above) and is appended to every agent's instructions by `OrchestratorBuilder` at session start. This means agents never need to call `list_files` on `.fuseraft/` to discover its layout — they already have it. In REPL mode the log-file entries are omitted (the session section already covers them; agents are directed to the `repl_session_*` tools). `SubAgentPlugin` prompts receive a one-line skip directive instead of the full manifest to keep their system prompts compact.
+**Folder orientation for agents** — `FuseraftPaths.BuildFolderOrientationBlock()` generates a compact manifest of the runtime directory layout (both the local `.fuseraft/` artifacts and the global `~/.fuseraft/` session/state paths above) and is appended to every agent's instructions by `OrchestratorBuilder` at session start. This means agents never need to call `list_files` on `.fuseraft/` to discover its layout — they already have it. In REPL mode the log-file entries are omitted (the session section already covers them; agents are directed to the `repl_session_*` tools). `SubagentPlugin` prompts receive a one-line skip directive instead of the full manifest to keep their system prompts compact.
 
 ---
 
@@ -674,7 +674,7 @@ Plugins are `AIFunction`-providing objects registered in `PluginRegistry` and re
 | `Scratchpad` | `scratchpad_read`, `scratchpad_read_all`, `scratchpad_search`, `scratchpad_write`, `scratchpad_delete` — per-agent key-value store |
 | `Chatroom` | `chatroom_send`, `chatroom_read` — shared coordination log |
 | `Handoff` | `handoff` — emits a routing keyword to trigger a state machine or keyword route transition |
-| `SubAgent` | `subagent_explore` (multi-hop exploration, prose or file-list output, configurable round cap) · `subagent_locate` (single-target symbol/file lookup, 5-round hard cap, path:line output) — both run an isolated tool loop and return a distilled result without filling the caller's context. Working directory is injected automatically; the parent's cancellation token is linked. Model and plugin set are configurable via `SubAgentModel`, `SubAgentMaxToolCalls`, and `SubAgentPlugins`. Default tool set: FileSystem read, Search, Git read, and Shell — **not** read-only: the default Shell allow-list is `shell_run`, `shell_get_env`, `shell_which`, `shell_get_working_directory`, so a sub-agent can execute commands (e.g. builds, tests) by default, subject to the sandbox/ring the parent agent runs under. |
+| `Subagent` | `subagent_explore` (multi-hop exploration, prose or file-list output, configurable round cap) · `subagent_locate` (single-target symbol/file lookup, 5-round hard cap, path:line output) — both run an isolated tool loop and return a distilled result without filling the caller's context. Working directory is injected automatically; the parent's cancellation token is linked. Model and plugin set are configurable via `SubagentModel`, `SubagentMaxToolCalls`, and `SubagentPlugins`. Default tool set: FileSystem read, Search, Git read, and Shell — **not** read-only: the default Shell allow-list is `shell_run`, `shell_get_env`, `shell_which`, `shell_get_working_directory`, so a subagent can execute commands (e.g. builds, tests) by default, subject to the sandbox/ring the parent agent runs under. |
 
 **MCP servers** (`McpSessionManager`): connected at startup via `ModelContextProtocol`. Each server's tools are registered under the server's configured name and are available to any agent that lists that name in `Plugins`. MCP connections are disposed when the session ends.
 
@@ -851,13 +851,13 @@ Event consumers may inject messages, trigger external systems, or enforce additi
 | `circuit_breaker_open` | `SessionRunner` | Agent name |
 | `http_reasoning` | `ChatClientFactory` | Reasoning content |
 
-*Sub-agent*
+*Subagent*
 
 | Event | Emitter | Payload |
 |---|---|---|
-| `sub_agent_start` | `SubAgentPlugin` | Agent name, query (truncated to 120 chars), mode (`explore` \| `locate`) |
-| `sub_agent_tool_call` | `SubAgentPlugin` | Agent name, tool name, args summary |
-| `sub_agent_end` | `SubAgentPlugin` | Agent name, outcome (`completed` \| `iteration_limit` \| `cancelled` \| `timeout` \| `error`), summary_chars, mode |
+| `subagent_start` | `SubagentPlugin` | Agent name, query (truncated to 120 chars), mode (`explore` \| `locate`) |
+| `subagent_tool_call` | `SubagentPlugin` | Agent name, tool name, args summary |
+| `subagent_end` | `SubagentPlugin` | Agent name, outcome (`completed` \| `iteration_limit` \| `cancelled` \| `timeout` \| `error`), summary_chars, mode |
 
 *REPL-specific*
 

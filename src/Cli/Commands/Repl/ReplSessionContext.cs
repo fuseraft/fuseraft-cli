@@ -62,7 +62,7 @@ internal sealed class ReplSessionContext
     public readonly ChatClientFactory   Factory;
     public readonly IApiKeyStore        KeyStore;
     public readonly Dictionary<string, List<AIFunction>> ToolsByCategory;
-    public readonly SubAgentPlugin?     SubAgent;
+    public readonly SubagentPlugin?     Subagent;
     public readonly UndoSnapshotStore?  UndoStore;
     public readonly bool                Verbose;
 
@@ -162,7 +162,7 @@ internal sealed class ReplSessionContext
     // alongside the conversation it belongs to (/clear, /rewind, session restore).
     public GoalRecord? LastGoal;
 
-    // Non-fatal problems from loading user-defined sub-agent files, shown by /agents.
+    // Non-fatal problems from loading user-defined subagent files, shown by /agents.
     public IReadOnlyList<string> AgentProblems { get; set; } = [];
 
     // JSON bridge mode (set when running inside VS Code webview panel)
@@ -275,7 +275,7 @@ internal sealed class ReplSessionContext
         MemoryStore memoryStore, Dictionary<string, List<AIFunction>> toolsByCategory,
         string systemPrompt, bool pendingSave, AdaptiveTrimTracker adaptiveTrimTracker,
         bool verbose = false,
-        SubAgentPlugin? subAgent = null, ConversationCompactor? compactor = null,
+        SubagentPlugin? subagent = null, ConversationCompactor? compactor = null,
         UndoSnapshotStore? undoStore = null, HitlModeState? hitlState = null)
     {
         Hitl            = hitlState ?? new HitlModeState();
@@ -297,7 +297,7 @@ internal sealed class ReplSessionContext
         EventsPath      = eventsPath;
         MemoryStore     = memoryStore;
         ToolsByCategory = toolsByCategory;
-        SubAgent        = subAgent;
+        Subagent        = subagent;
         UndoStore       = undoStore;
         PendingSave     = pendingSave;
         Verbose         = verbose;

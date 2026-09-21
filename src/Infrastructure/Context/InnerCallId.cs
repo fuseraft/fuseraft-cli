@@ -14,10 +14,10 @@ namespace fuseraft.Infrastructure.Context;
 /// </para>
 ///
 /// <para>
-/// Sub-agent HTTP calls never see the main-agent's sequence number. The
+/// Subagent HTTP calls never see the main-agent's sequence number. The
 /// <see cref="FunctionInvokingChatClient"/> executes tool calls within its own execution
-/// context (captured before our middleware ran), so any sub-agent that spawns HTTP requests
-/// reads <see langword="null"/> here — making sub-agent and main-agent calls distinguishable
+/// context (captured before our middleware ran), so any subagent that spawns HTTP requests
+/// reads <see langword="null"/> here — making subagent and main-agent calls distinguishable
 /// in <c>http_reasoning</c> events without any explicit clearing.
 /// </para>
 /// </summary>

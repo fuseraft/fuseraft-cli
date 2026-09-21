@@ -23,9 +23,9 @@ public sealed class UserConfig
     [JsonPropertyName("memory")]
     public MemoryExtractionConfig? Memory { get; set; }
 
-    /// <summary>Model override for the REPL's Explore/Locate/Delegate sub-agents.</summary>
+    /// <summary>Model override for the REPL's Explore/Locate/Delegate subagents.</summary>
     [JsonPropertyName("subagent")]
-    public SubAgentConfig? SubAgent { get; set; }
+    public SubagentConfig? Subagent { get; set; }
 
     /// <summary>Persisted default sampling parameters for new REPL sessions.</summary>
     [JsonPropertyName("sampling")]

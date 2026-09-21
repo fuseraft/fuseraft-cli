@@ -1,16 +1,16 @@
 using System.Text.RegularExpressions;
 using YamlDotNet.Serialization;
 
-namespace fuseraft.Core.SubAgents;
+namespace fuseraft.Core.Subagents;
 
 /// <summary>
-/// A user-defined sub-agent: a Markdown file whose YAML frontmatter says <em>when</em> to use it and
+/// A user-defined subagent: a Markdown file whose YAML frontmatter says <em>when</em> to use it and
 /// <em>what it may touch</em>, and whose body is its system prompt.
 /// </summary>
 /// <param name="Name">Lowercase slug the parent model calls it by (<c>subagent_run agent=&lt;name&gt;</c>).</param>
 /// <param name="Description">What it is for — the only thing the parent model sees when deciding to delegate.</param>
-/// <param name="Instructions">The sub-agent's system prompt (the Markdown body).</param>
-/// <param name="Model">Optional model id; <c>null</c> = the session's sub-agent model.</param>
+/// <param name="Instructions">The subagent's system prompt (the Markdown body).</param>
+/// <param name="Model">Optional model id; <c>null</c> = the session's subagent model.</param>
 /// <param name="Tools">
 /// Names of tools it may use. <c>null</c> (key omitted) = the read-only explorer set. A list names
 /// exact tools from the session's pool; the entry <c>*</c> (<see cref="AllTools"/>) grants the whole
@@ -19,7 +19,7 @@ namespace fuseraft.Core.SubAgents;
 /// <param name="MaxIterations">Tool-round cap for one run.</param>
 /// <param name="SourcePath">The file it was loaded from.</param>
 /// <param name="Scope"><c>project</c> or <c>user</c>.</param>
-public sealed record SubAgentDefinition(
+public sealed record SubagentDefinition(
     string                Name,
     string                Description,
     string                Instructions,
@@ -36,16 +36,16 @@ public sealed record SubAgentDefinition(
 }
 
 /// <summary>Everything discovered under the agent directories, plus non-fatal problems worth showing the user.</summary>
-public sealed record SubAgentLoadResult(
-    IReadOnlyList<SubAgentDefinition> Definitions,
+public sealed record SubagentLoadResult(
+    IReadOnlyList<SubagentDefinition> Definitions,
     IReadOnlyList<string>             Problems);
 
 /// <summary>
-/// Discovers and parses sub-agent definition files. One malformed file never hides the rest: it is
-/// reported in <see cref="SubAgentLoadResult.Problems"/> and skipped. Deliberately no I/O beyond
+/// Discovers and parses subagent definition files. One malformed file never hides the rest: it is
+/// reported in <see cref="SubagentLoadResult.Problems"/> and skipped. Deliberately no I/O beyond
 /// reading the files, and no model/tool resolution — that belongs to whoever owns the tool pool.
 /// </summary>
-public static class SubAgentDefinitionLoader
+public static class SubagentDefinitionLoader
 {
     public const int DefaultMaxIterations = 30;
     public const int MaxIterationsCeiling = 100;
@@ -80,11 +80,11 @@ public static class SubAgentDefinitionLoader
         return [.. dirs.Select(d => (Path.GetFullPath(d.Item1), d.Item2)).Where(d => seen.Add(d.Item1))];
     }
 
-    public static SubAgentLoadResult LoadFromDirectories(IEnumerable<(string Directory, string Scope)> dirs)
+    public static SubagentLoadResult LoadFromDirectories(IEnumerable<(string Directory, string Scope)> dirs)
     {
-        var defs     = new List<SubAgentDefinition>();
+        var defs     = new List<SubagentDefinition>();
         var problems = new List<string>();
-        var byName   = new Dictionary<string, SubAgentDefinition>(StringComparer.OrdinalIgnoreCase);
+        var byName   = new Dictionary<string, SubagentDefinition>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var (dir, scope) in dirs)
         {
@@ -131,12 +131,12 @@ public static class SubAgentDefinitionLoader
             }
         }
 
-        return new SubAgentLoadResult(defs, problems);
+        return new SubagentLoadResult(defs, problems);
     }
 
     /// <summary>Parses one file's content. On failure appends the reason to <paramref name="problems"/> and returns false.</summary>
     public static bool TryParse(
-        string path, string scope, string content, out SubAgentDefinition? definition, List<string> problems)
+        string path, string scope, string content, out SubagentDefinition? definition, List<string> problems)
     {
         definition = null;
 
@@ -175,7 +175,7 @@ public static class SubAgentDefinitionLoader
 
         if (string.IsNullOrWhiteSpace(body))
         {
-            problems.Add($"{path}: skipped — the Markdown body is empty; it is the sub-agent's system prompt");
+            problems.Add($"{path}: skipped — the Markdown body is empty; it is the subagent's system prompt");
             return false;
         }
 
@@ -193,7 +193,7 @@ public static class SubAgentDefinitionLoader
         if (unsupported.Count > 0)
             problems.Add($"{path}: ignored unsupported field(s): {string.Join(", ", unsupported)}");
 
-        definition = new SubAgentDefinition(
+        definition = new SubagentDefinition(
             name, description, body.Trim(),
             Model:         Scalar(fm, "model")?.Trim() is { Length: > 0 } m ? m : null,
             Tools:         ParseTools(fm),

@@ -364,7 +364,7 @@ internal static partial class ReplCommands
 
         if (arg.Equals("on", StringComparison.OrdinalIgnoreCase))
         {
-            if (ctx.SubAgent is null)
+            if (ctx.Subagent is null)
             {
                 AnsiConsole.MarkupLine("[yellow]Adversarial mode requires tools (started with --no-tools).[/]");
                 return CommandResult.Continue;

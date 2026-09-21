@@ -134,9 +134,9 @@ Orchestration:
       MaxChars: 3000
     - Source: own_history:4           # agent's own last 4 turns, text-only, bounded to 8k chars
       MaxChars: 8000                  # override default (8000 chars ≈ 2000 tokens)
-  SubAgentModel: claude-haiku-4-5-20251001   # cheaper model for sub-agent exploration
-  SubAgentMaxToolCalls: 20        # cap on sub-agent iterations
-  SubAgentPlugins:                # custom plugin list for sub-agent (defaults to read-only set)
+  SubagentModel: claude-haiku-4-5-20251001   # cheaper model for subagent exploration
+  SubagentMaxToolCalls: 20        # cap on subagent iterations
+  SubagentPlugins:                # custom plugin list for subagent (defaults to read-only set)
     - FileSystem
     - Search
 ```
@@ -147,7 +147,7 @@ Orchestration:
 
 Controls whether an agent sees the shared session transcript other agents have been writing
 to, or only a synthesized handoff directive plus its own declared `Context:` sources — the
-same fresh-by-default, fork-by-explicit-choice split Claude Code uses for its own sub-agents.
+same fresh-by-default, fork-by-explicit-choice split Claude Code uses for its own subagents.
 
 | Mode | What the agent receives | Use for |
 |---|---|---|
@@ -199,7 +199,7 @@ assume they can see your reasoning.
 | `Scratchpad` | scratchpad_write, scratchpad_read, scratchpad_read_all, scratchpad_search |
 | `Chatroom` | chatroom_send, chatroom_read |
 | `Changes` | changes_read, changes_read_latest — requires `ChangeTracking` in config |
-| `SubAgent` | subagent_explore, subagent_locate |
+| `Subagent` | subagent_explore, subagent_locate |
 | `Handoff` | handoff(route_keyword) — terminates tool loop immediately |
 | `Probe` | probe_code, probe_assert_output, probe_compare_outputs, probe_run_hypothesis |
 | `CodeExecution` | code_execution_sandbox_run, code_execution_repl_start/exec/stop |

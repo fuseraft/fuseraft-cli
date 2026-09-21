@@ -167,7 +167,7 @@ internal static class PluginCapabilityMap
     /// <summary>
     /// Every plugin name that appears in <see cref="ToolInfo"/> — the set of plugins that
     /// actually have fine-grained capability tags. Used to warn when <c>/tools restrict</c>
-    /// is given a plugin name (e.g. a typo, or a plugin like <c>Todo</c> or <c>SubAgent</c>
+    /// is given a plugin name (e.g. a typo, or a plugin like <c>Todo</c> or <c>Subagent</c>
     /// with no capability entries at all) that could never match a tool.
     /// </summary>
     public static readonly IReadOnlySet<string> KnownPlugins =

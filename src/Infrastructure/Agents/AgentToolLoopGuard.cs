@@ -5,7 +5,7 @@ namespace fuseraft.Infrastructure.Agents;
 /// <summary>
 /// Orchestration counterpart to <c>ReplToolLoopGuard</c> — installed as
 /// <see cref="FunctionInvokingChatClient.FunctionInvoker"/> for every orchestration agent (see
-/// <see cref="AgentFactory.Create"/>) and for <c>SubAgentPlugin.RunLoopAsync</c>'s independent
+/// <see cref="AgentFactory.Create"/>) and for <c>SubagentPlugin.RunLoopAsync</c>'s independent
 /// tool-calling loop, guarding against a model looping on the exact same tool call (same name +
 /// arguments) forever, or bouncing between two identical calls (A/B/A/B — see
 /// <see cref="ToolCallCycleDetector"/>).
@@ -21,7 +21,7 @@ namespace fuseraft.Infrastructure.Agents;
 /// <para>
 /// <b>Deliberately does not annotate the returned tool result</b> — unlike
 /// <c>ReplToolLoopGuard</c>, which safely embeds a notice in the result string. Both
-/// <see cref="AgentFactory.Create"/> and <c>SubAgentPlugin.RunLoopAsync</c> route their message
+/// <see cref="AgentFactory.Create"/> and <c>SubagentPlugin.RunLoopAsync</c> route their message
 /// history through <c>AgentContextCompactionFilters.ApplyInTurnFilters</c> with
 /// <c>maxInTurnChars &gt; 0</c> (the REPL's own client does not — its <c>maxInTurnChars</c> is
 /// always 0 — which is why <c>ReplToolLoopGuard</c> doesn't have this problem). That filter's

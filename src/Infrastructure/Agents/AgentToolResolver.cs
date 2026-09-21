@@ -7,7 +7,7 @@ using fuseraft.Infrastructure.Plugins;
 namespace fuseraft.Infrastructure.Agents;
 
 /// <summary>
-/// Resolves the plugin/tool list for an agent (and, separately, for a spawned sub-agent) into
+/// Resolves the plugin/tool list for an agent (and, separately, for a spawned subagent) into
 /// <see cref="AIFunction"/>s, including the offload-caching and tool-call-notification wrapping
 /// layers. Extracted from <see cref="AgentFactory"/> — single-caller-only from <c>Create</c>,
 /// low coupling to the rest of agent construction.
@@ -59,27 +59,27 @@ internal sealed class AgentToolResolver(
                     : (scratchpadConfig?.BasePath ?? FuseraftPaths.GlobalScratchpad);
                 functions = PluginRegistry.GetFunctionsFromObject(new ScratchpadPlugin(config.Name, basePath));
             }
-            // "SubAgent" is per-agent — each agent gets its own lightweight IChatClient
+            // "Subagent" is per-agent — each agent gets its own lightweight IChatClient
             // (optionally on a different, cheaper model) and a configurable tool set so
-            // the sub-agent respects the same sandbox constraints.
-            else if (pluginName.Equals("SubAgent", StringComparison.OrdinalIgnoreCase))
+            // the subagent respects the same sandbox constraints.
+            else if (pluginName.Equals("Subagent", StringComparison.OrdinalIgnoreCase))
             {
-                // Allow the sub-agent to run on a different model (e.g. Haiku for cost control).
-                var subModel  = string.IsNullOrWhiteSpace(config.SubAgentModel)
+                // Allow the subagent to run on a different model (e.g. Haiku for cost control).
+                var subModel  = string.IsNullOrWhiteSpace(config.SubagentModel)
                     ? resolvedModel
-                    : chatClientFactory.Resolve(new ModelConfig { ModelId = config.SubAgentModel });
+                    : chatClientFactory.Resolve(new ModelConfig { ModelId = config.SubagentModel });
                 var subClient = chatClientFactory.Create(subModel);
 
-                var explorerTools = BuildSubAgentTools(config, pluginRegistry, securityConfig);
+                var explorerTools = BuildSubagentTools(config, pluginRegistry, securityConfig);
 
                 // No delegateTools are passed here (delegate is REPL-only), so subagent_delegate
                 // would always answer "not available" — keep it out of the agent's tool schema.
                 functions = PluginRegistry.GetFunctionsFromObject(
-                        new SubAgentPlugin(subClient, explorerTools,
+                        new SubagentPlugin(subClient, explorerTools,
                             eventEmitter:    eventEmitter,
                             parentAgentName: config.Name,
-                            maxToolCalls:    config.SubAgentMaxToolCalls))
-                    .Where(f => f.Name != SubAgentPlugin.DelegateToolName);
+                            maxToolCalls:    config.SubagentMaxToolCalls))
+                    .Where(f => f.Name != SubagentPlugin.DelegateToolName);
             }
             // "Chatroom" is per-agent (own sender name) but all agents share the same file.
             else if (pluginName.Equals("Chatroom", StringComparison.OrdinalIgnoreCase))
@@ -171,20 +171,20 @@ internal sealed class AgentToolResolver(
         return tools;
     }
 
-    // Assembles the tool list for a sub-agent spawned by SubAgentPlugin.
-    // When config.SubAgentPlugins is set, uses those plugins (capability-filtered like normal agents).
+    // Assembles the tool list for a subagent spawned by SubagentPlugin.
+    // When config.SubagentPlugins is set, uses those plugins (capability-filtered like normal agents).
     // Otherwise falls back to the expanded default: FileSystem read, Search, Shell run, Git read.
-    private static List<AIFunction> BuildSubAgentTools(
+    private static List<AIFunction> BuildSubagentTools(
         AgentConfig config,
         PluginRegistry pluginRegistry,
         SecurityConfig? securityConfig)
     {
         var tools = new List<AIFunction>();
 
-        if (config.SubAgentPlugins is { Count: > 0 })
+        if (config.SubagentPlugins is { Count: > 0 })
         {
             // Custom plugin list — resolve and capability-filter the same way BuildTools does.
-            foreach (var name in config.SubAgentPlugins)
+            foreach (var name in config.SubagentPlugins)
             {
                 IEnumerable<AIFunction> fns;
                 if (pluginRegistry.TryGetAIFunctions(name, out var aiFns))
@@ -193,7 +193,7 @@ internal sealed class AgentToolResolver(
                     fns = ps.SelectMany(PluginRegistry.GetFunctionsFromObject);
                 else
                     throw new InvalidOperationException(
-                        $"Agent '{config.Name}' references unknown sub-agent plugin '{name}'. " +
+                        $"Agent '{config.Name}' references unknown subagent plugin '{name}'. " +
                         $"Registered plugins: {string.Join(", ", pluginRegistry.RegisteredPlugins)}");
 
                 if (config.Capabilities.TryGetValue(name, out var caps) && caps.Count > 0)
@@ -206,7 +206,7 @@ internal sealed class AgentToolResolver(
 
         // Default: expanded read-oriented set. FileSystem (sandboxed, read ops only).
         // denyPatterns applies DefaultSecurityPolicy's baseline (.env, .env.*) even here — a
-        // sub-agent's own FileSystemPlugin instance is separate from the parent's, and must
+        // subagent's own FileSystemPlugin instance is separate from the parent's, and must
         // not be a way around the parent's secrets protection.
         var fsDenyPatterns = DefaultSecurityPolicy.MergeFileSystemDeny(securityConfig?.FileSystemPermissions, securityConfig?.DenyCredentialFiles ?? true);
         var fsPlugin = new FileSystemPlugin(securityConfig?.FileSystemSandboxPath, exemptedPaths: ["~/.fuseraft/"], denyPatterns: fsDenyPatterns);

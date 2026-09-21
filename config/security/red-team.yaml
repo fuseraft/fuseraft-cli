@@ -147,7 +147,7 @@ Orchestration:
       Plugins:
         - FileSystem
         - Search
-        - SubAgent
+        - Subagent
         - Handoff
       Capabilities:
         FileSystem: [read, write]

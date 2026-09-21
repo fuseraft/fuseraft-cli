@@ -7,18 +7,18 @@ namespace fuseraft.Cli.Commands.Repl;
 internal static partial class ReplCommands
 {
     // -------------------------------------------------------------------------
-    // /agents — list user-defined sub-agents
+    // /agents — list user-defined subagents
     // -------------------------------------------------------------------------
 
     private static CommandResult CmdAgents(ReplSessionContext ctx)
     {
-        if (ctx.SubAgent is null)
+        if (ctx.Subagent is null)
         {
-            AnsiConsole.MarkupLine("[dim]Sub-agents not available (started with --no-tools).[/]");
+            AnsiConsole.MarkupLine("[dim]Subagents not available (started with --no-tools).[/]");
             return CommandResult.Continue;
         }
 
-        var agents   = ctx.SubAgent.CustomAgents;
+        var agents   = ctx.Subagent.CustomAgents;
         var problems = ctx.AgentProblems;
 
         if (ctx.JsonMode)
@@ -29,7 +29,7 @@ internal static partial class ReplCommands
 
         if (agents.Count == 0)
         {
-            AnsiConsole.MarkupLine("[dim]No user-defined sub-agents. Add a Markdown file with YAML frontmatter to[/] " +
+            AnsiConsole.MarkupLine("[dim]No user-defined subagents. Add a Markdown file with YAML frontmatter to[/] " +
                                    "[bold].fuseraft/agents/[/][dim] or[/] [bold].agents/agents/[/][dim] (project) or the same under[/] " +
                                    "[bold]~[/][dim] (user) — see docs/subagents.md.[/]");
         }
@@ -60,20 +60,20 @@ internal static partial class ReplCommands
         return CommandResult.Continue;
     }
 
-    private static string DescribeAgentTools(SubAgentPlugin.CustomAgentInfo a) =>
+    private static string DescribeAgentTools(SubagentPlugin.CustomAgentInfo a) =>
         a.Definition.Tools is null ? $"read-only ({a.ToolNames.Count})"
         : a.Definition.AllTools    ? $"all ({a.ToolNames.Count})"
         : a.ToolNames.Count == 0   ? "none"
         : string.Join(", ", a.ToolNames);
 
-    private static string RenderAgentsMarkdown(IReadOnlyList<SubAgentPlugin.CustomAgentInfo> agents, IReadOnlyList<string> problems)
+    private static string RenderAgentsMarkdown(IReadOnlyList<SubagentPlugin.CustomAgentInfo> agents, IReadOnlyList<string> problems)
     {
         var sb = new StringBuilder();
         if (agents.Count == 0)
-            sb.Append("No user-defined sub-agents. Add a Markdown file with YAML frontmatter to `.fuseraft/agents/` or `.agents/agents/`.");
+            sb.Append("No user-defined subagents. Add a Markdown file with YAML frontmatter to `.fuseraft/agents/` or `.agents/agents/`.");
         else
         {
-            sb.Append("## Sub-agents\n");
+            sb.Append("## Subagents\n");
             foreach (var a in agents)
                 sb.Append("\n- `").Append(a.Definition.Name).Append("` (").Append(a.Definition.Scope).Append(") — ")
                   .Append(a.Definition.Description.ReplaceLineEndings(" ")).Append("  \n  model: ")
@@ -100,29 +100,29 @@ internal static partial class ReplCommands
     private static async Task<CommandResult> CmdAgentAsync(
         ReplSessionContext ctx, string arg, CancellationToken cancellationToken)
     {
-        if (ctx.SubAgent is null)
+        if (ctx.Subagent is null)
         {
-            AnsiConsole.MarkupLine("[dim]Sub-agents not available (started with --no-tools).[/]");
+            AnsiConsole.MarkupLine("[dim]Subagents not available (started with --no-tools).[/]");
             return CommandResult.Continue;
         }
 
         var parts = (arg ?? string.Empty).Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (parts.Length < 2)
         {
-            var names = ctx.SubAgent.CustomAgents.Count > 0
-                ? string.Join(", ", ctx.SubAgent.CustomAgents.Select(a => a.Definition.Name))
+            var names = ctx.Subagent.CustomAgents.Count > 0
+                ? string.Join(", ", ctx.Subagent.CustomAgents.Select(a => a.Definition.Name))
                 : "(none defined — see /agents)";
             AnsiConsole.MarkupLine($"[yellow]Usage: /agent <name> <task>[/]  [dim]available: {Markup.Escape(names)}[/]");
             return CommandResult.Continue;
         }
 
         var (name, task) = (parts[0], parts[1]);
-        if (!ctx.SubAgent.CustomAgents.Any(a => a.Definition.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+        if (!ctx.Subagent.CustomAgents.Any(a => a.Definition.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
         {
-            var names = ctx.SubAgent.CustomAgents.Count > 0
-                ? string.Join(", ", ctx.SubAgent.CustomAgents.Select(a => a.Definition.Name))
+            var names = ctx.Subagent.CustomAgents.Count > 0
+                ? string.Join(", ", ctx.Subagent.CustomAgents.Select(a => a.Definition.Name))
                 : "(none defined)";
-            AnsiConsole.MarkupLine($"[yellow]No sub-agent named '{Markup.Escape(name)}'.[/] [dim]Available: {Markup.Escape(names)}[/]");
+            AnsiConsole.MarkupLine($"[yellow]No subagent named '{Markup.Escape(name)}'.[/] [dim]Available: {Markup.Escape(names)}[/]");
             return CommandResult.Continue;
         }
 
@@ -144,7 +144,7 @@ internal static partial class ReplCommands
 
         try
         {
-            var (_, inputTok, outputTok) = await ctx.SubAgent.RunAgentStreamingAsync(name, task,
+            var (_, inputTok, outputTok) = await ctx.Subagent.RunAgentStreamingAsync(name, task,
                 async chunk =>
                 {
                     if (!headerPrinted)

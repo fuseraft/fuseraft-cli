@@ -120,7 +120,7 @@ public sealed class PluginCapabilityMapTests
 
     [Theory]
     [InlineData("Todo")]
-    [InlineData("SubAgent")]
+    [InlineData("Subagent")]
     [InlineData("SessionContext")]
     public void KnownPlugins_ExcludesPluginsWithNoCapabilityTags(string plugin) =>
         Assert.DoesNotContain(plugin, PluginCapabilityMap.KnownPlugins);

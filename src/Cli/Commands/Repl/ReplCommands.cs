@@ -168,11 +168,11 @@ internal static partial class ReplCommands
             new("/snapshot", "Write a full debug snapshot (context, tools, history, plan) to a temp file"),
             new("/events", "Show session event stats (turns, tool calls, top tools, per-turn actual input/output tokens)"),
             new("/events stats", "Same as /events"),
-            new("/explore <query>", "Run a sub-agent exploration loop and return a prose summary"),
-            new("/locate <symbol>", "Run a sub-agent symbol lookup; returns path:line result"),
-            new("/delegate <task>", "Hand a self-contained subtask to a write-capable sub-agent (files, shell, git) and return its summary"),
-            new("/agents", "List user-defined sub-agents (Markdown files in .fuseraft/agents/ or .agents/agents/) and any load problems"),
-            new("/agent <name> <task>", "Run one of your sub-agents directly on a task and show its report"),
+            new("/explore <query>", "Run a subagent exploration loop and return a prose summary"),
+            new("/locate <symbol>", "Run a subagent symbol lookup; returns path:line result"),
+            new("/delegate <task>", "Hand a self-contained subtask to a write-capable subagent (files, shell, git) and return its summary"),
+            new("/agents", "List user-defined subagents (Markdown files in .fuseraft/agents/ or .agents/agents/) and any load problems"),
+            new("/agent <name> <task>", "Run one of your subagents directly on a task and show its report"),
         ]),
     ];
 

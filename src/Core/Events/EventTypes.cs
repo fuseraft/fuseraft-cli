@@ -88,10 +88,10 @@ public static class EventTypes
     public const string SkillCurationStart    = "skill_curation_start";
     public const string SkillCurationComplete = "skill_curation_complete";
 
-    // ── Sub-agent ────────────────────────────────────────────────────────────
-    public const string SubAgentStart    = "sub_agent_start";
-    public const string SubAgentEnd      = "sub_agent_end";
-    public const string SubAgentToolCall = "sub_agent_tool_call";
+    // ── Subagent ────────────────────────────────────────────────────────────
+    public const string SubagentStart    = "subagent_start";
+    public const string SubagentEnd      = "subagent_end";
+    public const string SubagentToolCall = "subagent_tool_call";
 
     // ── Magentic orchestrator ────────────────────────────────────────────────
     public const string MagenticPlan     = "magentic_plan";

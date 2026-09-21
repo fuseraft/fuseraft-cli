@@ -51,8 +51,8 @@ internal static class CorrectionEngine
         if (TryInjectForeignKeywordCorrection(history, responseText, routeTable, agentName, validKeywordList)) return;
         if (TryInjectCodeBlockCorrection(history, responseText, isReviewerType, validKeywordList)) return;
 
-        // Also treat as "has tool calls" when the AgentMessage records sub-agent tool calls
-        // that ran inside a SubAgentPlugin — those don't produce ChatRole.Tool entries in the
+        // Also treat as "has tool calls" when the AgentMessage records subagent tool calls
+        // that ran inside a SubagentPlugin — those don't produce ChatRole.Tool entries in the
         // outer history so CurrentTurnHasToolCalls would return false without this check.
         if (!CurrentTurnHasToolCalls(history) && (turnToolCalls is null || turnToolCalls.Count == 0))
         {

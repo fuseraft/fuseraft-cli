@@ -5,21 +5,21 @@ namespace FuseraftCli.Tests;
 
 /// <summary>
 /// Regression coverage for the in-turn context trim wired into
-/// <see cref="SubAgentPlugin"/>'s internal tool-calling loop (RunLoopAsync). Before this fix,
+/// <see cref="SubagentPlugin"/>'s internal tool-calling loop (RunLoopAsync). Before this fix,
 /// the loop's <c>loopClient</c> was built with only <c>UseFunctionInvocation</c> — no sliding
 /// tool-pair window, no char budget — so every round resent the full accumulated message list,
 /// producing O(N²) cumulative input tokens across a long DelegateAsync run (observed: ~1.03M
 /// input tokens for a single 40-iteration delegate call editing a dozen files).
 ///
-/// These tests drive <see cref="SubAgentPlugin.DelegateAsync"/> against a stub
+/// These tests drive <see cref="SubagentPlugin.DelegateAsync"/> against a stub
 /// <see cref="IChatClient"/> that keeps requesting a large-output tool for many rounds, and
 /// assert the char volume the stub actually receives stays bounded rather than growing
 /// linearly with round count.
 /// </summary>
-public sealed class SubAgentPluginContextTrimTests
+public sealed class SubagentPluginContextTrimTests
 {
     private const int ToolResultChars = 20_000;
-    private const int Rounds          = 15; // > SubAgentMaxInTurnToolPairs (10), well under DelegateMaxToolCalls (40)
+    private const int Rounds          = 15; // > SubagentMaxInTurnToolPairs (10), well under DelegateMaxToolCalls (40)
 
     [Fact]
     public async Task DelegateLoop_KeepsPerRoundRequestSizeBounded_AcrossManyLargeToolResults()
@@ -31,7 +31,7 @@ public sealed class SubAgentPluginContextTrimTests
             "fake_write_tool",
             "Simulates a tool call that returns a large result, e.g. a file read or patch confirmation.");
 
-        var plugin = new SubAgentPlugin(
+        var plugin = new SubagentPlugin(
             stub,
             explorerTools: [],
             delegateTools: [fakeTool]);

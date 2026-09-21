@@ -30,7 +30,7 @@ Orchestration:
         Shell — run commands and scripts; Git — git status/diff/add/commit/checkout;
         Http — HTTP GET/POST/PUT/PATCH/DELETE; Scratchpad — persistent per-agent notes;
         Chatroom — shared cross-agent message board; Plan — structured plan read/write;
-        SubAgent — spawn a focused sub-agent for wide exploration (avoids context flooding);
+        Subagent — spawn a focused subagent for wide exploration (avoids context flooding);
         Handoff — explicit routing via handoff(route_keyword: "KEYWORD");
         Changes — read the session change log; Json — JSON read/merge;
         Probe — run arbitrary diagnostic probes; CodeExecution — sandboxed code execution.
@@ -43,7 +43,7 @@ Orchestration:
         ContextWindow.TextOnly (strip tool frames from history — useful for review agents),
         MaxToolCallsPerTurn, MaxInTurnContextTokens, MaxInTurnToolPairs (sliding-window cap — deterministic
         alternative to MaxInTurnContextTokens; recommended 8–16 for Developer/Tester/Operator),
-        SubAgentModel, SubAgentPlugins, RemoteAgent.Url (delegate to remote A2A endpoint — ignores Model/Plugins/FunctionChoice/Capabilities).
+        SubagentModel, SubagentPlugins, RemoteAgent.Url (delegate to remote A2A endpoint — ignores Model/Plugins/FunctionChoice/Capabilities).
 
         ROUTING:
         - statemachine: States with Agent, Transitions (Signal, To, optional Contract for evidence gates). Agents signal transitions with handoff(route_keyword: "SIGNAL") or plain keyword on its own line.
@@ -64,7 +64,7 @@ Orchestration:
         Transitions reference a Contract name to gate state advancement.
 
         COMMON AGENT PATTERNS:
-        - Planner: FunctionChoice required, Plugins: FileSystem + Search + SubAgent + Handoff
+        - Planner: FunctionChoice required, Plugins: FileSystem + Search + Subagent + Handoff
         - Developer: FunctionChoice required, Plugins: FileSystem + Shell + Git + Changes + Handoff
         - Tester: FunctionChoice required, Plugins: FileSystem + Shell + Changes + Handoff
         - Reviewer: FunctionChoice auto, ContextWindow.TextOnly true, Plugins: FileSystem + Changes + Handoff
@@ -86,7 +86,7 @@ Orchestration:
         - FileSystem
         - Shell
         - Search
-        - SubAgent
+        - Subagent
       Capabilities:
         Shell: [run]
 

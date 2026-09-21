@@ -176,21 +176,21 @@ Orchestration:
           - Documents: paths and likely content for each doc file found
           - Async infrastructure: brokers, queues, schedulers, workflow engines found
 
-        Keep your own replies short — let sub-agents do the reading.
+        Keep your own replies short — let subagents do the reading.
 
         When done, write on its own line: RECON COMPLETE
       Model: heavy
       Plugins:
         - FileSystem
         - Search
-        - SubAgent
+        - Subagent
         - Scratchpad
       Capabilities:
         FileSystem: [read, write]
       FunctionChoice: required
-      SubAgentModel: scout
-      SubAgentMaxToolCalls: 30
-      SubAgentPlugins:
+      SubagentModel: scout
+      SubagentMaxToolCalls: 30
+      SubagentPlugins:
         - FileSystem
         - Search
 
@@ -257,14 +257,14 @@ Orchestration:
       Plugins:
         - FileSystem
         - Search
-        - SubAgent
+        - Subagent
         - Scratchpad
       Capabilities:
         FileSystem: [read, write]
       FunctionChoice: required
-      SubAgentModel: scout
-      SubAgentMaxToolCalls: 40
-      SubAgentPlugins:
+      SubagentModel: scout
+      SubagentMaxToolCalls: 40
+      SubagentPlugins:
         - FileSystem
         - Search
       ContextWindow:
@@ -332,15 +332,15 @@ Orchestration:
       Plugins:
         - FileSystem
         - Search
-        - SubAgent
+        - Subagent
         - Scratchpad
         - Changes
       Capabilities:
         FileSystem: [read, write]
       FunctionChoice: required
-      SubAgentModel: scout
-      SubAgentMaxToolCalls: 40
-      SubAgentPlugins:
+      SubagentModel: scout
+      SubagentMaxToolCalls: 40
+      SubagentPlugins:
         - FileSystem
         - Search
       ContextWindow:

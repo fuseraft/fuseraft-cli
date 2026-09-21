@@ -7,7 +7,7 @@ namespace FuseraftCli.Tests;
 /// Regression tests for <see cref="AgentToolLoopGuard"/> — orchestration's counterpart to the
 /// REPL's <c>ReplToolLoopGuard</c>, installed as
 /// <see cref="FunctionInvokingChatClient.FunctionInvoker"/> for every orchestration agent
-/// (<c>AgentFactory.Create</c>) and for <c>SubAgentPlugin.RunLoopAsync</c>. Unlike the REPL's
+/// (<c>AgentFactory.Create</c>) and for <c>SubagentPlugin.RunLoopAsync</c>. Unlike the REPL's
 /// guard, this one implements both the soft-nudge and hard-cutoff tiers itself, since
 /// orchestration has no separate stream-chunk-parsing backstop to lean on — and unlike the REPL's
 /// guard, it never modifies the returned tool result (see the class doc comment for why:

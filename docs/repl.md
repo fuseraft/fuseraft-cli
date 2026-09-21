@@ -59,7 +59,7 @@ Unless `--no-tools` is passed, the model gets a curated core toolset by default:
 | Search | Search file content, find symbols, find callers |
 | Git | Status, diff, log, add, commit |
 | Todo | A self-directed checklist the model uses to plan and track multi-step work |
-| SubAgent | `subagent_explore` / `subagent_locate` / `subagent_delegate` — the same tools behind [`/explore`, `/locate` and `/delegate`](#sub-agents-and-getting-unstuck), callable mid-turn; plus `subagent_run` when you've defined [custom sub-agents](subagents.md) |
+| Subagent | `subagent_explore` / `subagent_locate` / `subagent_delegate` — the same tools behind [`/explore`, `/locate` and `/delegate`](#subagents-and-getting-unstuck), callable mid-turn; plus `subagent_run` when you've defined [custom subagents](subagents.md) |
 | Session | Context-budget self-management (`compact_context`, `get_context_status`) |
 | Skills | `load_skill` / `run_skill_script`, when [skills](#skills) are installed |
 
@@ -89,7 +89,7 @@ Toggle it with `/hitl on` / `/hitl off`, or run `/hitl auto` to stop being asked
 
 Working across more than one project tree in a session? `--include <dir>` (repeatable) adds more allowed roots alongside the launch directory — shown in the banner as `Included:`. A path outside every allowed root isn't always a hard stop either: for the FileSystem read/write tools, a denied path offers a HITL prompt to grant it on the spot, and the grant covers the rest of the session. See [CLI Reference](cli-reference.md#fuseraft-repl) and [Security — Multi-root sessions](security.md#multi-root-sessions) for the full picture.
 
-**Capability restriction** — `/safe-mode on` blocks Shell/Git/Http outright; `/tools restrict <plugin> <tag…>` is finer-grained (e.g. `/tools restrict Git read` removes `git_commit`/`git_push` from the model's tool schema entirely, while leaving `git_status`/`git_diff` available). Both also bind [sub-agents](subagents.md#safety): a delegated agent cannot use a tool the session has closed off.
+**Capability restriction** — `/safe-mode on` blocks Shell/Git/Http outright; `/tools restrict <plugin> <tag…>` is finer-grained (e.g. `/tools restrict Git read` removes `git_commit`/`git_push` from the model's tool schema entirely, while leaving `git_status`/`git_diff` available). Both also bind [subagents](subagents.md#safety): a delegated agent cannot use a tool the session has closed off.
 
 None of this touches read-only tools (`read_file`, `git_status`, `http_get`, ...) — approval gates are for actions with side effects. See [CLI Reference — Shell/FileSystem/Git/Http write approval](cli-reference.md#fuseraft-repl) for prompts, defaults, and how restriction reaches across the `Extended` tool bucket.
 
@@ -154,13 +154,13 @@ When a step halts, `/resume` retries it as-is; `/recover` retries it with a cont
 
 ---
 
-## Sub-agents and getting unstuck
+## Subagents and getting unstuck
 
-`/explore <query>` and `/locate <symbol>` hand a read-only investigation off to an isolated sub-agent and return a prose summary or a `path:line` result — useful when you want an answer without polluting the main conversation with a long tool-call chain. `/delegate <task>` does the same for a self-contained subtask that needs to actually make changes (files, shell, git).
+`/explore <query>` and `/locate <symbol>` hand a read-only investigation off to an isolated subagent and return a prose summary or a `path:line` result — useful when you want an answer without polluting the main conversation with a long tool-call chain. `/delegate <task>` does the same for a self-contained subtask that needs to actually make changes (files, shell, git).
 
-Need a specialist — a reviewer, a test writer, a docs agent — with its own instructions, tools and even model? Define it as a Markdown file in `.fuseraft/agents/` and the model can call it (or you can, with `/agent <name> <task>`). See [Sub-agents](subagents.md).
+Need a specialist — a reviewer, a test writer, a docs agent — with its own instructions, tools and even model? Define it as a Markdown file in `.fuseraft/agents/` and the model can call it (or you can, with `/agent <name> <task>`). See [Subagents](subagents.md).
 
-When a session has stalled — repeating a mistake, stuck in a loop, drifted off-task — `/assist` has a sub-agent read the whole conversation, diagnose the root cause, and inject a corrective message addressed to the main agent, so you don't have to.
+When a session has stalled — repeating a mistake, stuck in a loop, drifted off-task — `/assist` has a subagent read the whole conversation, diagnose the root cause, and inject a corrective message addressed to the main agent, so you don't have to.
 
 ### Working until it's really done: `/goal`
 

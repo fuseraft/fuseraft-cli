@@ -49,7 +49,7 @@ public static partial class InitTemplates
               - FileSystem
               - Search
               - Shell
-              - SubAgent
+              - Subagent
               - Investigation
               - AuditFindings
               - Handoff

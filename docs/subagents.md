@@ -1,8 +1,8 @@
-# Sub-agents
+# Subagents
 
-A sub-agent is a focused assistant with its own system prompt, tool set and (optionally) model that the main REPL agent — or you — can hand a self-contained task to. It works in an isolated context, then reports back a summary, so a long tool-call chain never lands in your main conversation.
+A subagent is a focused assistant with its own system prompt, tool set and (optionally) model that the main REPL agent — or you — can hand a self-contained task to. It works in an isolated context, then reports back a summary, so a long tool-call chain never lands in your main conversation.
 
-fuseraft ships three built-in sub-agents (`/explore`, `/locate`, `/delegate`). This page is about the fourth kind: **agents you define yourself**, as Markdown files.
+fuseraft ships three built-in subagents (`/explore`, `/locate`, `/delegate`). This page is about the fourth kind: **agents you define yourself**, as Markdown files.
 
 ---
 
@@ -38,9 +38,9 @@ The YAML frontmatter says *when* to use the agent and *what it may touch*; the M
 |-------|----------|---------|
 | `name` | no | Lowercase letters, digits, `-` or `_` (max 64). Defaults to the file name. This is what the model and `/agent` call it by. |
 | `description` | **yes** | What the agent is for. This is the *only* thing the calling model sees when deciding whether to use it — write it like a trigger condition. |
-| `model` | no | A model id to run this agent on, e.g. a cheaper one for routine work. Omitted: the session's sub-agent model (`subagent.model`, else the main model). |
+| `model` | no | A model id to run this agent on, e.g. a cheaper one for routine work. Omitted: the session's subagent model (`subagent.model`, else the main model). |
 | `tools` | no | Which tools it may use — see below. |
-| `max_iterations` | no | Cap on rounds per run (1–100, default 30; a round is one model call, and tools it fires in parallel count once). A run that hits it reports `stopped after N rounds without finishing` (plus any partial output) instead of passing off unfinished work as an answer, and its `sub_agent_end` event has `outcome: iteration_limit`. |
+| `max_iterations` | no | Cap on rounds per run (1–100, default 30; a round is one model call, and tools it fires in parallel count once). A run that hits it reports `stopped after N rounds without finishing` (plus any partial output) instead of passing off unfinished work as an answer, and its `subagent_end` event has `outcome: iteration_limit`. |
 
 Field names are case-insensitive. Fields fuseraft does not implement (for example OpenHands' `permission_mode`, `hooks`, `skills`) are **reported, not silently ignored** — `/agents` lists them so a setting that looks like it is protecting you but is not never goes unnoticed. `color` is accepted for cross-tool compatibility and has no effect.
 
@@ -50,10 +50,10 @@ Field names are case-insensitive. Fields fuseraft does not implement (for exampl
 |----------|----------------|
 | *(omitted)* | The **read-only** set: file reads, search, `git_status`/`git_diff`/`git_log`/`git_show`. **No shell** — `shell_run` can change things, so a "read-only" agent must not have it by default. |
 | `[read_file, write_file, patch_file]` | Exactly those tools (comma-separated text works too). |
-| `['*']` | Everything the built-in `/delegate` sub-agent has: files, shell, git. |
+| `['*']` | Everything the built-in `/delegate` subagent has: files, shell, git. |
 | `[]` (or `tools:` with no value) | No tools at all — a pure reasoning agent that works from the task text. |
 
-A tool name that does not exist in your session is dropped and reported. An agent can never receive the sub-agent tools themselves, so **agents cannot spawn agents**.
+A tool name that does not exist in your session is dropped and reported. An agent can never receive the subagent tools themselves, so **agents cannot spawn agents**.
 
 ---
 
@@ -75,7 +75,7 @@ A tool name that does not exist in your session is dropped and reported. An agen
 2> /agent reviewer review textstats.py
 ```
 
-`/agents` also prints every problem found while loading — a file with no frontmatter, a missing `description`, an unknown tool, a model that could not be created (the agent then falls back to the session's sub-agent model). Definitions are read once at REPL start; restart to pick up edits.
+`/agents` also prints every problem found while loading — a file with no frontmatter, a missing `description`, an unknown tool, a model that could not be created (the agent then falls back to the session's subagent model). Definitions are read once at REPL start; restart to pick up edits.
 
 ---
 
@@ -84,13 +84,13 @@ A tool name that does not exist in your session is dropped and reported. An agen
 A custom agent is **not** a way around the session's controls — it runs on the same tool instances the main agent uses:
 
 - **Sandbox, deny rules and HITL still apply.** A write or shell command from inside an agent shows the same y/N prompt (with the diff, for file edits) as one from the main agent.
-- **`/safe-mode` and `/tools restrict` apply to sub-agents too.** With `/safe-mode on`, an agent that lists `shell_run` simply does not have it that run. (This also closes a gap in the built-in `/delegate`, which used to keep shell and git under safe mode.) The gate is checked at run time, so toggling safe mode mid-session takes effect on the next run.
+- **`/safe-mode` and `/tools restrict` apply to subagents too.** With `/safe-mode on`, an agent that lists `shell_run` simply does not have it that run. (This also closes a gap in the built-in `/delegate`, which used to keep shell and git under safe mode.) The gate is checked at run time, so toggling safe mode mid-session takes effect on the next run.
 - **Agent files are code-adjacent.** They choose a system prompt and a tool set, and travel with the repository. Treat `.fuseraft/agents/` and `.agents/agents/` like a `Makefile` — only run fuseraft in directories you trust. See [Security — Skills execution trust model](security.md#skills-execution-trust-model), which applies equally.
 
-Every run emits `sub_agent_start` / `sub_agent_tool_call` / `sub_agent_end` events with `mode: "agent:<name>"`.
+Every run emits `subagent_start` / `subagent_tool_call` / `subagent_end` events with `mode: "agent:<name>"`.
 
 ---
 
 ## Scope
 
-User-defined agents are a REPL feature. `fuseraft run` orchestration configs keep their own `SubAgent` plugin (see [Plugins](plugins.md)); they do not read these files.
+User-defined agents are a REPL feature. `fuseraft run` orchestration configs keep their own `Subagent` plugin (see [Plugins](plugins.md)); they do not read these files.

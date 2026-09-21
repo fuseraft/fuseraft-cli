@@ -215,7 +215,7 @@ Orchestration:
         - Search
         - Shell
         - Git
-        - SubAgent
+        - Subagent
         - Handoff
       Capabilities:
         FileSystem: [read, write]   # write only for .fuseraft/ artefacts
@@ -272,7 +272,7 @@ Orchestration:
         - FileSystem
         - Search
         - Scratchpad
-        - SubAgent
+        - Subagent
         - Handoff
 
     - Name: Developer

@@ -11,7 +11,7 @@ using fuseraft.Cli.Telemetry;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
-using fuseraft.Core.SubAgents;
+using fuseraft.Core.Subagents;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.KeyStore;
 using fuseraft.Infrastructure.Plugins;
@@ -91,7 +91,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
     // in those three plugins — destructive ops, remote ops, and background jobs — is still
     // useful but rarer, so it moves behind the opt-in "Extended" plugin (--plugins Extended)
     // rather than shipping in every request's tool schema by default. This does not affect
-    // /explore or /locate (SubAgentPlugin's explorerTools), which are built from the full,
+    // /explore or /locate (SubagentPlugin's explorerTools), which are built from the full,
     // unfiltered lists below regardless of whether Extended is enabled.
     private static readonly HashSet<string> CoreFileSystemTools = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -116,7 +116,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
     // current/list/read_event_log/read_log let the model enumerate and read a *different*
     // session's full event log by ID/prefix match — real cross-session data exposure with no
     // turn-to-turn value for the primary agent, so they're withheld from the default set and
-    // handed only to /assist's diagnose loop instead (see SubAgentPlugin's diagnosticTools).
+    // handed only to /assist's diagnose loop instead (see SubagentPlugin's diagnosticTools).
     private static readonly HashSet<string> CoreSessionTools = new(StringComparer.OrdinalIgnoreCase)
     {
         "repl_session_compact_context", "repl_session_get_context_status",
@@ -354,7 +354,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             (action, path, oldContent, newContent) => hitlState.Enabled
                 ? approvalService.PromptFileWriteAsync(action, path, oldContent, newContent)
                 : Task.FromResult(true);
-        SubAgentPlugin? subAgent        = null;
+        SubagentPlugin? subagent        = null;
         IReadOnlyList<string> agentProblems = [];
         IReadOnlyList<AgentSkill> discoveredSkills = [];
         string?         skillsCatalog   = null;
@@ -394,7 +394,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
         var initialTools = toolsByCategory.Values.SelectMany(v => v).ToList();
 
-        // Shared across every client this session builds (this one, the sub-agent's below, and
+        // Shared across every client this session builds (this one, the subagent's below, and
         // any later /provider or /model rebuild) so adaptive-trim signals from any of them are
         // visible to ReplTurn's post-turn forced-compaction check — see ReplSessionContext.
         var adaptiveTrimTracker = new AdaptiveTrimTracker();
@@ -421,7 +421,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
         // Constructed here — earlier than everything else that depends on sessionId/cwd below —
         // specifically so the very first client this session builds can receive it. Every other
-        // ReplFactory.BuildClient call site (/provider, /model, sub-agent rebuilds) already
+        // ReplFactory.BuildClient call site (/provider, /model, subagent rebuilds) already
         // passes ctx.Emitter; this was the one gap, since ctx doesn't exist yet this early in
         // startup. Without it, inner_call_context/model_call/model_response are never emitted
         // for the session's main client — only tool_call/tool_result (which ReplTurn emits
@@ -544,7 +544,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         {
             // Delegate gets exactly the write-capable tool set the parent REPL agent itself has
             // (Core, plus Extended if the user opted in) — never more. It never receives the
-            // SubAgent category, so it cannot recursively call subagent_delegate.
+            // Subagent category, so it cannot recursively call subagent_delegate.
             var delegateTools = fsFunctions!.Where(f => CoreFileSystemTools.Contains(f.Name))
                 .Concat(toolsByCategory["Search"])
                 .Concat(shellFunctions!.Where(f => CoreShellTools.Contains(f.Name)))
@@ -557,35 +557,35 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 delegateTools.AddRange(gitFunctions!.Where(f => !CoreGitTools.Contains(f.Name)));
             }
 
-            // Allow sub-agent tool calls (/explore, /locate, /delegate) to run on a different,
-            // cheaper model than the main REPL chat — mirrors AgentConfig.SubAgentModel, which
+            // Allow subagent tool calls (/explore, /locate, /delegate) to run on a different,
+            // cheaper model than the main REPL chat — mirrors AgentConfig.SubagentModel, which
             // does the same for orchestration agents.
-            var subAgentModelCfg = userCfg?.SubAgent?.Model is { Length: > 0 } sam
+            var subagentModelCfg = userCfg?.Subagent?.Model is { Length: > 0 } sam
                 ? factory.Resolve(new ModelConfig { ModelId = sam })
                 : modelConfig;
 
             // User-defined agents (.fuseraft/agents/*.md, .agents/agents/*.md, and the user-level
             // equivalents). Loaded here rather than lazily so the model's tool list — which enumerates
             // them — is complete from the first turn.
-            var agentLoad = SubAgentDefinitionLoader.LoadFromDirectories(SubAgentDefinitionLoader.DefaultSearchDirs(cwd));
+            var agentLoad = SubagentDefinitionLoader.LoadFromDirectories(SubagentDefinitionLoader.DefaultSearchDirs(cwd));
 
-            subAgent = new SubAgentPlugin(
-                ReplFactory.BuildClient(subAgentModelCfg, factory, explorerTools.Count > 0, adaptiveTrimTracker, emitter, tools: explorerTools),
+            subagent = new SubagentPlugin(
+                ReplFactory.BuildClient(subagentModelCfg, factory, explorerTools.Count > 0, adaptiveTrimTracker, emitter, tools: explorerTools),
                 explorerTools,
                 eventEmitter:     emitter,
                 parentAgentName:  "repl",
-                maxToolCalls:     userCfg?.SubAgent?.ExploreMaxIterations ?? 0,
-                delegateMaxToolCalls: userCfg?.SubAgent?.DelegateMaxIterations ?? 0,
+                maxToolCalls:     userCfg?.Subagent?.ExploreMaxIterations ?? 0,
+                delegateMaxToolCalls: userCfg?.Subagent?.DelegateMaxIterations ?? 0,
                 delegateTools:    delegateTools,
                 diagnosticTools:  sessionDiagnosticTools,
                 customAgents:     agentLoad.Definitions,
                 customAgentClientFactory: model => ReplFactory.BuildClient(
                     factory.Resolve(new ModelConfig { ModelId = model }), factory,
                     explorerTools.Count > 0, adaptiveTrimTracker, emitter, tools: explorerTools));
-            toolsByCategory["SubAgent"] = PluginRegistry.GetFunctionsFromObject(subAgent).ToList();
-            if (subAgent.BuildRunAgentTool() is { } runAgentTool)
-                toolsByCategory["SubAgent"].Add(runAgentTool);
-            agentProblems = [.. agentLoad.Problems, .. subAgent.CustomAgentProblems];
+            toolsByCategory["Subagent"] = PluginRegistry.GetFunctionsFromObject(subagent).ToList();
+            if (subagent.BuildRunAgentTool() is { } runAgentTool)
+                toolsByCategory["Subagent"].Add(runAgentTool);
+            agentProblems = [.. agentLoad.Problems, .. subagent.CustomAgentProblems];
         }
 
         // Wrap every tool category:
@@ -601,7 +601,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 .Select(f => (AIFunction)new ToolResultOffloadFilter(f, toolArtifactStore))
                 .ToList();
 
-        // Recompute now that SubAgent (and any optional --plugins categories) are registered,
+        // Recompute now that Subagent (and any optional --plugins categories) are registered,
         // so the session-start event, system prompt, and startup banner report the true count.
         initialTools = toolsByCategory.Values.SelectMany(v => v).ToList();
 
@@ -651,7 +651,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             cwd, sessionId, startedAt, modelId, modelConfig, userCfg, client,
             factory, keyStore, emitter, eventsPath,
             memoryStore, toolsByCategory, systemPrompt, pendingSave, adaptiveTrimTracker,
-            verbose: verbose, subAgent: subAgent, undoStore: fsPluginForCategory?.UndoStore,
+            verbose: verbose, subagent: subagent, undoStore: fsPluginForCategory?.UndoStore,
             hitlState: hitlState)
         {
             JsonMode    = jsonMode,
@@ -666,9 +666,9 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         };
         ctxForStdin = ctx;
 
-        // Sub-agents (built-in and user-defined) may only use what the session itself currently allows,
+        // Subagents (built-in and user-defined) may only use what the session itself currently allows,
         // so /safe-mode and /tools restrict cannot be sidestepped by delegating.
-        if (subAgent is not null) subAgent.ToolGate = ctx.IsToolAllowed;
+        if (subagent is not null) subagent.ToolGate = ctx.IsToolAllowed;
         stdinPump?.Start();
 
         // A persisted safe-mode default engages the real category-disable logic (not just the

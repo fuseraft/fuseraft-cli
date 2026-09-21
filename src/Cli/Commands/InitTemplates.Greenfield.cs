@@ -274,7 +274,7 @@ public static partial class InitTemplates
               - FileSystem
               - Search
               - SessionContext
-              - SubAgent
+              - Subagent
               - Decision
               - Objective
               - Brief

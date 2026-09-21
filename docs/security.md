@@ -142,7 +142,7 @@ For every filesystem function call, the three lists are checked in this order:
 
 `FileSystemPermissions.Deny` is enforced in both `fuseraft run` orchestration and the REPL — the REPL loads it from `Security.FileSystemPermissions` in `.fuseraft/config/orchestration.yaml`, if that file exists, no orchestration session needs to actually run for it to apply.
 
-Both surfaces also always deny `.env` and `.env.*` — at **any depth** (`backend/.env` and `apps/web/.env.local`, not only in the sandbox root) — for every FileSystem tool (`read_file`, `write_file`, `patch_file`, `delete_file`, `copy_file`, `move_file`, `grep_file`, `get_file_summary`, …) and for the [Search plugin](plugins.md#search) (`search_content`, `search_symbol`, and `search_callers` skip those files, so searching for a secret's name can't surface its line) — even with no `Security` config declared anywhere, and even for a sub-agent's own `FileSystem` tool set — "don't leak secrets into context" shouldn't require opting in. Any `Deny` patterns from config are merged on top of this default, never replacing it. `run_skill_script` is intentionally exempt: a vetted, path-verified skill script may still `source .env` internally (see [Skills execution trust model](#skills-execution-trust-model)) — the point is stopping the *model* from reading the file's content directly, not stopping a trusted script from using it.
+Both surfaces also always deny `.env` and `.env.*` — at **any depth** (`backend/.env` and `apps/web/.env.local`, not only in the sandbox root) — for every FileSystem tool (`read_file`, `write_file`, `patch_file`, `delete_file`, `copy_file`, `move_file`, `grep_file`, `get_file_summary`, …) and for the [Search plugin](plugins.md#search) (`search_content`, `search_symbol`, and `search_callers` skip those files, so searching for a secret's name can't surface its line) — even with no `Security` config declared anywhere, and even for a subagent's own `FileSystem` tool set — "don't leak secrets into context" shouldn't require opting in. Any `Deny` patterns from config are merged on top of this default, never replacing it. `run_skill_script` is intentionally exempt: a vetted, path-verified skill script may still `source .env` internally (see [Skills execution trust model](#skills-execution-trust-model)) — the point is stopping the *model* from reading the file's content directly, not stopping a trusted script from using it.
 
 ### Credential files
 
@@ -282,11 +282,11 @@ Like `FileSystemPermissions.Deny` above, both the REPL and orchestration merge a
 
 ---
 
-## Sub-agents obey the session's restrictions
+## Subagents obey the session's restrictions
 
-The REPL's sub-agents — the built-in `/explore`, `/locate`, `/delegate` and any [user-defined agent](subagents.md) — are built from the same sandboxed, deny-ruled, HITL-gated tool instances as the main agent, and every run is also filtered through the session's live tool gate. `/safe-mode on` and `/tools restrict` therefore reach delegated work: an agent cannot run a shell command or make a commit the session has closed off. The gate is read at run time, so toggling safe mode takes effect on the next run.
+The REPL's subagents — the built-in `/explore`, `/locate`, `/delegate` and any [user-defined agent](subagents.md) — are built from the same sandboxed, deny-ruled, HITL-gated tool instances as the main agent, and every run is also filtered through the session's live tool gate. `/safe-mode on` and `/tools restrict` therefore reach delegated work: an agent cannot run a shell command or make a commit the session has closed off. The gate is read at run time, so toggling safe mode takes effect on the next run.
 
-A user-defined agent's *default* tool set is strictly read-only — it excludes `shell_run` even though the built-in explorer includes it — and an agent never receives the sub-agent tools, so agents cannot spawn agents.
+A user-defined agent's *default* tool set is strictly read-only — it excludes `shell_run` even though the built-in explorer includes it — and an agent never receives the subagent tools, so agents cannot spawn agents.
 
 ---
 

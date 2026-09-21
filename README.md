@@ -48,7 +48,7 @@ fuseraft validate .fuseraft/config/orchestration.yaml --diagram
 `fuseraft repl` (or just `fuseraft` with no subcommand) starts an interactive chat session with a single model — no config file needed:
 
 - **Safe by default** — HITL approval and a filesystem/shell/git sandbox scoped to your launch directory are on unless you pass `--yolo`
-- **Built-in tools** — file read/write/patch, shell, code search, git, HTTP, a self-directed todo list, and sub-agents (`/explore`, `/locate`) the model can call mid-turn
+- **Built-in tools** — file read/write/patch, shell, code search, git, HTTP, a self-directed todo list, and subagents (`/explore`, `/locate`) the model can call mid-turn
 - **Slash commands** — plan and execute multi-step work (`/plan`, `/execute`, `/recover`), manage context (`/compact`, `/rewind`, `/undo`), inspect usage (`/context`, `/events`), connect MCP servers (`/mcp add`), switch models and reasoning effort live (`/model`, `/models`, `/reasoning`) — `/help` lists all of them
 - **Resumable sessions** — every session is checkpointed; `fuseraft repl --resume <id>` or `/sessions` picks up where you left off, `/fork` branches one off without disturbing the original
 - **Cross-session memory & skills** — the assistant saves and recalls memories (`/memory`) and loads portable skill packages

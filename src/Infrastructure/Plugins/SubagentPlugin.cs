@@ -2,13 +2,13 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Microsoft.Extensions.AI;
-using fuseraft.Core.SubAgents;
+using fuseraft.Core.Subagents;
 using fuseraft.Infrastructure.Agents;
 
 namespace fuseraft.Infrastructure.Plugins;
 
 /// <summary>
-/// Provides lightweight sub-agent tools that any pipeline agent can delegate work to:
+/// Provides lightweight subagent tools that any pipeline agent can delegate work to:
 ///
 /// <list type="bullet">
 ///   <item><see cref="ExploreAsync"/> — multi-hop exploration loop for broad codebase
@@ -19,8 +19,8 @@ namespace fuseraft.Infrastructure.Plugins;
 ///     caller's context window.</item>
 ///   <item><see cref="DelegateAsync"/> — write-capable loop for a self-contained coding
 ///     subtask (edit files, run shell commands, use git). Unlike Explore/Locate, this
-///     sub-agent is only constructed with <c>delegateTools</c> — it never receives the
-///     SubAgent tool set itself, so it cannot recursively spawn further delegates.</item>
+///     subagent is only constructed with <c>delegateTools</c> — it never receives the
+///     Subagent tool set itself, so it cannot recursively spawn further delegates.</item>
 /// </list>
 ///
 /// <para>
@@ -30,9 +30,9 @@ namespace fuseraft.Infrastructure.Plugins;
 /// </para>
 ///
 /// <para>
-/// When an <see cref="EventEmitter"/> is provided, each tool call inside the sub-agent loop
-/// emits a <c>sub_agent_tool_call</c> event so activity is visible between
-/// <c>sub_agent_start</c> and <c>sub_agent_end</c>.
+/// When an <see cref="EventEmitter"/> is provided, each tool call inside the subagent loop
+/// emits a <c>subagent_tool_call</c> event so activity is visible between
+/// <c>subagent_start</c> and <c>subagent_end</c>.
 /// </para>
 ///
 /// <para>
@@ -42,7 +42,7 @@ namespace fuseraft.Infrastructure.Plugins;
 /// <c>fuseraft plugins</c> can enumerate the tool names and descriptions.
 /// </para>
 /// </summary>
-public sealed class SubAgentPlugin(
+public sealed class SubagentPlugin(
     IChatClient? chatClient,
     IReadOnlyList<AIFunction> explorerTools,
     int maxOutputTokens = 2048,
@@ -52,7 +52,7 @@ public sealed class SubAgentPlugin(
     string? workspaceRoot = null,
     IReadOnlyList<AIFunction>? delegateTools = null,
     IReadOnlyList<AIFunction>? diagnosticTools = null,
-    IReadOnlyList<SubAgentDefinition>? customAgents = null,
+    IReadOnlyList<SubagentDefinition>? customAgents = null,
     Func<string, IChatClient?>? customAgentClientFactory = null,
     int delegateMaxToolCalls = 0)
 {
@@ -78,10 +78,10 @@ public sealed class SubAgentPlugin(
     // files can otherwise burn 7-figure cumulative input tokens for what should be a bounded
     // task. Sized smaller than AgentFactory's defaults (12 pairs / 200k chars) because these
     // are meant to stay lightweight relative to the parent agent. The pair window itself only
-    // actually collapses once CompactionTriggerRatio of SubAgentMaxInTurnChars is reached
+    // actually collapses once CompactionTriggerRatio of SubagentMaxInTurnChars is reached
     // (see ApplyInTurnFilters' triggerChars) — below that, calls resend an identical prefix.
-    private const int SubAgentMaxInTurnToolPairs = 10;
-    private const int SubAgentMaxInTurnChars     = 100_000;
+    private const int SubagentMaxInTurnToolPairs = 10;
+    private const int SubagentMaxInTurnChars     = 100_000;
 
     // Priority-ordered tool hints for Explore. Only tools actually present in explorerTools
     // are included — prevents instructing the model to call tools that don't exist.
@@ -105,8 +105,8 @@ public sealed class SubAgentPlugin(
         ("read_file",      "only to confirm the exact line number once the file is known"),
     ];
 
-    // Wrap tools with event-emitting proxies so sub-agent tool activity is visible in the
-    // event log between sub_agent_start and sub_agent_end.
+    // Wrap tools with event-emitting proxies so subagent tool activity is visible in the
+    // event log between subagent_start and subagent_end.
     private readonly IReadOnlyList<AIFunction> _tools =
         eventEmitter is not null
             ? WrapWithNotifiers(explorerTools, eventEmitter, parentAgentName)
@@ -122,10 +122,10 @@ public sealed class SubAgentPlugin(
                 ? WrapWithNotifiers(delegateTools, eventEmitter, parentAgentName)
                 : delegateTools;
 
-    // User-defined agents (Markdown files — see SubAgentDefinitionLoader), bound to this plugin's
+    // User-defined agents (Markdown files — see SubagentDefinitionLoader), bound to this plugin's
     // tool pool and, where they name one, their own model. Bound after _tools/_delegateTools so it
     // draws from the same event-wrapped instances. Never contains this plugin's own tools, so a
-    // custom agent cannot spawn further sub-agents.
+    // custom agent cannot spawn further subagents.
     // Lazy because a field initializer cannot read the other instance fields it draws from; first
     // touched at REPL startup (CustomAgents / BuildRunAgentTool), so model clients are built up front.
     private CustomAgentBinding? _customBinding;
@@ -139,8 +139,8 @@ public sealed class SubAgentPlugin(
         delegateMaxToolCalls > 0 ? delegateMaxToolCalls : DefaultDelegateMaxToolCalls;
 
     /// <summary>
-    /// Decides, per tool name and at run time, whether a sub-agent may use a tool. The REPL points this
-    /// at its session-wide gate (<c>/safe-mode</c>, <c>/tools restrict</c>) so a sub-agent can never do
+    /// Decides, per tool name and at run time, whether a subagent may use a tool. The REPL points this
+    /// at its session-wide gate (<c>/safe-mode</c>, <c>/tools restrict</c>) so a subagent can never do
     /// what the parent has been told not to — without it, /safe-mode would still leave shell and git
     /// reachable through <c>subagent_delegate</c>. <c>null</c> = no extra restriction.
     /// </summary>
@@ -198,14 +198,14 @@ public sealed class SubAgentPlugin(
     /// <summary>Tool name <see cref="DelegateAsync"/> is exposed under.</summary>
     public const string DelegateToolName = "subagent_delegate";
 
-    [Description("Delegate a self-contained coding subtask to a sub-agent with read/write file, shell, and git tools. Use for well-scoped work you want done without spending your own tool calls and context — e.g. 'add a null check to X and a regression test', 'rename Y across the codebase', 'run the test suite and fix any failures in Z'. The sub-agent works autonomously to completion and reports back a summary; it cannot ask clarifying questions mid-task, so give it a complete, unambiguous task description.")]
+    [Description("Delegate a self-contained coding subtask to a subagent with read/write file, shell, and git tools. Use for well-scoped work you want done without spending your own tool calls and context — e.g. 'add a null check to X and a regression test', 'rename Y across the codebase', 'run the test suite and fix any failures in Z'. The subagent works autonomously to completion and reports back a summary; it cannot ask clarifying questions mid-task, so give it a complete, unambiguous task description.")]
     public async Task<string> DelegateAsync(
-        [Description("Complete, self-contained task description. Include file paths, requirements, and acceptance criteria — enough context that the sub-agent never needs to ask a question.")]
+        [Description("Complete, self-contained task description. Include file paths, requirements, and acceptance criteria — enough context that the subagent never needs to ask a question.")]
         string task,
         CancellationToken cancellationToken = default)
     {
         if (_delegateTools.Count == 0)
-            return "[SubAgent] Delegate not available — no write-capable tools were configured for this session (e.g. started with --no-tools).";
+            return "[Subagent] Delegate not available — no write-capable tools were configured for this session (e.g. started with --no-tools).";
 
         var (text, _, _) = await RunLoopAsync(
             _delegateTools,
@@ -281,7 +281,7 @@ public sealed class SubAgentPlugin(
         catch (Exception ex)
         {
             if (eventEmitter is not null)
-                try { await eventEmitter.EmitAsync(EventTypes.SubAgentEnd, agent: parentAgentName,
+                try { await eventEmitter.EmitAsync(EventTypes.SubagentEnd, agent: parentAgentName,
                     payload: new { outcome = "error", error = ex.Message, mode = "diagnose" }); } catch { }
             return (null, null, null);
         }
@@ -353,7 +353,7 @@ public sealed class SubAgentPlugin(
         catch (Exception ex)
         {
             if (eventEmitter is not null)
-                try { await eventEmitter.EmitAsync(EventTypes.SubAgentEnd, agent: parentAgentName,
+                try { await eventEmitter.EmitAsync(EventTypes.SubagentEnd, agent: parentAgentName,
                     payload: new { outcome = "error", error = ex.Message, mode = "critic" }); } catch { }
             return (true, null);
         }
@@ -401,7 +401,7 @@ public sealed class SubAgentPlugin(
         CancellationToken cancellationToken = default)
         => _delegateTools.Count == 0
             ? Task.FromResult<(string, int?, int?)>((
-                "[SubAgent] Delegate not available — no write-capable tools were configured for this session (e.g. started with --no-tools).",
+                "[Subagent] Delegate not available — no write-capable tools were configured for this session (e.g. started with --no-tools).",
                 null, null))
             : RunLoopAsync(
                 _delegateTools,
@@ -426,8 +426,8 @@ public sealed class SubAgentPlugin(
         if (_custom.Agents.Count == 0) return null;
 
         return AIFunctionFactory.Create(
-            ([Description("Name of the sub-agent to run — one of the names listed in this tool's description.")] string agent,
-             [Description("Complete, self-contained task. Include file paths, requirements and acceptance criteria — the sub-agent cannot ask a clarifying question.")] string task,
+            ([Description("Name of the subagent to run — one of the names listed in this tool's description.")] string agent,
+             [Description("Complete, self-contained task. Include file paths, requirements and acceptance criteria — the subagent cannot ask a clarifying question.")] string task,
              CancellationToken cancellationToken) => RunAgentAsync(agent, task, cancellationToken),
             new AIFunctionFactoryOptions
             {
@@ -442,9 +442,9 @@ public sealed class SubAgentPlugin(
     internal string BuildRunAgentDescription()
     {
         var sb = new StringBuilder(
-            "Run a user-defined specialist sub-agent on a self-contained task and get back its report. " +
+            "Run a user-defined specialist subagent on a self-contained task and get back its report. " +
             "Prefer one of these over doing the work yourself when its description fits. " +
-            "The sub-agent cannot ask questions, so give it a complete task.\n\nAvailable agents:\n");
+            "The subagent cannot ask questions, so give it a complete task.\n\nAvailable agents:\n");
         foreach (var a in _custom.Agents)
         {
             var d = a.Def.Description;
@@ -471,7 +471,7 @@ public sealed class SubAgentPlugin(
         if (bound is null)
         {
             var known = _custom.Agents.Count > 0 ? string.Join(", ", _custom.Agents.Select(a => a.Def.Name)) : "(none defined)";
-            return Task.FromResult<(string, int?, int?)>(($"[SubAgent] Unknown agent '{agent}'. Available: {known}.", null, null));
+            return Task.FromResult<(string, int?, int?)>(($"[Subagent] Unknown agent '{agent}'. Available: {known}.", null, null));
         }
 
         var tools = Gate(bound.Tools);
@@ -491,14 +491,14 @@ public sealed class SubAgentPlugin(
     private IReadOnlyList<AIFunction> Gate(IReadOnlyList<AIFunction> tools) =>
         ToolGate is { } gate ? [.. tools.Where(t => gate(t.Name))] : tools;
 
-    private static string BuildCustomAgentPrompt(SubAgentDefinition def, IReadOnlyList<AIFunction> tools, string cwd)
+    private static string BuildCustomAgentPrompt(SubagentDefinition def, IReadOnlyList<AIFunction> tools, string cwd)
     {
         var toolList = tools.Count > 0 ? string.Join(", ", tools.Select(t => t.Name)) : "(none — reason from the task text alone)";
         return $"""
             {def.Instructions}
 
             ---
-            Runtime context: you are the '{def.Name}' sub-agent, invoked by another assistant to complete
+            Runtime context: you are the '{def.Name}' subagent, invoked by another assistant to complete
             one task and report back. You cannot ask the caller a clarifying question — make the most
             reasonable interpretation of any ambiguity and proceed.
             Working directory: {cwd}
@@ -512,9 +512,9 @@ public sealed class SubAgentPlugin(
     }
 
     /// <summary>What <c>/agents</c> shows for one bound agent.</summary>
-    public sealed record CustomAgentInfo(SubAgentDefinition Definition, IReadOnlyList<string> ToolNames, string? Model);
+    public sealed record CustomAgentInfo(SubagentDefinition Definition, IReadOnlyList<string> ToolNames, string? Model);
 
-    private sealed record BoundAgent(SubAgentDefinition Def, IReadOnlyList<AIFunction> Tools, IChatClient? Client);
+    private sealed record BoundAgent(SubagentDefinition Def, IReadOnlyList<AIFunction> Tools, IChatClient? Client);
 
     private sealed class CustomAgentBinding
     {
@@ -526,7 +526,7 @@ public sealed class SubAgentPlugin(
             Agents.FirstOrDefault(a => a.Def.Name.Equals(name?.Trim(), StringComparison.OrdinalIgnoreCase));
 
         public static CustomAgentBinding Bind(
-            IReadOnlyList<SubAgentDefinition> defs,
+            IReadOnlyList<SubagentDefinition> defs,
             Func<string, IChatClient?>? clientFactory,
             IReadOnlyList<AIFunction> readOnlyPool,
             IReadOnlyList<AIFunction> writePool)
@@ -568,11 +568,11 @@ public sealed class SubAgentPlugin(
                     {
                         client = clientFactory(def.Model);
                         if (client is null)
-                            result.Problems.Add($"agent '{def.Name}': model '{def.Model}' is not available — using the session's sub-agent model");
+                            result.Problems.Add($"agent '{def.Name}': model '{def.Model}' is not available — using the session's subagent model");
                     }
                     catch (Exception ex)
                     {
-                        result.Problems.Add($"agent '{def.Name}': model '{def.Model}' could not be created ({ex.Message}) — using the session's sub-agent model");
+                        result.Problems.Add($"agent '{def.Name}': model '{def.Model}' could not be created ({ex.Message}) — using the session's subagent model");
                     }
                 }
 
@@ -599,11 +599,11 @@ public sealed class SubAgentPlugin(
     {
         var client = clientOverride ?? chatClient;
         if (client is null)
-            return ("[SubAgent] No chat client configured — this is a stub instance. " +
-                    "Ensure AgentFactory created a real SubAgentPlugin for this agent.", null, null);
+            return ("[Subagent] No chat client configured — this is a stub instance. " +
+                    "Ensure AgentFactory created a real SubagentPlugin for this agent.", null, null);
 
         if (eventEmitter is not null)
-            await eventEmitter.EmitAsync(EventTypes.SubAgentStart,
+            await eventEmitter.EmitAsync(EventTypes.SubagentStart,
                 agent:   parentAgentName,
                 payload: new { query = userQuery.Length > 120 ? userQuery[..120] + "…" : userQuery, mode });
 
@@ -629,8 +629,8 @@ public sealed class SubAgentPlugin(
                     // window engages at CompactionTriggerRatio of it, slightly before
                     // TrimInTurnContext would kick in at 100%.
                     var trimmed = await AgentContextCompactionFilters.ApplyInTurnFilters(
-                        msgs, SubAgentMaxInTurnToolPairs, SubAgentMaxInTurnChars,
-                        triggerChars: SubAgentMaxInTurnChars, cancellationToken: ct);
+                        msgs, SubagentMaxInTurnToolPairs, SubagentMaxInTurnChars,
+                        triggerChars: SubagentMaxInTurnChars, cancellationToken: ct);
                     return await inner.GetResponseAsync(trimmed, opts, ct);
                 },
                 getStreamingResponseFunc: StreamWithInTurnTrimAsync)
@@ -701,13 +701,13 @@ public sealed class SubAgentPlugin(
                 }
                 else
                 {
-                    result = streamed.Length > 0 ? streamed : "Sub-agent produced no text output.";
+                    result = streamed.Length > 0 ? streamed : "Subagent produced no text output.";
                 }
                 inputTok  = streamedInputTok  > 0 ? (int)streamedInputTok  : null;
                 outputTok = streamedOutputTok > 0 ? (int)streamedOutputTok : null;
 
                 if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync(EventTypes.SubAgentEnd,
+                    await eventEmitter.EmitAsync(EventTypes.SubagentEnd,
                         agent:   parentAgentName,
                         payload: new { outcome, summary_chars = result.Length, mode,
                                        input_tokens = inputTok, output_tokens = outputTok });
@@ -725,12 +725,12 @@ public sealed class SubAgentPlugin(
                 else
                 {
                     result = string.IsNullOrWhiteSpace(response.Text)
-                        ? "Sub-agent produced no text output."
+                        ? "Subagent produced no text output."
                         : response.Text;
                 }
 
                 if (eventEmitter is not null)
-                    await eventEmitter.EmitAsync(EventTypes.SubAgentEnd,
+                    await eventEmitter.EmitAsync(EventTypes.SubagentEnd,
                         agent:   parentAgentName,
                         payload: new { outcome, summary_chars = result.Length, mode,
                                        input_tokens = inputTok, output_tokens = outputTok });
@@ -742,21 +742,21 @@ public sealed class SubAgentPlugin(
         {
             outcome = cancellationToken.IsCancellationRequested ? "cancelled" : "timeout";
             if (eventEmitter is not null)
-                try { await eventEmitter.EmitAsync(EventTypes.SubAgentEnd,
+                try { await eventEmitter.EmitAsync(EventTypes.SubagentEnd,
                     agent:   parentAgentName,
                     payload: new { outcome, mode }); } catch { }
             return (outcome == "cancelled"
-                ? "Sub-agent was cancelled."
-                : $"Sub-agent timed out after {timeoutMinutes} minutes.", null, null);
+                ? "Subagent was cancelled."
+                : $"Subagent timed out after {timeoutMinutes} minutes.", null, null);
         }
         catch (Exception ex)
         {
             outcome = "error";
             if (eventEmitter is not null)
-                try { await eventEmitter.EmitAsync(EventTypes.SubAgentEnd,
+                try { await eventEmitter.EmitAsync(EventTypes.SubagentEnd,
                     agent:   parentAgentName,
                     payload: new { outcome, error = ex.Message, mode }); } catch { }
-            return ($"Sub-agent failed: {ex.Message}", null, null);
+            return ($"Subagent failed: {ex.Message}", null, null);
         }
     }
 
@@ -766,7 +766,7 @@ public sealed class SubAgentPlugin(
     // last response, still ending on a tool call it never ran. Without this the caller would read an
     // unfinished run as an answer (or as "no output").
     private static string BuildIterationLimitNotice(int maxIterations) =>
-        $"[Sub-agent stopped after {maxIterations} rounds without finishing — its work may be incomplete. " +
+        $"[Subagent stopped after {maxIterations} rounds without finishing — its work may be incomplete. " +
         "Re-run with a narrower task, or finish the remaining work yourself.]";
 
     private static string AppendPartialOutput(string notice, string? partial) =>
@@ -781,8 +781,8 @@ public sealed class SubAgentPlugin(
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var trimmed = await AgentContextCompactionFilters.ApplyInTurnFilters(
-            messages, SubAgentMaxInTurnToolPairs, SubAgentMaxInTurnChars,
-            triggerChars: SubAgentMaxInTurnChars, cancellationToken: cancellationToken);
+            messages, SubagentMaxInTurnToolPairs, SubagentMaxInTurnChars,
+            triggerChars: SubagentMaxInTurnChars, cancellationToken: cancellationToken);
         await foreach (var update in inner.GetStreamingResponseAsync(trimmed, options, cancellationToken))
             yield return update;
     }
@@ -814,7 +814,7 @@ public sealed class SubAgentPlugin(
             : "Write a focused prose summary (under 600 words) that directly answers the query, then stop.";
 
         return $"""
-            You are a codebase explorer sub-agent. Your ONLY job is to answer the query you are given.
+            You are a codebase explorer subagent. Your ONLY job is to answer the query you are given.
             Working directory: {cwd}
             {toolPriority}
 
@@ -842,7 +842,7 @@ public sealed class SubAgentPlugin(
         var lineToken = "{line}"; // literal placeholder shown to the model
 
         return $"""
-            You are a symbol-locator sub-agent. Your ONLY job is to find where a symbol, type,
+            You are a symbol-locator subagent. Your ONLY job is to find where a symbol, type,
             method, interface, or file is defined in the codebase.
             Working directory: {cwd}
             {toolPriority}
@@ -864,7 +864,7 @@ public sealed class SubAgentPlugin(
             : "(none configured)";
 
         return $"""
-            You are a task-delegate sub-agent. You were handed a self-contained subtask by a
+            You are a task-delegate subagent. You were handed a self-contained subtask by a
             parent agent that wants it completed without spending its own tool calls or context.
             Working directory: {cwd}
             Available tools: {toolList}
@@ -893,7 +893,7 @@ public sealed class SubAgentPlugin(
         => tools.Select(t => (AIFunction)new NotifyingAIFunction(
             t,
             agentName ?? string.Empty,
-            (_, toolName, argsSummary) => emitter.EmitAsync(EventTypes.SubAgentToolCall,
+            (_, toolName, argsSummary) => emitter.EmitAsync(EventTypes.SubagentToolCall,
                 agent:   agentName,
                 payload: new { tool = toolName, args = argsSummary }))).ToList();
 }

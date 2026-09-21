@@ -4,8 +4,8 @@ namespace FuseraftCli.Tests;
 
 /// <summary>
 /// Pins the exact contents of <see cref="ExplorerToolSets"/> — the single source of truth the
-/// REPL's explorer/locate/delegate tools (ReplCommand.cs) and orchestration's SubAgent plugin
-/// default fallback (AgentToolResolver.BuildSubAgentTools) both read instead of each hand-copying
+/// REPL's explorer/locate/delegate tools (ReplCommand.cs) and orchestration's Subagent plugin
+/// default fallback (AgentToolResolver.BuildSubagentTools) both read instead of each hand-copying
 /// the same three tool-name sets. A change here is a deliberate, visible edit to what both
 /// call sites treat as "safe to hand a read-only delegated agent" — not a silent one-sided drift.
 /// </summary>

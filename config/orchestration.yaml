@@ -141,7 +141,7 @@ Orchestration:
         - FileSystem
         - Search
         - Scratchpad
-        - SubAgent
+        - Subagent
         - Handoff
 
     - Name: PlannerCritic
@@ -193,7 +193,7 @@ Orchestration:
       FunctionChoice: required
       Plugins:
         - FileSystem
-        - SubAgent
+        - Subagent
         - Handoff
 
     - Name: Developer

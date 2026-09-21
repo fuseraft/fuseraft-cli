@@ -131,7 +131,7 @@ Orchestration:
         - FileSystem
         - Search
         - Scratchpad
-        - SubAgent
+        - Subagent
         - Handoff
 
     - Name: Developer

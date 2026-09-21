@@ -23,7 +23,7 @@ namespace fuseraft.Cli.Commands.Repl;
 ///
 /// <para>
 /// <b>Collaborators</b> (both in <c>fuseraft.Cli.Commands.Repl</c>): terminal-presentation
-/// utilities (spinner, drip-print, ANSI stripping — also reused by sub-agent REPL commands)
+/// utilities (spinner, drip-print, ANSI stripping — also reused by subagent REPL commands)
 /// are owned by <see cref="ReplConsole"/>. Plan-capture and step-verification processing is
 /// owned by <see cref="ReplTurnOutcome"/>. <see cref="ExecuteAsync"/>'s own retry/streaming
 /// core is <see cref="StreamTurnResponseAsync"/>, a same-class extraction (not a separate
@@ -111,7 +111,7 @@ internal static class ReplTurn
     private const int MaxStreamRetries = 2;
 
     // Number of automatic "todo list still incomplete" nudges (see
-    // TryApplyTodoCompletionCorrectionAsync) before handing the decision to a critic sub-agent
+    // TryApplyTodoCompletionCorrectionAsync) before handing the decision to a critic subagent
     // instead of continuing to repeat the same canned nudge text. Previously this loop was
     // capped at exactly one round via the shared isCorrectionTurn flag, which meant any
     // multi-step task requiring more than one round of self-correction silently stalled and
@@ -222,7 +222,7 @@ internal static class ReplTurn
 
     // Minimum active tool count above which a raw, unclassified 400/413 is plausibly a
     // tool-schema or request-payload rejection rather than a genuine bad request — large
-    // REPL tool surfaces (FileSystem + Shell + Search + Git + Session + SubAgent, ~50+
+    // REPL tool surfaces (FileSystem + Shell + Search + Git + Session + Subagent, ~50+
     // schemas) are the likeliest trigger on gateways like Bedrock/LiteLLM.
     private const int LargeToolSurfaceThreshold = 20;
 
@@ -1098,11 +1098,11 @@ internal static class ReplTurn
         int todoCriticRound,
         CancellationToken cancellationToken)
     {
-        if (ctx.AdversarialMode && ctx.SubAgent is not null &&
+        if (ctx.AdversarialMode && ctx.Subagent is not null &&
             !isStepRequest && !capturePlan && !isCorrectionTurn && responseText.Length > 0)
         {
             if (!ctx.JsonMode) AnsiConsole.Markup("[dim]  critic reviewing…[/]");
-            var (approved, reason) = await ctx.SubAgent.CriticReviewAsync(
+            var (approved, reason) = await ctx.Subagent.CriticReviewAsync(
                 input, expectedTool: null, toolCallsThisTurn, responseText, cancellationToken: cancellationToken);
             if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 40)}\r");
             if (!approved)
@@ -1184,7 +1184,7 @@ internal static class ReplTurn
 
     // Fires once TryApplyTodoCompletionCorrectionAsync's automatic-nudge budget is exhausted.
     // Rather than keep repeating the same canned nudge text (which a model can start pattern-
-    // matching against and stall on), a critic sub-agent reviews the original task, the still-
+    // matching against and stall on), a critic subagent reviews the original task, the still-
     // open items, and the agent's last response, and either agrees stopping is reasonable (e.g.
     // genuinely blocked or ambiguous) or writes a fresh, specific correction itself. The critic
     // gets exactly one shot at this — todoCriticRound caps it at one escalation round so a task
@@ -1197,7 +1197,7 @@ internal static class ReplTurn
         int todoCriticRound,
         CancellationToken cancellationToken)
     {
-        if (ctx.SubAgent is null || todoCriticRound >= 1)
+        if (ctx.Subagent is null || todoCriticRound >= 1)
         {
             if (!ctx.JsonMode)
                 AnsiConsole.MarkupLine(
@@ -1214,7 +1214,7 @@ internal static class ReplTurn
             "it should keep working.";
 
         if (!ctx.JsonMode) AnsiConsole.Markup("[dim]  critic reviewing todo completion…[/]");
-        var (approved, reason) = await ctx.SubAgent.CriticReviewAsync(
+        var (approved, reason) = await ctx.Subagent.CriticReviewAsync(
             taskDescription, expectedTool: null, toolsCalled: [], responseText,
             originalUserRequest: rootInput, cancellationToken: cancellationToken);
         if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 48)}\r");

@@ -87,10 +87,10 @@ internal static class ReplTurnOutcome
 
         // When deterministic checks pass and adversarial mode is on, ask the critic.
         string? criticReason = null;
-        if (passed && ctx.AdversarialMode && ctx.SubAgent is not null)
+        if (passed && ctx.AdversarialMode && ctx.Subagent is not null)
         {
             if (!ctx.JsonMode) AnsiConsole.Markup("[dim]  critic reviewing…[/]");
-            var (approved, reason) = await ctx.SubAgent.CriticReviewAsync(
+            var (approved, reason) = await ctx.Subagent.CriticReviewAsync(
                 activeStep.Description, activeStep.Tool, toolCallsThisTurn, responseText,
                 originalUserRequest: ctx.CurrentPlanRequest, cancellationToken: cancellationToken);
             if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 40)}\r");

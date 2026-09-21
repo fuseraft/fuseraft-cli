@@ -26,22 +26,22 @@ public sealed class AgentToolResolverTests : IDisposable
     }
 
     [Fact]
-    public void SubAgentPlugin_ExposesExploreAndLocate_ButNotDelegate()
+    public void SubagentPlugin_ExposesExploreAndLocate_ButNotDelegate()
     {
-        var names = ResolveToolNames("SubAgent");
+        var names = ResolveToolNames("Subagent");
 
         Assert.Contains("subagent_explore", names);
         Assert.Contains("subagent_locate", names);
-        Assert.DoesNotContain(SubAgentPlugin.DelegateToolName, names);
+        Assert.DoesNotContain(SubagentPlugin.DelegateToolName, names);
     }
 
     [Fact]
     public void DelegateToolName_MatchesTheNameReflectionGivesDelegateAsync()
     {
-        var names = PluginRegistry.GetFunctionsFromObject(new SubAgentPlugin(chatClient: null, explorerTools: []))
+        var names = PluginRegistry.GetFunctionsFromObject(new SubagentPlugin(chatClient: null, explorerTools: []))
             .Select(f => f.Name);
 
-        Assert.Contains(SubAgentPlugin.DelegateToolName, names);
+        Assert.Contains(SubagentPlugin.DelegateToolName, names);
     }
 
     private List<string> ResolveToolNames(params string[] plugins)

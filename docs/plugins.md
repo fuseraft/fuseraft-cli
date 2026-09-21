@@ -447,17 +447,17 @@ When your work is complete, call handoff(route_keyword: "HANDOFF TO TESTER").
 
 ---
 
-## SubAgent
+## Subagent
 
-Exposes two lightweight sub-agent tools that keep the caller's context window clean. Instead of reading many files directly, the parent agent delegates work to a focused loop that returns only a distilled result.
+Exposes two lightweight subagent tools that keep the caller's context window clean. Instead of reading many files directly, the parent agent delegates work to a focused loop that returns only a distilled result.
 
-Both tools share the same tool set, timeout (8 minutes), and cancellation behaviour — the parent agent's cancellation token is linked so interrupts propagate immediately. The sub-agent's current working directory is automatically injected into its system prompt so it never wastes a tool call discovering it.
+Both tools share the same tool set, timeout (8 minutes), and cancellation behaviour — the parent agent's cancellation token is linked so interrupts propagate immediately. The subagent's current working directory is automatically injected into its system prompt so it never wastes a tool call discovering it.
 
-**Default tool set (read-only):** `read_file`, `list_files`, `grep_file`, `get_file_summary`, `get_file_info`, `search_content`, `search_symbol`, `shell_run`, `shell_get_env`, `shell_which`, `git_status`, `git_diff`, `git_log`, `git_show`, `git_branch_list`, `git_stash_list`. The sub-agent is instructed never to implement, edit, delete, commit, or push anything.
+**Default tool set (read-only):** `read_file`, `list_files`, `grep_file`, `get_file_summary`, `get_file_info`, `search_content`, `search_symbol`, `shell_run`, `shell_get_env`, `shell_which`, `git_status`, `git_diff`, `git_log`, `git_show`, `git_branch_list`, `git_stash_list`. The subagent is instructed never to implement, edit, delete, commit, or push anything.
 
 ```yaml
 Plugins:
-  - SubAgent
+  - Subagent
 ```
 
 | Tool | Parameters | Description |
@@ -472,7 +472,7 @@ Plugins:
 | `"prose"` (default) | Narrative summary, ≤600 words |
 | `"file_list"` | Markdown bullet list of relevant file paths, each with a one-line role description |
 
-**Tool selection inside the sub-agent loop (enforced by system prompt):**
+**Tool selection inside the subagent loop (enforced by system prompt):**
 
 > `search_symbol` → `list_files` → `search_content` → `get_file_summary` → `grep_file` → `read_file` → `shell_run`
 
@@ -493,9 +493,9 @@ subagent_locate("AgentFactory.Create")
 subagent_locate("EventEmitter.cs")
 ```
 
-### Sub-agent model override (`SubAgentModel`)
+### Subagent model override (`SubagentModel`)
 
-By default the sub-agent inherits the parent agent's model. Set `SubAgentModel` to run it on a cheaper model for cost control:
+By default the subagent inherits the parent agent's model. Set `SubagentModel` to run it on a cheaper model for cost control:
 
 ```yaml
 Agents:
@@ -504,29 +504,29 @@ Agents:
     Plugins:
       - FileSystem
       - Shell
-      - SubAgent
-    SubAgentModel: claude-haiku-4-5-20251001   # exploration on a cheaper model
+      - Subagent
+    SubagentModel: claude-haiku-4-5-20251001   # exploration on a cheaper model
 ```
 
 Any model alias or provider model ID accepted by the `Models` config section can be used here.
 
-### Sub-agent round cap (`SubAgentMaxToolCalls`)
+### Subagent round cap (`SubagentMaxToolCalls`)
 
-Controls the maximum number of rounds inside the `subagent_explore` loop. A round is one model call in the sub-agent's loop: tool calls it fires in parallel count once, so a run can make more tool calls than it has rounds. `subagent_locate` always uses a hard cap of 5.
+Controls the maximum number of rounds inside the `subagent_explore` loop. A round is one model call in the subagent's loop: tool calls it fires in parallel count once, so a run can make more tool calls than it has rounds. `subagent_locate` always uses a hard cap of 5.
 
 ```yaml
 Agents:
   - Name: Archaeologist
     Plugins:
-      - SubAgent
-    SubAgentMaxToolCalls: 30   # allow deeper exploration for this agent
+      - Subagent
+    SubagentMaxToolCalls: 30   # allow deeper exploration for this agent
 ```
 
-`0` (default) uses the built-in default of 20. A sub-agent that runs out of rounds returns a `stopped after N rounds without finishing` notice (with any partial output) rather than an answer, and its `sub_agent_end` event records `outcome: iteration_limit`.
+`0` (default) uses the built-in default of 20. A subagent that runs out of rounds returns a `stopped after N rounds without finishing` notice (with any partial output) rather than an answer, and its `subagent_end` event records `outcome: iteration_limit`.
 
-### Custom sub-agent plugin list (`SubAgentPlugins`)
+### Custom subagent plugin list (`SubagentPlugins`)
 
-To give the sub-agent a different set of plugins from the default, list them under `SubAgentPlugins`. Capability filters from `Capabilities` apply to sub-agent plugins the same way they apply to the parent. Unknown plugin names raise an error at session startup (they are not silently ignored).
+To give the subagent a different set of plugins from the default, list them under `SubagentPlugins`. Capability filters from `Capabilities` apply to subagent plugins the same way they apply to the parent. Unknown plugin names raise an error at session startup (they are not silently ignored).
 
 ```yaml
 Agents:
@@ -534,8 +534,8 @@ Agents:
     Plugins:
       - FileSystem
       - Shell
-      - SubAgent
-    SubAgentPlugins:
+      - Subagent
+    SubagentPlugins:
       - FileSystem
       - Search
       - Git
@@ -543,7 +543,7 @@ Agents:
       Git: [read]
 ```
 
-**Note:** `SubAgent` is instantiated per-agent by `AgentFactory`. The stub registered in `PluginRegistry` is only used by `fuseraft plugins` for enumeration.
+**Note:** `Subagent` is instantiated per-agent by `AgentFactory`. The stub registered in `PluginRegistry` is only used by `fuseraft plugins` for enumeration.
 
 ---
 

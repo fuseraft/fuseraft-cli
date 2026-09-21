@@ -92,16 +92,16 @@ public sealed class SettingsShowCommand : AsyncCommand
             .AddColumn("Field").AddColumn("Value");
         modelOverrides.AddRow("Memory extraction", string.IsNullOrEmpty(config.Memory?.Model)
             ? "[dim](main chat model)[/]" : Markup.Escape(config.Memory!.Model!));
-        modelOverrides.AddRow("Sub-agents", string.IsNullOrEmpty(config.SubAgent?.Model)
-            ? "[dim](main chat model)[/]" : Markup.Escape(config.SubAgent!.Model!));
+        modelOverrides.AddRow("Subagents", string.IsNullOrEmpty(config.Subagent?.Model)
+            ? "[dim](main chat model)[/]" : Markup.Escape(config.Subagent!.Model!));
         AnsiConsole.Write(modelOverrides);
         AnsiConsole.WriteLine();
 
-        var subAgentLimits = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey).Title("[bold]Sub-agent round caps[/]")
+        var subagentLimits = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey).Title("[bold]Subagent round caps[/]")
             .AddColumn("Field").AddColumn("Value");
-        subAgentLimits.AddRow("/explore",  config.SubAgent?.ExploreMaxIterations is { } e ? e.ToString() : "[dim](default 20)[/]");
-        subAgentLimits.AddRow("/delegate", config.SubAgent?.DelegateMaxIterations is { } d ? d.ToString() : "[dim](default 40)[/]");
-        AnsiConsole.Write(subAgentLimits);
+        subagentLimits.AddRow("/explore",  config.Subagent?.ExploreMaxIterations is { } e ? e.ToString() : "[dim](default 20)[/]");
+        subagentLimits.AddRow("/delegate", config.Subagent?.DelegateMaxIterations is { } d ? d.ToString() : "[dim](default 40)[/]");
+        AnsiConsole.Write(subagentLimits);
         AnsiConsole.WriteLine();
 
         AnsiConsole.MarkupLine(config.McpServers.Count > 0

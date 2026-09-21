@@ -5,14 +5,14 @@ using Spectre.Console.Cli;
 
 namespace FuseraftCli.Tests;
 
-/// <summary><c>fuseraft settings set subagent.*</c> — the REPL's sub-agent model and round caps.</summary>
+/// <summary><c>fuseraft settings set subagent.*</c> — the REPL's subagent model and round caps.</summary>
 [Collection("FuseraftHomeEnv")]
-public sealed class SettingsSetSubAgentTests : IDisposable
+public sealed class SettingsSetSubagentTests : IDisposable
 {
     private readonly string? _originalHome = Environment.GetEnvironmentVariable(FuseraftPaths.HomeOverrideEnvVar);
     private readonly string _tempHome = Path.Combine(Path.GetTempPath(), $"fuseraft-test-{Guid.NewGuid():N}");
 
-    public SettingsSetSubAgentTests()
+    public SettingsSetSubagentTests()
     {
         Directory.CreateDirectory(_tempHome);
         Environment.SetEnvironmentVariable(FuseraftPaths.HomeOverrideEnvVar, _tempHome);
@@ -28,7 +28,7 @@ public sealed class SettingsSetSubAgentTests : IDisposable
         await ((ICommand<SettingsSetSettings>)new SettingsSetCommand())
             .ExecuteAsync(null!, new SettingsSetSettings { Key = key, Value = value }, CancellationToken.None);
 
-    private static fuseraft.Core.Models.Config.SubAgentConfig? Saved() => UserConfigStore.Load().Config?.SubAgent;
+    private static fuseraft.Core.Models.Config.SubagentConfig? Saved() => UserConfigStore.Load().Config?.Subagent;
 
     [Fact]
     public async Task SetExploreCap_Persists()

@@ -11,9 +11,9 @@ internal static partial class ReplCommands
     private static async Task<CommandResult> CmdAssistAsync(
         ReplSessionContext ctx, CancellationToken cancellationToken)
     {
-        if (ctx.SubAgent is null)
+        if (ctx.Subagent is null)
         {
-            AnsiConsole.MarkupLine("[dim]Sub-agent not available (started with --no-tools).[/]");
+            AnsiConsole.MarkupLine("[dim]Subagent not available (started with --no-tools).[/]");
             return CommandResult.Continue;
         }
         if (ctx.TurnIndex == 0)
@@ -29,7 +29,7 @@ internal static partial class ReplCommands
             : Task.CompletedTask;
         try
         {
-            var (correction, inputTok, outputTok) = await ctx.SubAgent.DiagnoseAsync(ctx.History, cancellationToken);
+            var (correction, inputTok, outputTok) = await ctx.Subagent.DiagnoseAsync(ctx.History, cancellationToken);
             ctx.CumulativeInputTokens  += inputTok  ?? 0;
             ctx.CumulativeOutputTokens += outputTok ?? 0;
             if (spinCts is not null) { spinCts.Cancel(); await spinTask; ReplConsole.ClearSpinnerLine(); }
@@ -72,9 +72,9 @@ internal static partial class ReplCommands
     private static async Task<CommandResult> CmdExploreAsync(
         ReplSessionContext ctx, string arg, CancellationToken cancellationToken)
     {
-        if (ctx.SubAgent is null)
+        if (ctx.Subagent is null)
         {
-            AnsiConsole.MarkupLine("[dim]Sub-agent not available (started with --no-tools).[/]");
+            AnsiConsole.MarkupLine("[dim]Subagent not available (started with --no-tools).[/]");
             return CommandResult.Continue;
         }
         if (string.IsNullOrWhiteSpace(arg))
@@ -101,7 +101,7 @@ internal static partial class ReplCommands
 
         try
         {
-            var (_, inputTok, outputTok) = await ctx.SubAgent.ExploreStreamingAsync(arg,
+            var (_, inputTok, outputTok) = await ctx.Subagent.ExploreStreamingAsync(arg,
                 async chunk =>
                 {
                     if (!headerPrinted)
@@ -146,9 +146,9 @@ internal static partial class ReplCommands
     private static async Task<CommandResult> CmdDelegateAsync(
         ReplSessionContext ctx, string arg, CancellationToken cancellationToken)
     {
-        if (ctx.SubAgent is null)
+        if (ctx.Subagent is null)
         {
-            AnsiConsole.MarkupLine("[dim]Sub-agent not available (started with --no-tools).[/]");
+            AnsiConsole.MarkupLine("[dim]Subagent not available (started with --no-tools).[/]");
             return CommandResult.Continue;
         }
         if (string.IsNullOrWhiteSpace(arg))
@@ -175,7 +175,7 @@ internal static partial class ReplCommands
 
         try
         {
-            var (_, inputTok, outputTok) = await ctx.SubAgent.DelegateStreamingAsync(arg,
+            var (_, inputTok, outputTok) = await ctx.Subagent.DelegateStreamingAsync(arg,
                 async chunk =>
                 {
                     if (!headerPrinted)
@@ -220,9 +220,9 @@ internal static partial class ReplCommands
     private static async Task<CommandResult> CmdLocateAsync(
         ReplSessionContext ctx, string arg, CancellationToken cancellationToken)
     {
-        if (ctx.SubAgent is null)
+        if (ctx.Subagent is null)
         {
-            AnsiConsole.MarkupLine("[dim]Sub-agent not available (started with --no-tools).[/]");
+            AnsiConsole.MarkupLine("[dim]Subagent not available (started with --no-tools).[/]");
             return CommandResult.Continue;
         }
         if (string.IsNullOrWhiteSpace(arg))
@@ -249,7 +249,7 @@ internal static partial class ReplCommands
 
         try
         {
-            var (_, inputTok, outputTok) = await ctx.SubAgent.LocateStreamingAsync(arg,
+            var (_, inputTok, outputTok) = await ctx.Subagent.LocateStreamingAsync(arg,
                 async chunk =>
                 {
                     if (!gotOutput)

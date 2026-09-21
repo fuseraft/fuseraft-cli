@@ -80,7 +80,7 @@ internal sealed class AgentMiddlewareBuilder(
                     // making it possible to identify which content type drives token growth.
                     // Set the ambient call-seq so RawReasoningCaptureHandler can echo it into
                     // http_reasoning — enabling per-call correlation of estimated vs actual tokens.
-                    // Sub-agent HTTP calls naturally see null here (they run in FunctionInvokingChatClient's
+                    // Subagent HTTP calls naturally see null here (they run in FunctionInvokingChatClient's
                     // execution context, captured before this middleware ran, so the value never flows to them).
                     var callSeq = Interlocked.Increment(ref innerCallSeq);
                     InnerCallId.Current.Value = callSeq;
@@ -263,7 +263,7 @@ internal sealed class AgentMiddlewareBuilder(
 
                     // Usage/finish-reason typically land only on the final update, but track
                     // "last non-null wins" across every chunk in case a provider streams them
-                    // earlier or progressively — mirrors SubAgentPlugin's streaming variant.
+                    // earlier or progressively — mirrors SubagentPlugin's streaming variant.
                     ChatFinishReason? finishReason = enumerator.Current.FinishReason;
                     long? inputTok = null, outputTok = null;
                     foreach (var usage in enumerator.Current.Contents.OfType<UsageContent>())

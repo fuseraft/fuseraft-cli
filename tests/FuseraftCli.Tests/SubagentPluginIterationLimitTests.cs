@@ -6,10 +6,10 @@ using fuseraft.Infrastructure.Plugins;
 namespace FuseraftCli.Tests;
 
 /// <summary>
-/// A sub-agent loop that hits its iteration cap must say so — <c>FunctionInvokingChatClient</c>
+/// A subagent loop that hits its iteration cap must say so — <c>FunctionInvokingChatClient</c>
 /// stops silently on an unexecuted tool call, which used to read as "no output" or as a finished answer.
 /// </summary>
-public sealed class SubAgentPluginIterationLimitTests
+public sealed class SubagentPluginIterationLimitTests
 {
     private const int Cap = 3;
 
@@ -19,7 +19,7 @@ public sealed class SubAgentPluginIterationLimitTests
     [Fact]
     public async Task NonStreaming_HitsCap_ReportsItInsteadOfNoOutput()
     {
-        var plugin = new SubAgentPlugin(new ToolLoopClient(answerAfterCalls: null, narrate: false),
+        var plugin = new SubagentPlugin(new ToolLoopClient(answerAfterCalls: null, narrate: false),
             explorerTools: [FakeTool], maxToolCalls: Cap);
 
         var result = await plugin.ExploreAsync("q");
@@ -32,7 +32,7 @@ public sealed class SubAgentPluginIterationLimitTests
     [Fact]
     public async Task NonStreaming_HitsCap_KeepsNarrationAsPartialOutput()
     {
-        var plugin = new SubAgentPlugin(new ToolLoopClient(answerAfterCalls: null, narrate: true),
+        var plugin = new SubagentPlugin(new ToolLoopClient(answerAfterCalls: null, narrate: true),
             explorerTools: [FakeTool], maxToolCalls: Cap);
 
         var result = await plugin.ExploreAsync("q");
@@ -45,7 +45,7 @@ public sealed class SubAgentPluginIterationLimitTests
     [Fact]
     public async Task Streaming_HitsCap_SendsNoticeToTheUserAndReturnsIt()
     {
-        var plugin = new SubAgentPlugin(new ToolLoopClient(answerAfterCalls: null, narrate: true),
+        var plugin = new SubagentPlugin(new ToolLoopClient(answerAfterCalls: null, narrate: true),
             explorerTools: [FakeTool], maxToolCalls: Cap);
         var chunks = new List<string>();
 
@@ -59,7 +59,7 @@ public sealed class SubAgentPluginIterationLimitTests
     [Fact]
     public async Task Streaming_HitsCapWithNoNarration_StillSendsNotice()
     {
-        var plugin = new SubAgentPlugin(new ToolLoopClient(answerAfterCalls: null, narrate: false),
+        var plugin = new SubagentPlugin(new ToolLoopClient(answerAfterCalls: null, narrate: false),
             explorerTools: [FakeTool], maxToolCalls: Cap);
         var chunks = new List<string>();
 
@@ -72,7 +72,7 @@ public sealed class SubAgentPluginIterationLimitTests
     [Fact]
     public async Task Delegate_HitsItsConfiguredCap_ReportsIt()
     {
-        var plugin = new SubAgentPlugin(new ToolLoopClient(answerAfterCalls: null, narrate: false),
+        var plugin = new SubagentPlugin(new ToolLoopClient(answerAfterCalls: null, narrate: false),
             explorerTools: [], delegateTools: [FakeTool], delegateMaxToolCalls: Cap);
 
         var result = await plugin.DelegateAsync("do it");
@@ -83,7 +83,7 @@ public sealed class SubAgentPluginIterationLimitTests
     [Fact]
     public async Task Explore_CapDoesNotAffectDelegate()
     {
-        var plugin = new SubAgentPlugin(new ToolLoopClient(answerAfterCalls: 5, narrate: false),
+        var plugin = new SubagentPlugin(new ToolLoopClient(answerAfterCalls: 5, narrate: false),
             explorerTools: [FakeTool], delegateTools: [FakeTool], maxToolCalls: Cap);
 
         var result = await plugin.DelegateAsync("do it");
@@ -94,7 +94,7 @@ public sealed class SubAgentPluginIterationLimitTests
     [Fact]
     public async Task NonStreaming_FinishesWithinCap_ReturnsTheAnswerUntouched()
     {
-        var plugin = new SubAgentPlugin(new ToolLoopClient(answerAfterCalls: 2, narrate: false),
+        var plugin = new SubagentPlugin(new ToolLoopClient(answerAfterCalls: 2, narrate: false),
             explorerTools: [FakeTool], maxToolCalls: Cap);
 
         var result = await plugin.ExploreAsync("q");
@@ -105,7 +105,7 @@ public sealed class SubAgentPluginIterationLimitTests
     [Fact]
     public async Task Streaming_FinishesWithinCap_ReturnsTheAnswerUntouched()
     {
-        var plugin = new SubAgentPlugin(new ToolLoopClient(answerAfterCalls: 2, narrate: false),
+        var plugin = new SubagentPlugin(new ToolLoopClient(answerAfterCalls: 2, narrate: false),
             explorerTools: [FakeTool], maxToolCalls: Cap);
         var chunks = new List<string>();
 
@@ -118,20 +118,20 @@ public sealed class SubAgentPluginIterationLimitTests
     [Theory]
     [InlineData(null, "iteration_limit")]
     [InlineData(2, "completed")]
-    public async Task SubAgentEndEvent_RecordsWhetherTheCapWasHit(int? answerAfterCalls, string expectedOutcome)
+    public async Task SubagentEndEvent_RecordsWhetherTheCapWasHit(int? answerAfterCalls, string expectedOutcome)
     {
         var eventsPath = Path.Combine(Path.GetTempPath(), $"fuseraft-test-events-{Guid.NewGuid():N}.jsonl");
         try
         {
             using (var emitter = new EventEmitter(eventsPath))
             {
-                var plugin = new SubAgentPlugin(new ToolLoopClient(answerAfterCalls, narrate: false),
+                var plugin = new SubagentPlugin(new ToolLoopClient(answerAfterCalls, narrate: false),
                     explorerTools: [FakeTool], eventEmitter: emitter, maxToolCalls: Cap);
 
                 await plugin.ExploreAsync("q");
             }
 
-            var endLine = File.ReadAllLines(eventsPath).Single(l => l.Contains("sub_agent_end"));
+            var endLine = File.ReadAllLines(eventsPath).Single(l => l.Contains("subagent_end"));
             Assert.Contains($"\"outcome\":\"{expectedOutcome}\"", endLine);
         }
         finally
