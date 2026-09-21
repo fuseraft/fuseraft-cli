@@ -31,7 +31,7 @@ internal static partial class ReplCommands
         {
             AnsiConsole.MarkupLine("[dim]No user-defined sub-agents. Add a Markdown file with YAML frontmatter to[/] " +
                                    "[bold].fuseraft/agents/[/][dim] or[/] [bold].agents/agents/[/][dim] (project) or the same under[/] " +
-                                   "[bold]~[/][dim] (user) — see docs/sub-agents.md.[/]");
+                                   "[bold]~[/][dim] (user) — see docs/subagents.md.[/]");
         }
         else
         {

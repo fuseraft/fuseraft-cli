@@ -46,7 +46,7 @@ nav:
   - Models & Providers: models.md
   - Plugins: plugins.md
   - Skills: skills.md
-  - Sub-agents: sub-agents.md
+  - Sub-agents: subagents.md
   - Strategies: strategies.md
   - Validators: validators.md
   - Harness Engineering: harness-engineering.md

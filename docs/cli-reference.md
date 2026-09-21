@@ -384,7 +384,7 @@ common, low-risk operations that cover a typical session (read, edit, search, st
 | Search | `search_content`, `search_symbol`, `search_callers` |
 | Git | `git_status`, `git_diff`, `git_log`, `git_show`, `git_branch_list`, `git_add`, `git_commit`, `git_stash_list` |
 | Todo | `todo_write`, `todo_read` — self-directed checklist the model uses to plan and track multi-step work within the session (in-memory only, not persisted). |
-| SubAgent | `subagent_explore`, `subagent_locate`, `subagent_delegate` — the same tools behind `/explore`, `/locate` and `/delegate` (see below), also callable by the model directly mid-turn; `subagent_run` appears too when [custom sub-agents](sub-agents.md) are defined. Explore/locate are built from the full, unfiltered FileSystem/Shell/Git read tools regardless of whether `Extended` is enabled; delegate gets the same write-capable tool set as the main REPL agent (never the SubAgent category, so it can't recurse). |
+| SubAgent | `subagent_explore`, `subagent_locate`, `subagent_delegate` — the same tools behind `/explore`, `/locate` and `/delegate` (see below), also callable by the model directly mid-turn; `subagent_run` appears too when [custom sub-agents](subagents.md) are defined. Explore/locate are built from the full, unfiltered FileSystem/Shell/Git read tools regardless of whether `Extended` is enabled; delegate gets the same write-capable tool set as the main REPL agent (never the SubAgent category, so it can't recurse). |
 | Session | `repl_session_current`, `repl_session_list`, `repl_session_read_event_log`, `repl_session_read_log`, `compact_context`, `get_context_status` |
 | Skills | `load_skill`, `run_skill_script` (only when skills are installed — see [Skills](skills.md)) |
 
@@ -483,7 +483,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/events stats` | Same as `/events` |
 | `/explore <query>` | Run a sub-agent exploration loop over the codebase and return a prose summary. The sub-agent uses read-only tools and runs in an isolated context with no shared history from the main session. |
 | `/locate <symbol>` | Run a sub-agent symbol lookup and return a `path:line` result. Faster and more targeted than `/explore` for single-symbol lookups. |
-| `/agents` | List your [user-defined sub-agents](sub-agents.md) (Markdown files in `.fuseraft/agents/` or `.agents/agents/`) with scope, model and tools, plus any problems found loading them. |
+| `/agents` | List your [user-defined sub-agents](subagents.md) (Markdown files in `.fuseraft/agents/` or `.agents/agents/`) with scope, model and tools, plus any problems found loading them. |
 | `/agent <name> <task>` | Run one of your sub-agents directly on a task and show its report. The model can also call them itself through the `subagent_run` tool. |
 | `/safe-mode` | Show current safe mode status |
 | `/safe-mode on` | Block Shell, Git, and Http tools by owning plugin (including those in the Extended bucket) |
@@ -568,7 +568,7 @@ fuseraft settings set subagent.exploreMaxIterations 30
 fuseraft settings set subagent.delegateMaxIterations 60
 ```
 
-Each accepts 1–100, or `""` to go back to the default. A run that hits its cap stops with a `stopped after N rounds without finishing` notice and any partial output rather than passing itself off as done. Custom sub-agents set their own cap with `max_iterations` ([Sub-agents](sub-agents.md)); the orchestration equivalent is `SubAgentMaxToolCalls`.
+Each accepts 1–100, or `""` to go back to the default. A run that hits its cap stops with a `stopped after N rounds without finishing` notice and any partial output rather than passing itself off as done. Custom sub-agents set their own cap with `max_iterations` ([Sub-agents](subagents.md)); the orchestration equivalent is `SubAgentMaxToolCalls`.
 
 **Prompt format**
 
