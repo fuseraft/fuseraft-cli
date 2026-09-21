@@ -25,7 +25,7 @@ fuseraft uses a progressive-disclosure pattern to keep context lean:
 1. **Catalog injection** — At session start, the names and descriptions of all discovered skills are appended to the system prompt so the model knows what is available without loading every full body.
 2. **On-demand load** — When the model decides a skill is relevant, it calls `load_skill("<slug>")` to retrieve the full `SKILL.md` content, then follows those step-by-step instructions using its other tools.
 3. **Resource reading** — If a skill ships supplementary reference material (e.g. under `references/`), the model reads it with `read_skill_resource("<slug>", "<path>")`, e.g. `read_skill_resource("craft-orchestration", "references/schema-cheatsheet.md")`.
-4. **Script execution** — If a skill bundles executable scripts alongside its `SKILL.md`, the model can run them with `run_skill_script("<slug>", "<filename>")`.
+4. **Script execution** — If a skill bundles executable scripts alongside its `SKILL.md`, the model can run them with `run_skill_script("<slug>", "scripts/<file>")` — the script is named by its path relative to the skill directory. See [Bundled scripts](#bundled-scripts).
 5. **Direct invocation** — Type `$<slug>` at the REPL prompt to invoke a skill immediately without describing what you want. The `SKILL.md` content is loaded directly into the turn so the model applies the skill right away. Append arguments after the slug to pass context: `$commit fix typo in readme`. Tab completion cycles through matching skill slugs.
 
 At startup, the skill count appears in the compact info line alongside the active tool categories (e.g. `… · 3 skills · …`). Run `/tools` at any time to list all active tools by category, including the `Skills` category.
@@ -34,13 +34,34 @@ At startup, the skill count appears in the compact info line alongside the activ
 |------|-------------|
 | `load_skill` | Load the full `SKILL.md` for a skill by slug. |
 | `read_skill_resource` | Read a supplementary file bundled with a skill (e.g. a file under `references/`), by path relative to the skill directory. |
-| `run_skill_script` | Run a script bundled with a skill (`.sh`, `.py`, `.js`). |
+| `run_skill_script` | Run a script bundled with a skill (`.py`, `.js`, `.sh`, `.ps1`, `.cs`) — see [Bundled scripts](#bundled-scripts). |
 
 `read_skill_resource` and `run_skill_script` reject a path that resolves outside the skill directory, including via a symlinked file or subdirectory planted inside it.
 
 If `--no-tools` is passed, skills are disabled for that session.
 
 `fuseraft run` orchestration sessions use the same five discovery locations and the same three tools (`load_skill`, `read_skill_resource`, `run_skill_script`), wired onto every agent automatically whenever at least one skill directory exists — there is no need to add `Skills` to an agent's `Plugins:` list, though doing so as a declaration of intent is harmless. This is the same discovery pipeline the REPL uses, not a separate implementation — a skill either works identically in both, or (if its frontmatter is invalid) in neither.
+
+### Bundled scripts
+
+`run_skill_script` takes a skill slug, a script name, and an optional list of arguments:
+
+- **Script name** — the script's path relative to the skill directory: `scripts/md2docx.cs`, not `md2docx.cs`. A bare filename for a script that lives in a subdirectory is reported as not found.
+- **Arguments** — a JSON array of strings, each passed as one command-line argument (there is no shell parsing, so no quoting is needed). The script runs with its own directory as the working directory, so pass absolute paths for any file it should read or write. If a model sends a flag/value object such as `{"--type": "Bug", "--verbose": true}` instead, it is flattened into `--type Bug --verbose` (`false` is dropped; nested values are rejected).
+- **Interpreter** — chosen by file extension:
+
+| Extension | Run as |
+|-----------|--------|
+| `.py` | `python3` (`python` on Windows) |
+| `.js` | `node` |
+| `.sh` | `bash` |
+| `.ps1` | `pwsh` |
+| `.cs` | `dotnet run <file> --` — a single-file C# app; needs the .NET 10 SDK, and the first run restores its NuGet packages |
+| anything else that is discovered (for example `.csx`) | executed directly, so it needs a shebang and the executable bit |
+
+- **Result** — the script's standard output, followed by a `Stderr:` block if it wrote to standard error and a `Script exited with code N` line if the exit code was non-zero. A script that prints nothing returns `(no output)`.
+
+Scripts run as your OS user with the session's environment and there is no approval step, so read [Security — Skills execution trust model](security.md#skills-execution-trust-model) before installing skills you did not write.
 
 ---
 
@@ -52,7 +73,7 @@ fuseraft ships with the following built-in skills, all specific to building and 
 fuseraft skills add path/to/fuseraft/skills/craft-orchestration
 ```
 
-General-purpose productivity skills (not specific to fuseraft) live in the separate [fuseraft/skills](https://github.com/fuseraft/skills) repository — e.g. `commit`, `sandbox-test`, and `build-docx`. Clone that repo and install from it the same way:
+General-purpose productivity skills (not specific to fuseraft) live in the separate [fuseraft/skills](https://github.com/fuseraft/skills) repository — e.g. `commit`, `sandbox-test`, `build-docx`, `datamap`, `dbconnect`, `terminal-screenshot`, and `azure-devops`. Clone that repo and install from it the same way:
 
 ```bash
 fuseraft skills add path/to/skills/commit
@@ -153,7 +174,7 @@ fuseraft skills add ../skills/productivity/handoff
 fuseraft skills add ~/my-skills/triage
 ```
 
-The command accepts a path to a skill directory (containing `SKILL.md`) or directly to a `SKILL.md` file. The slug is derived from the `name:` field in the frontmatter; if no `name:` field is present, the directory name is used. If a skill with the same slug already exists it is updated in place — the installed copy is made to mirror the source exactly, so files removed or renamed at the source are pruned from the installed copy too.
+The command accepts a path to a skill directory (containing `SKILL.md`) or directly to a `SKILL.md` file. The slug is derived from the `name:` field in the frontmatter; if no `name:` field is present, the directory name is used. If a skill with the same slug already exists it is updated in place — the installed copy is made to mirror the source exactly, so files removed or renamed at the source are pruned from the installed copy too, and directories left empty by that pruning are removed. The whole skill directory is copied (`references/`, `scripts/`, and any other bundled files) except for a `.git` directory or `.git` file, which is never copied; pointing at a bare `SKILL.md` file copies only that file.
 
 You can also install skills by placing them directly under `~/.fuseraft/skills/` without using the CLI — skills are loaded from that directory at session start regardless of how they got there.
 

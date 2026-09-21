@@ -2205,7 +2205,7 @@ fuseraft skills add <source>
 |----------|-------------|
 | `<source>` | Path to a skill directory (containing `SKILL.md`) or directly to a `SKILL.md` file. Supports `~` expansion. |
 
-The slug is derived from the `name:` field in the `SKILL.md` frontmatter. If no `name:` field is present, the source directory name is used. If a skill with the same slug already exists it is updated in place — the installed copy is made to mirror the source exactly, so a file deleted or renamed at the source since the last `add` is pruned from `~/.fuseraft/skills/<slug>/` too, not just left behind.
+The slug is derived from the `name:` field in the `SKILL.md` frontmatter. If no `name:` field is present, the source directory name is used. If a skill with the same slug already exists it is updated in place — the installed copy is made to mirror the source exactly, so a file deleted or renamed at the source since the last `add` is pruned from `~/.fuseraft/skills/<slug>/` too, not just left behind, and directories left empty by that pruning are removed. The whole skill directory is copied except for a `.git` directory or `.git` file, which is never copied; pointing at a bare `SKILL.md` file copies only that file.
 
 **Examples**
 

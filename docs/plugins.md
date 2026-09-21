@@ -660,8 +660,9 @@ Unlike other plugins, Skills is not listed in an agent's `Plugins` config. It is
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
-| `load_skill` | `name` | Load the full `SKILL.md` body for a skill by slug. The model calls this when the catalog entry indicates the skill is relevant to the current task. |
-| `run_skill_script` | `skill`, `script`, `args` (optional) | Run a script bundled with a skill. `script` is the filename inside the skill directory (e.g. `transform.py`). `args` is a space-separated argument string. Supported extensions: `.sh`, `.py`, `.js`. |
+| `load_skill` | `skillName` | Load the full `SKILL.md` body for a skill by slug. The model calls this when the catalog entry indicates the skill is relevant to the current task. |
+| `read_skill_resource` | `skillName`, `resourceName` | Read a supplementary file bundled with a skill, by path relative to the skill directory (e.g. `references/schema.md`). |
+| `run_skill_script` | `skillName`, `scriptName`, `arguments` (optional) | Run a script bundled with a skill. `scriptName` is its path relative to the skill directory (e.g. `scripts/transform.py`). `arguments` is a JSON array of strings, one per command-line argument. Supported extensions: `.py`, `.js`, `.sh`, `.ps1`, `.cs` — see [Bundled scripts](skills.md#bundled-scripts). |
 
 ---
 
