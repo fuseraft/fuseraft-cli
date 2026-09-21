@@ -203,6 +203,36 @@ public sealed class MemoryStoreTests : IDisposable
         Assert.Null(block);
     }
 
+    [Fact]
+    public async Task BuildPromptBlockAsync_OverBudget_KeepsHigherPriorityTypeFirst()
+    {
+        var store = StoreAt(_dir);
+
+        // "reference" sorts before "user" alphabetically, so the old type-name ordering would have kept it.
+        await store.SaveAsync(Entry("ref_entry", "A reference", "reference", "REF_MARKER " + new string('r', 7_900)));
+        await store.SaveAsync(Entry("user_entry", "A preference", "user", "USER_MARKER " + new string('u', 7_900)));
+
+        var block = await store.BuildPromptBlockAsync();
+
+        Assert.Contains("USER_MARKER", block!);
+        Assert.DoesNotContain("REF_MARKER", block);
+    }
+
+    [Fact]
+    public async Task BuildPromptBlockAsync_OverBudget_TermMatchSurvivesEviction()
+    {
+        var store = StoreAt(_dir);
+        for (int i = 0; i < 30; i++)
+            await store.SaveAsync(Entry($"entry_{i:D2}", $"Desc {i}", "project", new string('x', 500)));
+        await store.SaveAsync(Entry("zz_deploy", "Deploy pipeline quirks", "reference", "DEPLOY_MARKER"));
+
+        var withoutTerms = await store.BuildPromptBlockAsync();
+        var withTerms    = await store.BuildPromptBlockAsync(["deploy", "pipeline"]);
+
+        Assert.DoesNotContain("DEPLOY_MARKER", withoutTerms!);
+        Assert.Contains("DEPLOY_MARKER", withTerms!);
+    }
+
     // Save / Load / Delete round-trip
 
     [Fact]

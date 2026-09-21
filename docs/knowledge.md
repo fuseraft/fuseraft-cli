@@ -223,8 +223,8 @@ The `ContextAssemblyPipeline` is the unified entry point for all agent context c
 |---|---|
 | `knowledge_retrieved` | Items returned by `KnowledgeRetriever` before budget trimming |
 | `knowledge_included` | Items that survived the 6 000-char budget and were injected |
-| `memory_loaded` | Memory entries loaded from the agent's store |
-| `memory_included` | Entries that fit within the 8 000-char memory block budget |
+| `memory_loaded` | `1` when a memory block was built for the turn, `0` when none applied (a block count, not an entry count) |
+| `memory_included` | Same as `memory_loaded`: the block is built and capped at 8 000 chars as a unit |
 | `artifacts` | Typed context artifacts assembled (knowledge + session_context) |
 | `context_chars` | Total character count of all messages in the assembled context |
 | `system_prompt_chars` | Character length of the system prompt |

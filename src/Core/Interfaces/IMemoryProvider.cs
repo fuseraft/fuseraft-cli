@@ -28,6 +28,14 @@ public interface IMemoryProvider
     Task<string?> LoadAsync(string agentName, CancellationToken ct = default);
 
     /// <summary>
+    /// Same as <see cref="LoadAsync(string, CancellationToken)"/>, with terms extracted from the
+    /// current task so a provider can prioritise relevant memory. Providers that do no ranking
+    /// inherit this default and ignore the terms.
+    /// </summary>
+    Task<string?> LoadAsync(string agentName, IReadOnlyList<string> relevanceTerms, CancellationToken ct = default)
+        => LoadAsync(agentName, ct);
+
+    /// <summary>
     /// Called after each agent turn with the full accumulated history.
     /// Implementations may persist learned facts or update their store asynchronously.
     /// </summary>

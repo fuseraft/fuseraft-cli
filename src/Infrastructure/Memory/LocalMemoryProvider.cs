@@ -15,10 +15,13 @@ internal sealed class LocalMemoryProvider : IMemoryProvider
     // call in a try/catch that logs via ILogger and swallows non-cancellation exceptions, so a
     // second, provider-local safety net (previously logging to Console.Error instead of the
     // shared logger) only duplicated that guarantee inconsistently.
-    public async Task<string?> LoadAsync(string agentName, CancellationToken ct = default)
+    public Task<string?> LoadAsync(string agentName, CancellationToken ct = default)
+        => LoadAsync(agentName, [], ct);
+
+    public async Task<string?> LoadAsync(string agentName, IReadOnlyList<string> relevanceTerms, CancellationToken ct = default)
     {
         var store = MemoryStore.ForAgent(agentName);
-        return await store.BuildPromptBlockAsync(ct);
+        return await store.BuildPromptBlockAsync(relevanceTerms, ct);
     }
 
     public Task SaveAsync(string agentName, IReadOnlyList<ChatMessage> history, CancellationToken ct = default)

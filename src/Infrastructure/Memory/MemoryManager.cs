@@ -64,7 +64,14 @@ public sealed class MemoryManager : IDisposable
     /// Includes <c>Approved</c>, high-confidence repository memories when a
     /// <see cref="RepositoryMemoryStore"/> has been attached via <see cref="AttachRepositoryMemory"/>.
     /// </summary>
-    public async Task<string?> PreTurnAsync(string agentName, CancellationToken ct = default)
+    public Task<string?> PreTurnAsync(string agentName, CancellationToken ct = default)
+        => PreTurnAsync(agentName, [], ct);
+
+    /// <summary>
+    /// As <see cref="PreTurnAsync(string, CancellationToken)"/>, passing terms extracted from the
+    /// current task so providers can prioritise relevant memory when it exceeds the prompt budget.
+    /// </summary>
+    public async Task<string?> PreTurnAsync(string agentName, IReadOnlyList<string> relevanceTerms, CancellationToken ct = default)
     {
         var blocks = new List<string>();
 
@@ -72,7 +79,7 @@ public sealed class MemoryManager : IDisposable
         {
             try
             {
-                var block = await p.LoadAsync(agentName, ct);
+                var block = await p.LoadAsync(agentName, relevanceTerms, ct);
                 if (!string.IsNullOrWhiteSpace(block))
                     blocks.Add(block);
             }

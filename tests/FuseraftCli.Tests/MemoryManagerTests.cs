@@ -132,6 +132,31 @@ public sealed class MemoryManagerTests
         Assert.Contains("block-two", result);
     }
 
+    // Relevance terms
+
+    [Fact]
+    public async Task PreTurnAsync_WithTerms_PassesTermsToProvider()
+    {
+        var provider = new TermsCapturingProvider();
+        using var sut = new MemoryManager([provider]);
+
+        await sut.PreTurnAsync("Agent1", ["deploy", "AuthMiddleware"]);
+
+        Assert.Equal(["deploy", "AuthMiddleware"], provider.ReceivedTerms);
+    }
+
+    [Fact]
+    public async Task PreTurnAsync_WithTerms_StillLoadsFromProviderThatIgnoresTerms()
+    {
+        var provider = new StubProvider("legacy-block");
+        using var sut = new MemoryManager([provider]);
+
+        var result = await sut.PreTurnAsync("Agent1", ["deploy"]);
+
+        Assert.Contains("legacy-block", result);
+        Assert.Equal(1, provider.LoadCallCount);
+    }
+
     // CancellationToken propagates through PreTurnAsync
 
     [Fact]
@@ -196,6 +221,23 @@ public sealed class MemoryManagerTests
             SaveCallCount++;
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class TermsCapturingProvider : IMemoryProvider
+    {
+        public IReadOnlyList<string>? ReceivedTerms { get; private set; }
+
+        public Task<string?> LoadAsync(string agentName, CancellationToken ct = default)
+            => Task.FromResult<string?>(null);
+
+        public Task<string?> LoadAsync(string agentName, IReadOnlyList<string> relevanceTerms, CancellationToken ct = default)
+        {
+            ReceivedTerms = relevanceTerms;
+            return Task.FromResult<string?>(null);
+        }
+
+        public Task SaveAsync(string agentName, IReadOnlyList<ChatMessage> history, CancellationToken ct = default)
+            => Task.CompletedTask;
     }
 
     private sealed class ThrowingProvider : IMemoryProvider

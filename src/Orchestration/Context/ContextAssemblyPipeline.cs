@@ -84,7 +84,7 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
 
         // ── Stage 2: Memory Block ────────────────────────────────────────────
         var (memoryBlock, memLoaded, memIncluded) =
-            await BuildMemoryBlockAsync(agentName, ct);
+            await BuildMemoryBlockAsync(agentName, signals, ct);
 
         // ── Stage 3: System Prompt ───────────────────────────────────────────
         var baseInstructions = agentCfg?.Instructions ?? string.Empty;
@@ -290,12 +290,14 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
 
     private async Task<(string? Block, int Loaded, int Included)> BuildMemoryBlockAsync(
         string agentName,
+        IntentSignals signals,
         CancellationToken ct)
     {
         if (_memoryManager is null) return (null, 0, 0);
         try
         {
-            var block = await _memoryManager.PreTurnAsync(agentName, ct);
+            IReadOnlyList<string> terms = [.. signals.Keywords, .. signals.ReferencedSymbols, .. signals.FailurePatterns];
+            var block = await _memoryManager.PreTurnAsync(agentName, terms, ct);
             return block is not null ? (block, 1, 1) : (null, 0, 0);
         }
         catch (OperationCanceledException) { throw; }

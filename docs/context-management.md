@@ -93,15 +93,22 @@ The memory block is automatically injected into the agent's system prompt by the
 No per-agent config is required.
 
 ```
-MEMORY — facts recalled from prior sessions:
+## MEMORY: facts recalled from prior sessions
 [feedback] preferred-test-runner: Use `go test -race ./...` for all test runs.
-[fact] auth-middleware: The auth middleware was rewritten in v2.3 — do not touch the legacy layer.
+  Always pass -race; CI rejects runs without it.
+[project] auth-middleware: The auth middleware was rewritten in v2.3 — do not touch the legacy layer.
 ```
 
-**Ranking:** Memories are now ranked by relevance to the current task — entries whose name,
-description, or body contain keywords or symbols extracted from the task score higher. Type
-priority (`feedback` > `project` > `user` > `reference`) is used as a tiebreaker.
-The prompt block is capped at 8,000 characters; entries that do not fit are silently dropped.
+**Ranking:** Memories are ranked by relevance to the current task. Each term extracted from the
+task (keywords, PascalCase symbols, failure patterns) adds 2 to an entry's score when it appears in
+the entry's name or description, or 1 when it appears only in the body. Type priority (`feedback` 4,
+`project` 3, `user` 2, `reference` 1) is added to the score, so with no overlap the order is
+`feedback` > `project` > `user` > `reference`, then by name. The prompt block is capped at 8,000
+characters: once the budget runs short, lower-ranked entries are cut to their one-line header, and
+after it is exhausted the rest are silently dropped.
+
+The REPL builds its memory block once at session start, before there is a task, so it orders by
+type priority alone.
 
 **Storage locations:**
 
@@ -132,8 +139,10 @@ Memory:
 
 Two built-in providers are available:
 
-- **`local`** — refreshes the file-backed memory store every turn. Useful when another process is writing new memories during the session.
-- **`webhook`** — delegates load and save to an HTTP endpoint you control (vector store, knowledge graph, managed memory service).
+- **`local`** — refreshes the file-backed memory store every turn and ranks it by relevance to the task (see [Layer 2](#layer-2-persistent-memory-pipeline-injected)). Useful when another process is writing new memories during the session.
+- **`webhook`** — delegates load and save to an HTTP endpoint you control (vector store, knowledge graph, managed memory service). It is sent only the agent name, so any ranking is up to your endpoint.
+
+A custom `IMemoryProvider` wired in code can receive the task terms by implementing the `LoadAsync(agentName, relevanceTerms, ct)` overload; providers that don't inherit a default that ignores them.
 
 See [Configuration — Pluggable memory provider](configuration.md#pluggable-memory-provider) for the full reference.
 

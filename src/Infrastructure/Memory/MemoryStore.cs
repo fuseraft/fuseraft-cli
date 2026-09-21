@@ -93,18 +93,25 @@ public sealed class MemoryStore
         const int MaxChars = 8_000;
         var entries = LoadAllSync();
         if (entries.Count == 0) return null;
-        return FormatPromptBlock(entries, MaxChars);
+        return FormatPromptBlock(entries, MaxChars, []);
     }
 
     /// <summary>
     /// Formats all memories as a block suitable for appending to a system prompt.
     /// Returns null when no memories exist.
     /// </summary>
-    public async Task<string?> BuildPromptBlockAsync(CancellationToken ct = default)
+    public Task<string?> BuildPromptBlockAsync(CancellationToken ct = default)
+        => BuildPromptBlockAsync([], ct);
+
+    /// <summary>
+    /// As <see cref="BuildPromptBlockAsync(CancellationToken)"/>, ordering entries by overlap with
+    /// <paramref name="relevanceTerms"/> so the most relevant survive the character budget.
+    /// </summary>
+    public async Task<string?> BuildPromptBlockAsync(IReadOnlyList<string> relevanceTerms, CancellationToken ct = default)
     {
         const int MaxChars = 8_000;
         var entries = await LoadAllAsync(ct);
-        return entries.Count == 0 ? null : FormatPromptBlock(entries, MaxChars);
+        return entries.Count == 0 ? null : FormatPromptBlock(entries, MaxChars, relevanceTerms);
     }
 
     /// <summary>
@@ -115,16 +122,16 @@ public sealed class MemoryStore
     {
         const int MaxChars = 8_000;
         var entries = await LoadAllAsync(localCwd, sessionId, ct);
-        return entries.Count == 0 ? null : FormatPromptBlock(entries, MaxChars);
+        return entries.Count == 0 ? null : FormatPromptBlock(entries, MaxChars, []);
     }
 
-    private static string FormatPromptBlock(List<MemoryEntry> entries, int maxChars)
+    private static string FormatPromptBlock(List<MemoryEntry> entries, int maxChars, IReadOnlyList<string> relevanceTerms)
     {
         var sb        = new StringBuilder();
         var remaining = maxChars;
         sb.AppendLine("## MEMORY: facts recalled from prior sessions");
 
-        foreach (var e in entries.OrderBy(e => e.Type).ThenBy(e => e.Name))
+        foreach (var e in MemoryRanker.Rank(entries, relevanceTerms))
         {
             if (remaining <= 0) break;
 

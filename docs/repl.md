@@ -228,7 +228,7 @@ Any call with different arguments — a different `patch_file` body, a different
 
 ## Memory
 
-The REPL keeps a persistent memory store, scoped to the working directory it was created in. At session start, relevant memories are injected into the system prompt; at session end, the model is asked to extract new ones automatically.
+The REPL keeps a persistent memory store, scoped to the working directory it was created in. At session start, the memories saved for this directory are injected into the system prompt (up to an 8,000-character budget, highest-priority types first: `feedback`, `project`, `user`, `reference`); at session end, the model is asked to extract new ones automatically.
 
 ```
 1> /memory
