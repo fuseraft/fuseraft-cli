@@ -857,7 +857,7 @@ Event consumers may inject messages, trigger external systems, or enforce additi
 |---|---|---|
 | `sub_agent_start` | `SubAgentPlugin` | Agent name, query (truncated to 120 chars), mode (`explore` \| `locate`) |
 | `sub_agent_tool_call` | `SubAgentPlugin` | Agent name, tool name, args summary |
-| `sub_agent_end` | `SubAgentPlugin` | Agent name, outcome (`completed` \| `cancelled` \| `timeout` \| `error`), summary_chars, mode |
+| `sub_agent_end` | `SubAgentPlugin` | Agent name, outcome (`completed` \| `iteration_limit` \| `cancelled` \| `timeout` \| `error`), summary_chars, mode |
 
 *REPL-specific*
 

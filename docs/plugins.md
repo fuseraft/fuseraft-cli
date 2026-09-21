@@ -522,7 +522,7 @@ Agents:
     SubAgentMaxToolCalls: 30   # allow deeper exploration for this agent
 ```
 
-`0` (default) uses the built-in default of 20.
+`0` (default) uses the built-in default of 20. A sub-agent that runs out of iterations returns a `stopped after N tool calls without finishing` notice (with any partial output) rather than an answer, and its `sub_agent_end` event records `outcome: iteration_limit`.
 
 ### Custom sub-agent plugin list (`SubAgentPlugins`)
 

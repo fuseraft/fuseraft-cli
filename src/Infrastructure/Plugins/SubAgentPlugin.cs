@@ -662,8 +662,15 @@ public sealed class SubAgentPlugin(
             {
                 var sb = new StringBuilder();
                 long streamedInputTok = 0, streamedOutputTok = 0;
+                var endedOnToolCall = false;
                 await foreach (var update in loopClient.GetStreamingResponseAsync(messages, options, cts.Token))
                 {
+                    foreach (var content in update.Contents)
+                    {
+                        if (content is FunctionCallContent) endedOnToolCall = true;
+                        else if (content is FunctionResultContent) endedOnToolCall = false;
+                    }
+
                     // A usage-only chunk arrives per underlying LLM call — a loop with tool
                     // round trips produces one per round trip, so sum rather than overwrite.
                     foreach (var usage in update.Contents.OfType<UsageContent>())
@@ -679,7 +686,19 @@ public sealed class SubAgentPlugin(
                         await onChunk(text);
                     }
                 }
-                result    = sb.Length > 0 ? sb.ToString() : "Sub-agent produced no text output.";
+                var streamed = sb.ToString();
+                if (endedOnToolCall)
+                {
+                    outcome = IterationLimitOutcome;
+                    var notice = BuildIterationLimitNotice(maxIterations);
+                    // The REPL commands show only what is streamed, so the notice has to reach the user here too.
+                    await onChunk($"\n\n{notice}");
+                    result = AppendPartialOutput(notice, streamed);
+                }
+                else
+                {
+                    result = streamed.Length > 0 ? streamed : "Sub-agent produced no text output.";
+                }
                 inputTok  = streamedInputTok  > 0 ? (int)streamedInputTok  : null;
                 outputTok = streamedOutputTok > 0 ? (int)streamedOutputTok : null;
 
@@ -694,9 +713,17 @@ public sealed class SubAgentPlugin(
                 var response = await loopClient.GetResponseAsync(messages, options, cts.Token);
                 inputTok     = (int?)response.Usage?.InputTokenCount;
                 outputTok    = (int?)response.Usage?.OutputTokenCount;
-                result = string.IsNullOrWhiteSpace(response.Text)
-                    ? "Sub-agent produced no text output."
-                    : response.Text;
+                if (response.Messages.LastOrDefault()?.Contents.OfType<FunctionCallContent>().Any() == true)
+                {
+                    outcome = IterationLimitOutcome;
+                    result  = AppendPartialOutput(BuildIterationLimitNotice(maxIterations), response.Text);
+                }
+                else
+                {
+                    result = string.IsNullOrWhiteSpace(response.Text)
+                        ? "Sub-agent produced no text output."
+                        : response.Text;
+                }
 
                 if (eventEmitter is not null)
                     await eventEmitter.EmitAsync(EventTypes.SubAgentEnd,
@@ -728,6 +755,18 @@ public sealed class SubAgentPlugin(
             return ($"Sub-agent failed: {ex.Message}", null, null);
         }
     }
+
+    private const string IterationLimitOutcome = "iteration_limit";
+
+    // FunctionInvokingChatClient stops at MaximumIterationsPerRequest without saying so: it returns the
+    // last response, still ending on a tool call it never ran. Without this the caller would read an
+    // unfinished run as an answer (or as "no output").
+    private static string BuildIterationLimitNotice(int maxIterations) =>
+        $"[Sub-agent stopped after {maxIterations} tool calls without finishing — its work may be incomplete. " +
+        "Re-run with a narrower task, or finish the remaining work yourself.]";
+
+    private static string AppendPartialOutput(string notice, string? partial) =>
+        string.IsNullOrWhiteSpace(partial) ? notice : $"{notice}\nPartial output:\n{partial}";
 
     // Streaming counterpart of the getResponseFunc trim above — same ApplyInTurnFilters call,
     // just shaped as an async iterator since the streaming delegate can't be a simple lambda.

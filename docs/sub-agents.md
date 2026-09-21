@@ -40,7 +40,7 @@ The YAML frontmatter says *when* to use the agent and *what it may touch*; the M
 | `description` | **yes** | What the agent is for. This is the *only* thing the calling model sees when deciding whether to use it — write it like a trigger condition. |
 | `model` | no | A model id to run this agent on, e.g. a cheaper one for routine work. Omitted: the session's sub-agent model (`subagent.model`, else the main model). |
 | `tools` | no | Which tools it may use — see below. |
-| `max_iterations` | no | Cap on tool-call rounds per run (1–100, default 30). |
+| `max_iterations` | no | Cap on tool-call rounds per run (1–100, default 30). A run that hits it reports `stopped after N tool calls without finishing` (plus any partial output) instead of passing off unfinished work as an answer, and its `sub_agent_end` event has `outcome: iteration_limit`. |
 
 Field names are case-insensitive. Fields fuseraft does not implement (for example OpenHands' `permission_mode`, `hooks`, `skills`) are **reported, not silently ignored** — `/agents` lists them so a setting that looks like it is protecting you but is not never goes unnoticed. `color` is accepted for cross-tool compatibility and has no effect.
 
