@@ -33,8 +33,9 @@ namespace fuseraft.Cli.Commands.Repl;
 /// across calls — rather than needing an explicit reset hook from <c>ReplTurn</c>.
 /// </para>
 /// </summary>
-internal sealed class ReplToolLoopGuard
+internal sealed class ReplToolLoopGuard(ReplLimits? limits = null)
 {
+    private readonly ReplLimits _limits = limits ?? ReplLimits.Default;
     private string _lastCallSignature      = string.Empty;
     private int    _consecutiveIdentical;
     private int    _consecutiveFailures;
@@ -73,7 +74,7 @@ internal sealed class ReplToolLoopGuard
         // softThreshold check (state.consecutiveIdenticalCount === config.softThreshold).
         List<string>? notices = null;
 
-        if (_consecutiveIdentical == ReplTurn.SoftRepeatedToolCallThreshold)
+        if (_consecutiveIdentical == _limits.WarnIdenticalToolCalls)
         {
             (notices ??= []).Add(
                 $"[SYSTEM NOTICE: this is the {_consecutiveIdentical} call in a row with " +
@@ -91,7 +92,7 @@ internal sealed class ReplToolLoopGuard
 
         // One short of the cutoff, so the model gets a chance to change course instead of being
         // stopped cold on the very next failure.
-        if (failed && _consecutiveFailures == ReplTurn.MaxConsecutiveToolFailures - 1)
+        if (failed && _consecutiveFailures == _limits.MaxConsecutiveToolFailures - 1)
         {
             (notices ??= []).Add(
                 $"[SYSTEM NOTICE: {_consecutiveFailures} tool calls in a row have failed — one more " +

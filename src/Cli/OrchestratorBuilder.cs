@@ -630,7 +630,8 @@ public static class OrchestratorBuilder
         var providerErrorLog  = config.Events is { } evtPath
             ? Path.Combine(Path.GetDirectoryName(evtPath.Path) ?? FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalLogs, projectSlug), "provider_errors.jsonl")
             : FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalProviderErrors, projectSlug);
-        var chatClientFactory = new ChatClientFactory(config.Models.Count > 0 ? config.Models : null, providerErrorLog, eventEmitter, loggerFactory);
+        var chatClientFactory = new ChatClientFactory(config.Models.Count > 0 ? config.Models : null, providerErrorLog, eventEmitter, loggerFactory,
+            TransportOptions.From(UserConfigStore.Load().Config));
 
         // Eagerly resolve every agent's model config so that undefined aliases
         // (e.g. "fast" not declared in the Models registry) fail here at startup

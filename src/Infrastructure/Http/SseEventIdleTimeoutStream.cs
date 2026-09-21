@@ -15,7 +15,7 @@ namespace fuseraft.Infrastructure;
 /// This wrapper parses the SSE framing (field lines separated by blank lines) and maintains
 /// two independent timers:
 /// <list type="bullet">
-///   <item><b>Byte-level</b> — <see cref="ByteIdleTimeout"/> (2 min): fires when the TCP
+///   <item><b>Byte-level</b> — <see cref="ByteIdleTimeout"/> (default 2 min): fires when the TCP
 ///     connection delivers no bytes at all, indicating a dead socket.</item>
 ///   <item><b>Content-event-level</b> — <paramref name="contentIdleTimeout"/> (default 5 min):
 ///     fires when no non-ping SSE event with a <c>data:</c> field has been received. Ping
@@ -24,11 +24,12 @@ namespace fuseraft.Infrastructure;
 /// </list>
 /// </para>
 /// </summary>
-internal sealed class SseEventIdleTimeoutStream(Stream inner, TimeSpan contentIdleTimeout) : Stream
+internal sealed class SseEventIdleTimeoutStream(
+    Stream inner, TimeSpan contentIdleTimeout, TimeSpan? byteIdle = null) : Stream
 {
     // Byte-level deadline: if the TCP socket delivers nothing at all for this long, the
     // connection is dead regardless of SSE state.
-    private static readonly TimeSpan ByteIdleTimeout = TimeSpan.FromSeconds(120);
+    private readonly TimeSpan ByteIdleTimeout = byteIdle ?? TimeSpan.FromSeconds(120);
 
     // Track when we last saw a non-ping SSE data event.
     private DateTime _lastContentEventAt = DateTime.UtcNow;
@@ -132,7 +133,7 @@ internal sealed class SseEventIdleTimeoutStream(Stream inner, TimeSpan contentId
         if (DateTime.UtcNow - _lastContentEventAt > contentIdleTimeout)
             throw new TimeoutException(
                 $"Streaming content idle timeout: no non-ping SSE event received for " +
-                $"{contentIdleTimeout.TotalMinutes:0} minute(s). " +
+                $"{contentIdleTimeout.TotalSeconds:0}s. " +
                 "Keep-alive pings are flowing but the model appears to have stalled.");
     }
 

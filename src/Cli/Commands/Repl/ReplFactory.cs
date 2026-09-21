@@ -24,6 +24,51 @@ internal static class ReplFactory
             ReasoningEffort = reasoningEffort,
         };
 
+    /// <summary>Resolves the model for a REPL side-call (<c>memory.model</c>, <c>subagent.model</c>) that may not run on the main chat model.</summary>
+    // An explicit endpoint makes the connection custom and reuses the main provider's key unless another is named.
+    // Otherwise the ID prefix picks the provider, and an ID it doesn't recognize rides the main connection
+    // instead of failing — a gateway serving models under names of its own.
+    internal static ModelConfig ResolveOverrideModel(
+        ChatClientFactory factory, ModelConfig main, string modelId,
+        string? provider, string? endpoint, string? apiKeyEnvVar)
+    {
+        static string? Clean(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim();
+        provider    = Clean(provider);
+        endpoint    = Clean(endpoint);
+        apiKeyEnvVar = Clean(apiKeyEnvVar);
+
+        var seed = new ModelConfig
+        {
+            ModelId      = modelId,
+            Provider     = provider     ?? string.Empty,
+            Endpoint     = endpoint     ?? string.Empty,
+            ApiKeyEnvVar = apiKeyEnvVar ?? string.Empty,
+        };
+
+        if (endpoint is not null)
+        {
+            if (apiKeyEnvVar is null) seed = seed with { ApiKey = main.ApiKey, ApiKeyEnvVar = main.ApiKeyEnvVar };
+            if (provider is null)     seed = seed with { Provider = main.Provider };
+            return factory.Resolve(seed);
+        }
+
+        try
+        {
+            return factory.Resolve(seed);
+        }
+        catch (InvalidOperationException)
+        {
+            return main with
+            {
+                ModelId         = modelId,
+                ReasoningEffort = null,
+                Provider        = provider ?? main.Provider,
+                ApiKeyEnvVar    = apiKeyEnvVar ?? main.ApiKeyEnvVar,
+                ApiKey          = apiKeyEnvVar is null ? main.ApiKey : string.Empty,
+            };
+        }
+    }
+
     // addFunctionInvocation controls whether the FunctionInvokingChatClient middleware is
     // attached. The actual tool list is supplied via ChatOptions at call time — this flag
     // only decides whether the invocation loop exists at all.
@@ -37,7 +82,8 @@ internal static class ReplFactory
         ModelConfig config, ChatClientFactory factory, bool addFunctionInvocation,
         AdaptiveTrimTracker adaptiveTrimTracker, EventEmitter? emitter = null,
         int maxIterations = ReplTurn.ChatIterationLimit,
-        IReadOnlyList<AIFunction>? tools = null)
+        IReadOnlyList<AIFunction>? tools = null,
+        ReplLimits? limits = null)
     {
         var client = factory.Create(config);
         if (addFunctionInvocation)
@@ -97,7 +143,7 @@ internal static class ReplFactory
             // why this parameter and that constant can't drift apart).
             Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>? functionInvoker =
                 maxIterations == ReplTurn.ChatIterationLimit
-                    ? new ReplToolLoopGuard().InvokeAsync
+                    ? new ReplToolLoopGuard(limits).InvokeAsync
                     : null;
             client = AgentMiddlewareBuilder.BuildEventEmitMiddleware(
                 client, agentConfig, skillsProvider: null, functionInvoker);
@@ -204,13 +250,19 @@ internal static class ReplFactory
 
         AnsiConsole.WriteLine();
 
-        var config = new UserConfig
-        {
-            ModelId  = modelId,
-            Endpoint = endpoint,
-            Provider = provider,
-        };
-        return (config, apiKey, selectedFromList);
+        return (ApplyWizardResult(currentCfg, modelId, endpoint, provider), apiKey, selectedFromList);
+    }
+
+    /// <summary>Applies the wizard's provider/model choice to the current config; the result is saved over <c>~/.fuseraft/config</c>, so every other section must survive.</summary>
+    // The API-key env var is reset because it named the previous provider's key.
+    internal static UserConfig ApplyWizardResult(UserConfig? current, string modelId, string endpoint, string provider)
+    {
+        var config = current?.Clone() ?? new UserConfig();
+        config.ModelId      = modelId;
+        config.Endpoint     = endpoint;
+        config.Provider     = provider;
+        config.ApiKeyEnvVar = string.Empty;
+        return config;
     }
 
     // Tries the OpenAI-compatible /models endpoint first, then Ollama's /api/tags, then

@@ -186,14 +186,6 @@ internal static partial class ReplCommands
         return CommandResult.Continue;
     }
 
-    // Fraction of ctx.ContextTokenBudget kept verbatim as the most recent whole turn-groups
-    // (see FindPreserveTailStart) rather than folded into the LLM summary. Mirrors Cline's
-    // preserveRecentTokens (fixed 20k / 128k default budget ≈ 15.6%) scaled to fuseraft's
-    // per-model budget instead of a fixed token count. Exists specifically so a session that
-    // just made several tool calls doesn't have that work paraphrased away right when it's
-    // most likely to still matter — only what's older than the tail gets summarized.
-    private const double PreserveRecentTailRatio = 0.20;
-
     private static int EstimateMessageListTokens(IEnumerable<ChatMessage> messages) =>
         messages.Sum(m => TokenEstimator.EstimateTokens(m.Contents.Sum(AgentContextCompactionFilters.EstimateContentChars)));
 
@@ -240,7 +232,11 @@ internal static partial class ReplCommands
         var sys    = ctx.History.FirstOrDefault(m => m.Role == ChatRole.System);
         int sysEnd = ctx.History.Count > 0 && ctx.History[0].Role == ChatRole.System ? 1 : 0;
 
-        var preserveTokens = (int)(ctx.ContextTokenBudget * PreserveRecentTailRatio);
+        // A fraction of the budget (default 0.20, ReplLimits.PreserveTailRatio) is kept verbatim as the most
+        // recent whole turn-groups rather than folded into the summary — mirrors Cline's preserveRecentTokens
+        // (fixed 20k / 128k ≈ 15.6%) scaled to fuseraft's per-model budget. Exists so a session that just made
+        // several tool calls doesn't have that work paraphrased away right when it's most likely to still matter.
+        var preserveTokens = (int)(ctx.ContextTokenBudget * ctx.Limits.PreserveTailRatio);
         var tailStart       = FindPreserveTailStart(ctx.History, sysEnd, preserveTokens);
         var toSummarize     = ctx.History.Skip(sysEnd).Take(tailStart - sysEnd).ToList();
         var preservedTail   = ctx.History.Skip(tailStart).ToList();

@@ -44,20 +44,33 @@ public sealed class ChatClientFactory(
     IReadOnlyDictionary<string, ModelConfig>? models = null,
     string? errorLogPath = null,
     EventEmitter? eventEmitter = null,
-    ILoggerFactory? loggerFactory = null) : IDisposable
+    ILoggerFactory? loggerFactory = null,
+    TransportOptions? transport = null) : IDisposable
 {
+    private readonly TransportOptions _transport = transport ?? TransportOptions.Default;
+
     // Created together so ReasoningEffortInjectHandler gets a reference to the shared dictionary.
     private static (ConcurrentDictionary<string, string> Efforts, HttpClient Client) CreateComponents(
-        string? errorLogPath, EventEmitter? eventEmitter, ILogger? logger)
+        string? errorLogPath, EventEmitter? eventEmitter, ILogger? logger, TransportOptions transport)
     {
         var efforts = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        return (efforts, BuildResilientClient(errorLogPath, eventEmitter, logger, efforts));
+        return (efforts, BuildResilientClient(errorLogPath, eventEmitter, logger, efforts, transport));
     }
 
     private readonly (ConcurrentDictionary<string, string> Efforts, HttpClient Client) _components =
-        CreateComponents(errorLogPath, eventEmitter, loggerFactory?.CreateLogger<TransientRetryHandler>());
+        CreateComponents(errorLogPath, eventEmitter, loggerFactory?.CreateLogger<TransientRetryHandler>(),
+            transport ?? TransportOptions.Default);
 
-    public void Dispose() => _components.Client.Dispose();
+    // OllamaSharp does not dispose an HttpClient it was handed, so the factory owns these.
+    private readonly ConcurrentBag<HttpClient> _ollamaClients = [];
+
+    internal IReadOnlyCollection<HttpClient> OllamaHttpClients => _ollamaClients;
+
+    public void Dispose()
+    {
+        _components.Client.Dispose();
+        foreach (var c in _ollamaClients) c.Dispose();
+    }
 
     // Provider presets:
     // Each entry maps a model-ID prefix (lower-cased) to the defaults used when the
@@ -261,18 +274,20 @@ public sealed class ChatClientFactory(
                     throw new InvalidOperationException(
                         $"No API key available for Azure deployment '{config.ModelId}' at '{config.Endpoint}'. " +
                         $"Run 'fuseraft repl' and complete the setup wizard, or add \"apiKeyEnvVar\": \"<VAR>\" to ~/.fuseraft/config.");
+                var azureOptions = new AzureOpenAIClientOptions { Transport = transport, NetworkTimeout = _transport.RequestTimeout };
+                if (SdkRetryPolicy() is { } azureRetry) azureOptions.RetryPolicy = azureRetry;
                 return new CacheUsageBackfillChatClient(new AzureOpenAIClient(
                     new Uri(config.Endpoint),
                     new ApiKeyCredential(apiKey),
-                    new AzureOpenAIClientOptions { Transport = transport, NetworkTimeout = HttpClientTimeout })
+                    azureOptions)
                     .GetChatClient(config.ModelId)
                     .AsIChatClient());
 
             case "ollama":
                 return new OllamaApiClient(
-                    string.IsNullOrEmpty(config.Endpoint)
+                    BuildOllamaHttpClient(string.IsNullOrEmpty(config.Endpoint)
                         ? new Uri("http://localhost:11434")
-                        : new Uri(config.Endpoint),
+                        : new Uri(config.Endpoint)),
                     config.ModelId);
 
             case "anthropic":
@@ -294,9 +309,11 @@ public sealed class ChatClientFactory(
                     throw new InvalidOperationException(
                         $"No API key available for model '{config.ModelId}' at '{config.Endpoint}'. " +
                         $"Run 'fuseraft repl' and complete the setup wizard, or add \"apiKeyEnvVar\": \"<VAR>\" to ~/.fuseraft/config.");
+                var openAiOptions = new OpenAIClientOptions { Transport = transport, Endpoint = new Uri(config.Endpoint), NetworkTimeout = _transport.RequestTimeout };
+                if (SdkRetryPolicy() is { } openAiRetry) openAiOptions.RetryPolicy = openAiRetry;
                 return new CacheUsageBackfillChatClient(new OpenAIClient(
                     new ApiKeyCredential(apiKey),
-                    new OpenAIClientOptions { Transport = transport, Endpoint = new Uri(config.Endpoint), NetworkTimeout = HttpClientTimeout })
+                    openAiOptions)
                     .GetChatClient(config.ModelId)
                     .AsIChatClient());
         }
@@ -326,18 +343,35 @@ public sealed class ChatClientFactory(
         return false;
     }
 
-    // Shared timeout applied to both HttpClient and the OpenAI SDK's per-request
-    // NetworkTimeout so the two layers stay in sync. The SDK default is 100 s, which
-    // is too short for long-running Magentic reasoning turns. Raised to 20 min so that
-    // reasoning models with large contexts (1 M+ token requests) can complete without
-    // hitting the timeout and triggering the 4-retry chain unnecessarily.
-    private static readonly TimeSpan HttpClientTimeout = TimeSpan.FromMinutes(20);
+    // The OpenAI/Azure SDKs stack their own retry policy (3 retries) on top of TransientRetryHandler's, so an
+    // unconfigured hard failure can take up to 4 x 4 attempts. Once provider.maxRetries is set the handler is
+    // the only retry layer, which is what makes the configured number exact (0 really means no retries).
+    private System.ClientModel.Primitives.ClientRetryPolicy? SdkRetryPolicy() =>
+        _transport.MaxRetriesConfigured ? new System.ClientModel.Primitives.ClientRetryPolicy(maxRetries: 0) : null;
 
+    // Deliberately a plain HttpClient, not the resilient one: Ollama streams NDJSON rather than SSE,
+    // so TransientRetryHandler's SSE idle-timeout wrapper would mistake every stream for a stalled one.
+    // OllamaSharp's own default is 100 s, so a configured timeout applies here but an unset one leaves
+    // that default alone rather than silently raising it.
+    internal HttpClient BuildOllamaHttpClient(Uri endpoint)
+    {
+        var client = new HttpClient { BaseAddress = endpoint };
+        if (_transport.RequestTimeoutConfigured) client.Timeout = _transport.RequestTimeout;
+        _ollamaClients.Add(client);
+        return client;
+    }
+
+    // The request timeout (default 20 min) is applied to both HttpClient and the OpenAI SDK's
+    // per-request NetworkTimeout so the two layers stay in sync. The SDK default is 100 s, which
+    // is too short for long-running Magentic reasoning turns. Raised so that reasoning models
+    // with large contexts (1 M+ token requests) can complete without hitting the timeout and
+    // triggering the retry chain unnecessarily.
     private static HttpClient BuildResilientClient(
         string? errorLogPath,
         EventEmitter? eventEmitter,
         ILogger? retryLogger,
-        ConcurrentDictionary<string, string> reasoningEfforts)
+        ConcurrentDictionary<string, string> reasoningEfforts,
+        TransportOptions transport)
     {
         var handler = new ToolsRequiredRetryHandler
         {
@@ -353,7 +387,7 @@ public sealed class ChatClientFactory(
                             {
                                 InnerHandler = new RawReasoningCaptureHandler(eventEmitter)
                                 {
-                                    InnerHandler = new TransientRetryHandler(errorLogPath, retryLogger) { InnerHandler = new SocketsHttpHandler() }
+                                    InnerHandler = new TransientRetryHandler(errorLogPath, retryLogger, transport) { InnerHandler = new SocketsHttpHandler() }
                                 }
                             }
                         }
@@ -361,7 +395,7 @@ public sealed class ChatClientFactory(
                 }
             }
         };
-        return new HttpClient(handler) { Timeout = HttpClientTimeout };
+        return new HttpClient(handler) { Timeout = transport.RequestTimeout };
     }
 }
 

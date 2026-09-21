@@ -54,4 +54,37 @@ public sealed class ReplDefaultsConfig
     /// </summary>
     [JsonPropertyName("hitlAutoApproveReadOnly")]
     public bool HitlAutoApproveReadOnly { get; set; }
+
+    /// <summary>
+    /// Fraction of the context budget at which the REPL warns and (when <see cref="AutoCompact"/> is on)
+    /// auto-compacts. Null uses 0.75.
+    /// </summary>
+    [JsonPropertyName("autoCompactThreshold")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? AutoCompactThreshold { get; set; }
+
+    /// <summary>Fraction of the context budget kept verbatim as recent turns when compacting. Null uses 0.20.</summary>
+    [JsonPropertyName("compactPreserveTailRatio")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? CompactPreserveTailRatio { get; set; }
+
+    /// <summary>Consecutive failing tool calls that end a turn. Null uses 3.</summary>
+    [JsonPropertyName("maxConsecutiveToolFailures")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxConsecutiveToolFailures { get; set; }
+
+    /// <summary>Consecutive identical tool calls (same name and arguments) that end a turn. Null uses 5.</summary>
+    [JsonPropertyName("maxIdenticalToolCalls")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxIdenticalToolCalls { get; set; }
+
+    /// <summary>Consecutive identical tool calls at which the model is nudged to change course; kept below <see cref="MaxIdenticalToolCalls"/>. Null uses 3.</summary>
+    [JsonPropertyName("warnIdenticalToolCalls")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? WarnIdenticalToolCalls { get; set; }
+
+    /// <summary>Automatic retries of a stream that dropped mid-response. Null uses 2.</summary>
+    [JsonPropertyName("maxStreamRetries")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxStreamRetries { get; set; }
 }

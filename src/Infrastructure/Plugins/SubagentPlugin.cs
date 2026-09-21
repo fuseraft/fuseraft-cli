@@ -54,16 +54,19 @@ public sealed class SubagentPlugin(
     IReadOnlyList<AIFunction>? diagnosticTools = null,
     IReadOnlyList<SubagentDefinition>? customAgents = null,
     Func<string, IChatClient?>? customAgentClientFactory = null,
-    int delegateMaxToolCalls = 0)
+    int delegateMaxToolCalls = 0,
+    double exploreTimeoutMinutes = 0,
+    double locateTimeoutMinutes = 0,
+    double delegateTimeoutMinutes = 0)
 {
     // Session-introspection tools (current session metadata, saved-session list, event/log
     // file reads) withheld from the REPL agent's own default tool set — they let a caller
     // read a *different* session's full event log by ID, real cross-session data exposure
     // with no turn-to-turn value for the primary loop — but useful for /assist's diagnosis.
     private readonly IReadOnlyList<AIFunction> _diagnosticTools = diagnosticTools ?? [];
-    private const double ExploreTimeoutMinutes  = 8.0;
-    private const double LocateTimeoutMinutes   = 2.0;
-    private const double DelegateTimeoutMinutes = 15.0;
+    private const double DefaultExploreTimeoutMinutes  = 8.0;
+    private const double DefaultLocateTimeoutMinutes   = 2.0;
+    private const double DefaultDelegateTimeoutMinutes = 15.0;
     private const int DefaultMaxToolCalls       = 20;
     private const int LocateMaxToolCalls        = 5;
     private const int LocateMaxOutputTokens     = 512;
@@ -138,6 +141,10 @@ public sealed class SubagentPlugin(
     private readonly int _effectiveDelegateMaxToolCalls =
         delegateMaxToolCalls > 0 ? delegateMaxToolCalls : DefaultDelegateMaxToolCalls;
 
+    private readonly double _exploreTimeoutMinutes  = exploreTimeoutMinutes  > 0 ? exploreTimeoutMinutes  : DefaultExploreTimeoutMinutes;
+    private readonly double _locateTimeoutMinutes   = locateTimeoutMinutes   > 0 ? locateTimeoutMinutes   : DefaultLocateTimeoutMinutes;
+    private readonly double _delegateTimeoutMinutes = delegateTimeoutMinutes > 0 ? delegateTimeoutMinutes : DefaultDelegateTimeoutMinutes;
+
     /// <summary>
     /// Decides, per tool name and at run time, whether a subagent may use a tool. The REPL points this
     /// at its session-wide gate (<c>/safe-mode</c>, <c>/tools restrict</c>) so a subagent can never do
@@ -172,7 +179,7 @@ public sealed class SubagentPlugin(
             _effectiveMaxToolCalls,
             maxOutputTokens,
             "explore",
-            ExploreTimeoutMinutes,
+            _exploreTimeoutMinutes,
             cancellationToken);
         return text;
     }
@@ -190,7 +197,7 @@ public sealed class SubagentPlugin(
             LocateMaxToolCalls,
             LocateMaxOutputTokens,
             "locate",
-            LocateTimeoutMinutes,
+            _locateTimeoutMinutes,
             cancellationToken);
         return text;
     }
@@ -214,7 +221,7 @@ public sealed class SubagentPlugin(
             _effectiveDelegateMaxToolCalls,
             DelegateMaxOutputTokens,
             "delegate",
-            DelegateTimeoutMinutes,
+            _delegateTimeoutMinutes,
             cancellationToken);
         return text;
     }
@@ -376,7 +383,7 @@ public sealed class SubagentPlugin(
             _effectiveMaxToolCalls,
             maxOutputTokens,
             "explore",
-            ExploreTimeoutMinutes,
+            _exploreTimeoutMinutes,
             cancellationToken,
             onChunk);
 
@@ -391,7 +398,7 @@ public sealed class SubagentPlugin(
             LocateMaxToolCalls,
             LocateMaxOutputTokens,
             "locate",
-            LocateTimeoutMinutes,
+            _locateTimeoutMinutes,
             cancellationToken,
             onChunk);
 
@@ -410,7 +417,7 @@ public sealed class SubagentPlugin(
                 _effectiveDelegateMaxToolCalls,
                 DelegateMaxOutputTokens,
                 "delegate",
-                DelegateTimeoutMinutes,
+                _delegateTimeoutMinutes,
                 cancellationToken,
                 onChunk);
 
@@ -482,7 +489,7 @@ public sealed class SubagentPlugin(
             bound.Def.MaxIterations,
             DelegateMaxOutputTokens,
             $"agent:{bound.Def.Name}",
-            DelegateTimeoutMinutes,
+            _delegateTimeoutMinutes,
             cancellationToken,
             onChunk,
             clientOverride: bound.Client);

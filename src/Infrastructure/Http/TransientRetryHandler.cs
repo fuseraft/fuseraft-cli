@@ -5,7 +5,7 @@ namespace fuseraft.Infrastructure;
 
 /// <summary>
 /// <see cref="DelegatingHandler"/> that retries transient HTTP errors (429, 5xx) up to
-/// <see cref="MaxRetries"/> times with exponential back-off and full jitter, without
+/// <see cref="TransportOptions.MaxRetries"/> times with exponential back-off and full jitter, without
 /// requiring an external resilience library.
 ///
 /// <para>Back-off schedule (before jitter):</para>
@@ -31,18 +31,22 @@ namespace fuseraft.Infrastructure;
 /// we don't overshoot the window the server has indicated.
 /// </para>
 /// </summary>
-internal sealed class TransientRetryHandler(string? errorLogPath = null, ILogger? logger = null) : DelegatingHandler
+internal sealed class TransientRetryHandler(
+    string? errorLogPath = null, ILogger? logger = null, TransportOptions? transport = null) : DelegatingHandler
 {
-    private const int MaxRetries = 3;
+    private readonly TransportOptions _transport = transport ?? TransportOptions.Default;
+    private int MaxRetries => _transport.MaxRetries;
+
+    // Overridable so tests can exercise the retry loop without sleeping through real back-off.
+    internal Func<TimeSpan, CancellationToken, Task> DelayAsync { get; init; } = Task.Delay;
+
     // Base delay in seconds for attempt N: 2^(N+1)  →  2 s, 4 s, 8 s
     private const double BaseDelaySeconds = 2.0;
     // Jitter fraction applied symmetrically around the base delay (±20 %).
     private const double JitterFraction = 0.2;
 
-    // Maximum time to wait between any two consecutive bytes in a streaming response.
-    // HttpClient.Timeout only covers header delivery; once the SSE stream is open the
-    // body read blocks indefinitely unless we enforce this per-chunk deadline.
-    private static readonly TimeSpan StreamingIdleTimeout = TimeSpan.FromMinutes(5);
+    // Caps the exponential schedule so a raised MaxRetries can't produce multi-minute sleeps.
+    private const double MaxBackoffSeconds = 60.0;
 
     private static readonly Random _jitter = new();
     private static readonly object _logLock = new();
@@ -64,7 +68,7 @@ internal sealed class TransientRetryHandler(string? errorLogPath = null, ILogger
                 logger?.LogWarning(
                     "[retry {Attempt}/{Max}] Network error ({Message}). Retrying in {Delay:F1} s…",
                     attempt + 1, MaxRetries, ex.Message, delay.TotalSeconds);
-                await Task.Delay(delay, cancellationToken);
+                await DelayAsync(delay, cancellationToken);
                 continue;
             }
 
@@ -101,11 +105,11 @@ internal sealed class TransientRetryHandler(string? errorLogPath = null, ILogger
             {
                 // Wrap successful response bodies with an idle timeout so that a hung
                 // SSE stream (server opens the connection but stops sending data) is
-                // detected and surfaced as a TimeoutException within StreamingIdleTimeout.
+                // detected and surfaced as a TimeoutException within TransportOptions.StreamIdleTimeout.
                 if ((int)response.StatusCode is >= 200 and < 300)
                 {
                     var raw   = await response.Content.ReadAsStreamAsync(cancellationToken);
-                    var timed = new StreamContent(new SseEventIdleTimeoutStream(raw, StreamingIdleTimeout));
+                    var timed = new StreamContent(new SseEventIdleTimeoutStream(raw, _transport.StreamIdleTimeout, _transport.ByteIdleTimeout));
                     foreach (var h in response.Content.Headers)
                         timed.Headers.TryAddWithoutValidation(h.Key, h.Value);
                     response.Content = timed;
@@ -120,7 +124,7 @@ internal sealed class TransientRetryHandler(string? errorLogPath = null, ILogger
 
             // Drain and dispose the error response before retrying.
             response.Dispose();
-            await Task.Delay(retryDelay, cancellationToken);
+            await DelayAsync(retryDelay, cancellationToken);
         }
     }
 
@@ -181,7 +185,7 @@ internal sealed class TransientRetryHandler(string? errorLogPath = null, ILogger
     /// </summary>
     private static TimeSpan ComputeBackoff(int attempt)
     {
-        double baseSeconds = Math.Pow(BaseDelaySeconds, attempt + 1);
+        double baseSeconds = Math.Min(Math.Pow(BaseDelaySeconds, attempt + 1), MaxBackoffSeconds);
         double lo = baseSeconds * (1.0 - JitterFraction);
         double hi = baseSeconds * (1.0 + JitterFraction);
         double jittered;

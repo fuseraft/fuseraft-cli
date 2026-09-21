@@ -268,6 +268,9 @@ internal sealed class ReplSessionContext
     // Turn-scoped plugin state that must be cleared before each new REPL turn.
     public readonly List<ITurnResettable> TurnResettables = [];
 
+    /// <summary>Tunable thresholds from the global config's <c>repl</c> section; re-read after <c>/provider setup</c> swaps <see cref="UserCfg"/>.</summary>
+    internal ReplLimits Limits => ReplLimits.From(UserCfg?.Repl);
+
     public ReplSessionContext(
         string cwd, string sessionId, DateTime startedAt, string modelId, ModelConfig modelConfig,
         UserConfig? userCfg, IChatClient client, ChatClientFactory factory,

@@ -154,4 +154,35 @@ public sealed class ReplCompactionPreserveTailTests : IDisposable
         Assert.Equal("nothing_to_compact", error);
         Assert.Equal(0, client.CallCount);
     }
+
+    private static int VerbatimGroupsKept(ReplSessionContext ctx) =>
+        ctx.History.Count(m => m.Role == ChatRole.User
+            && (m.Text == LastGroupMarker || (m.Text?.StartsWith("synthetic-group-") ?? false)));
+
+    private async Task<int> GroupsKeptAtRatioAsync(double? ratio)
+    {
+        var ctx = NewContext(new ScriptedStubChatClient(_ => "concise handoff summary"));
+        ctx.UserCfg = new fuseraft.Core.Models.Config.UserConfig
+        {
+            Repl = new fuseraft.Core.Models.Config.ReplDefaultsConfig { CompactPreserveTailRatio = ratio },
+        };
+        AddSyntheticHistory(ctx);
+
+        var (success, error, _, _) = await ReplCommands.CompactHistoryAsync(ctx, focus: null, CancellationToken.None);
+
+        Assert.True(success, error);
+        return VerbatimGroupsKept(ctx);
+    }
+
+    [Fact]
+    public async Task CompactHistoryAsync_KeepsMoreOrFewerRecentTurns_AsThePreserveRatioIsRaisedOrLowered()
+    {
+        var atDefault = await GroupsKeptAtRatioAsync(null);
+        var narrow    = await GroupsKeptAtRatioAsync(0.05);
+        var wide      = await GroupsKeptAtRatioAsync(0.5);
+
+        Assert.True(narrow < atDefault, $"0.05 kept {narrow}, default kept {atDefault}");
+        Assert.True(wide > atDefault, $"0.5 kept {wide}, default kept {atDefault}");
+        Assert.Equal(1, narrow); // the most recent group is always kept, however small the ratio
+    }
 }

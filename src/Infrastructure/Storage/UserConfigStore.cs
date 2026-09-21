@@ -76,6 +76,9 @@ public static class UserConfigStore
                         Endpoint      = onDisk.Provider?.Endpoint     ?? string.Empty,
                         Provider      = onDisk.Provider?.Type         ?? string.Empty,
                         ApiKeyEnvVar  = onDisk.Provider?.ApiKeyEnvVar ?? string.Empty,
+                        RequestTimeoutSeconds    = onDisk.Provider?.RequestTimeoutSeconds,
+                        StreamIdleTimeoutSeconds = onDisk.Provider?.StreamIdleTimeoutSeconds,
+                        MaxRetries               = onDisk.Provider?.MaxRetries,
                         Sampling      = onDisk.Sampling      ?? new SamplingDefaultsConfig(),
                         Repl          = onDisk.Repl          ?? new ReplDefaultsConfig(),
                         McpServers    = onDisk.McpServers    ?? [],
@@ -153,6 +156,9 @@ public static class UserConfigStore
                 Endpoint     = config.Endpoint,
                 Type         = config.Provider,
                 ApiKeyEnvVar = config.ApiKeyEnvVar,
+                RequestTimeoutSeconds    = config.RequestTimeoutSeconds,
+                StreamIdleTimeoutSeconds = config.StreamIdleTimeoutSeconds,
+                MaxRetries               = config.MaxRetries,
             },
             Sampling      = config.Sampling,
             Repl          = config.Repl,
@@ -207,6 +213,18 @@ public static class UserConfigStore
 
         [JsonPropertyName("apiKeyEnvVar")]
         public string? ApiKeyEnvVar { get; set; }
+
+        [JsonPropertyName("requestTimeoutSeconds")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? RequestTimeoutSeconds { get; set; }
+
+        [JsonPropertyName("streamIdleTimeoutSeconds")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? StreamIdleTimeoutSeconds { get; set; }
+
+        [JsonPropertyName("maxRetries")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? MaxRetries { get; set; }
     }
 
     // Mirrors the pre-sectioning flat file exactly. Used only to migrate an existing config on

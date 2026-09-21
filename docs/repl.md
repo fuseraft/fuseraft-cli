@@ -244,7 +244,7 @@ See [CLI Reference — Memory commands](cli-reference.md#fuseraft-repl) for scop
 
 ## Managing context
 
-`/context` shows current token usage against the model's budget. `/compact` summarizes everything older than a recent verbatim tail into a handoff document and resets history on top of it — the same thing fires automatically once usage crosses 75% of budget, so a long session doesn't need to be babysat. Facts the model stated without a backing tool call are tombstoned as `[UNVERIFIED ASSUMPTION: ...]` during compaction rather than carried forward as established truth. See [CLI Reference — Compacting a session](cli-reference.md#fuseraft-repl) for the full mechanics.
+`/context` shows current token usage against the model's budget. `/compact` summarizes everything older than a recent verbatim tail into a handoff document and resets history on top of it — the same thing fires automatically once usage crosses 75% of budget (tunable with `repl.autoCompactThreshold`), so a long session doesn't need to be babysat. Facts the model stated without a backing tool call are tombstoned as `[UNVERIFIED ASSUMPTION: ...]` during compaction rather than carried forward as established truth. See [CLI Reference — Compacting a session](cli-reference.md#fuseraft-repl) for the full mechanics.
 
 ---
 

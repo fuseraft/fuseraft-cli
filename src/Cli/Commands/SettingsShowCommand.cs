@@ -1,5 +1,7 @@
 using Spectre.Console;
 using Spectre.Console.Cli;
+using fuseraft.Cli.Commands.Repl;
+using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.KeyStore;
 using fuseraft.Infrastructure.Storage;
 
@@ -38,6 +40,9 @@ public sealed class SettingsShowCommand : AsyncCommand
         provider.AddRow("Type",           string.IsNullOrEmpty(config.Provider)     ? "[dim](auto-detected)[/]" : Markup.Escape(config.Provider));
         provider.AddRow("API key env var", string.IsNullOrEmpty(config.ApiKeyEnvVar) ? "[dim](none)[/]" : Markup.Escape(config.ApiKeyEnvVar));
         provider.AddRow("API key",        keyDisplay);
+        provider.AddRow("Request timeout",     config.RequestTimeoutSeconds is { } rt ? $"{rt}s" : $"[dim](default {TransportOptions.DefaultRequestTimeoutSeconds}s)[/]");
+        provider.AddRow("Stream idle timeout", config.StreamIdleTimeoutSeconds is { } st ? $"{st}s" : $"[dim](default {TransportOptions.DefaultStreamIdleTimeoutSeconds}s)[/]");
+        provider.AddRow("Max retries",         config.MaxRetries is { } mr ? mr.ToString() : $"[dim](default {TransportOptions.DefaultMaxRetries})[/]");
         AnsiConsole.Write(provider);
         AnsiConsole.WriteLine();
 
@@ -58,6 +63,14 @@ public sealed class SettingsShowCommand : AsyncCommand
         repl.AddRow("Safe mode",      config.Repl.SafeModeDefault ? "[green]on[/]" : "[dim]off[/]");
         repl.AddRow("Auto-compact",   config.Repl.AutoCompact     ? "[green]on[/]" : "[dim]off[/]");
         repl.AddRow("HITL auto-approve read-only", config.Repl.HitlAutoApproveReadOnly ? "[green]on[/]" : "[dim]off[/]");
+        var limits = ReplLimits.From(config.Repl);
+        string Tuned(bool set, string shown) => set ? shown : $"[dim](default {shown})[/]";
+        repl.AddRow("Auto-compact threshold",  Tuned(config.Repl.AutoCompactThreshold is not null,    limits.AutoCompactThreshold.ToString("0.00")));
+        repl.AddRow("Compact preserved tail",  Tuned(config.Repl.CompactPreserveTailRatio is not null, limits.PreserveTailRatio.ToString("0.00")));
+        repl.AddRow("Max tool failures",       Tuned(config.Repl.MaxConsecutiveToolFailures is not null, limits.MaxConsecutiveToolFailures.ToString()));
+        repl.AddRow("Max identical tool calls", Tuned(config.Repl.MaxIdenticalToolCalls is not null,   limits.MaxIdenticalToolCalls.ToString()));
+        repl.AddRow("Identical-call warning",  Tuned(config.Repl.WarnIdenticalToolCalls is not null,   limits.WarnIdenticalToolCalls.ToString()));
+        repl.AddRow("Max stream retries",      Tuned(config.Repl.MaxStreamRetries is not null,         limits.MaxStreamRetries.ToString()));
         repl.AddRow("Resume replay",  config.Repl.ResumeReplayTurns > 0
             ? $"last {config.Repl.ResumeReplayTurns} turn{(config.Repl.ResumeReplayTurns == 1 ? "" : "s")}"
             : "[dim]off[/]");
@@ -90,17 +103,27 @@ public sealed class SettingsShowCommand : AsyncCommand
 
         var modelOverrides = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey).Title("[bold]Model overrides[/]")
             .AddColumn("Field").AddColumn("Value");
+        string Conn(string? provider, string? endpoint, string? keyVar) =>
+            string.Join(", ", new[] { provider, endpoint, keyVar is null ? null : $"key from {keyVar}" }
+                .Where(v => !string.IsNullOrEmpty(v)).Select(v => Markup.Escape(v!)));
         modelOverrides.AddRow("Memory extraction", string.IsNullOrEmpty(config.Memory?.Model)
             ? "[dim](main chat model)[/]" : Markup.Escape(config.Memory!.Model!));
+        modelOverrides.AddRow("  connection", Conn(config.Memory?.Provider, config.Memory?.Endpoint, config.Memory?.ApiKeyEnvVar) is { Length: > 0 } mc
+            ? mc : "[dim](auto-detected from model ID, else main provider)[/]");
         modelOverrides.AddRow("Subagents", string.IsNullOrEmpty(config.Subagent?.Model)
             ? "[dim](main chat model)[/]" : Markup.Escape(config.Subagent!.Model!));
+        modelOverrides.AddRow("  connection", Conn(config.Subagent?.Provider, config.Subagent?.Endpoint, config.Subagent?.ApiKeyEnvVar) is { Length: > 0 } sc2
+            ? sc2 : "[dim](auto-detected from model ID, else main provider)[/]");
         AnsiConsole.Write(modelOverrides);
         AnsiConsole.WriteLine();
 
-        var subagentLimits = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey).Title("[bold]Subagent round caps[/]")
+        var subagentLimits = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey).Title("[bold]Subagent limits[/]")
             .AddColumn("Field").AddColumn("Value");
-        subagentLimits.AddRow("/explore",  config.Subagent?.ExploreMaxIterations is { } e ? e.ToString() : "[dim](default 20)[/]");
-        subagentLimits.AddRow("/delegate", config.Subagent?.DelegateMaxIterations is { } d ? d.ToString() : "[dim](default 40)[/]");
+        subagentLimits.AddRow("/explore rounds",   config.Subagent?.ExploreMaxIterations is { } e ? e.ToString() : "[dim](default 20)[/]");
+        subagentLimits.AddRow("/delegate rounds",  config.Subagent?.DelegateMaxIterations is { } d ? d.ToString() : "[dim](default 40)[/]");
+        subagentLimits.AddRow("/explore timeout",  config.Subagent?.ExploreTimeoutMinutes is { } et ? $"{et} min" : "[dim](default 8 min)[/]");
+        subagentLimits.AddRow("/locate timeout",   config.Subagent?.LocateTimeoutMinutes is { } lt ? $"{lt} min" : "[dim](default 2 min)[/]");
+        subagentLimits.AddRow("/delegate timeout", config.Subagent?.DelegateTimeoutMinutes is { } dt ? $"{dt} min" : "[dim](default 15 min)[/]");
         AnsiConsole.Write(subagentLimits);
         AnsiConsole.WriteLine();
 

@@ -348,7 +348,7 @@ internal static partial class ReplCommands
         {
             var activeTools    = ctx.GetActiveTools();
             var hasTools       = activeTools.Count > 0;
-            ctx.Client         = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, tools: activeTools);
+            ctx.Client         = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, tools: activeTools, limits: ctx.Limits);
             ctx.StepClient     = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, ReplTurn.StepIterationLimit, activeTools);
         }
         catch (Exception ex)
@@ -410,7 +410,7 @@ internal static partial class ReplCommands
         IChatClient newClient;
         try
         {
-            newClient = ReplFactory.BuildClient(newConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, tools: activeTools);
+            newClient = ReplFactory.BuildClient(newConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, tools: activeTools, limits: ctx.Limits);
         }
         catch (Exception ex)
         {
@@ -481,7 +481,7 @@ internal static partial class ReplCommands
         var hasTools = activeTools.Count > 0;
         try
         {
-            ctx.Client     = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, tools: activeTools);
+            ctx.Client     = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, tools: activeTools, limits: ctx.Limits);
             ctx.StepClient = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, ReplTurn.StepIterationLimit, activeTools);
         }
         catch (Exception ex)

@@ -222,7 +222,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         }
 
         var modelConfig = ReplFactory.BuildModelConfig(modelId, userCfg);
-        using var factory = new ChatClientFactory();
+        using var factory = new ChatClientFactory(transport: TransportOptions.From(userCfg));
 
         // Persisted REPL defaults (UserConfig.Repl) can only add to what the CLI flags for
         // this invocation already request, never take something away — e.g. a configured
@@ -444,7 +444,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         IChatClient client;
         try
         {
-            client = ReplFactory.BuildClient(modelConfig, factory, initialTools.Count > 0, adaptiveTrimTracker, emitter, tools: initialTools);
+            client = ReplFactory.BuildClient(modelConfig, factory, initialTools.Count > 0, adaptiveTrimTracker, emitter, tools: initialTools, limits: ReplLimits.From(userCfg?.Repl));
         }
         catch (Exception ex)
         {
@@ -560,8 +560,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             // Allow subagent tool calls (/explore, /locate, /delegate) to run on a different,
             // cheaper model than the main REPL chat — mirrors AgentConfig.SubagentModel, which
             // does the same for orchestration agents.
-            var subagentModelCfg = userCfg?.Subagent?.Model is { Length: > 0 } sam
-                ? factory.Resolve(new ModelConfig { ModelId = sam })
+            var subagentModelCfg = userCfg?.Subagent is { Model: { Length: > 0 } sam } sub
+                ? ReplFactory.ResolveOverrideModel(factory, modelConfig, sam, sub.Provider, sub.Endpoint, sub.ApiKeyEnvVar)
                 : modelConfig;
 
             // User-defined agents (.fuseraft/agents/*.md, .agents/agents/*.md, and the user-level
@@ -576,6 +576,9 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 parentAgentName:  "repl",
                 maxToolCalls:     userCfg?.Subagent?.ExploreMaxIterations ?? 0,
                 delegateMaxToolCalls: userCfg?.Subagent?.DelegateMaxIterations ?? 0,
+                exploreTimeoutMinutes:  userCfg?.Subagent?.ExploreTimeoutMinutes  ?? 0,
+                locateTimeoutMinutes:   userCfg?.Subagent?.LocateTimeoutMinutes   ?? 0,
+                delegateTimeoutMinutes: userCfg?.Subagent?.DelegateTimeoutMinutes ?? 0,
                 delegateTools:    delegateTools,
                 diagnosticTools:  sessionDiagnosticTools,
                 customAgents:     agentLoad.Definitions,

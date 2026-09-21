@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace fuseraft.Core.Models.Config;
 
 /// <summary>
@@ -9,10 +11,28 @@ public record MemoryExtractionConfig
 {
     /// <summary>
     /// Model alias or ID to use for extraction (e.g. a small/cheap model to keep the
-    /// end-of-session extraction call inexpensive). Resolved the same way as any other
-    /// <see cref="ModelConfig.ModelId"/> — provider, endpoint, and API key are
-    /// auto-detected from the prefix, independent of the REPL's main provider settings.
+    /// end-of-session extraction call inexpensive). Resolved by <c>ReplFactory.ResolveOverrideModel</c>:
+    /// provider, endpoint, and API key are auto-detected from the ID prefix, or inherited from the
+    /// REPL's main provider when the prefix isn't recognized, unless overridden by the fields below.
     /// Defaults to the REPL's main chat model when null or empty.
     /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Model { get; init; }
+
+    /// <summary>Provider for <see cref="Model"/> (e.g. <c>openai</c>, <c>anthropic</c>). Null auto-detects it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Provider { get; init; }
+
+    /// <summary>Base URL for <see cref="Model"/>, e.g. a gateway that serves it under a name the prefix table doesn't know.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Endpoint { get; init; }
+
+    /// <summary>Env var holding the API key for <see cref="Model"/>. Null reuses the main provider's key when <see cref="Endpoint"/> is set.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ApiKeyEnvVar { get; init; }
+
+    /// <summary>True when no field is set, so the whole section can be dropped from the config file.</summary>
+    [JsonIgnore]
+    public bool IsEmpty => string.IsNullOrWhiteSpace(Model) && string.IsNullOrWhiteSpace(Provider)
+        && string.IsNullOrWhiteSpace(Endpoint) && string.IsNullOrWhiteSpace(ApiKeyEnvVar);
 }

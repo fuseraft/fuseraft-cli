@@ -470,8 +470,8 @@ internal static partial class ReplCommands
                 if (!ctx.JsonMode) AnsiConsole.Markup("[dim]extracting memories…[/]");
                 try
                 {
-                    var memoryModelCfg = ctx.UserCfg?.Memory?.Model is { Length: > 0 } mm
-                        ? ctx.Factory.Resolve(new ModelConfig { ModelId = mm })
+                    var memoryModelCfg = ctx.UserCfg?.Memory is { Model: { Length: > 0 } mm } mem
+                        ? ReplFactory.ResolveOverrideModel(ctx.Factory, ctx.ModelConfig, mm, mem.Provider, mem.Endpoint, mem.ApiKeyEnvVar)
                         : ctx.ModelConfig;
                     var mc = ctx.Factory.Create(memoryModelCfg);
                     using var _ = mc as IDisposable;

@@ -361,6 +361,8 @@ By default this extraction call reuses the REPL's main chat model. Set `memory.m
 fuseraft settings set memory.model gpt-4o-mini
 ```
 
+The model ID picks its provider by prefix (`gpt-*` → OpenAI, `claude-*` → Anthropic, …) and reads that vendor's usual API-key env var (`OPENAI_API_KEY`, …); a key held only in the OS keychain is your main provider's, so set `memory.endpoint` to reuse it. An ID the prefix table doesn't recognize — a gateway's own names, say `openrouter/some-model` — rides the REPL's main provider connection instead. To point the model at a different host, set `memory.endpoint` (it reuses the main provider's API key unless `memory.apiKeyEnvVar` names another), and optionally `memory.provider`. These only take effect together with `memory.model`.
+
 See [CLI Reference — `fuseraft settings`](cli-reference.md#fuseraft-settings).
 
 ---

@@ -79,6 +79,7 @@ internal static class ReplTurn
     // hard .NET exception during invocation — most tool failures in this codebase are business-
     // logic failures a plugin catches and returns as a normal string (see PluginResult in
     // ProcessHelper.cs), which the SDK's own counter never observes.
+    // Default — overridable through the global config (repl.maxConsecutiveToolFailures; see ReplLimits).
     internal const int MaxConsecutiveToolFailures = 3;
 
     // Stop the round-trip loop after this many *consecutive* tool calls with the same name and
@@ -93,6 +94,7 @@ internal static class ReplTurn
     // FunctionInvokingChatClient, so — like the failure cutoff above — the earliest this can
     // react is to stop enumerating once the Nth identical call itself streams in, with no
     // earlier soft-warning point available to hook into.
+    // Default — overridable through the global config (repl.maxIdenticalToolCalls; see ReplLimits).
     internal const int MaxConsecutiveIdenticalToolCalls = 5;
 
     // Soft counterpart to MaxConsecutiveIdenticalToolCalls, mirroring Cline's
@@ -104,11 +106,8 @@ internal static class ReplTurn
     // the safe seam is embedding the nudge text in the returned result itself, in the same
     // tool-result message). Only ReplFactory's free-form client (ctx.Client) gets this guard —
     // step turns keep their existing StepIterationLimit-bounded handling unchanged.
+    // Default — overridable through the global config (repl.warnIdenticalToolCalls; see ReplLimits).
     internal const int SoftRepeatedToolCallThreshold = 3;
-
-    // Maximum times a transient streaming error (ResponseEnded, IOException, TimeoutException)
-    // is retried automatically before surfacing the failure to the user.
-    private const int MaxStreamRetries = 2;
 
     // Number of automatic "todo list still incomplete" nudges (see
     // TryApplyTodoCompletionCorrectionAsync) before handing the decision to a critic subagent
@@ -754,10 +753,10 @@ internal static class ReplTurn
             await ctx.Emitter.EmitAsync(EventTypes.ReplWarning, turn: ctx.TurnIndex, payload: new
             {
                 message   = "hit_consecutive_failure_limit",
-                failures  = MaxConsecutiveToolFailures,
+                failures  = ctx.Limits.MaxConsecutiveToolFailures,
                 last_tool = lastTool,
             });
-            var failMsg = $"Stopped after {MaxConsecutiveToolFailures} consecutive tool failures.{detail} " +
+            var failMsg = $"Stopped after {ctx.Limits.MaxConsecutiveToolFailures} consecutive tool failures.{detail} " +
                           "Progress so far was kept — send a follow-up once the issue is addressed.";
             if (ctx.JsonMode)
                 ReplJsonBridge.Emit(new { type = "warning", text = failMsg });
@@ -778,7 +777,7 @@ internal static class ReplTurn
                 limit   = repeatedToolCallLimit,
                 detail  = lastRepeatedToolCallDetail,
             });
-            var repeatMsg = $"Stopped after {lastRepeatedToolCallDetail ?? $"{MaxConsecutiveIdenticalToolCalls} identical tool calls in a row"} " +
+            var repeatMsg = $"Stopped after {lastRepeatedToolCallDetail ?? $"{ctx.Limits.MaxIdenticalToolCalls} identical tool calls in a row"} " +
                             "— the model may be stuck in a loop. Progress so far was kept — send a follow-up to try a different approach.";
             if (ctx.JsonMode)
                 ReplJsonBridge.Emit(new { type = "warning", text = repeatMsg });
@@ -807,7 +806,7 @@ internal static class ReplTurn
             var isActual  = ctx.LastActualContextTokens.HasValue;
             var effective = ctx.LastActualContextTokens ?? postEst;
             var pct       = (double)effective / ctx.ContextTokenBudget;
-            if (pct >= 0.75)
+            if (pct >= ctx.Limits.AutoCompactThreshold)
             {
                 ctx.ContextWarningShown = true;
                 var autoCompact = ctx.UserCfg?.Repl?.AutoCompact ?? true;
@@ -1268,13 +1267,13 @@ internal static class ReplTurn
         // toolCallsThisTurn is preserved from the aborted attempt (not always empty) so a
         // step halted mid-stream can still report which tools it managed to call before
         // failing — see ReplTurnOutcome.HaltStepOnStreamFailure.
-        internal static TurnStreamResult MakeFailed(List<string> toolCallsThisTurn) =>
-            new(false, "", toolCallsThisTurn, [], 0, null, 0, 0, 0, null, [], false, null, false, null, MaxConsecutiveIdenticalToolCalls);
+        internal static TurnStreamResult MakeFailed(List<string> toolCallsThisTurn, int repeatedToolCallLimit) =>
+            new(false, "", toolCallsThisTurn, [], 0, null, 0, 0, 0, null, [], false, null, false, null, repeatedToolCallLimit);
     }
 
     /// <summary>
     /// Streams one turn's response from <paramref name="ctx"/>'s active client, retrying
-    /// automatically on transient mid-stream disconnections (up to <see cref="MaxStreamRetries"/>
+    /// automatically on transient mid-stream disconnections (up to <see cref="ReplLimits.MaxStreamRetries"/>
     /// times). Owns the spinner lifecycle and the in-flight request's <see cref="CancellationTokenSource"/>
     /// entirely — nothing about it leaks into the caller. Returns <see cref="TurnStreamResult.Success"/>
     /// <see langword="false"/> on cancellation or a non-retryable/exhausted-retry failure, in which
@@ -1289,6 +1288,7 @@ internal static class ReplTurn
         DateTime turnStart,
         CancellationToken cancellationToken)
     {
+        var limits            = ctx.Limits;
         var sb                = new StringBuilder();
         // Automatic function invocation drives multiple model round trips within this
         // single streaming enumeration. Each round's leading/trailing text has no
@@ -1328,7 +1328,7 @@ internal static class ReplTurn
         string? lastRepeatedToolCallDetail = null;
         // Which limit tripped hitRepeatedToolCallLimit — the identical-call cap, or the (longer)
         // A/B/A/B alternation cap — so the warning event reports the one that actually fired.
-        var repeatedToolCallLimit          = MaxConsecutiveIdenticalToolCalls;
+        var repeatedToolCallLimit          = limits.MaxIdenticalToolCalls;
         // Catches what the identical-call counter above cannot: read → test → read → test.
         var toolCallCycles                 = new ToolCallCycleDetector();
 
@@ -1460,7 +1460,7 @@ internal static class ReplTurn
                     // another round — same early-break technique as the consecutive-failure
                     // cutoff below (a dangling call with no result is repaired by
                     // RepairDanglingToolCalls, so breaking mid-call here is safe).
-                    if (consecutiveIdenticalToolCalls >= MaxConsecutiveIdenticalToolCalls)
+                    if (consecutiveIdenticalToolCalls >= limits.MaxIdenticalToolCalls)
                     {
                         hitRepeatedToolCallLimit = true;
                         lastRepeatedToolCallDetail =
@@ -1506,7 +1506,7 @@ internal static class ReplTurn
                     // another round — GetStreamingResponseAsync only advances past this chunk
                     // (and only then invokes the next round) on the *next* MoveNextAsync, so
                     // breaking here means no further request is ever made for this turn.
-                    if (consecutiveToolFailures >= MaxConsecutiveToolFailures)
+                    if (consecutiveToolFailures >= limits.MaxConsecutiveToolFailures)
                     {
                         hitConsecutiveFailureLimit = true;
                         break;
@@ -1560,9 +1560,9 @@ internal static class ReplTurn
             if (!ctx.JsonMode) AnsiConsole.WriteLine();
             reqCts.Dispose();
             ctx.ActiveCts = null;
-            return TurnStreamResult.MakeFailed(toolCallsThisTurn);
+            return TurnStreamResult.MakeFailed(toolCallsThisTurn, limits.MaxIdenticalToolCalls);
         }
-        catch (Exception ex) when (IsTransientStreamError(ex) && streamAttempt < MaxStreamRetries)
+        catch (Exception ex) when (IsTransientStreamError(ex) && streamAttempt < limits.MaxStreamRetries)
         {
             // Transient stream disconnection — retry automatically with back-off.
             streamAttempt++;
@@ -1578,13 +1578,13 @@ internal static class ReplTurn
             });
 
             if (ctx.JsonMode)
-                ReplJsonBridge.Emit(new { type = "retrying", attempt = streamAttempt, max = MaxStreamRetries });
+                ReplJsonBridge.Emit(new { type = "retrying", attempt = streamAttempt, max = limits.MaxStreamRetries });
             else
                 AnsiConsole.MarkupLine(
-                    $"[dim]  ↺ {Markup.Escape(ex.Message)} — retrying ({streamAttempt}/{MaxStreamRetries})…[/]");
+                    $"[dim]  ↺ {Markup.Escape(ex.Message)} — retrying ({streamAttempt}/{limits.MaxStreamRetries})…[/]");
 
-            // Exponential back-off: 2 s, 4 s. Not wired to the cancellation token so the
-            // short sleep is never interrupted — max wasted time is 6 s total.
+            // Exponential back-off: 2 s, 4 s, … (at most 32 s for the last of the 5 permitted retries).
+            // Not wired to the cancellation token so the short sleep is never interrupted.
             await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, streamAttempt)));
 
             // Reset per-attempt accumulators before reissuing the request.
@@ -1597,7 +1597,7 @@ internal static class ReplTurn
             consecutiveToolFailures = 0; hitConsecutiveFailureLimit = false; lastToolFailureDetail = null;
             lastToolCallName = string.Empty; lastToolCallSignature = string.Empty;
             consecutiveIdenticalToolCalls = 0; hitRepeatedToolCallLimit = false; lastRepeatedToolCallDetail = null;
-            repeatedToolCallLimit = MaxConsecutiveIdenticalToolCalls; toolCallCycles.Reset();
+            repeatedToolCallLimit = limits.MaxIdenticalToolCalls; toolCallCycles.Reset();
 
             // Restart spinner for the fresh attempt.
             spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
@@ -1639,7 +1639,7 @@ internal static class ReplTurn
                 ctx.History.RemoveAt(ctx.History.Count - 1);
             reqCts.Dispose();
             ctx.ActiveCts = null;
-            return TurnStreamResult.MakeFailed(toolCallsThisTurn);
+            return TurnStreamResult.MakeFailed(toolCallsThisTurn, limits.MaxIdenticalToolCalls);
         }
         } // end while (retry loop)
 
@@ -1666,8 +1666,8 @@ internal static class ReplTurn
         try
         {
             if (!ctx.JsonMode) AnsiConsole.Markup("[dim]saving memory…[/]");
-            var memoryModelCfg = ctx.UserCfg?.Memory?.Model is { Length: > 0 } mm
-                ? ctx.Factory.Resolve(new ModelConfig { ModelId = mm })
+            var memoryModelCfg = ctx.UserCfg?.Memory is { Model: { Length: > 0 } mm } mem
+                ? ReplFactory.ResolveOverrideModel(ctx.Factory, ctx.ModelConfig, mm, mem.Provider, mem.Endpoint, mem.ApiKeyEnvVar)
                 : ctx.ModelConfig;
             var mc = ctx.Factory.Create(memoryModelCfg);
             using var _ = mc as IDisposable;

@@ -16,6 +16,18 @@ public sealed class UserConfig
     [JsonPropertyName("apiKeyEnvVar")]
     public string ApiKeyEnvVar { get; set; } = string.Empty;
 
+    /// <summary>Whole-request HTTP timeout for model calls, in seconds. Null uses the built-in default (see <c>TransportOptions</c>).</summary>
+    [JsonPropertyName("requestTimeoutSeconds")]
+    public int? RequestTimeoutSeconds { get; set; }
+
+    /// <summary>How long a streaming response may go without a content event before it is treated as stalled, in seconds. Null uses the built-in default.</summary>
+    [JsonPropertyName("streamIdleTimeoutSeconds")]
+    public int? StreamIdleTimeoutSeconds { get; set; }
+
+    /// <summary>Retries of a transient HTTP failure (429/5xx/network) per model call. Null uses the built-in default.</summary>
+    [JsonPropertyName("maxRetries")]
+    public int? MaxRetries { get; set; }
+
     [JsonPropertyName("skillCuration")]
     public SkillCurationConfig? SkillCuration { get; set; }
 
@@ -47,6 +59,9 @@ public sealed class UserConfig
     /// </summary>
     [JsonPropertyName("telemetry")]
     public TelemetryConfig? Telemetry { get; set; }
+
+    /// <summary>Shallow copy — sections are shared with the original, so mutate the copy's own fields, not the sections.</summary>
+    public UserConfig Clone() => (UserConfig)MemberwiseClone();
 
     // Never written to disk — populated at runtime from the OS keychain.
     [JsonIgnore]

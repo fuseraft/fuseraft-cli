@@ -268,4 +268,35 @@ public sealed class ReplToolLoopGuardTests
     [InlineData(null, false)]
     public void IsToolFailureText_RecognisesThePluginFailureConventions(string? text, bool expected) =>
         Assert.Equal(expected, ReplTurn.IsToolFailureText(text));
+
+    // Configured thresholds (repl.warnIdenticalToolCalls / repl.maxConsecutiveToolFailures)
+
+    [Fact]
+    public async Task ConfiguredWarnThreshold_MovesTheIdenticalCallNotice()
+    {
+        var guard = new ReplToolLoopGuard(ReplLimits.From(new() { WarnIdenticalToolCalls = 4, MaxIdenticalToolCalls = 8 }));
+        var args  = new Dictionary<string, object?> { ["cmd"] = "ls" };
+
+        var results = new List<string>();
+        for (var i = 0; i < 4; i++)
+            results.Add((await guard.InvokeAsync(MakeContext(i, "shell_run", args), CancellationToken.None))?.ToString() ?? "");
+
+        Assert.All(results.Take(3), r => Assert.DoesNotContain("SYSTEM NOTICE", r));   // not at the default 3rd call
+        Assert.Contains("SYSTEM NOTICE", results[3]);
+        Assert.Contains("4 call in a row", results[3]);
+    }
+
+    [Fact]
+    public async Task ConfiguredFailureLimit_MovesTheOneShortNudge()
+    {
+        var guard = new ReplToolLoopGuard(ReplLimits.From(new() { MaxConsecutiveToolFailures = 5 }));
+
+        var results = new List<string>();
+        for (var i = 0; i < 4; i++)
+            results.Add((await guard.InvokeAsync(MakeContextWith(FlakyFunction, i, $"bad-{i}"), CancellationToken.None))?.ToString() ?? "");
+
+        // Default limit 3 would have nudged on the 2nd failure; with 5 it's one short of the cutoff: the 4th.
+        Assert.All(results.Take(3), r => Assert.DoesNotContain("SYSTEM NOTICE", r));
+        Assert.Contains("4 tool calls in a row have failed", results[3]);
+    }
 }

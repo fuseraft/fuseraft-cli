@@ -125,6 +125,30 @@ The REPL trims conversation history against a working-context-token budget (`ctx
 
 Set `repl.contextBudget` in `~/.fuseraft/config` (a positive integer, in tokens — `fuseraft settings set repl.contextBudget 400000`) to override that heuristic for every model used in the REPL session, regardless of family. Leave it unset to keep the built-in heuristic. This is REPL-only and does not affect `MaxContextTokens` above (a separate per-agent hard ceiling enforced before each API call in non-REPL agent/orchestration contexts), nor the unrelated `ContextBudget` YAML block used in `orchestration.yaml` (warn/cutover/tool-result trimming for multi-agent orchestration runs) — the similarly-named field intentionally lives under the `repl` section to keep the two apart.
 
+### Timeouts and retries
+
+Every model call goes through one HTTP client with a fixed retry and timeout policy. Three keys in the `provider` section tune it — for a slow local model, a reasoning model that thinks for minutes before its first token, or a flaky gateway. They apply to `fuseraft repl` and `fuseraft run` alike.
+
+| Key | Default | Range | Meaning |
+|-----|---------|-------|---------|
+| `provider.requestTimeoutSeconds` | `1200` (20 min) | 30–7200 | Timeout for a model request. For a streaming reply this is the wait for the first byte (the response headers); once the stream is open the two idle timeouts below take over. |
+| `provider.streamIdleTimeoutSeconds` | `300` (5 min) | 30–3600 | How long a streaming reply may go without a *content* event before it is treated as stalled. Keep-alive pings don't count. The 2-minute dead-socket check (no bytes at all) is raised to match if this is set higher, so it never fires first. |
+| `provider.maxRetries` | `3` | 0–10 | Retries of a transient failure (429, 5xx, a dropped connection) per model call, with exponential back-off of 2 s, 4 s, 8 s, … capped at 60 s (a `Retry-After` header is honoured as given). `0` means exactly one attempt. |
+
+```bash
+fuseraft settings set provider.requestTimeoutSeconds 3600
+fuseraft settings set provider.streamIdleTimeoutSeconds 900
+fuseraft settings set provider.maxRetries 5
+```
+
+Each accepts `""` to go back to the default.
+
+**Retries stack unless you set `provider.maxRetries`.** The OpenAI and Azure SDKs apply their own retry (3 retries) on top of fuseraft's, so left unset a hard failure can take up to 4 × 4 = 16 attempts — a dead endpoint took about a minute to give up in testing. Setting `provider.maxRetries` to any value, `3` included, switches the SDK's own retry off, so the number becomes exact: *N* retries, *N* + 1 attempts. Anthropic and Ollama have no such second layer.
+
+**Ollama** is built on OllamaSharp's own HTTP client, whose built-in timeout is 100 s rather than 20 minutes — so a slow local model can time out before the first token. `provider.requestTimeoutSeconds` applies to it too; left unset, Ollama keeps its 100 s. Ollama streams NDJSON rather than SSE, so `streamIdleTimeoutSeconds` and `maxRetries` don't apply to it.
+
+In the REPL a stream that drops mid-reply is also retried automatically, separately from the above — see `repl.maxStreamRetries` under [`fuseraft settings`](cli-reference.md#fuseraft-settings). A stall that trips the idle timeout counts as such a drop, so with the defaults a fully stalled model costs up to `5 min × (1 + 2 retries)` before the turn fails.
+
 ### OS keychain fallback
 
 If an agent model has neither `ApiKey` nor `ApiKeyEnvVar` set after global defaults are applied, fuseraft retrieves the key stored in the OS keychain (set via `fuseraft key set` or the REPL wizard) and injects it as a literal `ApiKey`. This means the full auth resolution order for any agent model is:

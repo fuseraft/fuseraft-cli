@@ -442,7 +442,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/rewind <n>` | Keep turns 1…n and discard all later turns. Turn count is the number of User messages currently in memory. Clamps safely — passing a number larger than the current turn count is a no-op. |
 | `/rewind -<n>` | Step back n turns from the current position (relative rewind). `/rewind -1` drops the last turn; `/rewind -99` clamps to 0 and clears all turns. |
 | `/clear` | Clear conversation history (system prompt is kept). Also clears the terminal and redraws the startup banner, unless `--no-banner` was passed at launch (in which case it just prints a confirmation line). |
-| `/compact` | Ask the model to summarise everything older than a recent verbatim tail into a handoff document, then replace history with `[system, summary, ...recent turns]`. The system prompt, tools/skills catalog, and the most recent turns (~20% of the context budget, kept as whole turn-groups) are preserved as-is; only the older portion is folded into the summary. Declines with a message rather than mutating history if there's nothing old enough to summarise, or if the result wouldn't actually be smaller. Facts the assistant stated without a backing tool call are tombstoned as `[UNVERIFIED ASSUMPTION: ...]` rather than carried forward as established facts. Use this when context is filling up but you want to continue in the same session. The same logic fires automatically at 75% of the context budget unless disabled — see "Compacting a session" below. |
+| `/compact` | Ask the model to summarise everything older than a recent verbatim tail into a handoff document, then replace history with `[system, summary, ...recent turns]`. The system prompt, tools/skills catalog, and the most recent turns (~20% of the context budget by default — `repl.compactPreserveTailRatio` — kept as whole turn-groups) are preserved as-is; only the older portion is folded into the summary. Declines with a message rather than mutating history if there's nothing old enough to summarise, or if the result wouldn't actually be smaller. Facts the assistant stated without a backing tool call are tombstoned as `[UNVERIFIED ASSUMPTION: ...]` rather than carried forward as established facts. Use this when context is filling up but you want to continue in the same session. The same logic fires automatically at 75% of the context budget (`repl.autoCompactThreshold`) unless disabled — see "Compacting a session" below. |
 | `/compact <focus>` | Same as `/compact`, but passes a focus hint to the model so the summary is tailored toward the next task (e.g. `/compact fix the auth bug next`) |
 | `/history` | Show a condensed view of the conversation (role + preview of each message) |
 | `/replay [n\|all]` | Re-display the last `n` turns in full — your message, a one-line summary of the tools used, and the agent's rendered reply. Defaults to `repl.resumeReplayTurns` (3 if unset or 0); `all` shows every turn still in memory. This is the same view shown automatically when a session is resumed. Internal messages (self-correction nudges, plan-step summaries, `/run` results, the `/compact` summary) are left out. |
@@ -557,9 +557,17 @@ By default, `/explore`, `/locate`, and `/delegate` (and their model-callable equ
 fuseraft settings set subagent.model gpt-4o-mini
 ```
 
-See [`fuseraft settings`](#fuseraft-settings). This mirrors `SubagentModel` in orchestration YAML (see [Agent configuration](configuration.md#agent-configuration)), which does the same for `fuseraft run` agents.
+The model ID picks its provider by prefix (`gpt-*` → OpenAI, `claude-*` → Anthropic, …), using that vendor's own endpoint and the API key in that vendor's usual env var (`OPENAI_API_KEY`, `XAI_API_KEY`, …). A key that lives only in the OS keychain belongs to your *main* provider, so a recognized ID that isn't served by it needs `subagent.endpoint` (below) or that env var — otherwise the REPL refuses to start with `API key environment variable '…' is not set`. An ID the prefix table doesn't recognize — a gateway's own names, say `openrouter/some-model` — rides the REPL's main provider connection instead of failing. When the gateway serves a name the table *does* recognize (a LiteLLM proxy answering `gpt-4o-mini`), point it there explicitly:
 
-**Subagent round caps**
+```bash
+fuseraft settings set subagent.model gpt-4o-mini
+fuseraft settings set subagent.endpoint https://litellm.example/v1   # reuses the main provider's API key…
+fuseraft settings set subagent.apiKeyEnvVar LITELLM_KEY              # …unless you name another
+```
+
+`subagent.provider` (`openai`, `anthropic`, …) overrides the detected provider. These three only take effect together with `subagent.model`; `""` clears each. See [`fuseraft settings`](#fuseraft-settings). This mirrors `SubagentModel` in orchestration YAML (see [Agent configuration](configuration.md#agent-configuration)), which does the same for `fuseraft run` agents.
+
+**Subagent round caps and timeouts**
 
 A subagent's loop is capped in *rounds* — one model call each, so tools it fires in parallel count once. `/locate` is fixed at 5 rounds; `/explore` defaults to 20 and `/delegate` to 40. Raise (or reset) them in `~/.fuseraft/config`:
 
@@ -569,6 +577,16 @@ fuseraft settings set subagent.delegateMaxIterations 60
 ```
 
 Each accepts 1–100, or `""` to go back to the default. A run that hits its cap stops with a `stopped after N rounds without finishing` notice and any partial output rather than passing itself off as done. Custom subagents set their own cap with `max_iterations` ([Subagents](subagents.md)); the orchestration equivalent is `SubagentMaxToolCalls`.
+
+Each subagent also has a wall-clock limit, separate from the round cap — on a slow model a run can hit the clock long before it runs out of rounds. Defaults are 8 minutes for `/explore`, 2 for `/locate` and 15 for `/delegate` (custom subagents use the `/delegate` limit):
+
+```bash
+fuseraft settings set subagent.delegateTimeoutMinutes 45
+fuseraft settings set subagent.exploreTimeoutMinutes 15
+fuseraft settings set subagent.locateTimeoutMinutes 5
+```
+
+Each accepts 1–240 minutes, or `""` to reset. A run that hits its limit reports `Subagent timed out after N minutes.`
 
 **Prompt format**
 
@@ -945,6 +963,8 @@ This extraction call uses the REPL's main chat model by default. Set `memory.mod
 fuseraft settings set memory.model gpt-4o-mini
 ```
 
+Provider selection follows the same rules as the subagent model above: by ID prefix, falling back to the main provider's connection for an unrecognized ID, with `memory.provider` / `memory.endpoint` / `memory.apiKeyEnvVar` for a gateway that serves a recognized name. See [Memory](configuration.md#memory) for details.
+
 ```
 > /memory
   [user_role] (user): Senior engineer working on fuseraft-cli
@@ -1001,7 +1021,9 @@ As a conversation grows, token usage climbs and the model's effective context wi
 
 Two safeguards protect against a compaction that would do more harm than good: if recent history alone already fits inside the preserved window, there's nothing old enough to summarise and compaction declines rather than spending an LLM call on nothing; if the summarizer's result isn't actually smaller than what it replaced, compaction is rejected outright and history is left completely untouched.
 
-**Automatic compaction:** the same logic fires on its own once context usage crosses 75% of the budget, so a long session doesn't have to be babysat with manual `/compact` calls. Disable it with `fuseraft settings set repl.autoCompact false` — at 75% full you'll then just see a warning suggesting `/compact` instead.
+**Automatic compaction:** the same logic fires on its own once context usage crosses 75% of the budget, so a long session doesn't have to be babysat with manual `/compact` calls. Disable it with `fuseraft settings set repl.autoCompact false` — at the threshold you'll then just see a warning suggesting `/compact` instead.
+
+Two values here are tunable: `repl.autoCompactThreshold` (0.5–0.95, default `0.75`) sets where the warning or auto-compaction fires — lower it for a model that degrades well before its window is full, raise it if compacting feels premature — and `repl.compactPreserveTailRatio` (0.05–0.5, default `0.2`) sets how much of the budget is kept verbatim as recent turns rather than folded into the summary. The most recent turn is always kept, whatever the ratio.
 
 **Unverified assumption tombstoning**
 
@@ -1040,9 +1062,9 @@ Every session appends structured JSONL events to its own `~/.fuseraft/logs/{proj
 | `turn_end` | Model finishes a turn — includes `elapsed_ms`, `estimated_tokens`, `tool_rounds`, `tool_count` |
 | `assistant_response` | Final assistant message for a turn |
 | `tool_call` | Each individual tool invocation |
-| `compaction` | Compaction actually applied — manual `/compact`, `compact_context` tool, or automatic 75% trigger — includes `before_tokens`, `after_tokens`, `source`, `focus` |
+| `compaction` | Compaction actually applied — manual `/compact`, `compact_context` tool, or the automatic threshold trigger (75% by default) — includes `before_tokens`, `after_tokens`, `source`, `focus` |
 | `cancelled` | Turn cancelled by Ctrl+C |
-| `context_warning` | Context window exceeds 75% of the 80k token budget — includes `estimated_tokens`, `is_actual`, `budget`, `pct`, `auto_compact` |
+| `context_warning` | Context usage crosses the auto-compact threshold (75% of the context budget by default) — includes `estimated_tokens`, `is_actual`, `budget`, `pct`, `auto_compact` |
 | `correction_injected` | Harness injects a write-tool correction after a mutation claim with no tool call |
 | `plan_captured` | `/plan` stores a new plan — includes `step_count` |
 | `step_complete` | `/execute` step passes postconditions — includes `step`, `total`, `steps_left` |
@@ -2560,7 +2582,7 @@ fuseraft settings set <key> [value]
 
 ### `fuseraft settings show`
 
-Prints every section of the file as tables: Provider (including whether an API key is stored in the OS keychain — the key itself is never shown), Sampling defaults, REPL defaults, Telemetry default, Skill curation, Model overrides (memory extraction and subagent model), and connected MCP server names. If no config exists yet, prints a pointer to `/provider setup` or `settings set` instead of erroring.
+Prints every section of the file as tables: Provider (including whether an API key is stored in the OS keychain — the key itself is never shown — and the request timeout, stream idle timeout and retry budget), Sampling defaults, REPL defaults (including the compaction and tool-loop thresholds), Telemetry default, Skill curation, Model overrides (memory extraction and subagent model, with any connection override), Subagent limits (round caps and timeouts), and connected MCP server names. Values left at their built-in default show as `(default …)`. If no config exists yet, prints a pointer to `/provider setup` or `settings set` instead of erroring.
 
 ```bash
 fuseraft settings show
@@ -2585,6 +2607,9 @@ Sets one field by a dotted, case-insensitive key. Loads the existing config (or 
 | `provider.endpoint` | Provider base URL |
 | `provider.type` | Provider identifier, e.g. `openai`, `anthropic`, `ollama` |
 | `provider.apiKeyEnvVar` | Env var name to read the API key from |
+| `provider.requestTimeoutSeconds` | Whole-request timeout for model calls, 30–7200 (default `1200`; Ollama keeps its own 100 s unless this is set), or `""` to reset — see [Timeouts and retries](models.md#timeouts-and-retries) |
+| `provider.streamIdleTimeoutSeconds` | Seconds a streaming reply may go without content before it is treated as stalled, 30–3600 (default `300`), or `""` to reset |
+| `provider.maxRetries` | Retries of a transient HTTP failure (429, 5xx, network) per model call, 0–10 (default `3`), or `""` to reset. Setting it also switches off the OpenAI/Azure SDK's own stacked retries, so `0` means exactly one attempt |
 | `sampling.temperature` | `0.0`–`2.0`, or `""` to clear |
 | `sampling.topP` | `0.0`–`1.0`, or `""` to clear |
 | `sampling.seed` | Integer, or `""` to clear |
@@ -2596,14 +2621,25 @@ Sets one field by a dotted, case-insensitive key. Loads the existing config (or 
 | `repl.noBanner` | `true`/`false` |
 | `repl.verbose` | `true`/`false` |
 | `repl.safeMode` | `true`/`false` — engage `/safe-mode` at startup |
+| `repl.autoCompactThreshold` | Context fraction at which the REPL warns and (with `repl.autoCompact`) auto-compacts, 0.5–0.95 (default `0.75`), or `""` to reset |
+| `repl.compactPreserveTailRatio` | Context fraction kept verbatim as recent turns when compacting, 0.05–0.5 (default `0.2`), or `""` to reset |
+| `repl.maxConsecutiveToolFailures` | Consecutive failing tool calls that end a turn, 2–50 (default `3`), or `""` to reset |
+| `repl.maxIdenticalToolCalls` | Consecutive identical tool calls (same name and arguments) that end a turn, 3–50 (default `5`), or `""` to reset |
+| `repl.warnIdenticalToolCalls` | Identical calls in a row at which the model is nudged to change course, 2–49, always kept below `repl.maxIdenticalToolCalls` (default `3`), or `""` to reset |
+| `repl.maxStreamRetries` | Automatic retries of a stream that dropped mid-response, 0–5 (default `2`), or `""` to reset |
 | `repl.plugins` | Comma-separated plugin list, e.g. `Scratchpad,Http` |
 | `telemetry.otlpEndpoint` | OTLP endpoint URL, or `""` to disable |
 | `telemetry.serviceName` | Requires `telemetry.otlpEndpoint` to already be set |
 | `skillCuration.enabled` | `true`/`false` |
 | `memory.model` | Model ID for the REPL's end-of-session memory-extraction call, or `""` to use the main chat model |
+| `memory.provider` / `memory.endpoint` / `memory.apiKeyEnvVar` | Connection for `memory.model`: provider, base URL, and API-key env var. `endpoint` reuses the main provider's key unless `apiKeyEnvVar` is set. Only apply with `memory.model` |
 | `subagent.model` | Model ID for `/explore`, `/locate`, `/delegate` subagents, or `""` to use the main chat model |
+| `subagent.provider` / `subagent.endpoint` / `subagent.apiKeyEnvVar` | Connection for `subagent.model`, as for `memory.*` above. Only apply with `subagent.model` |
 | `subagent.exploreMaxIterations` | Round cap for `/explore` and `subagent_explore`, 1–100 (default `20`), or `""` to reset |
 | `subagent.delegateMaxIterations` | Round cap for `/delegate` and `subagent_delegate`, 1–100 (default `40`), or `""` to reset |
+| `subagent.exploreTimeoutMinutes` | Wall-clock limit for `/explore`, 1–240 minutes (default `8`), or `""` to reset |
+| `subagent.locateTimeoutMinutes` | Wall-clock limit for `/locate`, 1–240 minutes (default `2`), or `""` to reset |
+| `subagent.delegateTimeoutMinutes` | Wall-clock limit for `/delegate` and custom subagents, 1–240 minutes (default `15`), or `""` to reset |
 
 `provider.apiKey` is deliberately not a valid key — API keys are never written to this file. Set `FUSERAFT_API_KEY` and run `fuseraft keychain --set` instead. MCP servers (`/mcp add` in the REPL) and the rest of `skillCuration` (see [Skill curation](configuration.md#skill-curation)) also aren't exposed here yet — edit the file directly for those.
 
@@ -2624,12 +2660,26 @@ fuseraft settings set repl.noBanner true
 fuseraft settings set memory.model gpt-4o-mini
 fuseraft settings set subagent.model gpt-4o-mini
 
+# Give a slow local or reasoning model more room
+fuseraft settings set provider.requestTimeoutSeconds 3600
+fuseraft settings set provider.streamIdleTimeoutSeconds 900
+
+# Compact earlier, and let a stuck-loop-prone model retry a little longer before the turn is stopped
+fuseraft settings set repl.autoCompactThreshold 0.6
+fuseraft settings set repl.maxConsecutiveToolFailures 6
+
 # Clear a previously set value
 fuseraft settings set sampling.temperature ""
 
 # List all valid keys
 fuseraft settings set
 ```
+
+### Tool-loop guards
+
+A REPL turn stops itself, keeping the progress so far, when it looks stuck: after `repl.maxConsecutiveToolFailures` failing tool calls in a row, or `repl.maxIdenticalToolCalls` identical calls in a row (or an A/B/A/B alternation between two calls, which is fixed). One call short of the failure cutoff, and at `repl.warnIdenticalToolCalls` identical calls, the model gets a `[SYSTEM NOTICE]` appended to that tool's result so it can change course before being stopped. The warning is always kept below the cutoff — set the cutoff to 3 and the warning lands at 2 — however the two are configured. Raise the limits for a model that legitimately needs more attempts; lowering them trades patience for fewer wasted tokens. Out-of-range values in a hand-edited file are clamped to the ranges above rather than disabling a guard.
+
+Settings are read when the REPL starts, so `settings set` from another shell doesn't affect a session that's already running.
 
 ### Migrating from the old flat config
 
