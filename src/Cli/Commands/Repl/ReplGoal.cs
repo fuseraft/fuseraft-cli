@@ -103,7 +103,8 @@ internal static class ReplGoal
 
         Set "blocked" to true ONLY when the agent has stopped because it needs something the user
         must provide (a decision between options, a credential, an approval it was denied, a
-        clarification) and cannot make further progress alone. Otherwise false.
+        clarification) and cannot make further progress alone. That includes the agent asking
+        again because the user's earlier answer did not settle the question. Otherwise false.
         """;
 
     internal static string BuildJudgePrompt(string objective, string transcript) =>

@@ -98,7 +98,7 @@ internal static partial class ReplCommands
             new("/history", "Show condensed conversation history"),
             new("/replay [n|all]", "Re-display the last n turns in full (default 3) — the same view shown automatically when a session is resumed"),
             new("/assist", "Diagnose the conversation and inject a corrective message"),
-            new("/goal <objective>", "Work until an independent audit confirms the objective is met (--max N audits, default 5; /goal resume continues an unfinished one)"),
+            new("/goal <objective>", "Work until an independent audit confirms the objective is met (--max N audits, default 5; /goal resume continues an unfinished one; a goal paused on a question continues with your next message, /goal drop abandons it)"),
             new("/exit", "Exit the REPL (auto-saves memories)"),
         ]),
         new("Orchestration", [

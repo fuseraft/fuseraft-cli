@@ -39,7 +39,7 @@ internal sealed class ReplLineReader
     {
         ["/adversarial"] = ["off", "on"],
         ["/fork"]        = ["switch"],
-        ["/goal"]        = ["resume"],
+        ["/goal"]        = ["drop", "resume"],
         ["/hitl"]        = ["off", "on"],
         ["/max-tokens"]  = ["reset"],
         ["/mcp"]         = ["add", "login", "logout", "remove"],

@@ -177,13 +177,15 @@ It ends in one of six ways:
 | Outcome | Meaning |
 |---------|---------|
 | `✓ complete` | The audit found every requirement provably met. |
-| `? paused` | The agent needs something only you can give (a decision, a credential, an approval you denied). Control returns to you instead of guessing. |
+| `? paused` | The agent needs something only you can give (a decision, a credential, an approval you denied). Control returns to you instead of guessing; your next message continues the goal. |
 | `⚠ not verified` | The audit budget ran out (default 5, `--max N` up to 50). |
 | `⚠ stalled` | The same work was reported missing three audits running — the agent is stuck, not progressing. |
 | `⚠ interrupted` | You pressed Ctrl+C. |
 | `⚠ audit could not run` | The provider failed during the audit. It never assumes success on a failed check. |
 
-Everything except `complete` can be picked up with `/goal resume` (a fresh budget, same objective). `--max 8` sets the budget: `/goal --max 8 <objective>`. HITL, the sandbox and safe mode apply to every turn exactly as usual, and Ctrl+C stops the loop. Each audit is recorded as a `goal_audit` event.
+**Answering a paused goal.** When a goal pauses, just reply — no `/goal` needed. Your next plain message is the answer: it continues the same goal (same budget) and is audited like any other turn. The agent is free to push back. If your answer doesn't settle the question, it asks again, the audit reads that as paused, and control comes back to you. To leave a paused goal alone and do something else, run `/goal drop` first; otherwise the next message is treated as the answer. (`/image` and other slash commands don't count as an answer. `/goal resume` continues a paused goal without a reply, for when you fixed the blocker yourself.)
+
+Everything except `complete` can be picked up with `/goal resume` (a fresh budget, same objective). `/goal drop` forgets the last goal, so a later message is an ordinary turn. `--max 8` sets the budget: `/goal --max 8 <objective>`. HITL, the sandbox and safe mode apply to every turn exactly as usual, and Ctrl+C stops the loop. Each audit is recorded as a `goal_audit` event.
 
 Each round is a full agent turn plus one audit call, so a goal costs more than a single message — that is what it is for.
 
