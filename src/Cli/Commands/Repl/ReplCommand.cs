@@ -233,6 +233,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             enabledPlugins.UnionWith(cfgPlugins);
         bool noBanner = settings.NoBanner || (userCfg?.Repl?.NoBanner ?? false);
         bool verbose  = settings.Verbose  || (userCfg?.Repl?.Verbose  ?? false);
+        bool yolo     = settings.Yolo     || (userCfg?.Repl?.Yolo     ?? false);
 
         var toolsByCategory = new Dictionary<string, List<AIFunction>>(StringComparer.OrdinalIgnoreCase);
 
@@ -248,18 +249,18 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // instead so the webview can render and answer it.
         var hitlState = new HitlModeState
         {
-            Enabled             = !settings.Yolo,
+            Enabled             = !yolo,
             AutoApproveReadOnly = userCfg?.Repl?.HitlAutoApproveReadOnly ?? false,
         };
 
         // Sandbox root for FileSystem/Shell/Git — confines those plugins' filesystem/repo access
         // to the launch directory by default, same as --yolo skips HITL. null (via --yolo) means
         // fully unconstrained, matching pre-safety-default behavior.
-        string? sandboxRoot = settings.Yolo ? null : Directory.GetCurrentDirectory();
+        string? sandboxRoot = yolo ? null : Directory.GetCurrentDirectory();
 
-        if (!jsonMode && settings.Yolo)
+        if (!jsonMode && yolo)
             AnsiConsole.MarkupLine(
-                "[yellow]⚠ --yolo:[/] [dim]no /hitl approval prompts, no filesystem/shell/git sandbox — full unattended access enabled.[/]");
+                $"[yellow]⚠ {(settings.Yolo ? "--yolo" : "yolo (repl.yolo setting)")}:[/] [dim]no /hitl approval prompts, no filesystem/shell/git sandbox — full unattended access enabled.[/]");
 
         // --include: additional allowed roots layered on top of sandboxRoot, shared by reference
         // with every sandboxed plugin (see IncludedRootsState) so a HITL-approved sandbox-escape
@@ -278,7 +279,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         var includedRoots = new IncludedRootsState(allowEscapeGrants: jsonMode || !Console.IsInputRedirected);
         if (settings.Include is { Length: > 0 } rawIncludes)
         {
-            if (settings.Yolo)
+            if (yolo)
             {
                 if (!jsonMode)
                     AnsiConsole.MarkupLine("[yellow]⚠ --include is ignored under --yolo[/] [dim](no sandbox is active).[/]");
@@ -615,7 +616,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             tools_enabled = !settings.NoTools,
             tool_count    = initialTools.Count,
             resumed       = snapshot is not null,
-            yolo          = settings.Yolo,
+            yolo          = yolo,
             hitl_default  = hitlState.Enabled,
         });
 
@@ -677,7 +678,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // A persisted safe-mode default engages the real category-disable logic (not just the
         // bool) so it actually blocks Shell/Git/Http like a manual `/safe-mode on` would.
         // Skipped in the VS Code webview bridge, matching how NoBanner is jsonMode-gated above.
-        if (!jsonMode && !settings.Yolo && userCfg?.Repl?.SafeModeDefault == true)
+        if (!jsonMode && !yolo && userCfg?.Repl?.SafeModeDefault == true)
             await ReplCommands.CmdSafeModeAsync(ctx, "on");
 
         if (!settings.NoTools)

@@ -29,6 +29,10 @@ public sealed class ReplDefaultsConfig
     [JsonPropertyName("safeMode")]
     public bool SafeModeDefault { get; set; }
 
+    /// <summary>Start every session as if <c>--yolo</c> were passed: HITL off and no filesystem/shell/git sandbox.</summary>
+    [JsonPropertyName("yolo")]
+    public bool Yolo { get; set; }
+
     /// <summary>Optional plugins enabled by default, e.g. <c>["Scratchpad", "Http"]</c>. Merged with <c>--plugins</c>.</summary>
     [JsonPropertyName("plugins")]
     public List<string> Plugins { get; set; } = [];

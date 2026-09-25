@@ -61,6 +61,7 @@ public sealed class SettingsShowCommand : AsyncCommand
         repl.AddRow("No banner",      config.Repl.NoBanner       ? "[green]on[/]" : "[dim]off[/]");
         repl.AddRow("Verbose",        config.Repl.Verbose        ? "[green]on[/]" : "[dim]off[/]");
         repl.AddRow("Safe mode",      config.Repl.SafeModeDefault ? "[green]on[/]" : "[dim]off[/]");
+        repl.AddRow("Yolo",           config.Repl.Yolo            ? "[yellow]on[/] [dim](no HITL, no sandbox)[/]" : "[dim]off[/]");
         repl.AddRow("Auto-compact",   config.Repl.AutoCompact     ? "[green]on[/]" : "[dim]off[/]");
         repl.AddRow("HITL auto-approve read-only", config.Repl.HitlAutoApproveReadOnly ? "[green]on[/]" : "[dim]off[/]");
         var limits = ReplLimits.From(config.Repl);
