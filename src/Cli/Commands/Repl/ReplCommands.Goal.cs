@@ -14,6 +14,23 @@ internal sealed record GoalRecord(
 {
     /// <summary>The agent stopped to ask the user something, so the user's next plain message answers it and continues the goal.</summary>
     internal bool AwaitsReply => End == GoalEnd.Blocked;
+
+    internal SavedGoal ToSaved() => new(
+        Objective, End.ToString(), Audits, MaxIterations,
+        LastVerdict?.Score, LastVerdict?.Complete, LastVerdict?.Blocked, LastVerdict?.Missing);
+
+    /// <summary>Null when the snapshot's goal is unreadable (e.g. an end state this build doesn't know).</summary>
+    internal static GoalRecord? FromSaved(SavedGoal? saved)
+    {
+        if (saved is null || string.IsNullOrWhiteSpace(saved.Objective)
+            || !Enum.TryParse<GoalEnd>(saved.End, ignoreCase: true, out var end))
+            return null;
+        var verdict = saved.Score is { } score
+            ? new GoalVerdict(score, saved.Complete ?? false, saved.Blocked ?? false, saved.Missing ?? string.Empty)
+            : null;
+        var max = saved.MaxIterations is >= 1 and <= ReplGoal.MaxMaxIterations ? saved.MaxIterations : ReplGoal.DefaultMaxIterations;
+        return new GoalRecord(saved.Objective, end, Math.Max(0, saved.Audits), verdict, max);
+    }
 }
 
 internal static partial class ReplCommands
@@ -31,7 +48,7 @@ internal static partial class ReplCommands
     private static async Task<CommandResult> CmdGoalAsync(
         ReplSessionContext ctx, string arg, CancellationToken cancellationToken)
     {
-        if (!TryParseGoalArgs(arg, out var maxIterations, out var rest, out var error))
+        if (!TryParseGoalArgs(arg, out var maxIterations, out var maxGiven, out var rest, out var error))
         {
             GoalSay(ctx, error!, "yellow");
             return CommandResult.Continue;
@@ -67,6 +84,7 @@ internal static partial class ReplCommands
             }
             objective    = last.Objective;
             firstMessage = ReplGoal.BuildResumeMessage(objective);
+            if (!maxGiven) maxIterations = last.MaxIterations;
         }
         else
         {
@@ -80,9 +98,14 @@ internal static partial class ReplCommands
     }
 
     /// <summary>Accepts <c>--max N</c> (or <c>--max=N</c>) as a leading flag; everything after it is the objective.</summary>
-    internal static bool TryParseGoalArgs(string arg, out int maxIterations, out string rest, out string? error)
+    internal static bool TryParseGoalArgs(string arg, out int maxIterations, out string rest, out string? error) =>
+        TryParseGoalArgs(arg, out maxIterations, out _, out rest, out error);
+
+    /// <param name="maxGiven">True when <c>--max</c> was passed, so <c>/goal resume</c> knows whether to keep the earlier budget.</param>
+    internal static bool TryParseGoalArgs(string arg, out int maxIterations, out bool maxGiven, out string rest, out string? error)
     {
         maxIterations = ReplGoal.DefaultMaxIterations;
+        maxGiven      = false;
         rest          = (arg ?? string.Empty).Trim();
         error         = null;
 
@@ -94,12 +117,13 @@ internal static partial class ReplCommands
             return false;
         }
 
-        if (!int.TryParse(m.Groups[1].Value, out var n) || n < 1 || n > 50)
+        if (!int.TryParse(m.Groups[1].Value, out var n) || n < 1 || n > ReplGoal.MaxMaxIterations)
         {
-            error = "--max must be a whole number between 1 and 50.";
+            error = $"--max must be a whole number between 1 and {ReplGoal.MaxMaxIterations}.";
             return false;
         }
         maxIterations = n;
+        maxGiven      = true;
         rest          = m.Groups[2].Value.Trim();
         return true;
     }
@@ -124,6 +148,10 @@ internal static partial class ReplCommands
         await ctx.Emitter.EmitAsync(EventTypes.GoalStarted, turn: ctx.TurnIndex,
             payload: new { objective = goal.Objective, max_iterations = goal.MaxIterations, continued = continuing });
 
+        // Until the loop ends, the goal is recorded as interrupted so the per-turn snapshots
+        // below leave it resumable if the process dies mid-run.
+        ctx.LastGoal = new GoalRecord(goal.Objective, GoalEnd.Interrupted, 0, null, goal.MaxIterations);
+
         var message = firstMessage;
         GoalEnd end;
         while (true)
@@ -139,6 +167,7 @@ internal static partial class ReplCommands
             if (verdict is null) { end = GoalEnd.JudgeFailed; break; }
 
             var action = goal.Record(verdict);
+            ctx.LastGoal = new GoalRecord(goal.Objective, GoalEnd.Interrupted, goal.Iteration, goal.LastVerdict, goal.MaxIterations);
             await ctx.Emitter.EmitAsync(EventTypes.GoalAudit, turn: ctx.TurnIndex, payload: new
             {
                 iteration = goal.Iteration,
@@ -170,6 +199,7 @@ internal static partial class ReplCommands
 
         var record = new GoalRecord(goal.Objective, end, goal.Iteration, goal.LastVerdict, goal.MaxIterations);
         ctx.LastGoal = record;
+        await ReplTurn.SaveSnapshotAsync(ctx);
         await ctx.Emitter.EmitAsync(EventTypes.GoalEnded, turn: ctx.TurnIndex, payload: new
         {
             objective = goal.Objective,
@@ -241,6 +271,16 @@ internal static partial class ReplCommands
         {
             ctx.ActiveCts = null;
         }
+    }
+
+    /// <summary>After <c>--resume</c> or <c>/switch</c>: tells the user an unfinished goal came back with the session.</summary>
+    internal static void AnnounceRestoredGoal(ReplSessionContext ctx)
+    {
+        if (ctx.LastGoal is not { End: not GoalEnd.Complete } goal) return;
+        var next = goal.AwaitsReply
+            ? "Reply to continue it, or /goal drop to abandon it."
+            : "Run /goal resume to keep going.";
+        GoalSay(ctx, $"  Unfinished goal: {goal.Objective} — {DescribeGoalEnd(goal)} {next}", goal.AwaitsReply ? "cyan" : "yellow");
     }
 
     internal static string DescribeGoalEnd(GoalRecord r)

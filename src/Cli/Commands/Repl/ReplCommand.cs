@@ -760,6 +760,9 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                         $"[yellow]  ⚠ Plan halted at step {snapshot.HaltedAt.Step.Step} of {snapshot.HaltedAt.Total}. Run /recover or /resume.[/]");
             }
 
+            ctx.LastGoal = GoalRecord.FromSaved(snapshot.Goal);
+            ReplCommands.AnnounceRestoredGoal(ctx);
+
             if (!jsonMode) AnsiConsole.WriteLine();
         }
 

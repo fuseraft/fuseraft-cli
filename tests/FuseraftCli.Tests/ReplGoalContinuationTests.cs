@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
 using fuseraft.Cli.Commands.Repl;
 using fuseraft.Core;
+using fuseraft.Core.Models.Session;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Chat;
 using fuseraft.Infrastructure.KeyStore;
@@ -47,7 +48,8 @@ public sealed class ReplGoalContinuationTests : IDisposable
         System.Text.Json.JsonSerializer.Serialize(new { score, complete, blocked, missing });
 
     /// <summary>Agent turns replay <paramref name="agentReplies"/> in order; judge calls replay <paramref name="verdicts"/>.</summary>
-    private sealed class ScriptedClient(IEnumerable<string> agentReplies, IEnumerable<string> verdicts) : IChatClient
+    private sealed class ScriptedClient(
+        IEnumerable<string> agentReplies, IEnumerable<string> verdicts, Action<int>? onAgentTurn = null) : IChatClient
     {
         private readonly Queue<string> _agent = new(agentReplies);
         private readonly Queue<string> _judge = new(verdicts);
@@ -69,6 +71,7 @@ public sealed class ReplGoalContinuationTests : IDisposable
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             AgentTurns++;
+            onAgentTurn?.Invoke(AgentTurns);
             await Task.Yield();
             yield return new ChatResponseUpdate
             {
@@ -158,6 +161,82 @@ public sealed class ReplGoalContinuationTests : IDisposable
         Assert.Equal(GoalEnd.Capped, ctx.LastGoal!.End);
         Assert.Equal(2, ctx.LastGoal.Audits);
         Assert.Equal(2, ctx.LastGoal.MaxIterations);
+    }
+
+    private static GoalRecord Capped(int max) =>
+        new(Objective, GoalEnd.Capped, max, new GoalVerdict(0.4, false, false, "tests fail"), max);
+
+    [Fact]
+    public async Task Resume_WithoutMax_KeepsThePreviousBudget()
+    {
+        var client = new ScriptedClient(
+            ["Working.", "Still working."],
+            [Verdict(missing: "migrations not written"), Verdict(missing: "seed data not loaded")]);
+        var ctx = NewContext(client);
+        ctx.LastGoal = Capped(max: 2);
+
+        await ReplCommands.HandleAsync(ctx, "/goal", "resume", CancellationToken.None);
+
+        Assert.Equal(2, client.AgentTurns);
+        Assert.Equal(GoalEnd.Capped, ctx.LastGoal!.End);
+        Assert.Equal(2, ctx.LastGoal.MaxIterations);
+    }
+
+    [Fact]
+    public async Task Resume_WithMax_OverridesThePreviousBudget()
+    {
+        var client = new ScriptedClient(["Working."], [Verdict(missing: "migrations not written")]);
+        var ctx = NewContext(client);
+        ctx.LastGoal = Capped(max: 8);
+
+        await ReplCommands.HandleAsync(ctx, "/goal", "--max 1 resume", CancellationToken.None);
+
+        Assert.Equal(1, client.AgentTurns);
+        Assert.Equal(1, ctx.LastGoal!.MaxIterations);
+    }
+
+    [Fact]
+    public async Task FinishedGoal_IsSavedInTheSessionSnapshot()
+    {
+        var client = new ScriptedClient(["Working."], [Verdict(missing: "seed data not loaded", score: 0.3)]);
+        var ctx = NewContext(client);
+
+        await ReplCommands.HandleAsync(ctx, "/goal", "--max 1 " + Objective, CancellationToken.None);
+
+        var snap = await ReplSessionSnapshot.LoadAsync(ctx.SessionId);
+        var restored = GoalRecord.FromSaved(snap!.Goal);
+        Assert.NotNull(restored);
+        Assert.Equal(Objective, restored.Objective);
+        Assert.Equal(GoalEnd.Capped, restored.End);
+        Assert.Equal(1, restored.Audits);
+        Assert.Equal(1, restored.MaxIterations);
+        Assert.Equal("seed data not loaded", restored.LastVerdict!.Missing);
+    }
+
+    [Fact]
+    public async Task GoalStillRunning_IsRecordedAsInterrupted_SoACrashMidTurnLeavesItResumable()
+    {
+        var seen = new List<GoalRecord?>();
+        var ctx = NewContext(null!);
+        ctx.Client = new ScriptedClient(
+            ["Working.", "Still working."],
+            [Verdict(missing: "migrations not written"), Verdict(complete: true, score: 0.9)],
+            onAgentTurn: _ => seen.Add(ctx.LastGoal));   // what a snapshot taken mid-turn would capture
+
+        await ReplCommands.HandleAsync(ctx, "/goal", Objective, CancellationToken.None);
+
+        Assert.Collection(seen,
+            g => { Assert.Equal(GoalEnd.Interrupted, g!.End); Assert.Equal(0, g.Audits); },
+            g => { Assert.Equal(GoalEnd.Interrupted, g!.End); Assert.Equal(1, g.Audits); });
+        Assert.Equal(GoalEnd.Complete, ctx.LastGoal!.End);
+    }
+
+    [Fact]
+    public void FromSaved_RejectsAnUnknownEndOrAnOutOfRangeBudget()
+    {
+        Assert.Null(GoalRecord.FromSaved(new SavedGoal(Objective, "Exploded", 1, 5)));
+        Assert.Null(GoalRecord.FromSaved(null));
+        Assert.Equal(ReplGoal.DefaultMaxIterations, GoalRecord.FromSaved(new SavedGoal(Objective, "Capped", 1, 999))!.MaxIterations);
     }
 
     [Fact]

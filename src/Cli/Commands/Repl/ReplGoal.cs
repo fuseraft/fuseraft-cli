@@ -70,6 +70,7 @@ internal sealed class GoalState(string objective, int maxIterations)
 internal static class ReplGoal
 {
     internal const int DefaultMaxIterations = 5;
+    internal const int MaxMaxIterations     = 50;
 
     /// <summary>Leading text of the follow-up user message; recognised by <see cref="ReplTurn.IsInternalCorrectionMessage"/>.</summary>
     internal const string FollowUpPrefix = "The goal is not complete yet";

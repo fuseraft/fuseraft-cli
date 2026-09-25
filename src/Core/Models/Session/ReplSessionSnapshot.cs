@@ -41,6 +41,11 @@ public sealed record PlanStep(
 /// <summary>A queue entry pairing a step with the total step count for display.</summary>
 public sealed record PlanStepEntry(PlanStep Step, int Total);
 
+/// <summary>The session's most recent <c>/goal</c> run, persisted so <c>/goal resume</c> survives a restart.</summary>
+public sealed record SavedGoal(
+    string Objective, string End, int Audits, int MaxIterations,
+    double? Score = null, bool? Complete = null, bool? Blocked = null, string? Missing = null);
+
 /// <summary>
 /// Snapshot of a REPL session written to disk after every user turn so the session can be resumed.
 /// </summary>
@@ -74,6 +79,8 @@ public sealed record ReplSessionSnapshot
     // todo_read contradicting the restored chat history's last todo_write call.
     public TodoItem[]?      TodoItems       { get; init; }
 
+    public SavedGoal?       Goal            { get; init; }
+
     // -------------------------------------------------------------------------
 
     public static ReplSessionSnapshot Capture(
@@ -85,7 +92,8 @@ public sealed record ReplSessionSnapshot
         PlanStepEntry[]? haltedRemaining = null,
         string[]?        haltedToolCalls = null,
         string?          recoveryHint    = null,
-        TodoItem[]?      todoItems       = null) => new()
+        TodoItem[]?      todoItems       = null,
+        SavedGoal?       goal            = null) => new()
     {
         SessionId       = sessionId,
         ModelId         = modelId,
@@ -100,6 +108,7 @@ public sealed record ReplSessionSnapshot
         HaltedToolCalls = haltedToolCalls,
         RecoveryHint    = recoveryHint,
         TodoItems       = todoItems,
+        Goal            = goal,
     };
 
     /// <summary>Restores the serialized history as live ChatMessage objects.</summary>

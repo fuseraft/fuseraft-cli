@@ -542,7 +542,8 @@ internal static class ReplTurn
                 recoveryHint:    ctx.RecoveryHint,
                 todoItems:       ctx.Todo?.Snapshot() is { Count: > 0 } todoItems
                                  ? [.. todoItems]
-                                 : null);
+                                 : null,
+                goal:            ctx.LastGoal?.ToSaved());
             await ReplSessionSnapshot.SaveAsync(snap);
         }
         catch { }

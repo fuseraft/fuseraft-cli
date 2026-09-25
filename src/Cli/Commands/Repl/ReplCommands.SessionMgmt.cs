@@ -56,7 +56,8 @@ internal static partial class ReplCommands
             haltedRemaining: haltedRemaining,
             haltedToolCalls: ctx.HaltedToolCalls.Count > 0 ? [.. ctx.HaltedToolCalls] : null,
             recoveryHint:    ctx.RecoveryHint,
-            todoItems:       ctx.Todo?.Snapshot() is { Count: > 0 } todoItems ? [.. todoItems] : null);
+            todoItems:       ctx.Todo?.Snapshot() is { Count: > 0 } todoItems ? [.. todoItems] : null,
+            goal:            ctx.LastGoal?.ToSaved());
 
         try
         {
@@ -195,7 +196,7 @@ internal static partial class ReplCommands
         ctx.LastExtractedTurnIndex = -1;
         ctx.ContextWarningShown    = false;
         ctx.ResetPlanState();
-        ctx.LastGoal = null;
+        ctx.LastGoal = GoalRecord.FromSaved(snapshot.Goal);
 
         if (snapshot.ExecutionQueue is { Length: > 0 })
             foreach (var e in snapshot.ExecutionQueue)
@@ -249,6 +250,7 @@ internal static partial class ReplCommands
                 AnsiConsole.MarkupLine(
                     $"[yellow]  ⚠ Plan halted at step {ctx.HaltedAt.Value.Step.Step} of {ctx.HaltedAt.Value.Total}. Run /recover or /resume.[/]");
         }
+        ReplCommands.AnnounceRestoredGoal(ctx);
 
         await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new
         {
