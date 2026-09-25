@@ -502,6 +502,16 @@ internal static class ReplTurn
             ReplImages.Announce(ctx, inline.Images);
             var all = bridgeImages.Count == 0 ? inline.Images : [.. bridgeImages, .. inline.Images];
 
+            // A goal paused on a question: this message is the answer, so it continues the goal
+            // (and is audited) rather than starting a free-standing turn that would strand it.
+            if (ctx.LastGoal is { AwaitsReply: true } paused)
+            {
+                await ReplCommands.ContinuePausedGoalAsync(ctx, paused, raw, all, cancellationToken);
+                if (ctx.JsonMode)
+                    ReplJsonBridge.Emit(new { type = "message_end", turnIndex = ctx.TurnIndex, toolCalls = Array.Empty<string>() });
+                continue;
+            }
+
             await ExecuteAsync(
                 ctx, raw,
                 isStepRequest: false, capturePlan: false, activeStep: null,

@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.AI;
 using Spectre.Console;
 
 namespace fuseraft.Cli.Commands.Repl;
@@ -7,7 +8,13 @@ namespace fuseraft.Cli.Commands.Repl;
 internal enum GoalEnd { Complete, Capped, Stalled, Blocked, Interrupted, JudgeFailed }
 
 /// <summary>The most recent finished <c>/goal</c> run: enough to report on it and to resume it.</summary>
-internal sealed record GoalRecord(string Objective, GoalEnd End, int Audits, GoalVerdict? LastVerdict);
+internal sealed record GoalRecord(
+    string Objective, GoalEnd End, int Audits, GoalVerdict? LastVerdict,
+    int MaxIterations = ReplGoal.DefaultMaxIterations)
+{
+    /// <summary>The agent stopped to ask the user something, so the user's next plain message answers it and continues the goal.</summary>
+    internal bool AwaitsReply => End == GoalEnd.Blocked;
+}
 
 internal static partial class ReplCommands
 {
@@ -18,6 +25,7 @@ internal static partial class ReplCommands
     private static readonly string GoalUsage =
         "Usage: /goal [--max N] <objective>   — work until an independent audit confirms the objective is met\n" +
         "       /goal resume [--max N]        — pick up the last goal that did not finish\n" +
+        "       /goal drop                    — forget the last goal (a paused goal otherwise continues with your next message)\n" +
         $"Default budget is {ReplGoal.DefaultMaxIterations} audits.";
 
     private static async Task<CommandResult> CmdGoalAsync(
@@ -34,6 +42,18 @@ internal static partial class ReplCommands
             GoalSay(ctx, GoalUsage, "dim");
             if (ctx.LastGoal is { } last)
                 GoalSay(ctx, $"Last goal: {last.Objective} — {DescribeGoalEnd(last)}", "dim");
+            return CommandResult.Continue;
+        }
+
+        if (rest.Equals("drop", StringComparison.OrdinalIgnoreCase))
+        {
+            if (ctx.LastGoal is { } dropped)
+            {
+                ctx.LastGoal = null;
+                GoalSay(ctx, $"Dropped goal: {dropped.Objective}", "dim");
+            }
+            else
+                GoalSay(ctx, "No goal to drop.", "dim");
             return CommandResult.Continue;
         }
 
@@ -84,20 +104,34 @@ internal static partial class ReplCommands
         return true;
     }
 
+    /// <summary>
+    /// Runs the user's plain message as the answer to a paused goal: it is the next turn of that same
+    /// goal and is audited like any other. An answer that settles the question lets the goal finish; one
+    /// that doesn't lets the agent ask again, which the audit reads as <c>blocked</c> and pauses on.
+    /// </summary>
+    internal static Task ContinuePausedGoalAsync(
+        ReplSessionContext ctx, GoalRecord paused, string reply,
+        IReadOnlyList<DataContent> attachments, CancellationToken cancellationToken) =>
+        RunGoalLoopAsync(ctx, new GoalState(paused.Objective, paused.MaxIterations), reply, cancellationToken,
+            attachments, continuing: true);
+
     private static async Task RunGoalLoopAsync(
-        ReplSessionContext ctx, GoalState goal, string firstMessage, CancellationToken cancellationToken)
+        ReplSessionContext ctx, GoalState goal, string firstMessage, CancellationToken cancellationToken,
+        IReadOnlyList<DataContent>? attachments = null, bool continuing = false)
     {
-        GoalSay(ctx, $"Goal: {goal.Objective}", "dim");
+        GoalSay(ctx, continuing ? $"Goal (continuing): {goal.Objective}" : $"Goal: {goal.Objective}", "dim");
         GoalSay(ctx, $"Working until an independent audit confirms it (up to {goal.MaxIterations} audits — Ctrl+C stops).", "dim");
         await ctx.Emitter.EmitAsync(EventTypes.GoalStarted, turn: ctx.TurnIndex,
-            payload: new { objective = goal.Objective, max_iterations = goal.MaxIterations });
+            payload: new { objective = goal.Objective, max_iterations = goal.MaxIterations, continued = continuing });
 
         var message = firstMessage;
         GoalEnd end;
         while (true)
         {
             var turnOk = await ReplTurn.ExecuteAsync(
-                ctx, message, isStepRequest: false, capturePlan: false, activeStep: null, cancellationToken);
+                ctx, message, isStepRequest: false, capturePlan: false, activeStep: null, cancellationToken,
+                attachments: attachments);
+            attachments = null;
             await ReplTurn.SaveSnapshotAsync(ctx);
             if (!turnOk) { end = GoalEnd.Interrupted; break; }
 
@@ -134,7 +168,7 @@ internal static partial class ReplCommands
             message = ReplGoal.BuildFollowUp(goal.Iteration, verdict.Missing);
         }
 
-        var record = new GoalRecord(goal.Objective, end, goal.Iteration, goal.LastVerdict);
+        var record = new GoalRecord(goal.Objective, end, goal.Iteration, goal.LastVerdict, goal.MaxIterations);
         ctx.LastGoal = record;
         await ctx.Emitter.EmitAsync(EventTypes.GoalEnded, turn: ctx.TurnIndex, payload: new
         {
@@ -154,6 +188,8 @@ internal static partial class ReplCommands
         GoalSay(ctx, $"{glyph} Goal {DescribeGoalEnd(record)}", colour);
         if (end is GoalEnd.Capped or GoalEnd.Stalled or GoalEnd.Interrupted or GoalEnd.JudgeFailed)
             GoalSay(ctx, "Run /goal resume to keep going.", "dim");
+        else if (record.AwaitsReply)
+            GoalSay(ctx, "Reply to continue, /goal resume to continue without replying, or /goal drop to abandon it.", "dim");
         if (!ctx.JsonMode) AnsiConsole.WriteLine();
     }
 
