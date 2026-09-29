@@ -241,9 +241,10 @@ This means: to inherit a field from the file, simply omit it in the inline confi
 
 ### Subagent
 
-When the `Subagent` plugin is listed in `Plugins`, the agent gains access to two tools:
+When the `Subagent` plugin is listed in `Plugins`, the agent gains access to these tools:
 
 - **`subagent_explore`** — multi-hop exploration loop (up to `SubagentMaxToolCalls` rounds, default 20). Accepts an optional `format` parameter: `"prose"` (default) or `"file_list"` (bulleted path list).
+- **`subagent_explore_many`** — up to 4 explorations running at the same time, one per query. Strictly read-only, and it never shows an approval prompt: anything that would ask is refused. See [Plugins](plugins.md).
 - **`subagent_locate`** — single-target symbol/file lookup, hard-capped at 5 rounds and 512 output tokens.
 
 Both tools inject the current working directory into the subagent's system prompt and link the parent's cancellation token so interrupts propagate immediately. The subagent does not share the parent's conversation history.

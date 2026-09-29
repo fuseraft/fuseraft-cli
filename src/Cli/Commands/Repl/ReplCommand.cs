@@ -336,7 +336,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         using ShellPlugin? shellPlugin  = settings.NoTools ? null : new ShellPlugin(
             sandboxRoot:    sandboxRoot,
             shellPolicy:    effectiveShellPolicy,
-            approveCommand: cmd => hitlState.RequiresShellApproval(cmd) ? approvalService.PromptShellCommandAsync(cmd) : Task.FromResult(true),
+            approveCommand: ApprovalScope.Guard(cmd => hitlState.RequiresShellApproval(cmd) ? approvalService.PromptShellCommandAsync(cmd) : Task.FromResult(true)),
             includedRoots:  includedRoots,
             blockCredentialFiles: securityConfig?.DenyCredentialFiles ?? true,
             denyPatterns:   fsDenyPatterns);
@@ -344,17 +344,17 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // Same y/N gate as ShellPlugin's approveCommand above, generalized to the mutating
         // FileSystem/Git/Http tools — see IHumanApprovalService.PromptToolActionAsync.
         Func<string, Func<string, string, Task<bool>>> approveToolAction = pluginName =>
-            (action, detail) => hitlState.Enabled
+            ApprovalScope.Guard((action, detail) => hitlState.Enabled
                 ? approvalService.PromptToolActionAsync(pluginName, action, detail)
-                : Task.FromResult(true);
+                : Task.FromResult(true));
 
         // Diff-aware counterpart to approveToolAction, used only by write_file/patch_file
         // (see IHumanApprovalService.PromptFileWriteAsync) so the approval prompt can render
         // the actual before/after content instead of just the resolved path.
         Func<string, string, string, string, Task<bool>> approveFileWrite =
-            (action, path, oldContent, newContent) => hitlState.Enabled
+            ApprovalScope.Guard((action, path, oldContent, newContent) => hitlState.Enabled
                 ? approvalService.PromptFileWriteAsync(action, path, oldContent, newContent)
-                : Task.FromResult(true);
+                : Task.FromResult(true));
         SubagentPlugin? subagent        = null;
         IReadOnlyList<string> agentProblems = [];
         IReadOnlyList<AgentSkill> discoveredSkills = [];

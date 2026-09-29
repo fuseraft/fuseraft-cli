@@ -224,16 +224,16 @@ public static class OrchestratorBuilder
             ? (IReadOnlyDictionary<string, ApiProfileConfig>)config.ApiProfiles
             : null;
         Func<string, Task<bool>>? shellApprover = hitlMode && humanApprovalService is not null
-            ? humanApprovalService.PromptShellCommandAsync
+            ? ApprovalScope.Guard(humanApprovalService.PromptShellCommandAsync)
             : null;
         Func<string, string, string, Task<bool>>? toolActionApprover = hitlMode && humanApprovalService is not null
-            ? humanApprovalService.PromptToolActionAsync
+            ? ApprovalScope.Guard(humanApprovalService.PromptToolActionAsync)
             : null;
         // Diff-aware counterpart to toolActionApprover, used only by write_file/patch_file —
         // see IHumanApprovalService.PromptFileWriteAsync and ReplCommand.cs's approveFileWrite
         // closure, kept in parity here for `fuseraft run --hitl`.
         Func<string, string, string, string, Task<bool>>? fileWriteApprover = hitlMode && humanApprovalService is not null
-            ? humanApprovalService.PromptFileWriteAsync
+            ? ApprovalScope.Guard(humanApprovalService.PromptFileWriteAsync)
             : null;
 
         pluginRegistry.Configure(config.Security, profiles, shellApprover, toolActionApprover: toolActionApprover, fileWriteApprover: fileWriteApprover);

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Microsoft.Extensions.AI;
+using fuseraft.Core;
 using fuseraft.Core.Subagents;
 using fuseraft.Infrastructure.Agents;
 
@@ -182,6 +183,47 @@ public sealed class SubagentPlugin(
             _exploreTimeoutMinutes,
             cancellationToken);
         return text;
+    }
+
+    /// <summary>At most this many explorations run at once in <see cref="ExploreManyAsync"/>.</summary>
+    public const int MaxParallelExplores = 4;
+
+    private const string ParallelExploreNote = """
+
+
+        You are one of several explorations running at the same time. You cannot run shell commands, and
+        anything that needs the user's approval (such as reading outside the sandbox) is refused automatically:
+        say in your report what you couldn't check instead of retrying it.
+        """;
+
+    [Description("Run up to 4 independent explorations at the same time and get every report back, in order. Use it when a question splits into separate parts (one module, service or concern each); use explore for a single question. These explorations are strictly read-only: no shell commands, and anything that would need approval is refused instead of asked.")]
+    public async Task<string> ExploreManyAsync(
+        [Description("One complete, self-contained exploration question per subagent.")]
+        string[] queries,
+        [Description("Output format for every report: 'prose' (default) or 'file_list'.")]
+        string format = "prose",
+        CancellationToken cancellationToken = default)
+    {
+        if (queries is not { Length: > 0 and <= MaxParallelExplores })
+            return $"Give between 1 and {MaxParallelExplores} queries; got {queries?.Length ?? 0}.";
+
+        // Strictly read-only: the explorer set minus the tools that can mutate (shell_run). Prompts are
+        // refused per branch (ApprovalScope), so parallel loops never stack y/N prompts or widen the sandbox.
+        var tools  = Gate([.. _tools.Where(t => !ExplorerToolSets.CanMutate.Contains(t.Name))]);
+        var prompt = BuildExplorePrompt(tools, _effectiveMaxToolCalls, format, _workspaceRoot) + ParallelExploreNote;
+        var batch  = Guid.NewGuid().ToString("N")[..8];
+
+        var reports = await Task.WhenAll(queries.Select((query, i) => Task.Run(async () =>
+        {
+            ApprovalScope.RefuseInThisFlow();
+            CurrentRun.Value = new RunTag($"{batch}-{i + 1}", $"explore {i + 1}");
+            var (text, _, _) = await RunLoopAsync(tools, prompt, query, _effectiveMaxToolCalls, maxOutputTokens,
+                "explore", _exploreTimeoutMinutes, cancellationToken);
+            return text;
+        })));
+
+        return string.Join("\n\n", reports.Select((report, i) =>
+            $"## Exploration {i + 1}: {(queries[i].Length > 100 ? queries[i][..100] + "…" : queries[i])}\n{report}"));
     }
 
     [Description("Locate where a symbol, type, method, interface, or file is defined. Returns file path and line number. Prefer over explore for single-target lookups.")]
@@ -612,7 +654,7 @@ public sealed class SubagentPlugin(
         if (eventEmitter is not null)
             await eventEmitter.EmitAsync(EventTypes.SubagentStart,
                 agent:   parentAgentName,
-                payload: new { query = userQuery.Length > 120 ? userQuery[..120] + "…" : userQuery, mode });
+                payload: Tagged(new { query = userQuery.Length > 120 ? userQuery[..120] + "…" : userQuery, mode }));
 
         // Link the parent's CT so cancellation propagates immediately; timeout is a safety net.
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -716,8 +758,8 @@ public sealed class SubagentPlugin(
                 if (eventEmitter is not null)
                     await eventEmitter.EmitAsync(EventTypes.SubagentEnd,
                         agent:   parentAgentName,
-                        payload: new { outcome, summary_chars = result.Length, mode,
-                                       input_tokens = inputTok, output_tokens = outputTok });
+                        payload: Tagged(new { outcome, summary_chars = result.Length, mode,
+                                       input_tokens = inputTok, output_tokens = outputTok }));
             }
             else
             {
@@ -739,8 +781,8 @@ public sealed class SubagentPlugin(
                 if (eventEmitter is not null)
                     await eventEmitter.EmitAsync(EventTypes.SubagentEnd,
                         agent:   parentAgentName,
-                        payload: new { outcome, summary_chars = result.Length, mode,
-                                       input_tokens = inputTok, output_tokens = outputTok });
+                        payload: Tagged(new { outcome, summary_chars = result.Length, mode,
+                                       input_tokens = inputTok, output_tokens = outputTok }));
             }
 
             return (result, inputTok, outputTok);
@@ -751,7 +793,7 @@ public sealed class SubagentPlugin(
             if (eventEmitter is not null)
                 try { await eventEmitter.EmitAsync(EventTypes.SubagentEnd,
                     agent:   parentAgentName,
-                    payload: new { outcome, mode }); } catch { }
+                    payload: Tagged(new { outcome, mode })); } catch { }
             return (outcome == "cancelled"
                 ? "Subagent was cancelled."
                 : $"Subagent timed out after {timeoutMinutes} minutes.", null, null);
@@ -762,7 +804,7 @@ public sealed class SubagentPlugin(
             if (eventEmitter is not null)
                 try { await eventEmitter.EmitAsync(EventTypes.SubagentEnd,
                     agent:   parentAgentName,
-                    payload: new { outcome, error = ex.Message, mode }); } catch { }
+                    payload: Tagged(new { outcome, error = ex.Message, mode })); } catch { }
             return ($"Subagent failed: {ex.Message}", null, null);
         }
     }
@@ -891,6 +933,24 @@ public sealed class SubagentPlugin(
             """;
     }
 
+    // --- Parallel run tagging ---
+
+    // Set inside each ExploreManyAsync branch, so its subagent_* events say which run they belong to.
+    // Static because the tool notifiers are static; an AsyncLocal is per flow either way.
+    private static readonly AsyncLocal<RunTag?> CurrentRun = new();
+
+    private sealed record RunTag(string Id, string Label);
+
+    // Adds the current parallel run's id and label to a subagent_* payload; unchanged outside one.
+    private static object Tagged(object payload)
+    {
+        if (CurrentRun.Value is not { } run) return payload;
+        var node = System.Text.Json.JsonSerializer.SerializeToNode(payload)!.AsObject();
+        node["run"]   = run.Id;
+        node["label"] = run.Label;
+        return node;
+    }
+
     // --- Tool event wrapping ---
 
     private static IReadOnlyList<AIFunction> WrapWithNotifiers(
@@ -902,5 +962,5 @@ public sealed class SubagentPlugin(
             agentName ?? string.Empty,
             (_, toolName, argsSummary) => emitter.EmitAsync(EventTypes.SubagentToolCall,
                 agent:   agentName,
-                payload: new { tool = toolName, args = argsSummary }))).ToList();
+                payload: Tagged(new { tool = toolName, args = argsSummary })))).ToList();
 }

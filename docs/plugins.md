@@ -466,6 +466,7 @@ Plugins:
 | Tool | Parameters | Description |
 |------|-----------|-------------|
 | `subagent_explore` | `query`, `format` | Multi-hop exploration. Returns a prose summary (≤600 words) or a bulleted file list depending on `format`. Up to 20 rounds by default. |
+| `subagent_explore_many` | `queries`, `format` | Runs up to 4 explorations **at the same time**, one per query, and returns every report in order. Strictly read-only (no `shell_run`), and anything that would need a HITL approval — including a sandbox-escape grant — is refused instead of asked, so parallel runs never stack prompts or widen the sandbox. Their `subagent_*` events carry `run` and `label` (`explore 1`, `explore 2`, …). |
 | `subagent_locate` | `target` | Single-target lookup. Finds where a symbol, type, method, interface, or file is defined. Returns `path:line — description`. Capped at 5 rounds and 512 output tokens — much cheaper than explore for targeted lookups. |
 
 **`format` values for `subagent_explore`:**
@@ -491,6 +492,7 @@ subagent_explore("Which files in src/Parsing/ handle string interpolation and ho
 subagent_explore("What files does AgentFactory depend on?", format="file_list")
 
 # Single target — use locate (5 rounds, much cheaper)
+subagent_explore_many(["How does auth issue tokens?", "How does billing charge a plan?", "How do sessions expire?"])
 subagent_locate("IOrchestrationHook")
 subagent_locate("AgentFactory.Create")
 subagent_locate("EventEmitter.cs")
