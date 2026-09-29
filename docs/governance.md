@@ -1,4 +1,7 @@
-# Agent Governance Toolkit
+---
+title: "Agent Governance Toolkit"
+description: "fuseraft-cli integrates with the Agent Governance Toolkit (AGT) to provide runtime safety controls that operate independently of agent instructions. Governance is always on — there is no config key…"
+---
 
 fuseraft-cli integrates with the Agent Governance Toolkit (AGT) to provide runtime safety controls that operate independently of agent instructions. Governance is **always on** — there is no config key to enable or disable it. The controls described here apply to every session.
 

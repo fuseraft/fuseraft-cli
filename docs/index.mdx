@@ -1,0 +1,159 @@
+---
+title: fuseraft
+description: Chat with a model in your terminal, and scale into declarative multi-agent pipelines when one agent isn't enough. Built on Microsoft Agent Framework.
+template: splash
+hero:
+  tagline: Chat in your terminal. Scale into multi-agent pipelines when one agent isn't enough.
+  actions:
+    - text: Get Started
+      link: /getting-started/
+      icon: right-arrow
+    - text: GitHub
+      link: https://github.com/fuseraft/fuseraft-cli
+      icon: github
+      variant: minimal
+---
+
+import { Card, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import banner from './src/assets/fuseraft-banner.png';
+
+<Image
+	src={banner}
+	class="fr-banner"
+	alt="A real fuseraft REPL session: asking the agent what the !<command> shell escape does, then using it to run git log directly"
+/>
+
+## What it does
+
+Run `fuseraft` and start chatting with a model that can read and edit files, run shell commands, search your codebase, and use git — no config file needed. When one agent isn't enough, fuseraft scales into declarative, multi-agent pipelines defined in YAML, where routing validators mechanically enforce that each agent did what it claimed before the pipeline advances. Built on [Microsoft Agent Framework](https://github.com/microsoft/agent-framework).
+
+<CardGrid>
+	<Card title="Terminal AI assistant" icon="seti:shell">
+		`fuseraft repl` is an interactive chat session with a single model — safe by default (HITL approval, filesystem/shell/git sandbox), resumable, with ~50 slash commands and a `!<command>` shell escape for running things yourself without leaving the chat.
+
+		[REPL →](/repl/)
+	</Card>
+	<Card title="Agent teams as YAML" icon="document">
+		Define each agent's name, model, system prompt, and plugins in a single YAML config. The coordinator routes work between them automatically.
+
+		[Configuration →](/configuration/)
+	</Card>
+	<Card title="Model-agnostic" icon="random">
+		Mix frontier LLMs and local SLMs per agent in the same team — Anthropic, OpenAI, Google, Mistral, xAI, DeepSeek, Azure OpenAI, or any model served through Ollama. Rotate API keys automatically on rate limits.
+
+		[Models & Providers →](/models/)
+	</Card>
+	<Card title="Rich plugin ecosystem" icon="puzzle">
+		Every agent can call filesystem, shell, git, HTTP, JSON, search, and Docker sandbox tools out of the box. Connect any external MCP server.
+
+		[Plugins →](/plugins/)
+	</Card>
+	<Card title="Resilient sessions" icon="seti:db">
+		Sessions checkpoint after every turn. Interrupt anytime and resume exactly where you left off — no work is lost.
+
+		[Sessions →](/sessions/)
+	</Card>
+	<Card title="Spec-driven development" icon="approve-check">
+		Use `--spec` to anchor the team to an agreed specification before implementation begins. Routing validators block handoffs until evidence is present.
+
+		[Spec-Driven Development →](/spec-driven/)
+	</Card>
+	<Card title="Governance & cost control" icon="setting">
+		Track token usage and estimated cost per turn. Enforce hard spending caps. Apply execution rings, prompt injection detection, and a hash-chain audit log.
+
+		[Governance →](/governance/)
+	</Card>
+</CardGrid>
+
+## Quick start
+
+<Tabs syncKey="os">
+<TabItem label="Linux / macOS">
+
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.sh | bash
+```
+
+Then run the setup wizard on first launch:
+
+```
+fuseraft
+```
+
+```
+No configuration found at ~/.fuseraft/config
+
+Provider setup
+Configure your provider and API key, then pick a model.
+
+Provider URL  (http://localhost:11434): https://api.anthropic.com
+API Key       (leave blank for Ollama): ••••••••
+
+Model  (2 available from https://api.anthropic.com)
+> claude-sonnet-4-6
+  claude-opus-4-6
+
+>
+```
+
+That's it — you're chatting, with file, shell, search, and git tools already available.
+
+</TabItem>
+<TabItem label="Windows">
+
+
+```powershell
+irm https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.ps1 | iex
+```
+
+Then run the setup wizard on first launch:
+
+```
+fuseraft
+```
+
+</TabItem>
+</Tabs>
+
+When one agent isn't enough, generate a team config and run a multi-agent pipeline instead:
+
+```bash
+fuseraft init
+fuseraft run -c .fuseraft/config/orchestration.yaml "Add a hello-world endpoint to this project"
+```
+
+[Full installation guide](/getting-started/) · [REPL walkthrough](/repl/)
+
+## Documentation
+
+| Doc | What it covers |
+|-----|----------------|
+| [Getting Started](/getting-started/) | Prerequisites, installation, first run |
+| [REPL](/repl/) | Interactive terminal chat — tools, safety model, `!` shell escape, skills, sessions |
+| [Writing Effective Tasks](/writing-tasks/) | Task descriptions that produce correct, verifiable results |
+| [Spec-Driven Development](/spec-driven/) | Using `--spec` to anchor agents before implementation begins |
+| [CLI Reference](/cli-reference/) | All commands and flags |
+| [Scripting & Automation](/scripting/) | Running fuseraft from bash/Python, `--json` output, event-driven pipelines |
+| [Configuration](/configuration/) | Full config schema (YAML and JSON) |
+| [Models & Providers](/models/) | Model configuration and auto-detection |
+| [Plugins](/plugins/) | All built-in tools agents can call |
+| [Strategies](/strategies/) | Selection and termination strategies |
+| [Routing Validators](/validators/) | Anti-hallucination handoff guards |
+| [Harness Engineering](/harness-engineering/) | Building configs that enforce correctness mechanically |
+| [MCP Integration](/mcp/) | Connecting external MCP servers |
+| [Security & Sandbox](/security/) | File and network containment |
+| [Governance](/governance/) | Execution rings, audit log, circuit breaker, SLO tracking |
+| [Evals](/evals/) | Running agent teams against scored test cases; CI integration |
+| [Sessions](/sessions/) | Resumption, HITL, cost tracking, compaction |
+| [Context Management](/context-management/) | How fuseraft manages context across a long session |
+| [Context Store](/context-store/) | Importing reference material for agents |
+| [Knowledge Layer](/knowledge/) | ADRs, graph, provenance |
+| [Skills](/skills/) | Portable skill packages and cross-session skill index |
+| [Examples](/examples/) | Ready-to-use config examples |
+| [Design](/design/) | Architecture, layer map, MAF usage, and decision log |
+
+## VS Code Extension
+
+The [Fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) brings the CLI into your editor — run tasks, browse sessions, validate configs, and get YAML/JSON IntelliSense, all from the activity bar.

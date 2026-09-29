@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 1500" width="2000" height="2000" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <linearGradient id="fr-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#c4452e"/>
+      <stop offset="100%" stop-color="#d98c4f"/>
+    </linearGradient>
+  </defs>
+  <rect width="1500" height="1500" fill="url(#fr-gradient)"/>
+  <!-- center vertical bar -->
+  <rect x="675"  y="150"  width="150" height="1200" fill="white"/>
+  <!-- right vertical bar (top half) -->
+  <rect x="1200" y="150"  width="150" height="525"  fill="white"/>
+  <!-- left vertical bar (bottom half) -->
+  <rect x="150"  y="825"  width="150" height="525"  fill="white"/>
+  <!-- top horizontal bar -->
+  <rect x="675"  y="150"  width="675" height="150"  fill="white"/>
+  <!-- bottom horizontal bar -->
+  <rect x="150"  y="1200" width="675" height="150"  fill="white"/>
+  <!-- middle horizontal bar -->
+  <rect x="300"  y="675"  width="900" height="150"  fill="white"/>
+</svg>

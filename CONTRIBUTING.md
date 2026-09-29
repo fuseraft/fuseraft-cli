@@ -185,6 +185,8 @@ Examples in `config/examples/` are the primary reference for users and are check
 
 `docs/` is user-facing. Keep it accurate and practical. If something in the docs no longer matches the code, fix the docs in the same PR that changes the code.
 
+The site at [fuseraft.ai](https://fuseraft.ai) is built from `docs/` with [Starlight](https://starlight.astro.build). Each page is a Markdown file in `docs/` with a `title` and `description` in its front matter; link to other pages as `page-name.md`, which works both on GitHub and on the site. To preview, run `npm install && npm run dev` in `docs/`. A new page also needs an entry in the sidebar in `docs/astro.config.mjs`. Merging to `main` deploys the site.
+
 ---
 
 ## Code conventions

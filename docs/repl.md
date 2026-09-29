@@ -1,4 +1,7 @@
-# REPL
+---
+title: "REPL"
+description: "fuseraft repl (or just fuseraft with no subcommand) is a terminal chat session with a single model that can read and edit files, run shell commands, search your codebase, and use git — no config file…"
+---
 
 `fuseraft repl` (or just `fuseraft` with no subcommand) is a terminal chat session with a single model that can read and edit files, run shell commands, search your codebase, and use git — no config file required. It's the fastest way to get fuseraft doing real work; reach for [multi-agent orchestration](getting-started.md) (`fuseraft run`) once a task genuinely needs more than one agent working from a declarative plan.
 

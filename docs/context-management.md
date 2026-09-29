@@ -1,4 +1,7 @@
-# Context Management
+---
+title: "Context Management"
+description: "Context is the most important resource in a long-running agent session. Every token an agent sees costs money and time; everything it misses is a potential hallucination or regression. fuseraft…"
+---
 
 Context is the most important resource in a long-running agent session. Every token an agent
 sees costs money and time; everything it misses is a potential hallucination or regression.

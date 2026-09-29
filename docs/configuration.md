@@ -1,4 +1,7 @@
-# Configuration Reference
+---
+title: "Configuration Reference"
+description: "All orchestration settings live in a single config file (default: .fuseraft/config/orchestration.yaml). Both YAML and JSON formats are supported. The file must have a top-level Orchestration key."
+---
 
 All orchestration settings live in a single config file (default: `.fuseraft/config/orchestration.yaml`). Both **YAML** and **JSON** formats are supported. The file must have a top-level `Orchestration` key.
 
@@ -567,7 +570,7 @@ Security:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `FileSystemSandboxPath` | string | — | Restricts FileSystem, Shell, and Git plugins to this directory tree. |
-| `FileSystemPermissions` | object | — | Granular read/write/deny glob rules applied within the sandbox. Requires `FileSystemSandboxPath`. See [Security → Filesystem permissions](security.md#filesystem-permissions-read-write-deny-globs). |
+| `FileSystemPermissions` | object | — | Granular read/write/deny glob rules applied within the sandbox. Requires `FileSystemSandboxPath`. See [Security → Filesystem permissions](security.md#filesystem-permissions-read--write--deny-globs). |
 | `FileSystemPermissions.Read` | array | `[]` | When non-empty, read operations are restricted to matching paths. |
 | `FileSystemPermissions.Write` | array | `[]` | When non-empty, write operations are restricted to matching paths. Evaluated alongside `ChangeEnvelope`; both must match when both are set. |
 | `FileSystemPermissions.Deny` | array | `[]` | Paths matching these globs are hard-denied for all operations (read and write). Checked before `Read`/`Write`. |

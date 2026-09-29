@@ -1,4 +1,7 @@
-# Spec-Driven Development
+---
+title: "Spec-Driven Development"
+description: "Spec-driven development (SDD) is a workflow where a structured written specification is agreed upon before any code is written. The spec acts as the single source of truth — agents plan, implement…"
+---
 
 Spec-driven development (SDD) is a workflow where a structured written specification is agreed upon before any code is written. The spec acts as the single source of truth — agents plan, implement, and verify against it rather than interpreting a freeform prompt.
 

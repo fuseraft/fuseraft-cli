@@ -1,4 +1,7 @@
-# Evals
+---
+title: "Evals"
+description: "Evals let you run a team of agents against a set of predefined tasks and automatically score the results. Each eval case specifies what the agent should say (or not say), how many turns it may take…"
+---
 
 Evals let you run a team of agents against a set of predefined tasks and automatically score the results. Each eval case specifies what the agent should say (or not say), how many turns it may take, and whether the session must succeed — giving you a repeatable regression suite for your agent configs.
 

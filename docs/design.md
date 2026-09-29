@@ -1,4 +1,7 @@
-# fuseraft CLI — Design Document
+---
+title: "fuseraft CLI — Design Document"
+description: "This document describes the architecture and design decisions behind fuseraft-cli. It is meant to be a living reference for contributors and for future conversations with AI assistants working in…"
+---
 
 This document describes the architecture and design decisions behind fuseraft-cli. It is meant to be a living reference for contributors and for future conversations with AI assistants working in this codebase.
 

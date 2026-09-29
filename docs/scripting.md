@@ -1,4 +1,7 @@
-# Scripting & Automation
+---
+title: "Scripting & Automation"
+description: "fuseraft orchestrations are not limited to interactive terminal use. fuseraft run is a normal CLI command with a task argument, a real exit code, and (with --json) a single machine-parseable result…"
+---
 
 fuseraft orchestrations are not limited to interactive terminal use. `fuseraft run` is a normal CLI command with a task argument, a real exit code, and (with `--json`) a single machine-parseable result on stdout — the same shape as any other tool you'd shell out to from a script. This page covers running fuseraft from bash or Python, wiring it to external events (a webhook, a queue, a cron tick, a file landing in a watched directory), and the exact contract you can rely on when doing so.
 
@@ -26,7 +29,7 @@ These are the `fuseraft run` flags relevant to scripted invocations. Full flag r
 | Flag | Why it matters for scripts |
 |------|------------------------------|
 | `-f, --task-file <path>` | Pass a long or multi-line task without shell-quoting gymnastics. Build the task text yourself (e.g. from an event payload) and write it to a temp file. |
-| `--json` | Stdout carries only the JSON summary; see [The `--json` contract](#the-json-contract) below. |
+| `--json` | Stdout carries only the JSON summary; see [The `--json` contract](#the---json-contract) below. |
 | `--ci` | Fails the process (exit `2`) when the orchestration's own acceptance criteria didn't pass — not just when the session crashed. |
 | `--no-banner` | Skip the ASCII banner. Redundant with `--json` (which already suppresses it) but harmless to include; useful on its own if you're not using `--json`. |
 | `--work-dir <path>` | Pin the session to a specific directory instead of relying on the process's CWD — important when a single long-running handler processes events for multiple projects/directories. |

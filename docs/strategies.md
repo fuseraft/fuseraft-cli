@@ -1,4 +1,7 @@
-# Strategies
+---
+title: "Strategies"
+description: "Strategies control two things: which agent speaks next (selection) and when the run ends (termination)."
+---
 
 Strategies control two things: which agent speaks next (selection) and when the run ends (termination).
 

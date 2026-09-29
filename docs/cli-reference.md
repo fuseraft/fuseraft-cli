@@ -1,4 +1,7 @@
-# CLI Reference
+---
+title: "CLI Reference"
+description: "Run a task against the orchestration team."
+---
 
 ## `fuseraft run`
 
@@ -32,7 +35,7 @@ fuseraft run [task] [options]
 | `--context-file <path>` | — | Attach a file as context. Its content is appended to the task. PDF, DOCX, PPTX, and XLSX files are extracted to plain text automatically; other files are read as UTF-8. Repeatable — specify once per file. Ignored when resuming. |
 | `--spec <path>` | — | Path to a spec file (Markdown, plain text, or JSON) that anchors all agents to an agreed specification. The spec is injected into every agent's system prompt as the authoritative source of truth and appended to the task at turn 0. Ignored when resuming. See [Spec-Driven Development](spec-driven.md). |
 | `--snapshot` | off | Capture per-turn postmortem snapshots to `~/.fuseraft/snapshots/<project>/<session>/`. Writes `turns.jsonl` (one record per agent turn: content, tool calls, token usage) and `manifest.json` (run summary: task, success/failure, elapsed). Useful for debugging and postmortem analysis. |
-| `--json` | off | Suppress the banner, turn panels, and spinner; send all human-readable status to stderr; print one JSON summary object to stdout when the session ends. For scripted/automated invocations. Same effect as `Output.Json: true` in the config (this flag always wins). See [`--json` output](#-json-output) below. |
+| `--json` | off | Suppress the banner, turn panels, and spinner; send all human-readable status to stderr; print one JSON summary object to stdout when the session ends. For scripted/automated invocations. Same effect as `Output.Json: true` in the config (this flag always wins). See [`--json` output](#--json-output) below. |
 | `--vscode` | off | VS Code mode. Reads the API key from the `FUSERAFT_API_KEY` environment variable (injected by the fuseraft VS Code extension) instead of the OS keychain. Automatically passed by the extension — not intended for manual use. |
 
 **Examples**

@@ -1,4 +1,7 @@
-# Writing Effective Tasks
+---
+title: "Writing Effective Tasks"
+description: "The quality of a fuseraft session is bounded by the quality of the task you give it. A well-written task produces a complete implementation that the Reviewer can actually verify. A vague task…"
+---
 
 The quality of a fuseraft session is bounded by the quality of the task you give it. A well-written task produces a complete implementation that the Reviewer can actually verify. A vague task produces an implementation that looks plausible but may silently fail at runtime.
 

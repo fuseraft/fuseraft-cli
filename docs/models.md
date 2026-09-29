@@ -1,4 +1,7 @@
-# Models & Providers
+---
+title: "Models & Providers"
+description: "The Model field on any agent (or on Selection.Model, Selection.Magentic.Model, Compaction.Model) accepts three forms:"
+---
 
 ## Specifying a model
 

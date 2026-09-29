@@ -1,4 +1,7 @@
-# Plugins
+---
+title: "Plugins"
+description: "Plugins are the tools agents can call. Each plugin is a named collection of kernel functions. Add plugin names to an agent's Plugins list to make them available."
+---
 
 Plugins are the tools agents can call. Each plugin is a named collection of kernel functions. Add plugin names to an agent's `Plugins` list to make them available.
 

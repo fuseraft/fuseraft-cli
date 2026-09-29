@@ -1,4 +1,7 @@
-# Context Store
+---
+title: "Context Store"
+description: "The context store lets you import files and directories from outside the sandbox so that every agent in a session has access to them as reference material — without needing to make a tool call to…"
+---
 
 The context store lets you import files and directories from outside the sandbox so that every agent in a session has access to them as reference material — without needing to make a tool call to discover what's available.
 

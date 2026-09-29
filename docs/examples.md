@@ -1,4 +1,7 @@
-# Examples
+---
+title: "Examples"
+description: "Ready-to-use orchestration configs for common team structures."
+---
 
 Ready-to-use orchestration configs for common team structures.
 

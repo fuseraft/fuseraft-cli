@@ -1,4 +1,7 @@
-# Getting Started
+---
+title: "Getting Started"
+description: "Downloads the latest release binary to ~/.local/bin and prints a PATH hint if needed. Pass --system to install to /usr/local/bin instead."
+---
 
 ## Prerequisites
 
@@ -11,21 +14,23 @@
 
 ### Option A — install script (recommended)
 
-=== "Linux / macOS"
+#### Linux / macOS
 
-    ```bash
-    curl -fsSL https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.sh | bash
-    ```
 
-    Downloads the latest release binary to `~/.local/bin` and prints a PATH hint if needed. Pass `--system` to install to `/usr/local/bin` instead.
+```bash
+curl -fsSL https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.sh | bash
+```
 
-=== "Windows"
+Downloads the latest release binary to `~/.local/bin` and prints a PATH hint if needed. Pass `--system` to install to `/usr/local/bin` instead.
 
-    ```powershell
-    irm https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.ps1 | iex
-    ```
+#### Windows
 
-    Downloads the latest release binary to `%LOCALAPPDATA%\fuseraft\bin` and adds it to your user `PATH`.
+
+```powershell
+irm https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.ps1 | iex
+```
+
+Downloads the latest release binary to `%LOCALAPPDATA%\fuseraft\bin` and adds it to your user `PATH`.
 
 Once installed, `fuseraft` is available on your `PATH` (you may need to restart your terminal on Windows).
 
@@ -75,7 +80,7 @@ Model  (2 available from https://api.anthropic.com)
 
 The config is saved after the first successful reply. Once saved, subsequent `fuseraft` invocations start immediately using those defaults. Use `/provider setup` inside the REPL to reconfigure the provider/model/key at any time, or `fuseraft settings show`/`fuseraft settings set <key> <value>` to view or tweak everything else the file holds (sampling defaults, REPL startup defaults, telemetry, skill curation, model overrides) — see [CLI Reference — `fuseraft settings`](cli-reference.md#fuseraft-settings).
 
-Typing Anthropic's bare endpoint here (not its `/v1` OpenAI-compatible path) is what lands you on the native `anthropic` provider — see [Models & Providers — anthropic](models.md#anthropic-claude-via-the-native-messages-api) for why that's the one you want for Claude (it's what makes prompt caching available).
+Typing Anthropic's bare endpoint here (not its `/v1` OpenAI-compatible path) is what lands you on the native `anthropic` provider — see [Models & Providers — anthropic](models.md#anthropic--claude-via-the-native-messages-api) for why that's the one you want for Claude (it's what makes prompt caching available).
 
 The API key is stored in the OS keychain — never in the config file, and never in plaintext on disk anywhere:
 

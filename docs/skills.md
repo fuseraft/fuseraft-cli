@@ -1,4 +1,7 @@
-# Skills
+---
+title: "Skills"
+description: "Skills give agents specialized knowledge and step-by-step procedures for specific types of tasks, following the Agent Skills specification. At session start fuseraft scans your skill directories…"
+---
 
 Skills give agents specialized knowledge and step-by-step procedures for specific types of tasks, following the [Agent Skills specification](https://agentskills.io/specification). At session start fuseraft scans your skill directories, injects a catalog of available skills into the system prompt, and exposes tools the model can call to use them. Discovery, frontmatter parsing/validation, and the skill tools themselves all come from the [Microsoft Agent Framework](https://github.com/microsoft/agent-framework)'s `AgentFileSkillsSource`/`AgentSkillsProvider` — the REPL and `fuseraft run` orchestration sessions share the exact same implementation, so a skill is treated identically in both.
 

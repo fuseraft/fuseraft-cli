@@ -1,4 +1,7 @@
-# Sessions
+---
+title: "Sessions"
+description: "REPL sessions (fuseraft repl) are automatically saved after every user turn to ~/.fuseraft/repl-sessions/repl-<id>.json. No configuration is needed — every session is resumable by default."
+---
 
 ## REPL sessions
 

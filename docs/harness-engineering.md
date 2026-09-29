@@ -1,4 +1,7 @@
-# Harness Engineering
+---
+title: "Harness Engineering"
+description: "Harness engineering is the practice of designing orchestration configs so that agents cannot advance the pipeline without real, mechanical evidence — regardless of what they claim in prose. This page…"
+---
 
 Harness engineering is the practice of designing orchestration configs so that agents cannot advance the pipeline without real, mechanical evidence — regardless of what they claim in prose. This page explains the control layers available and how to combine them into a config that is resistant to hallucinated progress.
 

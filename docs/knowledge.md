@@ -1,4 +1,7 @@
-# Knowledge Layer
+---
+title: "Knowledge Layer"
+description: "The knowledge layer is a set of persistent, cross-session subsystems that let agents accumulate and query durable knowledge about a codebase — architectural decisions, structural symbols, verified…"
+---
 
 The knowledge layer is a set of persistent, cross-session subsystems that let agents accumulate and query durable knowledge about a codebase — architectural decisions, structural symbols, verified claims, recurring patterns, long-horizon objectives, and session-discovered findings. All subsystems share a single `IKnowledgeLayer` interface and are queried automatically on every agent turn by the `ContextAssemblyPipeline`.
 

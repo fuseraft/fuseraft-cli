@@ -1,0 +1,30 @@
+/* fuseraft's "Light Editorial" palette: warm paper, rust primary. Mirrors fuseraft.com. */
+:root {
+	--sl-color-accent-low: #3a1a12;
+	--sl-color-accent: #e0784f;
+	--sl-color-accent-high: #f6d3c3;
+}
+
+:root[data-theme='light'] {
+	--sl-color-accent-low: #f6ddd2;
+	--sl-color-accent: #c4452e;
+	--sl-color-accent-high: #6e2618;
+	--sl-color-white: #1a1a18;
+	--sl-color-gray-1: #2b2a26;
+	--sl-color-gray-2: #45423b;
+	--sl-color-gray-3: #6b6356;
+	--sl-color-gray-4: #9c9486;
+	--sl-color-gray-5: #e6ddd0;
+	--sl-color-gray-6: #f1ebe1;
+	--sl-color-gray-7: #faf8f5;
+	--sl-color-black: #faf8f5;
+}
+
+/* The home page's screenshot of a real session; the image carries its own window frame. */
+.fr-banner {
+	display: block;
+	width: 100%;
+	max-width: 60rem;
+	height: auto;
+	margin: 0 auto 2rem;
+}

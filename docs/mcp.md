@@ -1,4 +1,7 @@
-# MCP Integration
+---
+title: "MCP Integration"
+description: "fuseraft-cli supports the Model Context Protocol (MCP). You can connect any MCP server at session startup, and its tools are registered as a plugin that any agent can call."
+---
 
 fuseraft-cli supports the [Model Context Protocol (MCP)](https://modelcontextprotocol.io). You can connect any MCP server at session startup, and its tools are registered as a plugin that any agent can call.
 

@@ -1,4 +1,7 @@
-# Validators
+---
+title: "Validators"
+description: "Validators are deterministic pre-flight checks that run before a keyword route fires or before a termination strategy ends the session. They prevent agents from advancing the pipeline without real…"
+---
 
 Validators are deterministic pre-flight checks that run before a keyword route fires or before a termination strategy ends the session. They prevent agents from advancing the pipeline without real evidence — blocking claims like "I wrote the file" that were never actually executed, or "all tests pass" when no test report exists.
 
