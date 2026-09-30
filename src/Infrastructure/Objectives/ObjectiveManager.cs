@@ -75,23 +75,33 @@ public sealed class ObjectiveManager(ObjectiveStore store)
     /// or adds it to <c>RemainingTasks</c> (when false). Removes it from the other list if present.
     /// Also records <paramref name="sessionId"/> in <c>Sessions</c> when provided.
     /// </summary>
+    /// <param name="addIfMissing">
+    /// When <paramref name="completed"/> is false and <paramref name="task"/> is not already in
+    /// <c>RemainingTasks</c>, controls whether it gets added. Defaults to true for
+    /// <see cref="Plugins.ObjectivePlugin.LinkTaskAsync"/>'s "add a pending task" use case. Pass
+    /// false for automatic per-dispatch bookkeeping (see <c>fuseraft.Cli.Serve.ServeHost</c>),
+    /// where an ad-hoc task run under an objective ID should never silently expand that
+    /// objective's plan just because it happened to be dispatched under it.
+    /// </param>
     public async Task<Objective?> LinkTaskAsync(
         string id,
         string task,
         bool completed,
         string? sessionId = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool addIfMissing = true)
     {
         var obj = await store.GetAsync(id, ct);
         if (obj is null) return null;
 
-        var remaining  = obj.RemainingTasks.Where(t => t != task).ToList();
-        var done       = obj.CompletedTasks.Where(t => t != task).ToList();
-        var sessions   = obj.Sessions.ToList();
+        var wasRemaining = obj.RemainingTasks.Contains(task);
+        var remaining    = obj.RemainingTasks.Where(t => t != task).ToList();
+        var done         = obj.CompletedTasks.Where(t => t != task).ToList();
+        var sessions     = obj.Sessions.ToList();
 
         if (completed)
             done.Add(task);
-        else if (!remaining.Contains(task))
+        else if (wasRemaining || addIfMissing)
             remaining.Add(task);
 
         if (sessionId is not null && !sessions.Contains(sessionId))

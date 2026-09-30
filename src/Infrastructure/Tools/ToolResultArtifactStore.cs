@@ -11,7 +11,7 @@ namespace fuseraft.Infrastructure.Tools;
 /// </summary>
 public sealed class ToolResultArtifactStore
 {
-    private readonly string?        _artifactsDir;
+    private string?                 _artifactsDir;
     private readonly EventEmitter?  _emitter;
 
     /// <summary>Results larger than this are offloaded. Default: 40,000 chars (~10k tokens).</summary>
@@ -28,6 +28,15 @@ public sealed class ToolResultArtifactStore
         _artifactsDir = artifactsDir;
         _emitter      = eventEmitter;
     }
+
+    /// <summary>
+    /// Re-scopes this store to a different session's artifacts directory. Needed because
+    /// <c>fuseraft serve</c> builds one orchestrator — and therefore one
+    /// <see cref="ToolResultArtifactStore"/> instance — for the whole daemon's lifetime and
+    /// reuses it across every dispatched task; without this, offloading stays permanently bound
+    /// to (or disabled by) whichever session ID the daemon happened to start with.
+    /// </summary>
+    public void Rebind(string? artifactsDir) => _artifactsDir = artifactsDir;
 
     /// <summary>
     /// If <paramref name="content"/> exceeds <see cref="ThresholdChars"/>, writes it to disk

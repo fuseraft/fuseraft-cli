@@ -148,6 +148,57 @@ public static class FuseraftPaths
     public const string LocalExecutionState       = "~/.fuseraft/state/{project_slug}/execution-state.json";
     public const string LocalInvestigationLog     = "~/.fuseraft/state/{project_slug}/investigation-log.json";
 
+    // `fuseraft serve` — one daemon per project. The pidfile is project_slug-templated like
+    // everything else under state/; the socket is NOT (see DaemonSocketPath below).
+    public const string LocalDaemonPidFile        = "~/.fuseraft/state/{project_slug}/serve.pid";
+
+    /// <summary>
+    /// Directory for `fuseraft serve`'s Unix domain sockets. Deliberately flat and short —
+    /// NOT nested under the per-project state/ tree — because AF_UNIX socket paths are capped
+    /// at 108 bytes on Linux (92–104 on macOS/BSD via <c>sizeof(sockaddr_un.sun_path)</c>), and
+    /// a {project_slug}-derived path (the full absolute project path with separators replaced)
+    /// can easily exceed that for any moderately nested project directory. See
+    /// <see cref="DaemonSocketPath"/>.
+    /// </summary>
+    public static string GlobalRunRoot => Path.Combine(GlobalRoot, "run");
+
+    /// <summary>
+    /// Per-project Unix domain socket path for `fuseraft serve`/`fuseraft attach`, named by a
+    /// short hash of <paramref name="projectSlug"/> rather than the slug itself so the resulting
+    /// path can never approach the platform's AF_UNIX length limit, regardless of how deeply
+    /// nested the project directory is.
+    /// </summary>
+    public static string DaemonSocketPath(string projectSlug) =>
+        Path.Combine(GlobalRunRoot, $"{ShortHash(projectSlug)}.sock");
+
+    // Wide enough to make an accidental same-port collision between two unrelated projects
+    // vanishingly unlikely, while staying comfortably clear of both the well-known port range
+    // and the ephemeral range the OS hands out for outbound connections.
+    private const int DaemonHttpPortRangeStart = 20_000;
+    private const int DaemonHttpPortRangeSize  = 20_000;
+
+    /// <summary>
+    /// Deterministic per-project default for <c>fuseraft serve</c>'s MCP HTTP port, derived the
+    /// same way as <see cref="DaemonSocketPath"/> so two daemons for two different projects can
+    /// run concurrently without a fixed port colliding between them — a single hardcoded default
+    /// (the previous behavior) meant starting a second `fuseraft serve` for a different project
+    /// while one was already running elsewhere failed with an address-in-use error. Still
+    /// overridable via <c>--http-port</c> for anyone who wants a stable, memorable address for a
+    /// specific project.
+    /// </summary>
+    public static int DefaultDaemonHttpPort(string projectSlug)
+    {
+        var bytes  = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(projectSlug));
+        var offset = BitConverter.ToUInt16(bytes, 0) % DaemonHttpPortRangeSize;
+        return DaemonHttpPortRangeStart + offset;
+    }
+
+    private static string ShortHash(string input)
+    {
+        var bytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(input));
+        return Convert.ToHexString(bytes)[..16].ToLowerInvariant();
+    }
+
     // sessions/ — all session-scoped runtime data, keyed by {project_slug}/{session_id}
     public const string LocalSessions             = "~/.fuseraft/sessions/{project_slug}";
     public const string LocalEventsLog            = "~/.fuseraft/sessions/{project_slug}/{session_id}/events.jsonl";

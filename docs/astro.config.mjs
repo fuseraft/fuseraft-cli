@@ -34,6 +34,7 @@ export default defineConfig({
 					items: [
 						{ label: 'Getting Started', link: '/getting-started/' },
 						{ label: 'REPL', link: '/repl/' },
+						{ label: 'Serve (Daemon Mode)', link: '/serve/' },
 						{ label: 'Writing Tasks', link: '/writing-tasks/' },
 						{ label: 'Examples', link: '/examples/' },
 					],

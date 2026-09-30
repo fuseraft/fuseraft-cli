@@ -25,7 +25,7 @@ namespace fuseraft.Infrastructure.Plugins;
 /// </summary>
 public sealed class SessionContextPlugin : IHasArtifact
 {
-    private readonly string _summaryPath;
+    private string _summaryPath;
     private readonly int    _maxChars;
 
     internal const string Label = "shared handoff notes (read at turn start; write before handoff)";
@@ -42,6 +42,15 @@ public sealed class SessionContextPlugin : IHasArtifact
         _summaryPath = summaryPath;
         _maxChars    = maxChars;
     }
+
+    /// <summary>
+    /// Re-scopes this plugin to a different session's summary file. Needed because
+    /// <c>fuseraft serve</c> builds one orchestrator — and therefore one
+    /// <see cref="SessionContextPlugin"/> instance — for the whole daemon's lifetime and reuses
+    /// it across every dispatched task; without this, every task would share one "default"
+    /// handoff-notes file regardless of which session actually wrote it.
+    /// </summary>
+    public void Rebind(string summaryPath) => _summaryPath = summaryPath;
 
     [Description("Read the session context summary written by the previous agent. Call this at the start of every turn to catch up without re-reading source files.")]
     public async Task<string> ReadAsync()
