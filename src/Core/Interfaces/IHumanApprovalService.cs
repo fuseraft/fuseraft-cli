@@ -82,4 +82,15 @@ public interface IHumanApprovalService
     /// which is fed back to the manager for replanning.
     /// </summary>
     Task<string?> PromptPlanReviewAsync(string planText);
+
+    /// <summary>False where no one can answer a question (piped stdin, the webview, serve), so the ask_user tool isn't offered.</summary>
+    bool CanAskQuestions => false;
+
+    /// <summary>
+    /// Asks the user a multiple-choice question for the ask_user tool. With <paramref name="allowOther"/>,
+    /// the user may type an answer that isn't one of <paramref name="options"/>.
+    /// Returns the answer, or null if the user dismissed the question.
+    /// </summary>
+    Task<string?> PromptQuestionAsync(string question, IReadOnlyList<string> options, bool allowOther, CancellationToken ct) =>
+        Task.FromResult<string?>(null);
 }

@@ -398,6 +398,18 @@ Unlike [Scratchpad](#scratchpad) (free-form key/value notes), Todo holds one ord
 
 ---
 
+## Ask
+
+Lets the model ask you a multiple-choice question when it's blocked on a decision that is genuinely yours — a preference, or intent the request and the code don't settle. REPL only, and only in an interactive terminal: it isn't offered when stdin is piped or with `--vscode`, where no one can answer, and never to subagents. Not applicable to `fuseraft run` orchestrations.
+
+The question shows as a picker: move with ↑/↓ and press Enter. Unless `allow_other` is false, a "Something else" entry lets you type your own answer. "Skip" dismisses the question, and the model continues on its own judgment and says what it assumed. Ctrl+C cancels the turn as usual.
+
+| Function | Parameters | Description |
+|----------|-----------|-------------|
+| `ask_user` | `question`, `options`, `allow_other` (default `true`) | Ask one question with 2 to 8 options, the recommended one first. Returns the chosen or typed answer, or a note that you dismissed it. |
+
+---
+
 ## Compaction
 
 Lets an agent request a history compaction flush on demand — the same path as the automatic

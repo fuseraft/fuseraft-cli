@@ -167,6 +167,37 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
             input.Equals("yes", StringComparison.OrdinalIgnoreCase));
     }
 
+    public bool CanAskQuestions => true;
+
+    public async Task<string?> PromptQuestionAsync(string question, IReadOnlyList<string> options, bool allowOther, CancellationToken ct)
+    {
+        using var _ = ReplConsole.SuspendSpinner();
+
+        const string other = "Something else (type an answer)";
+        const string skip  = "Skip (let the agent decide)";
+        AnsiConsole.WriteLine();
+        var choice = await new SelectionPrompt<string>()
+            .Title($"[bold {ThemeDetector.Warning}]? {Markup.Escape(question)}[/]")
+            .PageSize(12)
+            .UseConverter(Markup.Escape)
+            .AddChoices(allowOther ? [.. options, other, skip] : [.. options, skip])
+            .ShowAsync(AnsiConsole.Console, ct);
+
+        if (choice == skip)
+        {
+            AnsiConsole.MarkupLine("[dim]  Skipped.[/]");
+            return null;
+        }
+        if (choice == other)
+        {
+            AnsiConsole.Markup("[dim]  Your answer:[/]  ");
+            var typed = Console.ReadLine()?.Trim();
+            return string.IsNullOrEmpty(typed) ? null : typed;
+        }
+        AnsiConsole.MarkupLine($"[dim]  → {Markup.Escape(choice)}[/]");
+        return choice;
+    }
+
     public Task<string?> PromptPlanReviewAsync(string planText)
     {
         using var _ = ReplConsole.SuspendSpinner();

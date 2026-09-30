@@ -378,6 +378,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             toolsByCategory["Search"]     = PluginRegistry.GetFunctionsFromObject(new SearchPlugin(sandboxRoot, includedRoots, fsDenyPatterns)).ToList();
             todoPlugin                    = new TodoPlugin();
             toolsByCategory["Todo"]       = PluginRegistry.GetFunctionsFromObject(todoPlugin).ToList();
+            if (approvalService.CanAskQuestions)
+                toolsByCategory["Ask"]    = PluginRegistry.GetFunctionsFromObject(new AskPlugin(approvalService)).ToList();
 
             explorerTools = fsFunctions.Where(f => ExplorerToolSets.FileSystemRead.Contains(f.Name))
                 .Concat(toolsByCategory["Search"])

@@ -1,4 +1,5 @@
 using fuseraft.Cli;
+using fuseraft.Core.Interfaces;
 
 namespace FuseraftCli.Tests;
 
@@ -50,4 +51,12 @@ public sealed class NonInteractiveHumanApprovalServiceTests
     [Fact]
     public async Task PromptPlanReviewAsync_ReturnsNull()
         => Assert.Null(await _svc.PromptPlanReviewAsync("1. Do X\n2. Do Y"));
+
+    [Fact]
+    public async Task Questions_AreNotOffered_AndResolveAsDismissed()
+    {
+        IHumanApprovalService svc = _svc;
+        Assert.False(svc.CanAskQuestions);
+        Assert.Null(await svc.PromptQuestionAsync("Which?", ["A", "B"], allowOther: true, CancellationToken.None));
+    }
 }
