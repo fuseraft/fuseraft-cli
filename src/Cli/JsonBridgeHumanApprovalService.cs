@@ -13,8 +13,23 @@ namespace fuseraft.Cli;
 /// and blocks for the matching <c>approval_response</c> JSONL reply (see
 /// <see cref="ReplStdinPump.ReadApprovalResponseAsync"/>).
 /// </summary>
-public sealed class JsonBridgeHumanApprovalService(ReplStdinPump stdinPump) : IHumanApprovalService
+/// <param name="questions">
+/// Whether the webview answers <c>question</c> events (ask_user). An extension that predates them would
+/// never reply and the turn would hang, so the extension opts in with <see cref="QuestionsEnvVar"/>.
+/// </param>
+public sealed class JsonBridgeHumanApprovalService(ReplStdinPump stdinPump, bool questions = false) : IHumanApprovalService
 {
+    /// <summary>Set to "1" by an extension that renders <c>question</c> events and replies with <c>question_response</c>.</summary>
+    public const string QuestionsEnvVar = "FUSERAFT_VSCODE_QUESTIONS";
+
+    public bool CanAskQuestions => questions;
+
+    public async Task<string?> PromptQuestionAsync(string question, IReadOnlyList<string> options, bool allowOther, CancellationToken ct)
+    {
+        ReplJsonBridge.Emit(new { type = "question", question, options, allowOther });
+        return await stdinPump.ReadQuestionResponseAsync(ct);
+    }
+
     public async Task<bool> PromptShellCommandAsync(string command)
     {
         ReplJsonBridge.Emit(new { type = "approval_request", kind = "shell_command", command });

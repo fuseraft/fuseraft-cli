@@ -184,6 +184,37 @@ public sealed class ReplStdinPump
         return false;
     }
 
+    /// <summary>
+    /// Blocks for the webview's answer to a pending <c>question</c> event, e.g.
+    /// <c>{"type":"question_response","answer":"SQLite"}</c>. Like <see cref="ReadApprovalResponseAsync"/>,
+    /// only ever awaited mid-turn from the one ask_user call in flight. Anything but a non-empty string
+    /// answer — <c>"answer":null</c> (skipped), malformed JSON, the wrong "type", or stdin closing —
+    /// dismisses the question.
+    /// </summary>
+    internal async Task<string?> ReadQuestionResponseAsync(CancellationToken ct)
+    {
+        while (await _lines.Reader.WaitToReadAsync(ct))
+            if (_lines.Reader.TryRead(out var line))
+                return ExtractQuestionAnswer(line);
+        return null;
+    }
+
+    internal static string? ExtractQuestionAnswer(string line)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            if (doc.RootElement.TryGetProperty("type", out var typeEl) &&
+                typeEl.GetString() is "question_response" &&
+                doc.RootElement.TryGetProperty("answer", out var answerEl) &&
+                answerEl.ValueKind == JsonValueKind.String &&
+                answerEl.GetString()?.Trim() is { Length: > 0 } answer)
+                return answer;
+        }
+        catch { }
+        return null;
+    }
+
     internal static bool ExtractApproval(string line)
     {
         try

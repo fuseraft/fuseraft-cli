@@ -400,9 +400,9 @@ Unlike [Scratchpad](#scratchpad) (free-form key/value notes), Todo holds one ord
 
 ## Ask
 
-Lets the model ask you a multiple-choice question when it's blocked on a decision that is genuinely yours — a preference, or intent the request and the code don't settle. REPL only, and only in an interactive terminal: it isn't offered when stdin is piped or with `--vscode`, where no one can answer, and never to subagents. Not applicable to `fuseraft run` orchestrations.
+Lets the model ask you a multiple-choice question when it's blocked on a decision that is genuinely yours — a preference, or intent the request and the code don't settle. REPL only: it's offered in an interactive terminal and in the VS Code extension's REPL panel, but not when stdin is piped, where no one can answer, and never to subagents. Not applicable to `fuseraft run` orchestrations.
 
-The question shows as a picker: move with ↑/↓ and press Enter. Unless `allow_other` is false, a "Something else" entry lets you type your own answer. "Skip" dismisses the question, and the model continues on its own judgment and says what it assumed. Ctrl+C cancels the turn as usual.
+In the terminal the question shows as a picker: move with ↑/↓ and press Enter. Unless `allow_other` is false, a "Something else" entry lets you type your own answer. "Skip" dismisses the question, and the model continues on its own judgment and says what it assumed. Ctrl+C cancels the turn as usual. In the VS Code panel it shows above the composer as a row of buttons, with a text field for your own answer.
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|

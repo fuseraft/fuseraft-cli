@@ -328,6 +328,7 @@ The session ID is shown on every startup so you can note it down for later resum
 > | CLI → VS Code | `token` | `text` (streaming chunk) |
 > | CLI → VS Code | `tool_call` | `name`, `args?` |
 > | CLI → VS Code | `approval_request` | `kind`, plus `command` for `kind: "shell_command"` or `plugin`/`action`/`detail` for `kind: "tool_action"` (HITL approval gate — see below) |
+> | CLI → VS Code | `question` | `question`, `options[]`, `allowOther` (an `ask_user` question; only sent when the extension set `FUSERAFT_VSCODE_QUESTIONS=1` — see below) |
 > | CLI → VS Code | `message_end` | `turnIndex`, `toolCalls[]` |
 > | CLI → VS Code | `cancelled` | — (turn was interrupted; see below) |
 > | CLI → VS Code | `retrying` | `attempt`, `max` (transient stream disconnect, auto-retrying) |
@@ -342,9 +343,12 @@ The session ID is shown on every startup so you can note it down for later resum
 > | CLI → VS Code | `session_end` | — |
 > | VS Code → CLI | `user_input` | `text` |
 > | VS Code → CLI | `approval_response` | `approved` (bool; answers a pending `approval_request`) |
+> | VS Code → CLI | `question_response` | `answer` (string, or `null` to skip; answers a pending `question`) |
 > | VS Code → CLI | `interrupt` | — (Windows only; see below) |
 >
 > Non-JSON lines emitted by the CLI (e.g. from slash-command output) are silently ignored by the extension.
+>
+> **Questions (`ask_user`)** — the protocol has no request ids: a response is simply the next line on stdin, so an extension that doesn't know `question` would leave the turn waiting forever. The extension opts in by spawning the CLI with `FUSERAFT_VSCODE_QUESTIONS=1`; without it, `ask_user` isn't offered in `--vscode` sessions. A `null`, empty or malformed `question_response` dismisses the question.
 >
 > **Cancelling a turn ("Stop" button)** — the extension needs to interrupt a turn that's already streaming. On Linux/macOS it sends a real `SIGINT` to the CLI process, which the REPL's `Console.CancelKeyPress` handler turns into a clean cancellation (emits `cancelled`) instead of killing the session. Windows has no way to deliver a signal to a specific child process, so the extension instead writes an in-band `{"type":"interrupt"}` line to the CLI's stdin. A dedicated background reader (`ReplStdinPump`) owns stdin for the life of the session specifically so this line is acted on the instant it arrives — cancelling whatever turn is active — rather than waiting for the main loop to next read a line at a turn boundary, which would leave a mid-stream interrupt sitting unread until the turn finished on its own.
 
@@ -387,7 +391,7 @@ common, low-risk operations that cover a typical session (read, edit, search, st
 | Search | `search_content`, `search_symbol`, `search_callers` |
 | Git | `git_status`, `git_diff`, `git_log`, `git_show`, `git_branch_list`, `git_add`, `git_commit`, `git_stash_list` |
 | Todo | `todo_write`, `todo_read` — self-directed checklist the model uses to plan and track multi-step work within the session (in-memory only, not persisted). |
-| Ask | `ask_user` — asks you a multiple-choice question when the model is blocked on a decision only you can make (see [Ask](plugins.md#ask)). Interactive terminal sessions only: not offered with piped stdin or `--vscode`, or to subagents. |
+| Ask | `ask_user` — asks you a multiple-choice question when the model is blocked on a decision only you can make (see [Ask](plugins.md#ask)). Offered in an interactive terminal and in the VS Code panel; not offered with piped stdin or to subagents. |
 | Subagent | `subagent_explore`, `subagent_locate`, `subagent_delegate` — the same tools behind `/explore`, `/locate` and `/delegate` (see below), also callable by the model directly mid-turn; `subagent_explore_many` runs up to 4 read-only explorations at the same time; `subagent_run` appears too when [custom subagents](subagents.md) are defined. Explore/locate are built from the full, unfiltered FileSystem/Shell/Git read tools regardless of whether `Extended` is enabled; delegate gets the same write-capable tool set as the main REPL agent (never the Subagent category, so it can't recurse). |
 | Session | `repl_session_current`, `repl_session_list`, `repl_session_read_event_log`, `repl_session_read_log`, `compact_context`, `get_context_status` |
 | Skills | `load_skill`, `run_skill_script` (only when skills are installed — see [Skills](skills.md)) |

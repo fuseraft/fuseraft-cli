@@ -321,7 +321,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // read from what was meant to be the next piped REPL turn) or hangs outright. Fall back to the
         // same non-interactive, permissive approval service EvalCommand uses for its own no-TTY case.
         IHumanApprovalService approvalService = jsonMode
-            ? new JsonBridgeHumanApprovalService(stdinPump!)
+            ? new JsonBridgeHumanApprovalService(stdinPump!,
+                questions: Environment.GetEnvironmentVariable(JsonBridgeHumanApprovalService.QuestionsEnvVar) == "1")
             : Console.IsInputRedirected
                 ? new NonInteractiveHumanApprovalService()
                 : new ConsoleHumanApprovalService();

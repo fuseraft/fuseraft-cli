@@ -171,4 +171,43 @@ public sealed class ReplJsonBridgeApprovalTests
         Assert.Equal("hello", text);
         Assert.True(cts.IsCancellationRequested);
     }
+
+    [Theory]
+    [InlineData("""{"type":"question_response","answer":" SQLite "}""", "SQLite")]
+    [InlineData("""{"type":"question_response","answer":null}""", null)]
+    [InlineData("""{"type":"question_response","answer":"  "}""", null)]
+    [InlineData("""{"type":"approval_response","approved":true}""", null)]
+    [InlineData("not json", null)]
+    public void ExtractQuestionAnswer_OnlyANonEmptyStringAnswers(string line, string? expected) =>
+        Assert.Equal(expected, ReplStdinPump.ExtractQuestionAnswer(line));
+
+    [Fact]
+    public void Questions_AreOffered_OnlyWhenTheExtensionOptsIn()
+    {
+        var pump = new ReplStdinPump(new StringReader(string.Empty), () => null);
+
+        Assert.False(((fuseraft.Core.Interfaces.IHumanApprovalService)new JsonBridgeHumanApprovalService(pump)).CanAskQuestions);
+        Assert.True(new JsonBridgeHumanApprovalService(pump, questions: true).CanAskQuestions);
+    }
+
+    [Fact]
+    public async Task PromptQuestionAsync_RelaysTheAnswerFromStdin()
+    {
+        var pump = new ReplStdinPump(
+            new StringReader("""{"type":"question_response","answer":"SQLite"}""" + "\n"), () => null);
+        pump.Start();
+        var service = new JsonBridgeHumanApprovalService(pump, questions: true);
+
+        Assert.Equal("SQLite", await service.PromptQuestionAsync("Which database?", ["Postgres", "SQLite"], true, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task PromptQuestionAsync_Eof_Dismisses()
+    {
+        var pump = new ReplStdinPump(new StringReader(string.Empty), () => null);
+        pump.Start();
+
+        Assert.Null(await new JsonBridgeHumanApprovalService(pump, questions: true)
+            .PromptQuestionAsync("Which?", ["A", "B"], true, CancellationToken.None));
+    }
 }
