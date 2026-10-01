@@ -861,14 +861,16 @@ internal static class ReplTurn
         // One-time 75 % context check. Fires on free-form turns only (not plan steps or
         // plan-capture) so it never interrupts /execute flow. Resets after a successful
         // compaction (manual or auto) or /clear so it can fire once per "fill cycle".
-        // Prefers the provider-reported actual input-token count for this turn's first round
-        // (LastActualContextTokens) over the char-based heuristic (postEst) when available,
-        // since it reflects real billed size rather than an estimate — same preference /context
-        // already uses (see ReplCommands.Context.cs).
+        // Takes the larger of the provider-reported input count for this turn's first round
+        // (LastActualContextTokens) and the estimate of the history as kept (postEst). The
+        // provider count alone can't be trusted here: it measures the request *after* in-turn
+        // trimming, which caps it near maxInTurnChars no matter how large ctx.History grows, so
+        // on its own it never reaches the threshold and every later turn resends a history that
+        // has to be re-trimmed — with the prompt-cache misses that brings — on every round.
         if (!ctx.ContextWarningShown && !isStepRequest && !capturePlan && (responseText.Length > 0 || stoppedEarly))
         {
-            var isActual  = ctx.LastActualContextTokens.HasValue;
-            var effective = ctx.LastActualContextTokens ?? postEst;
+            var isActual  = ctx.LastActualContextTokens >= postEst;
+            var effective = Math.Max(ctx.LastActualContextTokens ?? 0, postEst);
             var pct       = (double)effective / ctx.ContextTokenBudget;
             if (pct >= ctx.Limits.AutoCompactThreshold)
             {

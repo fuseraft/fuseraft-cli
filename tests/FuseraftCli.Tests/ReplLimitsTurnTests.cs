@@ -317,6 +317,24 @@ public sealed class ReplLimitsTurnTests : IDisposable
 
     // ── context warning / auto-compact threshold ─────────────────────────────
 
+    // The provider's input count is taken after in-turn trimming, so it can sit far below the
+    // history the REPL is actually keeping; the larger of the two has to decide.
+    [Fact]
+    public async Task ContextWarning_UsesTheKeptHistory_WhenTheProviderCountIsSmaller()
+    {
+        var (ctx, eventsPath) = NewContext(
+            new ScriptedClient(_ => TextWithInputTokens(10)),
+            new ReplDefaultsConfig { AutoCompact = false });
+        ctx.History.Add(new ChatMessage(ChatRole.User, new string('x', 280_000)));   // ~70k of the 80k budget
+        ctx.History.Add(new ChatMessage(ChatRole.Assistant, "ok"));
+
+        await RunAsync(ctx);
+
+        var payload = Payload(await File.ReadAllLinesAsync(eventsPath), "context_warning");
+        Assert.False(payload.GetProperty("is_actual").GetBoolean());
+        Assert.True(payload.GetProperty("estimated_tokens").GetInt32() >= 70_000);
+    }
+
     // The budget for an unrecognised model ID is 80,000 tokens.
     [Theory]
     [InlineData(50_000, 0.75, false)]   // 62.5 % — below the default
