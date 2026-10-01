@@ -75,6 +75,9 @@ internal sealed class ReplSessionContext
     public readonly AdaptiveTrimTracker AdaptiveTrimTracker;
     public IReadOnlyList<AgentSkill>    Skills       { get; set; } = [];
     public TodoPlugin?                  Todo         { get; set; }
+    // Todo.Version when the current user request began (see ReplTurn.ExecuteAsync): the todo
+    // nudge only fires for a list the model wrote while working on this request.
+    public int                          TodoVersionAtRequestStart { get; set; }
 
     // Owns any MCP server connections added this session via /mcp add. Created lazily on
     // first use (either loading saved servers at startup or the first /mcp add call) and

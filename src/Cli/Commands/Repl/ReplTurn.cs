@@ -136,8 +136,11 @@ internal static class ReplTurn
     // instead of continuing to repeat the same canned nudge text. Previously this loop was
     // capped at exactly one round via the shared isCorrectionTurn flag, which meant any
     // multi-step task requiring more than one round of self-correction silently stalled and
-    // needed a manual "keep going" from the user for every remaining round.
-    internal const int MaxTodoCorrectionRounds = 5;
+    // needed a manual "keep going" from the user for every remaining round. It was then 5, but
+    // every nudge is a whole extra turn — its own unbounded tool loop — so a model that had
+    // genuinely stopped could cost five more full turns before the critic was asked.
+    // Default — overridable through the global config (repl.maxTodoNudges; see ReplLimits).
+    internal const int MaxTodoCorrectionRounds = 2;
 
     // Matches identify/locate/find-style questions about the codebase so the turn can force a
     // grounding tool call instead of letting the model answer from (possibly fabricated) memory.
@@ -595,6 +598,10 @@ internal static class ReplTurn
         // recursive calls, but the todo-critic escalation needs the real task, not the last
         // canned nudge.
         var rootInput = originalInput ?? input;
+        // A new user request (not one of this request's own correction turns): todo items written
+        // before this point belong to an earlier request and are no reason to nudge.
+        if (originalInput is null)
+            ctx.TodoVersionAtRequestStart = ctx.Todo?.Version ?? 0;
 
         ctx.BeginTurn();
         ctx.Emitter.SetTurn(ctx.TurnIndex);
@@ -1207,8 +1214,10 @@ internal static class ReplTurn
     // keep going instead of silently abandoning the rest of the checklist — the system prompt
     // asks the model to track completeness itself, but nothing previously enforced it, unlike
     // /execute's per-step VerifyStepAsync. Skipped when the response ends in a question — the
-    // agent may legitimately be waiting on the user before it can continue. Retries up to
-    // MaxTodoCorrectionRounds times with the same canned nudge; once that budget is exhausted,
+    // agent may legitimately be waiting on the user before it can continue — and when the list
+    // wasn't written during this request: a list left open by an earlier request (or restored
+    // from a snapshot) would otherwise send nudges after every later answer, however unrelated.
+    // Retries up to ReplLimits.MaxTodoNudges times with the same canned nudge; once that budget is exhausted,
     // hands the decision to TryApplyTodoCriticEscalationAsync instead of looping forever on a
     // task the agent genuinely can't finish.
     private static async Task TryApplyTodoCompletionCorrectionAsync(
@@ -1223,6 +1232,8 @@ internal static class ReplTurn
         CancellationToken cancellationToken)
     {
         if (isStepRequest || capturePlan || responseText.Length == 0 || ctx.Todo is null) return;
+        var maxNudges = ctx.Limits.MaxTodoNudges;
+        if (maxNudges == 0 || ctx.Todo.Version == ctx.TodoVersionAtRequestStart) return;
         if (TrailingQuestionPattern.IsMatch(responseText.TrimEnd())) return;
 
         var incomplete = ctx.Todo.Snapshot()
@@ -1230,13 +1241,13 @@ internal static class ReplTurn
             .ToList();
         if (incomplete.Count == 0) return;
 
-        if (todoCorrectionRound < MaxTodoCorrectionRounds)
+        if (todoCorrectionRound < maxNudges)
         {
             await ctx.Emitter.EmitAsync(EventTypes.CorrectionInjected, turn: ctx.TurnIndex,
                 payload: new { reason = "todo_incomplete", remaining = incomplete.Count, round = todoCorrectionRound + 1 });
             if (!ctx.JsonMode)
                 AnsiConsole.MarkupLine(
-                    $"[dim]  ↺ {incomplete.Count} todo item{(incomplete.Count == 1 ? "" : "s")} still open — injecting correction ({todoCorrectionRound + 1}/{MaxTodoCorrectionRounds})[/]");
+                    $"[dim]  ↺ {incomplete.Count} todo item{(incomplete.Count == 1 ? "" : "s")} still open — injecting correction ({todoCorrectionRound + 1}/{maxNudges})[/]");
             var remainingList = string.Join("\n", incomplete.Select(i => $"- [{i.Status}] {i.Content}"));
             var correctionMsg =
                 $"{TodoOpenCorrectionPrefix}{incomplete.Count} incomplete item(s):\n{remainingList}\n\n" +
@@ -1286,7 +1297,7 @@ internal static class ReplTurn
         var remainingList = string.Join("\n", incomplete.Select(i => $"- [{i.Status}] {i.Content}"));
         var taskDescription =
             $"The agent's todo list still has {incomplete.Count} incomplete item(s) after " +
-            $"{MaxTodoCorrectionRounds} automatic follow-up attempts:\n{remainingList}\n\n" +
+            $"{ctx.Limits.MaxTodoNudges} automatic follow-up attempts:\n{remainingList}\n\n" +
             "Decide whether it is reasonable for the agent to stop here (e.g. genuinely blocked, " +
             "waiting on missing information, or the remaining items no longer apply) or whether " +
             "it should keep working.";
@@ -1317,7 +1328,7 @@ internal static class ReplTurn
             ctx, correctionMsg,
             isStepRequest: false, capturePlan: false, activeStep: null,
             cancellationToken, isCorrectionTurn: true,
-            originalInput: rootInput, todoCorrectionRound: MaxTodoCorrectionRounds,
+            originalInput: rootInput, todoCorrectionRound: ctx.Limits.MaxTodoNudges,
             todoCriticRound: 1);
     }
 

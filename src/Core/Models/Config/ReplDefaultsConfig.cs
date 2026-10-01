@@ -95,6 +95,14 @@ public sealed class ReplDefaultsConfig
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? MaxTurnInputTokens { get; set; }
 
+    /// <summary>
+    /// Automatic "your todo list still has open items" follow-up turns after the model stops with
+    /// items it wrote during the current request still open. 0 turns them off. Null uses 2.
+    /// </summary>
+    [JsonPropertyName("maxTodoNudges")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxTodoNudges { get; set; }
+
     /// <summary>Automatic retries of a stream that dropped mid-response. Null uses 2.</summary>
     [JsonPropertyName("maxStreamRetries")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
