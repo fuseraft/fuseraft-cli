@@ -92,4 +92,14 @@ public sealed class ChatClientFactoryTransportTests
 
         Assert.Equal(1, attempts);
     }
+
+    // Built directly rather than through TransportOptions.From, so nothing marks the retry budget
+    // as "configured" — the path that used to leave the SDK's own 3 retries stacked on top.
+    [Fact]
+    public async Task ZeroRetriesByDefaultConstruction_StillMeansExactlyOneAttempt()
+    {
+        var attempts = await AttemptsMadeAsync(new TransportOptions { MaxRetries = 0 });
+
+        Assert.Equal(1, attempts);
+    }
 }

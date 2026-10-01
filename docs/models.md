@@ -146,7 +146,7 @@ fuseraft settings set provider.maxRetries 5
 
 Each accepts `""` to go back to the default.
 
-**Retries stack unless you set `provider.maxRetries`.** The OpenAI and Azure SDKs apply their own retry (3 retries) on top of fuseraft's, so left unset a hard failure can take up to 4 × 4 = 16 attempts — a dead endpoint took about a minute to give up in testing. Setting `provider.maxRetries` to any value, `3` included, switches the SDK's own retry off, so the number becomes exact: *N* retries, *N* + 1 attempts. Anthropic and Ollama have no such second layer.
+**Retries don't stack.** The OpenAI and Azure SDKs' own retry is switched off, so `provider.maxRetries` is exact whether you set it or not: *N* retries, *N* + 1 attempts (4 by default). Behind a gateway this matters for cost as well as time — a gateway that times out (504) after the model behind it has already answered can bill every retry.
 
 **Ollama** is built on OllamaSharp's own HTTP client, whose built-in timeout is 100 s rather than 20 minutes — so a slow local model can time out before the first token. `provider.requestTimeoutSeconds` applies to it too; left unset, Ollama keeps its 100 s. Ollama streams NDJSON rather than SSE, so `streamIdleTimeoutSeconds` and `maxRetries` don't apply to it.
 
