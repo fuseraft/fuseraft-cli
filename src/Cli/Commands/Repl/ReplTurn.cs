@@ -1040,15 +1040,22 @@ internal static class ReplTurn
         // next turn with its own turn index and events, instead of a nested call whose
         // TurnIndex++ and emits would otherwise land inside this turn's own tail and get
         // relabeled onto the wrong turn.
+        //
+        // At most one of these fires per turn. Each one that fires runs a whole new turn, which
+        // makes its own checks against its own, fresher response — so once one has fired, this
+        // turn's response is stale and its remaining checks (with this turn's round counters, not
+        // the nested turn's) would only repeat work the nested turn already decided on.
         if (stoppedEarly) return stepPassed;
 
-        await TryApplyMutationCorrectionAsync(
-            ctx, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn,
-            rootInput, todoCorrectionRound, todoCriticRound, cancellationToken);
+        if (await TryApplyMutationCorrectionAsync(
+                ctx, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn,
+                rootInput, todoCorrectionRound, todoCriticRound, cancellationToken))
+            return stepPassed;
 
-        await TryApplyCriticReviewAsync(
-            ctx, input, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn,
-            rootInput, todoCorrectionRound, todoCriticRound, cancellationToken);
+        if (await TryApplyCriticReviewAsync(
+                ctx, input, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn,
+                rootInput, todoCorrectionRound, todoCriticRound, cancellationToken))
+            return stepPassed;
 
         await TryApplyTodoCompletionCorrectionAsync(
             ctx, responseText, isStepRequest, capturePlan, isCorrectionTurn,
@@ -1108,7 +1115,8 @@ internal static class ReplTurn
     // Free-form turns: if the response claims a mutation but no write tool was called,
     // auto-inject a correction so the agent is required to actually call the tool.
     // On the correction turn itself fall back to a warning to avoid infinite recursion.
-    private static async Task TryApplyMutationCorrectionAsync(
+    // Returns true when it ran a correction turn.
+    private static async Task<bool> TryApplyMutationCorrectionAsync(
         ReplSessionContext ctx,
         string responseText,
         List<string> toolCallsThisTurn,
@@ -1139,20 +1147,21 @@ internal static class ReplTurn
                     cancellationToken, isCorrectionTurn: true,
                     originalInput: rootInput, todoCorrectionRound: todoCorrectionRound,
                     todoCriticRound: todoCriticRound);
+                return true;
             }
-            else
-            {
-                if (!ctx.JsonMode)
-                    AnsiConsole.MarkupLine(
-                        "[yellow]  ⚠ No write tool called after correction — verify the agent did not fabricate this result.[/]");
-            }
+
+            if (!ctx.JsonMode)
+                AnsiConsole.MarkupLine(
+                    "[yellow]  ⚠ No write tool called after correction — verify the agent did not fabricate this result.[/]");
         }
+        return false;
     }
 
     // Free-form turns under adversarial mode: a critic agent reviews the response for
     // fabrication/correctness, same infrastructure /execute steps use. Skipped on the
-    // correction turn itself so a rejection can't recurse forever.
-    private static async Task TryApplyCriticReviewAsync(
+    // correction turn itself so a rejection can't recurse forever. Returns true when the critic
+    // rejected the response and a correction turn ran.
+    private static async Task<bool> TryApplyCriticReviewAsync(
         ReplSessionContext ctx,
         string input,
         string responseText,
@@ -1187,8 +1196,10 @@ internal static class ReplTurn
                     cancellationToken, isCorrectionTurn: true,
                     originalInput: rootInput, todoCorrectionRound: todoCorrectionRound,
                     todoCriticRound: todoCriticRound);
+                return true;
             }
         }
+        return false;
     }
 
     // Free-form turns: if the self-directed todo list (see TodoPlugin) still has pending or
