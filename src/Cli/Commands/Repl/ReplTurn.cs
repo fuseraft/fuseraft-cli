@@ -53,10 +53,10 @@ internal static class ReplTurn
         text.StartsWith(ReplGoal.FollowUpPrefix,       StringComparison.Ordinal) ||
         text.StartsWith(ReplGoal.ResumePrefix,         StringComparison.Ordinal);
 
-    // Closes the history of a turn that one of its guards (see stoppedEarly in ExecuteAsync)
-    // stopped before the model gave its final answer. The reason is part of the note because the
-    // model can't see the terminal warning: told nothing, it guesses, and in a live session told
-    // the user a budget stop was "the user interrupted".
+    // Closes the history of a turn that ended before the model gave its final answer — stopped by
+    // one of its guards (see stoppedEarly in ExecuteAsync), cancelled, or failed. The reason is
+    // part of the note because the model can't see the terminal warning: told nothing, it guesses,
+    // and in a live session told the user a budget stop was "the user interrupted".
     internal const string StoppedEarlyNotePrefix = "[Turn stopped before a final answer";
 
     internal static string StoppedEarlyNote(string reason) =>
@@ -1448,6 +1448,29 @@ internal static class ReplTurn
             ReplConsole.ClearSpinnerLine();
         }
 
+        // Keeps the rounds that finished before the turn was cut off (cancelled, or failed for
+        // good) — their tools ran, so the model should see that next time rather than redo them —
+        // and closes them with an assistant note. With nothing to keep, the turn leaves no trace:
+        // its user message is withdrawn, as it always was.
+        void CloseInterruptedTurn(string reason)
+        {
+            ctx.History.AddRange(CompletedRounds(rawUpdates));
+            RepairDanglingToolCalls(ctx.History);
+            if (ctx.History.Count == 0) return;
+            if (ctx.History[^1].Role == ChatRole.User)
+                ctx.History.RemoveAt(ctx.History.Count - 1);
+            else
+                AppendStoppedEarlyNote(ctx.History, reason);
+        }
+
+        // Tokens a provider reported are billed whether or not the turn went on to succeed.
+        void CommitUsage()
+        {
+            ctx.CumulativeInputTokens  += turnInputTokens;
+            ctx.CumulativeOutputTokens += turnOutputTokens;
+            ctx.CumulativeCacheReadTokens += turnCacheReadTokens;
+        }
+
         var activeClient   = isStepRequest ? ctx.StepClient : ctx.Client;
         var requestOptions = BuildRequestOptions(ctx.ChatOptions, input);
         var streamAttempt  = 0;
@@ -1665,8 +1688,8 @@ internal static class ReplTurn
                 ReplJsonBridge.Emit(new { type = "cancelled" });
             else
                 AnsiConsole.MarkupLine("[dim](cancelled)[/]");
-            if (ctx.History.Count > 0 && ctx.History[^1].Role == ChatRole.User)
-                ctx.History.RemoveAt(ctx.History.Count - 1);
+            CloseInterruptedTurn("the user cancelled it");
+            CommitUsage();
             if (!ctx.JsonMode) AnsiConsole.WriteLine();
             reqCts.Dispose();
             ctx.ActiveCts = null;
@@ -1697,18 +1720,39 @@ internal static class ReplTurn
             // Not wired to the cancellation token so the short sleep is never interrupted.
             await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, streamAttempt)));
 
-            // Reset per-attempt accumulators before reissuing the request.
-            sb.Clear(); rawUpdates.Clear(); toolCallsThisTurn.Clear();
-            pendingParagraphBreak = false;
-            fileChanges.Clear(); fileChangeSeen.Clear(); pendingFileChanges.Clear();
-            capturedResults?.Clear(); callIdToName?.Clear();
-            toolRounds = 0; usageRounds = 0; finishRounds = 0;
-            turnInputTokens = 0; turnOutputTokens = 0; turnCacheReadTokens = 0; turnFirstInputTokens = null;
-            consecutiveToolFailures = 0; hitConsecutiveFailureLimit = false; lastToolFailureDetail = null;
-            lastToolCallName = string.Empty; lastToolCallSignature = string.Empty;
-            consecutiveIdenticalToolCalls = 0; hitRepeatedToolCallLimit = false; lastRepeatedToolCallDetail = null;
-            repeatedToolCallLimit = limits.MaxIdenticalToolCalls; toolCallCycles.Reset();
-            turnTokenBudgetReached = false; hitTurnTokenBudget = false;
+            // Resume rather than restart: the rounds that finished move into ctx.History, so the
+            // reissued request carries on from them. Resending the request as it stood when the
+            // turn began re-ran every model call and every tool call — writes and shell commands
+            // included — from the start, once per retry. Token counts carry over either way:
+            // what the failed attempt used was billed, and the per-turn budget must see it.
+            var kept = CompletedRounds(rawUpdates);
+            rawUpdates.Clear(); pendingFileChanges.Clear();
+            if (kept.Count > 0)
+            {
+                ctx.History.AddRange(kept);
+                RepairDanglingToolCalls(ctx.History);
+                // Only what was kept: the cut-off round's partial text is regenerated by the retry.
+                sb.Clear();
+                sb.AppendJoin("\n\n", kept
+                    .Where(m => m.Role == ChatRole.Assistant && !string.IsNullOrWhiteSpace(m.Text))
+                    .Select(m => m.Text));
+                pendingParagraphBreak = sb.Length > 0;
+                toolCallsThisTurn.Clear();
+                toolCallsThisTurn.AddRange(kept.SelectMany(m => m.Contents.OfType<FunctionCallContent>()).Select(c => c.Name));
+            }
+            else
+            {
+                // Nothing finished — a clean restart of this turn.
+                sb.Clear(); toolCallsThisTurn.Clear();
+                pendingParagraphBreak = false;
+                fileChanges.Clear(); fileChangeSeen.Clear();
+                capturedResults?.Clear(); callIdToName?.Clear();
+                toolRounds = 0; usageRounds = 0; finishRounds = 0;
+                consecutiveToolFailures = 0; hitConsecutiveFailureLimit = false; lastToolFailureDetail = null;
+                lastToolCallName = string.Empty; lastToolCallSignature = string.Empty;
+                consecutiveIdenticalToolCalls = 0; hitRepeatedToolCallLimit = false; lastRepeatedToolCallDetail = null;
+                repeatedToolCallLimit = limits.MaxIdenticalToolCalls; toolCallCycles.Reset();
+            }
 
             // Restart spinner for the fresh attempt.
             spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
@@ -1746,8 +1790,8 @@ internal static class ReplTurn
                 if (toolSurfaceHint is not null)
                     AnsiConsole.MarkupLine($"[dim]  ↪ {Markup.Escape(toolSurfaceHint)}[/]");
             }
-            if (ctx.History.Count > 0 && ctx.History[^1].Role == ChatRole.User)
-                ctx.History.RemoveAt(ctx.History.Count - 1);
+            CloseInterruptedTurn($"it failed with an error ({(ex.Message.Length > 200 ? ex.Message[..200] + "…" : ex.Message)})");
+            CommitUsage();
             reqCts.Dispose();
             ctx.ActiveCts = null;
             return TurnStreamResult.MakeFailed(toolCallsThisTurn, limits.MaxIdenticalToolCalls);
@@ -1759,9 +1803,7 @@ internal static class ReplTurn
         await StopSpinnerAsync();
         spinCts.Dispose();
 
-        ctx.CumulativeInputTokens  += turnInputTokens;
-        ctx.CumulativeOutputTokens += turnOutputTokens;
-        ctx.CumulativeCacheReadTokens += turnCacheReadTokens;
+        CommitUsage();
         ctx.LastActualContextTokens = turnFirstInputTokens;
 
         return new TurnStreamResult(
@@ -1835,6 +1877,21 @@ internal static class ReplTurn
                 callId, "[interrupted — turn ended before this tool call could run]"))
             .ToList();
         history.Add(new ChatMessage(ChatRole.Tool, resultContents));
+    }
+
+    /// <summary>
+    /// The messages of the rounds that finished — up to and including the last tool result — out
+    /// of a stream that was cut off. A tool result only streams in after its tool has run, so
+    /// everything up to it really happened. What follows is a round still being generated: its
+    /// partial text or calls would leave the history ending on a half-written assistant message.
+    /// Empty when no tool result had arrived.
+    /// </summary>
+    internal static List<ChatMessage> CompletedRounds(List<ChatResponseUpdate> updates)
+    {
+        var messages = new List<ChatMessage>();
+        messages.AddMessages(updates);
+        var last = messages.FindLastIndex(m => m.Contents.OfType<FunctionResultContent>().Any());
+        return last < 0 ? [] : messages[..(last + 1)];
     }
 
     // Returns the number of ChatMessage entries removed (0 when no trimming was needed).
