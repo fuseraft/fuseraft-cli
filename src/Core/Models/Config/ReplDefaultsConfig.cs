@@ -87,6 +87,14 @@ public sealed class ReplDefaultsConfig
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? WarnIdenticalToolCalls { get; set; }
 
+    /// <summary>
+    /// Input tokens one REPL turn may spend, summed over all of its model calls, before it stops
+    /// and keeps its progress. Null uses 1,000,000.
+    /// </summary>
+    [JsonPropertyName("maxTurnInputTokens")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxTurnInputTokens { get; set; }
+
     /// <summary>Automatic retries of a stream that dropped mid-response. Null uses 2.</summary>
     [JsonPropertyName("maxStreamRetries")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

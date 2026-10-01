@@ -53,6 +53,28 @@ internal static class ReplTurn
         text.StartsWith(ReplGoal.FollowUpPrefix,       StringComparison.Ordinal) ||
         text.StartsWith(ReplGoal.ResumePrefix,         StringComparison.Ordinal);
 
+    // Closes the history of a turn that one of its guards (see stoppedEarly in ExecuteAsync)
+    // stopped before the model gave its final answer. The reason is part of the note because the
+    // model can't see the terminal warning: told nothing, it guesses, and in a live session told
+    // the user a budget stop was "the user interrupted".
+    internal const string StoppedEarlyNotePrefix = "[Turn stopped before a final answer";
+
+    internal static string StoppedEarlyNote(string reason) =>
+        $"{StoppedEarlyNotePrefix}: {reason}. The tool calls above are the work done so far.]";
+
+    // Adds the note as the turn's closing assistant message, or onto that message when the turn
+    // already ended on plain assistant text, so the history never gets two assistant messages in
+    // a row.
+    internal static void AppendStoppedEarlyNote(List<ChatMessage> history, string reason)
+    {
+        var note = StoppedEarlyNote(reason);
+        if (history.Count > 0 && history[^1] is { Role: var role } last && role == ChatRole.Assistant &&
+            !last.Contents.OfType<FunctionCallContent>().Any())
+            last.Contents.Add(new TextContent("\n\n" + note));
+        else
+            history.Add(new ChatMessage(ChatRole.Assistant, note));
+    }
+
     // Tool-call round-trip cap for free-form turns (ctx.Client). Named so
     // ReplFactory.BuildClient's default and the hit-cap check below can't drift apart.
     //
@@ -621,9 +643,14 @@ internal static class ReplTurn
         var hitRepeatedToolCallLimit   = stream.HitRepeatedToolCallLimit;
         var lastRepeatedToolCallDetail = stream.LastRepeatedToolCallDetail;
         var repeatedToolCallLimit      = stream.RepeatedToolCallLimit;
+        var hitTurnTokenBudget         = stream.HitTurnTokenBudget;
+        // The turn was cut off by one of its own guards rather than finishing. Its tool calls and
+        // results are kept even when no closing text arrived, and no correction turn follows —
+        // re-prompting the model is exactly the spending the guard just stopped.
+        var stoppedEarly = hitConsecutiveFailureLimit || hitRepeatedToolCallLimit || hitTurnTokenBudget;
 
         responseText = SanitizeAssistantResponse(responseText, out var warningMessage);
-        if (!capturePlan && responseText.Length == 0)
+        if (!capturePlan && responseText.Length == 0 && !stoppedEarly)
         {
             // Gated on its own emptyResponseRetried flag rather than the shared isCorrectionTurn
             // flag — an empty response can legitimately occur mid-way through an in-progress
@@ -656,7 +683,7 @@ internal static class ReplTurn
             AnsiConsole.Write(MarkdownRenderer.Render(responseText));
         }
         if (!ctx.JsonMode) AnsiConsole.WriteLine();
-        if (responseText.Length > 0)
+        if (responseText.Length > 0 || stoppedEarly)
         {
             // Append the full reconstructed transcript (assistant tool calls + tool-role
             // results, then final text) rather than just the final text — otherwise the
@@ -664,6 +691,13 @@ internal static class ReplTurn
             // view, and re-does or re-verifies work it already has evidence for.
             ctx.History.AddMessages(rawUpdates);
             RepairDanglingToolCalls(ctx.History);
+            // Say why the turn stopped — and, when it stopped mid tool loop on a tool result, close
+            // it with an assistant message so the history keeps its user/assistant alternation.
+            if (stoppedEarly)
+                AppendStoppedEarlyNote(ctx.History,
+                    hitTurnTokenBudget         ? $"it reached the per-turn input-token budget ({ctx.Limits.MaxTurnInputTokens:N0}, repl.maxTurnInputTokens)" :
+                    hitConsecutiveFailureLimit ? $"{ctx.Limits.MaxConsecutiveToolFailures} tool calls in a row failed" :
+                                                 "the same tool calls kept repeating without progress");
         }
         else if (!capturePlan)
         {
@@ -754,7 +788,7 @@ internal static class ReplTurn
         // failures in a row rather than burning through the rest of ChatIterationLimit on a
         // loop that's stuck, not making progress. Step turns get an equivalent notice via
         // HandleStepResult above.
-        if (!isStepRequest && hitConsecutiveFailureLimit && responseText.Length > 0)
+        if (!isStepRequest && hitConsecutiveFailureLimit)
         {
             var lastTool = toolCallsThisTurn.Count > 0 ? toolCallsThisTurn[^1] : "tool";
             var snippet  = lastToolFailureDetail?.Trim();
@@ -780,7 +814,7 @@ internal static class ReplTurn
         // call verbatim produces no failure signal at all, so the consecutive-failure cutoff
         // above never engages for this failure mode, and neither would ChatIterationLimit even
         // when it was a real flat cap.
-        if (!isStepRequest && hitRepeatedToolCallLimit && responseText.Length > 0)
+        if (!isStepRequest && hitRepeatedToolCallLimit)
         {
             await ctx.Emitter.EmitAsync(EventTypes.ReplWarning, turn: ctx.TurnIndex, payload: new
             {
@@ -794,6 +828,25 @@ internal static class ReplTurn
                 ReplJsonBridge.Emit(new { type = "warning", text = repeatMsg });
             else
                 AnsiConsole.MarkupLine($"[dim yellow]  ⚠ {Markup.Escape(repeatMsg)}[/]");
+        }
+
+        // Per-turn input-token budget (see ReplLimits.MaxTurnInputTokens) — the one guard that
+        // also stops a turn that is making progress, just too expensively.
+        if (hitTurnTokenBudget)
+        {
+            await ctx.Emitter.EmitAsync(EventTypes.ReplWarning, turn: ctx.TurnIndex, payload: new
+            {
+                message      = "hit_turn_token_budget",
+                input_tokens = turnInputTokens,
+                limit        = ctx.Limits.MaxTurnInputTokens,
+            });
+            var budgetMsg = $"Stopped after {turnInputTokens:N0} input tokens this turn " +
+                            $"(repl.maxTurnInputTokens is {ctx.Limits.MaxTurnInputTokens:N0}). " +
+                            "Progress so far was kept — send a follow-up to continue.";
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new { type = "warning", text = budgetMsg });
+            else
+                AnsiConsole.MarkupLine($"[dim yellow]  ⚠ {Markup.Escape(budgetMsg)}[/]");
         }
 
         // Tracks whether either auto-compact branch below already replaced ctx.History this
@@ -812,7 +865,7 @@ internal static class ReplTurn
         // (LastActualContextTokens) over the char-based heuristic (postEst) when available,
         // since it reflects real billed size rather than an estimate — same preference /context
         // already uses (see ReplCommands.Context.cs).
-        if (!ctx.ContextWarningShown && !isStepRequest && !capturePlan && responseText.Length > 0)
+        if (!ctx.ContextWarningShown && !isStepRequest && !capturePlan && (responseText.Length > 0 || stoppedEarly))
         {
             var isActual  = ctx.LastActualContextTokens.HasValue;
             var effective = ctx.LastActualContextTokens ?? postEst;
@@ -985,6 +1038,8 @@ internal static class ReplTurn
         // next turn with its own turn index and events, instead of a nested call whose
         // TurnIndex++ and emits would otherwise land inside this turn's own tail and get
         // relabeled onto the wrong turn.
+        if (stoppedEarly) return stepPassed;
+
         await TryApplyMutationCorrectionAsync(
             ctx, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn,
             rootInput, todoCorrectionRound, todoCriticRound, cancellationToken);
@@ -1273,13 +1328,14 @@ internal static class ReplTurn
         string? LastToolFailureDetail,
         bool HitRepeatedToolCallLimit,
         string? LastRepeatedToolCallDetail,
-        int RepeatedToolCallLimit)
+        int RepeatedToolCallLimit,
+        bool HitTurnTokenBudget)
     {
         // toolCallsThisTurn is preserved from the aborted attempt (not always empty) so a
         // step halted mid-stream can still report which tools it managed to call before
         // failing — see ReplTurnOutcome.HaltStepOnStreamFailure.
         internal static TurnStreamResult MakeFailed(List<string> toolCallsThisTurn, int repeatedToolCallLimit) =>
-            new(false, "", toolCallsThisTurn, [], 0, null, 0, 0, 0, null, [], false, null, false, null, repeatedToolCallLimit);
+            new(false, "", toolCallsThisTurn, [], 0, null, 0, 0, 0, null, [], false, null, false, null, repeatedToolCallLimit, false);
     }
 
     /// <summary>
@@ -1342,6 +1398,12 @@ internal static class ReplTurn
         var repeatedToolCallLimit          = limits.MaxIdenticalToolCalls;
         // Catches what the identical-call counter above cannot: read → test → read → test.
         var toolCallCycles                 = new ToolCallCycleDetector();
+        // See ReplLimits.MaxTurnInputTokens. Armed by the usage chunk of the round that crosses
+        // the budget, acted on at that round's end: after its tool results (the tools have already
+        // run by the time they stream in, so they belong in the transcript) and before the next
+        // MoveNextAsync, which is what would make the next model call.
+        var turnTokenBudgetReached         = false;
+        var hitTurnTokenBudget             = false;
 
         var reqCts    = new CancellationTokenSource();
         ctx.ActiveCts = reqCts;
@@ -1372,6 +1434,13 @@ internal static class ReplTurn
             await foreach (var chunk in activeClient.GetStreamingResponseAsync(
                 ctx.History, requestOptions, cancellationToken: reqCts.Token))
             {
+                // The round that crossed the budget ended without tool results to wait for.
+                if (turnTokenBudgetReached && !chunk.Contents.OfType<FunctionResultContent>().Any())
+                {
+                    hitTurnTokenBudget = true;
+                    break;
+                }
+
                 // Captured verbatim so a successful turn can reconstruct the full message
                 // transcript (assistant tool calls + tool-role results, not just final text)
                 // via ChatResponseExtensions.AddMessages — see the history-append comment below.
@@ -1406,6 +1475,7 @@ internal static class ReplTurn
                     sawUsageThisChunk = true;
                 }
                 if (sawUsageThisChunk) usageRounds++;
+                if (turnInputTokens >= limits.MaxTurnInputTokens) turnTokenBudgetReached = true;
                 if (chunk.FinishReason is not null) finishRounds++;
                 toolRounds = Math.Max(usageRounds, finishRounds);
 
@@ -1522,6 +1592,11 @@ internal static class ReplTurn
                         hitConsecutiveFailureLimit = true;
                         break;
                     }
+                    if (turnTokenBudgetReached)
+                    {
+                        hitTurnTokenBudget = true;
+                        break;
+                    }
                     continue;
                 }
 
@@ -1609,6 +1684,7 @@ internal static class ReplTurn
             lastToolCallName = string.Empty; lastToolCallSignature = string.Empty;
             consecutiveIdenticalToolCalls = 0; hitRepeatedToolCallLimit = false; lastRepeatedToolCallDetail = null;
             repeatedToolCallLimit = limits.MaxIdenticalToolCalls; toolCallCycles.Reset();
+            turnTokenBudgetReached = false; hitTurnTokenBudget = false;
 
             // Restart spinner for the fresh attempt.
             spinCts  = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
@@ -1668,7 +1744,8 @@ internal static class ReplTurn
             true, sb.ToString(), toolCallsThisTurn, fileChanges, toolRounds, capturedResults,
             turnInputTokens, turnOutputTokens, turnCacheReadTokens, turnFirstInputTokens, rawUpdates,
             hitConsecutiveFailureLimit, lastToolFailureDetail,
-            hitRepeatedToolCallLimit, lastRepeatedToolCallDetail, repeatedToolCallLimit);
+            hitRepeatedToolCallLimit, lastRepeatedToolCallDetail, repeatedToolCallLimit,
+            hitTurnTokenBudget);
     }
 
     internal static async Task ExtractMemoriesOnExitAsync(ReplSessionContext ctx)

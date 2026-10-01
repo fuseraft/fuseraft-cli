@@ -57,6 +57,7 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
         ("repl.maxIdenticalToolCalls",    "Consecutive identical tool calls that end a turn, 3-50 (default 5), or \"\" to reset"),
         ("repl.warnIdenticalToolCalls",   "Identical calls in a row at which the model is nudged, 2-49 and below the cutoff (default 3), or \"\" to reset"),
         ("repl.maxStreamRetries",         "Automatic retries of a stream that dropped mid-response, 0-5 (default 2), or \"\" to reset"),
+        ("repl.maxTurnInputTokens",       "Input tokens one turn may spend across all its model calls before stopping, 100000-100000000 (default 1000000), or \"\" to reset"),
         ("repl.plugins",            "Comma-separated plugin list, e.g. Scratchpad,Http"),
         ("telemetry.otlpEndpoint",  "OTLP endpoint URL, or \"\" to disable"),
         ("telemetry.serviceName",   "Requires telemetry.otlpEndpoint to already be set"),
@@ -125,6 +126,7 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
             "repl.maxidenticaltoolcalls"     => AssignIntRange(v => config.Repl.MaxIdenticalToolCalls = v, value, ReplLimits.IdenticalCallsMin, ReplLimits.IdenticalCallsMax),
             "repl.warnidenticaltoolcalls"    => AssignIntRange(v => config.Repl.WarnIdenticalToolCalls = v, value, ReplLimits.WarnIdenticalCallsMin, ReplLimits.IdenticalCallsMax - 1),
             "repl.maxstreamretries"          => AssignIntRange(v => config.Repl.MaxStreamRetries = v, value, 0, ReplLimits.StreamRetriesMax),
+            "repl.maxturninputtokens"        => AssignIntRange(v => config.Repl.MaxTurnInputTokens = v, value, ReplLimits.TurnInputTokensMin, ReplLimits.TurnInputTokensMax),
             "repl.plugins"             => Assign(() => config.Repl.Plugins = value
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .ToList()),

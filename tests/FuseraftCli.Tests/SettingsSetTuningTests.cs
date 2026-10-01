@@ -100,6 +100,7 @@ public sealed class SettingsSetTuningTests : IDisposable
         Assert.Equal(0, await SetAsync("repl.maxIdenticalToolCalls", "9"));
         Assert.Equal(0, await SetAsync("repl.warnIdenticalToolCalls", "6"));
         Assert.Equal(0, await SetAsync("repl.maxStreamRetries", "4"));
+        Assert.Equal(0, await SetAsync("repl.maxTurnInputTokens", "500000"));
 
         var repl = Saved().Repl;
         Assert.Equal(0.6, repl.AutoCompactThreshold);
@@ -108,6 +109,7 @@ public sealed class SettingsSetTuningTests : IDisposable
         Assert.Equal(9, repl.MaxIdenticalToolCalls);
         Assert.Equal(6, repl.WarnIdenticalToolCalls);
         Assert.Equal(4, repl.MaxStreamRetries);
+        Assert.Equal(500_000, repl.MaxTurnInputTokens);
     }
 
     [Theory]
@@ -124,6 +126,8 @@ public sealed class SettingsSetTuningTests : IDisposable
     [InlineData("repl.warnIdenticalToolCalls", "50")]
     [InlineData("repl.maxStreamRetries", "-1")]
     [InlineData("repl.maxStreamRetries", "6")]
+    [InlineData("repl.maxTurnInputTokens", "99999")]
+    [InlineData("repl.maxTurnInputTokens", "100000001")]
     public async Task ReplThresholdOutOfRange_IsRejectedAndNothingIsSaved(string key, string value)
     {
         Assert.Equal(1, await SetAsync(key, value));

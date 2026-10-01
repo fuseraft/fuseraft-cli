@@ -8,6 +8,7 @@ internal sealed record ReplLimits
     internal const double DefaultAutoCompactThreshold = 0.75;
     internal const double DefaultPreserveTailRatio    = 0.20;
     internal const int    DefaultMaxStreamRetries     = 2;
+    internal const int    DefaultMaxTurnInputTokens   = 1_000_000;
 
     internal const double AutoCompactThresholdMin = 0.50, AutoCompactThresholdMax = 0.95;
     internal const double PreserveTailRatioMin    = 0.05, PreserveTailRatioMax    = 0.50;
@@ -15,6 +16,7 @@ internal sealed record ReplLimits
     internal const int    IdenticalCallsMin       = 3,    IdenticalCallsMax       = 50;
     internal const int    WarnIdenticalCallsMin   = 2;
     internal const int    StreamRetriesMax        = 5;
+    internal const int    TurnInputTokensMin      = 100_000, TurnInputTokensMax = 100_000_000;
 
     internal static ReplLimits Default { get; } = new();
 
@@ -24,6 +26,7 @@ internal sealed record ReplLimits
     internal int    MaxIdenticalToolCalls   { get; init; } = ReplTurn.MaxConsecutiveIdenticalToolCalls;
     internal int    WarnIdenticalToolCalls  { get; init; } = ReplTurn.SoftRepeatedToolCallThreshold;
     internal int    MaxStreamRetries        { get; init; } = DefaultMaxStreamRetries;
+    internal int    MaxTurnInputTokens      { get; init; } = DefaultMaxTurnInputTokens;
 
     internal static ReplLimits From(ReplDefaultsConfig? cfg)
     {
@@ -50,6 +53,8 @@ internal sealed record ReplLimits
             WarnIdenticalToolCalls = warn,
             MaxStreamRetries = cfg.MaxStreamRetries is { } s
                 ? Math.Clamp(s, 0, StreamRetriesMax) : DefaultMaxStreamRetries,
+            MaxTurnInputTokens = cfg.MaxTurnInputTokens is { } b
+                ? Math.Clamp(b, TurnInputTokensMin, TurnInputTokensMax) : DefaultMaxTurnInputTokens,
         };
     }
 }

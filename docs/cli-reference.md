@@ -2745,6 +2745,7 @@ Sets one field by a dotted, case-insensitive key. Loads the existing config (or 
 | `repl.maxIdenticalToolCalls` | Consecutive identical tool calls (same name and arguments) that end a turn, 3–50 (default `5`), or `""` to reset |
 | `repl.warnIdenticalToolCalls` | Identical calls in a row at which the model is nudged to change course, 2–49, always kept below `repl.maxIdenticalToolCalls` (default `3`), or `""` to reset |
 | `repl.maxStreamRetries` | Automatic retries of a stream that dropped mid-response, 0–5 (default `2`), or `""` to reset |
+| `repl.maxTurnInputTokens` | Input tokens one turn may spend across all of its model calls before it stops, 100,000–100,000,000 (default `1000000`), or `""` to reset |
 | `repl.plugins` | Comma-separated plugin list, e.g. `Scratchpad,Http` |
 | `telemetry.otlpEndpoint` | OTLP endpoint URL, or `""` to disable |
 | `telemetry.serviceName` | Requires `telemetry.otlpEndpoint` to already be set |
@@ -2795,7 +2796,7 @@ fuseraft settings set
 
 ### Tool-loop guards
 
-A REPL turn stops itself, keeping the progress so far, when it looks stuck: after `repl.maxConsecutiveToolFailures` failing tool calls in a row, or `repl.maxIdenticalToolCalls` identical calls in a row (or an A/B/A/B alternation between two calls, which is fixed). One call short of the failure cutoff, and at `repl.warnIdenticalToolCalls` identical calls, the model gets a `[SYSTEM NOTICE]` appended to that tool's result so it can change course before being stopped. The warning is always kept below the cutoff — set the cutoff to 3 and the warning lands at 2 — however the two are configured. Raise the limits for a model that legitimately needs more attempts; lowering them trades patience for fewer wasted tokens. Out-of-range values in a hand-edited file are clamped to the ranges above rather than disabling a guard.
+A REPL turn stops itself, keeping the progress so far, when it looks stuck: after `repl.maxConsecutiveToolFailures` failing tool calls in a row, or `repl.maxIdenticalToolCalls` identical calls in a row (or an A/B/A/B alternation between two calls, which is fixed). One call short of the failure cutoff, and at `repl.warnIdenticalToolCalls` identical calls, the model gets a `[SYSTEM NOTICE]` appended to that tool's result so it can change course before being stopped. The warning is always kept below the cutoff — set the cutoff to 3 and the warning lands at 2 — however the two are configured. A turn also stops once the input tokens its model calls have reported add up to `repl.maxTurnInputTokens` — the one guard that stops a turn that is making progress, just too expensively. It stops between rounds, so the last round's tool results are kept, and needs a provider that reports usage on streamed responses (Ollama doesn't, so the budget never fires there). A stopped turn keeps every tool call and result it made, even when the model hadn't written any text yet, and no automatic follow-up turn runs after it. Raise the limits for a model that legitimately needs more attempts; lowering them trades patience for fewer wasted tokens. Out-of-range values in a hand-edited file are clamped to the ranges above rather than disabling a guard.
 
 Settings are read when the REPL starts, so `settings set` from another shell doesn't affect a session that's already running.
 
