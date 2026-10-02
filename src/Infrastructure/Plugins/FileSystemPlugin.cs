@@ -258,6 +258,7 @@ public sealed class FileSystemPlugin : ITurnResettable
             if (_readBudgetUsed + preview.Length > _readBudgetPerTurn)
             {
                 var remaining = _readBudgetPerTurn - _readBudgetUsed;
+                if (remaining <= 0) return BudgetUsedUpResult();
                 if (_readBudgetUsed == 0)
                 {
                     var allowed = Math.Max(1, Math.Min(preview.Length, _readBudgetPerTurn));
@@ -281,6 +282,19 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         return null;
     }
+
+    // Once the budget is fully spent, every further read this turn — any file, any range — would
+    // come back empty. This used to return "nearly exhausted … use narrower read_file ranges"
+    // plus a 1-char slice, which a model takes as advice and follows: in a live grok session it
+    // spent 8 more full-context calls (~420k input tokens) on narrower reads, compaction and
+    // context checks that could never succeed. So say plainly that nothing more can be read and
+    // what to do instead. [DENIED] also counts toward the REPL's consecutive-failure cutoff, so a
+    // model that keeps trying anyway is stopped within a few calls.
+    private string BudgetUsedUpResult() =>
+        $"[DENIED] This turn's read budget is used up ({_readBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars). " +
+        "No read_file call — any file, any line range — can return content again until the user's next message, " +
+        "and compacting or checking context won't change that. Stop reading and answer now with what you already " +
+        "have, naming the files or sections you didn't get to so the user can ask you to continue.";
 
     // Applies the character cap across the selected lines, checks the per-turn read budget,
     // appends a navigation hint when the output is a partial view, and records the read in
@@ -324,7 +338,12 @@ public sealed class FileSystemPlugin : ITurnResettable
             else
             {
                 var remaining = _readBudgetPerTurn - _readBudgetUsed;
-                var allowed = Math.Max(1, Math.Min(built.Length, Math.Max(remaining, 1)));
+                if (remaining <= 0)
+                {
+                    content = null;
+                    return BudgetUsedUpResult();
+                }
+                var allowed = Math.Max(1, Math.Min(built.Length, remaining));
                 built = $"[Read budget nearly exhausted ({_readBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars used this turn). " +
                         $"Returning a compact slice instead of failing so you can keep working. " +
                         $"Use grep_file/get_file_summary or narrower read_file ranges for any follow-up reads in this turn.]\n\n" +

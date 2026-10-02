@@ -65,7 +65,8 @@ internal sealed class AgentMiddlewareBuilder(
                     // cap the sliding tool-pair window and char budget — see
                     // AgentContextCompactionFilters.ApplyInTurnFilters for the full rationale.
                     messages = await AgentContextCompactionFilters.ApplyInTurnFilters(
-                        messages, maxInTurnToolPairs, maxInTurnChars, triggerChars, ct);
+                        messages, maxInTurnToolPairs, maxInTurnChars, triggerChars, ct,
+                        AgentContextCompactionFilters.CacheStableTrimStep);
 
                     // Stop the FunctionInvokingChatClient loop immediately after handoff —
                     // no follow-up LLM call is made, so the agent cannot call more tools.
@@ -190,7 +191,8 @@ internal sealed class AgentMiddlewareBuilder(
             [EnumeratorCancellation] CancellationToken ct)
         {
             messages = await AgentContextCompactionFilters.ApplyInTurnFilters(
-                messages, maxInTurnToolPairs, maxInTurnChars, triggerChars, ct);
+                messages, maxInTurnToolPairs, maxInTurnChars, triggerChars, ct,
+                AgentContextCompactionFilters.CacheStableTrimStep);
             if (hasHandoff && HandoffWasInvoked(messages))
                 yield break;
 

@@ -135,6 +135,10 @@ internal static class ReplFactory
                 toolSchemaChars: toolSchemaChars, maxPayloadBytes: resolved.MaxPayloadBytes,
                 hasHandoff: false, emitter: emitter);
 
+            // Directly under the function-invocation loop, so each of its rounds is counted once —
+            // and above the adaptive-trim retry, which re-sends one round rather than starting another.
+            client = new ModelCallCountingChatClient(client);
+
             // ReplToolLoopGuard's soft repeated-call nudge only makes sense for free-form turns
             // (isStepRequest: false) — StepIterationLimit (5) already bounds a step turn tightly
             // enough that the extra mechanism isn't worth the complexity there. maxIterations

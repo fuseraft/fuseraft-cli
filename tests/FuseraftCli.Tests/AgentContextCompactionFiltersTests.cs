@@ -193,4 +193,88 @@ public sealed class AgentContextCompactionFiltersTests
     private static ChatMessage ToolCallNamed(string callId, string toolName, string argKey, string argValue)
         => new(ChatRole.Assistant,
             [new FunctionCallContent(callId, toolName, new Dictionary<string, object?> { [argKey] = argValue })]);
+
+    // ── cacheStep: trimming past budget keeps most rounds' prefix stable ──────
+
+    // What a provider's prefix cache compares: each message's role and contents, in order.
+    private static string Fingerprint(ChatMessage m)
+        => m.Role + ":" + string.Join("|", m.Contents.Select(c => c switch
+        {
+            FunctionCallContent fc   => $"call {fc.CallId} {fc.Name} {string.Join(",", fc.Arguments?.Select(kv => $"{kv.Key}={kv.Value}") ?? [])}",
+            FunctionResultContent fr => $"result {fr.CallId} {fr.Result}",
+            TextContent t            => $"text {t.Text}",
+            _                        => c.GetType().Name,
+        }));
+
+    // Grows a transcript one tool round at a time, as a long REPL turn does, and counts the rounds
+    // whose filtered request does NOT begin with the previous round's filtered request — each of
+    // those is a prompt-cache miss on nearly the whole request.
+    private static async Task<int> CountPrefixChanges(int rounds, int maxPairs, int maxChars, int cacheStep)
+    {
+        var transcript = new List<ChatMessage> { new(ChatRole.User, "do the task") };
+        List<string>? previous = null;
+        int changes = 0;
+        for (int i = 0; i < rounds; i++)
+        {
+            transcript.Add(ToolCall($"c{i}", i));
+            transcript.Add(ToolResult($"c{i}", new string((char)('a' + i % 26), 1_000)));
+
+            var current = (await AgentContextCompactionFilters.ApplyInTurnFilters(
+                    transcript, maxPairs, maxChars, triggerChars: 10, cacheStep: cacheStep))
+                .Select(Fingerprint).ToList();
+            if (previous is not null && !current.Take(previous.Count).SequenceEqual(previous))
+                changes++;
+            previous = current;
+        }
+        return changes;
+    }
+
+    [Fact]
+    public async Task PairWindow_WithoutCacheStep_ChangesThePrefixEveryRoundPastTheWindow()
+    {
+        // Baseline the step exists to fix: a window held at exactly 4 slides on every round.
+        Assert.True(await CountPrefixChanges(rounds: 40, maxPairs: 4, maxChars: 0, cacheStep: 1) >= 30);
+    }
+
+    [Fact]
+    public async Task PairWindow_WithCacheStep_ChangesThePrefixOnlyOncePerStep()
+    {
+        Assert.True(await CountPrefixChanges(rounds: 40, maxPairs: 4, maxChars: 0, cacheStep: 8) <= 40 / 8);
+    }
+
+    [Fact]
+    public async Task CharBudget_WithCacheStep_ChangesThePrefixOnlyOncePerStep()
+    {
+        // No pair window; 1k-char results against a 10k budget force the char trim on most rounds.
+        Assert.True(await CountPrefixChanges(rounds: 40, maxPairs: 0, maxChars: 10_000, cacheStep: 1) >= 25);
+        Assert.True(await CountPrefixChanges(rounds: 40, maxPairs: 0, maxChars: 10_000, cacheStep: 8) <= 40 / 8);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(8)]
+    public void CharBudget_StaysUnderBudgetWhateverTheStep(int step)
+    {
+        var messages = ToolRounds(30, new string('r', 1_000));
+
+        var result = AgentContextCompactionFilters.TrimInTurnContext(messages, maxChars: 10_000, step: step).ToList();
+
+        Assert.True(AgentContextCompactionFilters.EstimateTotalChars(result) <= 10_000);
+    }
+
+    [Theory]
+    [InlineData(10, 12)]   // under the floor: the floor
+    [InlineData(12, 12)]
+    [InlineData(13, 13)]   // the window floats up to floor + step - 1 …
+    [InlineData(19, 19)]
+    [InlineData(20, 12)]   // … then drops back, collapsing a whole step of groups at once
+    [InlineData(27, 19)]
+    public void StableWindowSize_FloatsBetweenTheFloorAndAStepAboveIt(int groups, int expected)
+    {
+        // One user message plus tool rounds; a system message must not count as a group.
+        var messages = new List<ChatMessage> { new(ChatRole.System, "sys"), new(ChatRole.User, "go") };
+        messages.AddRange(ToolRounds(groups - 1, "ok"));
+
+        Assert.Equal(expected, AgentContextCompactionFilters.StableWindowSize(messages, minPreserved: 12, step: 8));
+    }
 }

@@ -44,6 +44,15 @@ public sealed class TransientRetryHandlerTests
         Assert.Equal(3, delays.Count);
     }
 
+    // The OpenAI SDK's own retry policy (now switched off) used to be what retried a 408.
+    [Fact]
+    public async Task RequestTimeout_IsRetried()
+    {
+        var (_, calls, _) = await SendAsync(HttpStatusCode.RequestTimeout, transport: null);
+
+        Assert.Equal(4, calls);
+    }
+
     [Fact]
     public async Task ZeroRetries_SurfacesTheFirstFailureImmediately()
     {

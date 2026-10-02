@@ -274,8 +274,7 @@ public sealed class ChatClientFactory(
                     throw new InvalidOperationException(
                         $"No API key available for Azure deployment '{config.ModelId}' at '{config.Endpoint}'. " +
                         $"Run 'fuseraft repl' and complete the setup wizard, or add \"apiKeyEnvVar\": \"<VAR>\" to ~/.fuseraft/config.");
-                var azureOptions = new AzureOpenAIClientOptions { Transport = transport, NetworkTimeout = _transport.RequestTimeout };
-                if (SdkRetryPolicy() is { } azureRetry) azureOptions.RetryPolicy = azureRetry;
+                var azureOptions = new AzureOpenAIClientOptions { Transport = transport, NetworkTimeout = _transport.RequestTimeout, RetryPolicy = NoSdkRetries };
                 return new CacheUsageBackfillChatClient(new AzureOpenAIClient(
                     new Uri(config.Endpoint),
                     new ApiKeyCredential(apiKey),
@@ -309,8 +308,7 @@ public sealed class ChatClientFactory(
                     throw new InvalidOperationException(
                         $"No API key available for model '{config.ModelId}' at '{config.Endpoint}'. " +
                         $"Run 'fuseraft repl' and complete the setup wizard, or add \"apiKeyEnvVar\": \"<VAR>\" to ~/.fuseraft/config.");
-                var openAiOptions = new OpenAIClientOptions { Transport = transport, Endpoint = new Uri(config.Endpoint), NetworkTimeout = _transport.RequestTimeout };
-                if (SdkRetryPolicy() is { } openAiRetry) openAiOptions.RetryPolicy = openAiRetry;
+                var openAiOptions = new OpenAIClientOptions { Transport = transport, Endpoint = new Uri(config.Endpoint), NetworkTimeout = _transport.RequestTimeout, RetryPolicy = NoSdkRetries };
                 return new CacheUsageBackfillChatClient(new OpenAIClient(
                     new ApiKeyCredential(apiKey),
                     openAiOptions)
@@ -343,11 +341,11 @@ public sealed class ChatClientFactory(
         return false;
     }
 
-    // The OpenAI/Azure SDKs stack their own retry policy (3 retries) on top of TransientRetryHandler's, so an
-    // unconfigured hard failure can take up to 4 x 4 attempts. Once provider.maxRetries is set the handler is
-    // the only retry layer, which is what makes the configured number exact (0 really means no retries).
-    private System.ClientModel.Primitives.ClientRetryPolicy? SdkRetryPolicy() =>
-        _transport.MaxRetriesConfigured ? new System.ClientModel.Primitives.ClientRetryPolicy(maxRetries: 0) : null;
+    // The OpenAI/Azure SDKs would otherwise stack their own retry policy (3 retries) on top of
+    // TransientRetryHandler's, so one hard failure could take 4 x 4 = 16 attempts — and behind a gateway that
+    // times out (504) after the model behind it has already answered, every one of those attempts can be
+    // billed. TransientRetryHandler is the only retry layer, so provider.maxRetries is always exact.
+    private static readonly System.ClientModel.Primitives.ClientRetryPolicy NoSdkRetries = new(maxRetries: 0);
 
     // Deliberately a plain HttpClient, not the resilient one: Ollama streams NDJSON rather than SSE,
     // so TransientRetryHandler's SSE idle-timeout wrapper would mistake every stream for a stalled one.

@@ -611,6 +611,13 @@ the cache invalidated) on every single round once the pair count merely exceeds 
 mirrors how Cline's own context-compaction pipeline only triggers past ~90% of usable input
 rather than reshaping the transcript on every call.
 
+**Moves in steps once triggered:** past the trigger, the window and the char budget below
+move their cut points 8 groups or results at a time rather than one per round. Each move
+rewrites a message near the start of the request — a prompt-cache miss on nearly all of
+it — so the window floats between `MaxInTurnToolPairs` and `MaxInTurnToolPairs + 7` groups,
+and the char budget trims results in batches of 8, keeping the prefix unchanged for the
+rounds in between instead of breaking the cache on every one.
+
 **Deterministic vs. budget-reactive:**
 
 | Field | When it fires | Guarantee |

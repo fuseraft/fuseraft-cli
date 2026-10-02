@@ -396,6 +396,8 @@ Unlike [Scratchpad](#scratchpad) (free-form key/value notes), Todo holds one ord
 | `todo_write` | `itemsJson` | Replace the current todo list. Pass a JSON array of items, e.g. `[{"content":"Read entry point","status":"completed"},{"content":"Map request flow","status":"in_progress"}]`. `status` is one of `pending`, `in_progress`, `completed`. Always pass the complete list, not just the changed item — this call replaces the whole list. |
 | `todo_read` | — | Read the current todo list. |
 
+When the model ends a turn with items it wrote during the current request still open (and its answer doesn't end in a question), the REPL sends it a follow-up asking it to finish them — up to `repl.maxTodoNudges` times (default 2; 0 turns this off). A list left over from an earlier request doesn't trigger these, and `/clear` empties the list.
+
 ---
 
 ## Ask

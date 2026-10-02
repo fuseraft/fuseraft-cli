@@ -16,6 +16,8 @@ public sealed class ReplLimitsTests
         Assert.Equal(ReplTurn.MaxConsecutiveIdenticalToolCalls, l.MaxIdenticalToolCalls);
         Assert.Equal(ReplTurn.SoftRepeatedToolCallThreshold, l.WarnIdenticalToolCalls);
         Assert.Equal(2, l.MaxStreamRetries);
+        Assert.Equal(1_000_000, l.MaxTurnInputTokens);
+        Assert.Equal(2, l.MaxTodoNudges);
     }
 
     [Fact]
@@ -31,6 +33,7 @@ public sealed class ReplLimitsTests
         {
             AutoCompactThreshold = 0.6, CompactPreserveTailRatio = 0.3, MaxConsecutiveToolFailures = 8,
             MaxIdenticalToolCalls = 12, WarnIdenticalToolCalls = 7, MaxStreamRetries = 4,
+            MaxTurnInputTokens = 250_000, MaxTodoNudges = 0,
         });
 
         Assert.Equal(0.6, l.AutoCompactThreshold);
@@ -39,6 +42,8 @@ public sealed class ReplLimitsTests
         Assert.Equal(12, l.MaxIdenticalToolCalls);
         Assert.Equal(7, l.WarnIdenticalToolCalls);
         Assert.Equal(4, l.MaxStreamRetries);
+        Assert.Equal(250_000, l.MaxTurnInputTokens);
+        Assert.Equal(0, l.MaxTodoNudges);
     }
 
     [Fact]
@@ -47,7 +52,8 @@ public sealed class ReplLimitsTests
         var l = ReplLimits.From(new ReplDefaultsConfig
         {
             AutoCompactThreshold = 5, CompactPreserveTailRatio = 0, MaxConsecutiveToolFailures = 0,
-            MaxIdenticalToolCalls = 1, MaxStreamRetries = 99,
+            MaxIdenticalToolCalls = 1, MaxStreamRetries = 99, MaxTurnInputTokens = 0,
+            MaxTodoNudges = 99,
         });
 
         Assert.Equal(ReplLimits.AutoCompactThresholdMax, l.AutoCompactThreshold);
@@ -55,6 +61,8 @@ public sealed class ReplLimitsTests
         Assert.Equal(ReplLimits.ToolFailuresMin, l.MaxConsecutiveToolFailures);
         Assert.Equal(ReplLimits.IdenticalCallsMin, l.MaxIdenticalToolCalls);
         Assert.Equal(ReplLimits.StreamRetriesMax, l.MaxStreamRetries);
+        Assert.Equal(ReplLimits.TurnInputTokensMin, l.MaxTurnInputTokens);
+        Assert.Equal(ReplLimits.TodoNudgesMax, l.MaxTodoNudges);
     }
 
     [Theory]

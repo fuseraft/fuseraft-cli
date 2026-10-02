@@ -719,15 +719,44 @@ public sealed class FileSystemPluginTests : IDisposable
     }
 
     [Fact]
-    public async Task ReadFile_SubsequentReadAfterBudgetExhausted_ReturnsCompactSlice()
+    public async Task ReadFile_ReadThatOnlyPartlyFits_ReturnsTheSliceThatFits()
+    {
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, readBudgetPerTurn: 100);
+        await File.WriteAllTextAsync(TempPath("first.txt"), new string('a', 59));
+        await File.WriteAllTextAsync(TempPath("big.txt"), new string('x', 200));
+        _ = await plugin.ReadFileAsync(TempPath("first.txt"));      // 60 of 100 used
+        var result = await plugin.ReadFileAsync(TempPath("big.txt"));
+        Assert.False(result.StartsWith("[ERROR]"));
+        Assert.Contains("Read budget nearly exhausted", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(new string('x', 40), result);
+        Assert.DoesNotContain(new string('x', 41), result);
+    }
+
+    // Used to return "nearly exhausted … use narrower read_file ranges" plus one character, which
+    // models took as advice and kept retrying narrower reads that could never return anything.
+    [Fact]
+    public async Task ReadFile_AfterTheBudgetIsUsedUp_IsDeniedAndSaysToStopReading()
     {
         var plugin = new FileSystemPlugin(sandboxRoot: _dir, readBudgetPerTurn: 10);
         await File.WriteAllTextAsync(TempPath("big.txt"), new string('x', 200));
         await File.WriteAllTextAsync(TempPath("small.txt"), "hello");
         _ = await plugin.ReadFileAsync(TempPath("big.txt"));
         var result = await plugin.ReadFileAsync(TempPath("small.txt"));
-        Assert.False(result.StartsWith("[ERROR]"));
-        Assert.Contains("Read budget nearly exhausted", result, StringComparison.OrdinalIgnoreCase);
+        Assert.StartsWith("[DENIED]", result);
+        Assert.Contains("used up", result);
+        Assert.DoesNotContain("hello", result);
+        Assert.True(fuseraft.Cli.Commands.Repl.ReplTurn.IsToolFailureText(result));
+    }
+
+    [Fact]
+    public async Task ReadFile_AfterTheBudgetIsUsedUp_IsAvailableAgainNextTurn()
+    {
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, readBudgetPerTurn: 10);
+        await File.WriteAllTextAsync(TempPath("big.txt"), new string('x', 200));
+        await File.WriteAllTextAsync(TempPath("small.txt"), "hello");
+        _ = await plugin.ReadFileAsync(TempPath("big.txt"));
+        ((ITurnResettable)plugin).BeginTurn();
+        Assert.Contains("hello", await plugin.ReadFileAsync(TempPath("small.txt")));
     }
 
     // -----------------------------------------------------------------------

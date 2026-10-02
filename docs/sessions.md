@@ -134,7 +134,7 @@ REPL agents can inspect their own session and diagnostic logs using the built-in
 | `inner_call_context` | Snapshot of the exact message-content breakdown about to be sent, taken after in-turn compaction — payload: `seq`, `msg_counts` (`user`/`assistant`/`tool`), `content_chars` (`text`, `reasoning_text`, `fn_call_args`, `fn_results`, `tool_schema_est`, `grand_total`), `est_tokens` |
 | `model_call` | One inner LLM HTTP request is about to be sent (a turn with tool calls fires several) — payload: `model`, `attempt`, `message_count`, `call_seq`, `streaming` — correlates with `inner_call_context` via `call_seq` |
 | `model_response` | LLM response received for that inner call — payload: `model`, `finish_reason`, `input_tokens`, `output_tokens`, `call_seq` |
-| `turn_end` | Model finishes a turn — payload: `elapsed_ms`, `estimated_tokens`, `tool_rounds`, `tool_count`, `is_step`, `is_correction` |
+| `turn_end` | Model finishes a turn — payload: `elapsed_ms`, `estimated_tokens`, `tool_rounds` (model calls the turn made, retried attempts included), `tool_count`, `is_step`, `is_correction` |
 | `assistant_response` | Final assistant message for the turn |
 | `tool_call` | Each individual tool invocation |
 | `compaction` | Context compacted (manual `/compact`, `compact_context` tool, or automatic threshold trigger, 75% by default) — payload: `before_tokens`, `after_tokens`, `source`, `focus` |
@@ -142,7 +142,7 @@ REPL agents can inspect their own session and diagnostic logs using the built-in
 | `context_warning` | Context usage crosses the auto-compact threshold (75% of the context budget by default; `repl.autoCompactThreshold`) — payload: `estimated_tokens`, `is_actual`, `budget`, `pct`, `auto_compact` |
 | `goal_started` / `goal_audit` / `goal_ended` | A [`/goal`](repl.md#working-until-its-really-done-goal) run — payloads: the objective, audit budget and `continued` (true when a reply resumed a paused goal); per audit `iteration`, `score`, `complete`, `blocked`, `missing`, `action`; and the final `end` (`Complete`, `Capped`, `Stalled`, `Blocked`, `Interrupted`, `JudgeFailed`). |
 | `user_input` images | A turn's `user_input` event carries `images` — how many were attached. The bytes are never logged. |
-| `repl_warning` | Non-fatal issue with a turn's response — payload: `message` (`empty_response`, `invalid_response_content`, `hit_iteration_cap`, or `hit_consecutive_failure_limit`), plus `tool_rounds`/`limit` for `hit_iteration_cap` or `failures`/`last_tool` for `hit_consecutive_failure_limit` |
+| `repl_warning` | Non-fatal issue with a turn's response — payload: `message` (`empty_response`, `invalid_response_content`, `hit_iteration_cap`, `hit_consecutive_failure_limit`, `hit_repeated_tool_call_limit`, or `hit_turn_token_budget`), plus `tool_rounds`/`limit` for `hit_iteration_cap`, `failures`/`last_tool` for `hit_consecutive_failure_limit`, `limit`/`detail` for `hit_repeated_tool_call_limit`, or `input_tokens`/`limit` for `hit_turn_token_budget` |
 | `correction_injected` | Harness injects a write-tool correction after a mutation claim without a backing tool call — payload: `reason` |
 | `plan_captured` | `/plan` stores a new step plan — payload: `step_count` |
 | `step_complete` | `/execute` step passes postconditions — payload: `step`, `total`, `skipped`, `steps_left`, `hit_iteration_cap`, `hit_consecutive_failure_limit` |

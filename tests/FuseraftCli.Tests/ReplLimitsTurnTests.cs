@@ -36,6 +36,7 @@ public sealed class ReplLimitsTurnTests : IDisposable
     private sealed class ScriptedClient(Func<int, IAsyncEnumerable<ChatResponseUpdate>> stream) : IChatClient
     {
         public int Streams;
+        public readonly List<List<ChatMessage>> Requests = [];
 
         public ChatClientMetadata Metadata => new("test", null!, "stub");
 
@@ -45,7 +46,10 @@ public sealed class ReplLimitsTurnTests : IDisposable
 
         public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
-            => stream(Streams++);
+        {
+            Requests.Add([.. messages]);
+            return stream(Streams++);
+        }
 
         public object? GetService(Type serviceType, object? key = null) => null;
         public void Dispose() { }
@@ -100,6 +104,86 @@ public sealed class ReplLimitsTurnTests : IDisposable
             yield return Usage(10);
         }
     }
+
+    // Distinct, succeeding calls in the shape a provider streams them: the round's call and its
+    // usage, then (once the invocation loop has run the tool) the tool's result.
+    private static async IAsyncEnumerable<ChatResponseUpdate> CostlyRounds(List<int> rounds, int count, int inputPerRound)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            rounds.Add(i);
+            yield return new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                Contents =
+                [
+                    new FunctionCallContent($"c{i}", "read_file", new Dictionary<string, object?> { ["path"] = $"f{i}.md" }),
+                    new UsageContent(new UsageDetails { InputTokenCount = inputPerRound, OutputTokenCount = 5 }),
+                ],
+            };
+            await Task.Yield();
+            yield return new ChatResponseUpdate
+            {
+                Role = ChatRole.Tool,
+                Contents = [new FunctionResultContent($"c{i}", $"[OK] contents of f{i}.md")],
+            };
+        }
+        yield return new ChatResponseUpdate { Role = ChatRole.Assistant, Contents = [new TextContent("Done.")] };
+        yield return Usage(inputPerRound);
+    }
+
+    // FailingCalls without its opening text — a turn the failure cutoff stops before the model
+    // has said anything at all.
+    private static async IAsyncEnumerable<ChatResponseUpdate> SilentFailingCalls(int count)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            yield return new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                Contents = [new FunctionCallContent($"c{i}", "read_file", new Dictionary<string, object?> { ["path"] = $"f{i}.md" })],
+            };
+            await Task.Yield();
+            yield return new ChatResponseUpdate
+            {
+                Role = ChatRole.Tool,
+                Contents = [new FunctionResultContent($"c{i}", $"[ERROR] boom {i}")],
+            };
+            yield return Usage(10);
+        }
+    }
+
+    private static bool HasResult(ReplSessionContext ctx, string callId) =>
+        ctx.History.SelectMany(m => m.Contents).OfType<FunctionResultContent>().Any(r => r.CallId == callId);
+
+    // One round that finishes (call c0, its usage, then its result — the tool has run), then the
+    // stream dies part way through the next round's text.
+    private static async IAsyncEnumerable<ChatResponseUpdate> RoundThenDrop(Exception drop)
+    {
+        yield return new ChatResponseUpdate
+        {
+            Role = ChatRole.Assistant,
+            Contents =
+            [
+                new FunctionCallContent("c0", "write_file", new Dictionary<string, object?> { ["path"] = "a.md" }),
+                new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 5 }),
+            ],
+        };
+        await Task.Yield();
+        yield return new ChatResponseUpdate { Role = ChatRole.Tool, Contents = [new FunctionResultContent("c0", "[OK] wrote a.md")] };
+        yield return new ChatResponseUpdate { Role = ChatRole.Assistant, Contents = [new TextContent("Now I'll wri")] };
+        throw drop;
+    }
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> Answer(string text)
+    {
+        await Task.Yield();
+        yield return new ChatResponseUpdate { Role = ChatRole.Assistant, Contents = [new TextContent(text)] };
+        yield return Usage(10);
+    }
+
+    private static int ResultCount(IEnumerable<ChatMessage> messages, string callId) =>
+        messages.SelectMany(m => m.Contents).OfType<FunctionResultContent>().Count(r => r.CallId == callId);
 
     private static async IAsyncEnumerable<ChatResponseUpdate> TextWithInputTokens(int inputTokens)
     {
@@ -180,7 +264,109 @@ public sealed class ReplLimitsTurnTests : IDisposable
         Assert.Equal(6, payload.GetProperty("failures").GetInt32());
     }
 
+    // ── per-turn input-token budget / stopped turns ──────────────────────────
+
+    [Fact]
+    public async Task TurnTokenBudget_StopsAtTheRoundThatCrossesIt_KeepingThatRoundsResults()
+    {
+        var rounds = new List<int>();
+        var client = new ScriptedClient(_ => CostlyRounds(rounds, count: 10, inputPerRound: 300_000));
+        var (ctx, eventsPath) = NewContext(client, new ReplDefaultsConfig { MaxTurnInputTokens = 1_000_000 });
+
+        await RunAsync(ctx);
+
+        // 4 × 300k crosses 1M; the 4th round's tool already ran, so its result is kept, and the
+        // 5th model call is never made.
+        Assert.Equal(4, rounds.Count);
+        Assert.True(HasResult(ctx, "c3"));
+        Assert.False(HasResult(ctx, "c4"));
+        var payload = Payload(await File.ReadAllLinesAsync(eventsPath), "hit_turn_token_budget");
+        Assert.Equal(1_000_000, payload.GetProperty("limit").GetInt32());
+        Assert.Equal(1_200_000, payload.GetProperty("input_tokens").GetInt64());
+    }
+
+    [Fact]
+    public async Task TurnTokenBudget_StoppedTurnWithNoText_KeepsItsWorkAndRunsNoRetryTurn()
+    {
+        var rounds = new List<int>();
+        var client = new ScriptedClient(_ => CostlyRounds(rounds, count: 10, inputPerRound: 300_000));
+        var (ctx, eventsPath) = NewContext(client, new ReplDefaultsConfig { MaxTurnInputTokens = 1_000_000 });
+
+        await RunAsync(ctx);
+
+        Assert.Equal(1, client.Streams);
+        Assert.Equal(ChatRole.Assistant, ctx.History[^1].Role);
+        Assert.StartsWith(ReplTurn.StoppedEarlyNotePrefix, ctx.History[^1].Text);
+        Assert.Contains("input-token budget", ctx.History[^1].Text);
+        Assert.DoesNotContain(await File.ReadAllLinesAsync(eventsPath), l => l.Contains("\"correction_injected\""));
+    }
+
+    [Fact]
+    public async Task TurnUnderTheTokenBudget_FinishesNormally()
+    {
+        var rounds = new List<int>();
+        var (ctx, eventsPath) = NewContext(
+            new ScriptedClient(_ => CostlyRounds(rounds, count: 3, inputPerRound: 10)), repl: null);
+
+        await RunAsync(ctx);
+
+        Assert.Equal(3, rounds.Count);
+        Assert.Contains(ctx.History, m => m.Role == ChatRole.Assistant && m.Text.Contains("Done."));
+        Assert.DoesNotContain(await File.ReadAllLinesAsync(eventsPath), l => l.Contains("\"hit_turn_token_budget\""));
+    }
+
+    [Fact]
+    public void StopNote_JoinsAClosingTextMessage_RatherThanAddingASecondAssistantMessage()
+    {
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.User, "go"),
+            new(ChatRole.Assistant, "Continuing with the remaining files."),
+        };
+
+        ReplTurn.AppendStoppedEarlyNote(history, "it reached the per-turn input-token budget");
+
+        Assert.Equal(2, history.Count);
+        Assert.Contains("Continuing with the remaining files.", history[^1].Text);
+        Assert.Contains("input-token budget", history[^1].Text);
+    }
+
+    // Previously the failure cutoff on a turn with no text fell into the empty-reply retry: the
+    // stopped turn's tool calls were dropped and a whole extra turn ran.
+    [Fact]
+    public async Task FailureCutoffWithNoText_KeepsTheToolCallsAndRunsNoRetryTurn()
+    {
+        var client = new ScriptedClient(_ => SilentFailingCalls(count: 12));
+        var (ctx, eventsPath) = NewContext(client, repl: null);
+
+        await RunAsync(ctx);
+
+        Assert.Equal(1, client.Streams);
+        Assert.True(HasResult(ctx, "c0"));
+        Assert.StartsWith(ReplTurn.StoppedEarlyNotePrefix, ctx.History[^1].Text);
+        Assert.Contains("tool calls in a row failed", ctx.History[^1].Text);
+        Assert.Contains(await File.ReadAllLinesAsync(eventsPath), l => l.Contains("\"hit_consecutive_failure_limit\""));
+    }
+
     // ── context warning / auto-compact threshold ─────────────────────────────
+
+    // The provider's input count is taken after in-turn trimming, so it can sit far below the
+    // history the REPL is actually keeping; the larger of the two has to decide.
+    [Fact]
+    public async Task ContextWarning_UsesTheKeptHistory_WhenTheProviderCountIsSmaller()
+    {
+        var (ctx, eventsPath) = NewContext(
+            new ScriptedClient(_ => TextWithInputTokens(10)),
+            new ReplDefaultsConfig { AutoCompact = false });
+        ctx.History.Add(new ChatMessage(ChatRole.User, new string('x', 280_000)));   // ~70k of the 80k budget
+        ctx.History.Add(new ChatMessage(ChatRole.Assistant, "ok"));
+
+        await RunAsync(ctx);
+
+        var payload = Payload(await File.ReadAllLinesAsync(eventsPath), "context_warning");
+        Assert.False(payload.GetProperty("is_actual").GetBoolean());
+        Assert.True(payload.GetProperty("estimated_tokens").GetInt32() >= 70_000);
+    }
 
     // The budget for an unrecognised model ID is 80,000 tokens.
     [Theory]
@@ -236,5 +422,65 @@ public sealed class ReplLimitsTurnTests : IDisposable
 
         Assert.Equal(2, client.Streams);
         Assert.Contains(ctx.History, m => m.Role == ChatRole.Assistant && m.Text.Contains("Recovered."));
+    }
+
+    // ── interrupted turns keep the rounds that finished ──────────────────────
+
+    // A retry used to resend the request as it stood when the turn began, re-running every
+    // model call and tool call (writes included) the turn had already made.
+    [Fact]
+    public async Task StreamRetry_AfterARoundFinished_ResumesFromItInsteadOfRerunningIt()
+    {
+        var client = new ScriptedClient(attempt => attempt == 0
+            ? RoundThenDrop(new IOException("connection was reset"))
+            : Answer("Done."));
+        var (ctx, _) = NewContext(client, new ReplDefaultsConfig { MaxStreamRetries = 1 });
+
+        await RunAsync(ctx);
+
+        Assert.Equal(2, client.Streams);
+        Assert.Equal(1, ResultCount(client.Requests[1], "c0"));   // the retry carries on from c0
+        Assert.Equal(1, ResultCount(ctx.History, "c0"));          // recorded once, not twice
+        Assert.Contains(ctx.History, m => m.Role == ChatRole.Assistant && m.Text.Contains("Done."));
+        Assert.DoesNotContain(ctx.History, m => m.Text.Contains("Now I'll wri"));
+    }
+
+    [Fact]
+    public async Task FailedTurn_AfterARoundFinished_KeepsItsWork()
+    {
+        var client = new ScriptedClient(_ => RoundThenDrop(new InvalidOperationException("boom")));
+        var (ctx, _) = NewContext(client, new ReplDefaultsConfig { MaxStreamRetries = 0 });
+
+        await RunAsync(ctx);
+
+        Assert.Contains(ctx.History, m => m.Role == ChatRole.User && m.Text == "go");
+        Assert.Equal(1, ResultCount(ctx.History, "c0"));
+        Assert.StartsWith(ReplTurn.StoppedEarlyNotePrefix, ctx.History[^1].Text);
+        Assert.Contains("failed with an error (boom)", ctx.History[^1].Text);
+        Assert.Equal(10, ctx.CumulativeInputTokens);   // billed even though the turn failed
+    }
+
+    [Fact]
+    public async Task CancelledTurn_AfterARoundFinished_KeepsItsWork()
+    {
+        var client = new ScriptedClient(_ => RoundThenDrop(new OperationCanceledException()));
+        var (ctx, _) = NewContext(client, repl: null);
+
+        await RunAsync(ctx);
+
+        Assert.Equal(1, ResultCount(ctx.History, "c0"));
+        Assert.StartsWith(ReplTurn.StoppedEarlyNotePrefix, ctx.History[^1].Text);
+        Assert.Contains("the user cancelled it", ctx.History[^1].Text);
+    }
+
+    [Fact]
+    public async Task FailedTurn_BeforeAnyRoundFinished_WithdrawsTheUserMessage()
+    {
+        var client = new ScriptedClient(attempt => DropsThenAnswers(attempt, dropsBeforeSuccess: 1));
+        var (ctx, _) = NewContext(client, new ReplDefaultsConfig { MaxStreamRetries = 0 });
+
+        await RunAsync(ctx);
+
+        Assert.DoesNotContain(ctx.History, m => m.Role == ChatRole.User);
     }
 }

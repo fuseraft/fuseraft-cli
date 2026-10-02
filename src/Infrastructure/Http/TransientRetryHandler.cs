@@ -150,6 +150,7 @@ internal sealed class TransientRetryHandler(
 
     private static bool IsRetryable(HttpResponseMessage r) =>
         r.StatusCode == HttpStatusCode.NotFound            || // 404 — transient backend unavailability (e.g. Open WebUI / Bedrock)
+        r.StatusCode == HttpStatusCode.RequestTimeout      || // 408 — the OpenAI SDK's own policy retried it, before that was switched off
         r.StatusCode == HttpStatusCode.TooManyRequests     || // 429
         r.StatusCode == HttpStatusCode.InternalServerError || // 500
         r.StatusCode == HttpStatusCode.BadGateway          || // 502

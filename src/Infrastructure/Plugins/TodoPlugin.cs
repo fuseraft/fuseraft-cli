@@ -20,6 +20,14 @@ public sealed class TodoPlugin
 {
     private readonly Lock _lock = new();
     private List<TodoItem> _items = [];
+    private int _version;
+
+    /// <summary>
+    /// Bumped by every successful <see cref="Write"/> — and only by that, not by <see cref="Restore"/>
+    /// or <see cref="Clear"/> — so the REPL can tell whether the model wrote the list during the
+    /// request it is working on now rather than inheriting it from an earlier one.
+    /// </summary>
+    internal int Version { get { lock (_lock) return _version; } }
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -66,7 +74,7 @@ public sealed class TodoPlugin
                 return $"[ERROR] Invalid status '{item.Status}' on '{item.Content}' — use pending, in_progress, or completed.";
         }
 
-        lock (_lock) _items = parsed;
+        lock (_lock) { _items = parsed; _version++; }
         return Render(parsed);
     }
 
@@ -91,6 +99,12 @@ public sealed class TodoPlugin
     internal void Restore(IReadOnlyList<TodoItem> items)
     {
         lock (_lock) _items = [.. items];
+    }
+
+    /// <summary>Empties the list (used by <c>/clear</c>).</summary>
+    internal void Clear()
+    {
+        lock (_lock) _items = [];
     }
 
     internal static string Render(IReadOnlyList<TodoItem> items)

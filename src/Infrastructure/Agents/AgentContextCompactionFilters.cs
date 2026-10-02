@@ -48,6 +48,13 @@ internal static class AgentContextCompactionFilters
     // staleness has piled up is it worth paying the one-time cache miss to reclaim the space.
     internal const int DefaultMinSupersededDropChars = 65_536;
 
+    // How far ApplyInTurnFilters' sliding window and char-budget trim move their cut points at a
+    // time once a turn is past budget (its cacheStep). Every move rewrites a message near the
+    // start of the request and costs a full prompt-cache miss, so moving 8 at a time instead of
+    // 1 per round lets roughly 7 of every 8 rounds hit the cache. Larger steps keep up to
+    // step - 1 extra groups per request or trim up to step - 1 results early.
+    internal const int CacheStableTrimStep = 8;
+
     /// <summary>
     /// Truncates verbose content in intermediate (tool-calling) assistant messages:
     /// <list type="bullet">
@@ -545,6 +552,25 @@ internal static class AgentContextCompactionFilters
         return await CompactionProvider.CompactAsync(strategy, messages, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// The window size to hand <see cref="KeepLastToolPairs"/> so its collapse boundary moves in
+    /// jumps of <paramref name="step"/> groups rather than one group per round. A window held at
+    /// exactly <paramref name="minPreserved"/> slides by one every round, rewriting the oldest
+    /// surviving group each time — which changes the request near its start and costs a full
+    /// prompt-cache miss on every call. Letting the window float between
+    /// <paramref name="minPreserved"/> and <c>minPreserved + step - 1</c> keeps the collapsed
+    /// prefix identical until another whole <paramref name="step"/> groups have accrued.
+    /// Groups are counted the way <see cref="ToolResultCompactionStrategy.MinimumPreservedGroups"/>
+    /// measures them: every non-system message is one group, except tool results, which belong
+    /// to the assistant call before them.
+    /// </summary>
+    internal static int StableWindowSize(IList<ChatMessage> messages, int minPreserved, int step)
+    {
+        if (step <= 1) return minPreserved;
+        var groups = messages.Count(m => m.Role != ChatRole.System && m.Role != ChatRole.Tool);
+        return groups <= minPreserved ? minPreserved : minPreserved + (groups - minPreserved) % step;
+    }
 #pragma warning restore MAAI001
 
     /// <summary>
@@ -582,9 +608,17 @@ internal static class AgentContextCompactionFilters
     /// replaced with a compact placeholder (preserving the <c>CallId</c> on tool results so the
     /// provider sees a structurally valid conversation). Everything else is never removed.
     /// </summary>
+    /// <param name="step">
+    /// Rounds the number of placeholdered results up to a multiple of this. Each call re-trims
+    /// the untrimmed transcript from scratch, so trimming only what is needed moves the cut by
+    /// about one result per round — a change near the start of the request that costs a full
+    /// prompt-cache miss on every call. Trimming in steps holds the cut still until the
+    /// transcript has outgrown it again. 1 (the default) trims exactly what is needed.
+    /// </param>
     internal static IEnumerable<ChatMessage> TrimInTurnContext(
         IEnumerable<ChatMessage> messages,
-        int maxChars)
+        int maxChars,
+        int step = 1)
     {
         var list = messages as IList<ChatMessage> ?? messages.ToList();
 
@@ -593,35 +627,31 @@ internal static class AgentContextCompactionFilters
         if (total <= maxChars) return list;
 
         // Collect indices of trimmable messages (oldest first).
-        var trimCandidates = new Queue<int>();
+        var candidates = new List<int>();
         for (int i = 0; i < list.Count; i++)
-            if (IsTrimmableMessage(list[i])) trimCandidates.Enqueue(i);
+            if (IsTrimmableMessage(list[i])) candidates.Add(i);
+
+        // How many of the oldest candidates must go to get under budget, then rounded up to a
+        // whole step (see the step parameter).
+        int needed = 0;
+        for (int projected = total; projected > maxChars && needed < candidates.Count; needed++)
+            projected -= MessageChars(list[candidates[needed]]) - MessageChars(ToPlaceholder(list[candidates[needed]]));
+        int trimCount = step > 1
+            ? Math.Min(candidates.Count, (needed + step - 1) / step * step)
+            : needed;
+        var trimCandidates = new Queue<int>(candidates.Take(trimCount));
 
         // Phase 1: replace oldest tool results with a tiny placeholder until under budget.
         // Wording mirrors ElisionMarkers.ArgValueNote: not just "shortened" but explicitly not
         // the real output, so the model doesn't reuse it as data (e.g. treating an elided
         // read_file result as the actual file contents when writing it elsewhere).
         var result = new List<ChatMessage>(list);
-        const string Placeholder = ElisionMarkers.ResultNote;
-        while (total > maxChars && trimCandidates.Count > 0)
+        while (trimCandidates.Count > 0)
         {
             int idx = trimCandidates.Dequeue();
-            var old = result[idx];
-            int oldChars = old.Contents.Sum(c => EstimateContentChars(c));
-
-            // Rebuild as same-role message with placeholder text per FunctionResultContent,
-            // preserving CallId so the message chain stays valid for strict providers.
-            var trimmedContents = old.Contents
-                .OfType<FunctionResultContent>()
-                .Select(fr => (AIContent)new FunctionResultContent(fr.CallId, Placeholder))
-                .ToList<AIContent>();
-
-            if (trimmedContents.Count == 0)
-                trimmedContents = [new TextContent(Placeholder)];
-
-            result[idx] = new ChatMessage(old.Role, trimmedContents);
-            int newChars = result[idx].Contents.Sum(c => EstimateContentChars(c));
-            total -= oldChars - newChars;
+            int oldChars = MessageChars(result[idx]);
+            result[idx] = ToPlaceholder(result[idx]);
+            total -= oldChars - MessageChars(result[idx]);
         }
 
         // Phase 2: if still over budget because individual retained results are larger than
@@ -643,7 +673,7 @@ internal static class AgentContextCompactionFilters
             {
                 int trimBudget    = Math.Max(maxChars - protectedChars, 0);
                 int perResultMax  = Math.Max(trimBudget / remainingTrimIndices.Count, 200);
-                // Unlike Placeholder above, the content before this suffix IS real — only
+                // Unlike the Phase 1 placeholder, the content before this suffix IS real — only
                 // everything after the cut point is missing. Says so explicitly so the model
                 // doesn't treat the retained prefix as the complete result.
                 const string TruncSuffix =
@@ -684,6 +714,24 @@ internal static class AgentContextCompactionFilters
         return result;
     }
 
+    private static int MessageChars(ChatMessage m) => m.Contents.Sum(c => EstimateContentChars(c));
+
+    // Rebuild as same-role message with placeholder text per FunctionResultContent,
+    // preserving CallId so the message chain stays valid for strict providers.
+    private static ChatMessage ToPlaceholder(ChatMessage old)
+    {
+        const string Placeholder = ElisionMarkers.ResultNote;
+        var trimmedContents = old.Contents
+            .OfType<FunctionResultContent>()
+            .Select(fr => (AIContent)new FunctionResultContent(fr.CallId, Placeholder))
+            .ToList<AIContent>();
+
+        if (trimmedContents.Count == 0)
+            trimmedContents = [new TextContent(Placeholder)];
+
+        return new ChatMessage(old.Role, trimmedContents);
+    }
+
     /// <summary>
     /// Composes the full in-turn filter sequence in the order every call site applies it:
     /// drop superseded writes, drop superseded observational reads, compress superseded
@@ -704,12 +752,20 @@ internal static class AgentContextCompactionFilters
     /// <see cref="DefaultMinSupersededDropChars"/> regardless of this parameter — that
     /// batching is a fixed policy, not something callers opt into per-call.
     /// </param>
+    /// <param name="cacheStep">
+    /// Once the window and char budget start trimming, move their cut points in jumps of this
+    /// many groups/results instead of one per round (see <see cref="StableWindowSize"/> and
+    /// <see cref="TrimInTurnContext"/>'s step), so most rounds past the budget still resend the
+    /// previous round's prefix. Pass <see cref="CacheStableTrimStep"/>; 1 (the default) keeps
+    /// the exact, cache-busting trim for callers that haven't opted in.
+    /// </param>
     internal static async Task<IEnumerable<ChatMessage>> ApplyInTurnFilters(
         IEnumerable<ChatMessage> messages,
         int maxInTurnToolPairs,
         int maxInTurnChars,
         int triggerChars = 0,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int cacheStep = 1)
     {
         messages = DropSupersededWritePairs(messages, DefaultMinSupersededDropChars);
         messages = DropSupersededObservationalPairs(messages, DefaultMinSupersededDropChars);
@@ -722,12 +778,12 @@ internal static class AgentContextCompactionFilters
             var shouldCollapse = triggerChars <= 0
                 || EstimateTotalChars(list) >= triggerChars * CompactionTriggerRatio;
             messages = shouldCollapse
-                ? await KeepLastToolPairs(list, maxInTurnToolPairs, cancellationToken)
+                ? await KeepLastToolPairs(list, StableWindowSize(list, maxInTurnToolPairs, cacheStep), cancellationToken)
                 : list;
         }
 
         if (maxInTurnChars > 0)
-            messages = TrimInTurnContext(messages, maxInTurnChars);
+            messages = TrimInTurnContext(messages, maxInTurnChars, cacheStep);
 
         return messages;
     }

@@ -29,9 +29,6 @@ public sealed record TransportOptions
 
     public int MaxRetries { get; init; } = DefaultMaxRetries;
 
-    /// <summary>True when the retry budget was set explicitly, which also switches off the OpenAI SDK's own stacked retries.</summary>
-    public bool MaxRetriesConfigured { get; init; }
-
     /// <summary>Never shorter than <see cref="StreamIdleTimeout"/>, or the byte-level check would fire first and make a raised idle window meaningless.</summary>
     public TimeSpan ByteIdleTimeout => StreamIdleTimeout > MinByteIdleTimeout ? StreamIdleTimeout : MinByteIdleTimeout;
 
@@ -45,6 +42,5 @@ public sealed record TransportOptions
             ? TimeSpan.FromSeconds(Math.Clamp(s, MinStreamIdleTimeoutSeconds, MaxStreamIdleTimeoutSeconds))
             : TimeSpan.FromSeconds(DefaultStreamIdleTimeoutSeconds),
         MaxRetries = cfg?.MaxRetries is { } m ? Math.Clamp(m, 0, MaxRetriesLimit) : DefaultMaxRetries,
-        MaxRetriesConfigured = cfg?.MaxRetries is not null,
     };
 }

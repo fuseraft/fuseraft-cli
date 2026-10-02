@@ -679,7 +679,8 @@ public sealed class SubagentPlugin(
                     // TrimInTurnContext would kick in at 100%.
                     var trimmed = await AgentContextCompactionFilters.ApplyInTurnFilters(
                         msgs, SubagentMaxInTurnToolPairs, SubagentMaxInTurnChars,
-                        triggerChars: SubagentMaxInTurnChars, cancellationToken: ct);
+                        triggerChars: SubagentMaxInTurnChars, cancellationToken: ct,
+                        cacheStep: AgentContextCompactionFilters.CacheStableTrimStep);
                     return await inner.GetResponseAsync(trimmed, opts, ct);
                 },
                 getStreamingResponseFunc: StreamWithInTurnTrimAsync)
@@ -831,7 +832,8 @@ public sealed class SubagentPlugin(
     {
         var trimmed = await AgentContextCompactionFilters.ApplyInTurnFilters(
             messages, SubagentMaxInTurnToolPairs, SubagentMaxInTurnChars,
-            triggerChars: SubagentMaxInTurnChars, cancellationToken: cancellationToken);
+            triggerChars: SubagentMaxInTurnChars, cancellationToken: cancellationToken,
+            cacheStep: AgentContextCompactionFilters.CacheStableTrimStep);
         await foreach (var update in inner.GetStreamingResponseAsync(trimmed, options, cancellationToken))
             yield return update;
     }
