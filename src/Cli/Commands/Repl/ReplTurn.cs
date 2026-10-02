@@ -1472,6 +1472,9 @@ internal static class ReplTurn
         }
 
         var activeClient   = isStepRequest ? ctx.StepClient : ctx.Client;
+        // Counts this turn's rounds exactly when the client has one (see toolRounds below).
+        var callCounter    = activeClient.GetService<ModelCallCountingChatClient>();
+        var callsAtStart   = callCounter?.Calls ?? 0;
         var requestOptions = BuildRequestOptions(ctx.ChatOptions, input);
         var streamAttempt  = 0;
         while (true) // retry loop for transient streaming errors
@@ -1498,20 +1501,13 @@ internal static class ReplTurn
                 // The *first* chunk's input count is kept separately: it reflects the exact size
                 // of everything sent to the model as this turn began, before this turn's own
                 // tool-call round trips inflated the request further.
-                // toolRounds is counted here too — one increment per underlying LLM call — rather
-                // than by detecting gaps between function-call chunks. A model that chains many
-                // consecutive tool calls with no text in between (e.g. retrying a failing command)
-                // never produces such a gap, which previously left toolRounds stuck at 1 no matter
-                // how many iterations actually ran, silently defeating the hit_iteration_cap warning.
-                //
-                // Two independent signals mark a round boundary: a UsageContent chunk, and a
-                // non-null FinishReason. Not every provider emits both for every round — Ollama
-                // in particular never reports UsageContent on streaming responses — so relying on
-                // either signal alone would undercount for some provider and silently defeat the
-                // cap warning again. Tracking both and taking the max avoids that without risking
-                // double-counting a round where a provider happens to emit both signals (whether
-                // in the same chunk or two different ones): each signal still only fires at most
-                // once per underlying round, so neither counter can outpace the true round count.
+                // usageRounds/finishRounds estimate toolRounds from the stream, and are used only
+                // for a client with no ModelCallCountingChatClient in it (one not built by
+                // ReplFactory.BuildClient — in practice, tests' stub clients); real REPL clients
+                // count their model calls directly. The stream can't be counted exactly: a usage
+                // chunk marks one call, but Ollama reports none, and Microsoft.Extensions.AI's
+                // OpenAI adapter repeats the finish reason on two or three updates per call. So
+                // usage chunks are preferred and finish reasons are only the fallback.
                 var sawUsageThisChunk = false;
                 foreach (var usage in chunk.Contents.OfType<UsageContent>())
                 {
@@ -1524,7 +1520,7 @@ internal static class ReplTurn
                 if (sawUsageThisChunk) usageRounds++;
                 if (turnInputTokens >= limits.MaxTurnInputTokens) turnTokenBudgetReached = true;
                 if (chunk.FinishReason is not null) finishRounds++;
-                toolRounds = Math.Max(usageRounds, finishRounds);
+                toolRounds = usageRounds > 0 ? usageRounds : finishRounds;
 
                 // A round can end without ever producing a FunctionCallContent this loop
                 // recognises — e.g. the FunctionInvokingChatClient middleware strips tools on
@@ -1805,6 +1801,8 @@ internal static class ReplTurn
 
         CommitUsage();
         ctx.LastActualContextTokens = turnFirstInputTokens;
+        // Every model call this turn made, retried attempts included — they were real calls.
+        if (callCounter is not null) toolRounds = callCounter.Calls - callsAtStart;
 
         return new TurnStreamResult(
             true, sb.ToString(), toolCallsThisTurn, fileChanges, toolRounds, capturedResults,

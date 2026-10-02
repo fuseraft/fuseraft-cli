@@ -134,7 +134,7 @@ REPL agents can inspect their own session and diagnostic logs using the built-in
 | `inner_call_context` | Snapshot of the exact message-content breakdown about to be sent, taken after in-turn compaction — payload: `seq`, `msg_counts` (`user`/`assistant`/`tool`), `content_chars` (`text`, `reasoning_text`, `fn_call_args`, `fn_results`, `tool_schema_est`, `grand_total`), `est_tokens` |
 | `model_call` | One inner LLM HTTP request is about to be sent (a turn with tool calls fires several) — payload: `model`, `attempt`, `message_count`, `call_seq`, `streaming` — correlates with `inner_call_context` via `call_seq` |
 | `model_response` | LLM response received for that inner call — payload: `model`, `finish_reason`, `input_tokens`, `output_tokens`, `call_seq` |
-| `turn_end` | Model finishes a turn — payload: `elapsed_ms`, `estimated_tokens`, `tool_rounds`, `tool_count`, `is_step`, `is_correction` |
+| `turn_end` | Model finishes a turn — payload: `elapsed_ms`, `estimated_tokens`, `tool_rounds` (model calls the turn made, retried attempts included), `tool_count`, `is_step`, `is_correction` |
 | `assistant_response` | Final assistant message for the turn |
 | `tool_call` | Each individual tool invocation |
 | `compaction` | Context compacted (manual `/compact`, `compact_context` tool, or automatic threshold trigger, 75% by default) — payload: `before_tokens`, `after_tokens`, `source`, `focus` |

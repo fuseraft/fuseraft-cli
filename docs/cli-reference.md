@@ -1068,7 +1068,7 @@ Every session appends structured JSONL events to its own `~/.fuseraft/logs/{proj
 | `session_end` | Session exits cleanly |
 | `user_input` | Each user message submitted |
 | `turn_start` | Model starts processing a turn |
-| `turn_end` | Model finishes a turn — includes `elapsed_ms`, `estimated_tokens`, `tool_rounds`, `tool_count` |
+| `turn_end` | Model finishes a turn — includes `elapsed_ms`, `estimated_tokens`, `tool_rounds` (model calls the turn made), `tool_count` |
 | `assistant_response` | Final assistant message for a turn |
 | `tool_call` | Each individual tool invocation |
 | `compaction` | Compaction actually applied — manual `/compact`, `compact_context` tool, or the automatic threshold trigger (75% by default) — includes `before_tokens`, `after_tokens`, `source`, `focus` |
