@@ -4,17 +4,20 @@ import starlight from '@astrojs/starlight';
 import { satteri } from '@astrojs/markdown-satteri';
 
 // Pages link to each other as `page.md#section`, which also works when browsing docs/ on GitHub.
-// On the site, those become `/page/#section`.
+// On the site, those become `/fuseraft-cli/page/#section`.
+const base = '/fuseraft-cli';
+
 const pageLinks = {
 	name: 'page-links',
 	link(node, ctx) {
 		const m = /^([a-z0-9-]+)\.mdx?(#.*)?$/.exec(node.url);
-		if (m) ctx.setProperty(node, 'url', m[1] === 'index' ? `/${m[2] ?? ''}` : `/${m[1]}/${m[2] ?? ''}`);
+		if (m) ctx.setProperty(node, 'url', m[1] === 'index' ? `${base}/${m[2] ?? ''}` : `${base}/${m[1]}/${m[2] ?? ''}`);
 	},
 };
 
 export default defineConfig({
 	site: 'https://fuseraft.ai',
+	base,
 	markdown: { processor: satteri({ mdastPlugins: [pageLinks] }) },
 	integrations: [
 		starlight({

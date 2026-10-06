@@ -6,7 +6,7 @@ hero:
   tagline: Chat in your terminal. Scale into multi-agent pipelines when one agent isn't enough.
   actions:
     - text: Get Started
-      link: /getting-started/
+      link: /fuseraft-cli/getting-started/
       icon: right-arrow
     - text: GitHub
       link: https://github.com/fuseraft/fuseraft-cli
@@ -32,37 +32,37 @@ Run `fuseraft` and start chatting with a model that can read and edit files, run
 	<Card title="Terminal AI assistant" icon="seti:shell">
 		`fuseraft repl` is an interactive chat session with a single model — safe by default (HITL approval, filesystem/shell/git sandbox), resumable, with ~50 slash commands and a `!<command>` shell escape for running things yourself without leaving the chat.
 
-		[REPL →](/repl/)
+		[REPL →](repl.md)
 	</Card>
 	<Card title="Agent teams as YAML" icon="document">
 		Define each agent's name, model, system prompt, and plugins in a single YAML config. The coordinator routes work between them automatically.
 
-		[Configuration →](/configuration/)
+		[Configuration →](configuration.md)
 	</Card>
 	<Card title="Model-agnostic" icon="random">
 		Mix frontier LLMs and local SLMs per agent in the same team — Anthropic, OpenAI, Google, Mistral, xAI, DeepSeek, Azure OpenAI, or any model served through Ollama. Rotate API keys automatically on rate limits.
 
-		[Models & Providers →](/models/)
+		[Models & Providers →](models.md)
 	</Card>
 	<Card title="Rich plugin ecosystem" icon="puzzle">
 		Every agent can call filesystem, shell, git, HTTP, JSON, search, and Docker sandbox tools out of the box. Connect any external MCP server.
 
-		[Plugins →](/plugins/)
+		[Plugins →](plugins.md)
 	</Card>
 	<Card title="Resilient sessions" icon="seti:db">
 		Sessions checkpoint after every turn. Interrupt anytime and resume exactly where you left off — no work is lost.
 
-		[Sessions →](/sessions/)
+		[Sessions →](sessions.md)
 	</Card>
 	<Card title="Spec-driven development" icon="approve-check">
 		Use `--spec` to anchor the team to an agreed specification before implementation begins. Routing validators block handoffs until evidence is present.
 
-		[Spec-Driven Development →](/spec-driven/)
+		[Spec-Driven Development →](spec-driven.md)
 	</Card>
 	<Card title="Governance & cost control" icon="setting">
 		Track token usage and estimated cost per turn. Enforce hard spending caps. Apply execution rings, prompt injection detection, and a hash-chain audit log.
 
-		[Governance →](/governance/)
+		[Governance →](governance.md)
 	</Card>
 </CardGrid>
 
@@ -124,35 +124,35 @@ fuseraft init
 fuseraft run -c .fuseraft/config/orchestration.yaml "Add a hello-world endpoint to this project"
 ```
 
-[Full installation guide](/getting-started/) · [REPL walkthrough](/repl/)
+[Full installation guide](getting-started.md) · [REPL walkthrough](repl.md)
 
 ## Documentation
 
 | Doc | What it covers |
 |-----|----------------|
-| [Getting Started](/getting-started/) | Prerequisites, installation, first run |
-| [REPL](/repl/) | Interactive terminal chat — tools, safety model, `!` shell escape, skills, sessions |
-| [Writing Effective Tasks](/writing-tasks/) | Task descriptions that produce correct, verifiable results |
-| [Spec-Driven Development](/spec-driven/) | Using `--spec` to anchor agents before implementation begins |
-| [CLI Reference](/cli-reference/) | All commands and flags |
-| [Scripting & Automation](/scripting/) | Running fuseraft from bash/Python, `--json` output, event-driven pipelines |
-| [Configuration](/configuration/) | Full config schema (YAML and JSON) |
-| [Models & Providers](/models/) | Model configuration and auto-detection |
-| [Plugins](/plugins/) | All built-in tools agents can call |
-| [Strategies](/strategies/) | Selection and termination strategies |
-| [Routing Validators](/validators/) | Anti-hallucination handoff guards |
-| [Harness Engineering](/harness-engineering/) | Building configs that enforce correctness mechanically |
-| [MCP Integration](/mcp/) | Connecting external MCP servers |
-| [Security & Sandbox](/security/) | File and network containment |
-| [Governance](/governance/) | Execution rings, audit log, circuit breaker, SLO tracking |
-| [Evals](/evals/) | Running agent teams against scored test cases; CI integration |
-| [Sessions](/sessions/) | Resumption, HITL, cost tracking, compaction |
-| [Context Management](/context-management/) | How fuseraft manages context across a long session |
-| [Context Store](/context-store/) | Importing reference material for agents |
-| [Knowledge Layer](/knowledge/) | ADRs, graph, provenance |
-| [Skills](/skills/) | Portable skill packages and cross-session skill index |
-| [Examples](/examples/) | Ready-to-use config examples |
-| [Design](/design/) | Architecture, layer map, MAF usage, and decision log |
+| [Getting Started](getting-started.md) | Prerequisites, installation, first run |
+| [REPL](repl.md) | Interactive terminal chat — tools, safety model, `!` shell escape, skills, sessions |
+| [Writing Effective Tasks](writing-tasks.md) | Task descriptions that produce correct, verifiable results |
+| [Spec-Driven Development](spec-driven.md) | Using `--spec` to anchor agents before implementation begins |
+| [CLI Reference](cli-reference.md) | All commands and flags |
+| [Scripting & Automation](scripting.md) | Running fuseraft from bash/Python, `--json` output, event-driven pipelines |
+| [Configuration](configuration.md) | Full config schema (YAML and JSON) |
+| [Models & Providers](models.md) | Model configuration and auto-detection |
+| [Plugins](plugins.md) | All built-in tools agents can call |
+| [Strategies](strategies.md) | Selection and termination strategies |
+| [Routing Validators](validators.md) | Anti-hallucination handoff guards |
+| [Harness Engineering](harness-engineering.md) | Building configs that enforce correctness mechanically |
+| [MCP Integration](mcp.md) | Connecting external MCP servers |
+| [Security & Sandbox](security.md) | File and network containment |
+| [Governance](governance.md) | Execution rings, audit log, circuit breaker, SLO tracking |
+| [Evals](evals.md) | Running agent teams against scored test cases; CI integration |
+| [Sessions](sessions.md) | Resumption, HITL, cost tracking, compaction |
+| [Context Management](context-management.md) | How fuseraft manages context across a long session |
+| [Context Store](context-store.md) | Importing reference material for agents |
+| [Knowledge Layer](knowledge.md) | ADRs, graph, provenance |
+| [Skills](skills.md) | Portable skill packages and cross-session skill index |
+| [Examples](examples.md) | Ready-to-use config examples |
+| [Design](design.md) | Architecture, layer map, MAF usage, and decision log |
 
 ## VS Code Extension
 
