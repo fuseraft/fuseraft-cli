@@ -127,6 +127,12 @@ public sealed class IncludedRootsState
     /// follow-up request for a sibling file doesn't re-prompt.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// In the detail of every sandbox-escape prompt, so an approval callback can tell one apart from an ordinary
+    /// action: an escape is a grant of its own, and "always" for an action must never answer one.
+    /// </summary>
+    internal const string EscapeMarker = "is outside the current sandbox";
+
     private async Task<bool?> TryGrantEscapeAsync(
         string resolvedPath, string toolName, Func<string, string, Task<bool>>? approveEscape)
     {
@@ -137,7 +143,7 @@ public sealed class IncludedRootsState
             : Path.GetDirectoryName(resolvedPath) ?? resolvedPath;
 
         if (!await approveEscape(toolName,
-                $"{resolvedPath} is outside the current sandbox — grants '{grantDir}' for the rest of this session"))
+                $"{resolvedPath} {EscapeMarker} — grants '{grantDir}' for the rest of this session"))
             return false;
 
         TryAdd(grantDir);

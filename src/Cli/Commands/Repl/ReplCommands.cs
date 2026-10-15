@@ -56,6 +56,10 @@ internal static partial class ReplCommands
             case "/run":           return await CmdRunAsync(ctx, arg, cancellationToken);
             case "/undo":          return await CmdUndoAsync(ctx);
             case "/mcp":           return await CmdMcpAsync(ctx, arg, cancellationToken);
+            case "/copy":          return await CmdCopyAsync(ctx, arg);
+            case "/approvals":     return CmdApprovals(ctx, arg);
+            case "/theme":         return CmdTheme(arg);
+            case "/dock":          return CmdDock(arg);
             default:
                 AnsiConsole.MarkupLine(
                     $"[yellow]Unknown command:[/] {Markup.Escape(command)}  [dim](type /help for commands)[/]");
@@ -74,6 +78,11 @@ internal static partial class ReplCommands
     // the other.
     private readonly record struct HelpEntry(string Command, string Description);
     private readonly record struct HelpSection(string Title, HelpEntry[] Entries);
+
+    /// <summary>What /help says a command does, for the TUI's suggestions: its first entry's description.</summary>
+    internal static string Describe(string command) =>
+        HelpSections.SelectMany(s => s.Entries)
+            .FirstOrDefault(e => e.Command.Split(' ')[0] == command).Description ?? string.Empty;
 
     private static readonly HelpSection[] HelpSections =
     [
@@ -94,6 +103,9 @@ internal static partial class ReplCommands
             new("/retry", "Resend the last message (useful when the response was poor)"),
             new("/image <path> [message]", "Send an image (PNG, JPEG, GIF, WebP) with your message — or just mention it inline as @shot.png. Needs a vision-capable model"),
             new("/last", "Re-print the last assistant response"),
+            new("/copy [code]", "Copy the last reply, or a code block from it, to the clipboard"),
+            new("/theme [name]", "List color themes, switch to one for this session, or /theme save <name> to save the current colors as a theme file (full-screen REPL)"),
+            new("/dock [top|bottom]", "Show where the prompt is, or move it to the top or bottom of the screen for this session (full-screen REPL)"),
             new("/clear", "Clear conversation history (keeps system prompt)"),
             new("/history", "Show condensed conversation history"),
             new("/replay [n|all]", "Re-display the last n turns in full (default 3) — the same view shown automatically when a session is resumed"),
@@ -125,6 +137,7 @@ internal static partial class ReplCommands
             new("/hitl", "Show HITL (human-in-the-loop) mode status"),
             new("/hitl on", "Require y/N approval before each shell command, and before each FileSystem write/delete, Git write, or write-ish Http call"),
             new("/hitl off", "Run those calls without approval"),
+            new("/approvals", "List the \"always\" answers given to HITL approvals: saved ones (commands by program, Git and Http tools) and this session's (file writes); /approvals clear forgets them"),
             new("/adversarial", "Show adversarial mode status"),
             new("/adversarial on", "Enable critic agent to review each /execute step"),
             new("/adversarial off", "Disable critic agent"),

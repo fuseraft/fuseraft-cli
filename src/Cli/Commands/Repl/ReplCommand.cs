@@ -8,6 +8,7 @@ using fuseraft.Cli;
 using fuseraft.Cli.Commands;
 using fuseraft.Cli.Display;
 using fuseraft.Cli.Telemetry;
+using fuseraft.Cli.Tui;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
@@ -61,6 +62,10 @@ public sealed class ReplSettings : CommandSettings
     [CommandOption("--yolo")]
     [Description("Skip the default safety gates: no /hitl approval prompts and no filesystem/shell/git sandbox. Restores fully-open behavior for trusted, unattended sessions.")]
     public bool Yolo { get; set; }
+
+    [CommandOption("--plain")]
+    [Description("Use the line-based REPL instead of the full-screen one. Piped input or output always gets it.")]
+    public bool Plain { get; set; }
 
     [CommandOption("--include")]
     [Description("Add an additional allowed root directory beyond the primary sandbox root (the launch directory). Repeatable. Ignored under --yolo (already unsandboxed).")]
@@ -127,12 +132,73 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         "repl_session_current", "repl_session_list", "repl_session_read_event_log", "repl_session_read_log",
     };
 
-    protected override async Task<int> ExecuteAsync(
+    protected override Task<int> ExecuteAsync(
         CommandContext context, ReplSettings settings, CancellationToken cancellationToken)
     {
         // JSON bridge mode: active when launched from the VS Code webview panel
         // (--vscode + stdin redirected from the extension's child process).
         bool jsonMode = OrchestratorConfigLoader.VsCodeMode && Console.IsInputRedirected;
+        return !jsonMode && !settings.Plain && ReplTui.Supported
+            ? ReplTui.RunAsync(tui => RunAsync(settings, jsonMode, tui, cancellationToken))
+            : RunAsync(settings, jsonMode, null, cancellationToken);
+    }
+
+    private static readonly StringComparison PathComparison = OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
+
+    /// <summary>
+    /// The directory a resumed session should run in: <paramref name="savedCwd"/> when it differs
+    /// from <paramref name="currentCwd"/> and still exists, otherwise null (stay put). The
+    /// conversation is full of paths under the directory it ran in, and the sandbox is rooted at
+    /// the current one, so resuming anywhere else gets the model's file and shell calls blocked.
+    /// </summary>
+    internal static string? ResumeDirectory(string? savedCwd, string currentCwd)
+    {
+        if (string.IsNullOrWhiteSpace(savedCwd)) return null;
+        var saved   = Path.TrimEndingDirectorySeparator(Path.GetFullPath(savedCwd));
+        var current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(currentCwd));
+        if (string.Equals(saved, current, PathComparison)) return null;
+        return Directory.Exists(saved) ? saved : null;
+    }
+
+    private static void EnterSessionDirectory(string? savedCwd, bool jsonMode)
+    {
+        if (string.IsNullOrWhiteSpace(savedCwd)) return;
+        var current = Directory.GetCurrentDirectory();
+        if (ResumeDirectory(savedCwd, current) is { } target)
+        {
+            Directory.SetCurrentDirectory(target);
+            if (!jsonMode)
+                AnsiConsole.MarkupLine($"[dim]Resuming in [/][bold]{Markup.Escape(target)}[/][dim], where this session ran.[/]");
+            return;
+        }
+        if (Directory.Exists(savedCwd)) return;
+
+        var msg = $"This session ran in {savedCwd}, which no longer exists — resuming in {current}. " +
+                  "Paths from the session may be outside the sandbox.";
+        if (jsonMode) ReplJsonBridge.Emit(new { type = "warning", text = msg });
+        else          AnsiConsole.MarkupLine($"[yellow]⚠ {Markup.Escape(msg)}[/]");
+    }
+
+    private async Task<int> RunAsync(
+        ReplSettings settings, bool jsonMode, ReplTui? tui, CancellationToken cancellationToken)
+    {
+        // Load snapshot when --resume is specified — first, because a session resumed from
+        // another directory moves back into the one it ran in before anything below reads the
+        // current directory (the sandbox root, approvals, project instructions, memories).
+        ReplSessionSnapshot? snapshot = null;
+        if (!string.IsNullOrWhiteSpace(settings.Resume))
+        {
+            snapshot = await ReplSessionSnapshot.LoadAsync(settings.Resume.Trim());
+            if (snapshot is null)
+            {
+                AnsiConsole.MarkupLine($"[red]✗ No saved session found with ID '[/][bold]{Markup.Escape(settings.Resume.Trim())}[/][red]'.[/]");
+                AnsiConsole.MarkupLine("[dim]  Use /sessions inside the REPL to list resumable sessions.[/]");
+                return 1;
+            }
+            EnterSessionDirectory(snapshot.Cwd, jsonMode);
+        }
 
         var keyStore = ApiKeyStoreFactory.Create();
         var (userCfg, legacyKey) = UserConfigStore.Load();
@@ -334,10 +400,14 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         var securityConfig       = TryLoadDefaultSecurityConfig();
         var effectiveShellPolicy = DefaultSecurityPolicy.MergeShellPolicy(securityConfig?.ShellPolicy);
         var fsDenyPatterns       = DefaultSecurityPolicy.MergeFileSystemDeny(securityConfig?.FileSystemPermissions, securityConfig?.DenyCredentialFiles ?? true);
+        // "Always" answers (see ReplApprovals), starting from the ones saved for this directory.
+        var approvals = new ReplApprovals(ReplApprovalStore.ForWorkspace(Directory.GetCurrentDirectory()), Directory.GetCurrentDirectory());
         using ShellPlugin? shellPlugin  = settings.NoTools ? null : new ShellPlugin(
             sandboxRoot:    sandboxRoot,
             shellPolicy:    effectiveShellPolicy,
-            approveCommand: ApprovalScope.Guard(cmd => hitlState.RequiresShellApproval(cmd) ? approvalService.PromptShellCommandAsync(cmd) : Task.FromResult(true)),
+            approveCommand: ApprovalScope.Guard(cmd => hitlState.RequiresShellApproval(cmd)
+                ? approvals.ShellAsync(cmd, always => approvalService.PromptShellCommandAsync(cmd, always))
+                : Task.FromResult(true)),
             includedRoots:  includedRoots,
             blockCredentialFiles: securityConfig?.DenyCredentialFiles ?? true,
             denyPatterns:   fsDenyPatterns);
@@ -346,16 +416,29 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // FileSystem/Git/Http tools — see IHumanApprovalService.PromptToolActionAsync.
         Func<string, Func<string, string, Task<bool>>> approveToolAction = pluginName =>
             ApprovalScope.Guard((action, detail) => hitlState.Enabled
-                ? approvalService.PromptToolActionAsync(pluginName, action, detail)
+                ? approvals.ToolActionAsync(pluginName, action, detail,
+                    always => approvalService.PromptToolActionAsync(pluginName, action, detail, always))
                 : Task.FromResult(true));
 
         // Diff-aware counterpart to approveToolAction, used only by write_file/patch_file
         // (see IHumanApprovalService.PromptFileWriteAsync) so the approval prompt can render
         // the actual before/after content instead of just the resolved path.
+        //
+        // The full-screen REPL also notes how many lines each write adds and removes, for the ✎ line it shows once the
+        // write has gone through (see ReplTurn) — this is the one place that sees both versions whether HITL asks or not.
+        var fileWriteStats = new System.Collections.Concurrent.ConcurrentDictionary<string, (int Added, int Removed)>(StringComparer.Ordinal);
         Func<string, string, string, string, Task<bool>> approveFileWrite =
-            ApprovalScope.Guard((action, path, oldContent, newContent) => hitlState.Enabled
-                ? approvalService.PromptFileWriteAsync(action, path, oldContent, newContent)
-                : Task.FromResult(true));
+            ApprovalScope.Guard((action, path, oldContent, newContent) =>
+            {
+                if (tui is not null)
+                {
+                    var diff = UnifiedDiff.Build(oldContent, newContent);
+                    fileWriteStats[Path.GetFullPath(path)] = (diff.Added, diff.Removed);
+                }
+                return hitlState.Enabled
+                    ? approvals.FileWriteAsync(path, always => approvalService.PromptFileWriteAsync(action, path, oldContent, newContent, always))
+                    : Task.FromResult(true);
+            });
         SubagentPlugin? subagent        = null;
         IReadOnlyList<string> agentProblems = [];
         IReadOnlyList<AgentSkill> discoveredSkills = [];
@@ -404,19 +487,6 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         var adaptiveTrimTracker = new AdaptiveTrimTracker();
 
         var cwd = Directory.GetCurrentDirectory();
-
-        // Load snapshot when --resume is specified.
-        ReplSessionSnapshot? snapshot = null;
-        if (!string.IsNullOrWhiteSpace(settings.Resume))
-        {
-            snapshot = await ReplSessionSnapshot.LoadAsync(settings.Resume.Trim());
-            if (snapshot is null)
-            {
-                AnsiConsole.MarkupLine($"[red]✗ No saved session found with ID '[/][bold]{Markup.Escape(settings.Resume.Trim())}[/][red]'.[/]");
-                AnsiConsole.MarkupLine("[dim]  Use /sessions inside the REPL to list resumable sessions.[/]");
-                return 1;
-            }
-        }
 
         var sessionId  = snapshot?.SessionId ?? StringHelpers.NewSessionId();
         var startedAt  = snapshot?.StartedAt  ?? DateTime.UtcNow;
@@ -670,8 +740,18 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             McpManager  = mcpManager,
             StdinPump   = stdinPump,
             AgentProblems = agentProblems,
+            FileWriteStats = fileWriteStats,
+            Approvals      = approvals,
         };
         ctxForStdin = ctx;
+        if (tui is not null)
+        {
+            tui.Skills = () => ctx.LineReader.SkillSlugs;
+            // @ completion offers what the FileSystem tools could read: nothing a deny rule covers.
+            var denyMatcher = fsPluginForCategory?.DenyMatcher;
+            tui.Files = new FileIndex(cwd, path => FileSystemSandbox.MatchesDenyRule(denyMatcher, Path.Combine(cwd, path), cwd)).Warm();
+            emitter.RegisterHook(new SubagentEventHook(tui));
+        }
 
         // Subagents (built-in and user-defined) may only use what the session itself currently allows,
         // so /safe-mode and /tools restrict cannot be sidestepped by delegating.

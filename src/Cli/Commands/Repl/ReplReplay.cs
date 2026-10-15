@@ -169,10 +169,9 @@ internal static class ReplReplay
             if (turn.Assistant.Length > 0)
             {
                 AnsiConsole.WriteLine();
-                AnsiConsole.MarkupLine("[dim]fuseraft agent:[/]");
                 // Rows terminates its last line; a bare single-block render (a Markup) doesn't, which
                 // left the next turn's ">" glued to the end of this reply.
-                AnsiConsole.Write(new Rows(MarkdownRenderer.Render(turn.Assistant)));
+                AnsiConsole.Write(new Rows(MarkdownRenderer.Render(turn.Assistant, lead: ReplConsole.ReplyMarkup)));
             }
             else if (turn.ToolCalls.Count == 0)
             {

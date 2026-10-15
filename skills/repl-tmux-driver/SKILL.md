@@ -37,8 +37,10 @@ Always rebuild before a live test of a source change - a stale binary silently t
 ```bash
 tmux kill-session -t <name> 2>/dev/null   # safe no-op if it doesn't already exist
 tmux new-session -d -s <name> -x 220 -y 50 -c <repo-root>
-tmux send-keys -t <name> "./src/bin/Release/net10.0/fuseraft repl [--plugins Extended] [--model ...]" Enter
+tmux send-keys -t <name> "./src/bin/Release/net10.0/fuseraft repl --plain [--plugins Extended] [--model ...]" Enter
 ```
+
+`--plain` gives the line-based REPL, which the polling and `/paste` steps below rely on. Without it, a terminal gets the full-screen REPL, whose prompt sits in an editor above a status line rather than after the `N>` marker. Drop `--plain` only when the full-screen REPL itself is under test.
 
 Wait a few seconds, then confirm the banner and prompt appeared:
 

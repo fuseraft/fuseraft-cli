@@ -1,0 +1,39 @@
+{
+  // Glowing embers on charcoal: rust's warmth, in exact 24-bit colors.
+  "description": "embers on charcoal, for dark backgrounds",
+  "base": "rust",
+  "palette": {
+    "ember": "#ff6a1f",
+    "flame": "#ffa94d",
+    "coal": "#5a3a2e",
+    "ash": "#a89080",
+    "rose": "#e07a6a",
+    "gold": "#f2c14e",
+    "sage": "#a3b46c",
+    "blood": "#e5383b",
+    "sand": "#d9b38c",
+    "copper": "#c8784c"
+  },
+  "colors": {
+    "text": "#eadfd4 on #1c1512",
+    "accent": "bold ember",
+    "tool": "flame",
+    "agent": "rose",
+    "success": "sage",
+    "warning": "gold",
+    "error": "blood",
+    "muted": "ash",
+    "border": "coal",
+    "heading": "bold flame",
+    "link": "underline sand",
+    "selection": "on #3a2a22",
+    "code": "sand",
+    "codeblock": "on #261c18",
+    "comment": "ash italic",
+    "string": "sage",
+    "constant": "gold",
+    "keyword": "ember",
+    "function": "flame",
+    "type": "copper"
+  }
+}

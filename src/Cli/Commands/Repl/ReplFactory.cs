@@ -139,6 +139,9 @@ internal static class ReplFactory
             // and above the adaptive-trim retry, which re-sends one round rather than starting another.
             client = new ModelCallCountingChatClient(client);
 
+            // Also directly under the loop: what the user sends mid-turn joins the turn after its tool results.
+            client = new ReplInterjectingChatClient(client);
+
             // ReplToolLoopGuard's soft repeated-call nudge only makes sense for free-form turns
             // (isStepRequest: false) — StepIterationLimit (5) already bounds a step turn tightly
             // enough that the extra mechanism isn't worth the complexity there. maxIterations
@@ -179,10 +182,8 @@ internal static class ReplFactory
         var defaultEndpoint = !string.IsNullOrEmpty(currentCfg?.Endpoint)
             ? currentCfg.Endpoint
             : "http://localhost:11434";
-        var endpointInput = AnsiConsole.Prompt(
-            new TextPrompt<string>("[dim]Provider URL[/]")
-                .DefaultValue(defaultEndpoint)
-                .PromptStyle("white"));
+        var endpointInput = ReplInput.Ask("[dim]Provider URL[/]", defaultValue: defaultEndpoint);
+        if (endpointInput is null) return (null, null, false);
         var endpoint = endpointInput.Trim().TrimEnd('/');
 
         if (string.IsNullOrWhiteSpace(endpoint))
@@ -192,13 +193,9 @@ internal static class ReplFactory
         }
 
         bool hasExistingKey = !string.IsNullOrEmpty(currentCfg?.ApiKey);
-        var apiKeyPrompt = new TextPrompt<string>("[dim]API Key (leave blank for Ollama)[/]")
-            .Secret('•')
-            .AllowEmpty()
-            .PromptStyle("white");
-        if (hasExistingKey)
-            apiKeyPrompt.DefaultValue(new string('•', 8));
-        var apiKeyInput = AnsiConsole.Prompt(apiKeyPrompt);
+        var apiKeyInput = ReplInput.Ask("[dim]API Key (leave blank for Ollama)[/]",
+            defaultValue: hasExistingKey ? new string('•', 8) : null, secret: true, allowEmpty: true);
+        if (apiKeyInput is null) return (null, null, false);
 
         var apiKey = string.IsNullOrEmpty(apiKeyInput) || apiKeyInput == new string('•', 8)
             ? (currentCfg?.ApiKey ?? string.Empty)
@@ -218,12 +215,12 @@ internal static class ReplFactory
                 ? currentCfg.ModelId
                 : modelIds[0];
 
-            modelId = AnsiConsole.Prompt(
-                new SelectionPrompt<string>()
-                    .Title($"[dim]Model[/] [dim]({modelIds.Count} available from {Markup.Escape(endpoint)})[/]")
-                    .PageSize(15)
-                    .MoreChoicesText("[dim](Move up/down to see more models)[/]")
-                    .AddChoices(modelIds.OrderBy(m => m == defaultModel ? 0 : 1).ThenBy(m => m)));
+            var chosen = ReplInput.Select(
+                $"[dim]Model[/] [dim]({modelIds.Count} available from {Markup.Escape(endpoint)})[/]",
+                [.. modelIds.OrderBy(m => m == defaultModel ? 0 : 1).ThenBy(m => m)]);
+            if (chosen is null) return (null, null, false);
+            AnsiConsole.MarkupLine($"[dim]Model:[/] {Markup.Escape(chosen)}");
+            modelId = chosen;
             selectedFromList = true;
         }
         else
@@ -238,10 +235,7 @@ internal static class ReplFactory
             var fallbackDefault = !string.IsNullOrEmpty(currentCfg?.ModelId)
                 ? currentCfg.ModelId
                 : (currentModelId ?? "claude-sonnet-4-6");
-            var modelIdInput = AnsiConsole.Prompt(
-                new TextPrompt<string>("[dim]Model ID[/]")
-                    .DefaultValue(fallbackDefault)
-                    .PromptStyle("white"));
+            var modelIdInput = ReplInput.Ask("[dim]Model ID[/]", defaultValue: fallbackDefault);
             if (string.IsNullOrWhiteSpace(modelIdInput))
             {
                 AnsiConsole.MarkupLine("[red]✗ Model ID is required.[/]");

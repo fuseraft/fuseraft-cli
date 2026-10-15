@@ -86,6 +86,13 @@ internal static partial class ReplCommands
             return CommandResult.Continue;
         }
 
+        if (ReplInput.Screen is not null)
+        {
+            // The full-screen prompt already takes a multi-line paste as one message.
+            AnsiConsole.MarkupLine("[dim]Paste straight into the prompt: a multi-line paste is sent as one message, and[/] [bold]Alt+Enter[/] [dim]starts a new line.[/]");
+            return CommandResult.Continue;
+        }
+
         AnsiConsole.MarkupLine("[dim]Paste your content below. Type[/] [bold].done[/] [dim]on its own line (or press Ctrl+D) when done.[/]");
         var lines = new List<string>();
         while (true)
@@ -451,8 +458,7 @@ internal static partial class ReplCommands
             return;
         }
 
-        AnsiConsole.MarkupLine("[dim]assistant (last response):[/]");
-        AnsiConsole.Write(MarkdownRenderer.Render(text));
+        AnsiConsole.Write(MarkdownRenderer.Render(text, lead: ReplConsole.ReplyMarkup));
         AnsiConsole.WriteLine();
     }
 

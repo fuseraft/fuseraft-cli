@@ -59,6 +59,10 @@
     <!-- Rich CLI: brings in Spectre.Console transitively -->
     <PackageReference Include="Spectre.Console.Cli" Version="0.55.0" />
 
+    <!-- Full-screen REPL: transcript, prompt editor, and status line -->
+    <PackageReference Include="Terminal.Gui" Version="2.5.0" />
+    <PackageReference Include="Terminal.Gui.Editor" Version="2.5.7" />
+
     <!-- Line diffing for REPL diff views (HITL write/patch approval previews) -->
     <PackageReference Include="DiffPlex" Version="1.9.0" />
 

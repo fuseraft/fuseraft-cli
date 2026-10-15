@@ -21,7 +21,7 @@ All tests must pass before committing. There are no integration tests that requi
 
 ```
 src/
-  Cli/              Commands/, DevUI/, OrchestratorBuilder.cs, SessionRunner.cs
+  Cli/              Commands/, DevUI/, Tui/ (full-screen REPL), OrchestratorBuilder.cs, SessionRunner.cs
   Core/             Interfaces/, Models/, Exceptions/
   Infrastructure/   AgentFactory.cs, ChatClientFactory.cs, Plugins/, ...
   Orchestration/    Orchestrators, strategies, validators, contracts, compaction, Saga/
@@ -211,4 +211,5 @@ When adding a new `FailureAction` or `FailureType` value, update:
 | How are tool results trimmed / tombstoned? | `src/Orchestration/ToolResultWindowTrimmer.cs` |
 | Full architecture decisions | `docs/design.md` |
 | Hardening configs against hallucination | `docs/harness-engineering.md` |
+| How does the full-screen REPL work? | `src/Cli/Tui/ReplTui.cs` — Spectre's output is redirected into a `Transcript` that reads the ANSI back; questions go through `ReplInput` so they're asked in the TUI's panel or on the plain terminal |
 | Why does `fuseraft repl` behave differently from an orchestrated agent? | `fuseraft repl` doesn't run through `OrchestratorBuilder` — no validators, change tracking, or routing corrections. See the scope note at the top of `docs/harness-engineering.md`. |

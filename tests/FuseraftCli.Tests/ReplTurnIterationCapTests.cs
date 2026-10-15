@@ -250,6 +250,40 @@ public sealed class ReplTurnIterationCapTests : IDisposable
         Assert.DoesNotContain("mangled.Retrying", content);
     }
 
+    // A tool round arms a paragraph break for the text after it, but when no text came before the tool call
+    // there's nothing to separate: the reply's first chunk starts the text, and its second must not get the break.
+    [Fact]
+    public async Task ReplyAfterASilentToolRound_IsNotSplitBetweenItsChunks()
+    {
+        var eventsPath = Path.Combine(Path.GetTempPath(), $"fuseraft-test-events-{Guid.NewGuid():N}.jsonl");
+        var ctx = NewContext(new SilentToolThenTextStubChatClient("Fixed", "."), eventsPath);
+
+        await ReplTurn.ExecuteAsync(
+            ctx, "fix it", isStepRequest: false, capturePlan: false, activeStep: null, CancellationToken.None);
+
+        Assert.Equal("Fixed.", await ReadAssistantResponseContentAsync(eventsPath));
+    }
+
+    private sealed class SilentToolThenTextStubChatClient(params string[] chunks) : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, string.Empty)));
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            yield return new ChatResponseUpdate { Role = ChatRole.Assistant, Contents = [new FunctionCallContent("c1", "patch_file")], FinishReason = ChatFinishReason.ToolCalls };
+            yield return new ChatResponseUpdate { Role = ChatRole.Tool, Contents = [new FunctionResultContent("c1", "[OK] Patched")] };
+            await Task.Yield();
+            foreach (var chunk in chunks)
+                yield return new ChatResponseUpdate(ChatRole.Assistant, chunk);
+        }
+
+        public object? GetService(Type serviceType, object? key = null) => null;
+        public void Dispose() { }
+    }
+
     private static async Task<string> ReadAssistantResponseContentAsync(string eventsPath)
     {
         foreach (var line in await File.ReadAllLinesAsync(eventsPath))

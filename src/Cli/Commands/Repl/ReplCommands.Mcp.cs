@@ -69,8 +69,8 @@ internal static partial class ReplCommands
 
         AnsiConsole.MarkupLine("[bold]Add MCP server[/]");
 
-        var name = AnsiConsole.Prompt(new TextPrompt<string>("[dim]Server name[/]").PromptStyle("white"));
-        name = name.Trim();
+        var name = ReplInput.Ask("[dim]Server name[/]")?.Trim();
+        if (name is null) return CommandResult.Continue;
         if (string.IsNullOrEmpty(name))
         {
             AnsiConsole.MarkupLine("[red]✗ Server name is required.[/]");
@@ -82,19 +82,16 @@ internal static partial class ReplCommands
             return CommandResult.Continue;
         }
 
-        var transport = AnsiConsole.Prompt(
-            new SelectionPrompt<string>()
-                .Title("[dim]Transport[/]")
-                .AddChoices("stdio", "http"));
+        var transport = ReplInput.Select("[dim]Transport[/]", ["stdio", "http"]);
+        if (transport is null) return CommandResult.Continue;
 
         McpServerConfig config;
         if (transport == "stdio")
         {
-            var command = AnsiConsole.Prompt(new TextPrompt<string>("[dim]Command[/] [dim](e.g. npx)[/]").PromptStyle("white"));
-            var argsLine = AnsiConsole.Prompt(
-                new TextPrompt<string>("[dim]Arguments[/] [dim](space-separated, blank for none)[/]")
-                    .AllowEmpty()
-                    .PromptStyle("white"));
+            var command = ReplInput.Ask("[dim]Command[/] [dim](e.g. npx)[/]");
+            if (command is null) return CommandResult.Continue;
+            var argsLine = ReplInput.Ask("[dim]Arguments[/] [dim](space-separated, blank for none)[/]", allowEmpty: true);
+            if (argsLine is null) return CommandResult.Continue;
             config = new McpServerConfig
             {
                 Name      = name,
@@ -105,31 +102,28 @@ internal static partial class ReplCommands
         }
         else
         {
-            var url = AnsiConsole.Prompt(new TextPrompt<string>("[dim]URL[/]").PromptStyle("white"));
+            var url = ReplInput.Ask("[dim]URL[/]");
+            if (url is null) return CommandResult.Continue;
 
-            var auth = AnsiConsole.Prompt(
-                new SelectionPrompt<string>()
-                    .Title("[dim]Authentication[/]")
-                    .AddChoices("None", "Header (API key / bearer token)", "OAuth (browser login)"));
+            var auth = ReplInput.Select("[dim]Authentication[/]",
+                ["None", "Header (API key / bearer token)", "OAuth (browser login)"]);
+            if (auth is null) return CommandResult.Continue;
 
             Dictionary<string, string> headers = [];
             McpOAuthConfig? oauth = null;
 
             if (auth.StartsWith("Header", StringComparison.Ordinal))
             {
-                var headerName = AnsiConsole.Prompt(
-                    new TextPrompt<string>("[dim]Header name[/]").DefaultValue("Authorization").PromptStyle("white"));
-                var headerValue = AnsiConsole.Prompt(
-                    new TextPrompt<string>("[dim]Header value[/] [dim](e.g. \"Bearer ${MY_TOKEN}\" — supports ${ENV_VAR})[/]")
-                        .PromptStyle("white"));
+                var headerName = ReplInput.Ask("[dim]Header name[/]", defaultValue: "Authorization");
+                if (headerName is null) return CommandResult.Continue;
+                var headerValue = ReplInput.Ask("[dim]Header value[/] [dim](e.g. \"Bearer ${MY_TOKEN}\" — supports ${ENV_VAR})[/]");
+                if (headerValue is null) return CommandResult.Continue;
                 headers[headerName.Trim()] = headerValue.Trim();
             }
             else if (auth.StartsWith("OAuth", StringComparison.Ordinal))
             {
-                var scopesLine = AnsiConsole.Prompt(
-                    new TextPrompt<string>("[dim]Scopes[/] [dim](space-separated, blank for server default)[/]")
-                        .AllowEmpty()
-                        .PromptStyle("white"));
+                var scopesLine = ReplInput.Ask("[dim]Scopes[/] [dim](space-separated, blank for server default)[/]", allowEmpty: true);
+                if (scopesLine is null) return CommandResult.Continue;
                 oauth = new McpOAuthConfig
                 {
                     Scopes = SplitStdioArgs(scopesLine),

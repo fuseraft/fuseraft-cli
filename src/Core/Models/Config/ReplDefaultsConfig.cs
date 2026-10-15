@@ -19,6 +19,22 @@ public sealed class ReplDefaultsConfig
     [JsonPropertyName("contextBudget")]
     public int? ContextBudget { get; set; }
 
+    /// <summary>The full-screen REPL's color theme: a built-in one, or a file in ~/.fuseraft/themes. Null is the default.</summary>
+    [JsonPropertyName("theme")]
+    public string? Theme { get; set; }
+
+    /// <summary>Colors for single theme roles on top of the theme, in color words: <c>"accent": "bold magenta"</c>.</summary>
+    [JsonPropertyName("colors")]
+    public Dictionary<string, string>? Colors { get; set; }
+
+    /// <summary>Where the full-screen REPL puts the prompt: <c>bottom</c> (the default) or <c>top</c>.</summary>
+    [JsonPropertyName("dock")]
+    public string? Dock { get; set; }
+
+    /// <summary>Whether the full-screen REPL rings the terminal bell when a turn ends or a question waits; on unless false.</summary>
+    [JsonPropertyName("bell")]
+    public bool? Bell { get; set; }
+
     [JsonPropertyName("noBanner")]
     public bool NoBanner { get; set; }
 
@@ -88,8 +104,10 @@ public sealed class ReplDefaultsConfig
     public int? WarnIdenticalToolCalls { get; set; }
 
     /// <summary>
-    /// Input tokens one REPL turn may spend, summed over all of its model calls, before it stops
-    /// and keeps its progress. Null uses 1,000,000.
+    /// Uncached input tokens one REPL turn may spend, summed over all of its model calls, before
+    /// it stops and keeps its progress. Prompt-cache reads don't count: every call resends the
+    /// whole conversation, so counting them would cap a turn at a call count that shrinks as the
+    /// context grows. Null uses 1,000,000.
     /// </summary>
     [JsonPropertyName("maxTurnInputTokens")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

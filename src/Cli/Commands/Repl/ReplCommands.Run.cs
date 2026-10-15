@@ -25,8 +25,7 @@ internal static partial class ReplCommands
                 ReplJsonBridge.Emit(new { type = "text", text = "Usage: `/run <task>` or `/run <path-to-task-file>`" });
                 return CommandResult.Continue;
             }
-            AnsiConsole.Markup("[dim]Task (or path to task file): [/]");
-            arg = Console.ReadLine()?.Trim() ?? string.Empty;
+            arg = ReplInput.ReadLine("[dim]Task (or path to task file): [/]")?.Trim() ?? string.Empty;
             if (string.IsNullOrWhiteSpace(arg))
             {
                 AnsiConsole.MarkupLine("[dim]No task provided.[/]");
@@ -186,9 +185,7 @@ internal static partial class ReplCommands
         for (int i = 0; i < configs.Count; i++)
             AnsiConsole.MarkupLine($"  [bold cyan]{i + 1}.[/] {Markup.Escape(Path.GetRelativePath(cwd, configs[i]))}");
         AnsiConsole.WriteLine();
-        AnsiConsole.Markup($"[dim]Select (1–{configs.Count}): [/]");
-
-        var line = Console.ReadLine()?.Trim() ?? string.Empty;
+        var line = ReplInput.ReadLine($"[dim]Select (1–{configs.Count}): [/]")?.Trim() ?? string.Empty;
         if (!int.TryParse(line, out var choice) || choice < 1 || choice > configs.Count)
         {
             AnsiConsole.MarkupLine("[yellow]Invalid selection — run cancelled.[/]");
@@ -218,8 +215,10 @@ internal static partial class ReplCommands
         using var proc = new Process { StartInfo = psi };
         proc.Start();
 
-        var stdoutTask = ForwardStreamAsync(proc.StandardOutput, output, Console.Out);
-        var stderrTask = ForwardStreamAsync(proc.StandardError,  output, Console.Error);
+        // Through Spectre's writer, so the output lands in the TUI's transcript when that's where the REPL draws.
+        var console    = ReplInput.Screen is null ? Console.Out : AnsiConsole.Profile.Out.Writer;
+        var stdoutTask = ForwardStreamAsync(proc.StandardOutput, output, console);
+        var stderrTask = ForwardStreamAsync(proc.StandardError,  output, ReplInput.Screen is null ? Console.Error : console);
 
         try
         {

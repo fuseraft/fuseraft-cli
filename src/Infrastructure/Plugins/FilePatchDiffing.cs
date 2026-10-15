@@ -227,8 +227,10 @@ internal static class FilePatchDiffing
             "WRITE BLOCKED — this content ends with a context-compaction placeholder note " +
             "(e.g. \"[ELIDED — ... NOT the real value ...]\"), not real data. That marker was " +
             "injected when older tool output aged out of context — it is NOT the file's actual " +
-            "content. Re-read the source file with read_file (or re-run the tool that produced " +
-            "the value) to get the real content, then retry with that.");
+            "content. Your earlier write_file/patch_file calls show this note in place of the " +
+            "content they really wrote; do not copy their arguments. Retry with the complete " +
+            "content written out in full — read_file the current file first if you need what " +
+            "is on disk, or re-run the tool that produced the value.");
     }
 
     internal static async Task<string?> EnsureFileExistsAsync(string resolved, string content)

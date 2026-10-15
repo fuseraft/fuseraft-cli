@@ -298,9 +298,10 @@ fuseraft repl [options]
 | `-m, --model <id>` | see below | Model ID to use (e.g. `gpt-4o`, `claude-sonnet-4-6`). Overrides `~/.fuseraft/config` when set. |
 | `--save` | off | Persist `--model` as the new default in `~/.fuseraft/config`. No effect without `--model`. |
 | `-s, --system <prompt>` | — | System prompt. Defaults to a coding/research prompt when tools are enabled. |
-| `--resume <id>` | — | Resume a previous REPL session by its session ID. The session's last few turns are re-displayed on startup (`repl.resumeReplayTurns`, default 3; `/replay` shows more). Use `/sessions` inside the REPL to list resumable sessions. |
+| `--resume <id>` | — | Resume a previous REPL session by its session ID. The session's last few turns are re-displayed on startup (`repl.resumeReplayTurns`, default 3; `/replay` shows more). Use `/sessions` inside the REPL to list resumable sessions. Resuming from a different directory than the session ran in moves back into that directory first, so the sandbox, approvals and project instructions match the paths the session already uses. |
 | `--no-banner` | off | Skip the ASCII banner. Persist as the default with `fuseraft settings set repl.noBanner true`. |
 | `--no-tools` | off | Disable all built-in tools and start a plain chat session. |
+| `--plain` | off | Use the line-based REPL instead of the full-screen one. Piped stdin or stdout, and `--vscode`, always get the line-based REPL. |
 | `--verbose` | off | Enable debug logging: prints per-turn detail (token estimate, tool-round count, total tool calls, and cache-read tokens when the provider reports any) and shows the event log path at startup. Persist as the default with `fuseraft settings set repl.verbose true`. |
 | `--vscode` | off | VS Code mode. When stdin is also redirected (the process is spawned by the fuseraft VS Code extension's REPL panel), switches to JSON bridge mode: all output is emitted as JSONL events to stdout and input is read as JSONL from stdin. In this mode the ASCII banner, ANSI prompts, spinner, and status lines are suppressed; the API key is read from `FUSERAFT_API_KEY` instead of the OS keychain. Automatically passed by the extension — not intended for manual use. |
 | `--yolo` | off | Skip the REPL's default safety gates: HITL approval is off instead of on, FileSystem/Shell/Git/Search are not sandboxed to the launch directory, and any `repl.safeMode` default from `fuseraft settings` is ignored. Restores the fully-open behavior for trusted, unattended sessions. Prints a warning banner when active. Make it the default with `fuseraft settings set repl.yolo true`. |
@@ -445,7 +446,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/sessions` | List resumable REPL sessions with their IDs, model, turn count, and age. Resume with `fuseraft repl --resume <id>`. |
 | `/fork` | Snapshot the current session to a new ID. The snapshot is saved immediately; the current session continues unchanged. Use `fuseraft repl --resume <id>` to open the fork later. |
 | `/fork switch` | Fork and immediately become the fork. The original session is already checkpointed on disk; the live session continues under the new ID. |
-| `/switch <id>` | Save the current session and load another saved session in its place. History, turn counter, model (if different), and plan state are all restored, and the session's most recent turns are re-displayed (see `repl.resumeReplayTurns`). Use `/sessions` to find IDs. |
+| `/switch <id>` | Save the current session and load another saved session in its place. History, turn counter, model (if different), and plan state are all restored, and the session's most recent turns are re-displayed (see `repl.resumeReplayTurns`). A session that ran in another directory isn't loaded; `/switch` prints the `cd … && fuseraft --resume <id>` that resumes it there. Use `/sessions` to find IDs. |
 | `/conversation` | List all turns in memory with 1-based turn numbers and a one-line preview of each user message and assistant response. Use this to find the right turn number before running `/rewind`. |
 | `/rewind <n>` | Keep turns 1…n and discard all later turns. Turn count is the number of User messages currently in memory. Clamps safely — passing a number larger than the current turn count is a no-op. |
 | `/rewind -<n>` | Step back n turns from the current position (relative rewind). `/rewind -1` drops the last turn; `/rewind -99` clamps to 0 and clears all turns. |
@@ -462,6 +463,9 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/tools restrict <plugin> <tag…>` | Allow only tools tagged with one of `<tag…>` for that plugin (e.g. `/tools restrict Git read`), using the same capability vocabulary as orchestration's [`Capabilities`](configuration.md#capabilities) |
 | `/tools unrestrict <plugin>` | Remove a plugin's capability restriction |
 | `/undo` | Revert files written, patched, copied, moved, or deleted in the most recent turn. Repeatable — walks back one turn at a time. Only affects the filesystem; use `/rewind` to also roll back conversation history. |
+| `/copy [code]` | Copy the last reply to the clipboard as the Markdown the model wrote, or with `code` one of its code blocks without the fences (pick one when there are several). Uses OSC 52, which works over SSH and in most terminals (in tmux, `set -g set-clipboard on`), plus `wl-copy`, `xclip`, `xsel`, `pbcopy` or `clip.exe` when one is there. |
+| `/theme [name]` | Full-screen REPL: list color themes, switch to one for this session, or `/theme save <name>` to write the current colors to `~/.fuseraft/themes/<name>.json`. |
+| `/dock [top\|bottom]` | Full-screen REPL: show where the prompt is, or move it and the status line to the top or bottom of the screen for this session. |
 | `/mcp` | List MCP servers connected this session and their tools |
 | `/mcp add` | Interactive wizard to connect an MCP server (stdio or HTTP). Persists to the `mcpServers` section of `~/.fuseraft/config` so it reconnects automatically on future REPL launches. |
 | `/mcp add --session-only` | Same as `/mcp add`, but don't persist past this session |
@@ -483,7 +487,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/memory show <name>` | Show the full body of a stored memory |
 | `/memory delete <name>` | Delete a stored memory by name |
 | `/memory save` | Extract memories from the current session and save them now (also runs automatically on `/exit`) |
-| `/paste` | Enter multi-line paste mode; type `EOF` on its own line to finish |
+| `/paste` | Enter multi-line paste mode; type `.done` on its own line to finish. The full-screen REPL takes a multi-line paste in its prompt directly, so there it only says so |
 | `/save` | Save a Markdown transcript to `repl-<sessionId>.md` in the current directory |
 | `/save <file>` | Save the transcript to a specific file |
 | `/snapshot` | Write a full debug snapshot of the current session state — metadata, active modes, context stats, tool inventory, plan state, and full message history — to a timestamped JSON file in `/tmp/fuseraft/`. Prints the file path on completion. |
@@ -499,6 +503,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/safe-mode off` | Restore tool categories to their state before safe mode was enabled |
 | `/hitl` | Show current HITL (human-in-the-loop) mode status |
 | `/hitl on` | Require y/N approval before each shell run, and before every FileSystem write/delete, Git write, or write-ish Http call |
+| `/approvals [clear]` | List the "always" answers given to HITL approvals, saved for this directory and for this session only; `clear` forgets them all |
 | `/hitl auto` | Like `on`, but shell commands that are provably read-only (`ls`, `git status`, `grep`, `git log \| head`, …) run without asking. Everything that can change something — including every FileSystem write, Git write, and write-ish Http call — still asks. See [Read-only auto-approval](#read-only-auto-approval-hitl-auto) |
 | `/hitl off` | Run those calls without approval again |
 | `/adversarial` | Show adversarial mode status |
@@ -640,7 +645,24 @@ Action allowed.
 ```
 
 - **y / yes** — the call runs normally
+- **a / always** — the call runs, and so does every later one the prompt's "always" covers (see below), without asking
 - **Enter / anything else** — the call is blocked; the agent receives `[DENIED]` and can try an alternative or ask what to do
+
+In the full-screen REPL the prompt takes a single key, `Allow? [y]es [n]o [a]lways: commands using npm`, and Esc means no; keys typed just as it appears are ignored, so a `y` meant for your message never approves anything.
+
+##### "Always" answers
+
+The REPL offers "always" when it can say exactly what it would cover, and remembers the answer:
+
+| Approval | "Always" covers | Kept |
+|---|---|---|
+| A shell command | Commands using the same programs (`npm install && npm test` → commands using `npm`); a later command is approved without asking only when every program in it is covered | Saved for the directory in `~/.fuseraft/approvals.json` |
+| A shell command using an interpreter or shell (`python3`, `node`, `bash`, `eval`, `xargs`, `npx`, …) | The same, but these can run any code | This session only |
+| `write_file` / `patch_file` inside the launch directory | All file writes there; seeing each diff is the point of asking, so it's never saved | This session only |
+| A FileSystem action inside the launch directory (`delete_file`, `move_file`, …) | Every call to that action there | This session only |
+| A Git or Http action (`git_commit`, `http_post`, …) | Every call to that tool | Saved for the directory |
+
+"Always" isn't offered for a command it can't name with confidence: one that sets environment variables first (`LD_PRELOAD=… ls`), runs a program by path (`./build.sh`), or hides a command substitution in quotes. It is never offered for, and never answers, a prompt to grant a directory outside the sandbox. Hard denials (dangerous commands, credential files, deny rules) and the sandbox still apply to everything an "always" answer covers. The saved file belongs to you, so a cloned project can't grant itself anything. `/approvals` lists what's saved and what holds for this session; `/approvals clear` forgets all of it. Saved answers apply wherever the REPL asks, including the VS Code panel, which doesn't offer "always" itself.
 
 ##### Read-only auto-approval (`/hitl auto`)
 
@@ -668,8 +690,7 @@ Safe mode itself (`/safe-mode`, distinct from HITL) is off by default; engage it
 1> /tools restrict Git read
 Restricted Git to: read
 1> commit these changes
-fuseraft agent:
-I don't have a git_commit tool available.
+◆ I don't have a git_commit tool available.
 1> /tools unrestrict Git
 Restriction on Git removed.
 ```
@@ -683,7 +704,33 @@ Restriction on Git removed.
 
 **Input and line editing**
 
-The REPL prompt supports history navigation and in-line editing without any external dependencies:
+On a terminal the REPL is full screen: the conversation scrolls above a prompt editor, and a status line at the bottom shows the model, the turn, how full the context is, and the active modes, with a spinner and the time so far while a turn runs. The context percentage is green while auto-compaction is out of reach, yellow when a turn as big as the last one would reach it, and red once it's past. Replies are styled as Markdown as they stream in (headings, bold, lists, quotes, links, tables fitted to the screen, and code blocks highlighted for the languages VS Code knows). Each tool call shows as one line (`↳ read_file src/app.py`), a failing one adds its first line of output, a subagent's calls are nested under it and tagged with its name, and each changed file shows as `✎ path +added -removed`. The model's thinking, when the provider streams it, shows dimmed under a `∴` and folds into one line once the model moves on.
+
+You can type while a turn runs. A message joins the running turn: the model reads it right after its current tool calls, so you can correct course mid-turn. If the turn ends before that, the message starts the next turn. A `/command` or `!command` waits until the turn ends. Cancelling the turn with Ctrl+C drops what you sent during it. Approvals (`Allow? [y]es [n]o`), `ask_user` questions, and the prompts of `/mcp add` and `/provider setup` take the prompt's place; keys typed just as one appears are ignored, so a `y` meant for your message never approves anything. When the session ends, the conversation is printed to the terminal so it stays in the scrollback.
+
+Naming a file or directory with `@` hands it to the model with your message (`why does @src/parser.py reject @tests/bad.json?`). It's read through the session's own `read_file` or `list_files` tool, so the sandbox and deny rules apply exactly as when the model reads it: a `.env` file is never attached. Only existing paths inside the working directory count, up to 10 a message; anything else after an `@` stays plain text, and `@shot.png` still attaches an image. As you type after `@`, the prompt suggests paths: the entries one level down, then files anywhere whose name starts with what you typed. Files git ignores and deny-ruled files aren't suggested. This works in the line-based REPL too, without the suggestions.
+
+| Key | Action |
+|-----|--------|
+| Enter | Send the message (or take the highlighted suggestion) |
+| Alt+Enter / Shift+Enter | Start a new line; a multi-line paste is one message |
+| Up / Down arrow | Walk input history at the first or last line, or move through suggestions |
+| Tab | Complete a slash command, the word it takes, a `$skill`, or an `@path` |
+| Esc | Hide suggestions; cancel a question, or deny an approval |
+| PgUp / PgDn, mouse wheel | Scroll the conversation |
+| Ctrl+Home / Ctrl+End | Jump to the top, or back to following new output |
+| Ctrl+F | Find text in the conversation (Enter or ↑ for older matches, ↓ for newer, Esc to close) |
+| Ctrl+R | Search earlier messages; the chosen one replaces the draft |
+| Ctrl+O | Show the latest tool output, approval diff, or thinking in full, in place of the conversation: ←/→ for older and newer (the last 100 are kept), ↑/↓ and PgUp/PgDn to scroll, Esc to close |
+| Ctrl+U | Delete from the cursor to the start of the line |
+| Ctrl+C | Cancel the running turn (denying an open approval), else close or clear what's open; twice on an empty prompt exits |
+| Ctrl+D | Exit, on an empty prompt |
+
+The terminal bell rings when a turn finishes or a question waits after you've been away from the keyboard for 10 seconds; `fuseraft settings set repl.bell false` turns it off.
+
+**Themes and docking.** `/theme` lists color themes (default, bright, light, mono, rust, and any in `~/.fuseraft/themes/`) and `/theme <name>` switches for the session; keep one with `fuseraft settings set repl.theme <name>`. `/theme save <name>` writes the current colors to a theme file to edit. Theme files use the same format as [anchor's](https://fuseraft.ai/anchor/guides/themes/), and the repository's `themes/` folder has samples to copy in. `repl.colors` in `~/.fuseraft/config` sets single roles on top of the theme (`"colors": { "accent": "bold magenta" }`). `/dock top` moves the prompt and status line to the top of the screen; keep it with `fuseraft settings set repl.dock top`.
+
+With `--plain`, or when stdin or stdout is piped, the REPL reads plain lines instead, with history navigation and in-line editing:
 
 | Key | Action |
 |-----|--------|
@@ -2735,6 +2782,9 @@ Sets one field by a dotted, case-insensitive key. Loads the existing config (or 
 | `repl.autoCompact` | `true`/`false` — auto-compact at 75% context instead of only warning (default `true`) |
 | `repl.hitlAutoApproveReadOnly` | `true`/`false` — start every session in `/hitl auto`: with HITL on, provably read-only shell commands skip the y/N prompt (default `false` — every shell command asks) |
 | `repl.resumeReplayTurns` | Integer ≥ 0 — how many recent turns to re-display when a session is resumed with `--resume` or `/switch` (default `3`; `0` turns it off, and `/replay` still works on demand) |
+| `repl.theme` | Full-screen REPL color theme: `default`, `bright`, `light`, `mono`, `rust`, or a file in `~/.fuseraft/themes`; `""` resets |
+| `repl.dock` | `bottom` (default) or `top`: where the full-screen REPL puts the prompt; `""` resets |
+| `repl.bell` | `true`/`false`: ring the bell when a turn ends or a question waits while you're away (default `true`) |
 | `repl.noBanner` | `true`/`false` |
 | `repl.verbose` | `true`/`false` |
 | `repl.safeMode` | `true`/`false` — engage `/safe-mode` at startup |
@@ -2746,7 +2796,7 @@ Sets one field by a dotted, case-insensitive key. Loads the existing config (or 
 | `repl.warnIdenticalToolCalls` | Identical calls in a row at which the model is nudged to change course, 2–49, always kept below `repl.maxIdenticalToolCalls` (default `3`), or `""` to reset |
 | `repl.maxStreamRetries` | Automatic retries of a stream that dropped mid-response, 0–5 (default `2`), or `""` to reset |
 | `repl.maxTodoNudges` | Follow-up turns sent when the model stops with todo items it wrote during the current request still open, 0–10 (default `2`; `0` turns them off), or `""` to reset |
-| `repl.maxTurnInputTokens` | Input tokens one turn may spend across all of its model calls before it stops, 100,000–100,000,000 (default `1000000`), or `""` to reset |
+| `repl.maxTurnInputTokens` | Uncached input tokens one turn may spend across all of its model calls before it stops (prompt-cache reads don't count), 100,000–100,000,000 (default `1000000`), or `""` to reset |
 | `repl.plugins` | Comma-separated plugin list, e.g. `Scratchpad,Http` |
 | `telemetry.otlpEndpoint` | OTLP endpoint URL, or `""` to disable |
 | `telemetry.serviceName` | Requires `telemetry.otlpEndpoint` to already be set |
@@ -2797,7 +2847,7 @@ fuseraft settings set
 
 ### Tool-loop guards
 
-A REPL turn stops itself, keeping the progress so far, when it looks stuck: after `repl.maxConsecutiveToolFailures` failing tool calls in a row, or `repl.maxIdenticalToolCalls` identical calls in a row (or an A/B/A/B alternation between two calls, which is fixed). One call short of the failure cutoff, and at `repl.warnIdenticalToolCalls` identical calls, the model gets a `[SYSTEM NOTICE]` appended to that tool's result so it can change course before being stopped. The warning is always kept below the cutoff — set the cutoff to 3 and the warning lands at 2 — however the two are configured. A turn also stops once the input tokens its model calls have reported add up to `repl.maxTurnInputTokens` — the one guard that stops a turn that is making progress, just too expensively. It stops between rounds, so the last round's tool results are kept, and needs a provider that reports usage on streamed responses (Ollama doesn't, so the budget never fires there). A stopped turn keeps every tool call and result it made, even when the model hadn't written any text yet, and no automatic follow-up turn runs after it. The same goes for a turn cut short by Ctrl+C or an error: the rounds that finished (every model call whose tool results came back) stay in the history, so the next message carries on from them instead of redoing them. A stream that drops and is retried (`repl.maxStreamRetries`) resumes from those rounds too, rather than re-running the turn — tool calls included — from the start. Raise the limits for a model that legitimately needs more attempts; lowering them trades patience for fewer wasted tokens. Out-of-range values in a hand-edited file are clamped to the ranges above rather than disabling a guard.
+A REPL turn stops itself, keeping the progress so far, when it looks stuck: after `repl.maxConsecutiveToolFailures` failing tool calls in a row, or `repl.maxIdenticalToolCalls` identical calls in a row (or an A/B/A/B alternation between two calls, which is fixed). One call short of the failure cutoff, and at `repl.warnIdenticalToolCalls` identical calls, the model gets a `[SYSTEM NOTICE]` appended to that tool's result so it can change course before being stopped. The warning is always kept below the cutoff — set the cutoff to 3 and the warning lands at 2 — however the two are configured. A turn also stops once the uncached input tokens its model calls have reported add up to `repl.maxTurnInputTokens` — the one guard that stops a turn that is making progress, just too expensively. Tokens the provider served from its prompt cache don't count: every call resends the whole conversation, so counting them would stop a turn after a number of calls that shrinks as the context grows, whatever the turn actually cost. It stops between rounds, so the last round's tool results are kept, and needs a provider that reports usage on streamed responses (Ollama doesn't, so the budget never fires there). A stopped turn keeps every tool call and result it made, even when the model hadn't written any text yet, and no automatic follow-up turn runs after it. The same goes for a turn cut short by Ctrl+C or an error: the rounds that finished (every model call whose tool results came back) stay in the history, so the next message carries on from them instead of redoing them. A stream that drops and is retried (`repl.maxStreamRetries`) resumes from those rounds too, rather than re-running the turn — tool calls included — from the start. Raise the limits for a model that legitimately needs more attempts; lowering them trades patience for fewer wasted tokens. Out-of-range values in a hand-edited file are clamped to the ranges above rather than disabling a guard.
 
 Settings are read when the REPL starts, so `settings set` from another shell doesn't affect a session that's already running.
 

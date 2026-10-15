@@ -123,12 +123,18 @@ internal static class ReplShellEscape
             FileName         = ShellEnvironment.Shell,
             WorkingDirectory = ctx.ShellCwd,
             UseShellExecute  = false,
-            // Deliberately NOT redirected: the child inherits this console's stdin/stdout/
+            // On a plain terminal, deliberately NOT redirected: the child inherits this console's stdin/stdout/
             // stderr directly, so it behaves like a normal foreground command in a real
             // terminal — interactive prompts, pagers, and live-streaming output all work,
             // and a Ctrl+C during the command reaches the child via the terminal's own
             // signal delivery to its foreground process group, not through this process.
         };
+
+        // The TUI owns the terminal, so there the command's output is read and written to the transcript instead,
+        // and it gets no input: an interactive program would wait for keys the TUI keeps.
+        var captured = ReplInput.Screen is not null;
+        if (captured)
+            psi.RedirectStandardOutput = psi.RedirectStandardError = psi.RedirectStandardInput = true;
 
         if (OperatingSystem.IsWindows())
         {
@@ -151,6 +157,15 @@ internal static class ReplShellEscape
         {
             AnsiConsole.MarkupLine($"[red]Failed to start shell:[/] {Markup.Escape(ex.Message)}");
             return;
+        }
+        if (captured)
+        {
+            process.StandardInput.Close();
+            var writer = AnsiConsole.Profile.Out.Writer;
+            process.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (writer) writer.WriteLine(e.Data); };
+            process.ErrorDataReceived  += (_, e) => { if (e.Data is not null) lock (writer) writer.WriteLine(e.Data); };
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
         }
 
         // Share ActiveCts with the same Ctrl+C gate ExecuteAsync's LLM streaming uses (see

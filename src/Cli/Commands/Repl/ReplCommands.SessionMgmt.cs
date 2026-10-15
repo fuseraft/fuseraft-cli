@@ -150,6 +150,18 @@ internal static partial class ReplCommands
             return CommandResult.Continue;
         }
 
+        // The sandbox, approvals and project instructions were rooted at this REPL's directory at
+        // startup and can't move now, so a session from another directory would have its own
+        // paths blocked. --resume at startup moves into the session's directory instead.
+        if (ReplCommand.ResumeDirectory(snapshot.Cwd, ctx.Cwd) is { } otherDir)
+        {
+            AnsiConsole.MarkupLine(
+                $"[yellow]Session [bold]{Markup.Escape(snapshot.SessionId)}[/] ran in {Markup.Escape(otherDir)}, not here.[/]");
+            AnsiConsole.MarkupLine(
+                $"[dim]Resume it there:[/] cd {Markup.Escape(otherDir)} && fuseraft --resume {Markup.Escape(snapshot.SessionId)}");
+            return CommandResult.Continue;
+        }
+
         var prevId    = ctx.SessionId;
         var prevModel = ctx.ModelId;
 

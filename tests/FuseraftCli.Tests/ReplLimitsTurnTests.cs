@@ -107,7 +107,8 @@ public sealed class ReplLimitsTurnTests : IDisposable
 
     // Distinct, succeeding calls in the shape a provider streams them: the round's call and its
     // usage, then (once the invocation loop has run the tool) the tool's result.
-    private static async IAsyncEnumerable<ChatResponseUpdate> CostlyRounds(List<int> rounds, int count, int inputPerRound)
+    private static async IAsyncEnumerable<ChatResponseUpdate> CostlyRounds(
+        List<int> rounds, int count, int inputPerRound, int cachedPerRound = 0)
     {
         for (var i = 0; i < count; i++)
         {
@@ -118,7 +119,14 @@ public sealed class ReplLimitsTurnTests : IDisposable
                 Contents =
                 [
                     new FunctionCallContent($"c{i}", "read_file", new Dictionary<string, object?> { ["path"] = $"f{i}.md" }),
-                    new UsageContent(new UsageDetails { InputTokenCount = inputPerRound, OutputTokenCount = 5 }),
+                    new UsageContent(new UsageDetails
+                    {
+                        InputTokenCount  = inputPerRound,
+                        OutputTokenCount = 5,
+                        AdditionalCounts = cachedPerRound > 0
+                            ? new() { [CacheUsageBackfillChatClient.CacheReadInputTokensKey] = cachedPerRound }
+                            : null,
+                    }),
                 ],
             };
             await Task.Yield();
@@ -299,6 +307,21 @@ public sealed class ReplLimitsTurnTests : IDisposable
         Assert.StartsWith(ReplTurn.StoppedEarlyNotePrefix, ctx.History[^1].Text);
         Assert.Contains("input-token budget", ctx.History[^1].Text);
         Assert.DoesNotContain(await File.ReadAllLinesAsync(eventsPath), l => l.Contains("\"correction_injected\""));
+    }
+
+    [Fact]
+    public async Task TurnTokenBudget_IgnoresPromptCacheReads()
+    {
+        // 10 rounds resending a 300k-token prompt that is almost all cache hits: 3M gross input,
+        // but only 100k of it uncached — well under the budget, so the turn runs to completion.
+        var rounds = new List<int>();
+        var client = new ScriptedClient(_ => CostlyRounds(rounds, count: 10, inputPerRound: 300_000, cachedPerRound: 290_000));
+        var (ctx, eventsPath) = NewContext(client, new ReplDefaultsConfig { MaxTurnInputTokens = 1_000_000 });
+
+        await RunAsync(ctx);
+
+        Assert.Equal(10, rounds.Count);
+        Assert.DoesNotContain(await File.ReadAllLinesAsync(eventsPath), l => l.Contains("\"hit_turn_token_budget\""));
     }
 
     [Fact]

@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
 using fuseraft.Cli.Display;
+using fuseraft.Cli.Tui;
 using fuseraft.Core;
 using fuseraft.Core.Images;
 using fuseraft.Core.Models;
@@ -207,11 +208,12 @@ internal static class ReplTurn
     }
 
     /// <summary>The user message for a turn: plain text, or text followed by its image attachments.</summary>
-    internal static ChatMessage BuildUserMessage(string input, IReadOnlyList<DataContent>? attachments)
+    internal static ChatMessage BuildUserMessage(string input, IReadOnlyList<DataContent>? attachments, string? mentioned = null)
     {
-        if (attachments is not { Count: > 0 }) return new ChatMessage(ChatRole.User, input);
-        var contents = new List<AIContent>(attachments.Count + 1) { new TextContent(input) };
-        contents.AddRange(attachments);
+        if (attachments is not { Count: > 0 } && mentioned is null) return new ChatMessage(ChatRole.User, input);
+        var contents = new List<AIContent> { new TextContent(input) };
+        if (mentioned is not null) contents.Add(new TextContent("\n\n" + mentioned));
+        contents.AddRange(attachments ?? []);
         return new ChatMessage(ChatRole.User, contents);
     }
 
@@ -286,8 +288,21 @@ internal static class ReplTurn
     internal static async Task RunAsync(ReplSessionContext ctx, CancellationToken cancellationToken)
     {
         Console.CancelKeyPress += OnCancelKeyPress;
+        // The TUI reads Ctrl+C as a key, so it asks here instead of raising CancelKeyPress.
+        if (ReplInput.Screen is { } screen)
+            screen.Interrupt = () =>
+            {
+                var c = ctx.ActiveCts;
+                if (c is null || c.IsCancellationRequested) return false;
+                c.Cancel();
+                return true;
+            };
         try   { await RunLoopAsync(ctx, cancellationToken); }
-        finally { Console.CancelKeyPress -= OnCancelKeyPress; }
+        finally
+        {
+            Console.CancelKeyPress -= OnCancelKeyPress;
+            if (ReplInput.Screen is { } s) s.Interrupt = null;
+        }
 
         void OnCancelKeyPress(object? sender, ConsoleCancelEventArgs e)
         {
@@ -383,20 +398,30 @@ internal static class ReplTurn
             }
 
             var turnLabel = (ctx.TurnIndex + 1).ToString();
-            if (!ctx.JsonMode)
-            {
-                var modeTags = new List<string>();
-                if (ctx.SafeMode) modeTags.Add("safe");
-                if (ctx.HitlMode) modeTags.Add("hitl");
-                var prefix = modeTags.Count > 0 ? $"[[{string.Join("·", modeTags)}]] " : string.Empty;
-                AnsiConsole.Markup($"[dim]{prefix}{turnLabel}[/][bold cyan]>[/] ");
-            }
+            var modeTags = new List<string>();
+            if (ctx.SafeMode) modeTags.Add("safe");
+            if (ctx.HitlMode) modeTags.Add("hitl");
+            // The TUI has its own prompt, and shows what was sent once the REPL takes it.
+            if (!ctx.JsonMode && ReplInput.Screen is null)
+                AnsiConsole.Markup((modeTags.Count > 0 ? $"[dim][[{string.Join("·", modeTags)}]] {turnLabel}[/]" : $"[dim]{turnLabel}[/]") + "[bold cyan]>[/] ");
 
             string? raw;
             IReadOnlyList<DataContent> bridgeImages = [];
             try
             {
-                if (ctx.JsonMode)
+                if (ReplInput.Screen is { } screen)
+                {
+                    screen.Status(BuildStatus(ctx, modeTags));
+                    if (ctx.CarriedInput is { } carried)
+                    {
+                        ctx.CarriedInput = null;
+                        AnsiConsole.MarkupLine("[dim]  (the turn ended before reading your message, so it starts the next one)[/]");
+                        raw = carried;
+                    }
+                    else
+                        raw = await screen.ReadAsync(cancellationToken);
+                }
+                else if (ctx.JsonMode)
                 {
                     var msg = await ctx.StdinPump!.ReadMessageAsync();
                     raw = msg?.Text;
@@ -537,12 +562,46 @@ internal static class ReplTurn
                 continue;
             }
 
+            var mentioned = await AttachMentionsAsync(ctx, raw, cancellationToken);
+            var before = ctx.EstimateTokens();
             await ExecuteAsync(
                 ctx, raw,
                 isStepRequest: false, capturePlan: false, activeStep: null,
-                cancellationToken, attachments: all);
+                cancellationToken, attachments: all, mentioned: mentioned);
+            ctx.LastTurnGrowth = Math.Max(0, ctx.EstimateTokens() - before);
             _ = SaveSnapshotAsync(ctx);
         }
+    }
+
+    // What the user sent mid-turn since the turn last looked, as one message, with any files it names with @.
+    static async Task<string?> TakeInterjectionsAsync(ReplSessionContext ctx, CancellationToken ct)
+    {
+        var texts = new List<string>();
+        while (ctx.Interjections.TryDequeue(out var text)) texts.Add(text);
+        if (texts.Count == 0) return null;
+        var typed = string.Join("\n\n", texts);
+        await ctx.Emitter.EmitAsync(EventTypes.UserInput, turn: ctx.TurnIndex, payload: new { content = typed, images = 0, interjection = true });
+        return await AttachMentionsAsync(ctx, typed, ct) is { } mentioned ? typed + "\n\n" + mentioned : typed;
+    }
+
+    // The files and directories the message names with @, read through the session's tools, and what was attached.
+    internal static Task<string?> AttachMentionsAsync(ReplSessionContext ctx, string text, CancellationToken ct) =>
+        ReplMentions.AttachAsync(text, ctx.Cwd, ctx.GetActiveTools(), (what, ok) =>
+        {
+            if (ctx.JsonMode) return;
+            AnsiConsole.MarkupLine(ok ? $"[dim]  + attached {Markup.Escape(what)}[/]" : $"[yellow]  {Markup.Escape(what)}[/]");
+        }, ct);
+
+    // The TUI's status line: the model, the turn, how full the context is (and how near auto-compaction), and the modes.
+    internal static ReplStatus BuildStatus(ReplSessionContext ctx, IReadOnlyList<string> modeTags)
+    {
+        var tokens  = ctx.EstimateTokens();
+        var budget  = Math.Max(1, ctx.ContextTokenBudget);
+        var trigger = budget * ctx.Limits.AutoCompactThreshold;
+        var level   = tokens > trigger ? ContextLevel.Compacting
+                    : tokens + ctx.LastTurnGrowth > trigger ? ContextLevel.Near
+                    : ContextLevel.Clear;
+        return new ReplStatus(ctx.ModelId, ctx.TurnIndex + 1, (double)tokens / budget, level, modeTags);
     }
 
     internal static async Task SaveSnapshotAsync(ReplSessionContext ctx)
@@ -591,7 +650,8 @@ internal static class ReplTurn
         int todoCorrectionRound = 0,
         int todoCriticRound = 0,
         bool emptyResponseRetried = false,
-        IReadOnlyList<DataContent>? attachments = null)
+        IReadOnlyList<DataContent>? attachments = null,
+        string? mentioned = null)
     {
         // The true original user request, preserved across every level of recursive
         // self-correction below — `input` itself becomes the injected correction text on
@@ -608,7 +668,7 @@ internal static class ReplTurn
         // Image bytes never go into the event log — only how many were attached.
         await ctx.Emitter.EmitAsync(EventTypes.UserInput, turn: ctx.TurnIndex,
             payload: new { content = input, images = attachments?.Count ?? 0 });
-        ctx.History.Add(BuildUserMessage(input, attachments));
+        ctx.History.Add(BuildUserMessage(input, attachments, mentioned));
         if (attachments is { Count: > 0 })
         {
             var dropped = ImageAttachments.StripOlderImages(ctx.History);
@@ -645,6 +705,7 @@ internal static class ReplTurn
         var turnInputTokens   = stream.TurnInputTokens;
         var turnOutputTokens  = stream.TurnOutputTokens;
         var turnCacheReadTokens = stream.TurnCacheReadTokens;
+        var turnUncachedInputTokens = stream.TurnUncachedInputTokens;
         var hitConsecutiveFailureLimit = stream.HitConsecutiveFailureLimit;
         var lastToolFailureDetail      = stream.LastToolFailureDetail;
         var hitRepeatedToolCallLimit   = stream.HitRepeatedToolCallLimit;
@@ -681,13 +742,13 @@ internal static class ReplTurn
             warningMessage ??= "Model returned an empty response twice. Provide a real user-facing answer next turn.";
         }
 
-        if (!capturePlan && responseText.Length > 0 && !ctx.JsonMode)
+        // The full-screen REPL showed the reply as it streamed.
+        if (!capturePlan && responseText.Length > 0 && !ctx.JsonMode && ReplInput.Screen is null)
         {
             if (!Console.IsOutputRedirected)
                 ReplConsole.ClearSpinnerLine();
             AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[dim]fuseraft agent:[/]");
-            AnsiConsole.Write(MarkdownRenderer.Render(responseText));
+            AnsiConsole.Write(MarkdownRenderer.Render(responseText, lead: ReplConsole.ReplyMarkup));
         }
         if (!ctx.JsonMode) AnsiConsole.WriteLine();
         if (responseText.Length > 0 || stoppedEarly)
@@ -702,7 +763,7 @@ internal static class ReplTurn
             // it with an assistant message so the history keeps its user/assistant alternation.
             if (stoppedEarly)
                 AppendStoppedEarlyNote(ctx.History,
-                    hitTurnTokenBudget         ? $"it reached the per-turn input-token budget ({ctx.Limits.MaxTurnInputTokens:N0}, repl.maxTurnInputTokens)" :
+                    hitTurnTokenBudget         ? $"it reached the per-turn uncached input-token budget ({ctx.Limits.MaxTurnInputTokens:N0}, repl.maxTurnInputTokens)" :
                     hitConsecutiveFailureLimit ? $"{ctx.Limits.MaxConsecutiveToolFailures} tool calls in a row failed" :
                                                  "the same tool calls kept repeating without progress");
         }
@@ -844,10 +905,11 @@ internal static class ReplTurn
             await ctx.Emitter.EmitAsync(EventTypes.ReplWarning, turn: ctx.TurnIndex, payload: new
             {
                 message      = "hit_turn_token_budget",
-                input_tokens = turnInputTokens,
-                limit        = ctx.Limits.MaxTurnInputTokens,
+                input_tokens          = turnInputTokens,
+                uncached_input_tokens = turnUncachedInputTokens,
+                limit                 = ctx.Limits.MaxTurnInputTokens,
             });
-            var budgetMsg = $"Stopped after {turnInputTokens:N0} input tokens this turn " +
+            var budgetMsg = $"Stopped after {turnUncachedInputTokens:N0} uncached input tokens this turn " +
                             $"(repl.maxTurnInputTokens is {ctx.Limits.MaxTurnInputTokens:N0}). " +
                             "Progress so far was kept — send a follow-up to continue.";
             if (ctx.JsonMode)
@@ -898,7 +960,7 @@ internal static class ReplTurn
                     if (!ctx.JsonMode) AnsiConsole.Markup($"[dim]  ⚡ context is {pct:P0} full — auto-compacting…[/]");
                     var (compacted, compactError, beforeTok, afterTok) = await ReplCommands.CompactHistoryAsync(
                         ctx, focus: null, cancellationToken, source: "auto_compact_threshold");
-                    if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 60)}\r");
+                    if (!ctx.JsonMode) ReplConsole.ClearLine(60);
 
                     if (compacted)
                     {
@@ -1187,7 +1249,7 @@ internal static class ReplTurn
             if (!ctx.JsonMode) AnsiConsole.Markup("[dim]  critic reviewing…[/]");
             var (approved, reason) = await ctx.Subagent.CriticReviewAsync(
                 input, expectedTool: null, toolCallsThisTurn, responseText, cancellationToken: cancellationToken);
-            if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 40)}\r");
+            if (!ctx.JsonMode) ReplConsole.ClearLine(40);
             if (!approved)
             {
                 await ctx.Emitter.EmitAsync(EventTypes.CorrectionInjected, turn: ctx.TurnIndex, payload: new { reason = "critic_rejected", detail = reason });
@@ -1306,7 +1368,7 @@ internal static class ReplTurn
         var (approved, reason) = await ctx.Subagent.CriticReviewAsync(
             taskDescription, expectedTool: null, toolsCalled: [], responseText,
             originalUserRequest: rootInput, cancellationToken: cancellationToken);
-        if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 48)}\r");
+        if (!ctx.JsonMode) ReplConsole.ClearLine(48);
 
         await ctx.Emitter.EmitAsync(EventTypes.CorrectionInjected, turn: ctx.TurnIndex,
             payload: new { reason = "todo_critic_escalation", approved, detail = reason, remaining = incomplete.Count });
@@ -1346,6 +1408,7 @@ internal static class ReplTurn
         long TurnInputTokens,
         long TurnOutputTokens,
         long TurnCacheReadTokens,
+        long TurnUncachedInputTokens,
         int? TurnFirstInputTokens,
         List<ChatResponseUpdate> RawUpdates,
         bool HitConsecutiveFailureLimit,
@@ -1359,7 +1422,7 @@ internal static class ReplTurn
         // step halted mid-stream can still report which tools it managed to call before
         // failing — see ReplTurnOutcome.HaltStepOnStreamFailure.
         internal static TurnStreamResult MakeFailed(List<string> toolCallsThisTurn, int repeatedToolCallLimit) =>
-            new(false, "", toolCallsThisTurn, [], 0, null, 0, 0, 0, null, [], false, null, false, null, repeatedToolCallLimit, false);
+            new(false, "", toolCallsThisTurn, [], 0, null, 0, 0, 0, 0, null, [], false, null, false, null, repeatedToolCallLimit, false);
     }
 
     /// <summary>
@@ -1402,6 +1465,8 @@ internal static class ReplTurn
         var turnInputTokens   = 0L;
         var turnOutputTokens  = 0L;
         var turnCacheReadTokens = 0L;
+        // What ReplLimits.MaxTurnInputTokens is measured against — see UncachedInputTokens.
+        var turnUncachedInputTokens = 0L;
         int? turnFirstInputTokens = null;
         // Captured tool outputs for inspect-step history injection (step execution only).
         List<(string ToolName, string Output)>? capturedResults = isStepRequest ? [] : null;
@@ -1475,6 +1540,37 @@ internal static class ReplTurn
         // Counts this turn's rounds exactly when the client has one (see toolRounds below).
         var callCounter    = activeClient.GetService<ModelCallCountingChatClient>();
         var callsAtStart   = callCounter?.Calls ?? 0;
+
+        // The full-screen REPL draws the turn as it happens: the reply as it streams, its thinking, each tool call.
+        var screen         = ctx.JsonMode ? null : ReplInput.Screen;
+        var callNames      = new Dictionary<string, string>();
+        // There, what the user sends while a free-form turn runs joins it after its next tool results.
+        var interjector    = screen is null || isStepRequest ? null : activeClient.GetService<ReplInterjectingChatClient>();
+        if (interjector is not null)
+        {
+            interjector.Take = ct => TakeInterjectionsAsync(ctx, ct);
+            screen!.Interject = text =>
+            {
+                ctx.Interjections.Enqueue(text);
+                return true;
+            };
+        }
+
+        // Whatever the turn didn't read starts the next one, unless the turn was cancelled, which drops it.
+        void ReleaseInterjections(bool cancelled)
+        {
+            screen?.EndMessage(turn: false);
+            if (interjector is null) return;
+            interjector.Take = null;
+            screen!.Interject = null;
+            var unread = new List<string>();
+            while (ctx.Interjections.TryDequeue(out var text)) unread.Add(text);
+            if (unread.Count == 0) return;
+            if (cancelled)
+                AnsiConsole.MarkupLine("[dim]  (what you sent during the turn was dropped)[/]");
+            else
+                ctx.CarriedInput = string.Join("\n\n", unread);
+        }
         var requestOptions = BuildRequestOptions(ctx.ChatOptions, input);
         var streamAttempt  = 0;
         while (true) // retry loop for transient streaming errors
@@ -1496,6 +1592,13 @@ internal static class ReplTurn
                 // via ChatResponseExtensions.AddMessages — see the history-append comment below.
                 rawUpdates.Add(chunk);
 
+                // A message the user sent mid-turn, which the turn has just read: it's in the transcript already.
+                if (chunk.Role == ChatRole.User)
+                {
+                    pendingParagraphBreak = true;
+                    continue;
+                }
+
                 // Providers emit a trailing usage-only chunk per underlying LLM call — a turn
                 // with tool round trips produces one per round trip, so sum rather than overwrite.
                 // The *first* chunk's input count is kept separately: it reflects the exact size
@@ -1514,11 +1617,17 @@ internal static class ReplTurn
                     turnInputTokens  += usage.Details.InputTokenCount  ?? 0;
                     turnOutputTokens += usage.Details.OutputTokenCount ?? 0;
                     turnCacheReadTokens += usage.Details.CacheReadTokens();
+                    turnUncachedInputTokens += usage.Details.UncachedInputTokens();
                     turnFirstInputTokens ??= (int?)usage.Details.InputTokenCount;
                     sawUsageThisChunk = true;
                 }
                 if (sawUsageThisChunk) usageRounds++;
-                if (turnInputTokens >= limits.MaxTurnInputTokens) turnTokenBudgetReached = true;
+
+                if (screen is not null && !capturePlan)
+                    foreach (var reasoning in chunk.Contents.OfType<TextReasoningContent>())
+                        if (reasoning.Text.Length > 0)
+                            screen.Thinking(reasoning.Text);
+                if (turnUncachedInputTokens >= limits.MaxTurnInputTokens) turnTokenBudgetReached = true;
                 if (chunk.FinishReason is not null) finishRounds++;
                 toolRounds = usageRounds > 0 ? usageRounds : finishRounds;
 
@@ -1535,6 +1644,27 @@ internal static class ReplTurn
                 // usage/finish chunk that also happens to carry this round's tail text isn't
                 // mistaken for the start of the next round.
                 var isRoundBoundary = sawUsageThisChunk || chunk.FinishReason is not null;
+
+                if (screen is not null)
+                    foreach (var call in chunk.Contents.OfType<FunctionCallContent>())
+                    {
+                        callNames[call.CallId ?? string.Empty] = call.Name;
+                        screen.ToolStarted(call.CallId ?? string.Empty, call.Name, TuiRenderer.Summarize(call.Arguments));
+                    }
+
+                if (screen is not null)
+                    foreach (var result in chunk.Contents.OfType<FunctionResultContent>())
+                    {
+                        var callId = result.CallId ?? string.Empty;
+                        var ok     = !IsToolFailure(result);
+                        screen.ToolFinished(callId, callNames.GetValueOrDefault(callId, "tool"), ok,
+                            result.Exception?.Message ?? result.Result?.ToString() ?? string.Empty);
+                        if (ok && pendingFileChanges.TryGetValue(callId, out var change))
+                        {
+                            var known = ctx.FileWriteStats.TryRemove(Path.GetFullPath(change.Path, ctx.Cwd), out var stats);
+                            screen.FileChanged(change.Path, known ? stats.Added : null, known ? stats.Removed : null);
+                        }
+                    }
 
                 var funcCall = chunk.Contents.OfType<FunctionCallContent>().FirstOrDefault();
                 if (funcCall is not null)
@@ -1663,6 +1793,10 @@ internal static class ReplTurn
                     text = "\n\n" + text;
                     pendingParagraphBreak = false;
                 }
+                // With no text before it there's nothing to separate: this chunk starts the reply, and the break
+                // must not wait for the next one, which would split the reply's own text ("Fixed" / ".").
+                else if (sb.Length == 0)
+                    pendingParagraphBreak = false;
                 sb.Append(text);
                 if (isRoundBoundary) pendingParagraphBreak = true;
 
@@ -1672,6 +1806,8 @@ internal static class ReplTurn
                 // VS Code integration's own renderer.
                 if (!capturePlan && ctx.JsonMode)
                     ReplJsonBridge.Emit(new { type = "token", text });
+                else if (!capturePlan && screen is not null)
+                    screen.Text(text);
             }
             break; // streaming succeeded — exit retry loop
         }
@@ -1685,6 +1821,7 @@ internal static class ReplTurn
             else
                 AnsiConsole.MarkupLine("[dim](cancelled)[/]");
             CloseInterruptedTurn("the user cancelled it");
+            ReleaseInterjections(cancelled: true);
             CommitUsage();
             if (!ctx.JsonMode) AnsiConsole.WriteLine();
             reqCts.Dispose();
@@ -1787,6 +1924,7 @@ internal static class ReplTurn
                     AnsiConsole.MarkupLine($"[dim]  ↪ {Markup.Escape(toolSurfaceHint)}[/]");
             }
             CloseInterruptedTurn($"it failed with an error ({(ex.Message.Length > 200 ? ex.Message[..200] + "…" : ex.Message)})");
+            ReleaseInterjections(cancelled: false);
             CommitUsage();
             reqCts.Dispose();
             ctx.ActiveCts = null;
@@ -1798,6 +1936,7 @@ internal static class ReplTurn
         ctx.ActiveCts = null;
         await StopSpinnerAsync();
         spinCts.Dispose();
+        ReleaseInterjections(cancelled: false);
 
         CommitUsage();
         ctx.LastActualContextTokens = turnFirstInputTokens;
@@ -1806,7 +1945,7 @@ internal static class ReplTurn
 
         return new TurnStreamResult(
             true, sb.ToString(), toolCallsThisTurn, fileChanges, toolRounds, capturedResults,
-            turnInputTokens, turnOutputTokens, turnCacheReadTokens, turnFirstInputTokens, rawUpdates,
+            turnInputTokens, turnOutputTokens, turnCacheReadTokens, turnUncachedInputTokens, turnFirstInputTokens, rawUpdates,
             hitConsecutiveFailureLimit, lastToolFailureDetail,
             hitRepeatedToolCallLimit, lastRepeatedToolCallDetail, repeatedToolCallLimit,
             hitTurnTokenBudget);
@@ -1825,7 +1964,7 @@ internal static class ReplTurn
             using var _ = mc as IDisposable;
             var existing = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd, ctx.SessionId);
             var (saved, parseFailed) = await new MemoryExtractor(mc).ExtractAsync([.. ctx.History], existing);
-            if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 30)}\r");
+            if (!ctx.JsonMode) ReplConsole.ClearLine(30);
             foreach (var m in saved) await ctx.MemoryStore.SaveAsync(m, ctx.Cwd, sessionId: ctx.SessionId);
             if (!ctx.JsonMode)
             {
@@ -1838,7 +1977,7 @@ internal static class ReplTurn
         }
         catch
         {
-            if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 30)}\r");
+            if (!ctx.JsonMode) ReplConsole.ClearLine(30);
         }
     }
 
