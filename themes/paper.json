@@ -1,0 +1,38 @@
+{
+  // Ink on paper: deep, saturated colors that stay readable on white.
+  "description": "ink on paper, for light backgrounds",
+  "base": "light",
+  "palette": {
+    "indigo": "#3b4cc0",
+    "navy": "#1f3a5f",
+    "teal": "#0f7b6c",
+    "grape": "#8e3b8e",
+    "leaf": "#2e7d32",
+    "ochre": "#a86400",
+    "brick": "#c62828",
+    "graphite": "#6b6b6b",
+    "rule": "#c8c8c8"
+  },
+  "colors": {
+    "text": "#2b2b2b on #fbf8f1",
+    "accent": "bold indigo",
+    "tool": "navy",
+    "agent": "grape",
+    "success": "leaf",
+    "warning": "ochre",
+    "error": "brick",
+    "muted": "graphite",
+    "border": "rule",
+    "heading": "bold navy",
+    "link": "underline indigo",
+    "selection": "on #e6e0f5",
+    "code": "teal",
+    "codeblock": "on #f0ebe0",
+    "comment": "graphite italic",
+    "string": "leaf",
+    "constant": "ochre",
+    "keyword": "grape",
+    "function": "indigo",
+    "type": "teal"
+  }
+}

@@ -178,6 +178,18 @@ internal sealed class ReplSessionContext
 
     // Safe mode
     public bool             SafeMode;
+
+    /// <summary>Messages the user sent in the full-screen REPL while the running turn works; the turn reads them after its next tool results.</summary>
+    public System.Collections.Concurrent.ConcurrentQueue<string> Interjections { get; } = new();
+
+    /// <summary>What the user sent during the last turn that it ended before reading; it starts the next turn.</summary>
+    public string? CarriedInput;
+
+    /// <summary>How many tokens the last turn added to the context, for the status line's guess at whether the next one compacts.</summary>
+    public int LastTurnGrowth;
+
+    /// <summary>Lines each pending file write adds and removes, by full path, from its approval check; for the full-screen REPL's ✎ lines.</summary>
+    public System.Collections.Concurrent.ConcurrentDictionary<string, (int Added, int Removed)> FileWriteStats { get; init; } = new(StringComparer.Ordinal);
     public HashSet<string>? PreSafeDisabled;
 
     // HITL (human-in-the-loop) mode — when on, every shell command, FileSystem write/delete,

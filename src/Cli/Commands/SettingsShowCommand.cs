@@ -58,6 +58,9 @@ public sealed class SettingsShowCommand : AsyncCommand
         var repl = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey).Title("[bold]REPL defaults[/]")
             .AddColumn("Field").AddColumn("Value");
         repl.AddRow("Context budget", config.Repl.ContextBudget?.ToString() ?? "[dim](heuristic)[/]");
+        repl.AddRow("Theme",          Markup.Escape(config.Repl.Theme ?? "default"));
+        repl.AddRow("Dock",           Markup.Escape(config.Repl.Dock ?? "bottom"));
+        repl.AddRow("Bell",           config.Repl.Bell ?? true    ? "[green]on[/]" : "[dim]off[/]");
         repl.AddRow("No banner",      config.Repl.NoBanner       ? "[green]on[/]" : "[dim]off[/]");
         repl.AddRow("Verbose",        config.Repl.Verbose        ? "[green]on[/]" : "[dim]off[/]");
         repl.AddRow("Safe mode",      config.Repl.SafeModeDefault ? "[green]on[/]" : "[dim]off[/]");

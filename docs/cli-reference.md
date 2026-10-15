@@ -301,6 +301,7 @@ fuseraft repl [options]
 | `--resume <id>` | — | Resume a previous REPL session by its session ID. The session's last few turns are re-displayed on startup (`repl.resumeReplayTurns`, default 3; `/replay` shows more). Use `/sessions` inside the REPL to list resumable sessions. |
 | `--no-banner` | off | Skip the ASCII banner. Persist as the default with `fuseraft settings set repl.noBanner true`. |
 | `--no-tools` | off | Disable all built-in tools and start a plain chat session. |
+| `--plain` | off | Use the line-based REPL instead of the full-screen one. Piped stdin or stdout, and `--vscode`, always get the line-based REPL. |
 | `--verbose` | off | Enable debug logging: prints per-turn detail (token estimate, tool-round count, total tool calls, and cache-read tokens when the provider reports any) and shows the event log path at startup. Persist as the default with `fuseraft settings set repl.verbose true`. |
 | `--vscode` | off | VS Code mode. When stdin is also redirected (the process is spawned by the fuseraft VS Code extension's REPL panel), switches to JSON bridge mode: all output is emitted as JSONL events to stdout and input is read as JSONL from stdin. In this mode the ASCII banner, ANSI prompts, spinner, and status lines are suppressed; the API key is read from `FUSERAFT_API_KEY` instead of the OS keychain. Automatically passed by the extension — not intended for manual use. |
 | `--yolo` | off | Skip the REPL's default safety gates: HITL approval is off instead of on, FileSystem/Shell/Git/Search are not sandboxed to the launch directory, and any `repl.safeMode` default from `fuseraft settings` is ignored. Restores the fully-open behavior for trusted, unattended sessions. Prints a warning banner when active. Make it the default with `fuseraft settings set repl.yolo true`. |
@@ -462,6 +463,9 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/tools restrict <plugin> <tag…>` | Allow only tools tagged with one of `<tag…>` for that plugin (e.g. `/tools restrict Git read`), using the same capability vocabulary as orchestration's [`Capabilities`](configuration.md#capabilities) |
 | `/tools unrestrict <plugin>` | Remove a plugin's capability restriction |
 | `/undo` | Revert files written, patched, copied, moved, or deleted in the most recent turn. Repeatable — walks back one turn at a time. Only affects the filesystem; use `/rewind` to also roll back conversation history. |
+| `/copy [code]` | Copy the last reply to the clipboard as the Markdown the model wrote, or with `code` one of its code blocks without the fences (pick one when there are several). Uses OSC 52, which works over SSH and in most terminals (in tmux, `set -g set-clipboard on`), plus `wl-copy`, `xclip`, `xsel`, `pbcopy` or `clip.exe` when one is there. |
+| `/theme [name]` | Full-screen REPL: list color themes, switch to one for this session, or `/theme save <name>` to write the current colors to `~/.fuseraft/themes/<name>.json`. |
+| `/dock [top\|bottom]` | Full-screen REPL: show where the prompt is, or move it and the status line to the top or bottom of the screen for this session. |
 | `/mcp` | List MCP servers connected this session and their tools |
 | `/mcp add` | Interactive wizard to connect an MCP server (stdio or HTTP). Persists to the `mcpServers` section of `~/.fuseraft/config` so it reconnects automatically on future REPL launches. |
 | `/mcp add --session-only` | Same as `/mcp add`, but don't persist past this session |
@@ -483,7 +487,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/memory show <name>` | Show the full body of a stored memory |
 | `/memory delete <name>` | Delete a stored memory by name |
 | `/memory save` | Extract memories from the current session and save them now (also runs automatically on `/exit`) |
-| `/paste` | Enter multi-line paste mode; type `EOF` on its own line to finish |
+| `/paste` | Enter multi-line paste mode; type `.done` on its own line to finish. The full-screen REPL takes a multi-line paste in its prompt directly, so there it only says so |
 | `/save` | Save a Markdown transcript to `repl-<sessionId>.md` in the current directory |
 | `/save <file>` | Save the transcript to a specific file |
 | `/snapshot` | Write a full debug snapshot of the current session state — metadata, active modes, context stats, tool inventory, plan state, and full message history — to a timestamped JSON file in `/tmp/fuseraft/`. Prints the file path on completion. |
@@ -668,8 +672,7 @@ Safe mode itself (`/safe-mode`, distinct from HITL) is off by default; engage it
 1> /tools restrict Git read
 Restricted Git to: read
 1> commit these changes
-fuseraft agent:
-I don't have a git_commit tool available.
+◆ I don't have a git_commit tool available.
 1> /tools unrestrict Git
 Restriction on Git removed.
 ```
@@ -683,7 +686,33 @@ Restriction on Git removed.
 
 **Input and line editing**
 
-The REPL prompt supports history navigation and in-line editing without any external dependencies:
+On a terminal the REPL is full screen: the conversation scrolls above a prompt editor, and a status line at the bottom shows the model, the turn, how full the context is, and the active modes, with a spinner and the time so far while a turn runs. The context percentage is green while auto-compaction is out of reach, yellow when a turn as big as the last one would reach it, and red once it's past. Replies are styled as Markdown as they stream in (headings, bold, lists, quotes, links, tables fitted to the screen, and code blocks highlighted for the languages VS Code knows). Each tool call shows as one line (`↳ read_file src/app.py`), a failing one adds its first line of output, a subagent's calls are nested under it and tagged with its name, and each changed file shows as `✎ path +added -removed`. The model's thinking, when the provider streams it, shows dimmed under a `∴` and folds into one line once the model moves on.
+
+You can type while a turn runs. A message joins the running turn: the model reads it right after its current tool calls, so you can correct course mid-turn. If the turn ends before that, the message starts the next turn. A `/command` or `!command` waits until the turn ends. Cancelling the turn with Ctrl+C drops what you sent during it. Approvals (`Allow? [y]es [n]o`), `ask_user` questions, and the prompts of `/mcp add` and `/provider setup` take the prompt's place; keys typed just as one appears are ignored, so a `y` meant for your message never approves anything. When the session ends, the conversation is printed to the terminal so it stays in the scrollback.
+
+Naming a file or directory with `@` hands it to the model with your message (`why does @src/parser.py reject @tests/bad.json?`). It's read through the session's own `read_file` or `list_files` tool, so the sandbox and deny rules apply exactly as when the model reads it: a `.env` file is never attached. Only existing paths inside the working directory count, up to 10 a message; anything else after an `@` stays plain text, and `@shot.png` still attaches an image. As you type after `@`, the prompt suggests paths: the entries one level down, then files anywhere whose name starts with what you typed. Files git ignores and deny-ruled files aren't suggested. This works in the line-based REPL too, without the suggestions.
+
+| Key | Action |
+|-----|--------|
+| Enter | Send the message (or take the highlighted suggestion) |
+| Alt+Enter / Shift+Enter | Start a new line; a multi-line paste is one message |
+| Up / Down arrow | Walk input history at the first or last line, or move through suggestions |
+| Tab | Complete a slash command, the word it takes, a `$skill`, or an `@path` |
+| Esc | Hide suggestions; cancel a question, or deny an approval |
+| PgUp / PgDn, mouse wheel | Scroll the conversation |
+| Ctrl+Home / Ctrl+End | Jump to the top, or back to following new output |
+| Ctrl+F | Find text in the conversation (Enter or ↑ for older matches, ↓ for newer, Esc to close) |
+| Ctrl+R | Search earlier messages; the chosen one replaces the draft |
+| Ctrl+O | Show the latest tool output, approval diff, or thinking in full, in place of the conversation: ←/→ for older and newer (the last 100 are kept), ↑/↓ and PgUp/PgDn to scroll, Esc to close |
+| Ctrl+U | Delete from the cursor to the start of the line |
+| Ctrl+C | Cancel the running turn (denying an open approval), else close or clear what's open; twice on an empty prompt exits |
+| Ctrl+D | Exit, on an empty prompt |
+
+The terminal bell rings when a turn finishes or a question waits after you've been away from the keyboard for 10 seconds; `fuseraft settings set repl.bell false` turns it off.
+
+**Themes and docking.** `/theme` lists color themes (default, bright, light, mono, rust, and any in `~/.fuseraft/themes/`) and `/theme <name>` switches for the session; keep one with `fuseraft settings set repl.theme <name>`. `/theme save <name>` writes the current colors to a theme file to edit. Theme files use the same format as [anchor's](https://fuseraft.ai/anchor/guides/themes/), and the repository's `themes/` folder has samples to copy in. `repl.colors` in `~/.fuseraft/config` sets single roles on top of the theme (`"colors": { "accent": "bold magenta" }`). `/dock top` moves the prompt and status line to the top of the screen; keep it with `fuseraft settings set repl.dock top`.
+
+With `--plain`, or when stdin or stdout is piped, the REPL reads plain lines instead, with history navigation and in-line editing:
 
 | Key | Action |
 |-----|--------|
@@ -2735,6 +2764,9 @@ Sets one field by a dotted, case-insensitive key. Loads the existing config (or 
 | `repl.autoCompact` | `true`/`false` — auto-compact at 75% context instead of only warning (default `true`) |
 | `repl.hitlAutoApproveReadOnly` | `true`/`false` — start every session in `/hitl auto`: with HITL on, provably read-only shell commands skip the y/N prompt (default `false` — every shell command asks) |
 | `repl.resumeReplayTurns` | Integer ≥ 0 — how many recent turns to re-display when a session is resumed with `--resume` or `/switch` (default `3`; `0` turns it off, and `/replay` still works on demand) |
+| `repl.theme` | Full-screen REPL color theme: `default`, `bright`, `light`, `mono`, `rust`, or a file in `~/.fuseraft/themes`; `""` resets |
+| `repl.dock` | `bottom` (default) or `top`: where the full-screen REPL puts the prompt; `""` resets |
+| `repl.bell` | `true`/`false`: ring the bell when a turn ends or a question waits while you're away (default `true`) |
 | `repl.noBanner` | `true`/`false` |
 | `repl.verbose` | `true`/`false` |
 | `repl.safeMode` | `true`/`false` — engage `/safe-mode` at startup |

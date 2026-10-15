@@ -157,7 +157,7 @@ internal static partial class ReplCommands
 
         var (success, errorReason, _, _) = await CompactHistoryAsync(ctx, arg, cancellationToken);
 
-        if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 30)}\r");
+        if (!ctx.JsonMode) ReplConsole.ClearLine(30);
 
         if (!success)
         {

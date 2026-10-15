@@ -31,6 +31,12 @@ Every session gets an 8-character session ID (shown in the startup header) and a
 
 ## The prompt
 
+The REPL fills the terminal: the conversation scrolls above a prompt editor, and a status line at the bottom shows the model, the turn, how full the context is (green, then yellow as auto-compaction nears, red once it's past), and whether HITL or safe mode is on. Replies stream in styled as Markdown, with highlighted code blocks; each tool call shows as a line of its own (`↳ shell_run dotnet test`), each changed file as `✎ src/app.cs +4 -1`, and the model's thinking dims under a `∴` while it lasts. Ctrl+O opens any of the last 100 tool outputs, approval diffs or thoughts in full.
+
+While a turn runs you can keep typing: a message joins the turn right after its current tool calls, and a `/command` waits for the turn to end. Approvals and questions appear in place of the prompt. Name files with `@` (`explain @src/parser.py`) to attach them to your message, read through the same tools and rules the model uses. `/copy` copies the last reply (`/copy code` a code block from it), `/theme` changes the colors, and `/dock top` moves the prompt to the top. `--plain` (or piped input or output) gives you the line-based REPL instead.
+
+In the line-based REPL each message you send follows a marker:
+
 ```
 1> your message here
 ```
@@ -47,7 +53,7 @@ After each response, a compact status line reports what happened:
   ── turn 1 · ~3,200 tok · 2 tools
 ```
 
-The prompt supports history navigation (↑/↓), word-wise cursor movement, and standard readline-style kill/delete shortcuts with no external dependencies — see the full key table in [CLI Reference — Input and line editing](cli-reference.md#fuseraft-repl).
+Enter sends and Alt+Enter starts a new line; ↑/↓ walk your history, Tab completes slash commands, `$skills` and `@paths`, PgUp/PgDn scroll, Ctrl+F finds text in the conversation, Ctrl+R searches what you've sent, and Ctrl+O shows a tool's whole output. See the full key tables, for both the full-screen and the line-based REPL, in [CLI Reference — Input and line editing](cli-reference.md#fuseraft-repl).
 
 ---
 
@@ -111,7 +117,7 @@ nothing to commit, working tree clean
 ...(live output, streams as it runs)...
 ```
 
-The child process inherits your terminal's stdio directly (no buffering, no redirection), so interactive programs — `less`, `vim`, `ssh`, an installer prompt — work exactly as they would in a real terminal, and Ctrl+C interrupts just that command without ending the session.
+In the full-screen REPL the command's output is written into the conversation, and the command gets no input, so run interactive programs (`less`, `vim`, `ssh`, an installer prompt) from `fuseraft --plain`. There the child process inherits your terminal's stdio directly (no buffering, no redirection), so they work exactly as they would in a real terminal. Either way, Ctrl+C interrupts just that command without ending the session.
 
 ```
 1> !cd src            # tracks a working directory that persists across ! commands

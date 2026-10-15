@@ -16,9 +16,18 @@ public static class MarkdownRenderer
     private static readonly Regex ListPattern    = new(@"^(\s*)[-*+]\s+(.+)$",    RegexOptions.Compiled);
     private static readonly Regex OListPattern   = new(@"^(\s*)\d+[.)]\s+(.+)$",  RegexOptions.Compiled);
 
-    public static IRenderable Render(string markdown)
+    /// <param name="lead">Markup that starts the first line, such as the REPL's reply mark; a reply that opens with a
+    /// code block, table or rule gets it on a line of its own.</param>
+    public static IRenderable Render(string markdown, string? lead = null)
     {
         var blocks = ParseBlocks(markdown.Trim());
+        if (lead is not null)
+        {
+            if (blocks.Count > 0 && blocks[0] is Markup && FirstMarkup is { } first)
+                blocks[0] = new Markup(lead + first);
+            else
+                blocks.Insert(0, new Markup(lead.TrimEnd()));
+        }
         if (blocks.Count == 0) return new Markup(Markup.Escape(markdown));
         if (blocks.Count == 1) return blocks[0];
         return new Rows(blocks);
@@ -28,8 +37,12 @@ public static class MarkdownRenderer
     // Block parser
     // -------------------------------------------------------------------------
 
+    // The markup the first block was made from, when it's a Markup: Spectre can't hand it back.
+    [ThreadStatic] private static string? FirstMarkup;
+
     private static List<IRenderable> ParseBlocks(string text)
     {
+        FirstMarkup = null;
         var blocks = new List<IRenderable>();
         var lines  = text.ReplaceLineEndings("\n").Split('\n');
         var i      = 0;
@@ -103,7 +116,7 @@ public static class MarkdownRenderer
                 var markup = level == 1
                     ? $"[bold underline]{ConvertInline(hText)}[/]"
                     : $"[bold]{ConvertInline(hText)}[/]";
-                blocks.Add(new Markup(markup));
+                AddMarkup(blocks, markup);
                 i++;
                 continue;
             }
@@ -120,7 +133,7 @@ public static class MarkdownRenderer
                     sb.AppendLine($"[dim]  ▏ {ConvertInline(content)}[/]");
                     i++;
                 }
-                blocks.Add(new Markup(sb.ToString().TrimEnd()));
+                AddMarkup(blocks, sb.ToString().TrimEnd());
                 continue;
             }
 
@@ -137,7 +150,7 @@ public static class MarkdownRenderer
                     content.Append(' ').Append(lines[i].Trim());
                     i++;
                 }
-                blocks.Add(new Markup($"{prefix}[dim]•[/] {ConvertInline(content.ToString())}"));
+                AddMarkup(blocks, $"{prefix}[dim]•[/] {ConvertInline(content.ToString())}");
                 continue;
             }
 
@@ -156,7 +169,7 @@ public static class MarkdownRenderer
                     content.Append(' ').Append(lines[i].Trim());
                     i++;
                 }
-                blocks.Add(new Markup($"{prefix}[dim]{Markup.Escape(num)}.[/] {ConvertInline(content.ToString())}"));
+                AddMarkup(blocks, $"{prefix}[dim]{Markup.Escape(num)}.[/] {ConvertInline(content.ToString())}");
                 continue;
             }
 
@@ -171,7 +184,7 @@ public static class MarkdownRenderer
             }
 
             if (para.Length > 0)
-                blocks.Add(new Markup(ConvertInline(para.ToString())));
+                AddMarkup(blocks, ConvertInline(para.ToString()));
         }
 
         return blocks;
@@ -305,5 +318,11 @@ public static class MarkdownRenderer
         }
 
         return (best, bestMkr);
+    }
+
+    private static void AddMarkup(List<IRenderable> blocks, string markup)
+    {
+        if (blocks.Count == 0) FirstMarkup = markup;
+        blocks.Add(new Markup(markup));
     }
 }

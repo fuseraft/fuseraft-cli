@@ -9,6 +9,7 @@ namespace fuseraft.Cli;
 /// Console-based human approval service — reads y/n and free-form redirects from stdin.
 /// </summary>
 /// <remarks>
+/// Questions go through <see cref="ReplInput"/>, so the full-screen REPL asks them in its panel.
 /// Every prompt method wraps its console output and blocking <c>Console.ReadLine()</c> in
 /// <see cref="ReplConsole.SuspendSpinner"/>. Without it, a REPL turn's background "fusing…"
 /// spinner (which redraws on its own 80ms timer, uncoordinated with anything else touching
@@ -24,8 +25,7 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
     {
         using var _ = ReplConsole.SuspendSpinner();
 
-        AnsiConsole.Markup("[dim]  ↩ Enter or y to continue  ·  type a message to redirect  ·  q to stop:[/]  ");
-        var input = Console.ReadLine()?.Trim() ?? string.Empty;
+        var input = ReplInput.ReadLine("[dim]  ↩ Enter or y to continue  ·  type a message to redirect  ·  q to stop:[/]  ")?.Trim() ?? string.Empty;
 
         if (string.IsNullOrEmpty(input)) return Task.FromResult<string?>(null);
         if (input.Equals("q", StringComparison.OrdinalIgnoreCase) ||
@@ -46,10 +46,9 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
     {
         using var _ = ReplConsole.SuspendSpinner();
 
-        AnsiConsole.Markup(
+        var input = ReplInput.ReadLine(
             $"[bold]Redirect {Markup.Escape(agentName)}[/] " +
-            $"[dim](Enter to pause session):[/]  ");
-        var input = Console.ReadLine()?.Trim() ?? string.Empty;
+            $"[dim](Enter to pause session):[/]  ")?.Trim() ?? string.Empty;
         return Task.FromResult<string?>(string.IsNullOrEmpty(input) ? null : input);
     }
 
@@ -68,9 +67,7 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
         AnsiConsole.MarkupLine($"  Validator: [bold]{Markup.Escape(validatorName)}[/] ({consecutiveFailures} consecutive failures)\n");
         AnsiConsole.MarkupLine(Markup.Escape(error));
         AnsiConsole.MarkupLine("[dim]─────────────────────────────────────────[/]");
-        AnsiConsole.Markup("[dim]Type a message to redirect the agent  ·  press Enter to pause:[/]  ");
-
-        var input = Console.ReadLine()?.Trim() ?? string.Empty;
+        var input = ReplInput.ReadLine("[dim]Type a message to redirect the agent  ·  press Enter to pause:[/]  ")?.Trim() ?? string.Empty;
         return Task.FromResult<string?>(string.IsNullOrEmpty(input) ? null : input);
     }
 
@@ -88,9 +85,7 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
         AnsiConsole.MarkupLine($"  Agent: [bold]{Markup.Escape(agentName)}[/]\n");
         AnsiConsole.MarkupLine(Markup.Escape(reason));
         AnsiConsole.MarkupLine("[dim]─────────────────────────────────────────[/]");
-        AnsiConsole.Markup("[dim]Type a message to unblock the agent  ·  press Enter to pause:[/]  ");
-
-        var input = Console.ReadLine()?.Trim() ?? string.Empty;
+        var input = ReplInput.ReadLine("[dim]Type a message to unblock the agent  ·  press Enter to pause:[/]  ")?.Trim() ?? string.Empty;
         return Task.FromResult<string?>(string.IsNullOrEmpty(input) ? null : input);
     }
 
@@ -101,10 +96,7 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine($"[{ThemeDetector.Warning}]⏸ Shell command requested:[/]");
         AnsiConsole.MarkupLine($"  [dim]{Markup.Escape(command)}[/]");
-        AnsiConsole.Markup("[dim]Allow? (y/N):[/]  ");
-        var input = Console.ReadLine()?.Trim() ?? string.Empty;
-        var allowed = input.Equals("y", StringComparison.OrdinalIgnoreCase) ||
-                      input.Equals("yes", StringComparison.OrdinalIgnoreCase);
+        var allowed = ReplInput.Confirm("[dim]Allow? (y/N):[/]  ");
         AnsiConsole.MarkupLine(allowed ? "[dim]Command allowed.[/]" : "[dim]Command blocked.[/]");
         return Task.FromResult(allowed);
     }
@@ -116,10 +108,7 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine($"[{ThemeDetector.Warning}]⏸ {Markup.Escape(plugin)} action requested:[/]");
         AnsiConsole.MarkupLine($"  [dim]{Markup.Escape(action)} — {Markup.Escape(detail)}[/]");
-        AnsiConsole.Markup("[dim]Allow? (y/N):[/]  ");
-        var input = Console.ReadLine()?.Trim() ?? string.Empty;
-        var allowed = input.Equals("y", StringComparison.OrdinalIgnoreCase) ||
-                      input.Equals("yes", StringComparison.OrdinalIgnoreCase);
+        var allowed = ReplInput.Confirm("[dim]Allow? (y/N):[/]  ");
         AnsiConsole.MarkupLine(allowed ? "[dim]Action allowed.[/]" : "[dim]Action blocked.[/]");
         return Task.FromResult(allowed);
     }
@@ -131,10 +120,8 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine($"[{ThemeDetector.Warning}]⏸ FileSystem action requested:[/] [dim]{Markup.Escape(action)}[/]");
         AnsiConsole.Write(DiffRenderer.Render(path, oldContent, newContent));
-        AnsiConsole.Markup("[dim]Allow? (y/N):[/]  ");
-        var input = Console.ReadLine()?.Trim() ?? string.Empty;
-        var allowed = input.Equals("y", StringComparison.OrdinalIgnoreCase) ||
-                      input.Equals("yes", StringComparison.OrdinalIgnoreCase);
+        ReplInput.Screen?.Keep($"{action} {path}", Tui.UnifiedDiff.Build(oldContent, newContent).Text, diff: true);
+        var allowed = ReplInput.Confirm("[dim]Allow? (y/N):[/]  ");
         AnsiConsole.MarkupLine(allowed ? "[dim]Action allowed.[/]" : "[dim]Action blocked.[/]");
         return Task.FromResult(allowed);
     }
@@ -145,8 +132,7 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
 
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[dim]  Session complete.[/]");
-        AnsiConsole.Markup("[dim]  Type a follow-up message to continue  ·  press Enter to exit:[/]  ");
-        var input = Console.ReadLine()?.Trim() ?? string.Empty;
+        var input = ReplInput.ReadLine("[dim]  Type a follow-up message to continue  ·  press Enter to exit:[/]  ")?.Trim() ?? string.Empty;
         if (string.IsNullOrEmpty(input)) return Task.FromResult<string?>(null);
         return Task.FromResult<string?>(input);
     }
@@ -160,11 +146,7 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
             $"  From:    [bold]{Markup.Escape(sourceAgent)}[/]\n" +
             $"  To:      [bold]{Markup.Escape(targetAgent)}[/]\n" +
             $"  Keyword: [bold]{Markup.Escape(keyword)}[/]\n");
-        AnsiConsole.Markup("[dim]Approve? (y/N):[/]  ");
-        var input = Console.ReadLine()?.Trim() ?? string.Empty;
-        return Task.FromResult(
-            input.Equals("y", StringComparison.OrdinalIgnoreCase) ||
-            input.Equals("yes", StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(ReplInput.Confirm("[dim]Approve? (y/N):[/]  "));
     }
 
     public bool CanAskQuestions => true;
@@ -176,12 +158,10 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
         const string other = "Something else (type an answer)";
         const string skip  = "Skip (let the agent decide)";
         AnsiConsole.WriteLine();
-        var choice = await new SelectionPrompt<string>()
-            .Title($"[bold {ThemeDetector.Warning}]? {Markup.Escape(question)}[/]")
-            .PageSize(12)
-            .UseConverter(Markup.Escape)
-            .AddChoices(allowOther ? [.. options, other, skip] : [.. options, skip])
-            .ShowAsync(AnsiConsole.Console, ct);
+        // Dismissing the TUI's picker with Esc is the same as skipping.
+        var choice = await ReplInput.SelectAsync(
+            $"[bold {ThemeDetector.Warning}]? {Markup.Escape(question)}[/]",
+            allowOther ? [.. options, other, skip] : [.. options, skip], ct) ?? skip;
 
         if (choice == skip)
         {
@@ -190,8 +170,7 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
         }
         if (choice == other)
         {
-            AnsiConsole.Markup("[dim]  Your answer:[/]  ");
-            var typed = Console.ReadLine()?.Trim();
+            var typed = ReplInput.ReadLine("[dim]  Your answer:[/]  ")?.Trim();
             return string.IsNullOrEmpty(typed) ? null : typed;
         }
         AnsiConsole.MarkupLine($"[dim]  → {Markup.Escape(choice)}[/]");
@@ -206,8 +185,7 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
         AnsiConsole.MarkupLine("[dim]─────────────────────────────────────────[/]");
         AnsiConsole.MarkupLine(Markup.Escape(planText));
         AnsiConsole.MarkupLine("[dim]─────────────────────────────────────────[/]");
-        AnsiConsole.Markup("[dim]Press Enter to approve  ·  type feedback to request revisions:[/]  ");
-        var input = Console.ReadLine()?.Trim() ?? string.Empty;
+        var input = ReplInput.ReadLine("[dim]Press Enter to approve  ·  type feedback to request revisions:[/]  ")?.Trim() ?? string.Empty;
         return Task.FromResult<string?>(string.IsNullOrEmpty(input) ? null : input);
     }
 }

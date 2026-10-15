@@ -1,0 +1,37 @@
+{
+  // Cool sea colors: foam, deep water and coral.
+  "description": "sea foam and coral, for dark backgrounds",
+  "palette": {
+    "foam": "#7fdbca",
+    "sea": "#4fb3d9",
+    "deep": "#1f4e66",
+    "mist": "#8aa4b4",
+    "coral": "#ff7a85",
+    "sun": "#ffd580",
+    "kelp": "#8bd49c",
+    "pearl": "#c3e0ec",
+    "urchin": "#b294e8"
+  },
+  "colors": {
+    "text": "#d6e4ea on #0f1c24",
+    "accent": "bold foam",
+    "tool": "sea",
+    "agent": "urchin",
+    "success": "kelp",
+    "warning": "sun",
+    "error": "coral",
+    "muted": "mist",
+    "border": "deep",
+    "heading": "bold sea",
+    "link": "underline foam",
+    "selection": "on #1f3a4a",
+    "code": "pearl",
+    "codeblock": "on #152833",
+    "comment": "mist italic",
+    "string": "kelp",
+    "constant": "sun",
+    "keyword": "urchin",
+    "function": "sea",
+    "type": "foam"
+  }
+}

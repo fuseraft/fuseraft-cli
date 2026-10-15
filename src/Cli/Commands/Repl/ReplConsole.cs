@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Spectre.Console;
 
 namespace fuseraft.Cli.Commands.Repl;
 
@@ -11,6 +12,12 @@ namespace fuseraft.Cli.Commands.Repl;
 /// </summary>
 internal static class ReplConsole
 {
+    /// <summary>What starts each of the model's replies, so they stand apart from everything else; drawn in the accent color.</summary>
+    internal const string ReplyMark = "◆";
+
+    /// <summary>The reply mark as Spectre markup, with the space after it.</summary>
+    internal const string ReplyMarkup = "[bold cyan]" + ReplyMark + "[/] ";
+
     internal static readonly string[] SpinnerFrames = OperatingSystem.IsWindows()
         ? ["-", "\\", "|", "/"]
         : ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -40,6 +47,14 @@ internal static class ReplConsole
 
     internal static async Task RunSpinnerAsync(string label, CancellationToken ct, DateTime? startedAt = null)
     {
+        // The TUI's status line has its own spinner and timer, and its transcript shows each tool call.
+        if (ReplInput.Screen is not null)
+        {
+            try { await Task.Delay(Timeout.Infinite, ct); }
+            catch (OperationCanceledException) { }
+            return;
+        }
+
         var i = 0;
         try
         {
@@ -81,7 +96,19 @@ internal static class ReplConsole
 
     internal static void ClearSpinnerLine()
     {
-        Console.Write("\r\x1b[2K");
+        if (ReplInput.Screen is null)
+            Console.Write("\r\x1b[2K");
+    }
+
+    /// <summary>
+    /// Wipes a transient status written with <c>AnsiConsole.Markup</c> (e.g. "saving memory…") off the current line:
+    /// through Spectre's writer, so it reaches the TUI's transcript when that's where the text went.
+    /// </summary>
+    internal static void ClearLine(int width)
+    {
+        var writer = AnsiConsole.Profile.Out.Writer;
+        writer.Write($"\r{new string(' ', width)}\r");
+        writer.Flush();
     }
 
     /// <summary>

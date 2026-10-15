@@ -69,7 +69,7 @@ internal static class ReplTurnOutcome
             else
             {
                 AnsiConsole.MarkupLine("[yellow]⚠ Could not parse plan JSON. Raw response:[/]");
-                Console.WriteLine(responseText);
+                AnsiConsole.WriteLine(responseText);
                 AnsiConsole.MarkupLine("[dim]Try /plan again.[/]");
                 AnsiConsole.WriteLine();
             }
@@ -93,7 +93,7 @@ internal static class ReplTurnOutcome
             var (approved, reason) = await ctx.Subagent.CriticReviewAsync(
                 activeStep.Description, activeStep.Tool, toolCallsThisTurn, responseText,
                 originalUserRequest: ctx.CurrentPlanRequest, cancellationToken: cancellationToken);
-            if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 40)}\r");
+            if (!ctx.JsonMode) ReplConsole.ClearLine(40);
             if (!approved)
             {
                 passed = false;

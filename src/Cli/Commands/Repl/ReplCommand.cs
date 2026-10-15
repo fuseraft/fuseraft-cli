@@ -8,6 +8,7 @@ using fuseraft.Cli;
 using fuseraft.Cli.Commands;
 using fuseraft.Cli.Display;
 using fuseraft.Cli.Telemetry;
+using fuseraft.Cli.Tui;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
@@ -61,6 +62,10 @@ public sealed class ReplSettings : CommandSettings
     [CommandOption("--yolo")]
     [Description("Skip the default safety gates: no /hitl approval prompts and no filesystem/shell/git sandbox. Restores fully-open behavior for trusted, unattended sessions.")]
     public bool Yolo { get; set; }
+
+    [CommandOption("--plain")]
+    [Description("Use the line-based REPL instead of the full-screen one. Piped input or output always gets it.")]
+    public bool Plain { get; set; }
 
     [CommandOption("--include")]
     [Description("Add an additional allowed root directory beyond the primary sandbox root (the launch directory). Repeatable. Ignored under --yolo (already unsandboxed).")]
@@ -127,12 +132,20 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         "repl_session_current", "repl_session_list", "repl_session_read_event_log", "repl_session_read_log",
     };
 
-    protected override async Task<int> ExecuteAsync(
+    protected override Task<int> ExecuteAsync(
         CommandContext context, ReplSettings settings, CancellationToken cancellationToken)
     {
         // JSON bridge mode: active when launched from the VS Code webview panel
         // (--vscode + stdin redirected from the extension's child process).
         bool jsonMode = OrchestratorConfigLoader.VsCodeMode && Console.IsInputRedirected;
+        return !jsonMode && !settings.Plain && ReplTui.Supported
+            ? ReplTui.RunAsync(tui => RunAsync(settings, jsonMode, tui, cancellationToken))
+            : RunAsync(settings, jsonMode, null, cancellationToken);
+    }
+
+    private async Task<int> RunAsync(
+        ReplSettings settings, bool jsonMode, ReplTui? tui, CancellationToken cancellationToken)
+    {
 
         var keyStore = ApiKeyStoreFactory.Create();
         var (userCfg, legacyKey) = UserConfigStore.Load();
@@ -352,10 +365,22 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // Diff-aware counterpart to approveToolAction, used only by write_file/patch_file
         // (see IHumanApprovalService.PromptFileWriteAsync) so the approval prompt can render
         // the actual before/after content instead of just the resolved path.
+        //
+        // The full-screen REPL also notes how many lines each write adds and removes, for the ✎ line it shows once the
+        // write has gone through (see ReplTurn) — this is the one place that sees both versions whether HITL asks or not.
+        var fileWriteStats = new System.Collections.Concurrent.ConcurrentDictionary<string, (int Added, int Removed)>(StringComparer.Ordinal);
         Func<string, string, string, string, Task<bool>> approveFileWrite =
-            ApprovalScope.Guard((action, path, oldContent, newContent) => hitlState.Enabled
-                ? approvalService.PromptFileWriteAsync(action, path, oldContent, newContent)
-                : Task.FromResult(true));
+            ApprovalScope.Guard((action, path, oldContent, newContent) =>
+            {
+                if (tui is not null)
+                {
+                    var diff = UnifiedDiff.Build(oldContent, newContent);
+                    fileWriteStats[Path.GetFullPath(path)] = (diff.Added, diff.Removed);
+                }
+                return hitlState.Enabled
+                    ? approvalService.PromptFileWriteAsync(action, path, oldContent, newContent)
+                    : Task.FromResult(true);
+            });
         SubagentPlugin? subagent        = null;
         IReadOnlyList<string> agentProblems = [];
         IReadOnlyList<AgentSkill> discoveredSkills = [];
@@ -670,8 +695,17 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             McpManager  = mcpManager,
             StdinPump   = stdinPump,
             AgentProblems = agentProblems,
+            FileWriteStats = fileWriteStats,
         };
         ctxForStdin = ctx;
+        if (tui is not null)
+        {
+            tui.Skills = () => ctx.LineReader.SkillSlugs;
+            // @ completion offers what the FileSystem tools could read: nothing a deny rule covers.
+            var denyMatcher = fsPluginForCategory?.DenyMatcher;
+            tui.Files = new FileIndex(cwd, path => FileSystemSandbox.MatchesDenyRule(denyMatcher, Path.Combine(cwd, path), cwd)).Warm();
+            emitter.RegisterHook(new SubagentEventHook(tui));
+        }
 
         // Subagents (built-in and user-defined) may only use what the session itself currently allows,
         // so /safe-mode and /tools restrict cannot be sidestepped by delegating.

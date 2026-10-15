@@ -1,0 +1,26 @@
+{
+  // An amber CRT. Only 256-colors, so it looks the same on every terminal that has them.
+  "description": "amber CRT glow, in 256-colors for any terminal",
+  "colors": {
+    "text": "223 on 232",
+    "accent": "bold 214",
+    "tool": "220",
+    "agent": "179",
+    "success": "184",
+    "warning": "bold 226",
+    "error": "bold 202",
+    "muted": "136",
+    "border": "94",
+    "heading": "bold 214",
+    "link": "underline 222",
+    "selection": "on 58",
+    "code": "222",
+    "codeblock": "on 233",
+    "comment": "136 italic",
+    "string": "186",
+    "constant": "220",
+    "keyword": "bold 172",
+    "function": "214",
+    "type": "179"
+  }
+}

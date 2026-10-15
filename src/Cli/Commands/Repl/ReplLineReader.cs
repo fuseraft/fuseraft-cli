@@ -23,21 +23,23 @@ internal sealed class ReplLineReader
 
     // ── Tab completion ────────────────────────────────────────────────────────
 
-    private static readonly string[] SlashCommands =
+    internal static readonly string[] SlashCommands =
     [
         "/adversarial", "/agent", "/agents", "/assist", "/clear", "/compact", "/context",
-        "/conversation", "/delegate", "/events", "/execute", "/exit", "/explore",
+        "/conversation", "/copy", "/delegate", "/dock", "/events", "/execute", "/exit", "/explore",
         "/fork", "/goal", "/help", "/hitl", "/history", "/image", "/last", "/locate",
         "/max-tokens", "/mcp", "/memory", "/model", "/models", "/paste", "/plan",
         "/provider", "/reasoning", "/recover", "/replay", "/resume", "/retry", "/rewind",
         "/run", "/safe-mode", "/save", "/seed", "/sessions", "/snapshot", "/switch",
-        "/system", "/temperature", "/tools", "/top-p", "/undo",
+        "/system", "/temperature", "/theme", "/tools", "/top-p", "/undo",
     ];
 
-    private static readonly Dictionary<string, string[]> SubCommands =
+    internal static readonly Dictionary<string, string[]> SubCommands =
         new(StringComparer.OrdinalIgnoreCase)
     {
         ["/adversarial"] = ["off", "on"],
+        ["/copy"]        = ["code"],
+        ["/dock"]        = ["bottom", "top"],
         ["/fork"]        = ["switch"],
         ["/goal"]        = ["drop", "resume"],
         ["/hitl"]        = ["off", "on"],
@@ -59,6 +61,8 @@ internal sealed class ReplLineReader
     private string[] _skillSlugs  = [];
 
     internal void SetSkillSlugs(string[] slugs) => _skillSlugs = slugs;
+
+    internal IReadOnlyList<string> SkillSlugs => _skillSlugs;
 
     // ── Input history ─────────────────────────────────────────────────────────
 

@@ -44,6 +44,9 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
         ("sampling.seed",           "Integer, or \"\" to clear"),
         ("sampling.maxOutputTokens","Integer, or \"\" to clear"),
         ("repl.contextBudget",      "Token budget override, or \"\" to clear"),
+        ("repl.theme",              "Full-screen REPL color theme: default, bright, light, mono, rust, or a file in ~/.fuseraft/themes; \"\" to reset"),
+        ("repl.dock",               "Where the full-screen REPL puts the prompt: bottom (default) or top; \"\" to reset"),
+        ("repl.bell",               "true/false — ring the terminal bell when a turn ends or a question waits while you're away (default true)"),
         ("repl.noBanner",           "true/false"),
         ("repl.verbose",            "true/false"),
         ("repl.safeMode",           "true/false — engage /safe-mode at startup"),
@@ -114,6 +117,11 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
             "sampling.maxoutputtokens" => AssignNullableInt(v => config.Sampling.MaxOutputTokens = v, value),
 
             "repl.contextbudget"       => AssignNullableInt(v => config.Repl.ContextBudget = v, value),
+            "repl.theme"               => Assign(() => config.Repl.Theme = string.IsNullOrWhiteSpace(value) ? null : value.Trim()),
+            "repl.dock"                => string.IsNullOrWhiteSpace(value) || value.Trim().ToLowerInvariant() is "top" or "bottom"
+                ? Assign(() => config.Repl.Dock = string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant())
+                : "repl.dock must be top or bottom.",
+            "repl.bell"                => AssignBool(v => config.Repl.Bell = v, value),
             "repl.nobanner"            => AssignBool(v => config.Repl.NoBanner = v, value),
             "repl.verbose"             => AssignBool(v => config.Repl.Verbose = v, value),
             "repl.safemode"            => AssignBool(v => config.Repl.SafeModeDefault = v, value),

@@ -440,7 +440,7 @@ internal static partial class ReplCommands
                     AnsiConsole.MarkupLine($"[bold]{Markup.Escape(found.Name)}[/] [dim]({Markup.Escape(found.Type)})[/]");
                     AnsiConsole.MarkupLine($"[dim]{Markup.Escape(found.Description)}[/]");
                     AnsiConsole.WriteLine();
-                    Console.WriteLine(found.Body);
+                    AnsiConsole.WriteLine(found.Body);
                 }
             }
         }
@@ -477,7 +477,7 @@ internal static partial class ReplCommands
                     using var _ = mc as IDisposable;
                     var existing             = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd, ctx.SessionId);
                     var (saved, parseFailed) = await new MemoryExtractor(mc).ExtractAsync([.. ctx.History], existing);
-                    if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 30)}\r");
+                    if (!ctx.JsonMode) ReplConsole.ClearLine(30);
                     foreach (var m in saved) await ctx.MemoryStore.SaveAsync(m, ctx.Cwd, sessionId: ctx.SessionId);
                     AnsiConsole.MarkupLine(parseFailed
                         ? "[dim](extraction returned unparseable output — memories may not have been saved)[/]"
@@ -490,7 +490,7 @@ internal static partial class ReplCommands
                 }
                 catch (Exception ex)
                 {
-                    if (!ctx.JsonMode) Console.Write($"\r{new string(' ', 30)}\r");
+                    if (!ctx.JsonMode) ReplConsole.ClearLine(30);
                     AnsiConsole.MarkupLine($"[red]Memory extraction failed:[/] {Markup.Escape(ex.Message)}");
                 }
             }
