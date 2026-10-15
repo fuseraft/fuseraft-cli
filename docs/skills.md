@@ -9,7 +9,7 @@ Skills give agents specialized knowledge and step-by-step procedures for specifi
 
 ## Where skills come from
 
-fuseraft loads skills from five locations, in precedence order (earlier entries win when two skills share the same name):
+fuseraft loads skills from four locations, in precedence order (earlier entries win when two skills share the same name):
 
 | Scope | Path |
 |-------|------|
@@ -17,7 +17,6 @@ fuseraft loads skills from five locations, in precedence order (earlier entries 
 | Project (shared) | `<project>/.agents/skills/` |
 | User (fuseraft) | `~/.fuseraft/skills/` |
 | User (shared) | `~/.agents/skills/` |
-| Built-in | shipped with fuseraft |
 
 ---
 
@@ -43,7 +42,7 @@ At startup, the skill count appears in the compact info line alongside the activ
 
 If `--no-tools` is passed, skills are disabled for that session.
 
-`fuseraft run` orchestration sessions use the same five discovery locations and the same three tools (`load_skill`, `read_skill_resource`, `run_skill_script`), wired onto every agent automatically whenever at least one skill directory exists — there is no need to add `Skills` to an agent's `Plugins:` list, though doing so as a declaration of intent is harmless. This is the same discovery pipeline the REPL uses, not a separate implementation — a skill either works identically in both, or (if its frontmatter is invalid) in neither.
+`fuseraft run` orchestration sessions use the same four discovery locations and the same three tools (`load_skill`, `read_skill_resource`, `run_skill_script`), wired onto every agent automatically whenever at least one skill directory exists — there is no need to add `Skills` to an agent's `Plugins:` list, though doing so as a declaration of intent is harmless. This is the same discovery pipeline the REPL uses, not a separate implementation — a skill either works identically in both, or (if its frontmatter is invalid) in neither.
 
 ### Bundled scripts
 
@@ -68,21 +67,9 @@ Scripts run as your OS user with the session's environment and there is no appro
 
 ---
 
-## Shipped skills
+## fuseraft skills
 
-fuseraft ships with the following built-in skills, all specific to building and operating fuseraft itself. Install any of them globally with `fuseraft skills add`:
-
-```bash
-fuseraft skills add path/to/fuseraft/skills/craft-orchestration
-```
-
-General-purpose productivity skills (not specific to fuseraft) live in the separate [fuseraft/skills](https://github.com/fuseraft/skills) repository — e.g. `commit`, `sandbox-test`, `build-docx`, `datamap`, `dbconnect`, `terminal-screenshot`, and `azure-devops`. Clone that repo and install from it the same way:
-
-```bash
-fuseraft skills add path/to/skills/commit
-```
-
----
+The fuseraft repository includes the following skills under [`skills/`](https://github.com/fuseraft/fuseraft-cli/tree/main/skills), all specific to building and operating fuseraft itself. They are not bundled with fuseraft — install the ones you want.
 
 ### `craft-orchestration`
 
@@ -140,11 +127,21 @@ The skill covers launching the REPL in a detached tmux session, injecting single
 
 ---
 
-## Cross-session handoff: `/compact`
+### Installing these skills
 
-To pass context from the current REPL session to a new one, use the `/compact` command. `/compact` generates a concise summary of what was worked on, key decisions, current state, and what comes next; it then replaces the conversation history with that summary so the session can continue with a clean context window.
+Clone the fuseraft repository and install any of them globally with `fuseraft skills add`:
 
-If you want to carry a summary to a *different* session or agent entirely, run `/compact` and copy the resulting summary into the new session as an opening message.
+```bash
+fuseraft skills add path/to/fuseraft/skills/craft-orchestration
+```
+
+General-purpose productivity skills (not specific to fuseraft) live in the separate [fuseraft/skills](https://github.com/fuseraft/skills) repository — e.g. `commit`, `sandbox-test`, `build-docx`, `datamap`, `dbconnect`, `terminal-screenshot`, and `azure-devops`. Clone that repo and install from it the same way:
+
+```bash
+fuseraft skills add path/to/skills/commit
+```
+
+See [Installing skills](#installing-skills) for project-scoped installs and what `fuseraft skills add` does.
 
 ---
 

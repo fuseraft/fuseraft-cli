@@ -1075,7 +1075,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
     private static IReadOnlyList<string> DiscoverSkills()
     {
         // Same order as BuildSkillsProvider: project-native → project cross-client →
-        // user-native → user cross-client → built-in.
+        // user-native → user cross-client.
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var dirs = new[]
         {
@@ -1083,7 +1083,6 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             Path.Combine(Directory.GetCurrentDirectory(), ".agents",   "skills"),
             FuseraftPaths.GlobalSkills,
             Path.Combine(home, ".agents",   "skills"),
-            Path.Combine(AppContext.BaseDirectory, "skills"),
         };
         var seen  = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var names = new List<string>();

@@ -621,7 +621,7 @@ A dump is written only for genuine crashes. Normal exits, user cancellation (Ctr
 
 ## Skills execution trust model
 
-Skills loaded from `~/.fuseraft/skills/`, `~/.agents/skills/`, or the built-in `<binary>/skills/` directory are operator-controlled and treated as trusted. Scripts bundled in those skills execute as OS subprocesses and inherit the process environment, including any API keys in env vars.
+Skills loaded from `~/.fuseraft/skills/` or `~/.agents/skills/` are operator-controlled and treated as trusted. Scripts bundled in those skills execute as OS subprocesses and inherit the process environment, including any API keys in env vars.
 
 Project-scoped skills — loaded from `<cwd>/.fuseraft/skills/` and `<cwd>/.agents/skills/` — carry additional risk: **they travel with the repository**. A repo checked out from an untrusted source may contain a `.agents/skills/` directory with malicious scripts. Those scripts are auto-discovered and advertised to agents at session start, with no prompt to the user.
 
