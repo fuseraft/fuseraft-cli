@@ -89,31 +89,40 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
         return Task.FromResult<string?>(string.IsNullOrEmpty(input) ? null : input);
     }
 
-    public Task<bool> PromptShellCommandAsync(string command)
+    public async Task<bool> PromptShellCommandAsync(string command) =>
+        await PromptShellCommandAsync(command, alwaysLabel: null) != ApprovalAnswer.No;
+
+    public Task<ApprovalAnswer> PromptShellCommandAsync(string command, string? alwaysLabel)
     {
         using var _ = ReplConsole.SuspendSpinner();
 
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine($"[{ThemeDetector.Warning}]⏸ Shell command requested:[/]");
         AnsiConsole.MarkupLine($"  [dim]{Markup.Escape(command)}[/]");
-        var allowed = ReplInput.Confirm("[dim]Allow? (y/N):[/]  ");
-        AnsiConsole.MarkupLine(allowed ? "[dim]Command allowed.[/]" : "[dim]Command blocked.[/]");
-        return Task.FromResult(allowed);
+        var answer = ReplInput.Approve("Allow?", alwaysLabel);
+        AnsiConsole.MarkupLine(answer != ApprovalAnswer.No ? "[dim]Command allowed.[/]" : "[dim]Command blocked.[/]");
+        return Task.FromResult(answer);
     }
 
-    public Task<bool> PromptToolActionAsync(string plugin, string action, string detail)
+    public async Task<bool> PromptToolActionAsync(string plugin, string action, string detail) =>
+        await PromptToolActionAsync(plugin, action, detail, alwaysLabel: null) != ApprovalAnswer.No;
+
+    public Task<ApprovalAnswer> PromptToolActionAsync(string plugin, string action, string detail, string? alwaysLabel)
     {
         using var _ = ReplConsole.SuspendSpinner();
 
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine($"[{ThemeDetector.Warning}]⏸ {Markup.Escape(plugin)} action requested:[/]");
         AnsiConsole.MarkupLine($"  [dim]{Markup.Escape(action)} — {Markup.Escape(detail)}[/]");
-        var allowed = ReplInput.Confirm("[dim]Allow? (y/N):[/]  ");
-        AnsiConsole.MarkupLine(allowed ? "[dim]Action allowed.[/]" : "[dim]Action blocked.[/]");
-        return Task.FromResult(allowed);
+        var answer = ReplInput.Approve("Allow?", alwaysLabel);
+        AnsiConsole.MarkupLine(answer != ApprovalAnswer.No ? "[dim]Action allowed.[/]" : "[dim]Action blocked.[/]");
+        return Task.FromResult(answer);
     }
 
-    public Task<bool> PromptFileWriteAsync(string action, string path, string oldContent, string newContent)
+    public async Task<bool> PromptFileWriteAsync(string action, string path, string oldContent, string newContent) =>
+        await PromptFileWriteAsync(action, path, oldContent, newContent, alwaysLabel: null) != ApprovalAnswer.No;
+
+    public Task<ApprovalAnswer> PromptFileWriteAsync(string action, string path, string oldContent, string newContent, string? alwaysLabel)
     {
         using var _ = ReplConsole.SuspendSpinner();
 
@@ -121,9 +130,9 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
         AnsiConsole.MarkupLine($"[{ThemeDetector.Warning}]⏸ FileSystem action requested:[/] [dim]{Markup.Escape(action)}[/]");
         AnsiConsole.Write(DiffRenderer.Render(path, oldContent, newContent));
         ReplInput.Screen?.Keep($"{action} {path}", Tui.UnifiedDiff.Build(oldContent, newContent).Text, diff: true);
-        var allowed = ReplInput.Confirm("[dim]Allow? (y/N):[/]  ");
-        AnsiConsole.MarkupLine(allowed ? "[dim]Action allowed.[/]" : "[dim]Action blocked.[/]");
-        return Task.FromResult(allowed);
+        var answer = ReplInput.Approve("Allow?", alwaysLabel);
+        AnsiConsole.MarkupLine(answer != ApprovalAnswer.No ? "[dim]Action allowed.[/]" : "[dim]Action blocked.[/]");
+        return Task.FromResult(answer);
     }
 
     public Task<string?> PromptPostSessionAsync()

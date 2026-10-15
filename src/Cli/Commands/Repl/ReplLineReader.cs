@@ -25,7 +25,7 @@ internal sealed class ReplLineReader
 
     internal static readonly string[] SlashCommands =
     [
-        "/adversarial", "/agent", "/agents", "/assist", "/clear", "/compact", "/context",
+        "/adversarial", "/agent", "/agents", "/approvals", "/assist", "/clear", "/compact", "/context",
         "/conversation", "/copy", "/delegate", "/dock", "/events", "/execute", "/exit", "/explore",
         "/fork", "/goal", "/help", "/hitl", "/history", "/image", "/last", "/locate",
         "/max-tokens", "/mcp", "/memory", "/model", "/models", "/paste", "/plan",
@@ -38,6 +38,7 @@ internal sealed class ReplLineReader
         new(StringComparer.OrdinalIgnoreCase)
     {
         ["/adversarial"] = ["off", "on"],
+        ["/approvals"]   = ["clear"],
         ["/copy"]        = ["code"],
         ["/dock"]        = ["bottom", "top"],
         ["/fork"]        = ["switch"],

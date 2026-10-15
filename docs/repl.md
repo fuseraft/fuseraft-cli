@@ -94,6 +94,8 @@ Allow? (y/N):  n
 Command blocked.
 ```
 
+Answer `a` (always) to stop being asked about that kind of action: commands using the same programs (saved for the directory, except interpreters such as `python3` or `bash`, which last the session), file writes in the workspace for this session, or a Git or Http tool. `/approvals` lists them and `/approvals clear` forgets them; see [CLI Reference — "Always" answers](cli-reference.md#always-answers).
+
 Toggle it with `/hitl on` / `/hitl off`, or run `/hitl auto` to stop being asked about commands that are provably read-only (`ls`, `git status`, `grep`, … — see [Read-only auto-approval](cli-reference.md#read-only-auto-approval-hitl-auto)). Or skip it for the whole session with `--yolo` (which also drops the sandbox — full unattended access, for trusted use only), or make that the default for every session with `fuseraft settings set repl.yolo true`.
 
 Working across more than one project tree in a session? `--include <dir>` (repeatable) adds more allowed roots alongside the launch directory — shown in the banner as `Included:`. A path outside every allowed root isn't always a hard stop either: for the FileSystem read/write tools, a denied path offers a HITL prompt to grant it on the spot, and the grant covers the rest of the session. See [CLI Reference](cli-reference.md#fuseraft-repl) and [Security — Multi-root sessions](security.md#multi-root-sessions) for the full picture.

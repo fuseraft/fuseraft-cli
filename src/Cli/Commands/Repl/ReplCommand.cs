@@ -347,10 +347,14 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         var securityConfig       = TryLoadDefaultSecurityConfig();
         var effectiveShellPolicy = DefaultSecurityPolicy.MergeShellPolicy(securityConfig?.ShellPolicy);
         var fsDenyPatterns       = DefaultSecurityPolicy.MergeFileSystemDeny(securityConfig?.FileSystemPermissions, securityConfig?.DenyCredentialFiles ?? true);
+        // "Always" answers (see ReplApprovals), starting from the ones saved for this directory.
+        var approvals = new ReplApprovals(ReplApprovalStore.ForWorkspace(Directory.GetCurrentDirectory()), Directory.GetCurrentDirectory());
         using ShellPlugin? shellPlugin  = settings.NoTools ? null : new ShellPlugin(
             sandboxRoot:    sandboxRoot,
             shellPolicy:    effectiveShellPolicy,
-            approveCommand: ApprovalScope.Guard(cmd => hitlState.RequiresShellApproval(cmd) ? approvalService.PromptShellCommandAsync(cmd) : Task.FromResult(true)),
+            approveCommand: ApprovalScope.Guard(cmd => hitlState.RequiresShellApproval(cmd)
+                ? approvals.ShellAsync(cmd, always => approvalService.PromptShellCommandAsync(cmd, always))
+                : Task.FromResult(true)),
             includedRoots:  includedRoots,
             blockCredentialFiles: securityConfig?.DenyCredentialFiles ?? true,
             denyPatterns:   fsDenyPatterns);
@@ -359,7 +363,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // FileSystem/Git/Http tools — see IHumanApprovalService.PromptToolActionAsync.
         Func<string, Func<string, string, Task<bool>>> approveToolAction = pluginName =>
             ApprovalScope.Guard((action, detail) => hitlState.Enabled
-                ? approvalService.PromptToolActionAsync(pluginName, action, detail)
+                ? approvals.ToolActionAsync(pluginName, action, detail,
+                    always => approvalService.PromptToolActionAsync(pluginName, action, detail, always))
                 : Task.FromResult(true));
 
         // Diff-aware counterpart to approveToolAction, used only by write_file/patch_file
@@ -378,7 +383,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                     fileWriteStats[Path.GetFullPath(path)] = (diff.Added, diff.Removed);
                 }
                 return hitlState.Enabled
-                    ? approvalService.PromptFileWriteAsync(action, path, oldContent, newContent)
+                    ? approvals.FileWriteAsync(path, always => approvalService.PromptFileWriteAsync(action, path, oldContent, newContent, always))
                     : Task.FromResult(true);
             });
         SubagentPlugin? subagent        = null;
@@ -696,6 +701,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             StdinPump   = stdinPump,
             AgentProblems = agentProblems,
             FileWriteStats = fileWriteStats,
+            Approvals      = approvals,
         };
         ctxForStdin = ctx;
         if (tui is not null)

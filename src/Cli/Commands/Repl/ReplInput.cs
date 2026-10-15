@@ -1,4 +1,5 @@
 using Spectre.Console;
+using fuseraft.Core.Interfaces;
 
 namespace fuseraft.Cli.Commands.Repl;
 
@@ -93,17 +94,45 @@ internal static class ReplInput
     /// <summary>A y/N question: true only for y or yes.</summary>
     internal static bool Confirm(string prompt)
     {
-        if (Screen is not { } screen)
+        if (Screen is null)
         {
             var input = ReadLine(prompt)?.Trim() ?? string.Empty;
             return input.Equals("y", StringComparison.OrdinalIgnoreCase) ||
                    input.Equals("yes", StringComparison.OrdinalIgnoreCase);
         }
-        // As the full screen asks it: the question, then the keys that answer it picked out ("Allow? [y]es [n]o").
         var question = System.Text.RegularExpressions.Regex.Replace(Plain(prompt), @"\s*\(y/N\):?$", "");
-        var key = screen.KeyAsync($"\e[33m{question}\e[0m \e[1m[y]\e[0mes \e[1m[n]\e[0mo", "ny", CancellationToken.None).GetAwaiter().GetResult();
-        AnsiConsole.MarkupLine($"[dim]  {Markup.Escape(question)}[/] " + (key == 'y' ? "[green]yes[/]" : "[red]no[/]"));
-        return key == 'y';
+        return Approve(question, alwaysLabel: null) == ApprovalAnswer.Yes;
+    }
+
+    /// <summary>
+    /// An approval: yes, no, or (when <paramref name="alwaysLabel"/> isn't null) always, for what the label describes.
+    /// The TUI takes one key, and ignores keys typed as it appears; a plain terminal reads y, a (always) or anything
+    /// else for no.
+    /// </summary>
+    internal static ApprovalAnswer Approve(string question, string? alwaysLabel)
+    {
+        if (Screen is not { } screen)
+        {
+            var input = ReadLine($"[dim]{Markup.Escape(question)} (y/N{(alwaysLabel is null ? "" : "/a")}):[/]  " +
+                                 (alwaysLabel is null ? "" : $"[dim](a = always: {Markup.Escape(alwaysLabel)})[/]  "))?.Trim() ?? string.Empty;
+            return input.ToLowerInvariant() switch
+            {
+                "y" or "yes" => ApprovalAnswer.Yes,
+                "a" or "always" when alwaysLabel is not null => ApprovalAnswer.Always,
+                _ => ApprovalAnswer.No,
+            };
+        }
+        var prompt = $"\e[33m{question}\e[0m \e[1m[y]\e[0mes \e[1m[n]\e[0mo"
+                     + (alwaysLabel is null ? "" : $" \e[1m[a]\e[0mlways\e[2m: {alwaysLabel}\e[0m");
+        var key = screen.KeyAsync(prompt, alwaysLabel is null ? "ny" : "nya", CancellationToken.None).GetAwaiter().GetResult();
+        var answer = key switch { 'y' => ApprovalAnswer.Yes, 'a' => ApprovalAnswer.Always, _ => ApprovalAnswer.No };
+        AnsiConsole.MarkupLine($"[dim]  {Markup.Escape(question)}[/] " + answer switch
+        {
+            ApprovalAnswer.Yes    => "[green]yes[/]",
+            ApprovalAnswer.Always => $"[green]always[/][dim]: {Markup.Escape(alwaysLabel!)}[/]",
+            _                     => "[red]no[/]",
+        });
+        return answer;
     }
 
     /// <summary>

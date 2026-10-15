@@ -182,6 +182,9 @@ internal sealed class ReplSessionContext
     /// <summary>Messages the user sent in the full-screen REPL while the running turn works; the turn reads them after its next tool results.</summary>
     public System.Collections.Concurrent.ConcurrentQueue<string> Interjections { get; } = new();
 
+    /// <summary>"Always" answers to approvals, for /approvals; null in a session built without them (tests).</summary>
+    public ReplApprovals? Approvals { get; init; }
+
     /// <summary>What the user sent during the last turn that it ended before reading; it starts the next turn.</summary>
     public string? CarriedInput;
 

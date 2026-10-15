@@ -503,6 +503,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/safe-mode off` | Restore tool categories to their state before safe mode was enabled |
 | `/hitl` | Show current HITL (human-in-the-loop) mode status |
 | `/hitl on` | Require y/N approval before each shell run, and before every FileSystem write/delete, Git write, or write-ish Http call |
+| `/approvals [clear]` | List the "always" answers given to HITL approvals, saved for this directory and for this session only; `clear` forgets them all |
 | `/hitl auto` | Like `on`, but shell commands that are provably read-only (`ls`, `git status`, `grep`, `git log \| head`, …) run without asking. Everything that can change something — including every FileSystem write, Git write, and write-ish Http call — still asks. See [Read-only auto-approval](#read-only-auto-approval-hitl-auto) |
 | `/hitl off` | Run those calls without approval again |
 | `/adversarial` | Show adversarial mode status |
@@ -644,7 +645,24 @@ Action allowed.
 ```
 
 - **y / yes** — the call runs normally
+- **a / always** — the call runs, and so does every later one the prompt's "always" covers (see below), without asking
 - **Enter / anything else** — the call is blocked; the agent receives `[DENIED]` and can try an alternative or ask what to do
+
+In the full-screen REPL the prompt takes a single key, `Allow? [y]es [n]o [a]lways: commands using npm`, and Esc means no; keys typed just as it appears are ignored, so a `y` meant for your message never approves anything.
+
+##### "Always" answers
+
+The REPL offers "always" when it can say exactly what it would cover, and remembers the answer:
+
+| Approval | "Always" covers | Kept |
+|---|---|---|
+| A shell command | Commands using the same programs (`npm install && npm test` → commands using `npm`); a later command is approved without asking only when every program in it is covered | Saved for the directory in `~/.fuseraft/approvals.json` |
+| A shell command using an interpreter or shell (`python3`, `node`, `bash`, `eval`, `xargs`, `npx`, …) | The same, but these can run any code | This session only |
+| `write_file` / `patch_file` inside the launch directory | All file writes there; seeing each diff is the point of asking, so it's never saved | This session only |
+| A FileSystem action inside the launch directory (`delete_file`, `move_file`, …) | Every call to that action there | This session only |
+| A Git or Http action (`git_commit`, `http_post`, …) | Every call to that tool | Saved for the directory |
+
+"Always" isn't offered for a command it can't name with confidence: one that sets environment variables first (`LD_PRELOAD=… ls`), runs a program by path (`./build.sh`), or hides a command substitution in quotes. It is never offered for, and never answers, a prompt to grant a directory outside the sandbox. Hard denials (dangerous commands, credential files, deny rules) and the sandbox still apply to everything an "always" answer covers. The saved file belongs to you, so a cloned project can't grant itself anything. `/approvals` lists what's saved and what holds for this session; `/approvals clear` forgets all of it. Saved answers apply wherever the REPL asks, including the VS Code panel, which doesn't offer "always" itself.
 
 ##### Read-only auto-approval (`/hitl auto`)
 

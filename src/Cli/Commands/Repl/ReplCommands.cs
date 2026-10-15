@@ -57,6 +57,7 @@ internal static partial class ReplCommands
             case "/undo":          return await CmdUndoAsync(ctx);
             case "/mcp":           return await CmdMcpAsync(ctx, arg, cancellationToken);
             case "/copy":          return await CmdCopyAsync(ctx, arg);
+            case "/approvals":     return CmdApprovals(ctx, arg);
             case "/theme":         return CmdTheme(arg);
             case "/dock":          return CmdDock(arg);
             default:
@@ -136,6 +137,7 @@ internal static partial class ReplCommands
             new("/hitl", "Show HITL (human-in-the-loop) mode status"),
             new("/hitl on", "Require y/N approval before each shell command, and before each FileSystem write/delete, Git write, or write-ish Http call"),
             new("/hitl off", "Run those calls without approval"),
+            new("/approvals", "List the \"always\" answers given to HITL approvals: saved ones (commands by program, Git and Http tools) and this session's (file writes); /approvals clear forgets them"),
             new("/adversarial", "Show adversarial mode status"),
             new("/adversarial on", "Enable critic agent to review each /execute step"),
             new("/adversarial off", "Disable critic agent"),

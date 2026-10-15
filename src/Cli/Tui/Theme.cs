@@ -130,7 +130,7 @@ internal sealed record Theme
     ];
 
     /// <summary>Where theme files live: ~/.fuseraft/themes, one &lt;name&gt;.json each.</summary>
-    public static string Dir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".fuseraft", "themes");
+    public static string Dir => Path.Combine(fuseraft.Core.FuseraftPaths.GlobalRoot, "themes");
 
     /// <summary>The built-in themes and the ones in <paramref name="dir"/> (by default <see cref="Dir"/>), read again each time.</summary>
     public static List<Theme> All(string? dir = null) => [.. BuiltIn, .. Load(dir ?? Dir).Themes];

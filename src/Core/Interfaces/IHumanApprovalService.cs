@@ -76,6 +76,21 @@ public interface IHumanApprovalService
     Task<bool> PromptFileWriteAsync(string action, string path, string oldContent, string newContent);
 
     /// <summary>
+    /// <see cref="PromptShellCommandAsync(string)"/>, also offering "always" for what <paramref name="alwaysLabel"/>
+    /// describes ("commands using npm") when it isn't null. Services with no way to offer it answer yes or no.
+    /// </summary>
+    async Task<ApprovalAnswer> PromptShellCommandAsync(string command, string? alwaysLabel) =>
+        await PromptShellCommandAsync(command) ? ApprovalAnswer.Yes : ApprovalAnswer.No;
+
+    /// <summary><see cref="PromptToolActionAsync(string, string, string)"/>, also offering "always" when <paramref name="alwaysLabel"/> isn't null.</summary>
+    async Task<ApprovalAnswer> PromptToolActionAsync(string plugin, string action, string detail, string? alwaysLabel) =>
+        await PromptToolActionAsync(plugin, action, detail) ? ApprovalAnswer.Yes : ApprovalAnswer.No;
+
+    /// <summary><see cref="PromptFileWriteAsync(string, string, string, string)"/>, also offering "always" when <paramref name="alwaysLabel"/> isn't null.</summary>
+    async Task<ApprovalAnswer> PromptFileWriteAsync(string action, string path, string oldContent, string newContent, string? alwaysLabel) =>
+        await PromptFileWriteAsync(action, path, oldContent, newContent) ? ApprovalAnswer.Yes : ApprovalAnswer.No;
+
+    /// <summary>
     /// Prompts the human operator to review a Magentic manager-generated plan.
     /// Called when <c>Selection.Magentic.EnablePlanReview</c> is true.
     /// Returns null to approve the plan as-is, or a non-empty string as revision feedback
@@ -94,3 +109,6 @@ public interface IHumanApprovalService
     Task<string?> PromptQuestionAsync(string question, IReadOnlyList<string> options, bool allowOther, CancellationToken ct) =>
         Task.FromResult<string?>(null);
 }
+
+/// <summary>How an approval was answered: no, yes this once, or yes from now on for what the prompt's "always" covers.</summary>
+public enum ApprovalAnswer { No, Yes, Always }
