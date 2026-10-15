@@ -11,6 +11,8 @@ public sealed class MarkdownRendererTests
         var console = AnsiConsole.Create(new AnsiConsoleSettings
         {
             Ansi = AnsiSupport.No, ColorSystem = ColorSystemSupport.NoColors, Out = new AnsiConsoleOutput(output),
+            // Spectre's CI enrichers (GITHUB_ACTIONS=true, among others) turn ANSI back on regardless of Ansi.
+            Enrichment = new ProfileEnrichment { UseDefaultEnrichers = false },
         });
         console.Profile.Width = 80;
         console.Write(MarkdownRenderer.Render(markdown, lead));
