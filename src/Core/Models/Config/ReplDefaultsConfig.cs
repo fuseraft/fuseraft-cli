@@ -104,8 +104,10 @@ public sealed class ReplDefaultsConfig
     public int? WarnIdenticalToolCalls { get; set; }
 
     /// <summary>
-    /// Input tokens one REPL turn may spend, summed over all of its model calls, before it stops
-    /// and keeps its progress. Null uses 1,000,000.
+    /// Uncached input tokens one REPL turn may spend, summed over all of its model calls, before
+    /// it stops and keeps its progress. Prompt-cache reads don't count: every call resends the
+    /// whole conversation, so counting them would cap a turn at a call count that shrinks as the
+    /// context grows. Null uses 1,000,000.
     /// </summary>
     [JsonPropertyName("maxTurnInputTokens")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

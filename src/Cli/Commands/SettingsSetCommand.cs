@@ -61,7 +61,7 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
         ("repl.warnIdenticalToolCalls",   "Identical calls in a row at which the model is nudged, 2-49 and below the cutoff (default 3), or \"\" to reset"),
         ("repl.maxStreamRetries",         "Automatic retries of a stream that dropped mid-response, 0-5 (default 2), or \"\" to reset"),
         ("repl.maxTodoNudges",            "Follow-up turns sent when the model stops with its own todo items still open, 0-10 (default 2; 0 turns them off), or \"\" to reset"),
-        ("repl.maxTurnInputTokens",       "Input tokens one turn may spend across all its model calls before stopping, 100000-100000000 (default 1000000), or \"\" to reset"),
+        ("repl.maxTurnInputTokens",       "Uncached input tokens one turn may spend across all its model calls before stopping, 100000-100000000 (default 1000000), or \"\" to reset"),
         ("repl.plugins",            "Comma-separated plugin list, e.g. Scratchpad,Http"),
         ("telemetry.otlpEndpoint",  "OTLP endpoint URL, or \"\" to disable"),
         ("telemetry.serviceName",   "Requires telemetry.otlpEndpoint to already be set"),

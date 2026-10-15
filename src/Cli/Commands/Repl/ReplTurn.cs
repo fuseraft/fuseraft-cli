@@ -705,6 +705,7 @@ internal static class ReplTurn
         var turnInputTokens   = stream.TurnInputTokens;
         var turnOutputTokens  = stream.TurnOutputTokens;
         var turnCacheReadTokens = stream.TurnCacheReadTokens;
+        var turnUncachedInputTokens = stream.TurnUncachedInputTokens;
         var hitConsecutiveFailureLimit = stream.HitConsecutiveFailureLimit;
         var lastToolFailureDetail      = stream.LastToolFailureDetail;
         var hitRepeatedToolCallLimit   = stream.HitRepeatedToolCallLimit;
@@ -762,7 +763,7 @@ internal static class ReplTurn
             // it with an assistant message so the history keeps its user/assistant alternation.
             if (stoppedEarly)
                 AppendStoppedEarlyNote(ctx.History,
-                    hitTurnTokenBudget         ? $"it reached the per-turn input-token budget ({ctx.Limits.MaxTurnInputTokens:N0}, repl.maxTurnInputTokens)" :
+                    hitTurnTokenBudget         ? $"it reached the per-turn uncached input-token budget ({ctx.Limits.MaxTurnInputTokens:N0}, repl.maxTurnInputTokens)" :
                     hitConsecutiveFailureLimit ? $"{ctx.Limits.MaxConsecutiveToolFailures} tool calls in a row failed" :
                                                  "the same tool calls kept repeating without progress");
         }
@@ -904,10 +905,11 @@ internal static class ReplTurn
             await ctx.Emitter.EmitAsync(EventTypes.ReplWarning, turn: ctx.TurnIndex, payload: new
             {
                 message      = "hit_turn_token_budget",
-                input_tokens = turnInputTokens,
-                limit        = ctx.Limits.MaxTurnInputTokens,
+                input_tokens          = turnInputTokens,
+                uncached_input_tokens = turnUncachedInputTokens,
+                limit                 = ctx.Limits.MaxTurnInputTokens,
             });
-            var budgetMsg = $"Stopped after {turnInputTokens:N0} input tokens this turn " +
+            var budgetMsg = $"Stopped after {turnUncachedInputTokens:N0} uncached input tokens this turn " +
                             $"(repl.maxTurnInputTokens is {ctx.Limits.MaxTurnInputTokens:N0}). " +
                             "Progress so far was kept — send a follow-up to continue.";
             if (ctx.JsonMode)
@@ -1406,6 +1408,7 @@ internal static class ReplTurn
         long TurnInputTokens,
         long TurnOutputTokens,
         long TurnCacheReadTokens,
+        long TurnUncachedInputTokens,
         int? TurnFirstInputTokens,
         List<ChatResponseUpdate> RawUpdates,
         bool HitConsecutiveFailureLimit,
@@ -1419,7 +1422,7 @@ internal static class ReplTurn
         // step halted mid-stream can still report which tools it managed to call before
         // failing — see ReplTurnOutcome.HaltStepOnStreamFailure.
         internal static TurnStreamResult MakeFailed(List<string> toolCallsThisTurn, int repeatedToolCallLimit) =>
-            new(false, "", toolCallsThisTurn, [], 0, null, 0, 0, 0, null, [], false, null, false, null, repeatedToolCallLimit, false);
+            new(false, "", toolCallsThisTurn, [], 0, null, 0, 0, 0, 0, null, [], false, null, false, null, repeatedToolCallLimit, false);
     }
 
     /// <summary>
@@ -1462,6 +1465,8 @@ internal static class ReplTurn
         var turnInputTokens   = 0L;
         var turnOutputTokens  = 0L;
         var turnCacheReadTokens = 0L;
+        // What ReplLimits.MaxTurnInputTokens is measured against — see UncachedInputTokens.
+        var turnUncachedInputTokens = 0L;
         int? turnFirstInputTokens = null;
         // Captured tool outputs for inspect-step history injection (step execution only).
         List<(string ToolName, string Output)>? capturedResults = isStepRequest ? [] : null;
@@ -1612,6 +1617,7 @@ internal static class ReplTurn
                     turnInputTokens  += usage.Details.InputTokenCount  ?? 0;
                     turnOutputTokens += usage.Details.OutputTokenCount ?? 0;
                     turnCacheReadTokens += usage.Details.CacheReadTokens();
+                    turnUncachedInputTokens += usage.Details.UncachedInputTokens();
                     turnFirstInputTokens ??= (int?)usage.Details.InputTokenCount;
                     sawUsageThisChunk = true;
                 }
@@ -1621,7 +1627,7 @@ internal static class ReplTurn
                     foreach (var reasoning in chunk.Contents.OfType<TextReasoningContent>())
                         if (reasoning.Text.Length > 0)
                             screen.Thinking(reasoning.Text);
-                if (turnInputTokens >= limits.MaxTurnInputTokens) turnTokenBudgetReached = true;
+                if (turnUncachedInputTokens >= limits.MaxTurnInputTokens) turnTokenBudgetReached = true;
                 if (chunk.FinishReason is not null) finishRounds++;
                 toolRounds = usageRounds > 0 ? usageRounds : finishRounds;
 
@@ -1939,7 +1945,7 @@ internal static class ReplTurn
 
         return new TurnStreamResult(
             true, sb.ToString(), toolCallsThisTurn, fileChanges, toolRounds, capturedResults,
-            turnInputTokens, turnOutputTokens, turnCacheReadTokens, turnFirstInputTokens, rawUpdates,
+            turnInputTokens, turnOutputTokens, turnCacheReadTokens, turnUncachedInputTokens, turnFirstInputTokens, rawUpdates,
             hitConsecutiveFailureLimit, lastToolFailureDetail,
             hitRepeatedToolCallLimit, lastRepeatedToolCallDetail, repeatedToolCallLimit,
             hitTurnTokenBudget);

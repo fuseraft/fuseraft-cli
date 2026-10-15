@@ -21,6 +21,24 @@ internal static class UsageDetailsCacheExtensions
     /// Anthropic-only; OpenAI-compatible providers cache automatically with no separate write
     /// price to report.</summary>
     public static long CacheCreationTokens(this UsageDetails? details) =>
-        details?.AdditionalCounts?.TryGetValue("CacheCreationInputTokens", out var v) == true
+        details?.AdditionalCounts?.TryGetValue(CacheCreationInputTokensKey, out var v) == true
             ? v : 0;
+
+    private const string CacheCreationInputTokensKey = "CacheCreationInputTokens";
+
+    /// <summary>
+    /// Prompt tokens this call paid full (or cache-write) price for — the input that was not
+    /// served from cache. The two provider families disagree on what InputTokenCount means:
+    /// OpenAI-compatible providers report the whole prompt, cached part included, while
+    /// Anthropic.SDK maps Anthropic's <c>input_tokens</c>, which already excludes cache reads
+    /// and cache writes. Anthropic.SDK always sets the cache-creation key (0 or not) and the
+    /// OpenAI backfill never does, which tells the two apart.
+    /// </summary>
+    public static long UncachedInputTokens(this UsageDetails? details)
+    {
+        var input = details?.InputTokenCount ?? 0;
+        if (details?.AdditionalCounts?.ContainsKey(CacheCreationInputTokensKey) == true)
+            return input + details.CacheCreationTokens();
+        return Math.Max(0, input - details.CacheReadTokens());
+    }
 }
