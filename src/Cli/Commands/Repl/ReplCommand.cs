@@ -143,9 +143,62 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             : RunAsync(settings, jsonMode, null, cancellationToken);
     }
 
+    private static readonly StringComparison PathComparison = OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
+
+    /// <summary>
+    /// The directory a resumed session should run in: <paramref name="savedCwd"/> when it differs
+    /// from <paramref name="currentCwd"/> and still exists, otherwise null (stay put). The
+    /// conversation is full of paths under the directory it ran in, and the sandbox is rooted at
+    /// the current one, so resuming anywhere else gets the model's file and shell calls blocked.
+    /// </summary>
+    internal static string? ResumeDirectory(string? savedCwd, string currentCwd)
+    {
+        if (string.IsNullOrWhiteSpace(savedCwd)) return null;
+        var saved   = Path.TrimEndingDirectorySeparator(Path.GetFullPath(savedCwd));
+        var current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(currentCwd));
+        if (string.Equals(saved, current, PathComparison)) return null;
+        return Directory.Exists(saved) ? saved : null;
+    }
+
+    private static void EnterSessionDirectory(string? savedCwd, bool jsonMode)
+    {
+        if (string.IsNullOrWhiteSpace(savedCwd)) return;
+        var current = Directory.GetCurrentDirectory();
+        if (ResumeDirectory(savedCwd, current) is { } target)
+        {
+            Directory.SetCurrentDirectory(target);
+            if (!jsonMode)
+                AnsiConsole.MarkupLine($"[dim]Resuming in [/][bold]{Markup.Escape(target)}[/][dim], where this session ran.[/]");
+            return;
+        }
+        if (Directory.Exists(savedCwd)) return;
+
+        var msg = $"This session ran in {savedCwd}, which no longer exists — resuming in {current}. " +
+                  "Paths from the session may be outside the sandbox.";
+        if (jsonMode) ReplJsonBridge.Emit(new { type = "warning", text = msg });
+        else          AnsiConsole.MarkupLine($"[yellow]⚠ {Markup.Escape(msg)}[/]");
+    }
+
     private async Task<int> RunAsync(
         ReplSettings settings, bool jsonMode, ReplTui? tui, CancellationToken cancellationToken)
     {
+        // Load snapshot when --resume is specified — first, because a session resumed from
+        // another directory moves back into the one it ran in before anything below reads the
+        // current directory (the sandbox root, approvals, project instructions, memories).
+        ReplSessionSnapshot? snapshot = null;
+        if (!string.IsNullOrWhiteSpace(settings.Resume))
+        {
+            snapshot = await ReplSessionSnapshot.LoadAsync(settings.Resume.Trim());
+            if (snapshot is null)
+            {
+                AnsiConsole.MarkupLine($"[red]✗ No saved session found with ID '[/][bold]{Markup.Escape(settings.Resume.Trim())}[/][red]'.[/]");
+                AnsiConsole.MarkupLine("[dim]  Use /sessions inside the REPL to list resumable sessions.[/]");
+                return 1;
+            }
+            EnterSessionDirectory(snapshot.Cwd, jsonMode);
+        }
 
         var keyStore = ApiKeyStoreFactory.Create();
         var (userCfg, legacyKey) = UserConfigStore.Load();
@@ -434,19 +487,6 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         var adaptiveTrimTracker = new AdaptiveTrimTracker();
 
         var cwd = Directory.GetCurrentDirectory();
-
-        // Load snapshot when --resume is specified.
-        ReplSessionSnapshot? snapshot = null;
-        if (!string.IsNullOrWhiteSpace(settings.Resume))
-        {
-            snapshot = await ReplSessionSnapshot.LoadAsync(settings.Resume.Trim());
-            if (snapshot is null)
-            {
-                AnsiConsole.MarkupLine($"[red]✗ No saved session found with ID '[/][bold]{Markup.Escape(settings.Resume.Trim())}[/][red]'.[/]");
-                AnsiConsole.MarkupLine("[dim]  Use /sessions inside the REPL to list resumable sessions.[/]");
-                return 1;
-            }
-        }
 
         var sessionId  = snapshot?.SessionId ?? StringHelpers.NewSessionId();
         var startedAt  = snapshot?.StartedAt  ?? DateTime.UtcNow;

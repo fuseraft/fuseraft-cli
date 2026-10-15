@@ -298,7 +298,7 @@ fuseraft repl [options]
 | `-m, --model <id>` | see below | Model ID to use (e.g. `gpt-4o`, `claude-sonnet-4-6`). Overrides `~/.fuseraft/config` when set. |
 | `--save` | off | Persist `--model` as the new default in `~/.fuseraft/config`. No effect without `--model`. |
 | `-s, --system <prompt>` | — | System prompt. Defaults to a coding/research prompt when tools are enabled. |
-| `--resume <id>` | — | Resume a previous REPL session by its session ID. The session's last few turns are re-displayed on startup (`repl.resumeReplayTurns`, default 3; `/replay` shows more). Use `/sessions` inside the REPL to list resumable sessions. |
+| `--resume <id>` | — | Resume a previous REPL session by its session ID. The session's last few turns are re-displayed on startup (`repl.resumeReplayTurns`, default 3; `/replay` shows more). Use `/sessions` inside the REPL to list resumable sessions. Resuming from a different directory than the session ran in moves back into that directory first, so the sandbox, approvals and project instructions match the paths the session already uses. |
 | `--no-banner` | off | Skip the ASCII banner. Persist as the default with `fuseraft settings set repl.noBanner true`. |
 | `--no-tools` | off | Disable all built-in tools and start a plain chat session. |
 | `--plain` | off | Use the line-based REPL instead of the full-screen one. Piped stdin or stdout, and `--vscode`, always get the line-based REPL. |
@@ -446,7 +446,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/sessions` | List resumable REPL sessions with their IDs, model, turn count, and age. Resume with `fuseraft repl --resume <id>`. |
 | `/fork` | Snapshot the current session to a new ID. The snapshot is saved immediately; the current session continues unchanged. Use `fuseraft repl --resume <id>` to open the fork later. |
 | `/fork switch` | Fork and immediately become the fork. The original session is already checkpointed on disk; the live session continues under the new ID. |
-| `/switch <id>` | Save the current session and load another saved session in its place. History, turn counter, model (if different), and plan state are all restored, and the session's most recent turns are re-displayed (see `repl.resumeReplayTurns`). Use `/sessions` to find IDs. |
+| `/switch <id>` | Save the current session and load another saved session in its place. History, turn counter, model (if different), and plan state are all restored, and the session's most recent turns are re-displayed (see `repl.resumeReplayTurns`). A session that ran in another directory isn't loaded; `/switch` prints the `cd … && fuseraft --resume <id>` that resumes it there. Use `/sessions` to find IDs. |
 | `/conversation` | List all turns in memory with 1-based turn numbers and a one-line preview of each user message and assistant response. Use this to find the right turn number before running `/rewind`. |
 | `/rewind <n>` | Keep turns 1…n and discard all later turns. Turn count is the number of User messages currently in memory. Clamps safely — passing a number larger than the current turn count is a no-op. |
 | `/rewind -<n>` | Step back n turns from the current position (relative rewind). `/rewind -1` drops the last turn; `/rewind -99` clamps to 0 and clears all turns. |
