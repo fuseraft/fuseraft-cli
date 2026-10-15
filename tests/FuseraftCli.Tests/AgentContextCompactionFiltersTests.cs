@@ -277,4 +277,53 @@ public sealed class AgentContextCompactionFiltersTests
 
         Assert.Equal(expected, AgentContextCompactionFilters.StableWindowSize(messages, minPreserved: 12, step: 8));
     }
+
+    // ── Intermediate argument elision ─────────────────────────────────────────
+
+    private static ChatMessage WriteCall(string callId, string content)
+        => new(ChatRole.Assistant,
+            [new FunctionCallContent(callId, "write_file",
+                new Dictionary<string, object?> { ["path"] = "probe.kiwi", ["content"] = content })]);
+
+    private static string? WrittenContent(IEnumerable<ChatMessage> messages, string callId)
+        => messages.SelectMany(m => m.Contents).OfType<FunctionCallContent>()
+            .Single(fc => fc.CallId == callId).Arguments!["content"]?.ToString();
+
+    [Fact]
+    public void TruncateIntermediate_KeepsTheNewestToolCallsWhole_ElidesOlderOnes()
+    {
+        var body = new string('x', 2_000);
+        var messages = new List<ChatMessage>();
+        for (int i = 0; i < 4; i++)
+        {
+            messages.Add(WriteCall($"w{i}", body));
+            messages.Add(ToolResult($"w{i}", "[OK] wrote probe.kiwi"));
+        }
+
+        var result = AgentContextCompactionFilters.TruncateIntermediateAssistantReasoning(messages).ToList();
+
+        Assert.Equal(ElisionMarkers.ArgValueNote(2_000), WrittenContent(result, "w0"));
+        Assert.Equal(ElisionMarkers.ArgValueNote(2_000), WrittenContent(result, "w1"));
+        Assert.Equal(body, WrittenContent(result, "w2"));
+        Assert.Equal(body, WrittenContent(result, "w3"));
+    }
+
+    [Fact]
+    public void CompressSupersededShell_StubSaysTheOutputWasDropped_NotCached()
+    {
+        static ChatMessage Shell(string id) => new(ChatRole.Assistant,
+            [new FunctionCallContent(id, "shell_run", new Dictionary<string, object?> { ["command"] = "make test" })]);
+        var messages = new List<ChatMessage>
+        {
+            Shell("s0"), ToolResult("s0", "[EXIT 1]\nboom"),
+            Shell("s1"), ToolResult("s1", "all green"),
+        };
+
+        var result = AgentContextCompactionFilters.CompressSupersededShellPairs(messages).ToList();
+
+        var stub = result.SelectMany(m => m.Contents).OfType<FunctionResultContent>().First(r => r.CallId == "s0").Result?.ToString();
+        Assert.StartsWith("failed [EXIT 1]", stub);
+        Assert.Contains("run again later", stub);
+        Assert.True(ContainsLiteralResult(result, "s1", "all green"));
+    }
 }

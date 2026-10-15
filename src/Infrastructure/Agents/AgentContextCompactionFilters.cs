@@ -24,6 +24,13 @@ internal static class AgentContextCompactionFilters
     // Large values (e.g. write_file content argument) accumulate in every subsequent step's
     // call frame, causing O(N) growth per step that compounds across N steps to O(N²) total.
     private const int MaxIntermediateArgValueChars = 500;
+    // The most recent tool-calling assistant messages are left whole. With every earlier call
+    // reduced to its ArgValueNote, the model's own latest write_file — the call it is most
+    // likely to imitate when it writes the same file again — would otherwise show the
+    // placeholder as its content, and models copy it verbatim into the next write. Leaving the
+    // newest calls intact gives it a real example to follow. Each message is rewritten once,
+    // when it leaves this window, which only re-sends the few messages after it uncached.
+    internal const int KeepRecentToolCallMessagesWhole = 2;
 
     // Ratio of the reference budget at which KeepLastToolPairs actually engages inside
     // ApplyInTurnFilters — mirrors Cline's COMPACTION_TRIGGER_RATIO (sdk/packages/core/src/
@@ -65,7 +72,8 @@ internal static class AgentContextCompactionFilters
     ///     <see cref="MaxIntermediateArgValueChars"/>. Short values (paths, flags) are kept
     ///     in full; only bulk payloads (file contents, scripts) are elided.</item>
     /// </list>
-    /// Pure-text (non-tool) messages are never modified.
+    /// Pure-text (non-tool) messages are never modified, nor are the last
+    /// <see cref="KeepRecentToolCallMessagesWhole"/> tool-calling ones.
     /// </summary>
     internal static IEnumerable<ChatMessage> TruncateIntermediateAssistantReasoning(
         IEnumerable<ChatMessage> messages)
@@ -77,10 +85,20 @@ internal static class AgentContextCompactionFilters
                            m.Contents.OfType<FunctionCallContent>().Any()))
             return list;
 
-        var result = new List<ChatMessage>(list.Count);
-        foreach (var msg in list)
+        var keepWholeFrom = list.Count;
+        for (int i = list.Count - 1, kept = 0; i >= 0 && kept < KeepRecentToolCallMessagesWhole; i--)
         {
-            if (msg.Role != ChatRole.Assistant)
+            if (list[i].Role != ChatRole.Assistant || !list[i].Contents.OfType<FunctionCallContent>().Any())
+                continue;
+            keepWholeFrom = i;
+            kept++;
+        }
+
+        var result = new List<ChatMessage>(list.Count);
+        for (var idx = 0; idx < list.Count; idx++)
+        {
+            var msg = list[idx];
+            if (msg.Role != ChatRole.Assistant || idx >= keepWholeFrom)
             {
                 result.Add(msg);
                 continue;
@@ -194,7 +212,7 @@ internal static class AgentContextCompactionFilters
     /// <summary>
     /// For <c>shell_run</c> calls with identical <c>command</c> + <c>workingDirectory</c>
     /// arguments, compresses the tool result of earlier calls to a single-line outcome
-    /// ("succeeded" / "failed [exit N]"). The command call itself is left intact so the
+    /// ("succeeded …" / "failed [EXIT N] …", see <see cref="ShellOutcomeSummary"/>). The command call itself is left intact so the
     /// sequence of attempts remains visible in context. The latest call keeps its full output.
     /// </summary>
     internal static IEnumerable<ChatMessage> CompressSupersededShellPairs(
@@ -269,12 +287,20 @@ internal static class AgentContextCompactionFilters
         return result;
     }
 
-    // Failures always begin with "[EXIT N]"; everything else is a success.
-    private static string ShellOutcomeSummary(string resultText)
+    // Failures always begin with "[EXIT N]"; everything else is a success. A bare "succeeded"
+    // in place of output a model remembers reading led it to conclude the shell was returning
+    // cached results and to re-run the command, so the stub says outright that this run's
+    // output was dropped in favor of the later, identical run.
+    internal static string ShellOutcomeSummary(string resultText)
     {
-        if (!resultText.StartsWith("[EXIT ", StringComparison.Ordinal)) return "succeeded";
-        var end = resultText.IndexOf(']');
-        return end > 0 ? $"failed {resultText[..(end + 1)]}" : "failed";
+        var outcome = "succeeded";
+        if (resultText.StartsWith("[EXIT ", StringComparison.Ordinal))
+        {
+            var end = resultText.IndexOf(']');
+            outcome = end > 0 ? $"failed {resultText[..(end + 1)]}" : "failed";
+        }
+        return $"{outcome} — output dropped from context because this same command was run " +
+               "again later; that later run's result is the current one. Nothing is cached.";
     }
 
     // Tools whose results are purely observational: the latest call with the same arguments
