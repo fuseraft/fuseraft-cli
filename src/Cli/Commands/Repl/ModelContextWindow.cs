@@ -54,4 +54,15 @@ internal static class ModelContextWindow
 
         return DefaultBudget;
     }
+
+    /// <summary>
+    /// The per-turn <c>read_file</c> budget, in chars, for a working context budget of
+    /// <paramref name="contextTokenBudget"/> tokens: half of it. The other half is left for the
+    /// system prompt, tool schemas, conversation history, and everything else the turn produces.
+    /// So a 150K-token model can read ~300K chars in a turn and an unrecognized one ~160K, instead
+    /// of every model getting the same 150K — and raising <c>repl.contextBudget</c> for a model
+    /// with a larger real window raises this with it.
+    /// </summary>
+    internal static int GetReadBudgetChars(int contextTokenBudget) =>
+        fuseraft.Core.TokenEstimator.EstimateChars(contextTokenBudget / 2);
 }

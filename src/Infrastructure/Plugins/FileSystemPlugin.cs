@@ -85,10 +85,12 @@ public sealed class FileSystemPlugin : ITurnResettable
     // individually respecting the per-call size limit while still collectively flooding
     // the in-turn context with hundreds of thousands of chars of file content — the
     // primary cause of 400k+ input-token turns. Cleared by BeginTurn().
-    // Default: 150,000 chars ≈ 37,500 tokens. Agents making >N large file reads per turn
-    // receive a "budget exhausted" error and must proceed with the context they have.
+    // Default: 150,000 chars ≈ 37,500 tokens, or whatever SetReadBudgetSource's callback says —
+    // the REPL sizes it from the model's context budget. Agents making >N large file reads per
+    // turn receive a "budget exhausted" error and must proceed with the context they have.
     private int _readBudgetUsed;
     private readonly int _readBudgetPerTurn;
+    private Func<int>? _readBudgetSource;
 
     // Pre-read byte threshold: if the file exceeds this, stream just the first 30 lines +
     // a line count for the preview instead of allocating a full string array. Internal so
@@ -132,6 +134,16 @@ public sealed class FileSystemPlugin : ITurnResettable
     // see PluginRegistry.RegisterAdditional) shares the exact same per-turn HashSet instances —
     // InvalidatePathAsync calls from either object must clear entries the other one added.
     internal HashSet<string> ReadThisTurnState    => _readThisTurn;
+
+    /// <summary>
+    /// Sizes the per-turn read budget from <paramref name="source"/>, asked on every read so a
+    /// model switch mid-session takes effect at once. A non-positive answer falls back to the
+    /// budget given to the constructor.
+    /// </summary>
+    internal void SetReadBudgetSource(Func<int> source) => _readBudgetSource = source;
+
+    private int ReadBudgetPerTurn =>
+        _readBudgetSource?.Invoke() is > 0 and var chars ? chars : _readBudgetPerTurn;
 
     // The read record, cache hints, and budget in effect for the current call: a subagent's own
     // (see ReadScope) when one is running, otherwise the turn's.
@@ -290,21 +302,21 @@ public sealed class FileSystemPlugin : ITurnResettable
                 $"\n\n[Large file — {coldLineCount:N0} lines ({coldSizeBytes:N0} bytes). " +
                 $"Cold-reading would flood your context. " +
                 $"Use grep_file to locate the relevant section, then read_file with startLine/maxLines.]";
-            if (ReadBudgetUsed + preview.Length > _readBudgetPerTurn)
+            if (ReadBudgetUsed + preview.Length > ReadBudgetPerTurn)
             {
-                var remaining = _readBudgetPerTurn - ReadBudgetUsed;
+                var remaining = ReadBudgetPerTurn - ReadBudgetUsed;
                 if (remaining <= 0) return BudgetUsedUpResult();
                 if (ReadBudgetUsed == 0)
                 {
-                    var allowed = Math.Max(1, Math.Min(preview.Length, _readBudgetPerTurn));
+                    var allowed = Math.Max(1, Math.Min(preview.Length, ReadBudgetPerTurn));
                     preview = preview[..allowed] +
-                              $"\n\n[Truncated to fit per-turn read budget of {_readBudgetPerTurn:N0} chars. " +
+                              $"\n\n[Truncated to fit per-turn read budget of {ReadBudgetPerTurn:N0} chars. " +
                               $"Use grep_file or read_file with startLine/maxLines for narrower follow-up reads.]";
                 }
                 else
                 {
                     var allowed = Math.Max(1, Math.Min(preview.Length, Math.Max(remaining, 1)));
-                    preview = $"[Read budget nearly exhausted ({ReadBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars used this turn). " +
+                    preview = $"[Read budget nearly exhausted ({ReadBudgetUsed:N0}/{ReadBudgetPerTurn:N0} chars used this turn). " +
                               $"Returning a compact preview instead of failing so you can keep working. " +
                               $"Use grep_file/get_file_summary or narrow read_file ranges for any follow-up reads in this turn.]\n\n" +
                               preview[..allowed];
@@ -327,7 +339,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     // what to do instead. [DENIED] also counts toward the REPL's consecutive-failure cutoff, so a
     // model that keeps trying anyway is stopped within a few calls.
     private string BudgetUsedUpResult() =>
-        $"[DENIED] This turn's read budget is used up ({ReadBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars). " +
+        $"[DENIED] This turn's read budget is used up ({ReadBudgetUsed:N0}/{ReadBudgetPerTurn:N0} chars). " +
         "No read_file call — any file, any line range — can return content again until the user's next message, " +
         "and compacting or checking context won't change that. Stop reading and answer now with what you already " +
         "have, naming the files or sections you didn't get to so the user can ask you to continue.";
@@ -364,26 +376,26 @@ public sealed class FileSystemPlugin : ITurnResettable
         // cumulative char limit for this turn. Large numbers of file reads is the primary
         // driver of 400k+ input-token turns — once the budget is hit, the agent must
         // proceed with what it already has in context rather than reading more files.
-        if (ReadBudgetUsed + built.Length > _readBudgetPerTurn)
+        if (ReadBudgetUsed + built.Length > ReadBudgetPerTurn)
         {
             budgetTrimmed = true;
             if (ReadBudgetUsed == 0)
             {
-                var allowed = Math.Max(1, Math.Min(built.Length, _readBudgetPerTurn));
+                var allowed = Math.Max(1, Math.Min(built.Length, ReadBudgetPerTurn));
                 built = built[..allowed] +
-                        $"\n\n[Truncated to fit per-turn read budget of {_readBudgetPerTurn:N0} chars. " +
+                        $"\n\n[Truncated to fit per-turn read budget of {ReadBudgetPerTurn:N0} chars. " +
                         $"Use grep_file/get_file_summary or narrow read_file ranges for follow-up reads.]";
             }
             else
             {
-                var remaining = _readBudgetPerTurn - ReadBudgetUsed;
+                var remaining = ReadBudgetPerTurn - ReadBudgetUsed;
                 if (remaining <= 0)
                 {
                     content = null;
                     return BudgetUsedUpResult();
                 }
                 var allowed = Math.Max(1, Math.Min(built.Length, remaining));
-                built = $"[Read budget nearly exhausted ({ReadBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars used this turn). " +
+                built = $"[Read budget nearly exhausted ({ReadBudgetUsed:N0}/{ReadBudgetPerTurn:N0} chars used this turn). " +
                         $"Returning a compact slice instead of failing so you can keep working. " +
                         $"Use grep_file/get_file_summary or narrower read_file ranges for any follow-up reads in this turn.]\n\n" +
                         built[..allowed];

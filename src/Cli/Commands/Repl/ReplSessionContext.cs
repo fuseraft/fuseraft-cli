@@ -105,6 +105,9 @@ internal sealed class ReplSessionContext
     // reassignment site that changes both (e.g. /provider setup) must preserve that order.
     public int ContextTokenBudget { get; private set; } = ModelContextWindow.DefaultBudget;
 
+    /// <summary>Per-turn read_file budget in chars, derived from <see cref="ContextTokenBudget"/>.</summary>
+    public int ReadBudgetChars => ModelContextWindow.GetReadBudgetChars(ContextTokenBudget);
+
     public ModelConfig ModelConfig { get; set; }
     public UserConfig? UserCfg     { get; set; }
     public IChatClient Client      { get; set; }
