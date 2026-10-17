@@ -365,7 +365,8 @@ public static class FuseraftPaths
         {
             os    = "Windows";
             shell = (Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe") +
-                    " (PowerShell syntax also works — commands cmd.exe can't resolve are retried via PowerShell automatically)";
+                    " — for PowerShell, pass shell=\"powershell\" to shell_run/shell_run_script/shell_run_background " +
+                    "and write the command as PowerShell, with no powershell -Command wrapper or cmd.exe escaping";
         }
         else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
         {
