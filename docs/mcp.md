@@ -30,7 +30,7 @@ fuseraft-cli supports the [Model Context Protocol (MCP)](https://modelcontextpro
 | `Transport` | string | `"stdio"` | `"stdio"` or `"http"`. |
 | `Command` | string | — | **stdio only.** Executable to launch (e.g. `"npx"`, `"python"`, `"dotnet"`). |
 | `Args` | array | `[]` | **stdio only.** Arguments passed to `Command`. |
-| `Env` | object | `{}` | **stdio only.** Additional environment variables for the child process. |
+| `Env` | object | `{}` | **stdio only.** Additional environment variables for the child process. Values support `${ENV_VAR}` tokens. |
 | `WorkingDirectory` | string | — | **stdio only.** Working directory for the child process. |
 | `Url` | string | — | **http only.** Endpoint URL (e.g. `"https://mcp.example.com/mcp"`). Supports `${ENV_VAR}` tokens. |
 | `Headers` | object | `{}` | **http only.** Extra HTTP headers sent with every request — e.g. a static API key or bearer token. Values support `${ENV_VAR}` tokens. |

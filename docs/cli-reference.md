@@ -541,21 +541,22 @@ This is distinct from `fuseraft run`, where `Temperature` is set per-model in `o
 
 **Connecting an MCP server (`/mcp`)**
 
-`/mcp add` opens the same style of interactive wizard as `/provider setup`: pick a transport (`stdio` or `http`), supply the command/args (stdio) or URL (http), and fuseraft connects immediately and registers the server's tools under an `mcp:<name>` category — available to the model on the very next turn.
+`/mcp add` opens the same style of interactive wizard as `/provider setup`: pick a transport (`stdio` or `http`), supply the command, arguments and any environment variables (stdio) or URL (http), and fuseraft connects immediately and registers the server's tools under an `mcp:<name>` category — available to the model on the very next turn.
 
 ```
 3> /mcp add
 Add MCP server
-Server name › filesystem
-Transport   › stdio
-Command     › npx
-Arguments   › -y @modelcontextprotocol/server-filesystem /tmp
+Server name           › filesystem
+Transport             › stdio
+Command               › npx
+Arguments             › -y @modelcontextprotocol/server-filesystem /tmp
+Environment variables ›
 Connecting to 'filesystem'…
 Connected 'filesystem' — 8 tool(s) available.
 Saved — will reconnect automatically on future REPL sessions.
 ```
 
-By default the server is saved to the `mcpServers` section of `~/.fuseraft/config` (`fuseraft settings show` lists connected server names) and reconnects automatically the next time you start `fuseraft repl` in any directory — pass `/mcp add --session-only` to skip persistence for a one-off connection. `/mcp` lists what's currently connected; `/mcp remove <name>` disconnects a server immediately and deletes it from the saved config.
+By default the server is saved to the `mcpServers` section of `~/.fuseraft/config` (`fuseraft settings show` lists connected server names) and reconnects automatically the next time you start `fuseraft repl` in any directory — pass `/mcp add --session-only` to skip persistence for a one-off connection. Environment variables are saved as typed, so give a secret as a `${ENV_VAR}` token (`DB_PASSWORD=${PROD_DB_PASSWORD}`) rather than its value; the token is filled in from fuseraft's own environment each time the server starts. `/mcp` lists what's currently connected; `/mcp remove <name>` disconnects a server immediately and deletes it from the saved config.
 
 For an `http` server, `/mcp add` also asks how to authenticate: a static header (API key or bearer token — supports `${ENV_VAR}` tokens) or OAuth (opens your browser to authorize; see [MCP Integration — OAuth login](mcp.md#oauth-login)). For an OAuth-configured server, `/mcp login <name>` reconnects it (e.g. after it failed to auto-connect at startup), reusing a cached token if one is still valid; `/mcp logout <name>` clears the cached token and disconnects without forgetting the server's config, so the next `/mcp login` (or REPL launch) prompts for a fresh login.
 

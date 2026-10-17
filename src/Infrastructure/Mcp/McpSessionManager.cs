@@ -184,7 +184,9 @@ public sealed class McpSessionManager : IAsyncDisposable
             {
                 Command          = server.Command,
                 Arguments        = server.Args.Count > 0 ? server.Args : null,
-                EnvironmentVariables = server.Env.Count > 0 ? server.Env : null,
+                EnvironmentVariables = server.Env.Count > 0
+                    ? server.Env.ToDictionary(e => e.Key, e => (string?)ProcessHelper.ExpandEnvTokens(e.Value))
+                    : null,
                 WorkingDirectory = server.WorkingDirectory
             };
             var transport = new StdioClientTransport(options, _loggerFactory);
