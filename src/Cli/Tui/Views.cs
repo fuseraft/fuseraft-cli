@@ -223,9 +223,12 @@ sealed class StatusView : View
         }
     }
 
-    /// <summary>The keys shown at the right: none while a question is asked, since the panel shows its own.</summary>
-    public static string Keys(bool working, bool asking) =>
-        asking ? "" : working ? "Enter adds to the turn · Ctrl+C cancel" : "Enter send · Alt+Enter newline · PgUp/PgDn scroll · Ctrl+O output";
+    /// <summary>The session is ending, and takes no more input.</summary>
+    public bool Ending { get; set; }
+
+    /// <summary>The keys shown at the right: none while a question is asked, since the panel shows its own, or as the session ends.</summary>
+    public static string Keys(bool working, bool asking, bool ending = false) =>
+        asking || ending ? "" : working ? "Enter adds to the turn · Ctrl+C cancel" : "Enter send · Alt+Enter newline · PgUp/PgDn scroll · Ctrl+O output";
 
     public void Set(string text, bool working)
     {
@@ -278,7 +281,7 @@ sealed class StatusView : View
         List<Span> left = _flash is not null ? [new(_flash, Theme.StyleOf(Theme.Current.Warning))]
             : _working && !_asking ? [new(Spinner[_frame % Spinner.Length], Theme.StyleOf(Theme.Current.Accent) with { Bold = true }), new($" working {Elapsed(DateTime.UtcNow - _since)} · ", default), .. Styled.Parse(_text)]
             : Styled.Parse(_text);
-        var right = Keys(_working, _asking);
+        var right = Keys(_working, _asking, Ending);
         var gap = Viewport.Width - left.Sum(s => s.Text.GetColumns()) - right.GetColumns();
         Styled.Draw(this, 0, gap >= 2 ? [.. left, new(new string(' ', gap) + right, default)] : left, Styled.Border);
         return true;

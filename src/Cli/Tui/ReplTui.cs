@@ -213,6 +213,12 @@ internal sealed partial class ReplTui : IReplScreen
     // take it (a command is running). Otherwise the REPL is waiting for it.
     void Send(string text)
     {
+        // Nothing reads it once the session is ending; it's in the history, for ↑ in the next one.
+        if (_status.Ending)
+        {
+            _status.Flash("The session is ending, so that wasn't sent");
+            return;
+        }
         if (!_status.Working)
         {
             _sent.Writer.TryWrite((text, false));
@@ -241,6 +247,12 @@ internal sealed partial class ReplTui : IReplScreen
         }
         return text;
     }
+
+    public void Ending() => Ui(() =>
+    {
+        _status.Ending = true;
+        _status.Set("ending the session (saving memories)", working: true);
+    });
 
     public void Status(ReplStatus status) => Ui(() =>
     {
