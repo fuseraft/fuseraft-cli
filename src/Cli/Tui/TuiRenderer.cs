@@ -1,3 +1,5 @@
+using System.Text.Json;
+using fuseraft.Infrastructure.Mcp;
 using Repl = fuseraft.Cli.Commands.Repl;
 
 namespace fuseraft.Cli.Tui;
@@ -20,7 +22,7 @@ internal sealed class TuiRenderer(Transcript transcript, Func<int> width)
 
     readonly Lock _lock = new();
     readonly List<ToolOutput> _outputs = [];
-    readonly Dictionary<string, string> _calls = []; // what each running call was started with, for its output's title
+    readonly Dictionary<string, (string Title, string? Arguments)> _calls = []; // what each running call was started with, for its output
     Markdown? _message; // the model's message being streamed, while it's being redrawn
     System.Text.StringBuilder? _thought; // the model's thinking so far, until it moves on and the thinking is folded
     bool _marked; // whether the message being streamed has its mark yet
@@ -92,14 +94,14 @@ internal sealed class TuiRenderer(Transcript transcript, Func<int> width)
         }
     }
 
-    public void ToolStarted(string callId, string name, string summary, string? agent = null)
+    public void ToolStarted(string callId, string name, string summary, string? agent = null, string? arguments = null)
     {
         lock (_lock)
         {
             End(turn: false);
-            // A subagent's calls report no result here, so only the turn's own are remembered for their output's title.
+            // A subagent's calls report no result here, so only the turn's own are remembered for their output.
             if (agent is null)
-                _calls[callId] = (name + " " + summary).Trim();
+                _calls[callId] = ((name + " " + summary).Trim(), arguments);
             Line((agent is null ? "  " : "    " + Paint(T.Agent, $"[{agent}]") + " ") + Paint(T.Tool, "↳ " + name) + (summary.Length == 0 ? "" : Paint(T.Muted, " " + summary)));
         }
     }
@@ -108,8 +110,14 @@ internal sealed class TuiRenderer(Transcript transcript, Func<int> width)
     {
         lock (_lock)
         {
-            var title = _calls.Remove(callId, out var started) ? started : name;
-            Keep(new ToolOutput(ok ? title : title + " (failed)", result.Length == 0 ? "(no output)" : result, Diff: false));
+            var (title, arguments) = _calls.Remove(callId, out var started) ? started : (name, null);
+            if (McpToolResult.TryRead(result, out var content, out _))
+                result = content;
+            if (result.Length == 0)
+                result = "(no output)";
+            // The arguments too, so what the call was asked to do can be read beside what it answered.
+            var text = string.IsNullOrEmpty(arguments) ? result : $"Arguments\n{Indent(arguments)}\n\nResult\n{Indent(result)}";
+            Keep(new ToolOutput(ok ? title : title + " (failed)", text, Diff: false));
             if (!ok)
                 Line(Paint(T.Error, (agent is null ? "    " : "      ") + FirstLine(result)));
         }
@@ -224,6 +232,29 @@ internal sealed class TuiRenderer(Transcript transcript, Func<int> width)
         var text = (value?.ToString() ?? "").ReplaceLineEndings(" ").Trim();
         return text.Length > 100 ? text[..97] + "..." : text;
     }
+
+    /// <summary>A call's arguments for the viewer: one per line, string values as they are, multi-line ones beneath their name.</summary>
+    public static string FormatArguments(IDictionary<string, object?>? args)
+    {
+        if (args is not { Count: > 0 })
+            return "";
+        var lines = new List<string>();
+        foreach (var (key, value) in args)
+        {
+            var text = value switch
+            {
+                null => "null",
+                string s => s,
+                JsonElement { ValueKind: JsonValueKind.String } e => e.GetString()!,
+                JsonElement e => e.GetRawText(),
+                _ => JsonSerializer.Serialize(value),
+            };
+            lines.Add(text.Contains('\n') ? $"{key}:\n{Indent(text.TrimEnd('\n'))}" : $"{key}: {text}");
+        }
+        return string.Join("\n", lines);
+    }
+
+    static string Indent(string text) => "  " + text.ReplaceLineEndings("\n").Replace("\n", "\n  ");
 
     static string Paint(string code, string s) => code.Length == 0 || s.Length == 0 ? s : $"\e[{code}m{s}\e[0m";
 

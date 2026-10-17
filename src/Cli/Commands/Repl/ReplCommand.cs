@@ -898,6 +898,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             // silently skipping all three. EmitAsync and ExtractMemoriesOnExitAsync already
             // swallow their own exceptions internally; DisposeAsync is wrapped here the same
             // way it always was, best-effort, since the session is ending regardless.
+            ReplInput.Screen?.Ending();
             if (ctx.McpManager is not null)
             {
                 try { await ctx.McpManager.DisposeAsync(); }

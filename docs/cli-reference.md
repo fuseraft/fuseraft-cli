@@ -469,6 +469,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/mcp` | List MCP servers connected this session and their tools |
 | `/mcp add` | Interactive wizard to connect an MCP server (stdio or HTTP). Persists to the `mcpServers` section of `~/.fuseraft/config` so it reconnects automatically on future REPL launches. |
 | `/mcp add --session-only` | Same as `/mcp add`, but don't persist past this session |
+| `/mcp log <name>` | Show the last 200 lines a stdio server wrote to stderr, which is where servers write their own logs; also kept for Ctrl+O |
 | `/mcp remove <name>` | Disconnect a server (closing its connection immediately, not just at session end), stop offering its tools, and delete it from `~/.fuseraft/config` — also clears any cached OAuth token for it. |
 | `/mcp login <name>` | (Re)connect a saved server by name — e.g. one that failed to auto-connect at REPL startup. Reuses a still-valid cached OAuth token if present; run `/mcp logout` first to force a fresh browser login. |
 | `/mcp logout <name>` | Clear a saved OAuth-configured server's cached token and disconnect it, without removing it from the saved config — `/mcp login <name>` (or the next REPL launch) will prompt for a fresh login. No-op message if the server isn't configured for OAuth. |
@@ -541,21 +542,22 @@ This is distinct from `fuseraft run`, where `Temperature` is set per-model in `o
 
 **Connecting an MCP server (`/mcp`)**
 
-`/mcp add` opens the same style of interactive wizard as `/provider setup`: pick a transport (`stdio` or `http`), supply the command/args (stdio) or URL (http), and fuseraft connects immediately and registers the server's tools under an `mcp:<name>` category — available to the model on the very next turn.
+`/mcp add` opens the same style of interactive wizard as `/provider setup`: pick a transport (`stdio` or `http`), supply the command, arguments and any environment variables (stdio) or URL (http), and fuseraft connects immediately and registers the server's tools under an `mcp:<name>` category — available to the model on the very next turn.
 
 ```
 3> /mcp add
 Add MCP server
-Server name › filesystem
-Transport   › stdio
-Command     › npx
-Arguments   › -y @modelcontextprotocol/server-filesystem /tmp
+Server name           › filesystem
+Transport             › stdio
+Command               › npx
+Arguments             › -y @modelcontextprotocol/server-filesystem /tmp
+Environment variables ›
 Connecting to 'filesystem'…
 Connected 'filesystem' — 8 tool(s) available.
 Saved — will reconnect automatically on future REPL sessions.
 ```
 
-By default the server is saved to the `mcpServers` section of `~/.fuseraft/config` (`fuseraft settings show` lists connected server names) and reconnects automatically the next time you start `fuseraft repl` in any directory — pass `/mcp add --session-only` to skip persistence for a one-off connection. `/mcp` lists what's currently connected; `/mcp remove <name>` disconnects a server immediately and deletes it from the saved config.
+By default the server is saved to the `mcpServers` section of `~/.fuseraft/config` (`fuseraft settings show` lists connected server names) and reconnects automatically the next time you start `fuseraft repl` in any directory — pass `/mcp add --session-only` to skip persistence for a one-off connection. Environment variables are saved as typed, so give a secret as a `${ENV_VAR}` token (`DB_PASSWORD=${PROD_DB_PASSWORD}`) rather than its value; the token is filled in from fuseraft's own environment each time the server starts. `/mcp` lists what's currently connected; `/mcp remove <name>` disconnects a server immediately and deletes it from the saved config. When a server's error points at its log, `/mcp log <name>` shows what it wrote to stderr.
 
 For an `http` server, `/mcp add` also asks how to authenticate: a static header (API key or bearer token — supports `${ENV_VAR}` tokens) or OAuth (opens your browser to authorize; see [MCP Integration — OAuth login](mcp.md#oauth-login)). For an OAuth-configured server, `/mcp login <name>` reconnects it (e.g. after it failed to auto-connect at startup), reusing a cached token if one is still valid; `/mcp logout <name>` clears the cached token and disconnects without forgetting the server's config, so the next `/mcp login` (or REPL launch) prompts for a fresh login.
 
@@ -721,7 +723,7 @@ Naming a file or directory with `@` hands it to the model with your message (`wh
 | Ctrl+Home / Ctrl+End | Jump to the top, or back to following new output |
 | Ctrl+F | Find text in the conversation (Enter or ↑ for older matches, ↓ for newer, Esc to close) |
 | Ctrl+R | Search earlier messages; the chosen one replaces the draft |
-| Ctrl+O | Show the latest tool output, approval diff, or thinking in full, in place of the conversation: ←/→ for older and newer (the last 100 are kept), ↑/↓ and PgUp/PgDn to scroll, Esc to close |
+| Ctrl+O | Show the latest tool output (with the arguments the call was made with), approval diff, or thinking in full, in place of the conversation: ←/→ for older and newer (the last 100 are kept), ↑/↓ and PgUp/PgDn to scroll, Esc to close |
 | Ctrl+U | Delete from the cursor to the start of the line |
 | Ctrl+C | Cancel the running turn (denying an open approval), else close or clear what's open; twice on an empty prompt exits |
 | Ctrl+D | Exit, on an empty prompt |

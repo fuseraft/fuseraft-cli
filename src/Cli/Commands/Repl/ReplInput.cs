@@ -45,7 +45,8 @@ internal interface IReplScreen
     /// <summary>Ends the reply being streamed; with <paramref name="turn"/>, the turn too.</summary>
     void EndMessage(bool turn);
 
-    void ToolStarted(string callId, string name, string summary, string? agent = null);
+    /// <summary>A tool call starting; <paramref name="arguments"/> is the whole of them, for Ctrl+O.</summary>
+    void ToolStarted(string callId, string name, string summary, string? agent = null, string? arguments = null);
 
     void ToolFinished(string callId, string name, bool ok, string result, string? agent = null);
 
@@ -54,6 +55,9 @@ internal interface IReplScreen
 
     /// <summary>Keeps a whole output (an approval's diff) for Ctrl+O.</summary>
     void Keep(string title, string text, bool diff);
+
+    /// <summary>The session is ending: say so, and take no more input.</summary>
+    void Ending();
 
     /// <summary>Puts <paramref name="text"/> on the clipboard; returns the system tool's name, or null when only the terminal was asked.</summary>
     string? Copy(string text);

@@ -29,14 +29,40 @@ internal static partial class ReplCommands
             "remove" => await CmdMcpRemoveAsync(ctx, rest),
             "login"  => await CmdMcpLoginAsync(ctx, rest, cancellationToken),
             "logout" => await CmdMcpLogoutAsync(ctx, rest),
+            "log"    => CmdMcpLog(ctx, rest),
             _        => Unknown(),
         };
 
         CommandResult Unknown()
         {
-            AnsiConsole.MarkupLine("[yellow]Usage:[/] /mcp | /mcp add [[--session-only]] | /mcp remove <name> | /mcp login <name> | /mcp logout <name>");
+            AnsiConsole.MarkupLine("[yellow]Usage:[/] /mcp | /mcp add [[--session-only]] | /mcp remove <name> | /mcp login <name> | /mcp logout <name> | /mcp log <name>");
             return CommandResult.Continue;
         }
+    }
+
+    private static CommandResult CmdMcpLog(ReplSessionContext ctx, string name)
+    {
+        name = name.Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            AnsiConsole.MarkupLine("[yellow]Usage:[/] /mcp log <name>");
+            return CommandResult.Continue;
+        }
+        if (ctx.McpManager?.StderrLines(name) is not { } lines)
+        {
+            AnsiConsole.MarkupLine($"[yellow]No log for '{Markup.Escape(name)}':[/] [dim]only a connected stdio server's stderr is kept.[/]");
+            return CommandResult.Continue;
+        }
+        if (lines.Count == 0)
+        {
+            AnsiConsole.MarkupLine($"[dim]'{Markup.Escape(name)}' hasn't written anything to stderr.[/]");
+            return CommandResult.Continue;
+        }
+        var text = string.Join("\n", lines);
+        AnsiConsole.MarkupLine($"[dim]Last {lines.Count} line(s) '{Markup.Escape(name)}' wrote to stderr:[/]");
+        AnsiConsole.WriteLine(text);
+        ReplInput.Screen?.Keep($"{name} stderr", text, diff: false);
+        return CommandResult.Continue;
     }
 
     private static CommandResult CmdMcpList(ReplSessionContext ctx)
@@ -84,6 +110,7 @@ internal static partial class ReplCommands
 
         var transport = ReplInput.Select("[dim]Transport[/]", ["stdio", "http"]);
         if (transport is null) return CommandResult.Continue;
+        AnsiConsole.MarkupLine($"[dim]Transport:[/] {transport}");
 
         McpServerConfig config;
         if (transport == "stdio")
@@ -92,12 +119,24 @@ internal static partial class ReplCommands
             if (command is null) return CommandResult.Continue;
             var argsLine = ReplInput.Ask("[dim]Arguments[/] [dim](space-separated, blank for none)[/]", allowEmpty: true);
             if (argsLine is null) return CommandResult.Continue;
+            Dictionary<string, string>? env;
+            while (true)
+            {
+                var envLine = ReplInput.Ask(
+                    "[dim]Environment variables[/] [dim](KEY=VALUE, space-separated, blank for none — values support ${ENV_VAR}, which keeps a secret out of the saved config)[/]",
+                    allowEmpty: true);
+                if (envLine is null) return CommandResult.Continue;
+                env = ParseEnvPairs(envLine);
+                if (env is not null) break;
+                AnsiConsole.MarkupLine("[red]✗ Each variable needs the form KEY=VALUE.[/]");
+            }
             config = new McpServerConfig
             {
                 Name      = name,
                 Transport = "stdio",
                 Command   = command.Trim(),
                 Args      = SplitStdioArgs(argsLine),
+                Env       = env,
             };
         }
         else
@@ -108,6 +147,7 @@ internal static partial class ReplCommands
             var auth = ReplInput.Select("[dim]Authentication[/]",
                 ["None", "Header (API key / bearer token)", "OAuth (browser login)"]);
             if (auth is null) return CommandResult.Continue;
+            AnsiConsole.MarkupLine($"[dim]Authentication:[/] {Markup.Escape(auth)}");
 
             Dictionary<string, string> headers = [];
             McpOAuthConfig? oauth = null;
@@ -291,6 +331,19 @@ internal static partial class ReplCommands
 
     // Quote-aware split for the stdio "Arguments" prompt — a bare space.Split would break an
     // argument value containing a space (e.g. a path) into multiple Args entries.
+    /// <summary>KEY=VALUE pairs, split like arguments so a quoted value can hold spaces; null when one has no key or no '='.</summary>
+    internal static Dictionary<string, string>? ParseEnvPairs(string line)
+    {
+        var env = new Dictionary<string, string>();
+        foreach (var pair in SplitStdioArgs(line))
+        {
+            var eq = pair.IndexOf('=');
+            if (eq <= 0) return null;
+            env[pair[..eq]] = pair[(eq + 1)..];
+        }
+        return env;
+    }
+
     private static List<string> SplitStdioArgs(string argsLine)
     {
         var result  = new List<string>();

@@ -113,7 +113,7 @@ public sealed class MemoryExtractor(IChatClient client)
         return lines.Length > 0 ? lines.ToString().TrimEnd() : "(none)";
     }
 
-    private static string BuildPrompt(string excerpt, string index)
+    internal static string BuildPrompt(string excerpt, string index)
     {
         var date = DateTime.UtcNow.ToString("yyyy-MM-dd");
         return $$"""
@@ -134,6 +134,12 @@ public sealed class MemoryExtractor(IChatClient client)
 
         Rules:
         - Only extract non-obvious facts a future assistant would benefit from knowing
+        - Never save data the assistant read or retrieved with tools: query results, records, file contents, logs.
+          What a database or file holds can be read again, and it may be private
+        - Never save personal information about anyone other than the user (names with salaries, contact details,
+          account data), or secrets (passwords, tokens, keys, connection strings)
+        - Don't save what a future session can look up cheaply, such as a table's columns or a file's layout,
+          unless the user asked for it to be remembered
         - Update an existing memory (same name) only when there is new or corrected information
         - Return an empty array if nothing worth saving was found
         - Output ONLY valid JSON — no prose, no markdown fences

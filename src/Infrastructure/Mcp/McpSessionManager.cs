@@ -29,6 +29,12 @@ public sealed class McpSessionManager : IAsyncDisposable
     // can be torn down on its own via RemoveAsync — e.g. the REPL's /mcp remove — instead of
     // only ever being reachable through DisposeAsync's tear-down-everything path.
     private readonly Dictionary<string, McpClient> _clients = new(StringComparer.OrdinalIgnoreCase);
+    // What each stdio server has written to stderr lately — where servers put their logs, which would
+    // otherwise be lost, though their errors often point to them.
+    private readonly Dictionary<string, Queue<string>> _stderr = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>How many of a server's latest stderr lines are kept.</summary>
+    public const int KeptStderrLines = 200;
     private readonly ILoggerFactory? _loggerFactory;
     private readonly ILogger<McpSessionManager>? _logger;
 
@@ -100,6 +106,26 @@ public sealed class McpSessionManager : IAsyncDisposable
     /// process if it has one) and stops tracking it. Returns <c>false</c> without side effects
     /// if no server with that name is connected.
     /// </summary>
+    /// <summary>
+    /// The latest lines a stdio server wrote to stderr, oldest first, kept even when its connect failed; null for a
+    /// server that isn't stdio or was never started.
+    /// </summary>
+    public IReadOnlyList<string>? StderrLines(string name)
+    {
+        lock (_stderr)
+            return _stderr.TryGetValue(name, out var lines) ? [.. lines] : null;
+    }
+
+    private void KeepStderr(Queue<string> lines, string line)
+    {
+        lock (_stderr)
+        {
+            lines.Enqueue(line);
+            if (lines.Count > KeptStderrLines)
+                lines.Dequeue();
+        }
+    }
+
     public async Task<bool> RemoveAsync(string name)
     {
         if (!_clients.Remove(name, out var client))
@@ -180,11 +206,17 @@ public sealed class McpSessionManager : IAsyncDisposable
                 throw new InvalidOperationException(
                     $"MCP server '{server.Name}': 'Command' is required for stdio transport.");
 
+            var stderr = new Queue<string>();
+            lock (_stderr)
+                _stderr[server.Name] = stderr;
             var options = new StdioClientTransportOptions
             {
+                StandardErrorLines = line => KeepStderr(stderr, line),
                 Command          = server.Command,
                 Arguments        = server.Args.Count > 0 ? server.Args : null,
-                EnvironmentVariables = server.Env.Count > 0 ? server.Env : null,
+                EnvironmentVariables = server.Env.Count > 0
+                    ? server.Env.ToDictionary(e => e.Key, e => (string?)ProcessHelper.ExpandEnvTokens(e.Value))
+                    : null,
                 WorkingDirectory = server.WorkingDirectory
             };
             var transport = new StdioClientTransport(options, _loggerFactory);

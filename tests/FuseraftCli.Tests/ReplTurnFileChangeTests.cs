@@ -188,13 +188,50 @@ public sealed class ReplTurnFileChangeTests : IDisposable
         public void Dispose() { }
     }
 
-    private async Task<string> RunTurnAndReadEvents((string Tool, string Path, string Result)[] steps)
+    /// <summary>Streams the calls together in one chunk, as a model calling tools in parallel does, then their results together.</summary>
+    private sealed class ParallelClient((string Tool, string Path, string Result)[] calls) : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> m, ChatOptions? o = null, CancellationToken ct = default)
+            => Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "")));
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            yield return new ChatResponseUpdate
+            {
+                Role     = ChatRole.Assistant,
+                Contents = [.. calls.Select((c, i) => (AIContent)new FunctionCallContent($"call-{i}", c.Tool, new Dictionary<string, object?> { ["path"] = c.Path }))],
+            };
+            await Task.Yield();
+            yield return new ChatResponseUpdate
+            {
+                Role     = ChatRole.Assistant,
+                Contents = [.. calls.Select((c, i) => (AIContent)new FunctionResultContent($"call-{i}", c.Result)),
+                            new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 5 })],
+            };
+            await Task.Yield();
+            yield return new ChatResponseUpdate
+            {
+                Role     = ChatRole.Assistant,
+                Contents = [new TextContent("Done."), new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 5 })],
+            };
+        }
+
+        public object? GetService(Type t, object? k = null) => null;
+        public void Dispose() { }
+    }
+
+    private Task<string> RunTurnAndReadEvents((string Tool, string Path, string Result)[] steps) =>
+        RunTurnAndReadEvents(new ScriptedClient(steps));
+
+    private async Task<string> RunTurnAndReadEvents(IChatClient client)
     {
         var events = Path.Combine(_home, $"events-{Guid.NewGuid():N}.jsonl");
         var ctx = new ReplSessionContext(
             cwd: _home, sessionId: "fchg", startedAt: DateTime.UtcNow,
             modelId: "test-model", modelConfig: new() { ModelId = "test-model" },
-            userCfg: null, client: new ScriptedClient(steps), factory: new ChatClientFactory(),
+            userCfg: null, client: client, factory: new ChatClientFactory(),
             keyStore: new UnavailableKeyStore(),
             emitter: new EventEmitter(events), eventsPath: events,
             memoryStore: MemoryStore.CreateForTest(Path.Combine(_home, "mem")),
@@ -245,5 +282,21 @@ public sealed class ReplTurnFileChangeTests : IDisposable
         Assert.Contains("kept.txt", change);
         Assert.DoesNotContain("denied.txt", change);
         Assert.DoesNotContain("errored.txt", change);
+    }
+
+    [Fact]
+    public async Task ParallelCalls_AreAllCountedAndReported()
+    {
+        var log = await RunTurnAndReadEvents(new ParallelClient([
+            ("write_file", "first.txt",  "[OK] wrote 1 byte"),
+            ("write_file", "second.txt", "[OK] wrote 1 byte"),
+            ("write_file", "third.txt",  "[OK] wrote 1 byte"),
+        ]));
+
+        Assert.Contains("\"tool_count\":3", log);
+        var change = log.Split('\n').Single(l => l.Contains("\"file_changes\""));
+        Assert.Contains("first.txt", change);
+        Assert.Contains("second.txt", change);
+        Assert.Contains("third.txt", change);
     }
 }
