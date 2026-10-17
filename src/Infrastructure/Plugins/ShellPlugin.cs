@@ -362,8 +362,9 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         [Description("Return 'OK' instead of full output when the command succeeds.")] bool quiet = false)
     {
         // LLM outputs sometimes carry HTML entity encoding (e.g. &amp;&amp; instead of &&).
-        // Decode before passing to the shell so commands execute as intended.
-        command = System.Net.WebUtility.HtmlDecode(command);
+        // Decode before passing to the shell so commands execute as intended — outside quoted
+        // strings only, where a filename may genuinely contain "&gt;".
+        command = HtmlEntityArtifacts.DecodeOutsideQuotes(command);
 
         var sudoDenial = CheckForSudo(command);
         if (sudoDenial is not null) return sudoDenial;
@@ -644,7 +645,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         [Description("Shell command.")] string command,
         [Description("Working directory.")] string? workingDirectory = null)
     {
-        command = System.Net.WebUtility.HtmlDecode(command);
+        command = HtmlEntityArtifacts.DecodeOutsideQuotes(command);
 
         var sudoDenial = CheckForSudo(command);
         if (sudoDenial is not null) return sudoDenial;

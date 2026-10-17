@@ -82,14 +82,15 @@ internal sealed class FileSystemManagementOps
         if (BinaryFileSniffer.LooksBinary(resolved))
             return PluginResult.Error($"'{resolved}' looks like a binary file — grep_file only searches text.");
 
-        // Some models HTML-encode characters in tool arguments (e.g. &lt; for <).
-        pattern = System.Net.WebUtility.HtmlDecode(pattern);
+        // Some models HTML-encode characters in tool arguments (e.g. &lt; for <), but XML
+        // files also store "&lt;" literally — match either form.
+        var regexPattern = HtmlEntityArtifacts.MatchEitherForm(pattern);
 
         System.Text.RegularExpressions.Regex regex;
         try
         {
             regex = new System.Text.RegularExpressions.Regex(
-                pattern,
+                regexPattern,
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase |
                 System.Text.RegularExpressions.RegexOptions.Multiline,
                 TimeSpan.FromSeconds(5));

@@ -151,15 +151,15 @@ public sealed class SearchPlugin
         if (targets is null)
             return PluginResult.Error($"Directory not found: {resolved}");
 
-        // Some models HTML-encode characters in tool arguments (e.g. &lt; for <).
-        // Decode so that a query like "&lt;TargetFramework" still matches "<TargetFramework".
-        query = System.Net.WebUtility.HtmlDecode(query);
+        // Some models HTML-encode characters in tool arguments (e.g. &lt; for <), but XML
+        // files also store "&lt;" literally — match either form.
+        var pattern = HtmlEntityArtifacts.MatchEitherForm(query);
 
         Regex regex;
         try
         {
             var options = caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase;
-            regex = GetOrCreateRegex(query, options);
+            regex = GetOrCreateRegex(pattern, options);
         }
         catch (ArgumentException ex)
         {
