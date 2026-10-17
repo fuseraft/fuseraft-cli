@@ -416,9 +416,14 @@ public sealed class FileSystemPlugin : ITurnResettable
         // Apply the same normalisations WriteFileAsync applies so that patch arguments are
         // consistent with what was actually written to disk.  Without this, over-escaped
         // quotes (\" instead of ") silently prevent the match even though the file and
-        // oldText look identical when printed.
-        oldText = FilePatchDiffing.NormalizePatchText(oldText, ext);
-        newText = FilePatchDiffing.NormalizePatchText(newText, ext);
+        // oldText look identical when printed. An oldText that already occurs in the file
+        // verbatim is taken as written; when it carries \" itself, so is newText — a
+        // snippet such as \"1900-01-01\" from inside a correctly escaped Python string
+        // must keep its escapes on both sides.
+        var oldTextIsVerbatim = content.Replace("\r\n", "\n").Contains(oldText.Replace("\r\n", "\n"), StringComparison.Ordinal);
+        var escapesAreReal    = oldTextIsVerbatim && oldText.Contains("\\\"");
+        if (!oldTextIsVerbatim) oldText = FilePatchDiffing.NormalizePatchText(oldText, ext);
+        if (!escapesAreReal)    newText = FilePatchDiffing.NormalizePatchText(newText, ext);
 
         // Normalise line endings in both the file content and the search text so that
         // \r\n / \n mismatches from tool-call JSON serialisation don't cause false misses.

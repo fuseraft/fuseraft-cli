@@ -8,7 +8,8 @@ namespace FuseraftCli.Tests;
 /// Unit tests for <see cref="FileSystemPlugin.WriteFileAsync"/> normalisation logic.
 ///
 /// Key invariant under test: quote normalisation (\" → ") always runs for extensions in
-/// QuoteNormalizeExtensions, even when raw=true. The raw flag only controls escape-sequence
+/// QuoteNormalizeExtensions when the content is wholesale over-escaped, even when raw=true,
+/// and never strips a correctly escaped \" inside a string. The raw flag only controls escape-sequence
 /// expansion (\\n → newline, code-fence stripping, etc.).
 /// </summary>
 public sealed class FileSystemPluginTests : IDisposable
@@ -291,6 +292,54 @@ public sealed class FileSystemPluginTests : IDisposable
         await _plugin.WriteFileAsync(TempPath("hi.js"), content, raw: true);
 
         Assert.Equal("console.log(\"hi\")", await ReadBack("hi.js"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Correctly escaped \" inside a string is kept
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task WriteFile_PyExtension_KeepsEscapedQuotesInsideAString()
+    {
+        // A Python helper that writes Groovy. Stripping the escapes used to leave
+        // 1900-01-01 outside the string: "SyntaxError: leading zeros in decimal integer
+        // literals are not permitted".
+        var content = "GROOVY = \"return \\\"1900-01-01\\\"\"\nFMT = \"new SimpleDateFormat(\\\"yyyy-MM-dd\\\")\"\n";
+        await _plugin.WriteFileAsync(TempPath("fix_dates.py"), content, raw: false);
+
+        Assert.Equal(content, await ReadBack("fix_dates.py"));
+    }
+
+    [Fact]
+    public async Task WriteFile_ShExtension_KeepsEscapedQuotesInsideAString()
+    {
+        var content = "echo \"say \\\"hi\\\"\"";
+        await _plugin.WriteFileAsync(TempPath("say.sh"), content, raw: false);
+
+        Assert.Equal(content, await ReadBack("say.sh"));
+    }
+
+    [Fact]
+    public async Task PatchFile_OldTextWithEscapedQuotesFoundVerbatim_KeepsEscapes()
+    {
+        var original = "GROOVY = \"return \\\"1900-01-01\\\"\"\n";
+        await File.WriteAllTextAsync(TempPath("helper.py"), original);
+
+        var result = await _plugin.PatchFileAsync(TempPath("helper.py"), "\\\"1900-01-01\\\"", "\\\"1900-01-02\\\"");
+
+        Assert.DoesNotContain("[ERROR]", result);
+        Assert.Equal("GROOVY = \"return \\\"1900-01-02\\\"\"\n", await ReadBack("helper.py"));
+    }
+
+    [Fact]
+    public async Task PatchFile_OverEscapedOldText_StillMatchesBareQuotes()
+    {
+        await File.WriteAllTextAsync(TempPath("hello.py"), "print(\"hello\")\n");
+
+        var result = await _plugin.PatchFileAsync(TempPath("hello.py"), "print(\\\"hello\\\")", "print(\\\"bye\\\")");
+
+        Assert.DoesNotContain("[ERROR]", result);
+        Assert.Equal("print(\"bye\")\n", await ReadBack("hello.py"));
     }
 
     // -----------------------------------------------------------------------
