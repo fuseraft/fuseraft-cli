@@ -45,6 +45,7 @@ internal static class FileSystemSandbox
         SessionReadCache? sessionCache, FileVersionStore? versionStore)
     {
         readThisTurn.Remove(resolved);
+        ReadScope.Current?.Read.Remove(resolved);
         writtenThisTurn.Remove(resolved);
         patchedThisTurn.Remove(resolved);
         sessionCache?.Invalidate(resolved);

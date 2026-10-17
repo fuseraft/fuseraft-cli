@@ -412,11 +412,18 @@ public static class FuseraftPaths
     /// and <paramref name="includeInfrastructure"/> is true, the full hardcoded list is used
     /// as a fallback so existing callers that have not adopted per-agent filtering still work.
     /// </param>
+    /// <param name="onlyExistingProjectFiles">
+    /// When true, the project-file section lists only the folders that exist. A REPL works in
+    /// whatever project it is started in, and a listed folder reads as a fact about that project:
+    /// told that tests live in <c>.fuseraft/tests/</c>, a model goes looking there for the
+    /// project's tests. Orchestration agents leave it false, since they are told to create these.
+    /// </param>
     public static string BuildFolderOrientationBlock(
         string sessionId,
         bool includeLogs = true,
         bool includeInfrastructure = true,
-        IEnumerable<(string Path, string Label)>? pluginArtifacts = null)
+        IEnumerable<(string Path, string Label)>? pluginArtifacts = null,
+        bool onlyExistingProjectFiles = false)
     {
         var slug = ProjectSlug(Directory.GetCurrentDirectory());
 
@@ -467,14 +474,28 @@ public static class FuseraftPaths
             sb.Append(artifacts);
         }
 
-        sb.AppendLine("## User-authored project files — tracked by git (in .fuseraft/)");
-        sb.AppendLine("  .fuseraft/docs/                 — write all markdown notes, reports, and drafts here");
-        sb.AppendLine("  .fuseraft/tests/                — write all test scripts and test support files here");
-        sb.AppendLine("  .fuseraft/tests/fixtures/       — seed data, stubs, and fixture files");
-        sb.AppendLine("  .fuseraft/context/              — injected reference documents (see .fuseraft/context/index.json)");
-        sb.AppendLine("  .fuseraft/summaries/            — compaction summaries");
-        sb.AppendLine("  .fuseraft/knowledge/decisions/  — architecture decision records (use decision_search / decision_read)");
-        sb.Append(    $"  {ExpandP(LocalRepositoryGraph),-70} — repository semantic graph (use graph_search / graph_refs / graph_dependents)");
-        return sb.ToString();
+        (string Path, string Line)[] projectFiles =
+        [
+            (".fuseraft/docs",                "  .fuseraft/docs/                 — write all markdown notes, reports, and drafts here"),
+            (".fuseraft/tests",               "  .fuseraft/tests/                — write all test scripts and test support files here"),
+            (".fuseraft/tests/fixtures",      "  .fuseraft/tests/fixtures/       — seed data, stubs, and fixture files"),
+            (".fuseraft/context",             "  .fuseraft/context/              — injected reference documents (see .fuseraft/context/index.json)"),
+            (".fuseraft/summaries",           "  .fuseraft/summaries/            — compaction summaries"),
+            (".fuseraft/knowledge/decisions", "  .fuseraft/knowledge/decisions/  — architecture decision records (use decision_search / decision_read)"),
+        ];
+        var shown = onlyExistingProjectFiles
+            ? projectFiles.Where(f => Directory.Exists(Path.Combine(Directory.GetCurrentDirectory(), f.Path))).ToArray()
+            : projectFiles;
+        var graph     = ExpandP(LocalRepositoryGraph);
+        var showGraph = !onlyExistingProjectFiles || File.Exists(ExpandPath(graph));
+        if (shown.Length > 0 || showGraph)
+        {
+            sb.AppendLine("## User-authored project files — tracked by git (in .fuseraft/)");
+            foreach (var (_, line) in shown)
+                sb.AppendLine(line);
+            if (showGraph)
+                sb.AppendLine($"  {graph,-70} — repository semantic graph (use graph_search / graph_refs / graph_dependents)");
+        }
+        return sb.ToString().TrimEnd();
     }
 }

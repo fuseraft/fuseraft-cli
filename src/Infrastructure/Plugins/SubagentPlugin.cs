@@ -651,6 +651,12 @@ public sealed class SubagentPlugin(
             return ("[Subagent] No chat client configured — this is a stub instance. " +
                     "Ensure AgentFactory created a real SubagentPlugin for this agent.", null, null);
 
+        // This run reads in its own scope, so the parent's file tools don't later claim it already
+        // has content only this run saw. Both AsyncLocals end with this method.
+        ReadScope.BeginInThisFlow();
+        CurrentRun.Value ??= new RunTag(Guid.NewGuid().ToString("N")[..8],
+            mode.StartsWith("agent:", StringComparison.Ordinal) ? mode["agent:".Length..] : mode);
+
         if (eventEmitter is not null)
             await eventEmitter.EmitAsync(EventTypes.SubagentStart,
                 agent:   parentAgentName,
@@ -935,15 +941,16 @@ public sealed class SubagentPlugin(
             """;
     }
 
-    // --- Parallel run tagging ---
+    // --- Run tagging ---
 
-    // Set inside each ExploreManyAsync branch, so its subagent_* events say which run they belong to.
+    // Set inside each ExploreManyAsync branch, and by RunLoopAsync for any other run, so its
+    // subagent_* events say which run they belong to and what to call it ("explore 2", "delegate").
     // Static because the tool notifiers are static; an AsyncLocal is per flow either way.
     private static readonly AsyncLocal<RunTag?> CurrentRun = new();
 
     private sealed record RunTag(string Id, string Label);
 
-    // Adds the current parallel run's id and label to a subagent_* payload; unchanged outside one.
+    // Adds the current run's id and label to a subagent_* payload; unchanged outside one.
     private static object Tagged(object payload)
     {
         if (CurrentRun.Value is not { } run) return payload;
