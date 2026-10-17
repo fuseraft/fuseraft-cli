@@ -263,7 +263,7 @@ public sealed class FileSystemPlugin : ITurnResettable
             return PluginResult.Info(hint);
         }
 
-        if (startLine <= 1 && maxLines <= 0 && !ReadSet.Add(resolved))
+        if (startLine <= 1 && maxLines <= 0 && ReadSet.Contains(resolved))
         {
             _onCacheHit?.Invoke();
             return PluginResult.Info(
@@ -310,8 +310,9 @@ public sealed class FileSystemPlugin : ITurnResettable
                               preview[..allowed];
                 }
             }
+            // Not recorded as read: a 30-line preview isn't the file, and a later "already read"
+            // hint would tell the model it has content it never saw.
             ReadBudgetUsed += preview.Length;
-            _sessionCache?.RecordRead(resolved, fileInfo);
             return preview;
         }
 
@@ -357,12 +358,15 @@ public sealed class FileSystemPlugin : ITurnResettable
         var endLine = effectiveStart + linesIncluded - 1;
         var built   = sb.ToString();
 
+        var budgetTrimmed = false;
+
         // Per-turn read budget: reject this read if adding its content would exceed the
         // cumulative char limit for this turn. Large numbers of file reads is the primary
         // driver of 400k+ input-token turns — once the budget is hit, the agent must
         // proceed with what it already has in context rather than reading more files.
         if (ReadBudgetUsed + built.Length > _readBudgetPerTurn)
         {
+            budgetTrimmed = true;
             if (ReadBudgetUsed == 0)
             {
                 var allowed = Math.Max(1, Math.Min(built.Length, _readBudgetPerTurn));
@@ -390,13 +394,18 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         built = AnnotateTypographicWarnings(built, effectiveStart, endLine, totalLines, startLine, maxLines, charTruncated);
 
-        // Record successful full cold reads in the session cache so subsequent attempts
-        // on the same unchanged file are short-circuited with a "content unchanged" hint.
-        // Partial reads (startLine > 1 or maxLines > 0) are not cached — agents requesting
-        // specific ranges are actively paging and should continue to receive content.
-        // A subagent's reads aren't recorded: the parent never saw that content.
-        if (startLine <= 1 && maxLines <= 0 && ReadScope.Current is null)
-            _sessionCache?.RecordRead(resolved, fileInfo);
+        // Record reads that returned the whole file, so a later cold read of the same unchanged
+        // file is short-circuited with an "already read" hint. Ranged reads aren't recorded —
+        // agents requesting specific ranges are actively paging and should keep receiving
+        // content — and neither is a cold read the char cap or read budget cut short: the
+        // model has only part of the file, and the hint would say it has all of it.
+        // A subagent's reads stay out of the session cache: the parent never saw that content.
+        if (startLine <= 1 && maxLines <= 0 && !charTruncated && !budgetTrimmed)
+        {
+            ReadSet.Add(resolved);
+            if (ReadScope.Current is null)
+                _sessionCache?.RecordRead(resolved, fileInfo);
+        }
 
         content = built;
         return null;

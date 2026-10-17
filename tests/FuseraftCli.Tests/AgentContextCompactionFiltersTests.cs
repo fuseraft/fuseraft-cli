@@ -326,4 +326,35 @@ public sealed class AgentContextCompactionFiltersTests
         Assert.Contains("run again later", stub);
         Assert.True(ContainsLiteralResult(result, "s1", "all green"));
     }
+
+    [Fact]
+    public void CompressSupersededShell_KeepsWarningsOnlyTheEarlierRunPrinted()
+    {
+        static ChatMessage Build(string id) => new(ChatRole.Assistant,
+            [new FunctionCallContent(id, "shell_run", new Dictionary<string, object?> { ["command"] = "dotnet build" })]);
+        var messages = new List<ChatMessage>
+        {
+            Build("b0"), ToolResult("b0",
+                "Program.cs(12,9): warning CS0168: The variable 'ex' is declared but never used\n" +
+                "Program.cs(40,1): error CS1002: ; expected\n" +
+                "Shared.cs(3,1): warning CS8019: Unnecessary using directive\n" +
+                "    2 Warning(s)"),
+            Build("b1"), ToolResult("b1", "Shared.cs(3,1): warning CS8019: Unnecessary using directive\nBuild succeeded."),
+        };
+
+        var result = AgentContextCompactionFilters.CompressSupersededShellPairs(messages).ToList();
+
+        var stub = result.SelectMany(m => m.Contents).OfType<FunctionResultContent>().First(r => r.CallId == "b0").Result?.ToString();
+        Assert.Contains("run again later", stub);
+        Assert.Contains("warning CS0168", stub);
+        Assert.DoesNotContain("CS8019", stub);    // the later run still prints it
+        Assert.DoesNotContain("CS1002", stub);    // errors the later run doesn't print were fixed
+        Assert.DoesNotContain("Warning(s)", stub);
+    }
+
+    [Fact]
+    public void CompressSupersededShell_NoWarningsOnlyEarlier_KeepsTheOneLineStub()
+    {
+        Assert.DoesNotContain("\n", AgentContextCompactionFilters.ShellOutcomeSummary("all green", "all green"));
+    }
 }
