@@ -128,6 +128,8 @@ The REPL trims conversation history against a working-context-token budget (`ctx
 
 Set `repl.contextBudget` in `~/.fuseraft/config` (a positive integer, in tokens — `fuseraft settings set repl.contextBudget 400000`) to override that heuristic for every model used in the REPL session, regardless of family. Leave it unset to keep the built-in heuristic. This is REPL-only and does not affect `MaxContextTokens` above (a separate per-agent hard ceiling enforced before each API call in non-REPL agent/orchestration contexts), nor the unrelated `ContextBudget` YAML block used in `orchestration.yaml` (warn/cutover/tool-result trimming for multi-agent orchestration runs) — the similarly-named field intentionally lives under the `repl` section to keep the two apart.
 
+The same budget sizes how much file content `read_file` can return in one turn: half of it, in characters (about 4 per token). That's ~300K chars for a 150K-token model and ~160K for an unrecognized one. A turn that uses it up gets a `[DENIED]` for further reads until the next message, so on a model with a larger real context window, raising `repl.contextBudget` lets the agent read more before stopping. Each subagent run gets its own budget of the same size.
+
 ### Timeouts and retries
 
 Every model call goes through one HTTP client with a fixed retry and timeout policy. Three keys in the `provider` section tune it — for a slow local model, a reasoning model that thinks for minutes before its first token, or a flaky gateway. They apply to `fuseraft repl` and `fuseraft run` alike.

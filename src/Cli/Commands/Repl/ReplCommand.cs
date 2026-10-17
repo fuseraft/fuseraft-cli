@@ -818,6 +818,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         });
         replSessionPlugin?.SetStatusDelegate(
             () => (ctx.EstimateTokens(), ctx.ContextTokenBudget, ctx.TurnIndex));
+        fsPluginForCategory?.SetReadBudgetSource(() => ctx.ReadBudgetChars);
 
         if (snapshot is not null)
         {
