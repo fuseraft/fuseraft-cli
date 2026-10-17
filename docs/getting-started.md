@@ -137,6 +137,9 @@ Every session is auto-saved after each turn. Resume a previous session at any ti
 
 # Resume by ID (shown in the header at startup)
 fuseraft repl --resume a87569bc
+
+# Resume the most recent session from the current directory
+fuseraft --resume
 ```
 
 Working across more than one project tree in a session? Add `--include <dir>` (repeatable) for each extra root:

@@ -1,4 +1,5 @@
 using fuseraft.Cli.Commands.Repl;
+using fuseraft.Core.Models;
 
 namespace FuseraftCli.Tests;
 
@@ -35,4 +36,31 @@ public sealed class ReplResumeDirectoryTests : IDisposable
         Assert.Null(ReplCommand.ResumeDirectory(null, _root));
         Assert.Null(ReplCommand.ResumeDirectory("", _root));
     }
+
+    [Fact]
+    public void BareResume_PicksTheNewestSessionFromThisDirectory()
+    {
+        var here  = Directory.CreateDirectory(Path.Combine(_root, "kiwi")).FullName;
+        var other = Directory.CreateDirectory(Path.Combine(_root, "elsewhere")).FullName;
+        var t0    = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc);
+        ReplSessionSnapshot[] sessions =
+        [
+            Snapshot("older", here + Path.DirectorySeparatorChar, t0),
+            Snapshot("newer", here, t0.AddHours(1)),
+            Snapshot("other", other, t0.AddHours(2)),
+        ];
+
+        Assert.Equal("newer", ReplCommand.LatestSessionIn(sessions, here)?.SessionId);
+    }
+
+    [Fact]
+    public void BareResume_NoSessionFromThisDirectory_FindsNothing()
+    {
+        var other = Directory.CreateDirectory(Path.Combine(_root, "elsewhere")).FullName;
+
+        Assert.Null(ReplCommand.LatestSessionIn([Snapshot("other", other, DateTime.UtcNow)], _root));
+    }
+
+    private static ReplSessionSnapshot Snapshot(string id, string cwd, DateTime updated) =>
+        new() { SessionId = id, ModelId = "m", Cwd = cwd, LastUpdatedAt = updated };
 }

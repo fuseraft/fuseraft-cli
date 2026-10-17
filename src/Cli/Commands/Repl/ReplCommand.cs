@@ -47,9 +47,9 @@ public sealed class ReplSettings : CommandSettings
     [Description("Show debug-level log output.")]
     public bool Verbose { get; set; }
 
-    [CommandOption("--resume")]
-    [Description("Resume a previous REPL session by ID (e.g. --resume abc123ef).")]
-    public string? Resume { get; set; }
+    [CommandOption("--resume [ID]")]
+    [Description("Resume a previous REPL session by ID (e.g. --resume abc123ef). Omit the ID to resume the most recent session in this directory.")]
+    public FlagValue<string>? Resume { get; set; }
 
     [CommandOption("--plugins")]
     [Description("Comma-separated list of optional plugins to enable: Http, Changes, Chatroom, SessionContext, Scratchpad, Extended.")]
@@ -162,6 +162,19 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         return Directory.Exists(saved) ? saved : null;
     }
 
+    /// <summary>
+    /// The most recently updated session that ran in <paramref name="cwd"/>, or null when none
+    /// did — what a bare <c>--resume</c> picks up. <paramref name="sessions"/> needn't be sorted.
+    /// </summary>
+    internal static ReplSessionSnapshot? LatestSessionIn(IEnumerable<ReplSessionSnapshot> sessions, string cwd)
+    {
+        var dir = Path.TrimEndingDirectorySeparator(Path.GetFullPath(cwd));
+        return sessions
+            .Where(s => !string.IsNullOrWhiteSpace(s.Cwd) &&
+                        string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(s.Cwd)), dir, PathComparison))
+            .MaxBy(s => s.LastUpdatedAt);
+    }
+
     private static void EnterSessionDirectory(string? savedCwd, bool jsonMode)
     {
         if (string.IsNullOrWhiteSpace(savedCwd)) return;
@@ -188,14 +201,28 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // another directory moves back into the one it ran in before anything below reads the
         // current directory (the sandbox root, approvals, project instructions, memories).
         ReplSessionSnapshot? snapshot = null;
-        if (!string.IsNullOrWhiteSpace(settings.Resume))
+        if (settings.Resume is { IsSet: true } resume)
         {
-            snapshot = await ReplSessionSnapshot.LoadAsync(settings.Resume.Trim());
-            if (snapshot is null)
+            var resumeId = resume.Value?.Trim();
+            if (string.IsNullOrEmpty(resumeId))
             {
-                AnsiConsole.MarkupLine($"[red]✗ No saved session found with ID '[/][bold]{Markup.Escape(settings.Resume.Trim())}[/][red]'.[/]");
-                AnsiConsole.MarkupLine("[dim]  Use /sessions inside the REPL to list resumable sessions.[/]");
-                return 1;
+                snapshot = LatestSessionIn(await ReplSessionSnapshot.ListAsync(), Directory.GetCurrentDirectory());
+                if (snapshot is null)
+                {
+                    AnsiConsole.MarkupLine("[red]✗ No saved session found for this directory.[/]");
+                    AnsiConsole.MarkupLine("[dim]  Use /sessions inside the REPL to list resumable sessions.[/]");
+                    return 1;
+                }
+            }
+            else
+            {
+                snapshot = await ReplSessionSnapshot.LoadAsync(resumeId);
+                if (snapshot is null)
+                {
+                    AnsiConsole.MarkupLine($"[red]✗ No saved session found with ID '[/][bold]{Markup.Escape(resumeId)}[/][red]'.[/]");
+                    AnsiConsole.MarkupLine("[dim]  Use /sessions inside the REPL to list resumable sessions.[/]");
+                    return 1;
+                }
             }
             EnterSessionDirectory(snapshot.Cwd, jsonMode);
         }

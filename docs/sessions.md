@@ -20,6 +20,9 @@ fuseraft repl
 
 # Resume a specific session by ID
 fuseraft repl --resume a87569bc
+
+# Resume the most recent session from the current directory
+fuseraft --resume
 ```
 
 When resuming:
