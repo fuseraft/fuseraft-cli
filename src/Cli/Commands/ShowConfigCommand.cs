@@ -20,7 +20,7 @@ public sealed class ShowConfigSettings : CommandSettings
 /// </summary>
 public sealed class ShowConfigCommand : Command<ShowConfigSettings>
 {
-    protected override int Execute(CommandContext context, ShowConfigSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, ShowConfigSettings settings, CancellationToken cancellationToken)
     {
         if (settings.List)
             return ListConfigs();

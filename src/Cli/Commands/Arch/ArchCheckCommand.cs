@@ -21,7 +21,7 @@ public sealed class ArchCheckSettings : CommandSettings
 
 public sealed class ArchCheckCommand : AsyncCommand<ArchCheckSettings>
 {
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext context,
         ArchCheckSettings settings,
         CancellationToken cancellationToken)

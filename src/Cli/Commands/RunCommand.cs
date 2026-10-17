@@ -99,7 +99,7 @@ public sealed class RunSettings : CommandSettings
 public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry pluginRegistry, ISessionStore sessionStore)
     : AsyncCommand<RunSettings>
 {
-    protected override async Task<int> ExecuteAsync(CommandContext context, RunSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, RunSettings settings, CancellationToken cancellationToken)
     {
         // --json redirects all human-readable Spectre output to stderr so stdout stays a clean
         // channel for the single JSON summary object printed at the end of the run. The config

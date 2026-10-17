@@ -20,7 +20,7 @@ public sealed class ContextRemoveSettings : CommandSettings
 
 public sealed class ContextRemoveCommand : AsyncCommand<ContextRemoveSettings>
 {
-    protected override async Task<int> ExecuteAsync(CommandContext context, ContextRemoveSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, ContextRemoveSettings settings, CancellationToken cancellationToken)
     {
         var contextDir = ContextHelpers.ResolveContextDir(settings.Dir);
         var store      = new ContextStore(contextDir);

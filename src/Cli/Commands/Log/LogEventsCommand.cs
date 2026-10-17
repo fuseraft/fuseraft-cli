@@ -27,7 +27,7 @@ public sealed class LogEventsSettings : CommandSettings
 
 public sealed class LogEventsCommand : AsyncCommand<LogEventsSettings>
 {
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext context, LogEventsSettings settings, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(settings.Path))

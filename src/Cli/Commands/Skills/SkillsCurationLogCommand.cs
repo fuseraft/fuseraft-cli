@@ -35,7 +35,7 @@ public sealed class SkillsCurationLogCommand : AsyncCommand<SkillsCurationLogSet
         PropertyNameCaseInsensitive = true,
     };
 
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext context, SkillsCurationLogSettings settings, CancellationToken cancellationToken)
     {
         var logPath = !string.IsNullOrWhiteSpace(settings.Path)

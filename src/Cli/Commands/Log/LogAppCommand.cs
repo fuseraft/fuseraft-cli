@@ -24,7 +24,7 @@ public sealed class LogAppSettings : CommandSettings
 
 public sealed class LogAppCommand : AsyncCommand<LogAppSettings>
 {
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext context, LogAppSettings settings, CancellationToken cancellationToken)
     {
         var path = !string.IsNullOrWhiteSpace(settings.Path)

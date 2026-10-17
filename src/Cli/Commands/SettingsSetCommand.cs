@@ -82,7 +82,7 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
         ("subagent.delegateTimeoutMinutes", "Wall-clock limit for /delegate in minutes, 1-240 (default 15), or \"\" to reset"),
     ];
 
-    protected override int Execute(CommandContext context, SettingsSetSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, SettingsSetSettings settings, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(settings.Key))
         {

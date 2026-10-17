@@ -16,7 +16,7 @@ public sealed class ScheduleRemoveSettings : CommandSettings
 
 public sealed class ScheduleRemoveCommand : AsyncCommand<ScheduleRemoveSettings>
 {
-    protected override Task<int> ExecuteAsync(CommandContext context, ScheduleRemoveSettings settings, CancellationToken cancellationToken)
+    public override Task<int> ExecuteAsync(CommandContext context, ScheduleRemoveSettings settings, CancellationToken cancellationToken)
     {
         var slug    = ScheduleUtil.ToSlug(settings.Name);
         var jobPath = Path.Combine(FuseraftPaths.GlobalSchedule, $"{slug}.yaml");

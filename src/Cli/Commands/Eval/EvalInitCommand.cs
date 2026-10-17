@@ -28,7 +28,7 @@ public sealed class EvalInitSettings : CommandSettings
 /// </summary>
 public sealed class EvalInitCommand : AsyncCommand<EvalInitSettings>
 {
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext context, EvalInitSettings settings, CancellationToken cancellationToken)
     {
         AnsiConsole.WriteLine();

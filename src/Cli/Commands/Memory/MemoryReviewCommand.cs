@@ -21,7 +21,7 @@ public sealed class MemoryReviewSettings : CommandSettings
 
 public sealed class MemoryReviewCommand : AsyncCommand<MemoryReviewSettings>
 {
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext context,
         MemoryReviewSettings settings,
         CancellationToken cancellationToken)

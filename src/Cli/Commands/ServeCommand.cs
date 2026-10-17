@@ -46,7 +46,7 @@ public sealed class ServeSettings : CommandSettings
 public sealed class ServeCommand(ILoggerFactory loggerFactory, PluginRegistry pluginRegistry, ISessionStore sessionStore)
     : AsyncCommand<ServeSettings>
 {
-    protected override async Task<int> ExecuteAsync(CommandContext context, ServeSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, ServeSettings settings, CancellationToken cancellationToken)
     {
         var configPath = Path.GetFullPath(settings.ConfigPath ?? ".fuseraft/config/orchestration.yaml");
         if (!File.Exists(configPath))

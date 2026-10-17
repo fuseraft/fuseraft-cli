@@ -42,7 +42,7 @@ public sealed class ScheduleAddSettings : CommandSettings
 
 public sealed class ScheduleAddCommand : AsyncCommand<ScheduleAddSettings>
 {
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext context,
         ScheduleAddSettings settings,
         CancellationToken cancellationToken)

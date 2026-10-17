@@ -132,7 +132,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         "repl_session_current", "repl_session_list", "repl_session_read_event_log", "repl_session_read_log",
     };
 
-    protected override Task<int> ExecuteAsync(
+    public override Task<int> ExecuteAsync(
         CommandContext context, ReplSettings settings, CancellationToken cancellationToken)
     {
         // JSON bridge mode: active when launched from the VS Code webview panel

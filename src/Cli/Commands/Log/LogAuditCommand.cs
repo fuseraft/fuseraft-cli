@@ -35,7 +35,7 @@ public sealed class LogAuditSettings : CommandSettings
 
 public sealed class LogAuditCommand : AsyncCommand<LogAuditSettings>
 {
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext context, LogAuditSettings settings, CancellationToken cancellationToken)
     {
         var paths = ResolvePaths(settings);

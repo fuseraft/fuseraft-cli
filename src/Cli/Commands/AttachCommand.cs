@@ -36,7 +36,7 @@ public sealed class AttachSettings : CommandSettings
 /// </summary>
 public sealed class AttachCommand : AsyncCommand<AttachSettings>
 {
-    protected override async Task<int> ExecuteAsync(CommandContext context, AttachSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, AttachSettings settings, CancellationToken cancellationToken)
     {
         var projectSlug = FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory());
         var socketPath  = settings.Socket ?? FuseraftPaths.DaemonSocketPath(projectSlug);
