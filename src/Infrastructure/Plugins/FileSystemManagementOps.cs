@@ -171,7 +171,34 @@ internal sealed class FileSystemManagementOps
     // call from dumping an unbounded listing into context in a very large tree.
     private const int ListFilesHardCap = 500;
 
-    [Description("List files recursively. Reports when results were truncated so you know to narrow the search — this matters most in large or multi-repo directories, where a flat result cap can silently miss files in a sibling subdirectory that wasn't reached yet. If you already know the exact filename, pass it as 'pattern' (e.g. 'Foo.cs') instead of '*' to skip truncation entirely.")]
+    private const int MaxListedSubdirs = 50;
+
+    // Level by level, so a capped listing covers the top of every subtree instead of exhausting
+    // the cap inside whichever subdirectory the file system happens to return first (a vendored
+    // dependency, a large model project) and never reaching the folder the user named. Excluded
+    // trees (bin, obj, node_modules, …) are skipped without being entered, and a directory that
+    // can't be read is skipped rather than ending the walk.
+    private static IEnumerable<string> WalkBreadthFirst(string root, string pattern)
+    {
+        var pending = new Queue<string>([root]);
+        while (pending.TryDequeue(out var dir))
+        {
+            foreach (var file in SafeEnumerate(() => Directory.EnumerateFiles(dir, pattern)))
+                yield return file;
+            foreach (var sub in SafeEnumerate(() => Directory.EnumerateDirectories(dir))
+                         .Order(StringComparer.OrdinalIgnoreCase))
+                if (!DirectoryFilters.IsExcluded(sub, root))
+                    pending.Enqueue(sub);
+        }
+    }
+
+    private static List<string> SafeEnumerate(Func<IEnumerable<string>> enumerate)
+    {
+        try { return enumerate().ToList(); }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException) { return []; }
+    }
+
+    [Description("List files recursively. Reports when results were truncated so you know to narrow the search — results come shallowest first, and a truncated listing names the top-level folders so you know where else to look. If you already know the exact filename, pass it as 'pattern' (e.g. 'Foo.cs') instead of '*' to skip truncation entirely.")]
     public string ListFiles(
         [Description("Directory path.")] string directory,
         [Description("Glob pattern, e.g. '*.cs'. Pass an exact filename here to find a known file directly.")] string pattern = "*",
@@ -191,10 +218,7 @@ internal sealed class FileSystemManagementOps
         }
 
         var maxFiles = Math.Clamp(maxResults, 1, ListFilesHardCap);
-        var files = Directory.EnumerateFiles(resolved, pattern, SearchOption.AllDirectories)
-            .Where(f => !DirectoryFilters.IsExcluded(f, resolved))
-            .Take(maxFiles + 1)
-            .ToList();
+        var files = WalkBreadthFirst(resolved, pattern).Take(maxFiles + 1).ToList();
 
         if (files.Count == 0)
             return PluginResult.Info("No files matched.");
@@ -204,11 +228,20 @@ internal sealed class FileSystemManagementOps
 
         var result = string.Join("\n", files);
         if (truncated)
-            result += $"\n\n[TRUNCATED — showing first {maxFiles} matches; more exist beyond this cap. " +
-                      "They may be concentrated in whichever subdirectory was walked first (e.g. one " +
-                      "repo in a multi-repo working directory) — files elsewhere may not be represented " +
-                      "at all. Narrow with a more specific 'directory' or 'pattern' rather than only " +
+        {
+            result += $"\n\n[TRUNCATED — showing first {maxFiles} matches, shallowest first; more exist " +
+                      "deeper down. Narrow with a more specific 'directory' or 'pattern' rather than only " +
                       "raising maxResults.]";
+            var subdirs = SafeEnumerate(() => Directory.EnumerateDirectories(resolved))
+                .Where(d => !DirectoryFilters.IsExcluded(d, resolved))
+                .Select(d => Path.GetFileName(d) + Path.DirectorySeparatorChar)
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (subdirs.Count > 0)
+                result += $"\n[Top-level folders in {resolved}: " +
+                          string.Join(", ", subdirs.Take(MaxListedSubdirs)) +
+                          (subdirs.Count > MaxListedSubdirs ? $", … (+{subdirs.Count - MaxListedSubdirs} more)" : "") + "]";
+        }
 
         return result;
     }

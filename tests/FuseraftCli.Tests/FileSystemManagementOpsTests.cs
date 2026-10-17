@@ -232,6 +232,26 @@ public sealed class FileSystemManagementOpsTests : IDisposable
     }
 
     [Fact]
+    public async Task ListFiles_Truncated_ListsShallowFilesFirst_AndNamesTheTopLevelFolders()
+    {
+        // A big subtree the walk might enter first must not use up the cap before SQLTester is reached.
+        Directory.CreateDirectory(TempPath(Path.Combine("AModel", "Generated")));
+        for (var i = 0; i < 20; i++)
+            await File.WriteAllTextAsync(TempPath(Path.Combine("AModel", "Generated", $"E{i}.cs")), "");
+        Directory.CreateDirectory(TempPath("SQLTester"));
+        await File.WriteAllTextAsync(TempPath(Path.Combine("SQLTester", "Program.cs")), "");
+        Directory.CreateDirectory(TempPath("bin"));
+
+        var result = _ops.ListFiles(_dir, "*.cs", maxResults: 5);
+
+        Assert.Contains(Path.Combine("SQLTester", "Program.cs"), result);
+        Assert.Contains("TRUNCATED", result);
+        Assert.Contains("Top-level folders", result);
+        Assert.Contains("SQLTester" + Path.DirectorySeparatorChar, result);
+        Assert.DoesNotContain("bin" + Path.DirectorySeparatorChar, result);
+    }
+
+    [Fact]
     public async Task ListFiles_MaxResultsAboveHardCap_IsClamped()
     {
         await File.WriteAllTextAsync(TempPath("only.kiwi"), "");

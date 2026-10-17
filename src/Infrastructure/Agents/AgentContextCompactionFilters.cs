@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.Agents.AI.Compaction;
 using Microsoft.Extensions.AI;
 using fuseraft.Core;
@@ -250,13 +251,14 @@ internal static class AgentContextCompactionFilters
 
         if (toCompress.Count == 0) return list;
 
-        // Snapshot the result text for each superseded call so we can extract its outcome.
+        // Snapshot the result text for every shell call: a superseded one's outcome comes from
+        // its own, and its diagnostics are compared against the latest run's.
         var resultById = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var msg in list)
         {
             if (msg.Role != ChatRole.Tool) continue;
             foreach (var fr in msg.Contents.OfType<FunctionResultContent>())
-                if (fr.CallId is not null && toCompress.Contains(fr.CallId))
+                if (fr.CallId is not null && keyById.ContainsKey(fr.CallId))
                     resultById[fr.CallId] = fr.Result?.ToString() ?? string.Empty;
         }
 
@@ -273,7 +275,9 @@ internal static class AgentContextCompactionFilters
                     if (c is FunctionResultContent fr && fr.CallId is not null && toCompress.Contains(fr.CallId))
                     {
                         resultById.TryGetValue(fr.CallId, out var text);
-                        return (AIContent)new FunctionResultContent(fr.CallId, ShellOutcomeSummary(text ?? string.Empty));
+                        resultById.TryGetValue(lastByKey[keyById[fr.CallId]], out var latest);
+                        return (AIContent)new FunctionResultContent(fr.CallId,
+                            ShellOutcomeSummary(text ?? string.Empty, latest ?? string.Empty));
                     }
                     return c;
                 }).ToList<AIContent>();
@@ -291,7 +295,13 @@ internal static class AgentContextCompactionFilters
     // in place of output a model remembers reading led it to conclude the shell was returning
     // cached results and to re-run the command, so the stub says outright that this run's
     // output was dropped in favor of the later, identical run.
-    internal static string ShellOutcomeSummary(string resultText)
+    //
+    // Warnings only this run printed are kept: an incremental `dotnet build` (or make, cargo,
+    // tsc --incremental) reports a project's warnings only when it compiles it, so the identical
+    // rerun that supersedes this one comes back clean, and dropping this output would lose them
+    // for good. Errors aren't: one the later run no longer prints was fixed, and keeping it would
+    // refill context with stale failures in exactly the fix-and-rerun loop this compression is for.
+    internal static string ShellOutcomeSummary(string resultText, string latestResultText = "")
     {
         var outcome = "succeeded";
         if (resultText.StartsWith("[EXIT ", StringComparison.Ordinal))
@@ -299,9 +309,30 @@ internal static class AgentContextCompactionFilters
             var end = resultText.IndexOf(']');
             outcome = end > 0 ? $"failed {resultText[..(end + 1)]}" : "failed";
         }
-        return $"{outcome} — output dropped from context because this same command was run " +
-               "again later; that later run's result is the current one. Nothing is cached.";
+        var summary = $"{outcome} — output dropped from context because this same command was run " +
+                      "again later; that later run's result is the current one. Nothing is cached.";
+
+        var latest = new HashSet<string>(WarningLines(latestResultText), StringComparer.Ordinal);
+        var onlyHere = WarningLines(resultText).Where(l => !latest.Contains(l)).Distinct().ToList();
+        if (onlyHere.Count == 0) return summary;
+
+        var kept = onlyHere.Take(MaxKeptWarningLines)
+            .Select(l => l.Length > MaxKeptWarningChars ? l[..MaxKeptWarningChars] + "…" : l);
+        var more = onlyHere.Count > MaxKeptWarningLines ? $"\n(+{onlyHere.Count - MaxKeptWarningLines} more)" : "";
+        return summary + $"\nWarnings this run printed that the later run did not:\n{string.Join('\n', kept)}{more}";
     }
+
+    private const int MaxKeptWarningLines = 20;
+    private const int MaxKeptWarningChars = 300;
+
+    // Compiler-style warnings: "warning CS0168:", "warning:", "warning[unused]:",
+    // "file.c:3:5: warning: …". Not a "0 Warning(s)" summary line.
+    private static readonly Regex WarningLine = new(
+        @"\bwarning(?:\s+[A-Z]+\d+|\[[\w-]+\])?\s*:",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static IEnumerable<string> WarningLines(string text) =>
+        text.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0 && WarningLine.IsMatch(l));
 
     // Tools whose results are purely observational: the latest call with the same arguments
     // is the only one that matters — earlier results reflect stale state.

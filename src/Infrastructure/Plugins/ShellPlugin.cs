@@ -5,6 +5,7 @@ using Microsoft.Extensions.FileSystemGlobbing;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
+using fuseraft.Infrastructure.Agents;
 
 namespace fuseraft.Infrastructure.Plugins;
 
@@ -366,6 +367,9 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         // strings only, where a filename may genuinely contain "&gt;".
         command = HtmlEntityArtifacts.DecodeOutsideQuotes(command);
 
+        var placeholderDenial = CheckForElisionPlaceholder(command);
+        if (placeholderDenial is not null) return placeholderDenial;
+
         var sudoDenial = CheckForSudo(command);
         if (sudoDenial is not null) return sudoDenial;
 
@@ -520,6 +524,9 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         [Description("Working directory.")] string? workingDirectory = null,
         [Description("Timeout in seconds.")] int timeoutSeconds = 120)
     {
+        var placeholderDenial = CheckForElisionPlaceholder(script);
+        if (placeholderDenial is not null) return placeholderDenial;
+
         var sudoDenial = CheckForSudo(script);
         if (sudoDenial is not null) return sudoDenial;
 
@@ -646,6 +653,9 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         [Description("Working directory.")] string? workingDirectory = null)
     {
         command = HtmlEntityArtifacts.DecodeOutsideQuotes(command);
+
+        var placeholderDenial = CheckForElisionPlaceholder(command);
+        if (placeholderDenial is not null) return placeholderDenial;
 
         var sudoDenial = CheckForSudo(command);
         if (sudoDenial is not null) return sudoDenial;
@@ -857,6 +867,21 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
             System.Text.RegularExpressions.RegexOptions.Multiline |
             System.Text.RegularExpressions.RegexOptions.Compiled);
 
+    // Compaction replaces a long tool-call argument that has aged out of context — a multi-line
+    // command or script included — with an "[ELIDED — N chars, NOT the real value …]" note. A
+    // model retrying an earlier call copies its arguments as they now read, so without this the
+    // note itself reaches cmd.exe or sh ("'[ELIDED' is not recognized as an internal or external
+    // command"), and the model is left to guess why. write_file/patch_file block the same thing
+    // (FilePatchDiffing.DetectElisionPlaceholder).
+    private static string? CheckForElisionPlaceholder(string commandOrScript) =>
+        ElisionMarkers.PlaceholderTail.IsMatch(commandOrScript)
+            ? PluginResult.Error(
+                "NOT RUN — this command ends with a context-compaction placeholder " +
+                "(\"[ELIDED — ... NOT the real value ...]\"), not a real command. Your earlier call's " +
+                "arguments were replaced with that note when they aged out of context; do not copy them. " +
+                "Write the full command out again.")
+            : null;
+
     // The regex is kept as a backstop (it also catches a `sudo` at the start of a line inside a
     // heredoc or script body, which the tokenizer deliberately treats as data), so nothing that was
     // blocked before is allowed now. DangerousCommandDetector's PrivilegeEscalation rule adds the
@@ -912,6 +937,8 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     internal async Task<string?> VetAsync(string commandOrScript, bool shellSyntax = true)
     {
         // The sudo check is a pattern over shell text; in a Python string "; sudo" is just characters.
+        if (CheckForElisionPlaceholder(commandOrScript) is { } placeholderDenial) return placeholderDenial;
+
         if (shellSyntax && CheckForSudo(commandOrScript) is { } sudoDenial) return sudoDenial;
 
         var dangerDenial = CheckForDangerousCommand(commandOrScript, credentialFilesOnly: !shellSyntax);
