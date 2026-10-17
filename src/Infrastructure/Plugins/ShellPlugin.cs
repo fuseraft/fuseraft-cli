@@ -52,41 +52,56 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         return retried.Succeeded ? retried : primary;
     }
 
-    // Agents frequently wrap their actual script in an explicit `powershell -Command "..."`
-    // (or `pwsh -Command "..."`) invocation even though shell_run already runs everything
-    // through cmd.exe on Windows. Passing that whole string through cmd.exe's /c parser
-    // re-parses it a second time with an incompatible quoting dialect: cmd.exe does not treat
-    // a backslash as a quote-escape (only a bare, unescaped `"` toggles its quoted-region
-    // state), so it desyncs against the model's escaped inner quotes/backticks before
-    // PowerShell ever sees the string — silently corrupting quote- or newline-heavy content
-    // (e.g. writing a markdown file via Set-Content) while still exiting 0. Detecting this
-    // pattern and invoking powershell.exe directly, with the script passed as a single
-    // ArgumentList element, skips the cmd.exe re-parse entirely.
-    private static readonly Regex PowerShellInvocation = new(
-        @"^\s*(?:powershell(?:\.exe)?|pwsh(?:\.exe)?)\b.*?-command\s+(.*)$",
-        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+    private const string ShellParamDescription =
+        "Windows only. 'powershell' runs the command in PowerShell exactly as written: no cmd.exe quoting " +
+        "or escaping to work around, so use it for anything with nested quotes (connection strings, JSON). " +
+        "'cmd' forces cmd.exe. Leave it out for cmd.exe, unless the command is plainly PowerShell.";
 
-    private static bool TryExtractPowerShellScript(string command, out string script)
+    // Parses the shell argument, and refuses one this platform can't honor.
+    private static string? ResolveShellArg(string? shell, out WindowsShell? choice)
     {
-        var match = PowerShellInvocation.Match(command);
-        if (!match.Success)
+        if (WindowsShellRouting.ParseShellArg(shell, out choice) is { } error)
+            return PluginResult.Error(error);
+        if (choice is not null && !OperatingSystem.IsWindows())
+            return PluginResult.Error($"shell='{shell}' is only available on Windows; commands here run in {Shell}. Leave shell out.");
+        return null;
+    }
+
+    // The PowerShell script to run for `command` on Windows, or null to run it in cmd.exe. Named
+    // PowerShell runs the command as written — unwrapping a `powershell -Command "..."` the model
+    // wrote anyway. Unnamed, explicit invocations and plain PowerShell syntax are routed up front
+    // (see WindowsShellRouting.TryRouteToPowerShell); everything else goes to cmd.exe.
+    private static string? PowerShellScriptFor(string command, WindowsShell? choice) => choice switch
+    {
+        WindowsShell.PowerShell => WindowsShellRouting.TryExtractPowerShellScript(command, out var inner) ? inner : command,
+        WindowsShell.Cmd        => null,
+        _                       => WindowsShellRouting.TryRouteToPowerShell(command, out var routed) ? routed : null,
+    };
+
+    // Runs `script` in PowerShell with no command-line parsing in between: as -EncodedCommand, or
+    // from a temp .ps1 file when it's too long for a command line.
+    private static async Task<ProcessResult> RunPowerShellAsync(string script, string? workingDirectory, int timeoutSeconds) =>
+        WindowsShellRouting.EncodedCommandArgs(script) is { } args
+            ? await ProcessHelper.RunAsync(ProcessHelper.WindowsPowerShellPath.Value, args, workingDirectory, timeoutSeconds)
+            : await RunPowerShellFileAsync(script, workingDirectory, timeoutSeconds);
+
+    private static async Task<ProcessResult> RunPowerShellFileAsync(string script, string? workingDirectory, int timeoutSeconds)
+    {
+        // .ps1, not the .cmd a script would otherwise get: PowerShell applies script-file policy
+        // (execution policy, etc.) by extension.
+        var psFile = FuseraftPaths.NewTempFile("script", ".ps1");
+        try
         {
-            script = string.Empty;
-            return false;
+            var (text, encoding) = WindowsShellRouting.ScriptFile(script);
+            await File.WriteAllTextAsync(psFile, text, encoding);
+            return await ProcessHelper.RunAsync(
+                ProcessHelper.WindowsPowerShellPath.Value, WindowsShellRouting.FileArgs(psFile),
+                workingDirectory, timeoutSeconds);
         }
-
-        script = match.Groups[1].Value.Trim();
-
-        // Strip one layer of wrapping quotes the model added for cmd.exe's benefit — the
-        // script is now delivered as a single argv element, so no outer quoting is needed
-        // (and keeping it would make PowerShell see it as literal text inside a string).
-        if (script.Length >= 2 &&
-            ((script[0] == '"' && script[^1] == '"') || (script[0] == '\'' && script[^1] == '\'')))
+        finally
         {
-            script = script[1..^1];
+            try { File.Delete(psFile); } catch { /* best effort */ }
         }
-
-        return script.Length > 0;
     }
 
     private readonly string? _sandboxRoot;
@@ -279,13 +294,13 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         if (!IsCmdUnrecognizedCommand(job.ReadOutput()))
             return;
 
+        if (WindowsShellRouting.EncodedCommandArgs(command) is not { } args)
+            return;
+
         System.Diagnostics.Process retryProcess;
         try
         {
-            retryProcess = StartProcess(
-                ProcessHelper.WindowsPowerShellPath.Value,
-                ["-NoProfile", "-NonInteractive", "-Command", command],
-                workingDirectory);
+            retryProcess = StartProcess(ProcessHelper.WindowsPowerShellPath.Value, args, workingDirectory);
         }
         catch
         {
@@ -360,12 +375,16 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         [Description("Shell command to execute.")] string command,
         [Description("Working directory.")] string? workingDirectory = null,
         [Description("Timeout in seconds.")] int timeoutSeconds = 60,
-        [Description("Return 'OK' instead of full output when the command succeeds.")] bool quiet = false)
+        [Description("Return 'OK' instead of full output when the command succeeds.")] bool quiet = false,
+        [Description(ShellParamDescription)] string? shell = null)
     {
         // LLM outputs sometimes carry HTML entity encoding (e.g. &amp;&amp; instead of &&).
         // Decode before passing to the shell so commands execute as intended — outside quoted
         // strings only, where a filename may genuinely contain "&gt;".
         command = HtmlEntityArtifacts.DecodeOutsideQuotes(command);
+
+        var shellDenial = ResolveShellArg(shell, out var shellChoice);
+        if (shellDenial is not null) return shellDenial;
 
         var placeholderDenial = CheckForElisionPlaceholder(command);
         if (placeholderDenial is not null) return placeholderDenial;
@@ -392,19 +411,14 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         // Any other intervening shell_run clears the cached entry so that file changes
         // made via shell (cat >, tee, heredocs, etc.) are reflected on the next verify run.
         // Applies regardless of quiet — the loop-detection concern is the same either way.
-        var cacheKey = command.Trim() + "\0" + (resolvedDir ?? "(default)");
+        var cacheKey = command.Trim() + "\0" + (resolvedDir ?? "(default)") + "\0" + shellChoice;
         if (_lastRunKey == cacheKey)
             return $"[Command already ran this turn — cached output follows]\n\n{_lastRunOutput}";
 
         ProcessResult result;
-        if (OperatingSystem.IsWindows() && TryExtractPowerShellScript(command, out var script))
+        if (OperatingSystem.IsWindows() && PowerShellScriptFor(command, shellChoice) is { } script)
         {
-            // Explicit `powershell`/`pwsh -Command "..."` invocation — run it directly rather
-            // than through cmd.exe /c. See TryExtractPowerShellScript for why.
-            result = await ProcessHelper.RunAsync(
-                ProcessHelper.WindowsPowerShellPath.Value,
-                ["-NoProfile", "-NonInteractive", "-Command", script],
-                resolvedDir, timeoutSeconds);
+            result = await RunPowerShellAsync(script, resolvedDir, timeoutSeconds);
         }
         else if (OperatingSystem.IsWindows())
         {
@@ -416,11 +430,10 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
                 Shell, $"{ShellFlag} {command}",
                 resolvedDir, timeoutSeconds);
 
-            result = await WithWindowsPowerShellFallbackAsync(result, () =>
-                ProcessHelper.RunAsync(
-                    ProcessHelper.WindowsPowerShellPath.Value,
-                    ["-NoProfile", "-NonInteractive", "-Command", command],
-                    resolvedDir, timeoutSeconds));
+            // Last resort for PowerShell the routing didn't recognize — not when cmd was asked for.
+            if (shellChoice is null)
+                result = await WithWindowsPowerShellFallbackAsync(result, () =>
+                    RunPowerShellAsync(command, resolvedDir, timeoutSeconds));
         }
         else
         {
@@ -518,12 +531,16 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         return errors;
     }
 
-    [Description("Write a script to a temp file and execute it.")]
+    [Description("Write a script to a temp file and execute it. On Windows it runs as a .cmd batch file, or as a .ps1 with shell='powershell'.")]
     public async Task<string> RunScriptAsync(
         [Description("Script body.")] string script,
         [Description("Working directory.")] string? workingDirectory = null,
-        [Description("Timeout in seconds.")] int timeoutSeconds = 120)
+        [Description("Timeout in seconds.")] int timeoutSeconds = 120,
+        [Description(ShellParamDescription)] string? shell = null)
     {
+        var shellDenial = ResolveShellArg(shell, out var shellChoice);
+        if (shellDenial is not null) return shellDenial;
+
         var placeholderDenial = CheckForElisionPlaceholder(script);
         if (placeholderDenial is not null) return placeholderDenial;
 
@@ -542,6 +559,11 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         var denial = ValidateWorkingDirectory(workingDirectory, out var resolvedDir);
         if (denial is not null) return denial;
 
+        if (OperatingSystem.IsWindows() &&
+            (shellChoice == WindowsShell.PowerShell ||
+             (shellChoice is null && WindowsShellRouting.LooksLikePowerShell(script))))
+            return Present(await RunPowerShellFileAsync(script, resolvedDir, timeoutSeconds), resolvedDir);
+
         var ext     = OperatingSystem.IsWindows() ? ".cmd" : ".sh";
         var tmpFile = FuseraftPaths.NewTempFile("script", ext);
 
@@ -559,24 +581,9 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
 
             var result = await ProcessHelper.RunAsync(Shell, [ShellFlag, tmpFile], resolvedDir, timeoutSeconds);
 
-            result = await WithWindowsPowerShellFallbackAsync(result, async () =>
-            {
-                // Re-materialize as .ps1 rather than reusing the .cmd file: PowerShell applies
-                // script-file security policy (execution policy, etc.) based on extension.
-                var psFile = FuseraftPaths.NewTempFile("script", ".ps1");
-                try
-                {
-                    await File.WriteAllTextAsync(psFile, script);
-                    return await ProcessHelper.RunAsync(
-                        ProcessHelper.WindowsPowerShellPath.Value,
-                        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", psFile],
-                        resolvedDir, timeoutSeconds);
-                }
-                finally
-                {
-                    try { File.Delete(psFile); } catch { /* best effort */ }
-                }
-            });
+            if (shellChoice is null)
+                result = await WithWindowsPowerShellFallbackAsync(result, () =>
+                    RunPowerShellFileAsync(script, resolvedDir, timeoutSeconds));
 
             return Present(result, resolvedDir);
         }
@@ -650,9 +657,13 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     [Description("Run a shell command in the background. Returns a job ID.")]
     public async Task<string> RunBackgroundAsync(
         [Description("Shell command.")] string command,
-        [Description("Working directory.")] string? workingDirectory = null)
+        [Description("Working directory.")] string? workingDirectory = null,
+        [Description(ShellParamDescription)] string? shell = null)
     {
         command = HtmlEntityArtifacts.DecodeOutsideQuotes(command);
+
+        var shellDenial = ResolveShellArg(shell, out var shellChoice);
+        if (shellDenial is not null) return shellDenial;
 
         var placeholderDenial = CheckForElisionPlaceholder(command);
         if (placeholderDenial is not null) return placeholderDenial;
@@ -676,17 +687,20 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         var job        = new BackgroundJob(jobId, resolvedDir);
         var workingDir = resolvedDir ?? Directory.GetCurrentDirectory();
 
-        var script = string.Empty;
-        var runDirectViaPowerShell = OperatingSystem.IsWindows() && TryExtractPowerShellScript(command, out script);
+        string[]? powerShellArgs = null;
+        if (OperatingSystem.IsWindows() && PowerShellScriptFor(command, shellChoice) is { } script)
+        {
+            powerShellArgs = WindowsShellRouting.EncodedCommandArgs(script);
+            if (powerShellArgs is null)
+                return PluginResult.Error("This PowerShell command is too long to start as a background job. " +
+                                          "Save it as a .ps1 file and run that instead.");
+        }
 
         System.Diagnostics.Process process;
         try
         {
-            process = runDirectViaPowerShell
-                ? StartProcess(
-                    ProcessHelper.WindowsPowerShellPath.Value,
-                    ["-NoProfile", "-NonInteractive", "-Command", script],
-                    workingDir)
+            process = powerShellArgs is not null
+                ? StartProcess(ProcessHelper.WindowsPowerShellPath.Value, powerShellArgs, workingDir)
                 : OperatingSystem.IsWindows()
                     // Raw-string overload for cmd.exe — see RunAsync for why ArgumentList
                     // can't be used here.
@@ -701,7 +715,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         }
         WireOutputReaders(job, process);
 
-        if (OperatingSystem.IsWindows() && !runDirectViaPowerShell)
+        if (OperatingSystem.IsWindows() && powerShellArgs is null && shellChoice is null)
             await RetryBackgroundJobViaPowerShellIfMismatchedAsync(job, process, command, workingDir);
 
         _jobs[jobId] = job;
