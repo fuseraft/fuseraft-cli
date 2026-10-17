@@ -719,6 +719,7 @@ When an agent calls `read_file` without `startLine`/`maxLines`:
    - **Write-primed entry** (`ReadCount = 0`): the file was written via `write_file` this session and not yet read. The hint says the content is in history via the `write_file` call.
    - **Read-primed entry** (`ReadCount ≥ 1`): the file was previously read this session. The hint says the content is in history from that earlier read, and reports how many times and how long ago.
 3. Both hints include the caveat "(unless compacted away)" so agents know to force a re-read with `startLine`/`maxLines` if the turn is post-compaction.
+4. The hint is given once. The cache can't see whether compaction has since replaced the earlier content with an `[ELIDED …]` placeholder, so a second `read_file` of the same file right after a hint returns the content. The same applies to the within-turn "already read this turn" hint. A real read re-arms the hint.
 
 **Write priming (`write_file`):**
 
@@ -728,7 +729,7 @@ Within the same turn, the cache hint is suppressed so the agent can immediately 
 
 **`patch_file` is not write-primed:** `patch_file` gives the agent a delta, not full content, so the patched file's cache entry is invalidated rather than primed. A subsequent cross-turn `read_file` will read the actual content.
 
-**Bypassing the cache:** pass `startLine` and/or `maxLines` to any `read_file` call to bypass the session cache and force a targeted re-read. This is the correct recovery path after compaction removes earlier file content from context.
+**Bypassing the cache:** pass `startLine` and/or `maxLines` to any `read_file` call to bypass the session cache and force a targeted re-read, or repeat the same `read_file` call after a hint (see step 4). Either is the recovery path after compaction removes earlier file content from context.
 
 **Storage:** the cache is persisted to `read_cache.json` in the session directory and survives compaction. Cache entries record `mtime`, `size`, `reads` (read count), and `last` (last read or write timestamp).
 

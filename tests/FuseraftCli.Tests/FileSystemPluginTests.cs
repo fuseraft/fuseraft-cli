@@ -824,6 +824,39 @@ public sealed class FileSystemPluginTests : IDisposable
     }
 
     [Fact]
+    public async Task ReadFile_AskedAgainAfterHint_ReturnsContent()
+    {
+        // The cache can't tell whether compaction has replaced the earlier read with an
+        // [ELIDED …] placeholder. A model that asks again after the hint doesn't have it.
+        await File.WriteAllTextAsync(TempPath("elided.txt"), "some content");
+        await _plugin.ReadFileAsync(TempPath("elided.txt"));
+        var hint  = await _plugin.ReadFileAsync(TempPath("elided.txt"));
+        var third = await _plugin.ReadFileAsync(TempPath("elided.txt"));
+        var fourth = await _plugin.ReadFileAsync(TempPath("elided.txt"));
+
+        Assert.StartsWith("[INFO]", hint);
+        Assert.Contains("call read_file again", hint);
+        Assert.Contains("some content", third);
+        Assert.StartsWith("[INFO]", fourth);   // a fresh read re-arms the hint
+    }
+
+    [Fact]
+    public async Task ReadFile_SessionCacheHint_AskedAgain_ReturnsContent()
+    {
+        var cache  = new SessionReadCache();
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, sessionCache: cache);
+        await File.WriteAllTextAsync(TempPath("cross_turn.txt"), "cross-turn content");
+
+        await plugin.ReadFileAsync(TempPath("cross_turn.txt"));
+        ((ITurnResettable)plugin).BeginTurn();
+        var hint  = await plugin.ReadFileAsync(TempPath("cross_turn.txt"));
+        var again = await plugin.ReadFileAsync(TempPath("cross_turn.txt"));
+
+        Assert.StartsWith("[INFO]", hint);
+        Assert.Contains("cross-turn content", again);
+    }
+
+    [Fact]
     public async Task ReadFile_AfterBeginTurn_CacheCleared()
     {
         await File.WriteAllTextAsync(TempPath("cache2.txt"), "some content");

@@ -64,6 +64,13 @@ public sealed class FileSystemPlugin : ITurnResettable
     // content into the model's context.
     private readonly HashSet<string> _readThisTurn = new(StringComparer.OrdinalIgnoreCase);
 
+    // Paths whose last read_file answer was a cache hint ("already read — content is in
+    // context") rather than the content. Neither cache can see whether that earlier content
+    // is still in context: compaction may have replaced it with an [ELIDED …] placeholder,
+    // and the model is then told it has content it doesn't. So the hint is given once; asking
+    // for the same file again reads it for real.
+    private readonly HashSet<string> _cacheHinted = new(StringComparer.OrdinalIgnoreCase);
+
     // Paths that were successfully patch_file'd this turn. A write_file to any of these
     // paths is blocked: the write is derived from the agent's stale mental model, not the
     // current disk state, so it would silently clobber the patch that was just applied.
@@ -203,6 +210,16 @@ public sealed class FileSystemPlugin : ITurnResettable
     // Returns a result string when a cache hit is detected, or null to continue reading.
     private string? CheckSessionCache(string resolved, FileInfo fileInfo, int startLine, int maxLines)
     {
+        // Asked again right after a hint: the content isn't in context after all.
+        if (_cacheHinted.Remove(resolved)) return null;
+
+        var hint = CacheHint(resolved, fileInfo, startLine, maxLines);
+        if (hint is not null) _cacheHinted.Add(resolved);
+        return hint;
+    }
+
+    private string? CacheHint(string resolved, FileInfo fileInfo, int startLine, int maxLines)
+    {
         if (startLine <= 1 && maxLines <= 0 && _sessionCache is not null
             && !_writtenThisTurn.Contains(resolved)
             && _sessionCache.TryGetHit(resolved, fileInfo, out var cacheHit))
@@ -215,7 +232,8 @@ public sealed class FileSystemPlugin : ITurnResettable
                 hint = $"'{resolved}' was written this session ({ago} ago) and has not changed " +
                        $"since. The content is in your conversation history via the write_file call " +
                        $"(unless compacted away). Use grep_file to search within it, or pass " +
-                       $"startLine/maxLines to force a targeted re-read.";
+                       $"startLine/maxLines to force a targeted re-read. If that content was " +
+                       $"elided from your context, call read_file again to get it.";
             }
             else
             {
@@ -224,7 +242,8 @@ public sealed class FileSystemPlugin : ITurnResettable
                 hint = $"'{resolved}' has not changed since it was last read this session " +
                        $"({times}, {ago} ago). Content from that read is in your conversation " +
                        $"history (unless compacted away). Use grep_file to locate a specific " +
-                       $"section, or pass startLine/maxLines to force a targeted re-read.";
+                       $"section, or pass startLine/maxLines to force a targeted re-read. If that " +
+                       $"content was elided from your context, call read_file again to get it.";
             }
             return PluginResult.Info(hint);
         }
@@ -234,7 +253,8 @@ public sealed class FileSystemPlugin : ITurnResettable
             _onCacheHit?.Invoke();
             return PluginResult.Info(
                 $"'{resolved}' already read this turn — content is in context. " +
-                $"Use grep_file to locate a section, then read_file with startLine/maxLines for a targeted excerpt.");
+                $"Use grep_file to locate a section, then read_file with startLine/maxLines for a targeted excerpt. " +
+                $"If that content was elided from your context, call read_file again to get it.");
         }
 
         return null;
