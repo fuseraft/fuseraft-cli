@@ -182,8 +182,9 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         }
     }
 
-    private static System.Diagnostics.ProcessStartInfo BuildBackgroundStartInfo(string exe, string workingDirectory) =>
-        new()
+    private static System.Diagnostics.ProcessStartInfo BuildBackgroundStartInfo(string exe, string workingDirectory)
+    {
+        var startInfo = new System.Diagnostics.ProcessStartInfo
         {
             FileName               = exe,
             WorkingDirectory       = workingDirectory,
@@ -193,6 +194,9 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
             UseShellExecute        = false,
             CreateNoWindow         = true,
         };
+        ProcessHelper.PreferUtf8(startInfo);
+        return startInfo;
+    }
 
     private static System.Diagnostics.Process LaunchBackgroundProcess(System.Diagnostics.ProcessStartInfo startInfo)
     {

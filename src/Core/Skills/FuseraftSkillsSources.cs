@@ -110,6 +110,7 @@ public static class FuseraftSkillsSources
         };
         foreach (var arg in leadingArgs)
             startInfo.ArgumentList.Add(arg);
+        fuseraft.Infrastructure.Plugins.ProcessHelper.PreferUtf8(startInfo);
 
         if (arguments is { ValueKind: JsonValueKind.Array } json)
         {
