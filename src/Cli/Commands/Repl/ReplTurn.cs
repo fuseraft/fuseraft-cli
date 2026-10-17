@@ -1666,35 +1666,62 @@ internal static class ReplTurn
                         }
                     }
 
-                var funcCall = chunk.Contents.OfType<FunctionCallContent>().FirstOrDefault();
-                if (funcCall is not null)
+                // A model that calls several tools at once sends them all in one chunk.
+                var funcCalls = chunk.Contents.OfType<FunctionCallContent>().ToList();
+                if (funcCalls.Count > 0)
                 {
                     pendingParagraphBreak = true;
-                    toolCallsThisTurn.Add(funcCall.Name);
-                    if (DescribeFileChange(funcCall.Name, funcCall.Arguments, ctx.Cwd) is { } requested)
-                        pendingFileChanges[funcCall.CallId ?? string.Empty] = requested;
-                    if (callIdToName is not null && funcCall.CallId is not null)
-                        callIdToName[funcCall.CallId] = funcCall.Name;
-
-                    var callSignature = ToolCallSignature.Compute(funcCall.Arguments);
-                    consecutiveIdenticalToolCalls =
-                        funcCall.Name == lastToolCallName && callSignature == lastToolCallSignature
-                            ? consecutiveIdenticalToolCalls + 1 : 1;
-                    lastToolCallName      = funcCall.Name;
-                    lastToolCallSignature = callSignature;
-                    var cycleVerdict      = toolCallCycles.Observe($"{funcCall.Name}|{callSignature}");
-
-                    if (ctx.JsonMode)
+                    foreach (var funcCall in funcCalls)
                     {
-                        // Include arguments so the webview can show them on hover/expand.
-                        // Values are typically JsonElement from the model's JSON response and
-                        // serialise correctly; null Arguments → omit the field entirely.
-                        var args = funcCall.Arguments is { Count: > 0 }
-                            ? (object)funcCall.Arguments
-                            : null;
-                        ReplJsonBridge.Emit(new { type = "tool_call", name = funcCall.Name, args });
+                        toolCallsThisTurn.Add(funcCall.Name);
+                        if (DescribeFileChange(funcCall.Name, funcCall.Arguments, ctx.Cwd) is { } requested)
+                            pendingFileChanges[funcCall.CallId ?? string.Empty] = requested;
+                        if (callIdToName is not null && funcCall.CallId is not null)
+                            callIdToName[funcCall.CallId] = funcCall.Name;
+
+                        var callSignature = ToolCallSignature.Compute(funcCall.Arguments);
+                        consecutiveIdenticalToolCalls =
+                            funcCall.Name == lastToolCallName && callSignature == lastToolCallSignature
+                                ? consecutiveIdenticalToolCalls + 1 : 1;
+                        lastToolCallName      = funcCall.Name;
+                        lastToolCallSignature = callSignature;
+                        var cycleVerdict      = toolCallCycles.Observe($"{funcCall.Name}|{callSignature}");
+
+                        if (ctx.JsonMode)
+                        {
+                            // Include arguments so the webview can show them on hover/expand.
+                            // Values are typically JsonElement from the model's JSON response and
+                            // serialise correctly; null Arguments → omit the field entirely.
+                            var args = funcCall.Arguments is { Count: > 0 }
+                                ? (object)funcCall.Arguments
+                                : null;
+                            ReplJsonBridge.Emit(new { type = "tool_call", name = funcCall.Name, args });
+                        }
+
+                        if (consecutiveIdenticalToolCalls >= limits.MaxIdenticalToolCalls)
+                        {
+                            hitRepeatedToolCallLimit = true;
+                            lastRepeatedToolCallDetail =
+                                $"{consecutiveIdenticalToolCalls} consecutive identical calls to '{funcCall.Name}'";
+                            break;
+                        }
+                        if (cycleVerdict == ToolCallCycleVerdict.Hard)
+                        {
+                            hitRepeatedToolCallLimit   = true;
+                            repeatedToolCallLimit      = ToolCallCycleDetector.HardThreshold;
+                            lastRepeatedToolCallDetail =
+                                $"{toolCallCycles.LastLength} tool calls alternating between the same two calls";
+                            break;
+                        }
                     }
-                    else
+
+                    // Stop enumerating now, before the automatic-invocation loop ever requests
+                    // another round — same early-break technique as the consecutive-failure
+                    // cutoff below (a dangling call with no result is repaired by
+                    // RepairDanglingToolCalls, so breaking mid-call here is safe).
+                    if (hitRepeatedToolCallLimit) break;
+
+                    if (!ctx.JsonMode)
                     {
                         // Update spinner label to show the accumulating tool chain live.
                         var chain = toolCallsThisTurn.Count <= 4
@@ -1709,50 +1736,33 @@ internal static class ReplTurn
                         spinTask = ReplConsole.RunSpinnerAsync($"{verb}…  {chain}", spinCts.Token, turnStart);
                         spinning = true;
                     }
-
-                    // Stop enumerating now, before the automatic-invocation loop ever requests
-                    // another round — same early-break technique as the consecutive-failure
-                    // cutoff below (a dangling call with no result is repaired by
-                    // RepairDanglingToolCalls, so breaking mid-call here is safe).
-                    if (consecutiveIdenticalToolCalls >= limits.MaxIdenticalToolCalls)
-                    {
-                        hitRepeatedToolCallLimit = true;
-                        lastRepeatedToolCallDetail =
-                            $"{consecutiveIdenticalToolCalls} consecutive identical calls to '{funcCall.Name}'";
-                        break;
-                    }
-                    if (cycleVerdict == ToolCallCycleVerdict.Hard)
-                    {
-                        hitRepeatedToolCallLimit   = true;
-                        repeatedToolCallLimit      = ToolCallCycleDetector.HardThreshold;
-                        lastRepeatedToolCallDetail =
-                            $"{toolCallCycles.LastLength} tool calls alternating between the same two calls";
-                        break;
-                    }
                     continue;
                 }
 
-                var funcResult = chunk.Contents.OfType<FunctionResultContent>().FirstOrDefault();
-                if (funcResult is not null)
+                var funcResults = chunk.Contents.OfType<FunctionResultContent>().ToList();
+                if (funcResults.Count > 0)
                 {
-                    CommitFileChange(pendingFileChanges, funcResult, fileChanges, fileChangeSeen);
+                    foreach (var funcResult in funcResults)
+                    {
+                        CommitFileChange(pendingFileChanges, funcResult, fileChanges, fileChangeSeen);
 
-                    if (IsToolFailure(funcResult))
-                    {
-                        consecutiveToolFailures++;
-                        lastToolFailureDetail = funcResult.Result?.ToString();
-                    }
-                    else
-                    {
-                        consecutiveToolFailures = 0;
-                    }
+                        if (IsToolFailure(funcResult))
+                        {
+                            consecutiveToolFailures++;
+                            lastToolFailureDetail = funcResult.Result?.ToString();
+                        }
+                        else
+                        {
+                            consecutiveToolFailures = 0;
+                        }
 
-                    if (capturedResults is not null)
-                    {
-                        var toolName = funcResult.CallId is not null &&
-                                      callIdToName?.TryGetValue(funcResult.CallId, out var n) == true
-                                      ? n : "tool";
-                        capturedResults.Add((toolName, funcResult.Result?.ToString() ?? string.Empty));
+                        if (capturedResults is not null)
+                        {
+                            var toolName = funcResult.CallId is not null &&
+                                          callIdToName?.TryGetValue(funcResult.CallId, out var n) == true
+                                          ? n : "tool";
+                            capturedResults.Add((toolName, funcResult.Result?.ToString() ?? string.Empty));
+                        }
                     }
                     if (isRoundBoundary) pendingParagraphBreak = true;
 
