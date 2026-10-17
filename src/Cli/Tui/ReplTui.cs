@@ -276,8 +276,8 @@ internal sealed partial class ReplTui : IReplScreen
 
     public void EndMessage(bool turn) => _renderer.End(turn);
 
-    public void ToolStarted(string callId, string name, string summary, string? agent = null) =>
-        _renderer.ToolStarted(callId, name, summary, agent);
+    public void ToolStarted(string callId, string name, string summary, string? agent = null, string? arguments = null) =>
+        _renderer.ToolStarted(callId, name, summary, agent, arguments);
 
     public void ToolFinished(string callId, string name, bool ok, string result, string? agent = null) =>
         _renderer.ToolFinished(callId, name, ok, result, agent);

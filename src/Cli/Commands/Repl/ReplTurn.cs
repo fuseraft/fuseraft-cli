@@ -11,6 +11,7 @@ using fuseraft.Core.Images;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Chat;
+using fuseraft.Infrastructure.Mcp;
 using fuseraft.Infrastructure.Plugins;
 using fuseraft.Orchestration;
 
@@ -1649,7 +1650,8 @@ internal static class ReplTurn
                     foreach (var call in chunk.Contents.OfType<FunctionCallContent>())
                     {
                         callNames[call.CallId ?? string.Empty] = call.Name;
-                        screen.ToolStarted(call.CallId ?? string.Empty, call.Name, TuiRenderer.Summarize(call.Arguments));
+                        screen.ToolStarted(call.CallId ?? string.Empty, call.Name, TuiRenderer.Summarize(call.Arguments),
+                            arguments: TuiRenderer.FormatArguments(call.Arguments));
                     }
 
                 if (screen is not null)
@@ -2189,7 +2191,8 @@ internal static class ReplTurn
     // Shared with ReplToolLoopGuard so its "one failure from the cutoff" notice and this class's
     // consecutive-failure counter can never disagree about what a failure is.
     internal static bool IsToolFailureText(string? text) =>
-        text is not null && ToolFailurePrefixes.Any(p => text.StartsWith(p, StringComparison.Ordinal));
+        text is not null && (ToolFailurePrefixes.Any(p => text.StartsWith(p, StringComparison.Ordinal)) ||
+                             McpToolResult.TryRead(text, out _, out var isError) && isError);
 
     // True when the turn's accumulated text so far ends inside an unclosed **bold**
     // span (an odd number of "**" markers). Only called right before a round-boundary

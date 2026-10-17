@@ -39,6 +39,41 @@ public sealed class TuiRendererTests
     }
 
     [Fact]
+    public void A_kept_output_shows_the_arguments_beside_the_result()
+    {
+        _renderer.ToolStarted("c1", "query_database", "hr", arguments: "dbName: hr\nsql:\n  SELECT *\n  FROM t");
+        _renderer.ToolFinished("c1", "query_database", ok: true, "[]");
+
+        Assert.Equal("Arguments\n  dbName: hr\n  sql:\n    SELECT *\n    FROM t\n\nResult\n  []", _renderer.Outputs.Single().Text);
+    }
+
+    [Fact]
+    public void An_mcp_result_shows_its_text_not_its_envelope()
+    {
+        _renderer.ToolStarted("c1", "query_database", "hr");
+        _renderer.ToolFinished("c1", "query_database", ok: false,
+            """{"content":[{"type":"text","text":"Only SELECT queries are permitted."}],"isError":true,"_meta":{}}""");
+
+        Assert.Contains("    Only SELECT queries are permitted.", Texts());
+        Assert.Equal("Only SELECT queries are permitted.", _renderer.Outputs.Single().Text);
+    }
+
+    [Fact]
+    public void FormatArguments_puts_multi_line_values_beneath_their_name()
+    {
+        var args = new Dictionary<string, object?>
+        {
+            ["dbName"]     = "hr",
+            ["sql"]        = "SELECT 1\nFROM t",
+            ["parameters"] = System.Text.Json.JsonDocument.Parse("""{"name":"Zoë"}""").RootElement,
+            ["limit"]      = 5,
+        };
+
+        Assert.Equal("dbName: hr\nsql:\n  SELECT 1\n  FROM t\nparameters: {\"name\":\"Zoë\"}\nlimit: 5", TuiRenderer.FormatArguments(args));
+        Assert.Equal("", TuiRenderer.FormatArguments(null));
+    }
+
+    [Fact]
     public void Thinking_folds_into_one_line_when_the_model_moves_on()
     {
         _renderer.Thinking("Let me look ");
