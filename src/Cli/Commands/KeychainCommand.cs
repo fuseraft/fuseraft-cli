@@ -22,7 +22,7 @@ public sealed class KeychainSettings : CommandSettings
 /// </summary>
 public sealed class KeychainCommand : AsyncCommand<KeychainSettings>
 {
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext context, KeychainSettings settings, CancellationToken cancellationToken)
     {
         var store = ApiKeyStoreFactory.Create();

@@ -80,7 +80,7 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
         ("DEEPSEEK_API_KEY",  "deepseek-chat"),
     ];
 
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext context, InitSettings settings, CancellationToken cancellationToken)
     {
         AnsiConsole.WriteLine();

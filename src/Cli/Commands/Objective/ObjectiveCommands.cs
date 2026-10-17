@@ -25,7 +25,7 @@ public sealed class ObjectiveCreateSettings : CommandSettings
 
 public sealed class ObjectiveCreateCommand : AsyncCommand<ObjectiveCreateSettings>
 {
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext context,
         ObjectiveCreateSettings settings,
         CancellationToken cancellationToken)
@@ -69,7 +69,7 @@ public sealed class ObjectiveListSettings : CommandSettings
 
 public sealed class ObjectiveListCommand : AsyncCommand<ObjectiveListSettings>
 {
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext context,
         ObjectiveListSettings settings,
         CancellationToken cancellationToken)
@@ -129,7 +129,7 @@ public sealed class ObjectiveStatusSettings : CommandSettings
 
 public sealed class ObjectiveStatusCommand : AsyncCommand<ObjectiveStatusSettings>
 {
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext context,
         ObjectiveStatusSettings settings,
         CancellationToken cancellationToken)

@@ -39,7 +39,7 @@ public sealed class KnowledgeGcSettings : CommandSettings
 
 public sealed class KnowledgeGcCommand : AsyncCommand<KnowledgeGcSettings>
 {
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext     context,
         KnowledgeGcSettings settings,
         CancellationToken  cancellationToken)

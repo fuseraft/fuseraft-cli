@@ -29,7 +29,7 @@ public sealed class MemoryDeleteSettings : CommandSettings
 
 public sealed class MemoryDeleteCommand : AsyncCommand<MemoryDeleteSettings>
 {
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext context,
         MemoryDeleteSettings settings,
         CancellationToken cancellationToken)

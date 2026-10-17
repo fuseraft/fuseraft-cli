@@ -19,7 +19,7 @@ public sealed class SkillsAddSettings : CommandSettings
 
 public sealed class SkillsAddCommand : AsyncCommand<SkillsAddSettings>
 {
-    protected override async Task<int> ExecuteAsync(CommandContext context, SkillsAddSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, SkillsAddSettings settings, CancellationToken cancellationToken)
     {
         var sourcePath = FuseraftPaths.ExpandPath(settings.Source);
 

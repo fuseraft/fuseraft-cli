@@ -48,7 +48,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
     internal Task<int> ExecuteAsync(CommandContext context, ValidateConfigSettings settings) =>
         ExecuteAsync(context, settings, CancellationToken.None);
 
-    protected override async Task<int> ExecuteAsync(CommandContext context, ValidateConfigSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, ValidateConfigSettings settings, CancellationToken cancellationToken)
     {
         var issues = new List<(string Level, string Message)>();
 

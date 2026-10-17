@@ -13,7 +13,7 @@ public sealed class SkillsListSettings : CommandSettings { }
 
 public sealed class SkillsListCommand : AsyncCommand<SkillsListSettings>
 {
-    protected override async Task<int> ExecuteAsync(CommandContext context, SkillsListSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, SkillsListSettings settings, CancellationToken cancellationToken)
     {
         var root = FuseraftPaths.GlobalSkills;
 

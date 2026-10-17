@@ -17,7 +17,7 @@ public sealed class MemoryListSettings : CommandSettings
 
 public sealed class MemoryListCommand : AsyncCommand<MemoryListSettings>
 {
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext context,
         MemoryListSettings settings,
         CancellationToken cancellationToken)

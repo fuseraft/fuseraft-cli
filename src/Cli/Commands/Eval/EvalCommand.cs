@@ -66,7 +66,7 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
     };
 
-    protected override async Task<int> ExecuteAsync(CommandContext context, EvalSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, EvalSettings settings, CancellationToken cancellationToken)
     {
         var suitePath = Path.GetFullPath(settings.Suite ?? ".fuseraft/evals/suite.yaml");
 

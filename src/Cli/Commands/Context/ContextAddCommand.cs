@@ -29,7 +29,7 @@ public sealed class ContextAddSettings : CommandSettings
 
 public sealed class ContextAddCommand : AsyncCommand<ContextAddSettings>
 {
-    protected override async Task<int> ExecuteAsync(CommandContext context, ContextAddSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, ContextAddSettings settings, CancellationToken cancellationToken)
     {
         var contextDir = ContextHelpers.ResolveContextDir(settings.Dir);
 

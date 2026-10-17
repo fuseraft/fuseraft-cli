@@ -17,7 +17,7 @@ public sealed class SkillsRemoveSettings : CommandSettings
 
 public sealed class SkillsRemoveCommand : AsyncCommand<SkillsRemoveSettings>
 {
-    protected override async Task<int> ExecuteAsync(CommandContext context, SkillsRemoveSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, SkillsRemoveSettings settings, CancellationToken cancellationToken)
     {
         var slug    = settings.Slug.Trim();
         var destDir = Path.Combine(FuseraftPaths.GlobalSkills, slug);

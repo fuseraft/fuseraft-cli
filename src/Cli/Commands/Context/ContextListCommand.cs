@@ -16,7 +16,7 @@ public sealed class ContextListSettings : CommandSettings
 
 public sealed class ContextListCommand : AsyncCommand<ContextListSettings>
 {
-    protected override async Task<int> ExecuteAsync(CommandContext context, ContextListSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, ContextListSettings settings, CancellationToken cancellationToken)
     {
         var contextDir = ContextHelpers.ResolveContextDir(settings.Dir);
         var store      = new ContextStore(contextDir);

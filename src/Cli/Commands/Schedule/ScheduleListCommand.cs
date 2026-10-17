@@ -11,7 +11,7 @@ public sealed class ScheduleListSettings : CommandSettings { }
 
 public sealed class ScheduleListCommand : AsyncCommand<ScheduleListSettings>
 {
-    protected override Task<int> ExecuteAsync(CommandContext context, ScheduleListSettings settings, CancellationToken cancellationToken)
+    public override Task<int> ExecuteAsync(CommandContext context, ScheduleListSettings settings, CancellationToken cancellationToken)
     {
         var dir = FuseraftPaths.GlobalSchedule;
         if (!Directory.Exists(dir) || Directory.GetFiles(dir, "*.yaml").Length == 0)

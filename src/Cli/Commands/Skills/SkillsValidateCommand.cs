@@ -28,7 +28,7 @@ public sealed class SkillsValidateSettings : CommandSettings
 /// </summary>
 public sealed class SkillsValidateCommand : AsyncCommand<SkillsValidateSettings>
 {
-    protected override async Task<int> ExecuteAsync(CommandContext context, SkillsValidateSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, SkillsValidateSettings settings, CancellationToken cancellationToken)
     {
         string searchRoot;
         List<string> candidateDirs;

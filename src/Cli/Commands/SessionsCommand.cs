@@ -38,7 +38,7 @@ public sealed class SessionsSettings : CommandSettings
 /// </summary>
 public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<SessionsSettings>
 {
-    protected override async Task<int> ExecuteAsync(CommandContext context, SessionsSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, SessionsSettings settings, CancellationToken cancellationToken)
     {
         // Prune orphaned sessions (config file no longer exists on disk).
         if (settings.Prune)

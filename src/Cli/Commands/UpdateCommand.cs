@@ -23,7 +23,7 @@ public sealed class UpdateCommand : AsyncCommand<UpdateSettings>
     private const string ApiUrl    = $"https://api.github.com/repos/{Repo}/releases/latest";
     private const string UserAgent = "fuseraft-cli";
 
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext context, UpdateSettings settings, CancellationToken cancellationToken)
     {
         var currentVer = typeof(UpdateCommand).Assembly

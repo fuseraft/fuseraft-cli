@@ -14,7 +14,7 @@ namespace fuseraft.Cli.Commands;
 /// </summary>
 public sealed class SettingsShowCommand : AsyncCommand
 {
-    protected override async Task<int> ExecuteAsync(CommandContext context, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, CancellationToken cancellationToken)
     {
         var (config, _) = UserConfigStore.Load();
         if (config is null)

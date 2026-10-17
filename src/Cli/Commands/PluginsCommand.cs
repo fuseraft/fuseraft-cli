@@ -18,7 +18,7 @@ public sealed class PluginsSettings : CommandSettings
 /// </summary>
 public sealed class PluginsCommand(PluginRegistry registry) : Command<PluginsSettings>
 {
-    protected override int Execute(CommandContext context, PluginsSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, PluginsSettings settings, CancellationToken cancellationToken)
     {
         var names = registry.RegisteredPlugins.OrderBy(n => n).ToList();
 

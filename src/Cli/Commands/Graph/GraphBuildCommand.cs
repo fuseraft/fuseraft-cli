@@ -21,7 +21,7 @@ public sealed class GraphBuildSettings : CommandSettings
 
 public sealed class GraphBuildCommand : AsyncCommand<GraphBuildSettings>
 {
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext context,
         GraphBuildSettings settings,
         CancellationToken cancellationToken)
