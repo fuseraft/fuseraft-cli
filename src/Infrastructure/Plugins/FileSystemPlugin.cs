@@ -132,6 +132,20 @@ public sealed class FileSystemPlugin : ITurnResettable
     // see PluginRegistry.RegisterAdditional) shares the exact same per-turn HashSet instances —
     // InvalidatePathAsync calls from either object must clear entries the other one added.
     internal HashSet<string> ReadThisTurnState    => _readThisTurn;
+
+    // The read record, cache hints, and budget in effect for the current call: a subagent's own
+    // (see ReadScope) when one is running, otherwise the turn's.
+    private HashSet<string> ReadSet   => ReadScope.Current?.Read ?? _readThisTurn;
+    private HashSet<string> HintedSet => ReadScope.Current?.Hinted ?? _cacheHinted;
+    private int ReadBudgetUsed
+    {
+        get => ReadScope.Current?.BudgetUsed ?? _readBudgetUsed;
+        set
+        {
+            if (ReadScope.Current is { } scope) scope.BudgetUsed = value;
+            else _readBudgetUsed = value;
+        }
+    }
     internal HashSet<string> WrittenThisTurnState => _writtenThisTurn;
     internal HashSet<string> PatchedThisTurnState => _patchedThisTurn;
 
@@ -211,16 +225,17 @@ public sealed class FileSystemPlugin : ITurnResettable
     private string? CheckSessionCache(string resolved, FileInfo fileInfo, int startLine, int maxLines)
     {
         // Asked again right after a hint: the content isn't in context after all.
-        if (_cacheHinted.Remove(resolved)) return null;
+        if (HintedSet.Remove(resolved)) return null;
 
         var hint = CacheHint(resolved, fileInfo, startLine, maxLines);
-        if (hint is not null) _cacheHinted.Add(resolved);
+        if (hint is not null) HintedSet.Add(resolved);
         return hint;
     }
 
     private string? CacheHint(string resolved, FileInfo fileInfo, int startLine, int maxLines)
     {
-        if (startLine <= 1 && maxLines <= 0 && _sessionCache is not null
+        // A subagent's session-cache hint would point it at a read only the parent saw.
+        if (startLine <= 1 && maxLines <= 0 && _sessionCache is not null && ReadScope.Current is null
             && !_writtenThisTurn.Contains(resolved)
             && _sessionCache.TryGetHit(resolved, fileInfo, out var cacheHit))
         {
@@ -248,7 +263,7 @@ public sealed class FileSystemPlugin : ITurnResettable
             return PluginResult.Info(hint);
         }
 
-        if (startLine <= 1 && maxLines <= 0 && !_readThisTurn.Add(resolved))
+        if (startLine <= 1 && maxLines <= 0 && !ReadSet.Add(resolved))
         {
             _onCacheHit?.Invoke();
             return PluginResult.Info(
@@ -275,11 +290,11 @@ public sealed class FileSystemPlugin : ITurnResettable
                 $"\n\n[Large file — {coldLineCount:N0} lines ({coldSizeBytes:N0} bytes). " +
                 $"Cold-reading would flood your context. " +
                 $"Use grep_file to locate the relevant section, then read_file with startLine/maxLines.]";
-            if (_readBudgetUsed + preview.Length > _readBudgetPerTurn)
+            if (ReadBudgetUsed + preview.Length > _readBudgetPerTurn)
             {
-                var remaining = _readBudgetPerTurn - _readBudgetUsed;
+                var remaining = _readBudgetPerTurn - ReadBudgetUsed;
                 if (remaining <= 0) return BudgetUsedUpResult();
-                if (_readBudgetUsed == 0)
+                if (ReadBudgetUsed == 0)
                 {
                     var allowed = Math.Max(1, Math.Min(preview.Length, _readBudgetPerTurn));
                     preview = preview[..allowed] +
@@ -289,13 +304,13 @@ public sealed class FileSystemPlugin : ITurnResettable
                 else
                 {
                     var allowed = Math.Max(1, Math.Min(preview.Length, Math.Max(remaining, 1)));
-                    preview = $"[Read budget nearly exhausted ({_readBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars used this turn). " +
+                    preview = $"[Read budget nearly exhausted ({ReadBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars used this turn). " +
                               $"Returning a compact preview instead of failing so you can keep working. " +
                               $"Use grep_file/get_file_summary or narrow read_file ranges for any follow-up reads in this turn.]\n\n" +
                               preview[..allowed];
                 }
             }
-            _readBudgetUsed += preview.Length;
+            ReadBudgetUsed += preview.Length;
             _sessionCache?.RecordRead(resolved, fileInfo);
             return preview;
         }
@@ -311,7 +326,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     // what to do instead. [DENIED] also counts toward the REPL's consecutive-failure cutoff, so a
     // model that keeps trying anyway is stopped within a few calls.
     private string BudgetUsedUpResult() =>
-        $"[DENIED] This turn's read budget is used up ({_readBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars). " +
+        $"[DENIED] This turn's read budget is used up ({ReadBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars). " +
         "No read_file call — any file, any line range — can return content again until the user's next message, " +
         "and compacting or checking context won't change that. Stop reading and answer now with what you already " +
         "have, naming the files or sections you didn't get to so the user can ask you to continue.";
@@ -346,9 +361,9 @@ public sealed class FileSystemPlugin : ITurnResettable
         // cumulative char limit for this turn. Large numbers of file reads is the primary
         // driver of 400k+ input-token turns — once the budget is hit, the agent must
         // proceed with what it already has in context rather than reading more files.
-        if (_readBudgetUsed + built.Length > _readBudgetPerTurn)
+        if (ReadBudgetUsed + built.Length > _readBudgetPerTurn)
         {
-            if (_readBudgetUsed == 0)
+            if (ReadBudgetUsed == 0)
             {
                 var allowed = Math.Max(1, Math.Min(built.Length, _readBudgetPerTurn));
                 built = built[..allowed] +
@@ -357,21 +372,21 @@ public sealed class FileSystemPlugin : ITurnResettable
             }
             else
             {
-                var remaining = _readBudgetPerTurn - _readBudgetUsed;
+                var remaining = _readBudgetPerTurn - ReadBudgetUsed;
                 if (remaining <= 0)
                 {
                     content = null;
                     return BudgetUsedUpResult();
                 }
                 var allowed = Math.Max(1, Math.Min(built.Length, remaining));
-                built = $"[Read budget nearly exhausted ({_readBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars used this turn). " +
+                built = $"[Read budget nearly exhausted ({ReadBudgetUsed:N0}/{_readBudgetPerTurn:N0} chars used this turn). " +
                         $"Returning a compact slice instead of failing so you can keep working. " +
                         $"Use grep_file/get_file_summary or narrower read_file ranges for any follow-up reads in this turn.]\n\n" +
                         built[..allowed];
             }
         }
 
-        _readBudgetUsed += built.Length;
+        ReadBudgetUsed += built.Length;
 
         built = AnnotateTypographicWarnings(built, effectiveStart, endLine, totalLines, startLine, maxLines, charTruncated);
 
@@ -379,7 +394,8 @@ public sealed class FileSystemPlugin : ITurnResettable
         // on the same unchanged file are short-circuited with a "content unchanged" hint.
         // Partial reads (startLine > 1 or maxLines > 0) are not cached — agents requesting
         // specific ranges are actively paging and should continue to receive content.
-        if (startLine <= 1 && maxLines <= 0)
+        // A subagent's reads aren't recorded: the parent never saw that content.
+        if (startLine <= 1 && maxLines <= 0 && ReadScope.Current is null)
             _sessionCache?.RecordRead(resolved, fileInfo);
 
         content = built;
@@ -516,6 +532,7 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         // Invalidate caches — content has changed.
         _readThisTurn.Remove(resolved);
+        ReadScope.Current?.Read.Remove(resolved);
         _sessionCache?.Invalidate(resolved);
         var patchSp = FileSystemSandbox.SummaryPath(resolved, _summaryDir);
         if (File.Exists(patchSp)) File.Delete(patchSp);
@@ -665,6 +682,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         // _writtenThisTurn suppresses the session-cache check for the first within-turn
         // read so agents can still verify the content they just wrote.
         _readThisTurn.Remove(resolved);
+        ReadScope.Current?.Read.Remove(resolved);
         _writtenThisTurn.Add(resolved);
         _sessionCache?.RecordWrite(resolved, new FileInfo(resolved));
 

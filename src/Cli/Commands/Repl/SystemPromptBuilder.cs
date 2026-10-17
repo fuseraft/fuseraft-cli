@@ -108,7 +108,9 @@ internal sealed class SystemPromptBuilder
         {
             var descriptors = activePlugins?
                 .Select(p => (p.ArtifactPath, p.ArtifactLabel));
-            _sb.Append($"\n\n{FuseraftPaths.BuildFolderOrientationBlock(sessionId ?? "default", includeLogs: false, includeInfrastructure: false, pluginArtifacts: descriptors)}");
+            var orientation = FuseraftPaths.BuildFolderOrientationBlock(sessionId ?? "default", includeLogs: false, includeInfrastructure: false, pluginArtifacts: descriptors, onlyExistingProjectFiles: true);
+            if (orientation.Length > 0)
+                _sb.Append($"\n\n{orientation}");
         }
 
         return this;
