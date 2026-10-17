@@ -31,6 +31,10 @@ public sealed class UserConfig
     [JsonPropertyName("skillCuration")]
     public SkillCurationConfig? SkillCuration { get; set; }
 
+    /// <summary>Skill discovery settings (resource/script search depth).</summary>
+    [JsonPropertyName("skills")]
+    public SkillsConfig? Skills { get; set; }
+
     /// <summary>Model override for the REPL's end-of-session memory-extraction call.</summary>
     [JsonPropertyName("memory")]
     public MemoryExtractionConfig? Memory { get; set; }

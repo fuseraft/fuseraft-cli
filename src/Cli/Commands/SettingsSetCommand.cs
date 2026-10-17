@@ -66,6 +66,7 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
         ("telemetry.otlpEndpoint",  "OTLP endpoint URL, or \"\" to disable"),
         ("telemetry.serviceName",   "Requires telemetry.otlpEndpoint to already be set"),
         ("skillCuration.enabled",   "true/false"),
+        ("skills.searchDepth",      "Directory levels scanned inside each skill for resources/scripts, 1-10 (default 5), or \"\" to reset"),
         ("memory.model",            "Model ID for the end-of-session memory-extraction call (e.g. a cheap model), or \"\" to use the main chat model"),
         ("memory.provider",         "Provider for memory.model (openai, anthropic, ...), or \"\" to auto-detect"),
         ("memory.endpoint",         "Base URL for memory.model; reuses the main provider's API key unless memory.apiKeyEnvVar is set"),
@@ -149,6 +150,7 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
                 : Assign(() => config.Telemetry = config.Telemetry with { ServiceName = string.IsNullOrWhiteSpace(value) ? null : value }),
 
             "skillcuration.enabled"    => AssignBool(v => config.SkillCuration = (config.SkillCuration ?? new SkillCurationConfig()) with { Enabled = v }, value),
+            "skills.searchdepth"       => AssignIntRange(v => config.Skills = (config.Skills ?? new SkillsConfig()) with { SearchDepth = v }, value, 1, SkillsConfig.MaxSearchDepth),
 
             "memory.model"             => Assign(() => UpdateMemory(config, m => m with { Model = Blank(value) })),
             "memory.provider"          => Assign(() => UpdateMemory(config, m => m with { Provider = Blank(value) })),

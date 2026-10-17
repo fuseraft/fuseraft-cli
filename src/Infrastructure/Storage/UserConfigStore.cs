@@ -84,6 +84,7 @@ public static class UserConfigStore
                         McpServers    = onDisk.McpServers    ?? [],
                         Telemetry     = onDisk.Telemetry,
                         SkillCuration = onDisk.SkillCuration,
+                        Skills        = onDisk.Skills,
                         Memory        = onDisk.Memory,
                         Subagent      = onDisk.Subagent,
                     };
@@ -165,6 +166,7 @@ public static class UserConfigStore
             McpServers    = config.McpServers,
             Telemetry     = config.Telemetry,
             SkillCuration = config.SkillCuration,
+            Skills        = config.Skills,
             Memory        = config.Memory,
             Subagent      = config.Subagent,
         };
@@ -192,6 +194,10 @@ public static class UserConfigStore
 
         [JsonPropertyName("skillCuration")]
         public SkillCurationConfig? SkillCuration { get; set; }
+
+        [JsonPropertyName("skills")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public SkillsConfig? Skills { get; set; }
 
         [JsonPropertyName("memory")]
         public MemoryExtractionConfig? Memory { get; set; }

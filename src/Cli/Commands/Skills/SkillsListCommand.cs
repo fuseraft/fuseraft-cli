@@ -36,7 +36,7 @@ public sealed class SkillsListCommand : AsyncCommand<SkillsListSettings>
 
         // The same discovery pipeline the REPL and orchestration use at runtime — a skill shown
         // here with a real description/compatibility is guaranteed to load identically in both.
-        var source = new AgentFileSkillsSource(root, FuseraftSkillsSources.RunScriptAsync);
+        var source = new AgentFileSkillsSource(root, FuseraftSkillsSources.RunScriptAsync, FuseraftSkillsSources.CreateSourceOptions());
         var skills = await source.GetSkillsAsync(new AgentSkillsSourceContext(SkillDiscoveryAgent.Create(), session: null), cancellationToken);
         var bySlug = skills.ToDictionary(s => s.Frontmatter.Name, StringComparer.Ordinal);
 

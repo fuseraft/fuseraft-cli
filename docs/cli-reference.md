@@ -2801,6 +2801,7 @@ Sets one field by a dotted, case-insensitive key. Loads the existing config (or 
 | `telemetry.otlpEndpoint` | OTLP endpoint URL, or `""` to disable |
 | `telemetry.serviceName` | Requires `telemetry.otlpEndpoint` to already be set |
 | `skillCuration.enabled` | `true`/`false` |
+| `skills.searchDepth` | Directory levels scanned inside each skill for resources and scripts, 1–10 (default `5`; `3` reaches `references/components/x.md`), or `""` to reset |
 | `memory.model` | Model ID for the REPL's end-of-session memory-extraction call, or `""` to use the main chat model |
 | `memory.provider` / `memory.endpoint` / `memory.apiKeyEnvVar` | Connection for `memory.model`: provider, base URL, and API-key env var. `endpoint` reuses the main provider's key unless `apiKeyEnvVar` is set. Only apply with `memory.model` |
 | `subagent.model` | Model ID for `/explore`, `/locate`, `/delegate` subagents, or `""` to use the main chat model |

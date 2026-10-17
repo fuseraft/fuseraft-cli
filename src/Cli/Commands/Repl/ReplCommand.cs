@@ -559,7 +559,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             // run_skill_script tools all come from Microsoft.Agents.AI's AgentFileSkillsSource/
             // AgentSkillsProvider — the same classes orchestration uses — via a throwaway
             // ChatClientAgent wrapping the client just built above.
-            var skillsResult = await ReplSkillsLoader.BuildAsync(client, loggerFactory, cancellationToken);
+            var skillsResult = await ReplSkillsLoader.BuildAsync(client, loggerFactory, userCfg?.Skills, cancellationToken);
             discoveredSkills = skillsResult.Skills;
             skillsCatalog    = skillsResult.CatalogInstructions;
             if (skillsResult.Tools.Count > 0)

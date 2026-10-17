@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Agents.AI;
+using fuseraft.Core.Models.Config;
+using fuseraft.Infrastructure.Storage;
 using Microsoft.Extensions.AI;
 
 namespace fuseraft.Core.Skills;
@@ -41,6 +43,22 @@ public static class FuseraftSkillsSources
 
         return [.. dirs.Select(Path.GetFullPath).Distinct()];
     }
+
+    /// <summary>
+    /// Source options every <see cref="AgentFileSkillsSource"/> fuseraft builds must use, so
+    /// discovery, <c>fuseraft skills list/validate/add</c>, and the skill tools agree on which
+    /// files a skill has. The library's own default search depth (2: the skill root plus one
+    /// subdirectory) hides grouped references such as <c>references/components/*.md</c> —
+    /// <c>read_skill_resource</c> reports them as not found while they sit on disk.
+    /// </summary>
+    public static AgentFileSkillsSourceOptions CreateSourceOptions(SkillsConfig? config) => new()
+    {
+        SearchDepth = Math.Clamp(config?.SearchDepth ?? SkillsConfig.DefaultSearchDepth, 1, SkillsConfig.MaxSearchDepth),
+    };
+
+    /// <summary><see cref="CreateSourceOptions(SkillsConfig?)"/> using the <c>skills</c> section of <c>~/.fuseraft/config</c>.</summary>
+    public static AgentFileSkillsSourceOptions CreateSourceOptions() =>
+        CreateSourceOptions(UserConfigStore.Load().Config?.Skills);
 
     /// <summary>
     /// Applies the provider options fuseraft needs regardless of caller: fuseraft has no

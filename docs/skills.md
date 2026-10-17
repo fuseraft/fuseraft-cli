@@ -214,6 +214,18 @@ fuseraft follows the [Agent Skills specification](https://agentskills.io/specifi
 
 If your instructions are long, move reference material into a `references/` subdirectory inside the skill folder. The agent loads those files on demand — with `read_skill_resource` — rather than all at once. `scripts/` and `assets/` are supported the same way.
 
+Resources and scripts may sit in nested subdirectories (`references/components/map_component.md` is read as `read_skill_resource("<slug>", "references/components/map_component.md")`), up to five levels below the skill root counting the root itself. A file deeper than that is not discovered, and `read_skill_resource` reports it as not found. Raise the limit (up to `10`) with `fuseraft settings set skills.searchDepth <n>`, or the `skills` section of `~/.fuseraft/config`:
+
+```json
+{
+  "skills": {
+    "searchDepth": 6
+  }
+}
+```
+
+The setting applies to the REPL, `fuseraft run`, and `fuseraft skills list`/`validate`/`add`.
+
 **If two installed skills share the same name**, the one in the higher-precedence location wins.
 
 > **`name:` must match the directory name exactly.** Both the REPL and `fuseraft run` require `name:` to match its parent directory name **exactly** (case-sensitive), to be valid lowercase kebab-case, and require a non-empty, correctly-sized `description:` — they use the identical discovery pipeline, so there is no REPL-specific leniency here. A skill that violates any of these is silently excluded from the catalog in **both** surfaces, with the reason logged as a warning or error (visible by default — no `--verbose` needed). Run `fuseraft skills validate [path]` to check a skill (or every installed skill) against the full specification before relying on it. The one exception is `fuseraft skills add`, which stays deliberately lenient — see [Installing skills](#for-all-your-projects) above.

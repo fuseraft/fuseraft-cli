@@ -105,6 +105,12 @@ public sealed class SettingsShowCommand : AsyncCommand
         AnsiConsole.Write(skills);
         AnsiConsole.WriteLine();
 
+        var discovery = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey).Title("[bold]Skill discovery[/]")
+            .AddColumn("Field").AddColumn("Value");
+        discovery.AddRow("Search depth", config.Skills?.SearchDepth is { } sd ? sd.ToString() : $"[dim](default {SkillsConfig.DefaultSearchDepth})[/]");
+        AnsiConsole.Write(discovery);
+        AnsiConsole.WriteLine();
+
         var modelOverrides = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey).Title("[bold]Model overrides[/]")
             .AddColumn("Field").AddColumn("Value");
         string Conn(string? provider, string? endpoint, string? keyVar) =>
