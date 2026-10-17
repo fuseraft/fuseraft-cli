@@ -29,14 +29,40 @@ internal static partial class ReplCommands
             "remove" => await CmdMcpRemoveAsync(ctx, rest),
             "login"  => await CmdMcpLoginAsync(ctx, rest, cancellationToken),
             "logout" => await CmdMcpLogoutAsync(ctx, rest),
+            "log"    => CmdMcpLog(ctx, rest),
             _        => Unknown(),
         };
 
         CommandResult Unknown()
         {
-            AnsiConsole.MarkupLine("[yellow]Usage:[/] /mcp | /mcp add [[--session-only]] | /mcp remove <name> | /mcp login <name> | /mcp logout <name>");
+            AnsiConsole.MarkupLine("[yellow]Usage:[/] /mcp | /mcp add [[--session-only]] | /mcp remove <name> | /mcp login <name> | /mcp logout <name> | /mcp log <name>");
             return CommandResult.Continue;
         }
+    }
+
+    private static CommandResult CmdMcpLog(ReplSessionContext ctx, string name)
+    {
+        name = name.Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            AnsiConsole.MarkupLine("[yellow]Usage:[/] /mcp log <name>");
+            return CommandResult.Continue;
+        }
+        if (ctx.McpManager?.StderrLines(name) is not { } lines)
+        {
+            AnsiConsole.MarkupLine($"[yellow]No log for '{Markup.Escape(name)}':[/] [dim]only a connected stdio server's stderr is kept.[/]");
+            return CommandResult.Continue;
+        }
+        if (lines.Count == 0)
+        {
+            AnsiConsole.MarkupLine($"[dim]'{Markup.Escape(name)}' hasn't written anything to stderr.[/]");
+            return CommandResult.Continue;
+        }
+        var text = string.Join("\n", lines);
+        AnsiConsole.MarkupLine($"[dim]Last {lines.Count} line(s) '{Markup.Escape(name)}' wrote to stderr:[/]");
+        AnsiConsole.WriteLine(text);
+        ReplInput.Screen?.Keep($"{name} stderr", text, diff: false);
+        return CommandResult.Continue;
     }
 
     private static CommandResult CmdMcpList(ReplSessionContext ctx)
