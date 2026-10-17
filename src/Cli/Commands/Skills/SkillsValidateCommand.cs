@@ -55,7 +55,7 @@ public sealed class SkillsValidateCommand : AsyncCommand<SkillsValidateSettings>
             candidateDirs = [.. Directory.EnumerateDirectories(searchRoot).Select(Normalize).OrderBy(d => d, StringComparer.OrdinalIgnoreCase)];
         }
 
-        var source = new AgentFileSkillsSource(searchRoot, FuseraftSkillsSources.RunScriptAsync);
+        var source = new AgentFileSkillsSource(searchRoot, FuseraftSkillsSources.RunScriptAsync, FuseraftSkillsSources.CreateSourceOptions());
         var passed = await source.GetSkillsAsync(new AgentSkillsSourceContext(SkillDiscoveryAgent.Create(), session: null), cancellationToken);
         var passedByDir = passed
             .OfType<AgentFileSkill>()

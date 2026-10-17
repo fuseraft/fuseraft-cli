@@ -93,8 +93,6 @@ public sealed class SearchPlugin
         " Common dependency directories (node_modules, .nuget, packages, vendor, bin, obj, .venv, __pycache__) " +
         "are skipped by default — point 'directory' directly at one of those if the target lives in a dependency.";
 
-    private const int MaxMatchLineLength = 500;
-
     private static bool TryReadLines(string file, out string[] lines)
     {
         lines = [];
@@ -107,14 +105,30 @@ public sealed class SearchPlugin
         catch { return false; }
     }
 
-    // Caps an individual matched line so one abnormally long line — a minified bundle, a data
-    // row, or anything that slipped past the binary sniff — can't dominate a tool result on its own.
-    private static string TruncateMatch(string line)
+    // Prints each match on a line through MatchExcerpt, so a hit deep inside a very long line
+    // (one-line XML, a minified bundle) is shown with its surroundings instead of being cut off
+    // by a 500-character prefix that doesn't contain it.
+    private static List<string> Excerpts(string line, Regex regex) =>
+        [.. MatchExcerpt.For(line, regex).Select(e => e.Trim())];
+
+    // The files a search walks: every file under a directory, or just the file itself when the
+    // model points 'directory' at one (e.g. directory: "profiles/Vehicle Contracts.xml") — a
+    // natural thing to try that used to fail with "Directory not found". Null when the path is
+    // neither. The deny rules and build/VCS filters still apply to a single file, judged against
+    // its parent directory.
+    private IEnumerable<string>? EnumerateTargets(string resolved, string filePattern)
     {
-        line = line.Trim();
-        return line.Length > MaxMatchLineLength
-            ? line[..MaxMatchLineLength] + $"... [+{line.Length - MaxMatchLineLength} chars truncated]"
-            : line;
+        if (File.Exists(resolved))
+        {
+            var parent = Path.GetDirectoryName(resolved) ?? resolved;
+            return IsSkipped(resolved, parent) ? [] : [resolved];
+        }
+
+        if (!Directory.Exists(resolved))
+            return null;
+
+        return Directory.EnumerateFiles(resolved, filePattern, SearchOption.AllDirectories)
+            .Where(f => !IsSkipped(f, resolved));
     }
 
     // Content search
@@ -122,7 +136,7 @@ public sealed class SearchPlugin
     [Description("Search file contents by text or regex (like grep). 'query' is the pattern, not a path — use 'directory' to scope.")]
     public string SearchContent(
         [Description("Text or regex to search for.")] string query,
-        [Description("Root directory.")] string directory = ".",
+        [Description("Root directory, or a single file.")] string directory = ".",
         [Description("File filter, e.g. '*.cs'.")] string filePattern = "*",
         [Description("Max matching lines.")] int maxResults = 100,
         [Description("Case-sensitive search.")] bool caseSensitive = false)
@@ -133,18 +147,19 @@ public sealed class SearchPlugin
         var denial = FileSystemSandbox.ResolveSafe(directory, _sandboxRoot, exemptedPrefixes: [], _includedRoots.Snapshot(), out var resolved);
         if (denial is not null) return denial;
 
-        if (!Directory.Exists(resolved))
+        var targets = EnumerateTargets(resolved, filePattern);
+        if (targets is null)
             return PluginResult.Error($"Directory not found: {resolved}");
 
-        // Some models HTML-encode characters in tool arguments (e.g. &lt; for <).
-        // Decode so that a query like "&lt;TargetFramework" still matches "<TargetFramework".
-        query = System.Net.WebUtility.HtmlDecode(query);
+        // Some models HTML-encode characters in tool arguments (e.g. &lt; for <), but XML
+        // files also store "&lt;" literally — match either form.
+        var pattern = HtmlEntityArtifacts.MatchEitherForm(query);
 
         Regex regex;
         try
         {
             var options = caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase;
-            regex = GetOrCreateRegex(query, options);
+            regex = GetOrCreateRegex(pattern, options);
         }
         catch (ArgumentException ex)
         {
@@ -156,8 +171,7 @@ public sealed class SearchPlugin
         int filesWithMatches = 0;
         int skippedFiles = 0;
 
-        foreach (var file in Directory.EnumerateFiles(resolved, filePattern, SearchOption.AllDirectories)
-                     .Where(f => !IsSkipped(f, resolved)))
+        foreach (var file in targets)
         {
             if (totalMatches >= maxResults) break;
 
@@ -167,11 +181,12 @@ public sealed class SearchPlugin
 
             for (int i = 0; i < lines.Length && totalMatches < maxResults; i++)
             {
-                if (regex.IsMatch(lines[i]))
-                {
-                    fileMatches.Add($"  L{i + 1}: {TruncateMatch(lines[i])}");
-                    totalMatches++;
-                }
+                var excerpts = Excerpts(lines[i], regex);
+                if (excerpts.Count == 0) continue;
+
+                foreach (var excerpt in excerpts)
+                    fileMatches.Add($"  L{i + 1}: {excerpt}");
+                totalMatches++;
             }
 
             if (fileMatches.Count > 0)
@@ -203,7 +218,7 @@ public sealed class SearchPlugin
     [Description("Find call sites and usages of a symbol across source files.")]
     public string SearchCallers(
         [Description("Symbol name to find usages of.")] string symbol,
-        [Description("Root directory.")] string directory = ".",
+        [Description("Root directory, or a single file.")] string directory = ".",
         [Description("File extension filter, e.g. '.cs'.")] string extension = "",
         [Description("Max results.")] int maxResults = 100)
     {
@@ -213,7 +228,7 @@ public sealed class SearchPlugin
         var denial = FileSystemSandbox.ResolveSafe(directory, _sandboxRoot, exemptedPrefixes: [], _includedRoots.Snapshot(), out var resolved);
         if (denial is not null) return denial;
 
-        if (!Directory.Exists(resolved))
+        if (!Directory.Exists(resolved) && !File.Exists(resolved))
             return PluginResult.Error($"Directory not found: {resolved}");
 
         var escapedSymbol = Regex.Escape(symbol);
@@ -246,8 +261,7 @@ public sealed class SearchPlugin
         int totalMatches = 0;
         int skippedFiles = 0;
 
-        foreach (var file in Directory.EnumerateFiles(resolved, filePattern, SearchOption.AllDirectories)
-                     .Where(f => !IsSkipped(f, resolved)))
+        foreach (var file in EnumerateTargets(resolved, filePattern) ?? [])
         {
             if (totalMatches >= maxResults) break;
 
@@ -259,7 +273,8 @@ public sealed class SearchPlugin
                 if (!callSiteRegex.IsMatch(line)) continue;
                 if (defRegex?.IsMatch(line) == true) continue;
 
-                sb.AppendLine($"{file}:L{i + 1}  {TruncateMatch(line)}");
+                foreach (var excerpt in Excerpts(line, callSiteRegex))
+                    sb.AppendLine($"{file}:L{i + 1}  {excerpt}");
                 totalMatches++;
             }
         }
@@ -284,7 +299,7 @@ public sealed class SearchPlugin
     [Description("Find symbol definitions across source files.")]
     public string SearchSymbol(
         [Description("Symbol name.")] string symbol,
-        [Description("Root directory.")] string directory = ".",
+        [Description("Root directory, or a single file.")] string directory = ".",
         [Description("File extension filter, e.g. '.cs'.")] string extension = "",
         [Description("Max results.")] int maxResults = 50)
     {
@@ -294,7 +309,7 @@ public sealed class SearchPlugin
         var denial = FileSystemSandbox.ResolveSafe(directory, _sandboxRoot, exemptedPrefixes: [], _includedRoots.Snapshot(), out var resolved);
         if (denial is not null) return denial;
 
-        if (!Directory.Exists(resolved))
+        if (!Directory.Exists(resolved) && !File.Exists(resolved))
             return PluginResult.Error($"Directory not found: {resolved}");
 
         // Build a combined pattern that matches any known definition form.
@@ -318,8 +333,7 @@ public sealed class SearchPlugin
         int totalMatches = 0;
         int skippedFiles = 0;
 
-        foreach (var file in Directory.EnumerateFiles(resolved, filePattern, SearchOption.AllDirectories)
-                     .Where(f => !IsSkipped(f, resolved)))
+        foreach (var file in EnumerateTargets(resolved, filePattern) ?? [])
         {
             if (totalMatches >= maxResults) break;
 
@@ -327,11 +341,12 @@ public sealed class SearchPlugin
 
             for (int i = 0; i < lines.Length && totalMatches < maxResults; i++)
             {
-                if (regex.IsMatch(lines[i]))
-                {
-                    sb.AppendLine($"{file}:L{i + 1}  {TruncateMatch(lines[i])}");
-                    totalMatches++;
-                }
+                var excerpts = Excerpts(lines[i], regex);
+                if (excerpts.Count == 0) continue;
+
+                foreach (var excerpt in excerpts)
+                    sb.AppendLine($"{file}:L{i + 1}  {excerpt}");
+                totalMatches++;
             }
         }
 

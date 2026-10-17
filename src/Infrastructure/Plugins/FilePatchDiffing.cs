@@ -65,7 +65,7 @@ internal static class FilePatchDiffing
     {
         // Quote normalisation: LLMs sometimes over-escape " as \" in tool-call JSON. The
         // written file has bare ", so oldText must also have bare " or the match fails.
-        if (QuoteNormalizeExtensions.Contains(ext) && text.Contains("\\\""))
+        if (QuoteNormalizeExtensions.Contains(ext) && LooksOverEscaped(text))
             text = text.Replace("\\\"", "\"");
 
         // Escape-sequence expansion: only expand when there are no real newlines but
@@ -149,11 +149,28 @@ internal static class FilePatchDiffing
     // they mean "), producing syntax errors like `\"\"\"docstring\"\"\"` or
     // `f\"{x}\"`.  Normalising before write prevents the agent needing multiple
     // correction turns just to fix tooling-layer escaping artifacts.
+    // \" is also a legitimate escape inside a string in every one of these languages
+    // (`"say \"hi\""` in Python/JS, `echo "a \"b\""` in bash), so the rewrite only runs when
+    // the text looks wholesale over-escaped — see LooksOverEscaped.
     // C / C++ / C# / Rust are intentionally excluded because \" is a valid and common
     // string-escape sequence in those languages.
     internal static readonly HashSet<string> QuoteNormalizeExtensions =
         [".py", ".js", ".ts", ".jsx", ".tsx", ".rb", ".sh", ".bash", ".zsh",
          ".lua", ".pl", ".r", ".swift", ".kt", ".scala", ".ex", ".exs", ".kiwi"];
+
+    // True when the text has \" and no bare " at all: the signature of a model escaping every
+    // quote in the tool-call JSON twice (`print(\"hi\")`). A bare " anywhere means the text was
+    // escaped once, correctly, so its \" are real string escapes and must be kept: rewriting
+    // `GROOVY = "return \"1900-01-01\""` to `"return "1900-01-01""` leaves 1900-01-01 outside
+    // the string, where Python reads it as arithmetic on an invalid octal literal.
+    internal static bool LooksOverEscaped(string text)
+    {
+        if (!text.Contains("\\\"")) return false;
+        for (int i = 0; i < text.Length; i++)
+            if (text[i] == '"' && (i == 0 || text[i - 1] != '\\'))
+                return false;
+        return true;
+    }
 
     // Source-code file extensions for which typographic-character contamination is
     // checked before writing.  LLMs occasionally substitute Unicode lookalikes for
@@ -268,7 +285,7 @@ internal static class FilePatchDiffing
     {
         normalised = false;
 
-        if (QuoteNormalizeExtensions.Contains(ext) && content.Contains("\\\""))
+        if (QuoteNormalizeExtensions.Contains(ext) && LooksOverEscaped(content))
         {
             content    = content.Replace("\\\"", "\"");
             normalised = true;

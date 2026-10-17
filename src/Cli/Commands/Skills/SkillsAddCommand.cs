@@ -98,7 +98,7 @@ public sealed class SkillsAddCommand : AsyncCommand<SkillsAddSettings>
         // compatibility could still be missing or too long. Confirm with the same
         // AgentFileSkillsSource pipeline orchestration and the REPL actually use, rather than
         // re-deriving the answer here.
-        var checkSource = new AgentFileSkillsSource(destDir, FuseraftSkillsSources.RunScriptAsync);
+        var checkSource = new AgentFileSkillsSource(destDir, FuseraftSkillsSources.RunScriptAsync, FuseraftSkillsSources.CreateSourceOptions());
         var checkResult = await checkSource.GetSkillsAsync(
             new AgentSkillsSourceContext(SkillDiscoveryAgent.Create(), session: null), cancellationToken);
         if (checkResult.Count == 0)

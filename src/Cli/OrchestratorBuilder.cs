@@ -1610,7 +1610,7 @@ public static class OrchestratorBuilder
         // trace anywhere. Wiring the real factory surfaces those through the same logging
         // pipeline as the rest of the orchestrator.
         return new AgentSkillsProviderBuilder()
-            .UseFileSkills(dirs)
+            .UseFileSkills(dirs, FuseraftSkillsSources.CreateSourceOptions())
             .UseFileScriptRunner(FuseraftSkillsSources.RunScriptAsync)
             .UseOptions(FuseraftSkillsSources.DisableApproval)
             .UseLoggerFactory(loggerFactory)

@@ -8,7 +8,8 @@ namespace FuseraftCli.Tests;
 /// Unit tests for <see cref="FileSystemPlugin.WriteFileAsync"/> normalisation logic.
 ///
 /// Key invariant under test: quote normalisation (\" → ") always runs for extensions in
-/// QuoteNormalizeExtensions, even when raw=true. The raw flag only controls escape-sequence
+/// QuoteNormalizeExtensions when the content is wholesale over-escaped, even when raw=true,
+/// and never strips a correctly escaped \" inside a string. The raw flag only controls escape-sequence
 /// expansion (\\n → newline, code-fence stripping, etc.).
 /// </summary>
 public sealed class FileSystemPluginTests : IDisposable
@@ -291,6 +292,54 @@ public sealed class FileSystemPluginTests : IDisposable
         await _plugin.WriteFileAsync(TempPath("hi.js"), content, raw: true);
 
         Assert.Equal("console.log(\"hi\")", await ReadBack("hi.js"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Correctly escaped \" inside a string is kept
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task WriteFile_PyExtension_KeepsEscapedQuotesInsideAString()
+    {
+        // A Python helper that writes Groovy. Stripping the escapes used to leave
+        // 1900-01-01 outside the string: "SyntaxError: leading zeros in decimal integer
+        // literals are not permitted".
+        var content = "GROOVY = \"return \\\"1900-01-01\\\"\"\nFMT = \"new SimpleDateFormat(\\\"yyyy-MM-dd\\\")\"\n";
+        await _plugin.WriteFileAsync(TempPath("fix_dates.py"), content, raw: false);
+
+        Assert.Equal(content, await ReadBack("fix_dates.py"));
+    }
+
+    [Fact]
+    public async Task WriteFile_ShExtension_KeepsEscapedQuotesInsideAString()
+    {
+        var content = "echo \"say \\\"hi\\\"\"";
+        await _plugin.WriteFileAsync(TempPath("say.sh"), content, raw: false);
+
+        Assert.Equal(content, await ReadBack("say.sh"));
+    }
+
+    [Fact]
+    public async Task PatchFile_OldTextWithEscapedQuotesFoundVerbatim_KeepsEscapes()
+    {
+        var original = "GROOVY = \"return \\\"1900-01-01\\\"\"\n";
+        await File.WriteAllTextAsync(TempPath("helper.py"), original);
+
+        var result = await _plugin.PatchFileAsync(TempPath("helper.py"), "\\\"1900-01-01\\\"", "\\\"1900-01-02\\\"");
+
+        Assert.DoesNotContain("[ERROR]", result);
+        Assert.Equal("GROOVY = \"return \\\"1900-01-02\\\"\"\n", await ReadBack("helper.py"));
+    }
+
+    [Fact]
+    public async Task PatchFile_OverEscapedOldText_StillMatchesBareQuotes()
+    {
+        await File.WriteAllTextAsync(TempPath("hello.py"), "print(\"hello\")\n");
+
+        var result = await _plugin.PatchFileAsync(TempPath("hello.py"), "print(\\\"hello\\\")", "print(\\\"bye\\\")");
+
+        Assert.DoesNotContain("[ERROR]", result);
+        Assert.Equal("print(\"bye\")\n", await ReadBack("hello.py"));
     }
 
     // -----------------------------------------------------------------------
@@ -772,6 +821,39 @@ public sealed class FileSystemPluginTests : IDisposable
         Assert.DoesNotContain("[INFO]", first);
         Assert.StartsWith("[INFO]", second);
         Assert.Contains("already read", second, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ReadFile_AskedAgainAfterHint_ReturnsContent()
+    {
+        // The cache can't tell whether compaction has replaced the earlier read with an
+        // [ELIDED …] placeholder. A model that asks again after the hint doesn't have it.
+        await File.WriteAllTextAsync(TempPath("elided.txt"), "some content");
+        await _plugin.ReadFileAsync(TempPath("elided.txt"));
+        var hint  = await _plugin.ReadFileAsync(TempPath("elided.txt"));
+        var third = await _plugin.ReadFileAsync(TempPath("elided.txt"));
+        var fourth = await _plugin.ReadFileAsync(TempPath("elided.txt"));
+
+        Assert.StartsWith("[INFO]", hint);
+        Assert.Contains("call read_file again", hint);
+        Assert.Contains("some content", third);
+        Assert.StartsWith("[INFO]", fourth);   // a fresh read re-arms the hint
+    }
+
+    [Fact]
+    public async Task ReadFile_SessionCacheHint_AskedAgain_ReturnsContent()
+    {
+        var cache  = new SessionReadCache();
+        var plugin = new FileSystemPlugin(sandboxRoot: _dir, sessionCache: cache);
+        await File.WriteAllTextAsync(TempPath("cross_turn.txt"), "cross-turn content");
+
+        await plugin.ReadFileAsync(TempPath("cross_turn.txt"));
+        ((ITurnResettable)plugin).BeginTurn();
+        var hint  = await plugin.ReadFileAsync(TempPath("cross_turn.txt"));
+        var again = await plugin.ReadFileAsync(TempPath("cross_turn.txt"));
+
+        Assert.StartsWith("[INFO]", hint);
+        Assert.Contains("cross-turn content", again);
     }
 
     [Fact]

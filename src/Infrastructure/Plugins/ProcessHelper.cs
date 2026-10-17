@@ -6,6 +6,26 @@ namespace fuseraft.Infrastructure.Plugins;
 /// </summary>
 internal static class ProcessHelper
 {
+    private static readonly System.Text.Encoding Utf8NoBom = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
+    /// <summary>
+    /// Makes a child process's text output UTF-8 end to end. On Windows, Python writing to a
+    /// pipe uses the locale code page (cp1252), not the console's, so printing a character such
+    /// as → fails with UnicodeEncodeError and the script dies mid-output; models then work
+    /// around it by writing every result to a scratch file and reading that back.
+    /// PYTHONIOENCODING/PYTHONUTF8 switch Python to UTF-8 (open() included), unless the user
+    /// has set either one themselves, and the output is decoded as UTF-8 to match — the same
+    /// code page fuseraft sets for its own console at startup.
+    /// </summary>
+    internal static void PreferUtf8(System.Diagnostics.ProcessStartInfo startInfo)
+    {
+        startInfo.StandardOutputEncoding = Utf8NoBom;
+        startInfo.StandardErrorEncoding  = Utf8NoBom;
+        foreach (var (name, value) in new[] { ("PYTHONIOENCODING", "utf-8"), ("PYTHONUTF8", "1") })
+            if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(name)))
+                startInfo.Environment[name] = value;
+    }
+
     /// <summary>
     /// Runs <paramref name="executable"/> with <paramref name="arguments"/>, captures
     /// stdout + stderr, and returns a <see cref="ProcessResult"/>.
@@ -62,6 +82,8 @@ internal static class ProcessHelper
         {
             startInfo.Arguments = arguments ?? string.Empty;
         }
+
+        PreferUtf8(startInfo);
 
         using var process = new System.Diagnostics.Process { StartInfo = startInfo };
 

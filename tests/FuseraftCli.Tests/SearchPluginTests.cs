@@ -171,7 +171,7 @@ public class SearchPluginTests
     }
 
     [Fact]
-    public void SearchContent_TruncatesAbnormallyLongMatchLine()
+    public void SearchContent_BoundsAbnormallyLongMatchLine()
     {
         var dir = CreateTempDir();
         try
@@ -183,8 +183,99 @@ public class SearchPluginTests
             var result = plugin.SearchContent("needle-marker", dir);
 
             Assert.Contains("[RESULTS]", result);
-            Assert.Contains("chars truncated", result);
-            Assert.True(result.Length < 1000, $"Expected a bounded result, got {result.Length} chars.");
+            Assert.Contains("col 1: needle-marker", result);
+            Assert.True(result.Length < MatchExcerpt.MaxLineLength + 500, $"Expected a bounded result, got {result.Length} chars.");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    // A Boomi profile/map export is a single ~38k-character line. The match used to be shown as
+    // the line's first 500 characters, which didn't contain it, so the model saw a "hit" with
+    // nothing useful in it and fell back to writing throwaway Python inspectors.
+    private static string OneLineXml(string field) =>
+        "<Component>" +
+        string.Concat(Enumerable.Range(0, 400).Select(i => $"<JSONProfileEntry name=\"Field{i}\" dataType=\"character\"/>")) +
+        $"<JSONProfileEntry name=\"{field}\" dataType=\"datetime\"><ProfileDateFormat/></JSONProfileEntry>" +
+        string.Concat(Enumerable.Range(400, 200).Select(i => $"<JSONProfileEntry name=\"Field{i}\" dataType=\"character\"/>")) +
+        "</Component>";
+
+    [Fact]
+    public void SearchContent_MatchDeepInOneLineFile_ShowsTheMatchWithItsSurroundings()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var xml = OneLineXml("EffectiveDate");
+            File.WriteAllText(Path.Combine(dir, "Vehicle Contracts.xml"), xml);
+
+            var result = new SearchPlugin().SearchContent("EffectiveDate", dir);
+
+            Assert.Contains("[RESULTS] 1 match(es)", result);
+            Assert.Contains($"col {xml.IndexOf("EffectiveDate", StringComparison.Ordinal) + 1}:", result);
+            Assert.Contains("name=\"EffectiveDate\" dataType=\"datetime\"><ProfileDateFormat/>", result);
+            Assert.True(result.Length < MatchExcerpt.MaxLineLength + 500, $"Expected a bounded result, got {result.Length} chars.");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SearchContent_ManyMatchesOnOneLongLine_CapsExcerptsAndSaysHowManyWereLeftOut()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "profile.xml"), OneLineXml("EffectiveDate"));
+
+            var result = new SearchPlugin().SearchContent("dataType=\"character\"", dir, maxResults: 100);
+
+            Assert.Equal(MatchExcerpt.MaxExcerptsPerLine, result.Split("col ").Length - 1);
+            Assert.Contains("more match(es) on this", result);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SearchContent_DirectoryIsAFile_SearchesJustThatFile()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "target.md"), "needle-marker in the target");
+            File.WriteAllText(Path.Combine(dir, "other.md"), "needle-marker elsewhere");
+
+            var result = new SearchPlugin().SearchContent("needle-marker", Path.Combine(dir, "target.md"));
+
+            Assert.Contains("[RESULTS] 1 match(es) in 1 file(s)", result);
+            Assert.Contains("target.md", result);
+            Assert.DoesNotContain("other.md", result);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SearchContent_DirectoryIsADeniedFile_FindsNothing()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, ".env"), "SECRET=needle-marker");
+
+            var result = new SearchPlugin(sandboxRoot: dir, denyPatterns: [".env"]).SearchContent("needle-marker", Path.Combine(dir, ".env"));
+
+            Assert.Contains("No matches found", result);
+            Assert.DoesNotContain("SECRET", result);
         }
         finally
         {

@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using fuseraft.Core.Models.Config;
 using fuseraft.Core.Skills;
 
 namespace fuseraft.Cli.Commands.Repl;
@@ -23,10 +24,10 @@ internal sealed record ReplSkillsResult(
 /// </summary>
 internal static class ReplSkillsLoader
 {
-    /// <summary>Convenience overload used by <see cref="ReplCommand"/> — searches the default dirs.</summary>
+    /// <summary>Convenience overload used by <see cref="ReplCommand"/> — searches the default dirs with the user's <c>skills</c> settings.</summary>
     internal static Task<ReplSkillsResult> BuildAsync(
-        IChatClient client, ILoggerFactory loggerFactory, CancellationToken cancellationToken) =>
-        BuildAsync(client, loggerFactory, FuseraftSkillsSources.GetDefaultSearchDirs(), cancellationToken);
+        IChatClient client, ILoggerFactory loggerFactory, SkillsConfig? skillsConfig, CancellationToken cancellationToken) =>
+        BuildAsync(client, loggerFactory, FuseraftSkillsSources.GetDefaultSearchDirs(), skillsConfig, cancellationToken);
 
     /// <summary>
     /// Discovers skills under <paramref name="searchDirs"/> using <paramref name="client"/>
@@ -36,12 +37,13 @@ internal static class ReplSkillsLoader
     /// instructions and tools an <see cref="AgentSkillsProvider"/> would attach to that agent.
     /// </summary>
     internal static async Task<ReplSkillsResult> BuildAsync(
-        IChatClient client, ILoggerFactory loggerFactory, IEnumerable<string> searchDirs, CancellationToken cancellationToken)
+        IChatClient client, ILoggerFactory loggerFactory, IEnumerable<string> searchDirs, SkillsConfig? skillsConfig, CancellationToken cancellationToken)
     {
         var fileSource = new AgentFileSkillsSource(
             searchDirs,
             FuseraftSkillsSources.RunScriptAsync,
-            loggerFactory: loggerFactory);
+            FuseraftSkillsSources.CreateSourceOptions(skillsConfig),
+            loggerFactory);
 
         // Same caching+dedup pipeline AgentSkillsProvider's own convenience constructor builds
         // internally — applied explicitly here so the skill list used for the startup banner
