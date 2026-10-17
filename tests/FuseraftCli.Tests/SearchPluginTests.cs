@@ -282,4 +282,49 @@ public class SearchPluginTests
             Directory.Delete(dir, recursive: true);
         }
     }
+
+    // Regression: the model found a SQLTester folder, then searched for "SQLTester" to see what
+    // referenced it (the .sln, project references) and was told the word "looks like a directory
+    // path" because a folder of that name sits in the working directory.
+    [Fact]
+    public void SearchContent_BareWordMatchingADirectoryInTheWorkingDirectory_IsSearchedNotRejected()
+    {
+        var word = "SearchTester" + Guid.NewGuid().ToString("N");
+        var cwdDir = Path.Combine(Directory.GetCurrentDirectory(), word);
+        var dir = CreateTempDir();
+        Directory.CreateDirectory(cwdDir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "App.sln"), $"Project(\"{word}\") = \"{word}\", \"{word}\\\\{word}.csproj\"");
+
+            var result = new SearchPlugin().SearchContent(word, dir);
+
+            Assert.DoesNotContain("looks like a directory path", result);
+            Assert.Contains("App.sln", result);
+        }
+        finally
+        {
+            Directory.Delete(cwdDir);
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SearchContent_PathShapedQueryNamingADirectory_IsRejectedWithAHint()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var query = dir.Replace('\\', '/') + "/";
+            if (!System.Text.RegularExpressions.Regex.IsMatch(query, @"^[\w./-]+/?$")) return; // e.g. a drive-letter temp path
+
+            var result = new SearchPlugin().SearchContent(query);
+
+            Assert.Contains("looks like a directory path", result);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
 }

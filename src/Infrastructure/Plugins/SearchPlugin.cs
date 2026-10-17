@@ -68,17 +68,16 @@ public sealed class SearchPlugin
     // searched, not the pattern. Returns an error string when the mistake is detected, or
     // null when the argument looks like a genuine pattern/symbol.
     //
-    // requirePathSeparator gates this to values that actually look path-shaped (contain '/').
-    // Symbol names are conventionally a single identifier, so a bare word like "Models" or
-    // "Config" — which can easily collide with a real subdirectory name — must not trip this
-    // check for SearchCallers/SearchSymbol; a genuine transposed path there still reads as
-    // "src/Models" or "./Config". Free-text search queries don't get this restriction since
-    // they're already unrestricted in shape.
-    private static string? CheckArgumentTransposition(string value, string argDescription, string paramName, string toolName, bool requirePathSeparator = false)
+    // Only values that actually look path-shaped (contain '/') are checked. A bare word like
+    // "SQLTester" or "Models" is a perfectly good thing to search for even when a directory of
+    // that name sits in the working directory — the model is usually hunting for references to
+    // the project or folder it just found — so rejecting it made the search unusable for exactly
+    // that question. A genuinely transposed path still reads as "src/Models" or "./Config".
+    private static string? CheckArgumentTransposition(string value, string argDescription, string paramName, string toolName)
     {
         if (!string.IsNullOrEmpty(value) &&
             Regex.IsMatch(value, @"^[\w./-]+/?$") &&
-            (!requirePathSeparator || value.Contains('/')) &&
+            value.Contains('/') &&
             Directory.Exists(value))
             return PluginResult.Error(
                 $"'{value}' looks like a directory path, not a {argDescription}. " +
@@ -222,7 +221,7 @@ public sealed class SearchPlugin
         [Description("File extension filter, e.g. '.cs'.")] string extension = "",
         [Description("Max results.")] int maxResults = 100)
     {
-        var transpositionDenial = CheckArgumentTransposition(symbol, "symbol name", "symbol", "SearchCallers", requirePathSeparator: true);
+        var transpositionDenial = CheckArgumentTransposition(symbol, "symbol name", "symbol", "SearchCallers");
         if (transpositionDenial is not null) return transpositionDenial;
 
         var denial = FileSystemSandbox.ResolveSafe(directory, _sandboxRoot, exemptedPrefixes: [], _includedRoots.Snapshot(), out var resolved);
@@ -303,7 +302,7 @@ public sealed class SearchPlugin
         [Description("File extension filter, e.g. '.cs'.")] string extension = "",
         [Description("Max results.")] int maxResults = 50)
     {
-        var transpositionDenial = CheckArgumentTransposition(symbol, "symbol name", "symbol", "SearchSymbol", requirePathSeparator: true);
+        var transpositionDenial = CheckArgumentTransposition(symbol, "symbol name", "symbol", "SearchSymbol");
         if (transpositionDenial is not null) return transpositionDenial;
 
         var denial = FileSystemSandbox.ResolveSafe(directory, _sandboxRoot, exemptedPrefixes: [], _includedRoots.Snapshot(), out var resolved);
