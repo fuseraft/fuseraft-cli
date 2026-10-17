@@ -109,6 +109,7 @@ internal sealed partial class ReplTui
                 setup(_panel, value => answer.TrySetResult(value));
                 _panel.Rows = rows;
                 _panel.Visible = true;
+                _status.Asking = true;
                 _prompt.Visible = _caret.Visible = false;
                 Layout();
                 if (_panel.SubViews.Count == 0)
@@ -124,6 +125,7 @@ internal sealed partial class ReplTui
                 {
                     _panel.Reset(default, Quiet);
                     _panel.Visible = false;
+                    _status.Asking = false;
                     _prompt.Visible = _caret.Visible = true;
                     Layout();
                     _prompt.SetFocus();

@@ -210,6 +210,22 @@ sealed class StatusView : View
     public bool Working => _working;
 
     volatile bool _working;
+    volatile bool _asking;
+
+    /// <summary>A question in the panel is waiting on the user, so nothing is working until it's answered.</summary>
+    public bool Asking
+    {
+        get => _asking;
+        set
+        {
+            _asking = value;
+            SetNeedsDraw();
+        }
+    }
+
+    /// <summary>The keys shown at the right: none while a question is asked, since the panel shows its own.</summary>
+    public static string Keys(bool working, bool asking) =>
+        asking ? "" : working ? "Enter adds to the turn · Ctrl+C cancel" : "Enter send · Alt+Enter newline · PgUp/PgDn scroll · Ctrl+O output";
 
     public void Set(string text, bool working)
     {
@@ -260,9 +276,9 @@ sealed class StatusView : View
     protected override bool OnDrawingContent(DrawContext? context)
     {
         List<Span> left = _flash is not null ? [new(_flash, Theme.StyleOf(Theme.Current.Warning))]
-            : _working ? [new(Spinner[_frame % Spinner.Length], Theme.StyleOf(Theme.Current.Accent) with { Bold = true }), new($" working {Elapsed(DateTime.UtcNow - _since)} · ", default), .. Styled.Parse(_text)]
+            : _working && !_asking ? [new(Spinner[_frame % Spinner.Length], Theme.StyleOf(Theme.Current.Accent) with { Bold = true }), new($" working {Elapsed(DateTime.UtcNow - _since)} · ", default), .. Styled.Parse(_text)]
             : Styled.Parse(_text);
-        var right = _working ? "Enter adds to the turn · Ctrl+C cancel" : "Enter send · Alt+Enter newline · PgUp/PgDn scroll · Ctrl+O output";
+        var right = Keys(_working, _asking);
         var gap = Viewport.Width - left.Sum(s => s.Text.GetColumns()) - right.GetColumns();
         Styled.Draw(this, 0, gap >= 2 ? [.. left, new(new string(' ', gap) + right, default)] : left, Styled.Border);
         return true;
