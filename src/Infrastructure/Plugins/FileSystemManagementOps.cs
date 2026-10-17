@@ -60,8 +60,6 @@ internal sealed class FileSystemManagementOps
         _denyMatcher      = owner.DenyMatcher;
     }
 
-    private const int MaxGrepLineLength = 500;
-
     [Description("Search a file (grep). Cheaper than full read_file.")]
     public async Task<string> GrepFileAsync(
         [Description("File path.")] string path,
@@ -117,14 +115,13 @@ internal sealed class FileSystemManagementOps
                 cancellationToken.ThrowIfCancellationRequested();
                 lineNumber++;
 
-                // Caps one abnormally long line (a minified bundle, a data row, or anything
-                // that slipped past the binary sniff above) so it can't dominate the result.
-                if (line.Length > MaxGrepLineLength)
-                    line = line[..MaxGrepLineLength] + $"... [+{line.Length - MaxGrepLineLength} chars truncated]";
-
                 if (matches >= maxMatches) continue; // drain to count total lines
 
-                if (regex.IsMatch(line))
+                // Match against the whole line, then render it through MatchExcerpt: a line
+                // over the cap (one-line XML, a minified bundle) comes back as a window around
+                // each match rather than a prefix that may not contain the match at all.
+                var excerpts = MatchExcerpt.For(line, regex);
+                if (excerpts.Count > 0)
                 {
                     matches++;
 
@@ -140,19 +137,20 @@ internal sealed class FileSystemManagementOps
                     }
                     preCtxBuf.Clear();
 
-                    sb.AppendLine($"{lineNumber,6}: {line}");
+                    foreach (var excerpt in excerpts)
+                        sb.AppendLine($"{lineNumber,6}: {excerpt}");
                     lastOutput  = lineNumber;
                     postCtxLeft = ctx;
                 }
                 else if (postCtxLeft > 0)
                 {
-                    sb.AppendLine($"{lineNumber,6}: {line}");
+                    sb.AppendLine($"{lineNumber,6}: {MatchExcerpt.Context(line)}");
                     lastOutput = lineNumber;
                     postCtxLeft--;
                 }
                 else
                 {
-                    preCtxBuf.Enqueue((lineNumber, line));
+                    preCtxBuf.Enqueue((lineNumber, MatchExcerpt.Context(line)));
                     if (preCtxBuf.Count > ctx) preCtxBuf.Dequeue();
                 }
             }

@@ -107,14 +107,29 @@ public sealed class FileSystemManagementOpsTests : IDisposable
     }
 
     [Fact]
-    public async Task GrepFile_AbnormallyLongLine_IsTruncated()
+    public async Task GrepFile_AbnormallyLongLine_IsBounded()
     {
         var longLine = "needle-marker " + new string('x', 5000);
         await File.WriteAllTextAsync(TempPath("longline.txt"), longLine);
 
         var result = await _ops.GrepFileAsync(TempPath("longline.txt"), "needle-marker");
-        Assert.Contains("chars truncated", result);
-        Assert.True(result.Length < 1000, $"Expected a bounded result, got {result.Length} chars.");
+        Assert.Contains("col 1: needle-marker", result);
+        Assert.True(result.Length < MatchExcerpt.MaxLineLength + 500, $"Expected a bounded result, got {result.Length} chars.");
+    }
+
+    [Fact]
+    public async Task GrepFile_MatchPastTheLineCap_IsFoundAndShown()
+    {
+        // The line used to be cut to 500 characters before matching, so anything later on a
+        // one-line XML export was reported as "No matches" even though it was in the file.
+        var longLine = new string('x', 20_000) + "<Entry name=\"EffectiveDate\" dataType=\"datetime\"/>" + new string('y', 18_000);
+        await File.WriteAllTextAsync(TempPath("map.xml"), longLine);
+
+        var result = await _ops.GrepFileAsync(TempPath("map.xml"), "EffectiveDate");
+        Assert.Contains("[1 match(s)", result);
+        Assert.Contains("col 20014:", result);
+        Assert.Contains("name=\"EffectiveDate\" dataType=\"datetime\"", result);
+        Assert.True(result.Length < MatchExcerpt.MaxLineLength + 500, $"Expected a bounded result, got {result.Length} chars.");
     }
 
     // -----------------------------------------------------------------------
