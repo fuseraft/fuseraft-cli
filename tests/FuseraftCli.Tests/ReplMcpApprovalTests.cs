@@ -26,6 +26,9 @@ public sealed class ReplMcpApprovalTests : IAsyncLifetime
                     new() { Name = "query", ReadOnly = true }),
                 McpServerTool.Create((string title) => { _ran.Add("create " + title); return "created"; },
                     new() { Name = "create_issue" }),
+                McpServerTool.Create(() => new string('x', 500), new() { Name = "dump", ReadOnly = true }),
+                McpServerTool.Create(() => "{\"rows\":[" + string.Join(",", Enumerable.Range(1, 20).Select(i => $"{{\"ID\":{i}}}")) + "]}",
+                    new() { Name = "rows", ReadOnly = true }),
             ],
         };
         _server = McpServer.Create(new StreamServerTransport(_toServer.Reader.AsStream(), _toClient.Writer.AsStream()), options);
@@ -77,6 +80,59 @@ public sealed class ReplMcpApprovalTests : IAsyncLifetime
         Assert.Empty(_ran);
         Assert.Equal("[DENIED] MCP tool 'create_issue' on 'gh' blocked by user.", result?.ToString());
         Assert.True(ReplTurn.IsToolFailureText(result?.ToString()));
+    }
+
+    // Every REPL tool is wrapped (logging, offload) before safe mode looks at it.
+    [Fact]
+    public async Task Read_only_is_seen_through_the_wrappers_and_never_for_a_gated_tool()
+    {
+        var events = Path.Combine(Path.GetTempPath(), $"fuseraft-test-events-{Guid.NewGuid():N}.jsonl");
+        using var emitter = new fuseraft.Core.Events.EventEmitter(events);
+        var store = new fuseraft.Infrastructure.Tools.ToolResultArtifactStore(null, emitter);
+        var tools = (await GatedAsync((_, _) => Task.FromResult(true)))
+            .ToDictionary(kv => kv.Key, kv => ReplSessionContext.WrapTool(kv.Value, emitter, store));
+
+        Assert.True(ReplMcpApproval.IsReadOnly(tools["query"]));
+        Assert.False(ReplMcpApproval.IsReadOnly(tools["create_issue"]));
+        File.Delete(events);
+    }
+
+    // The SDK hands back an MCP result as its content, not a string, which the offload filter used to pass
+    // through whatever its size.
+    [Fact]
+    public async Task An_oversized_result_is_offloaded()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"fuseraft-test-artifacts-{Guid.NewGuid():N}");
+        var events = Path.Combine(Path.GetTempPath(), $"fuseraft-test-events-{Guid.NewGuid():N}.jsonl");
+        using var emitter = new fuseraft.Core.Events.EventEmitter(events);
+        var store = new fuseraft.Infrastructure.Tools.ToolResultArtifactStore(dir, emitter) { ThresholdChars = 100 };
+        var dump = ReplSessionContext.WrapTool((await GatedAsync(null))["dump"], emitter, store);
+
+        var result = await dump.InvokeAsync(new());
+
+        var stub = Assert.IsType<string>(result);
+        Assert.Contains("offloaded", stub);
+        Assert.Equal(new string('x', 500), File.ReadAllText(Assert.Single(Directory.GetFiles(dir, "*.txt"))));
+        Directory.Delete(dir, recursive: true);
+        File.Delete(events);
+    }
+
+    // A server's JSON answer is stored laid out, so a search of the stored copy finds the one row.
+    [Fact]
+    public async Task An_offloaded_json_answer_is_stored_a_row_per_line()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"fuseraft-test-artifacts-{Guid.NewGuid():N}");
+        var store = new fuseraft.Infrastructure.Tools.ToolResultArtifactStore(dir) { ThresholdChars = 50 };
+        var events = Path.Combine(Path.GetTempPath(), $"fuseraft-test-events-{Guid.NewGuid():N}.jsonl");
+        using var emitter = new fuseraft.Core.Events.EventEmitter(events);
+        var rows = ReplSessionContext.WrapTool((await GatedAsync(null))["rows"], emitter, store);
+
+        await rows.InvokeAsync(new());
+
+        var lines = File.ReadAllLines(Assert.Single(Directory.GetFiles(dir, "*.txt")));
+        Assert.Single(lines, l => l.Trim() == "\"ID\": 17");
+        Directory.Delete(dir, recursive: true);
+        File.Delete(events);
     }
 
     [Fact]

@@ -91,6 +91,18 @@ internal sealed class ReplSessionContext
     // --yolo (or repl.yolo): the session runs unattended, so a turn that hits a limit stops rather than asking.
     public bool Yolo { get; set; }
 
+    // Where oversized tool results go instead of the conversation (see WrapTool) — kept so tools that
+    // join mid-session, from /mcp add or /mcp login, are wrapped like the ones registered at startup.
+    public fuseraft.Infrastructure.Tools.ToolResultArtifactStore? ToolArtifactStore { get; set; }
+
+    /// <summary>
+    /// Every REPL tool's wrapping: <see cref="ToolResultLoggingFilter"/> (inner) emits tool_call/tool_result/tool_error
+    /// events with the raw result, then <see cref="ToolResultOffloadFilter"/> (outer) replaces an oversized result with a
+    /// compact stub and emits artifact_created when it does.
+    /// </summary>
+    internal static AIFunction WrapTool(AIFunction tool, EventEmitter emitter, fuseraft.Infrastructure.Tools.ToolResultArtifactStore store) =>
+        new ToolResultOffloadFilter(new ToolResultLoggingFilter(tool, emitter), store);
+
     // Mutable provider state (may be replaced by /provider setup)
     private string _modelId = string.Empty;
     public string ModelId

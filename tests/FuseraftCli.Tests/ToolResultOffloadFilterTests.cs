@@ -55,7 +55,11 @@ public sealed class ToolResultOffloadFilterTests : IDisposable
         Assert.Contains("offloaded", stub);
         Assert.Contains("big_tool", stub);
         Assert.DoesNotContain(new string('x', 500), stub);
-        Assert.Single(Directory.GetFiles(_artifactsDir));
+        // The JSON record, and the plain text the stub names so it can be read with the file tools.
+        var text = Assert.Single(Directory.GetFiles(_artifactsDir, "*.txt"));
+        Assert.Single(Directory.GetFiles(_artifactsDir, "*.json"));
+        Assert.Contains($"Full result: {text}", stub);
+        Assert.Equal(new string('x', 500), File.ReadAllText(text));
     }
 
     [Fact]

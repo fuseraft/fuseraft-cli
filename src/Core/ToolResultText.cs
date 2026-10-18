@@ -20,6 +20,12 @@ namespace fuseraft.Core;
 /// consumed-read elision (same). Route every such check through here instead of a local
 /// re-implementation, so the next one only has to be fixed once.
 /// </para>
+///
+/// <para>
+/// An MCP tool's result is a third shape: the SDK hands back the content the server sent, a
+/// <see cref="TextContent"/> or a list of contents, not a string — and every one of those checks
+/// missed it in turn, so an MCP server's result was never offloaded however large it was.
+/// </para>
 /// </summary>
 internal static class ToolResultText
 {
@@ -34,6 +40,9 @@ internal static class ToolResultText
         null => null,
         string s => s,
         JsonElement { ValueKind: JsonValueKind.String } je => je.GetString(),
+        TextContent t => t.Text,
+        IEnumerable<AIContent> items when items.Any() && items.All(i => i is TextContent) =>
+            string.Join("\n", items.Cast<TextContent>().Select(t => t.Text)),
         _ => null,
     };
 

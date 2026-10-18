@@ -218,7 +218,11 @@ internal static partial class ReplCommands
     private static void ActivateMcpTools(ReplSessionContext ctx, string category, List<AIFunction> tools)
     {
         var server = category[McpCategoryPrefix.Length..];
-        ctx.ToolsByCategory[category] = ReplMcpApproval.Gate(server, tools, ctx.ApproveToolAction?.Invoke($"MCP {server}"));
+        var gated  = ReplMcpApproval.Gate(server, tools, ctx.ApproveToolAction?.Invoke($"MCP {server}"));
+        // Wrapped like the tools registered at startup, so an oversized result is offloaded here too.
+        ctx.ToolsByCategory[category] = ctx.ToolArtifactStore is { } store
+            ? [.. gated.Select(t => ReplSessionContext.WrapTool(t, ctx.Emitter, store))]
+            : gated;
 
         var activeTools = ctx.GetActiveTools();
         var hasTools = activeTools.Count > 0;

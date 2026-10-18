@@ -475,14 +475,20 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         TodoPlugin?     todoPlugin      = null;
         FileSystemPlugin? fsPluginForCategory = null;
         McpSessionManager? mcpManager          = null;
+        var cwd              = Directory.GetCurrentDirectory();
+        var sessionId        = snapshot?.SessionId ?? StringHelpers.NewSessionId();
+        var toolArtifactsDir = Path.Combine(cwd, FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalSessionToolArtifacts, sessionId));
         List<AIFunction>? fsFunctions    = null;
         List<AIFunction>? shellFunctions = null;
         List<AIFunction>? gitFunctions   = null;
         if (!settings.NoTools)
         {
-            fsPluginForCategory = new FileSystemPlugin(sandboxRoot: sandboxRoot, approveAction: approveToolAction("FileSystem"), approveWrite: approveFileWrite, includedRoots: includedRoots, denyPatterns: fsDenyPatterns);
+            // The session's offloaded tool results (see ToolResultArtifactStore) live outside the workspace, and
+            // the stub that replaces one sends the model to read it with these tools.
+            fsPluginForCategory = new FileSystemPlugin(sandboxRoot: sandboxRoot, approveAction: approveToolAction("FileSystem"), approveWrite: approveFileWrite, includedRoots: includedRoots, denyPatterns: fsDenyPatterns,
+                exemptedPaths: [toolArtifactsDir]);
             fsFunctions    = PluginRegistry.GetFunctionsFromObject(fsPluginForCategory)
-                .Concat(PluginRegistry.GetFunctionsFromObject(new FileSystemManagementOps(fsPluginForCategory, sandboxRoot: sandboxRoot, includedRoots: includedRoots)))
+                .Concat(PluginRegistry.GetFunctionsFromObject(new FileSystemManagementOps(fsPluginForCategory, sandboxRoot: sandboxRoot, includedRoots: includedRoots, exemptedPaths: [toolArtifactsDir])))
                 .ToList();
             shellFunctions = PluginRegistry.GetFunctionsFromObject(shellPlugin!).ToList();
             gitFunctions   = PluginRegistry.GetFunctionsFromObject(new GitPlugin(approveToolAction("Git"), sandboxRoot, includedRoots, fsDenyPatterns)).ToList();
@@ -513,9 +519,6 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // visible to ReplTurn's post-turn forced-compaction check — see ReplSessionContext.
         var adaptiveTrimTracker = new AdaptiveTrimTracker();
 
-        var cwd = Directory.GetCurrentDirectory();
-
-        var sessionId  = snapshot?.SessionId ?? StringHelpers.NewSessionId();
         var startedAt  = snapshot?.StartedAt  ?? DateTime.UtcNow;
         var eventsPath = FuseraftPaths.ExpandSessionPaths(
             FuseraftPaths.LocalReplEventsLog, sessionId, FuseraftPaths.ProjectSlug(cwd));
@@ -692,17 +695,11 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             agentProblems = [.. agentLoad.Problems, .. subagent.CustomAgentProblems];
         }
 
-        // Wrap every tool category:
-        // 1. ToolResultLoggingFilter (inner) — emits tool_call/tool_result/tool_error events
-        //    with the raw result before any transformation.
-        // 2. ToolResultOffloadFilter (outer) — replaces oversized results with a compact stub
-        //    and emits artifact_created when offloading occurs.
-        var toolArtifactsDir  = Path.Combine(cwd, FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalSessionToolArtifacts, sessionId));
+        // Wrap every tool category (see ReplSessionContext.WrapTool).
         var toolArtifactStore = new ToolResultArtifactStore(toolArtifactsDir, emitter);
         foreach (var key in toolsByCategory.Keys.ToList())
             toolsByCategory[key] = toolsByCategory[key]
-                .Select(f => (AIFunction)new ToolResultLoggingFilter(f, emitter))
-                .Select(f => (AIFunction)new ToolResultOffloadFilter(f, toolArtifactStore))
+                .Select(f => ReplSessionContext.WrapTool(f, emitter, toolArtifactStore))
                 .ToList();
 
         // Recompute now that Subagent (and any optional --plugins categories) are registered,
@@ -771,6 +768,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             Approvals      = approvals,
             ApproveToolAction = approveToolAction,
             Yolo           = yolo,
+            ToolArtifactStore = toolArtifactStore,
         };
         ctxForStdin = ctx;
         if (tui is not null)

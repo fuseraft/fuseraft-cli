@@ -15,8 +15,13 @@ internal static class ReplMcpApproval
     public static List<AIFunction> Gate(string server, IEnumerable<AIFunction> tools, Func<string, string, Task<bool>>? approve) =>
         approve is null ? [.. tools] : [.. tools.Select(t => IsReadOnly(t) ? t : new GatedTool(t, server, approve))];
 
+    /// <summary>
+    /// True for an MCP tool its server marks read-only, looking through the wrappers the REPL puts around every
+    /// tool (see <see cref="ReplSessionContext.WrapTool"/>). A tool behind the approval gate never is.
+    /// </summary>
     internal static bool IsReadOnly(AIFunction tool) =>
-        tool is McpClientTool { ProtocolTool.Annotations.ReadOnlyHint: true };
+        tool.GetService<GatedTool>() is null &&
+        tool.GetService<McpClientTool>() is { ProtocolTool.Annotations.ReadOnlyHint: true };
 
     private sealed class GatedTool(AIFunction inner, string server, Func<string, string, Task<bool>> approve)
         : DelegatingAIFunction(inner)

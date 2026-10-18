@@ -24,6 +24,10 @@ internal sealed class ToolResultOffloadFilter(AIFunction inner, ToolResultArtifa
         // See ToolResultText's doc comment for the two other places this exact trap was found.
         if (ToolResultText.AsStringOrNull(result) is { } s)
         {
+            // An MCP server's JSON answer is often one long line; laid out, the stored copy can be read and
+            // searched a row at a time.
+            if (result is AIContent or IEnumerable<AIContent>)
+                s = fuseraft.Infrastructure.Mcp.McpToolResult.Display(result, indentJson: true);
             var hint = ToolCallHelper.SummarizeArgs(arguments) ?? string.Empty;
             if (store.TryOffload(Name, hint, s, out var stub))
                 return stub;
