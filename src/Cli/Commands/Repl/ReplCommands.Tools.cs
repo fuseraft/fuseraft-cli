@@ -40,7 +40,7 @@ internal static partial class ReplCommands
                 if (!off)
                     foreach (var t in funcs)
                     {
-                        var blocked = !ctx.PassesCapabilityRestriction(t.Name) || !ctx.PassesSafeMode(t.Name);
+                        var blocked = !ctx.PassesCapabilityRestriction(t.Name) || !ctx.PassesSafeMode(t.Name) || !ctx.PassesSafeMode(catName, t);
                         AnsiConsole.MarkupLine(blocked
                             ? $"  [dim]    ·[/] {Markup.Escape(t.Name)} [dim](restricted)[/]"
                             : $"  [dim]    ·[/] {Markup.Escape(t.Name)}");
@@ -204,8 +204,9 @@ internal static partial class ReplCommands
 
     // Blocks Shell/Git/Http by owning plugin (via PassesSafeMode + category disable), so
     // tools that live in the "Extended" bucket under --plugins Extended are covered too —
-    // the same per-tool GetPlugin reach /tools restrict already had. FileSystem-owned
-    // Extended tools are left alone. Any prior /tools restrict on Shell/Git/Http is
+    // the same per-tool GetPlugin reach /tools restrict already had — and every MCP tool
+    // its server doesn't mark read-only. FileSystem-owned Extended tools are left alone.
+    // SafeMode is set before the tool list is rebuilt, since the per-tool checks read it. Any prior /tools restrict on Shell/Git/Http is
     // left untouched in CapabilityRestrictions and remains after /safe-mode off.
     // internal (not private): also invoked from ReplCommand.ExecuteAsync at startup when
     // UserConfig.Repl.SafeModeDefault is set, so a default engages the same real category-
@@ -215,7 +216,7 @@ internal static partial class ReplCommands
         if (string.IsNullOrEmpty(arg))
         {
             AnsiConsole.MarkupLine(ctx.SafeMode
-                ? "[dim]Safe mode:[/] [green]on[/]  [dim](Shell, Git, Http blocked by owning plugin — including Extended-bucket tools)[/]"
+                ? "[dim]Safe mode:[/] [green]on[/]  [dim](Shell, Git, Http blocked by owning plugin — including Extended-bucket tools — and MCP tools not marked read-only)[/]"
                 : "[dim]Safe mode:[/] [dim]off[/]");
             AnsiConsole.MarkupLine("[dim]Run[/] [bold]/safe-mode on[/] [dim]or[/] [bold]/safe-mode off[/][dim].[/]");
             return CommandResult.Continue;
@@ -236,11 +237,11 @@ internal static partial class ReplCommands
                 ctx.PreSafeDisabled = new HashSet<string>(ctx.DisabledCategories, StringComparer.OrdinalIgnoreCase);
                 foreach (var c in SafeModeCategories.Where(c => ctx.ToolsByCategory.ContainsKey(c)))
                     ctx.DisabledCategories.Add(c);
-                ctx.ChatOptions = ctx.BuildChatOptions();
                 ctx.SafeMode    = true;
+                ctx.ChatOptions = ctx.BuildChatOptions();
                 AnsiConsole.MarkupLine(
                     "[dim]Safe mode[/] [green]on[/][dim]: Shell, Git, Http tools blocked " +
-                    "(by owning plugin, including any in the Extended bucket).[/]");
+                    "(by owning plugin, including any in the Extended bucket), and MCP tools their server doesn't mark read-only.[/]");
                 await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/safe-mode on" });
             }
         }
@@ -256,8 +257,8 @@ internal static partial class ReplCommands
                 if (ctx.PreSafeDisabled is not null)
                     foreach (var c in ctx.PreSafeDisabled) ctx.DisabledCategories.Add(c);
                 ctx.PreSafeDisabled = null;
-                ctx.ChatOptions     = ctx.BuildChatOptions();
                 ctx.SafeMode        = false;
+                ctx.ChatOptions     = ctx.BuildChatOptions();
                 AnsiConsole.MarkupLine("[dim]Safe mode[/] [dim]off[/][dim]: prior tool categories restored.[/]");
                 await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/safe-mode off" });
             }

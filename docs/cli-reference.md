@@ -500,7 +500,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/agents` | List your [user-defined subagents](subagents.md) (Markdown files in `.fuseraft/agents/` or `.agents/agents/`) with scope, model and tools, plus any problems found loading them. |
 | `/agent <name> <task>` | Run one of your subagents directly on a task and show its report. The model can also call them itself through the `subagent_run` tool. |
 | `/safe-mode` | Show current safe mode status |
-| `/safe-mode on` | Block Shell, Git, and Http tools by owning plugin (including those in the Extended bucket) |
+| `/safe-mode on` | Block Shell, Git, and Http tools by owning plugin (including those in the Extended bucket), and MCP tools their server doesn't mark read-only (`readOnlyHint`) |
 | `/safe-mode off` | Restore tool categories to their state before safe mode was enabled |
 | `/hitl` | Show current HITL (human-in-the-loop) mode status |
 | `/hitl on` | Require y/N approval before each shell run, and before every FileSystem write/delete, Git write, or write-ish Http call |

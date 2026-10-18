@@ -363,8 +363,14 @@ internal sealed class ReplSessionContext
 
     public List<AIFunction> GetActiveTools() => [.. ToolsByCategory
         .Where(kv => !DisabledCategories.Contains(kv.Key))
-        .SelectMany(kv => kv.Value)
-        .Where(f => IsToolAllowed(f.Name))];
+        .SelectMany(kv => kv.Value.Where(f => IsToolAllowed(f.Name) && PassesSafeMode(kv.Key, f)))];
+
+    /// <summary>
+    /// Safe mode's check for an MCP server's tools, which no capability map names: like Http, a server can reach
+    /// anything, so only the tools it marks read-only (MCP's <c>readOnlyHint</c>) stay, as read-only built-in tools do.
+    /// </summary>
+    public bool PassesSafeMode(string category, AIFunction tool) =>
+        !SafeMode || !category.StartsWith("mcp:", StringComparison.OrdinalIgnoreCase) || ReplMcpApproval.IsReadOnly(tool);
 
     /// <summary>True when the tool passes both safe-mode and capability-restriction gates.</summary>
     public bool IsToolAllowed(string toolName) =>
