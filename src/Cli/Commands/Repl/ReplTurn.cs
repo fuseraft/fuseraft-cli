@@ -45,6 +45,7 @@ internal static class ReplTurn
     internal const string NoWriteToolCorrectionPrefix  = "You described changes above but did not call any write tool.";
     internal const string CriticRejectedCorrectionPrefix = "A critic reviewed ";
     internal const string TodoOpenCorrectionPrefix     = "Your todo list still has ";
+    internal const string FailureLimitSummaryPrefix    = "Your tool calls were stopped because ";
     // /goal's follow-up and resume messages (see ReplGoal) are internal in the same sense.
 
     internal static bool IsInternalCorrectionMessage(string text) =>
@@ -52,6 +53,7 @@ internal static class ReplTurn
         text.StartsWith(NoWriteToolCorrectionPrefix,   StringComparison.Ordinal) ||
         text.StartsWith(CriticRejectedCorrectionPrefix, StringComparison.Ordinal) ||
         text.StartsWith(TodoOpenCorrectionPrefix,      StringComparison.Ordinal) ||
+        text.StartsWith(FailureLimitSummaryPrefix,     StringComparison.Ordinal) ||
         text.StartsWith(ReplGoal.FollowUpPrefix,       StringComparison.Ordinal) ||
         text.StartsWith(ReplGoal.ResumePrefix,         StringComparison.Ordinal);
 
@@ -93,16 +95,18 @@ internal static class ReplTurn
     // AgentMiddlewareBuilder) — so this is what keeps this REPL client's cap out of the way.
     internal const int ChatIterationLimit = int.MaxValue;
 
-    // Stop the round-trip loop after this many *consecutive* tool-call failures — same spirit
-    // as Cline's MistakeTracker (default 6, resets to 0 on any turn with a success — see
-    // sdk/packages/core/src/runtime/safety/mistake-tracker.ts) and Codex's guardian
-    // consecutive-denial cap, though not the same unit: Cline counts consecutive *turns* with
-    // no successful tool call at all, ours counts consecutive failing tool-call *results*
-    // one at a time (see IsToolFailure below) rather than relying solely on
+    // Stop the round-trip loop after this many rounds in a row in which every tool call failed —
+    // the unit Cline's MistakeTracker uses (a round with failures and no success counts once, and
+    // any success resets it; see sdk/packages/core/src/runtime/safety/mistake-tracker.ts). Counting
+    // each failing result instead stopped a model that made three calls at once in a single round,
+    // and one trying three different queries that a server refused. Failures are read from the
+    // results (see IsToolFailure below) rather than left to
     // FunctionInvokingChatClient.MaximumConsecutiveErrorsPerRequest, which only ever sees a
     // hard .NET exception during invocation — most tool failures in this codebase are business-
     // logic failures a plugin catches and returns as a normal string (see PluginResult in
-    // ProcessHelper.cs), which the SDK's own counter never observes.
+    // ProcessHelper.cs), which the SDK's own counter never observes. As in Cline, someone at the
+    // REPL is asked whether to keep going (see KeepGoingAfterFailuresAsync); an unattended turn
+    // stops, then gets one reply without tools to say what went wrong.
     // Default — overridable through the global config (repl.maxConsecutiveToolFailures; see ReplLimits).
     internal const int MaxConsecutiveToolFailures = 3;
 
@@ -181,6 +185,63 @@ internal static class ReplTurn
         var forced = baseOptions.Clone();
         forced.ToolMode = ChatToolMode.RequireAny;
         return forced;
+    }
+
+    // The options for a reply that mustn't call tools. The tools stay declared, since a provider may reject a
+    // history with tool calls in it when none are, and the model is told not to use them.
+    internal static ChatOptions? WithoutToolCalls(ChatOptions? baseOptions)
+    {
+        if (baseOptions?.Tools is not { Count: > 0 }) return baseOptions;
+        var options = baseOptions.Clone();
+        options.ToolMode = ChatToolMode.None;
+        return options;
+    }
+
+    // Whether someone can be asked at the failure limit: not a plan step (its outcome handles the stop), not
+    // the VS Code bridge, and not an unattended session (--yolo, or input that isn't a terminal).
+    internal static bool CanAskAtFailureLimit(ReplSessionContext ctx, bool isStepRequest) =>
+        !isStepRequest && !ctx.JsonMode && !ctx.Yolo && (ReplInput.Screen is not null || !Console.IsInputRedirected);
+
+    internal const string KeepGoingChoice     = "Keep going";
+    internal const string KeepGoingNoteChoice = "Keep going, with a note for the model";
+    internal const string StopChoice          = "Stop the turn";
+
+    // Asked when a turn reaches MaxConsecutiveToolFailures, as Cline asks on its mistake limit: a model can
+    // be getting somewhere (correcting a query from each error) or stuck, and the person watching can tell.
+    // Keeping going restarts the count. In the full-screen REPL a note joins the turn as an interjection,
+    // read before the model's next call.
+    internal static async Task<bool> KeepGoingAfterFailuresAsync(
+        ReplSessionContext ctx, int rounds, string? lastFailure, bool canAddNote, CancellationToken ct)
+    {
+        using var _ = ReplConsole.SuspendSpinner();
+        var last = lastFailure?.Trim().ReplaceLineEndings(" ");
+        var question = $"{rounds} rounds of tool calls in a row failed" +
+                       (string.IsNullOrEmpty(last) ? "." : $"; the last: {(last.Length > 160 ? last[..160] + "…" : last)}");
+
+        bool keepGoing;
+        if (ReplInput.Screen is not null)
+        {
+            var choice = await ReplInput.SelectAsync($"[yellow]{Markup.Escape(question)}[/]",
+                canAddNote ? [KeepGoingChoice, KeepGoingNoteChoice, StopChoice] : [KeepGoingChoice, StopChoice], ct);
+            keepGoing = choice is KeepGoingChoice or KeepGoingNoteChoice;
+            if (choice is not null)
+                AnsiConsole.MarkupLine($"[dim]  {Markup.Escape(choice)}[/]");
+            if (choice == KeepGoingNoteChoice && ReplInput.Ask("Note for the model", allowEmpty: true) is { Length: > 0 } note)
+                ctx.Interjections.Enqueue(note);
+        }
+        else
+        {
+            AnsiConsole.WriteLine();
+            keepGoing = ReplInput.Confirm($"[yellow]{Markup.Escape(question)}[/] [dim]Keep going? (y/N):[/] ");
+        }
+
+        await ctx.Emitter.EmitAsync(EventTypes.ReplWarning, turn: ctx.TurnIndex, payload: new
+        {
+            message   = "consecutive_failure_limit_asked",
+            failures  = rounds,
+            keep_going = keepGoing,
+        });
+        return keepGoing;
     }
 
     /// <summary>
@@ -652,7 +713,8 @@ internal static class ReplTurn
         int todoCriticRound = 0,
         bool emptyResponseRetried = false,
         IReadOnlyList<DataContent>? attachments = null,
-        string? mentioned = null)
+        string? mentioned = null,
+        bool toolsOff = false)
     {
         // The true original user request, preserved across every level of recursive
         // self-correction below — `input` itself becomes the injected correction text on
@@ -685,7 +747,7 @@ internal static class ReplTurn
             _ = SaveSnapshotAsync(ctx);
 
         var turnStart = DateTime.UtcNow;
-        var stream = await StreamTurnResponseAsync(ctx, input, isStepRequest, capturePlan, turnStart, cancellationToken);
+        var stream = await StreamTurnResponseAsync(ctx, input, isStepRequest, capturePlan, turnStart, cancellationToken, toolsOff);
         if (!stream.Success)
         {
             // A plan step whose turn was cancelled or hit an unrecoverable streaming error
@@ -765,7 +827,7 @@ internal static class ReplTurn
             if (stoppedEarly)
                 AppendStoppedEarlyNote(ctx.History,
                     hitTurnTokenBudget         ? $"it reached the per-turn uncached input-token budget ({ctx.Limits.MaxTurnInputTokens:N0}, repl.maxTurnInputTokens)" :
-                    hitConsecutiveFailureLimit ? $"{ctx.Limits.MaxConsecutiveToolFailures} tool calls in a row failed" :
+                    hitConsecutiveFailureLimit ? $"{ctx.Limits.MaxConsecutiveToolFailures} rounds of tool calls in a row failed" :
                                                  "the same tool calls kept repeating without progress");
         }
         else if (!capturePlan)
@@ -870,7 +932,7 @@ internal static class ReplTurn
                 failures  = ctx.Limits.MaxConsecutiveToolFailures,
                 last_tool = lastTool,
             });
-            var failMsg = $"Stopped after {ctx.Limits.MaxConsecutiveToolFailures} consecutive tool failures.{detail} " +
+            var failMsg = $"Stopped after {ctx.Limits.MaxConsecutiveToolFailures} rounds of tool calls in a row failed.{detail} " +
                           "Progress so far was kept — send a follow-up once the issue is addressed.";
             if (ctx.JsonMode)
                 ReplJsonBridge.Emit(new { type = "warning", text = failMsg });
@@ -1115,6 +1177,20 @@ internal static class ReplTurn
         // makes its own checks against its own, fresher response — so once one has fired, this
         // turn's response is stale and its remaining checks (with this turn's round counters, not
         // the nested turn's) would only repeat work the nested turn already decided on.
+        // Nobody was there to ask at the failure limit (see CanAskAtFailureLimit), so the turn ended on a
+        // failed tool result: one more reply, with tools off, tells the user what was tried and what went wrong.
+        // It runs once — a turn with tools off can't reach the limit again by calling them.
+        if (hitConsecutiveFailureLimit && !isStepRequest && !capturePlan && !toolsOff && !CanAskAtFailureLimit(ctx, isStepRequest))
+        {
+            await ExecuteAsync(
+                ctx,
+                $"{FailureLimitSummaryPrefix}{ctx.Limits.MaxConsecutiveToolFailures} rounds of them in a row failed. " +
+                "Without calling any tools, tell the user briefly what you tried, what failed and why, and what they could do next.",
+                isStepRequest: false, capturePlan: false, activeStep: null, cancellationToken,
+                isCorrectionTurn: true, originalInput: rootInput, todoCorrectionRound: todoCorrectionRound,
+                todoCriticRound: todoCriticRound, toolsOff: true);
+            return stepPassed;
+        }
         if (stoppedEarly) return stepPassed;
 
         if (await TryApplyMutationCorrectionAsync(
@@ -1441,7 +1517,8 @@ internal static class ReplTurn
         bool isStepRequest,
         bool capturePlan,
         DateTime turnStart,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool toolsOff = false)
     {
         var limits            = ctx.Limits;
         var sb                = new StringBuilder();
@@ -1472,7 +1549,7 @@ internal static class ReplTurn
         // Captured tool outputs for inspect-step history injection (step execution only).
         List<(string ToolName, string Output)>? capturedResults = isStepRequest ? [] : null;
         Dictionary<string, string>? callIdToName = isStepRequest ? [] : null;
-        // See MaxConsecutiveToolFailures — resets to 0 on any non-failing FunctionResultContent.
+        // See MaxConsecutiveToolFailures — rounds in a row in which every call failed; any success resets it.
         var consecutiveToolFailures    = 0;
         var hitConsecutiveFailureLimit = false;
         string? lastToolFailureDetail  = null;
@@ -1572,7 +1649,7 @@ internal static class ReplTurn
             else
                 ctx.CarriedInput = string.Join("\n\n", unread);
         }
-        var requestOptions = BuildRequestOptions(ctx.ChatOptions, input);
+        var requestOptions = toolsOff ? WithoutToolCalls(ctx.ChatOptions) : BuildRequestOptions(ctx.ChatOptions, input);
         var streamAttempt  = 0;
         while (true) // retry loop for transient streaming errors
         {
@@ -1744,19 +1821,17 @@ internal static class ReplTurn
                 var funcResults = chunk.Contents.OfType<FunctionResultContent>().ToList();
                 if (funcResults.Count > 0)
                 {
+                    // A round's results arrive together, so this chunk is the round: it counts once, and only
+                    // when none of its calls worked.
+                    var roundSucceeded = false;
                     foreach (var funcResult in funcResults)
                     {
                         CommitFileChange(pendingFileChanges, funcResult, fileChanges, fileChangeSeen);
 
                         if (IsToolFailure(funcResult))
-                        {
-                            consecutiveToolFailures++;
                             lastToolFailureDetail = McpToolResult.Display(funcResult.Result);
-                        }
                         else
-                        {
-                            consecutiveToolFailures = 0;
-                        }
+                            roundSucceeded = true;
 
                         if (capturedResults is not null)
                         {
@@ -1766,16 +1841,26 @@ internal static class ReplTurn
                             capturedResults.Add((toolName, McpToolResult.Display(funcResult.Result)));
                         }
                     }
+                    consecutiveToolFailures = roundSucceeded ? 0 : consecutiveToolFailures + 1;
                     if (isRoundBoundary) pendingParagraphBreak = true;
 
                     // Stop enumerating now, before the automatic-invocation loop ever requests
                     // another round — GetStreamingResponseAsync only advances past this chunk
                     // (and only then invokes the next round) on the *next* MoveNextAsync, so
-                    // breaking here means no further request is ever made for this turn.
+                    // breaking here means no further request is ever made for this turn. Asking
+                    // happens here too, for the same reason: the next round waits on the answer.
                     if (consecutiveToolFailures >= limits.MaxConsecutiveToolFailures)
                     {
-                        hitConsecutiveFailureLimit = true;
-                        break;
+                        if (CanAskAtFailureLimit(ctx, isStepRequest) &&
+                            await KeepGoingAfterFailuresAsync(ctx, consecutiveToolFailures, lastToolFailureDetail, interjector is not null, reqCts.Token))
+                        {
+                            consecutiveToolFailures = 0;
+                        }
+                        else
+                        {
+                            hitConsecutiveFailureLimit = true;
+                            break;
+                        }
                     }
                     if (turnTokenBudgetReached)
                     {

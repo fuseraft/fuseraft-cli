@@ -262,7 +262,7 @@ public sealed class ReplLimitsTurnTests : IDisposable
     {
         var rounds = new List<int>();
         var (ctx, eventsPath) = NewContext(
-            new ScriptedClient(_ => FailingCalls(rounds, count: 12)),
+            new ScriptedClient(n => n == 0 ? FailingCalls(rounds, count: 12) : TextWithInputTokens(10)),
             new ReplDefaultsConfig { MaxConsecutiveToolFailures = 6 });
 
         await RunAsync(ctx);
@@ -355,20 +355,107 @@ public sealed class ReplLimitsTurnTests : IDisposable
     }
 
     // Previously the failure cutoff on a turn with no text fell into the empty-reply retry: the
-    // stopped turn's tool calls were dropped and a whole extra turn ran.
+    // stopped turn's tool calls were dropped and a whole extra turn ran. Now the tool calls are
+    // kept, and an unattended turn (JSON mode here) gets one reply without tools, not a retry.
     [Fact]
-    public async Task FailureCutoffWithNoText_KeepsTheToolCallsAndRunsNoRetryTurn()
+    public async Task FailureCutoffWithNoText_KeepsTheToolCalls_ThenRepliesOnceWithoutTools()
     {
-        var client = new ScriptedClient(_ => SilentFailingCalls(count: 12));
+        var client = new ScriptedClient(n => n == 0 ? SilentFailingCalls(count: 12) : TextWithInputTokens(10));
+        var (ctx, eventsPath) = NewContext(client, repl: null);
+
+        await RunAsync(ctx);
+
+        Assert.Equal(2, client.Streams);
+        Assert.True(HasResult(ctx, "c0"));
+        Assert.StartsWith(ReplTurn.StoppedEarlyNotePrefix, ctx.History[^3].Text);
+        Assert.Contains("rounds of tool calls in a row failed", ctx.History[^3].Text);
+        Assert.StartsWith(ReplTurn.FailureLimitSummaryPrefix, ctx.History[^2].Text);
+        Assert.Equal("Done.", ctx.History[^1].Text);
+        Assert.Contains(await File.ReadAllLinesAsync(eventsPath), l => l.Contains("\"hit_consecutive_failure_limit\""));
+    }
+
+    [Fact]
+    public void TheReplyWithoutTools_KeepsThemDeclared_ButWontCallThem()
+    {
+        var tool = AIFunctionFactory.Create(() => "x", "noop");
+        var options = new ChatOptions { Tools = [tool], ToolMode = ChatToolMode.Auto };
+
+        var off = ReplTurn.WithoutToolCalls(options)!;
+
+        Assert.Equal(ChatToolMode.None, off.ToolMode);
+        Assert.Same(tool, Assert.Single(off.Tools!));
+        Assert.Equal(ChatToolMode.Auto, options.ToolMode);
+    }
+
+    // A round counts once: three calls made together that all fail are one failed round, not three.
+    [Fact]
+    public async Task ParallelFailures_CountAsOneRound()
+    {
+        var client = new ScriptedClient(n => n == 0 ? ParallelFailingRounds(rounds: 2, callsPerRound: 3) : TextWithInputTokens(10));
         var (ctx, eventsPath) = NewContext(client, repl: null);
 
         await RunAsync(ctx);
 
         Assert.Equal(1, client.Streams);
-        Assert.True(HasResult(ctx, "c0"));
-        Assert.StartsWith(ReplTurn.StoppedEarlyNotePrefix, ctx.History[^1].Text);
-        Assert.Contains("tool calls in a row failed", ctx.History[^1].Text);
-        Assert.Contains(await File.ReadAllLinesAsync(eventsPath), l => l.Contains("\"hit_consecutive_failure_limit\""));
+        Assert.True(HasResult(ctx, "r1c2"));
+        Assert.DoesNotContain(await File.ReadAllLinesAsync(eventsPath), l => l.Contains("\"hit_consecutive_failure_limit\""));
+    }
+
+    // Two failed rounds, then a third round whose results arrive together: one failure and one success.
+    // The success resets the count, so the turn runs on to its answer.
+    [Fact]
+    public async Task ARoundWithAnySuccess_ResetsTheCount()
+    {
+        var client = new ScriptedClient(_ => MixedRounds());
+        var (ctx, eventsPath) = NewContext(client, repl: null);
+
+        await RunAsync(ctx);
+
+        Assert.Equal(1, client.Streams);
+        Assert.Equal("Done.", ctx.History[^1].Text);
+        Assert.DoesNotContain(await File.ReadAllLinesAsync(eventsPath), l => l.Contains("\"hit_consecutive_failure_limit\""));
+    }
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> ParallelFailingRounds(int rounds, int callsPerRound)
+    {
+        for (var r = 0; r < rounds; r++)
+        {
+            var ids = Enumerable.Range(0, callsPerRound).Select(c => $"r{r}c{c}").ToList();
+            yield return new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                Contents = [.. ids.Select(id => (AIContent)new FunctionCallContent(id, "read_file", new Dictionary<string, object?> { ["path"] = id }))],
+            };
+            await Task.Yield();
+            yield return new ChatResponseUpdate
+            {
+                Role = ChatRole.Tool,
+                Contents = [.. ids.Select(id => (AIContent)new FunctionResultContent(id, $"[ERROR] boom {id}"))],
+            };
+            yield return Usage(10);
+        }
+        yield return new ChatResponseUpdate { Role = ChatRole.Assistant, Contents = [new TextContent("Done.")] };
+    }
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> MixedRounds()
+    {
+        string[][] rounds = [["[ERROR] a"], ["[ERROR] b"], ["[ERROR] c", "[OK] d"], ["[ERROR] e"], ["[ERROR] f"]];
+        for (var r = 0; r < rounds.Length; r++)
+        {
+            yield return new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                Contents = [.. rounds[r].Select((_, c) => (AIContent)new FunctionCallContent($"r{r}c{c}", "read_file", new Dictionary<string, object?> { ["path"] = $"r{r}c{c}" }))],
+            };
+            await Task.Yield();
+            yield return new ChatResponseUpdate
+            {
+                Role = ChatRole.Tool,
+                Contents = [.. rounds[r].Select((result, c) => (AIContent)new FunctionResultContent($"r{r}c{c}", result))],
+            };
+            yield return Usage(10);
+        }
+        yield return new ChatResponseUpdate { Role = ChatRole.Assistant, Contents = [new TextContent("Done.")] };
     }
 
     // ── context warning / auto-compact threshold ─────────────────────────────

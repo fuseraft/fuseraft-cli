@@ -20,9 +20,11 @@ namespace fuseraft.Cli.Commands.Repl;
 /// sits *underneath* that parsing, not instead of it). Three notices ride in the tool result,
 /// each once per streak, each a chance to course-correct before the matching hard stop:
 /// an identical-call repeat, an A/B/A/B alternation
-/// (<see cref="ToolCallCycleDetector"/>), and the failure streak one short of the failure cutoff.
-/// An invocation exception is left to propagate untouched (it still counts toward the failure
-/// streak) — there's no result to annotate.
+/// (<see cref="ToolCallCycleDetector"/>), and the failure streak one round short of the failure
+/// cutoff. That streak counts rounds as <c>ReplTurn</c> does — a round in which every call failed
+/// counts once, any success resets it — and is told on the round's last result. An invocation
+/// exception is left to propagate untouched (it still counts as a failed call) — there's no
+/// result to annotate.
 /// </para>
 ///
 /// <para>
@@ -38,7 +40,9 @@ internal sealed class ReplToolLoopGuard(ReplLimits? limits = null)
     private readonly ReplLimits _limits = limits ?? ReplLimits.Default;
     private string _lastCallSignature      = string.Empty;
     private int    _consecutiveIdentical;
-    private int    _consecutiveFailures;
+    private int    _failedRounds;
+    private int    _round = -1;
+    private bool   _roundSucceeded;
     private readonly ToolCallCycleDetector _cycles = new();
 
     public async ValueTask<object?> InvokeAsync(FunctionInvocationContext context, CancellationToken cancellationToken)
@@ -47,9 +51,17 @@ internal sealed class ReplToolLoopGuard(ReplLimits? limits = null)
         {
             _lastCallSignature     = string.Empty;
             _consecutiveIdentical  = 0;
-            _consecutiveFailures   = 0;
+            _failedRounds          = 0;
+            _round                 = -1;
             _cycles.Reset();
         }
+        if (context.Iteration != _round)
+        {
+            _round          = context.Iteration;
+            _roundSucceeded = false;
+        }
+        // Calls in a round run one after another, so the last one closes the round.
+        var closesRound = context.FunctionCallIndex == context.FunctionCount - 1;
 
         var signature = $"{context.CallContent.Name}|{ToolCallSignature.Compute(context.Arguments)}";
         _consecutiveIdentical = signature == _lastCallSignature ? _consecutiveIdentical + 1 : 1;
@@ -63,12 +75,14 @@ internal sealed class ReplToolLoopGuard(ReplLimits? limits = null)
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _consecutiveFailures++;   // ReplTurn counts a thrown invocation as a failure too
+            // ReplTurn counts a thrown invocation as a failure too.
+            if (closesRound) CloseRound();
             throw;
         }
 
         var failed = ReplTurn.IsToolFailureText(result?.ToString());
-        _consecutiveFailures = failed ? _consecutiveFailures + 1 : 0;
+        _roundSucceeded |= !failed;
+        if (closesRound) CloseRound();
 
         // Exact equality (not >=) so each fires once per climbing streak — matches Cline's own
         // softThreshold check (state.consecutiveIdenticalCount === config.softThreshold).
@@ -90,16 +104,20 @@ internal sealed class ReplToolLoopGuard(ReplLimits? limits = null)
                 "Try a different approach.]");
         }
 
-        // One short of the cutoff, so the model gets a chance to change course instead of being
-        // stopped cold on the very next failure.
-        if (failed && _consecutiveFailures == _limits.MaxConsecutiveToolFailures - 1)
+        // One round short of the cutoff, so the model gets a chance to change course instead of
+        // being stopped cold on the next failed round. Taken modulo the cutoff because someone at
+        // the REPL can let the turn go on past it, which restarts ReplTurn's count.
+        var limit = _limits.MaxConsecutiveToolFailures;
+        if (closesRound && !_roundSucceeded && _failedRounds % limit == limit - 1)
         {
             (notices ??= []).Add(
-                $"[SYSTEM NOTICE: {_consecutiveFailures} tool calls in a row have failed — one more " +
-                "failure will end this turn. Re-read the error above and change your approach rather " +
+                $"[SYSTEM NOTICE: {limit - 1} rounds of tool calls in a row have failed — one more " +
+                "will stop this turn. Re-read the errors above and change your approach rather " +
                 "than retrying the same thing.]");
         }
 
         return notices is null ? result : $"{result}\n\n{string.Join("\n", notices)}";
     }
+
+    private void CloseRound() => _failedRounds = _roundSucceeded ? 0 : _failedRounds + 1;
 }

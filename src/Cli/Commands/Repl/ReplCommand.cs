@@ -770,6 +770,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             FileWriteStats = fileWriteStats,
             Approvals      = approvals,
             ApproveToolAction = approveToolAction,
+            Yolo           = yolo,
         };
         ctxForStdin = ctx;
         if (tui is not null)

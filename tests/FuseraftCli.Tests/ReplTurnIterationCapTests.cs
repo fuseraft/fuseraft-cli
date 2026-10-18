@@ -363,9 +363,18 @@ public sealed class ReplTurnIterationCapTests : IDisposable
             IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
             => Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, string.Empty)));
 
+        // Set to answer every request after the first with plain text, as a model told not to call tools would.
+        public string? ReplyAfterFirst { get; init; }
+        public readonly List<ChatOptions?> Options = [];
+
         public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
-            => ToolCallResultRoundsAsync(roundsStarted, results);
+        {
+            Options.Add(options);
+            return Options.Count > 1 && ReplyAfterFirst is { } reply
+                ? new[] { new ChatResponseUpdate(ChatRole.Assistant, reply) }.ToAsyncEnumerable()
+                : ToolCallResultRoundsAsync(roundsStarted, results);
+        }
 
         public object? GetService(Type serviceType, object? key = null) => null;
         public void Dispose() { }
@@ -379,10 +388,12 @@ public sealed class ReplTurnIterationCapTests : IDisposable
     {
         var eventsPath = Path.Combine(Path.GetTempPath(), $"fuseraft-test-events-{Guid.NewGuid():N}.jsonl");
         var roundsStarted = new List<int>();
-        var ctx = NewContext(
-            new ToolCallResultStubChatClient(roundsStarted,
-                "[ERROR] boom 1", "[ERROR] boom 2", "[ERROR] boom 3", "[ERROR] boom 4", "[ERROR] boom 5"),
-            eventsPath);
+        var client = new ToolCallResultStubChatClient(roundsStarted,
+            "[ERROR] boom 1", "[ERROR] boom 2", "[ERROR] boom 3", "[ERROR] boom 4", "[ERROR] boom 5")
+        {
+            ReplyAfterFirst = "I tried three times; each call failed with boom.",
+        };
+        var ctx = NewContext(client, eventsPath);
 
         await ReplTurn.ExecuteAsync(
             ctx, "fix it", isStepRequest: false, capturePlan: false, activeStep: null, CancellationToken.None);
@@ -393,6 +404,12 @@ public sealed class ReplTurnIterationCapTests : IDisposable
 
         var events = await File.ReadAllLinesAsync(eventsPath);
         Assert.Contains(events, l => l.Contains("\"hit_consecutive_failure_limit\""));
+
+        // Nobody can be asked here (JSON mode), so the model gets one reply, told in words not to call tools,
+        // and the user sees it.
+        Assert.Equal(2, client.Options.Count);
+        Assert.StartsWith(ReplTurn.FailureLimitSummaryPrefix, ctx.History[^2].Text);
+        Assert.Equal("I tried three times; each call failed with boom.", ctx.History[^1].Text);
     }
 
     // A success must reset the consecutive-failure streak — mirrors Cline's MistakeTracker

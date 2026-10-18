@@ -20,6 +20,7 @@ public sealed class ReplToolLoopGuardTests
         int iteration, string toolName, Dictionary<string, object?>? args) => new()
     {
         Iteration    = iteration,
+        FunctionCount = 1,
         Function     = EchoFunction,
         Arguments    = new AIFunctionArguments(args),
         CallContent  = new FunctionCallContent($"call-{iteration}", toolName, args),
@@ -128,10 +129,13 @@ public sealed class ReplToolLoopGuardTests
 
     // Alternation (A/B/A/B) and failure-streak notices
 
+    // One call per round unless index and count say otherwise.
     private static FunctionInvocationContext MakeContextWith(
-        AIFunction function, int iteration, string cmd) => new()
+        AIFunction function, int iteration, string cmd, int index = 0, int count = 1) => new()
     {
         Iteration   = iteration,
+        FunctionCallIndex = index,
+        FunctionCount = count,
         Function    = function,
         Arguments   = new AIFunctionArguments(new Dictionary<string, object?> { ["cmd"] = cmd }),
         CallContent = new FunctionCallContent($"call-{iteration}", "shell_run",
@@ -192,8 +196,8 @@ public sealed class ReplToolLoopGuardTests
 
         Assert.DoesNotContain("SYSTEM NOTICE", r1);
         Assert.StartsWith("[ERROR] nope", r2);                       // still classified as a failure by ReplTurn
-        Assert.Contains("2 tool calls in a row have failed", r2);
-        Assert.Contains("one more failure will end this turn", r2);
+        Assert.Contains("2 rounds of tool calls in a row have failed", r2);
+        Assert.Contains("one more will stop this turn", r2);
     }
 
     [Fact]
@@ -227,7 +231,50 @@ public sealed class ReplToolLoopGuardTests
             await guard.InvokeAsync(MakeContextWith(FlakyFunction, 0, "throw-1"), CancellationToken.None));
         var r = (await guard.InvokeAsync(MakeContextWith(FlakyFunction, 1, "bad-2"), CancellationToken.None))?.ToString();
 
-        Assert.Contains("2 tool calls in a row have failed", r);
+        Assert.Contains("2 rounds of tool calls in a row have failed", r);
+    }
+
+    [Fact]
+    public async Task ARoundOfFailuresCountsOnce_AndIsToldOnItsLastResult()
+    {
+        var guard = new ReplToolLoopGuard();
+
+        // Round 0: three calls made together, all failing — one failed round, so no notice yet.
+        for (var c = 0; c < 3; c++)
+            Assert.DoesNotContain("SYSTEM NOTICE",
+                (await guard.InvokeAsync(MakeContextWith(FlakyFunction, 0, $"bad-0{c}", c, 3), CancellationToken.None))?.ToString());
+        // Round 1: two failing calls — the second failed round, told on the round's last result.
+        var first = (await guard.InvokeAsync(MakeContextWith(FlakyFunction, 1, "bad-10", 0, 2), CancellationToken.None))?.ToString();
+        var last  = (await guard.InvokeAsync(MakeContextWith(FlakyFunction, 1, "bad-11", 1, 2), CancellationToken.None))?.ToString();
+
+        Assert.DoesNotContain("SYSTEM NOTICE", first);
+        Assert.Contains("2 rounds of tool calls in a row have failed", last);
+    }
+
+    [Fact]
+    public async Task ARoundWithOneSuccess_ResetsTheFailureStreak()
+    {
+        var guard = new ReplToolLoopGuard();
+        await guard.InvokeAsync(MakeContextWith(FlakyFunction, 0, "bad-0"), CancellationToken.None);
+        await guard.InvokeAsync(MakeContextWith(FlakyFunction, 1, "bad-10", 0, 2), CancellationToken.None);
+        await guard.InvokeAsync(MakeContextWith(FlakyFunction, 1, "ok-11", 1, 2), CancellationToken.None);
+
+        var r = (await guard.InvokeAsync(MakeContextWith(FlakyFunction, 2, "bad-2"), CancellationToken.None))?.ToString();
+
+        Assert.DoesNotContain("SYSTEM NOTICE", r);
+    }
+
+    // Someone at the REPL can let a turn go on past the cutoff, which restarts the count there, so the
+    // notice comes again one round short of the next cutoff.
+    [Fact]
+    public async Task PastTheCutoff_TheNoticeComesAgainOneRoundShortOfTheNext()
+    {
+        var guard = new ReplToolLoopGuard();
+        var results = new List<string>();
+        for (var i = 0; i < 6; i++)
+            results.Add((await guard.InvokeAsync(MakeContextWith(FlakyFunction, i, $"bad-{i}"), CancellationToken.None))?.ToString() ?? "");
+
+        Assert.Equal([false, true, false, false, true, false], results.Select(r => r.Contains("SYSTEM NOTICE")));
     }
 
     [Fact]
@@ -297,6 +344,6 @@ public sealed class ReplToolLoopGuardTests
 
         // Default limit 3 would have nudged on the 2nd failure; with 5 it's one short of the cutoff: the 4th.
         Assert.All(results.Take(3), r => Assert.DoesNotContain("SYSTEM NOTICE", r));
-        Assert.Contains("4 tool calls in a row have failed", results[3]);
+        Assert.Contains("4 rounds of tool calls in a row have failed", results[3]);
     }
 }

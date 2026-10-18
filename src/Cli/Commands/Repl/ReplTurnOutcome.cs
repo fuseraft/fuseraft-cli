@@ -142,7 +142,7 @@ internal static class ReplTurnOutcome
                         $"[dim]  ↯ Step {activeStep.Step} reached the {ReplTurn.StepIterationLimit}-round limit; later calls in this step may have been cut short.[/]");
                 if (hitConsecutiveFailureLimit)
                     AnsiConsole.MarkupLine(
-                        $"[dim]  ↯ Step {activeStep.Step} stopped after {ctx.Limits.MaxConsecutiveToolFailures} consecutive tool failures; later calls in this step may have been cut short.[/]");
+                        $"[dim]  ↯ Step {activeStep.Step} stopped after {ctx.Limits.MaxConsecutiveToolFailures} rounds of tool calls in a row failed; later calls in this step may have been cut short.[/]");
                 if (zeroCallSkip && activeStep.Tool is not null && !InspectTools.Contains(activeStep.Tool))
                     AnsiConsole.MarkupLine(
                         $"[yellow]  ⚠ Step {activeStep.Step}: '{Markup.Escape(activeStep.Tool)}' was not called — verify the agent did not fabricate this result.[/]");
@@ -173,8 +173,8 @@ internal static class ReplTurnOutcome
                             $"'{Markup.Escape(activeStep.Tool)}' was called — step may be too broad, consider splitting it.[/]");
                     else if (hitConsecutiveFailureLimit)
                         AnsiConsole.MarkupLine(
-                            $"[yellow]  ⚠ Step {activeStep.Step}: stopped after {ctx.Limits.MaxConsecutiveToolFailures} consecutive " +
-                            $"tool failures before '{Markup.Escape(activeStep.Tool)}' was called.[/]");
+                            $"[yellow]  ⚠ Step {activeStep.Step}: stopped after {ctx.Limits.MaxConsecutiveToolFailures} rounds of " +
+                            $"tool calls in a row failed before '{Markup.Escape(activeStep.Tool)}' was called.[/]");
                     else
                         AnsiConsole.MarkupLine(
                             $"[yellow]  ⚠ Step {activeStep.Step}: expected tool '{Markup.Escape(activeStep.Tool)}' was not called.[/]");
