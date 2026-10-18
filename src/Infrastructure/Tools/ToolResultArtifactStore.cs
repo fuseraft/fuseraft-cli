@@ -5,9 +5,10 @@ namespace fuseraft.Infrastructure.Tools;
 
 /// <summary>
 /// Offloads large tool results to disk so they never enter the conversation history verbatim.
-/// Each oversized result is written as a JSON file under the session artifacts directory;
-/// the tool's inline result is replaced with a compact stub that tells the agent how to
-/// access specific sections via targeted tools.
+/// Each oversized result is written under the session artifacts directory, as a JSON record
+/// and as the plain text itself, and the tool's inline result is replaced with a compact stub
+/// naming the text file, so the agent can read sections of it or search it with the file tools
+/// (which have to be allowed to read the directory — see the REPL's FileSystemPlugin).
 /// </summary>
 public sealed class ToolResultArtifactStore
 {
@@ -65,6 +66,9 @@ public sealed class ToolResultArtifactStore
                     Chars   = content.Length,
                     Content = content,
                 }, JsonOpts));
+            // The JSON record holds the content as one escaped string, which line-based reads and searches
+            // can't use; this copy is what the stub points the agent at.
+            File.WriteAllText(TextPath(id), content);
         }
         catch
         {
@@ -81,9 +85,11 @@ public sealed class ToolResultArtifactStore
                 chars = content.Length,
             });
 
-        stub = BuildStub(toolName, hint, content.Length, id);
+        stub = BuildStub(toolName, hint, content.Length, id, TextPath(id));
         return true;
     }
+
+    private string TextPath(string id) => Path.GetFullPath(Path.Combine(_artifactsDir!, $"{id}.txt"));
 
     /// <summary>Loads artifact content by ID. Returns null if not found.</summary>
     public string? TryResolve(string id)
@@ -100,11 +106,12 @@ public sealed class ToolResultArtifactStore
         catch { return null; }
     }
 
-    private static string BuildStub(string toolName, string hint, int chars, string id) =>
+    private static string BuildStub(string toolName, string hint, int chars, string id, string textPath) =>
         $"[result offloaded — {chars:N0} chars stored to artifact store]\n" +
         $"Tool: {toolName} | {hint}\n" +
         $"Artifact: {id}\n" +
-        "Use targeted tools (e.g. read_file with startLine/maxLines, or grep_file) for specific sections.";
+        $"Full result: {textPath}\n" +
+        "Read sections of that file with read_file (startLine/maxLines), or search it with grep_file, rather than running the tool again.";
 }
 
 internal sealed record ToolResultArtifact

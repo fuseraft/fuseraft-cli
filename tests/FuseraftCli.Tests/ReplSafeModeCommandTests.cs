@@ -146,6 +146,42 @@ public sealed class ReplSafeModeCommandTests : IDisposable
         Assert.Contains("write_file", names);
     }
 
+    // What the model is offered is ChatOptions, rebuilt by the command: it has to be rebuilt after the mode
+    // changes, or the per-tool checks still see the old mode and Extended-bucket tools stay offered.
+    [Fact]
+    public async Task SafeModeOnAndOff_ChangeTheToolsTheModelIsOffered()
+    {
+        var ctx = NewContextWithExtended(Path.Combine(_tempHome, "events-options.jsonl"));
+        List<string> Offered() => [.. ctx.ChatOptions!.Tools!.Select(t => t.Name)];
+
+        await ReplCommands.HandleAsync(ctx, "/safe-mode", "on", CancellationToken.None);
+        Assert.DoesNotContain("git_push", Offered());
+        Assert.DoesNotContain("shell_run_background", Offered());
+
+        await ReplCommands.HandleAsync(ctx, "/safe-mode", "off", CancellationToken.None);
+        Assert.Contains("git_push", Offered());
+        Assert.Contains("shell_run_background", Offered());
+    }
+
+    // An MCP server's tools have no capability-map entry, so safe mode decides by the server's own read-only
+    // marking; a tool without it (as FakeTool is) is blocked, and other categories' tools of the same name aren't.
+    [Fact]
+    public async Task SafeModeOn_BlocksMcpToolsNotMarkedReadOnly()
+    {
+        var ctx = NewContextCoreOnly(Path.Combine(_tempHome, "events-mcp.jsonl"));
+        ctx.ToolsByCategory["mcp:notes"] = [FakeTool("add_note")];
+        ctx.ChatOptions = ctx.BuildChatOptions();
+        Assert.Contains("add_note", ActiveNames(ctx));
+
+        await ReplCommands.HandleAsync(ctx, "/safe-mode", "on", CancellationToken.None);
+        Assert.DoesNotContain("add_note", ActiveNames(ctx));
+        Assert.DoesNotContain("add_note", ctx.ChatOptions!.Tools!.Select(t => t.Name));
+        Assert.True(ctx.PassesSafeMode("FileSystem", FakeTool("add_note")));
+
+        await ReplCommands.HandleAsync(ctx, "/safe-mode", "off", CancellationToken.None);
+        Assert.Contains("add_note", ActiveNames(ctx));
+    }
+
     [Fact]
     public async Task SafeModeOff_RestoresExtendedTools()
     {

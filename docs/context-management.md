@@ -691,14 +691,15 @@ When a tool returns a result that exceeds 40,000 characters (~10k tokens), fuser
 [result offloaded — 52,000 chars stored to artifact store]
 Tool: read_file | path=src/LargeService.cs
 Artifact: a3f9c20b1d7e
-Use targeted tools (e.g. read_file with startLine/maxLines, or grep_file) for specific sections.
+Full result: /home/you/.fuseraft/sessions/my-project/1a2b3c4d/tool-results/a3f9c20b1d7e.txt
+Read sections of that file with read_file (startLine/maxLines), or search it with grep_file, rather than running the tool again.
 ```
 
-The stub is actionable: it tells the agent what happened, which tool produced the result, and how to access specific sections without pulling the full payload back into context.
+The stub is actionable: it tells the agent what happened, which tool produced the result, and where the full result is, so it can read or search just the part it needs without pulling the whole payload back into context.
 
-**Storage:** the full content is written to `~/.fuseraft/sessions/{project_slug}/{session_id}/tool-results/{id}.json`. Nothing is lost — the artifact is available for inspection or future retrieval.
+**Storage:** the full content is written to `~/.fuseraft/sessions/{project_slug}/{session_id}/tool-results/`, as `{id}.txt` (the text itself, which the stub names) and `{id}.json` (the same content with the tool name and arguments). The file tools may read that directory even when they're sandboxed to the project: in `fuseraft repl` only this session's `tool-results` directory is allowed, in `fuseraft run` all of `~/.fuseraft/`. An MCP server's JSON answer is stored indented, a value per line, so `grep_file` finds one row of a large query result instead of returning the whole answer as one line.
 
-**Coverage:** applies to all tools in both `fuseraft run` sessions and `fuseraft repl` sessions. No configuration is required.
+**Coverage:** applies to all tools in both `fuseraft run` sessions and `fuseraft repl` sessions, including MCP servers' tools and servers connected mid-session with `/mcp add`. No configuration is required.
 
 **Threshold:** 40,000 characters (approximately 10,000 tokens at 4 chars/token). Results below this threshold are passed through unchanged.
 

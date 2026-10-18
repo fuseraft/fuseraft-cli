@@ -91,6 +91,18 @@ internal sealed class ReplSessionContext
     // --yolo (or repl.yolo): the session runs unattended, so a turn that hits a limit stops rather than asking.
     public bool Yolo { get; set; }
 
+    // Where oversized tool results go instead of the conversation (see WrapTool) — kept so tools that
+    // join mid-session, from /mcp add or /mcp login, are wrapped like the ones registered at startup.
+    public fuseraft.Infrastructure.Tools.ToolResultArtifactStore? ToolArtifactStore { get; set; }
+
+    /// <summary>
+    /// Every REPL tool's wrapping: <see cref="ToolResultLoggingFilter"/> (inner) emits tool_call/tool_result/tool_error
+    /// events with the raw result, then <see cref="ToolResultOffloadFilter"/> (outer) replaces an oversized result with a
+    /// compact stub and emits artifact_created when it does.
+    /// </summary>
+    internal static AIFunction WrapTool(AIFunction tool, EventEmitter emitter, fuseraft.Infrastructure.Tools.ToolResultArtifactStore store) =>
+        new ToolResultOffloadFilter(new ToolResultLoggingFilter(tool, emitter), store);
+
     // Mutable provider state (may be replaced by /provider setup)
     private string _modelId = string.Empty;
     public string ModelId
@@ -351,8 +363,14 @@ internal sealed class ReplSessionContext
 
     public List<AIFunction> GetActiveTools() => [.. ToolsByCategory
         .Where(kv => !DisabledCategories.Contains(kv.Key))
-        .SelectMany(kv => kv.Value)
-        .Where(f => IsToolAllowed(f.Name))];
+        .SelectMany(kv => kv.Value.Where(f => IsToolAllowed(f.Name) && PassesSafeMode(kv.Key, f)))];
+
+    /// <summary>
+    /// Safe mode's check for an MCP server's tools, which no capability map names: like Http, a server can reach
+    /// anything, so only the tools it marks read-only (MCP's <c>readOnlyHint</c>) stay, as read-only built-in tools do.
+    /// </summary>
+    public bool PassesSafeMode(string category, AIFunction tool) =>
+        !SafeMode || !category.StartsWith("mcp:", StringComparison.OrdinalIgnoreCase) || ReplMcpApproval.IsReadOnly(tool);
 
     /// <summary>True when the tool passes both safe-mode and capability-restriction gates.</summary>
     public bool IsToolAllowed(string toolName) =>

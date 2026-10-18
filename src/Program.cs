@@ -80,6 +80,9 @@ var logConfig = new LoggerConfiguration()
     .MinimumLevel.Is(verbose ? LogEventLevel.Debug : LogEventLevel.Information)
     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
     .MinimumLevel.Override("System", LogEventLevel.Warning)
+    // The MCP SDK logs every connection step and each line a server writes to stderr at Information, which
+    // landed in the REPL's conversation; the REPL keeps a server's stderr for /mcp log instead.
+    .MinimumLevel.Override("ModelContextProtocol", LogEventLevel.Warning)
     .Enrich.FromLogContext();
 
 // In VSCode mode all output must go to stderr so stdout stays a clean JSON stream.

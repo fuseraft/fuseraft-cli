@@ -29,6 +29,8 @@ public sealed class McpSessionManager : IAsyncDisposable
     // can be torn down on its own via RemoveAsync — e.g. the REPL's /mcp remove — instead of
     // only ever being reachable through DisposeAsync's tear-down-everything path.
     private readonly Dictionary<string, McpClient> _clients = new(StringComparer.OrdinalIgnoreCase);
+    // The config each connected server was connected with, so it can be connected again as it was.
+    private readonly Dictionary<string, McpServerConfig> _configs = new(StringComparer.OrdinalIgnoreCase);
     // What each stdio server has written to stderr lately — where servers put their logs, which would
     // otherwise be lost, though their errors often point to them.
     private readonly Dictionary<string, Queue<string>> _stderr = new(StringComparer.OrdinalIgnoreCase);
@@ -93,6 +95,7 @@ public sealed class McpSessionManager : IAsyncDisposable
 
         var client = await ConnectAsync(server, cancellationToken);
         _clients[server.Name] = client;
+        _configs[server.Name] = server;
 
         var tools = await client.ListToolsAsync(cancellationToken: cancellationToken);
         _logger?.LogInformation("MCP server '{Name}' registered {Count} tool(s).",
@@ -126,8 +129,35 @@ public sealed class McpSessionManager : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// The <c>${ENV_VAR}</c> tokens in a server's Env, Url and Headers whose variable isn't set, each with the setting
+    /// it's in: they're filled in as empty, so a server started without its secret fails later, in its own words.
+    /// </summary>
+    public static IReadOnlyList<(string Setting, string Variable)> UnsetEnvTokens(McpServerConfig server)
+    {
+        var settings = server.Env.Select(e => ($"Env {e.Key}", e.Value))
+            .Concat(server.Headers.Select(h => ($"header {h.Key}", (string?)h.Value)))
+            .Append(("Url", server.Url));
+        return [.. settings
+            .Where(s => s.Item2 is not null)
+            .SelectMany(s => System.Text.RegularExpressions.Regex.Matches(s.Item2!, @"\$\{([^}]+)\}")
+                .Select(m => (s.Item1, m.Groups[1].Value)))
+            .Where(t => Environment.GetEnvironmentVariable(t.Item2) is null)
+            .Distinct()];
+    }
+
+    /// <summary>The config a connected server was connected with; null for one this manager doesn't hold.</summary>
+    public McpServerConfig? ConfigOf(string name) => _configs.GetValueOrDefault(name);
+
+    /// <summary>
+    /// False once a connected server's session has ended — its process exited or its connection closed — though
+    /// its tools are still registered; false too for a server this manager doesn't hold.
+    /// </summary>
+    public bool IsRunning(string name) => _clients.TryGetValue(name, out var client) && !client.Completion.IsCompleted;
+
     public async Task<bool> RemoveAsync(string name)
     {
+        _configs.Remove(name);
         if (!_clients.Remove(name, out var client))
             return false;
 
@@ -215,7 +245,8 @@ public sealed class McpSessionManager : IAsyncDisposable
                 Command          = server.Command,
                 Arguments        = server.Args.Count > 0 ? server.Args : null,
                 EnvironmentVariables = server.Env.Count > 0
-                    ? server.Env.ToDictionary(e => e.Key, e => (string?)ProcessHelper.ExpandEnvTokens(e.Value))
+                    // A null value unsets that variable for the server, so it's passed on as null.
+                    ? server.Env.ToDictionary(e => e.Key, e => e.Value is null ? null : ProcessHelper.ExpandEnvTokens(e.Value))
                     : null,
                 WorkingDirectory = server.WorkingDirectory
             };

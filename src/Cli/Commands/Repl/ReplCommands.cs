@@ -146,6 +146,7 @@ internal static partial class ReplCommands
             new("/mcp add --session-only", "Same, but don't persist past this session"),
             new("/mcp remove <name>", "Stop offering a connected server's tools to the model"),
             new("/mcp log <name>", "Show what a stdio server wrote to stderr lately (its own log)"),
+            new("/mcp reconnect <name>", "Connect a server again as it was, after it stopped"),
         ]),
         new("Context & model", [
             new("/context", "Show context window usage (actual once a turn has run, else estimated), per-category breakdown, and cumulative session token usage"),
