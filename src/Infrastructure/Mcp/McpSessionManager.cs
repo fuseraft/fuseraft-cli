@@ -215,7 +215,8 @@ public sealed class McpSessionManager : IAsyncDisposable
                 Command          = server.Command,
                 Arguments        = server.Args.Count > 0 ? server.Args : null,
                 EnvironmentVariables = server.Env.Count > 0
-                    ? server.Env.ToDictionary(e => e.Key, e => (string?)ProcessHelper.ExpandEnvTokens(e.Value))
+                    // A null value unsets that variable for the server, so it's passed on as null.
+                    ? server.Env.ToDictionary(e => e.Key, e => e.Value is null ? null : ProcessHelper.ExpandEnvTokens(e.Value))
                     : null,
                 WorkingDirectory = server.WorkingDirectory
             };

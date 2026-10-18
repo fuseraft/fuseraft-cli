@@ -119,7 +119,7 @@ internal static partial class ReplCommands
             if (command is null) return CommandResult.Continue;
             var argsLine = ReplInput.Ask("[dim]Arguments[/] [dim](space-separated, blank for none)[/]", allowEmpty: true);
             if (argsLine is null) return CommandResult.Continue;
-            Dictionary<string, string>? env;
+            Dictionary<string, string?>? env;
             while (true)
             {
                 var envLine = ReplInput.Ask(
@@ -330,12 +330,10 @@ internal static partial class ReplCommands
         return CommandResult.Continue;
     }
 
-    // Quote-aware split for the stdio "Arguments" prompt — a bare space.Split would break an
-    // argument value containing a space (e.g. a path) into multiple Args entries.
     /// <summary>KEY=VALUE pairs, split like arguments so a quoted value can hold spaces; null when one has no key or no '='.</summary>
-    internal static Dictionary<string, string>? ParseEnvPairs(string line)
+    internal static Dictionary<string, string?>? ParseEnvPairs(string line)
     {
-        var env = new Dictionary<string, string>();
+        var env = new Dictionary<string, string?>();
         foreach (var pair in SplitStdioArgs(line))
         {
             var eq = pair.IndexOf('=');
@@ -345,6 +343,8 @@ internal static partial class ReplCommands
         return env;
     }
 
+    // Quote-aware split for the stdio "Arguments" prompt — a bare space.Split would break an
+    // argument value containing a space (e.g. a path) into multiple Args entries.
     private static List<string> SplitStdioArgs(string argsLine)
     {
         var result  = new List<string>();
