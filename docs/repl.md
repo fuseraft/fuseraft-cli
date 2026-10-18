@@ -84,7 +84,7 @@ Everything in this section is about controlling what the **model** can do on its
 
 **Sandboxing** — FileSystem, Shell, and Git are confined to the directory you launched from. A path outside it is rejected before anything else runs.
 
-**HITL (human-in-the-loop)** — every shell command, every FileSystem write/delete, every Git write, and write-ish HTTP calls pause for a y/N approval:
+**HITL (human-in-the-loop)** — every shell command, every FileSystem write/delete, every Git write, write-ish HTTP calls, and every MCP tool its server doesn't mark read-only pause for a y/N approval:
 
 ```
 [hitl] 2> delete the build artifacts and rerun the tests
@@ -94,7 +94,7 @@ Allow? (y/N):  n
 Command blocked.
 ```
 
-Answer `a` (always) to stop being asked about that kind of action: commands using the same programs (saved for the directory, except interpreters such as `python3` or `bash`, which last the session), file writes in the workspace for this session, or a Git or Http tool. `/approvals` lists them and `/approvals clear` forgets them; see [CLI Reference — "Always" answers](cli-reference.md#always-answers).
+Answer `a` (always) to stop being asked about that kind of action: commands using the same programs (saved for the directory, except interpreters such as `python3` or `bash`, which last the session), file writes in the workspace for this session, or a Git, Http or MCP tool. `/approvals` lists them and `/approvals clear` forgets them; see [CLI Reference — "Always" answers](cli-reference.md#always-answers).
 
 Toggle it with `/hitl on` / `/hitl off`, or run `/hitl auto` to stop being asked about commands that are provably read-only (`ls`, `git status`, `grep`, … — see [Read-only auto-approval](cli-reference.md#read-only-auto-approval-hitl-auto)). Or skip it for the whole session with `--yolo` (which also drops the sandbox — full unattended access, for trusted use only), or make that the default for every session with `fuseraft settings set repl.yolo true`.
 

@@ -625,7 +625,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                     AnsiConsole.MarkupLine($"[dim]Connecting MCP server '{Markup.Escape(server.Name)}'…[/]");
                     mcpManager ??= new McpSessionManager(loggerFactory);
                     var (_, mcpTools) = await mcpManager.ConnectSingleAsync(server, cancellationToken);
-                    toolsByCategory[$"mcp:{server.Name}"] = mcpTools.ToList();
+                    toolsByCategory[$"mcp:{server.Name}"] = ReplMcpApproval.Gate(server.Name, mcpTools, approveToolAction($"MCP {server.Name}"));
                 }
                 catch (Exception ex)
                 {
@@ -769,6 +769,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             AgentProblems = agentProblems,
             FileWriteStats = fileWriteStats,
             Approvals      = approvals,
+            ApproveToolAction = approveToolAction,
         };
         ctxForStdin = ctx;
         if (tui is not null)

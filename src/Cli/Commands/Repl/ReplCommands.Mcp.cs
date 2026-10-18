@@ -217,7 +217,8 @@ internal static partial class ReplCommands
     // tool-availability state. Shared by /mcp add and /mcp login.
     private static void ActivateMcpTools(ReplSessionContext ctx, string category, List<AIFunction> tools)
     {
-        ctx.ToolsByCategory[category] = tools;
+        var server = category[McpCategoryPrefix.Length..];
+        ctx.ToolsByCategory[category] = ReplMcpApproval.Gate(server, tools, ctx.ApproveToolAction?.Invoke($"MCP {server}"));
 
         var activeTools = ctx.GetActiveTools();
         var hasTools = activeTools.Count > 0;

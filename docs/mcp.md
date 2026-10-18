@@ -5,7 +5,7 @@ description: "fuseraft-cli supports the Model Context Protocol (MCP). You can co
 
 fuseraft-cli supports the [Model Context Protocol (MCP)](https://modelcontextprotocol.io). You can connect any MCP server at session startup, and its tools are registered as a plugin that any agent can call.
 
-> **REPL users:** everything below configures MCP servers for `fuseraft run` via a YAML/JSON config. If you're in `fuseraft repl`, use `/mcp add` instead for an interactive wizard that connects a server on the spot and persists it for future sessions — see [CLI Reference — Connecting an MCP server](cli-reference.md#fuseraft-repl).
+> **REPL users:** everything below configures MCP servers for `fuseraft run` via a YAML/JSON config. If you're in `fuseraft repl`, use `/mcp add` instead for an interactive wizard that connects a server on the spot and persists it for future sessions — see [CLI Reference — Connecting an MCP server](cli-reference.md#fuseraft-repl). With HITL on, the REPL asks before each call to a tool the server doesn't mark read-only (MCP's `readOnlyHint`), showing the call's arguments; tools marked read-only run without asking, like built-in read-only tools.
 
 > **Looking for the other direction?** Everything below is about fuseraft connecting *out* to MCP servers as a client. If you want fuseraft itself to be callable as an MCP server — so another agent can dispatch tasks into a running fuseraft process — see [CLI Reference — `fuseraft serve`](cli-reference.md#fuseraft-serve).
 
