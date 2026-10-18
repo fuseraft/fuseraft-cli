@@ -189,6 +189,7 @@ internal static partial class ReplCommands
         try
         {
             ctx.McpManager ??= new McpSessionManager();
+            WarnUnsetEnvTokens(config);
             var (_, connectedTools) = await ctx.McpManager.ConnectSingleAsync(config, cancellationToken);
             tools = connectedTools.ToList();
         }
@@ -234,6 +235,16 @@ internal static partial class ReplCommands
         ctx.Client     = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, tools: activeTools, limits: ctx.Limits);
         ctx.StepClient = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, ReplTurn.StepIterationLimit, activeTools);
         ctx.ChatOptions = ctx.BuildChatOptions();
+    }
+
+    // Says which ${ENV_VAR} tokens a server is about to start with as empty, before it's connected, so a server that
+    // then refuses to work without its secret isn't a mystery.
+    internal static void WarnUnsetEnvTokens(McpServerConfig config)
+    {
+        foreach (var (setting, variable) in McpSessionManager.UnsetEnvTokens(config))
+            AnsiConsole.MarkupLine(
+                $"[yellow]⚠ '{Markup.Escape(config.Name)}' {Markup.Escape(setting)} uses ${{{Markup.Escape(variable)}}}, which isn't set in fuseraft's environment,[/] " +
+                "[dim]so it's passed as empty; start fuseraft with it set.[/]");
     }
 
     // Why a connect failed, as markup: every distinct message down the exception chain, since the outer one is often
@@ -283,6 +294,7 @@ internal static partial class ReplCommands
         try
         {
             ctx.McpManager ??= new McpSessionManager();
+            WarnUnsetEnvTokens(config);
             var (_, connectedTools) = await ctx.McpManager.ConnectSingleAsync(config, cancellationToken);
             tools = connectedTools.ToList();
         }
@@ -333,6 +345,7 @@ internal static partial class ReplCommands
         try
         {
             ctx.McpManager ??= new McpSessionManager();
+            WarnUnsetEnvTokens(config);
             var (_, connectedTools) = await ctx.McpManager.ConnectSingleAsync(config, cancellationToken);
             tools = connectedTools.ToList();
         }

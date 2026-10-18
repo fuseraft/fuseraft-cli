@@ -129,6 +129,23 @@ public sealed class McpSessionManager : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// The <c>${ENV_VAR}</c> tokens in a server's Env, Url and Headers whose variable isn't set, each with the setting
+    /// it's in: they're filled in as empty, so a server started without its secret fails later, in its own words.
+    /// </summary>
+    public static IReadOnlyList<(string Setting, string Variable)> UnsetEnvTokens(McpServerConfig server)
+    {
+        var settings = server.Env.Select(e => ($"Env {e.Key}", e.Value))
+            .Concat(server.Headers.Select(h => ($"header {h.Key}", (string?)h.Value)))
+            .Append(("Url", server.Url));
+        return [.. settings
+            .Where(s => s.Item2 is not null)
+            .SelectMany(s => System.Text.RegularExpressions.Regex.Matches(s.Item2!, @"\$\{([^}]+)\}")
+                .Select(m => (s.Item1, m.Groups[1].Value)))
+            .Where(t => Environment.GetEnvironmentVariable(t.Item2) is null)
+            .Distinct()];
+    }
+
     /// <summary>The config a connected server was connected with; null for one this manager doesn't hold.</summary>
     public McpServerConfig? ConfigOf(string name) => _configs.GetValueOrDefault(name);
 

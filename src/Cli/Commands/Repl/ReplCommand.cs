@@ -626,7 +626,9 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 try
                 {
                     AnsiConsole.MarkupLine($"[dim]Connecting MCP server '{Markup.Escape(server.Name)}'…[/]");
-                    mcpManager ??= new McpSessionManager(loggerFactory);
+                    // Without the logger, as /mcp add makes it: the REPL says what's connecting itself.
+                    mcpManager ??= new McpSessionManager();
+                    ReplCommands.WarnUnsetEnvTokens(server);
                     var (_, mcpTools) = await mcpManager.ConnectSingleAsync(server, cancellationToken);
                     var manager = mcpManager;
                     toolsByCategory[$"mcp:{server.Name}"] = ReplMcpApproval.Gate(server.Name,
