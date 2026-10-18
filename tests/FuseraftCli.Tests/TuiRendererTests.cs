@@ -59,6 +59,39 @@ public sealed class TuiRendererTests
     }
 
     [Fact]
+    public void An_mcp_servers_json_answer_is_indented_for_the_viewer()
+    {
+        _renderer.ToolStarted("c1", "query_database", "crm");
+        _renderer.ToolFinished("c1", "query_database", ok: true,
+            """{"content":[{"type":"text","text":"{\"columns\":[\"ID\"],\"rows\":[{\"ID\":1,\"NAME\":\"Zoë\"}]}"}],"isError":false}""");
+
+        Assert.Equal(
+            """
+            {
+              "columns": [
+                "ID"
+              ],
+              "rows": [
+                {
+                  "ID": 1,
+                  "NAME": "Zoë"
+                }
+              ]
+            }
+            """.ReplaceLineEndings("\n"),
+            _renderer.Outputs.Single().Text.ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
+    public void A_json_file_a_tool_read_is_shown_as_it_is()
+    {
+        _renderer.ToolStarted("c1", "read_file", "a.json");
+        _renderer.ToolFinished("c1", "read_file", ok: true, """{"a":1}""");
+
+        Assert.Equal("""{"a":1}""", _renderer.Outputs.Single().Text);
+    }
+
+    [Fact]
     public void FormatArguments_puts_multi_line_values_beneath_their_name()
     {
         var args = new Dictionary<string, object?>

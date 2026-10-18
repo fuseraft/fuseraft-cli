@@ -1660,7 +1660,7 @@ internal static class ReplTurn
                         var callId = result.CallId ?? string.Empty;
                         var ok     = !IsToolFailure(result);
                         screen.ToolFinished(callId, callNames.GetValueOrDefault(callId, "tool"), ok,
-                            result.Exception?.Message ?? result.Result?.ToString() ?? string.Empty);
+                            result.Exception?.Message ?? McpToolResult.Display(result.Result, indentJson: true));
                         if (ok && pendingFileChanges.TryGetValue(callId, out var change))
                         {
                             var known = ctx.FileWriteStats.TryRemove(Path.GetFullPath(change.Path, ctx.Cwd), out var stats);
@@ -1751,7 +1751,7 @@ internal static class ReplTurn
                         if (IsToolFailure(funcResult))
                         {
                             consecutiveToolFailures++;
-                            lastToolFailureDetail = funcResult.Result?.ToString();
+                            lastToolFailureDetail = McpToolResult.Display(funcResult.Result);
                         }
                         else
                         {
@@ -1763,7 +1763,7 @@ internal static class ReplTurn
                             var toolName = funcResult.CallId is not null &&
                                           callIdToName?.TryGetValue(funcResult.CallId, out var n) == true
                                           ? n : "tool";
-                            capturedResults.Add((toolName, funcResult.Result?.ToString() ?? string.Empty));
+                            capturedResults.Add((toolName, McpToolResult.Display(funcResult.Result)));
                         }
                     }
                     if (isRoundBoundary) pendingParagraphBreak = true;

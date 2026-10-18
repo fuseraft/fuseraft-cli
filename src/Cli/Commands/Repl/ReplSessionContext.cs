@@ -84,6 +84,10 @@ internal sealed class ReplSessionContext
     // disposed once, on REPL exit — see ReplCommand.cs.
     public McpSessionManager? McpManager { get; set; }
 
+    // HITL approval for a plugin's actions, by plugin name — what an MCP server's tools are put behind when
+    // /mcp add or /mcp login connects one mid-session (see ReplMcpApproval).
+    public Func<string, Func<string, string, Task<bool>>>? ApproveToolAction { get; set; }
+
     // Mutable provider state (may be replaced by /provider setup)
     private string _modelId = string.Empty;
     public string ModelId

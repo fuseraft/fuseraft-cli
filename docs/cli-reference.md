@@ -628,7 +628,7 @@ After each response a compact status line is printed showing the turn number, es
 
 **Shell/FileSystem/Git/Http write approval (`/hitl`)**
 
-`/hitl on` gates every `shell_run`, `shell_run_script`, and `shell_run_background` call, every FileSystem write/delete tool, every Git write operation, and the write-ish HTTP verbs behind the same y/N approval prompt `fuseraft run --hitl` uses (see [Shell/FileSystem/Git/Http write approval in `--hitl` mode](#human-in-the-loop-controls)):
+`/hitl on` gates every `shell_run`, `shell_run_script`, and `shell_run_background` call, every FileSystem write/delete tool, every Git write operation, the write-ish HTTP verbs, and every MCP tool whose server doesn't mark it read-only (`readOnlyHint`) behind the same y/N approval prompt `fuseraft run --hitl` uses (see [Shell/FileSystem/Git/Http write approval in `--hitl` mode](#human-in-the-loop-controls)):
 
 ```
 [hitl] 2> delete the build artifacts and rerun the tests
@@ -662,7 +662,7 @@ The REPL offers "always" when it can say exactly what it would cover, and rememb
 | A shell command using an interpreter or shell (`python3`, `node`, `bash`, `eval`, `xargs`, `npx`, …) | The same, but these can run any code | This session only |
 | `write_file` / `patch_file` inside the launch directory | All file writes there; seeing each diff is the point of asking, so it's never saved | This session only |
 | A FileSystem action inside the launch directory (`delete_file`, `move_file`, …) | Every call to that action there | This session only |
-| A Git or Http action (`git_commit`, `http_post`, …) | Every call to that tool | Saved for the directory |
+| A Git, Http or MCP action (`git_commit`, `http_post`, `github.create_issue`, …) | Every call to that tool (for MCP, that tool on that server) | Saved for the directory |
 
 "Always" isn't offered for a command it can't name with confidence: one that sets environment variables first (`LD_PRELOAD=… ls`), runs a program by path (`./build.sh`), or hides a command substitution in quotes. It is never offered for, and never answers, a prompt to grant a directory outside the sandbox. Hard denials (dangerous commands, credential files, deny rules) and the sandbox still apply to everything an "always" answer covers. The saved file belongs to you, so a cloned project can't grant itself anything. `/approvals` lists what's saved and what holds for this session; `/approvals clear` forgets all of it. Saved answers apply wherever the REPL asks, including the VS Code panel, which doesn't offer "always" itself.
 
@@ -723,7 +723,7 @@ Naming a file or directory with `@` hands it to the model with your message (`wh
 | Ctrl+Home / Ctrl+End | Jump to the top, or back to following new output |
 | Ctrl+F | Find text in the conversation (Enter or ↑ for older matches, ↓ for newer, Esc to close) |
 | Ctrl+R | Search earlier messages; the chosen one replaces the draft |
-| Ctrl+O | Show the latest tool output (with the arguments the call was made with), approval diff, or thinking in full, in place of the conversation: ←/→ for older and newer (the last 100 are kept), ↑/↓ and PgUp/PgDn to scroll, Esc to close |
+| Ctrl+O | Show the latest tool output (with the arguments the call was made with; an MCP server's JSON answer is indented), approval diff, or thinking in full, in place of the conversation: ←/→ for older and newer (the last 100 are kept), ↑/↓ and PgUp/PgDn to scroll, Esc to close |
 | Ctrl+U | Delete from the cursor to the start of the line |
 | Ctrl+C | Cancel the running turn (denying an open approval), else close or clear what's open; twice on an empty prompt exits |
 | Ctrl+D | Exit, on an empty prompt |
