@@ -723,7 +723,7 @@ Naming a file or directory with `@` hands it to the model with your message (`wh
 | Ctrl+Home / Ctrl+End | Jump to the top, or back to following new output |
 | Ctrl+F | Find text in the conversation (Enter or ↑ for older matches, ↓ for newer, Esc to close) |
 | Ctrl+R | Search earlier messages; the chosen one replaces the draft |
-| Ctrl+O | Show the latest tool output (with the arguments the call was made with), approval diff, or thinking in full, in place of the conversation: ←/→ for older and newer (the last 100 are kept), ↑/↓ and PgUp/PgDn to scroll, Esc to close |
+| Ctrl+O | Show the latest tool output (with the arguments the call was made with; an MCP server's JSON answer is indented), approval diff, or thinking in full, in place of the conversation: ←/→ for older and newer (the last 100 are kept), ↑/↓ and PgUp/PgDn to scroll, Esc to close |
 | Ctrl+U | Delete from the cursor to the start of the line |
 | Ctrl+C | Cancel the running turn (denying an open approval), else close or clear what's open; twice on an empty prompt exits |
 | Ctrl+D | Exit, on an empty prompt |

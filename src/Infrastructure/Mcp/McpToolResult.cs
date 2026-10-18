@@ -1,3 +1,4 @@
+using Microsoft.Extensions.AI;
 using System.Text;
 using System.Text.Json;
 
@@ -11,7 +12,25 @@ public static class McpToolResult
     /// (other content kinds as their JSON) and <paramref name="isError"/> its <c>isError</c> flag. Text after the
     /// result, such as a notice the REPL's loop guard appended, is kept at the end of the content.
     /// </summary>
-    public static bool TryRead(string? text, out string content, out bool isError)
+    /// <summary>
+    /// The text to show for a tool's result: the text of the content an MCP tool returned (as the SDK's
+    /// <see cref="TextContent"/>, a list of contents, or a CallToolResult's JSON), and any other result as its
+    /// string. With <paramref name="indentJson"/>, an MCP tool's JSON text is indented; a string result never is,
+    /// so a file a tool read is shown exactly as it is.
+    /// </summary>
+    public static string Display(object? result, bool indentJson = false) => result switch
+    {
+        null                         => "",
+        TextContent t                => indentJson ? Indented(t.Text) : t.Text,
+        DataContent d                => $"[{d.MediaType}]",
+        IEnumerable<AIContent> items => string.Join("\n", items.Select(i => Display(i, indentJson))),
+        _ => TryRead(result.ToString(), out var content, out _, indentJson) ? content : result.ToString() ?? "",
+    };
+
+    public static bool TryRead(string? text, out string content, out bool isError) =>
+        TryRead(text, out content, out isError, indentJson: false);
+
+    private static bool TryRead(string? text, out string content, out bool isError, bool indentJson)
     {
         content = "";
         isError = false;
@@ -32,7 +51,7 @@ public static class McpToolResult
                 parts.Add(item.ValueKind == JsonValueKind.Object &&
                           item.TryGetProperty("type", out var type) && type.ValueEquals("text") &&
                           item.TryGetProperty("text", out var t) && t.ValueKind == JsonValueKind.String
-                    ? t.GetString()!
+                    ? indentJson ? Indented(t.GetString()!) : t.GetString()!
                     : item.GetRawText());
             if (after.Length > 0)
                 parts.Add("\n" + after);
@@ -43,6 +62,25 @@ public static class McpToolResult
         catch (JsonException)
         {
             return false;
+        }
+    }
+
+    private static readonly JsonSerializerOptions IndentedOptions = new() { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+    // A server's JSON answer, often a single long line, laid out so it can be read. Anything else is left as sent.
+    private static string Indented(string text)
+    {
+        var trimmed = text.TrimStart();
+        if (!trimmed.StartsWith('{') && !trimmed.StartsWith('['))
+            return text;
+        try
+        {
+            using var doc = JsonDocument.Parse(text);
+            return JsonSerializer.Serialize(doc.RootElement, IndentedOptions);
+        }
+        catch (JsonException)
+        {
+            return text;
         }
     }
 }

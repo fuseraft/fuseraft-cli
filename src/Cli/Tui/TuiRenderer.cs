@@ -111,15 +111,14 @@ internal sealed class TuiRenderer(Transcript transcript, Func<int> width)
         lock (_lock)
         {
             var (title, arguments) = _calls.Remove(callId, out var started) ? started : (name, null);
-            if (McpToolResult.TryRead(result, out var content, out _))
-                result = content;
-            if (result.Length == 0)
-                result = "(no output)";
+            var shown = McpToolResult.Display(result, indentJson: true);
+            if (shown.Length == 0)
+                shown = "(no output)";
             // The arguments too, so what the call was asked to do can be read beside what it answered.
-            var text = string.IsNullOrEmpty(arguments) ? result : $"Arguments\n{Indent(arguments)}\n\nResult\n{Indent(result)}";
+            var text = string.IsNullOrEmpty(arguments) ? shown : $"Arguments\n{Indent(arguments)}\n\nResult\n{Indent(shown)}";
             Keep(new ToolOutput(ok ? title : title + " (failed)", text, Diff: false));
             if (!ok)
-                Line(Paint(T.Error, (agent is null ? "    " : "      ") + FirstLine(result)));
+                Line(Paint(T.Error, (agent is null ? "    " : "      ") + FirstLine(McpToolResult.Display(result))));
         }
     }
 
