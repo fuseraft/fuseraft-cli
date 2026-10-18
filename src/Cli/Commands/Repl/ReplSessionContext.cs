@@ -88,6 +88,9 @@ internal sealed class ReplSessionContext
     // /mcp add or /mcp login connects one mid-session (see ReplMcpApproval).
     public Func<string, Func<string, string, Task<bool>>>? ApproveToolAction { get; set; }
 
+    // --yolo (or repl.yolo): the session runs unattended, so a turn that hits a limit stops rather than asking.
+    public bool Yolo { get; set; }
+
     // Mutable provider state (may be replaced by /provider setup)
     private string _modelId = string.Empty;
     public string ModelId
