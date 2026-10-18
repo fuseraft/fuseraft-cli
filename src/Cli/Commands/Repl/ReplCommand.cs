@@ -628,12 +628,15 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                     AnsiConsole.MarkupLine($"[dim]Connecting MCP server '{Markup.Escape(server.Name)}'…[/]");
                     mcpManager ??= new McpSessionManager(loggerFactory);
                     var (_, mcpTools) = await mcpManager.ConnectSingleAsync(server, cancellationToken);
-                    toolsByCategory[$"mcp:{server.Name}"] = ReplMcpApproval.Gate(server.Name, mcpTools, approveToolAction($"MCP {server.Name}"));
+                    var manager = mcpManager;
+                    toolsByCategory[$"mcp:{server.Name}"] = ReplMcpApproval.Gate(server.Name,
+                        ReplMcpFailures.Wrap(server.Name, mcpTools, () => manager.IsRunning(server.Name)),
+                        approveToolAction($"MCP {server.Name}"));
                 }
                 catch (Exception ex)
                 {
                     AnsiConsole.MarkupLine(
-                        $"[yellow]⚠ Could not connect saved MCP server '{Markup.Escape(server.Name)}':[/] {Markup.Escape(ex.Message)}");
+                        $"[yellow]⚠ Could not connect saved MCP server '{Markup.Escape(server.Name)}':[/] {ReplCommands.ConnectFailure(ex, server)}");
                 }
             }
         }

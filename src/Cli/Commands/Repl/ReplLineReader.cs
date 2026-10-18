@@ -45,7 +45,7 @@ internal sealed class ReplLineReader
         ["/goal"]        = ["drop", "resume"],
         ["/hitl"]        = ["off", "on"],
         ["/max-tokens"]  = ["reset"],
-        ["/mcp"]         = ["add", "log", "login", "logout", "remove"],
+        ["/mcp"]         = ["add", "log", "login", "logout", "reconnect", "remove"],
         ["/memory"]      = ["delete", "list", "save", "show"],
         ["/provider"]    = ["setup"],
         ["/replay"]      = ["all"],

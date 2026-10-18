@@ -30,12 +30,13 @@ internal static partial class ReplCommands
             "login"  => await CmdMcpLoginAsync(ctx, rest, cancellationToken),
             "logout" => await CmdMcpLogoutAsync(ctx, rest),
             "log"    => CmdMcpLog(ctx, rest),
+            "reconnect" => await CmdMcpReconnectAsync(ctx, rest, cancellationToken),
             _        => Unknown(),
         };
 
         CommandResult Unknown()
         {
-            AnsiConsole.MarkupLine("[yellow]Usage:[/] /mcp | /mcp add [[--session-only]] | /mcp remove <name> | /mcp login <name> | /mcp logout <name> | /mcp log <name>");
+            AnsiConsole.MarkupLine("[yellow]Usage:[/] /mcp | /mcp add [[--session-only]] | /mcp remove <name> | /mcp reconnect <name> | /mcp login <name> | /mcp logout <name> | /mcp log <name>");
             return CommandResult.Continue;
         }
     }
@@ -81,7 +82,9 @@ internal static partial class ReplCommands
         foreach (var (category, tools) in servers)
         {
             var name = category[McpCategoryPrefix.Length..];
-            AnsiConsole.MarkupLine($"  [bold cyan]{Markup.Escape(name)}[/] [dim]({tools.Count} tool(s))[/]");
+            var stopped = ctx.McpManager?.IsRunning(name) == false;
+            AnsiConsole.MarkupLine($"  [bold cyan]{Markup.Escape(name)}[/] [dim]({tools.Count} tool(s))[/]" +
+                (stopped ? $" [yellow]not running[/] [dim]— /mcp reconnect {Markup.Escape(name)}[/]" : ""));
             foreach (var t in tools)
                 AnsiConsole.MarkupLine($"    [dim]·[/] {Markup.Escape(t.Name)}");
         }
@@ -191,7 +194,7 @@ internal static partial class ReplCommands
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]✗ Could not connect to '{Markup.Escape(name)}':[/] {Markup.Escape(ex.Message)}");
+            AnsiConsole.MarkupLine($"[red]✗ Could not connect to '{Markup.Escape(name)}':[/] {ConnectFailure(ex, config)}");
             return CommandResult.Continue;
         }
 
@@ -218,7 +221,9 @@ internal static partial class ReplCommands
     private static void ActivateMcpTools(ReplSessionContext ctx, string category, List<AIFunction> tools)
     {
         var server = category[McpCategoryPrefix.Length..];
-        var gated  = ReplMcpApproval.Gate(server, tools, ctx.ApproveToolAction?.Invoke($"MCP {server}"));
+        var gated  = ReplMcpApproval.Gate(server,
+            ReplMcpFailures.Wrap(server, tools, () => ctx.McpManager?.IsRunning(server) == true),
+            ctx.ApproveToolAction?.Invoke($"MCP {server}"));
         // Wrapped like the tools registered at startup, so an oversized result is offloaded here too.
         ctx.ToolsByCategory[category] = ctx.ToolArtifactStore is { } store
             ? [.. gated.Select(t => ReplSessionContext.WrapTool(t, ctx.Emitter, store))]
@@ -229,6 +234,67 @@ internal static partial class ReplCommands
         ctx.Client     = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, tools: activeTools, limits: ctx.Limits);
         ctx.StepClient = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, ReplTurn.StepIterationLimit, activeTools);
         ctx.ChatOptions = ctx.BuildChatOptions();
+    }
+
+    // Why a connect failed, as markup: every distinct message down the exception chain, since the outer one is often
+    // just "Failed to connect transport." while the inner one says the command wasn't found — and, for a stdio
+    // server, where its own explanation went.
+    internal static string ConnectFailure(Exception ex, McpServerConfig config)
+    {
+        var messages = new List<string>();
+        for (var e = ex; e is not null; e = e.InnerException)
+            if (!messages.Contains(e.Message))
+                messages.Add(e.Message);
+        var text = Markup.Escape(string.Join(": ", messages));
+        return config.Transport.Equals("stdio", StringComparison.OrdinalIgnoreCase)
+            ? text + $" [dim]/mcp log {Markup.Escape(config.Name)} shows what it wrote to stderr.[/]"
+            : text;
+    }
+
+    // Connects a server again as it was connected — a saved one or one added with --session-only — after its
+    // process exited or its connection dropped, without going through /mcp add again.
+    private static async Task<CommandResult> CmdMcpReconnectAsync(
+        ReplSessionContext ctx, string name, CancellationToken cancellationToken)
+    {
+        name = name.Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            AnsiConsole.MarkupLine("[yellow]Usage:[/] /mcp reconnect <name>");
+            return CommandResult.Continue;
+        }
+
+        var config = ctx.McpManager?.ConfigOf(name) ?? ReplMcpServerStore.Load()
+            .FirstOrDefault(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (config is null)
+        {
+            AnsiConsole.MarkupLine(
+                $"[yellow]No MCP server named '{Markup.Escape(name)}'.[/] [dim]Use /mcp add to configure one.[/]");
+            return CommandResult.Continue;
+        }
+
+        var category = $"{McpCategoryPrefix}{config.Name}";
+        if (ctx.ToolsByCategory.Remove(category))
+            ctx.ChatOptions = ctx.BuildChatOptions();
+        try { if (ctx.McpManager is not null) await ctx.McpManager.RemoveAsync(config.Name); }
+        catch { /* best-effort — the session being replaced has usually already ended */ }
+
+        AnsiConsole.MarkupLine($"[dim]Reconnecting '{Markup.Escape(config.Name)}'…[/]");
+        List<AIFunction> tools;
+        try
+        {
+            ctx.McpManager ??= new McpSessionManager();
+            var (_, connectedTools) = await ctx.McpManager.ConnectSingleAsync(config, cancellationToken);
+            tools = connectedTools.ToList();
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]✗ Could not reconnect '{Markup.Escape(config.Name)}':[/] {ConnectFailure(ex, config)}");
+            return CommandResult.Continue;
+        }
+
+        ActivateMcpTools(ctx, category, tools);
+        AnsiConsole.MarkupLine($"[green]Reconnected '{Markup.Escape(config.Name)}' — {tools.Count} tool(s) available.[/]");
+        return CommandResult.Continue;
     }
 
     private static async Task<CommandResult> CmdMcpLoginAsync(
@@ -272,7 +338,7 @@ internal static partial class ReplCommands
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]✗ Could not connect to '{Markup.Escape(config.Name)}':[/] {Markup.Escape(ex.Message)}");
+            AnsiConsole.MarkupLine($"[red]✗ Could not connect to '{Markup.Escape(config.Name)}':[/] {ConnectFailure(ex, config)}");
             return CommandResult.Continue;
         }
 

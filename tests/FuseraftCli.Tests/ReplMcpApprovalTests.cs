@@ -27,6 +27,7 @@ public sealed class ReplMcpApprovalTests : IAsyncLifetime
                 McpServerTool.Create((string title) => { _ran.Add("create " + title); return "created"; },
                     new() { Name = "create_issue" }),
                 McpServerTool.Create(() => new string('x', 500), new() { Name = "dump", ReadOnly = true }),
+                McpServerTool.Create(string () => throw new InvalidOperationException("disk full"), new() { Name = "explode", ReadOnly = true }),
                 McpServerTool.Create(() => "{\"rows\":[" + string.Join(",", Enumerable.Range(1, 20).Select(i => $"{{\"ID\":{i}}}")) + "]}",
                     new() { Name = "rows", ReadOnly = true }),
             ],
@@ -38,8 +39,11 @@ public sealed class ReplMcpApprovalTests : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        await _client.DisposeAsync();
-        await _server.DisposeAsync();
+        await _client.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        await _toServer.Writer.CompleteAsync();
+        await _toClient.Writer.CompleteAsync();
+        await _server.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        await _serverRun.WaitAsync(TimeSpan.FromSeconds(10));
     }
 
     private async Task<Dictionary<string, AIFunction>> GatedAsync(Func<string, string, Task<bool>>? approve) =>
@@ -133,6 +137,37 @@ public sealed class ReplMcpApprovalTests : IAsyncLifetime
         Assert.Single(lines, l => l.Trim() == "\"ID\": 17");
         Directory.Delete(dir, recursive: true);
         File.Delete(events);
+    }
+
+    // A tool that fails on the server answers with an error result, not an exception: that's left as it is.
+    [Fact]
+    public async Task A_servers_own_error_result_passes_through()
+    {
+        var tool = ReplMcpFailures.Wrap("gh", (await _client.ListToolsAsync()).Where(t => t.Name == "explode"), () => true).Single();
+
+        var result = (await tool.InvokeAsync(new()))?.ToString();
+
+        Assert.DoesNotContain("[ERROR] MCP", result);
+        Assert.True(ReplTurn.IsToolFailureText(result));
+    }
+
+    [Fact]
+    public void A_failure_names_the_tool_and_the_error_while_the_server_runs() =>
+        Assert.Equal("[ERROR] MCP tool 'query' on 'gh' failed: timed out", ReplMcpFailures.Describe("gh", "query", "timed out", running: true));
+
+    [Fact]
+    public async Task A_call_to_a_server_that_stopped_says_so_and_not_to_retry()
+    {
+        var tool = ReplMcpFailures.Wrap("gh", (await _client.ListToolsAsync()).Where(t => t.Name == "query"),
+            () => !_client.Completion.IsCompleted).Single();
+        // What the client sees when a server's process exits: its output ends.
+        await _toClient.Writer.CompleteAsync();
+        await _client.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var result = (await tool.InvokeAsync(new() { ["sql"] = "SELECT 1" }).AsTask().WaitAsync(TimeSpan.FromSeconds(5)))?.ToString();
+
+        Assert.StartsWith("[ERROR] MCP server 'gh' is no longer running", result);
+        Assert.Contains("/mcp reconnect gh", result);
     }
 
     [Fact]
