@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using fuseraft.Core.Models;
 
@@ -10,8 +11,8 @@ namespace fuseraft.Infrastructure.Memory;
 ///
 /// <para>
 /// The extraction prompt includes the existing memory index so the model can update
-/// existing entries in-place rather than creating duplicates. Network and JSON errors
-/// are swallowed so the calling session is never interrupted by a failed save.
+/// existing entries in-place rather than creating duplicates. A failed model call throws,
+/// so callers can tell it apart from an extraction that found nothing (and retry later).
 /// </para>
 /// <para>
 /// <see cref="ExtractAsync"/> returns <c>ParseFailed = true</c> when the model returned
@@ -37,18 +38,13 @@ public sealed class MemoryExtractor(IChatClient client)
         if (string.IsNullOrWhiteSpace(excerpt)) return ([], false);
 
         var prompt = BuildPrompt(excerpt, BuildIndex(existingMemories));
-        try
-        {
-            var response = await client.GetResponseAsync(
-                [new ChatMessage(ChatRole.User, prompt)],
-                cancellationToken: ct);
-            var raw     = response.Text ?? string.Empty;
-            var entries = Parse(raw);
-            var parseFailed = entries is null && !string.IsNullOrWhiteSpace(raw);
-            return (entries ?? [], parseFailed);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch { return ([], false); }
+        var response = await client.GetResponseAsync(
+            [new ChatMessage(ChatRole.User, prompt)],
+            cancellationToken: ct);
+        var raw     = response.Text ?? string.Empty;
+        var entries = Parse(raw);
+        var parseFailed = entries is null && !string.IsNullOrWhiteSpace(raw);
+        return (entries ?? [], parseFailed);
     }
 
     internal static string BuildExcerpt(IReadOnlyList<ChatMessage> history)
@@ -96,21 +92,32 @@ public sealed class MemoryExtractor(IChatClient client)
         return string.Join('\n', formatted);
     }
 
-    private const int MaxIndexChars = 4_000;
+    private const int MaxIndexChars = 16_000;
 
-    private static string BuildIndex(IReadOnlyList<MemoryEntry> memories)
+    // Lists the existing memories with their bodies, so that updating one (same name) can merge
+    // into what it already says rather than replace it with only the new facts. Once the budget
+    // runs short, an entry is listed by its header alone; every entry gets at least that, so the
+    // model never reuses a name it can't see and overwrites that memory unknowingly.
+    internal static string BuildIndex(IReadOnlyList<MemoryEntry> memories)
     {
         if (memories.Count == 0) return "(none)";
         var lines = new System.Text.StringBuilder();
-        var remaining = MaxIndexChars;
+        var remaining = MaxIndexChars - memories.Sum(m => Header(m).Length + 1);
         foreach (var m in memories)
         {
-            var line = $"- [{m.Name}] ({m.Type}): {m.Description}\n";
-            if (line.Length > remaining) break;
-            lines.Append(line);
-            remaining -= line.Length;
+            var header = Header(m);
+            var body   = string.Join('\n', m.Body.Split('\n').Select(l => $"    {l}"));
+            if (!string.IsNullOrWhiteSpace(m.Body) && body.Length + 1 <= remaining)
+            {
+                lines.Append(header).Append('\n').Append(body).Append('\n');
+                remaining -= body.Length + 1;
+            }
+            else
+                lines.Append(header).Append('\n');
         }
-        return lines.Length > 0 ? lines.ToString().TrimEnd() : "(none)";
+        return lines.ToString().TrimEnd();
+
+        static string Header(MemoryEntry m) => $"- [{m.Name}] ({m.Type}): {m.Description}";
     }
 
     internal static string BuildPrompt(string excerpt, string index)
@@ -140,7 +147,9 @@ public sealed class MemoryExtractor(IChatClient client)
           account data), or secrets (passwords, tokens, keys, connection strings)
         - Don't save what a future session can look up cheaply, such as a table's columns or a file's layout,
           unless the user asked for it to be remembered
-        - Update an existing memory (same name) only when there is new or corrected information
+        - Update an existing memory (same name) only when there is new or corrected information. An update
+          replaces the stored memory, so its body must keep everything still true from the existing body
+        - Use a new name for a new fact; reusing an existing name overwrites that memory
         - Return an empty array if nothing worth saving was found
         - Output ONLY valid JSON — no prose, no markdown fences
 
@@ -156,40 +165,54 @@ public sealed class MemoryExtractor(IChatClient client)
         """;
     }
 
-    // Returns null when parsing fails (malformed JSON found but undeserializable),
-    // distinguishing a true parse failure from a successful extraction that found nothing.
-    // Returns [] when the model produced no JSON array at all (prose "nothing to save" responses).
+    // Returns null when no JSON array could be parsed (malformed JSON, or prose with no array),
+    // distinguishing a parse failure from a successful extraction that found nothing ([]).
     internal static List<MemoryEntry>? Parse(string text)
     {
         var t = StripCodeFences(text.Trim());
 
-        var s = t.LastIndexOf('[');
         var e = t.LastIndexOf(']');
-        if (s < 0 || e <= s) return null;
+        if (e < 0) return null;
 
-        try
+        // The array starts at some '[' before the last ']', but not necessarily the first one
+        // (prose like "these [important] things" can precede it) or the last one (a body can
+        // contain brackets). Take the first '[' from which the rest parses as the array.
+        List<ExtractionDto>? items = null;
+        var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+        for (var s = t.IndexOf('['); s >= 0 && s < e; s = t.IndexOf('[', s + 1))
         {
-            var opts  = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            var items = JsonSerializer.Deserialize<List<ExtractionDto>>(t[s..(e + 1)], opts) ?? [];
-            return items
-                .Where(i => !string.IsNullOrWhiteSpace(i.Name) && !string.IsNullOrWhiteSpace(i.Body))
-                .Select(i => new MemoryEntry
-                {
-                    Name        = i.Name.Trim(),
-                    Description = (i.Description ?? string.Empty).Trim(),
-                    Type        = i.Type?.ToLowerInvariant() switch
-                    {
-                        "user"      => "user",
-                        "feedback"  => "feedback",
-                        "reference" => "reference",
-                        _           => "project",
-                    },
-                    Body = i.Body.Trim(),
-                })
-                .ToList();
+            try
+            {
+                items = JsonSerializer.Deserialize<List<ExtractionDto>>(t[s..(e + 1)], opts) ?? [];
+                break;
+            }
+            catch (JsonException) { }
         }
-        catch (JsonException) { return null; }
+        if (items is null) return null;
+
+        return items
+            .Where(i => !string.IsNullOrWhiteSpace(i.Body))
+            .Select(i => new MemoryEntry
+            {
+                // Name and description are written as frontmatter lines and as the index's
+                // "- [name](file)" link, so a line break or a bracket in them would corrupt both.
+                Name        = SingleLine(Regex.Replace(i.Name, @"[\[\]()]", string.Empty)),
+                Description = SingleLine(i.Description ?? string.Empty),
+                Type        = i.Type?.ToLowerInvariant() switch
+                {
+                    "user"      => "user",
+                    "feedback"  => "feedback",
+                    "reference" => "reference",
+                    _           => "project",
+                },
+                Body = i.Body.Trim(),
+            })
+            .Where(m => m.Name.Length > 0)
+            .ToList();
     }
+
+    private static string SingleLine(string s) =>
+        string.Join(' ', s.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
     private static string StripCodeFences(string text)
     {

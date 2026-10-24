@@ -260,55 +260,72 @@ internal static partial class ReplCommands
 
         var messages = new List<ChatMessage>(toSummarize) { new ChatMessage(ChatRole.User, compactionPrompt) };
 
-        string summary;
+        // The summary replaces the older turns, so save their memories first. It runs alongside
+        // the summary call and must finish before ctx.History changes, since it reads (and
+        // checkpoints) the history as it stands now.
+        var memorySave = ReplTurn.SaveMemoriesBeforeDiscardAsync(ctx, quiet: true, cancellationToken);
         try
         {
-            // Route through ctx.Client rather than a bare ctx.Factory.Create client: this call
-            // fires exactly when history is largest (75%+ of budget, or a forced post-overflow
-            // recovery), so it needs the same AgentMiddlewareBuilder adaptive-trim-and-retry
-            // protection normal turns get. No ChatOptions/tools are passed, so the wrapped
-            // FunctionInvokingChatClient just runs a single pass-through round — it never invokes
-            // a tool mid-summarization.
-            var response = await ctx.Client.GetResponseAsync(messages, cancellationToken: cancellationToken);
-            summary      = response.Text ?? string.Empty;
+            return await ReplaceWithSummaryAsync();
         }
-        catch (OperationCanceledException) { return (false, "cancelled", 0, 0); }
-        catch (Exception ex)               { return (false, ex.Message,   0, 0); }
-
-        if (string.IsNullOrWhiteSpace(summary)) return (false, "empty", 0, 0);
-
-        var candidate = new List<ChatMessage>();
-        if (sys is not null) candidate.Add(sys);
-        candidate.Add(new ChatMessage(ChatRole.User, $"{CompactedContextPrefix}\n\n{summary}"));
-        candidate.AddRange(preservedTail);
-
-        // Acceptance bar (mirrors Cline's overflow-recovery contract): a compaction that
-        // doesn't actually shrink the history isn't worth the fidelity loss + LLM round-trip
-        // it cost — reject it and leave ctx.History untouched rather than silently accepting
-        // a "compaction" that made things worse or no better.
-        var afterMsgTokens  = EstimateMessageListTokens(candidate);
-        var beforeMsgTokens = EstimateMessageListTokens(ctx.History);
-        if (afterMsgTokens >= beforeMsgTokens)
-            return (false, "not_smaller", beforeEst, afterMsgTokens);
-
-        ctx.History.Clear();
-        ctx.History.AddRange(candidate);
-
-        ctx.PrevTurnTokenEstimate = 0;
-        ctx.PrevCtxEstimate       = 0;
-        ctx.TurnTokenDeltas.Clear();
-        ctx.ContextWarningShown   = false;
-        ctx.ResetPlanState();
-
-        var afterEst = ctx.EstimateTokens();
-        await ctx.Emitter.EmitAsync(EventTypes.Compaction, payload: new
+        finally
         {
-            source,
-            before_tokens = beforeEst,
-            after_tokens  = afterEst,
-            focus,
-        });
-        return (true, null, beforeEst, afterEst);
+            await memorySave;
+        }
+
+        async Task<(bool, string?, int, int)> ReplaceWithSummaryAsync()
+        {
+            string summary;
+            try
+            {
+                // Route through ctx.Client rather than a bare ctx.Factory.Create client: this call
+                // fires exactly when history is largest (75%+ of budget, or a forced post-overflow
+                // recovery), so it needs the same AgentMiddlewareBuilder adaptive-trim-and-retry
+                // protection normal turns get. No ChatOptions/tools are passed, so the wrapped
+                // FunctionInvokingChatClient just runs a single pass-through round — it never invokes
+                // a tool mid-summarization.
+                var response = await ctx.Client.GetResponseAsync(messages, cancellationToken: cancellationToken);
+                summary      = response.Text ?? string.Empty;
+            }
+            catch (OperationCanceledException) { return (false, "cancelled", 0, 0); }
+            catch (Exception ex)               { return (false, ex.Message,   0, 0); }
+
+            if (string.IsNullOrWhiteSpace(summary)) return (false, "empty", 0, 0);
+
+            var candidate = new List<ChatMessage>();
+            if (sys is not null) candidate.Add(sys);
+            candidate.Add(new ChatMessage(ChatRole.User, $"{CompactedContextPrefix}\n\n{summary}"));
+            candidate.AddRange(preservedTail);
+
+            // Acceptance bar (mirrors Cline's overflow-recovery contract): a compaction that
+            // doesn't actually shrink the history isn't worth the fidelity loss + LLM round-trip
+            // it cost — reject it and leave ctx.History untouched rather than silently accepting
+            // a "compaction" that made things worse or no better.
+            var afterMsgTokens  = EstimateMessageListTokens(candidate);
+            var beforeMsgTokens = EstimateMessageListTokens(ctx.History);
+            if (afterMsgTokens >= beforeMsgTokens)
+                return (false, "not_smaller", beforeEst, afterMsgTokens);
+
+            await memorySave;
+            ctx.History.Clear();
+            ctx.History.AddRange(candidate);
+
+            ctx.PrevTurnTokenEstimate = 0;
+            ctx.PrevCtxEstimate       = 0;
+            ctx.TurnTokenDeltas.Clear();
+            ctx.ContextWarningShown   = false;
+            ctx.ResetPlanState();
+
+            var afterEst = ctx.EstimateTokens();
+            await ctx.Emitter.EmitAsync(EventTypes.Compaction, payload: new
+            {
+                source,
+                before_tokens = beforeEst,
+                after_tokens  = afterEst,
+                focus,
+            });
+            return (true, null, beforeEst, afterEst);
+        }
     }
 
     // -------------------------------------------------------------------------

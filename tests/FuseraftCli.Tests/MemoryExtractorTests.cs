@@ -215,4 +215,87 @@ public sealed class MemoryExtractorTests
         var excerpt = MemoryExtractor.BuildExcerpt(history);
         Assert.Equal(string.Empty, excerpt);
     }
+
+    [Fact]
+    public void Parse_BodyContainsBrackets_ExtractsArray()
+    {
+        var text = """[{"name":"k","description":"d","type":"project","body":"Use [x] and see [docs](https://example.com)."}]""";
+        var result = MemoryExtractor.Parse(text);
+        Assert.NotNull(result);
+        Assert.Equal("Use [x] and see [docs](https://example.com).", Assert.Single(result!).Body);
+    }
+
+    [Fact]
+    public void Parse_ProseBracketsAndBodyBrackets_ExtractsArray()
+    {
+        var text = """Saving [two] things: [{"name":"k","description":"d","type":"project","body":"see [x]"}]""";
+        var result = MemoryExtractor.Parse(text);
+        Assert.NotNull(result);
+        Assert.Equal("k", Assert.Single(result!).Name);
+    }
+
+    [Fact]
+    public void Parse_NameAndDescriptionWithLineBreaksOrBrackets_AreMadeSafeForFrontmatterAndIndex()
+    {
+        var json = """[{"name":"[odd](name)\nsecond","description":"line one\nline two","type":"user","body":"b"}]""";
+        var entry = Assert.Single(MemoryExtractor.Parse(json)!);
+        Assert.Equal("oddname second", entry.Name);
+        Assert.Equal("line one line two", entry.Description);
+    }
+
+    [Fact]
+    public void Parse_NameOfOnlyBrackets_FiltersEntry()
+    {
+        var result = MemoryExtractor.Parse("""[{"name":"[]","description":"d","type":"user","body":"b"}]""");
+        Assert.NotNull(result);
+        Assert.Empty(result!);
+    }
+
+    // BuildIndex
+
+    [Fact]
+    public void BuildIndex_IncludesExistingBodies()
+    {
+        var index = MemoryExtractor.BuildIndex([Memory("prefs", "Likes tabs.\nHates trailing commas.")]);
+        Assert.Contains("- [prefs] (user): prefs description", index);
+        Assert.Contains("    Likes tabs.", index);
+        Assert.Contains("    Hates trailing commas.", index);
+    }
+
+    [Fact]
+    public void BuildIndex_OverBudget_StillListsEveryName()
+    {
+        var memories = Enumerable.Range(0, 40).Select(i => Memory($"m{i:D2}", new string('x', 2_000))).ToList();
+        var index = MemoryExtractor.BuildIndex(memories);
+        foreach (var m in memories)
+            Assert.Contains($"- [{m.Name}]", index);
+        Assert.True(index.Length < 20_000, $"Index length {index.Length} exceeds budget");
+    }
+
+    // ExtractAsync
+
+    [Fact]
+    public async Task ExtractAsync_ModelCallFails_Throws()
+    {
+        var extractor = new MemoryExtractor(new ThrowingClient());
+        await Assert.ThrowsAsync<HttpRequestException>(() =>
+            extractor.ExtractAsync([new(ChatRole.User, "remember I like tabs")], []));
+    }
+
+    private static MemoryEntry Memory(string name, string body) =>
+        new() { Name = name, Description = $"{name} description", Type = "user", Body = body };
+
+    private sealed class ThrowingClient : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+            => throw new HttpRequestException("401 Unauthorized");
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? key = null) => null;
+        public void Dispose() { }
+    }
 }

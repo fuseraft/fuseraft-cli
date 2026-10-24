@@ -689,7 +689,8 @@ internal static class ReplTurn
                 todoItems:       ctx.Todo?.Snapshot() is { Count: > 0 } todoItems
                                  ? [.. todoItems]
                                  : null,
-                goal:            ctx.LastGoal?.ToSaved());
+                goal:            ctx.LastGoal?.ToSaved(),
+                lastExtractedTurnIndex: ctx.LastExtractedTurnIndex >= 0 ? ctx.LastExtractedTurnIndex : null);
             await ReplSessionSnapshot.SaveAsync(snap);
         }
         catch { }
@@ -2048,34 +2049,82 @@ internal static class ReplTurn
             hitTurnTokenBudget);
     }
 
-    internal static async Task ExtractMemoriesOnExitAsync(ReplSessionContext ctx)
+    /// <summary>
+    /// Extracts memories from the current history and saves them to the workspace. On success
+    /// (anything but unparseable output) records the turn as extracted and checkpoints the
+    /// session, so neither the exit save nor a later resume re-extracts the same history.
+    /// Throws when the model call fails, so callers can say so.
+    /// </summary>
+    internal static async Task<(int Saved, bool ParseFailed)> ExtractMemoriesAsync(
+        ReplSessionContext ctx, CancellationToken ct = default)
     {
-        if (ctx.TurnIndex == 0 || ctx.LastExtractedTurnIndex == ctx.TurnIndex) return;
+        var history   = ctx.History.ToList();
+        var turnIndex = ctx.TurnIndex;
+        var memoryModelCfg = ctx.UserCfg?.Memory is { Model: { Length: > 0 } mm } mem
+            ? ReplFactory.ResolveOverrideModel(ctx.Factory, ctx.ModelConfig, mm, mem.Provider, mem.Endpoint, mem.ApiKeyEnvVar)
+            : ctx.ModelConfig;
+        var mc = ctx.Factory.Create(memoryModelCfg);
+        using var _ = mc as IDisposable;
+        var existing             = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd, ct);
+        var (saved, parseFailed) = await new MemoryExtractor(mc).ExtractAsync(history, existing, ct);
+        foreach (var m in saved) await ctx.MemoryStore.SaveAsync(m, ctx.Cwd, sessionId: ctx.SessionId, ct: ct);
+        if (saved.Count > 0)
+            ctx.MemoryCount = (await ctx.MemoryStore.LoadAllAsync(ctx.Cwd, ct)).Count;
+        if (!parseFailed)
+        {
+            ctx.LastExtractedTurnIndex = turnIndex;
+            await SaveSnapshotAsync(ctx);
+        }
+        return (saved.Count, parseFailed);
+    }
+
+    /// <summary>True when the history holds turns whose memories haven't been extracted yet.</summary>
+    internal static bool HasUnextractedTurns(ReplSessionContext ctx) =>
+        ctx.TurnIndex > 0 && ctx.LastExtractedTurnIndex != ctx.TurnIndex;
+
+    /// <summary>
+    /// Saves memories before the history is thrown away (/clear, /switch, /provider setup, or
+    /// compaction folding old turns into a summary), so those turns aren't lost to memory.
+    /// Never throws. <paramref name="quiet"/> keeps it off the console, for callers that are
+    /// showing their own progress line.
+    /// </summary>
+    internal static async Task SaveMemoriesBeforeDiscardAsync(
+        ReplSessionContext ctx, bool quiet = false, CancellationToken ct = default)
+    {
+        if (!HasUnextractedTurns(ctx)) return;
+        var show = !quiet && !ctx.JsonMode;
         try
         {
-            if (!ctx.JsonMode) AnsiConsole.Markup("[dim]saving memory…[/]");
-            var memoryModelCfg = ctx.UserCfg?.Memory is { Model: { Length: > 0 } mm } mem
-                ? ReplFactory.ResolveOverrideModel(ctx.Factory, ctx.ModelConfig, mm, mem.Provider, mem.Endpoint, mem.ApiKeyEnvVar)
-                : ctx.ModelConfig;
-            var mc = ctx.Factory.Create(memoryModelCfg);
-            using var _ = mc as IDisposable;
-            var existing = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd, ctx.SessionId);
-            var (saved, parseFailed) = await new MemoryExtractor(mc).ExtractAsync([.. ctx.History], existing);
-            if (!ctx.JsonMode) ReplConsole.ClearLine(30);
-            foreach (var m in saved) await ctx.MemoryStore.SaveAsync(m, ctx.Cwd, sessionId: ctx.SessionId);
-            if (!ctx.JsonMode)
+            if (show) AnsiConsole.Markup("[dim]saving memory…[/]");
+            var (saved, parseFailed) = await ExtractMemoriesAsync(ctx, ct);
+            if (show)
             {
+                ReplConsole.ClearLine(30);
                 if (parseFailed)
                     AnsiConsole.MarkupLine("[dim](memory extraction returned unparseable output)[/]");
-                else if (saved.Count > 0)
-                    AnsiConsole.MarkupLine(
-                        $"[dim]Memory: {saved.Count} entr{(saved.Count == 1 ? "y" : "ies")} saved.[/]");
+                else if (saved > 0)
+                    AnsiConsole.MarkupLine($"[dim]Memory: {saved} entr{(saved == 1 ? "y" : "ies")} saved.[/]");
             }
         }
-        catch
+        catch (Exception ex)
         {
-            if (!ctx.JsonMode) ReplConsole.ClearLine(30);
+            if (show)
+            {
+                ReplConsole.ClearLine(30);
+                AnsiConsole.MarkupLine(ex is OperationCanceledException
+                    ? "[dim]Memory not saved: timed out.[/]"
+                    : $"[dim]Memory not saved: {Markup.Escape(ex.Message)}[/]");
+            }
         }
+    }
+
+    // How long the exit save may take before the session ends without it.
+    private static readonly TimeSpan ExitExtractionTimeout = TimeSpan.FromSeconds(60);
+
+    internal static async Task ExtractMemoriesOnExitAsync(ReplSessionContext ctx)
+    {
+        using var cts = new CancellationTokenSource(ExitExtractionTimeout);
+        await SaveMemoriesBeforeDiscardAsync(ctx, ct: cts.Token);
     }
 
     // -------------------------------------------------------------------------

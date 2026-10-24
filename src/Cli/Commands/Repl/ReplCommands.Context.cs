@@ -357,10 +357,13 @@ internal static partial class ReplCommands
             return CommandResult.Continue;
         }
 
+        await ReplTurn.SaveMemoriesBeforeDiscardAsync(ctx);
+
         var sys = ctx.History.FirstOrDefault(m => m.Role == ChatRole.System);
         ctx.History.Clear();
         if (sys is not null) ctx.History.Add(sys);
         ctx.TurnIndex    = 0;
+        ctx.LastExtractedTurnIndex = -1;
         ctx.PendingSave  = false;
         UserConfigStore.Save(ctx.UserCfg);
         AnsiConsole.MarkupLine($"[dim]Settings saved to[/] [bold]{Markup.Escape(UserConfigStore.ConfigPath)}[/]");

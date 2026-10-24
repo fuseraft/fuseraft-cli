@@ -352,12 +352,9 @@ The `{AgentName}` component is sanitized so it is safe as a directory name. Agen
 
 The REPL always loads and saves memories automatically — no config flag is needed. Each REPL memory entry is identified by a UUID (stored in the file's frontmatter and used as its filename).
 
-Memories are **scoped to the working directory** where they were created. A file at `~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json` records the GUIDs of memories saved in that session. On session start the REPL loads only the entries listed in that file:
+Memories are **scoped to the working directory** where they were created. A file at `~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json` records the GUIDs of memories saved in that session, and on session start the REPL loads the entries listed by every session of the directory, and none from other directories.
 
-- Directories with a `.fuseraft/` folder but no refs file start with an empty memory set.
-- Directories without a `.fuseraft/` folder fall back to loading all global memories (useful outside a project context).
-
-When the session ends, the model is asked to extract new memories from the conversation. Each saved entry is written to the global store and its GUID is registered in the local refs file. Use `/memory` commands to manage them. See [CLI Reference — `/memory`](cli-reference.md#memory-commands).
+When the session ends, and before `/clear`, `/switch`, `/provider setup` or compaction discards the conversation, the model is asked to extract new memories from it. Each saved entry is written to the global store and its GUID is registered in the session's refs file. Use `/memory` commands to manage them. See [CLI Reference — `/memory`](cli-reference.md#memory-commands).
 
 By default this extraction call reuses the REPL's main chat model. Set `memory.model` in `~/.fuseraft/config` to run it on a different model instead — e.g. a smaller/cheaper one, since extraction doesn't need the same capability as the main conversation:
 

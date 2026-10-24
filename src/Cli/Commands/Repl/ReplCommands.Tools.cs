@@ -403,7 +403,7 @@ internal static partial class ReplCommands
 
         if (string.IsNullOrEmpty(arg) || sub == "list")
         {
-            var all = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd, ctx.SessionId);
+            var all = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd);
             if (all.Count == 0)
                 AnsiConsole.MarkupLine("[dim]No memories stored. They are saved automatically on /exit.[/]");
             else
@@ -422,7 +422,7 @@ internal static partial class ReplCommands
             }
             else
             {
-                var all   = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd, ctx.SessionId);
+                var all   = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd);
                 var found = all.FirstOrDefault(e => e.Name.Equals(memArg, StringComparison.OrdinalIgnoreCase));
                 if (found is null)
                 {
@@ -453,7 +453,8 @@ internal static partial class ReplCommands
             }
             else
             {
-                var deleted = await ctx.MemoryStore.DeleteAsync(memArg, ctx.Cwd, sessionId: ctx.SessionId);
+                var deleted = await ctx.MemoryStore.DeleteAsync(memArg, ctx.Cwd);
+                if (deleted) ctx.MemoryCount = (await ctx.MemoryStore.LoadAllAsync(ctx.Cwd)).Count;
                 AnsiConsole.MarkupLine(deleted
                     ? $"[dim]Deleted memory '{Markup.Escape(memArg)}'.[/]"
                     : $"[yellow]No memory named '{Markup.Escape(memArg)}'.[/]");
@@ -471,23 +472,15 @@ internal static partial class ReplCommands
                 if (!ctx.JsonMode) AnsiConsole.Markup("[dim]extracting memories…[/]");
                 try
                 {
-                    var memoryModelCfg = ctx.UserCfg?.Memory is { Model: { Length: > 0 } mm } mem
-                        ? ReplFactory.ResolveOverrideModel(ctx.Factory, ctx.ModelConfig, mm, mem.Provider, mem.Endpoint, mem.ApiKeyEnvVar)
-                        : ctx.ModelConfig;
-                    var mc = ctx.Factory.Create(memoryModelCfg);
-                    using var _ = mc as IDisposable;
-                    var existing             = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd, ctx.SessionId);
-                    var (saved, parseFailed) = await new MemoryExtractor(mc).ExtractAsync([.. ctx.History], existing);
+                    var (saved, parseFailed) = await ReplTurn.ExtractMemoriesAsync(ctx, cancellationToken);
                     if (!ctx.JsonMode) ReplConsole.ClearLine(30);
-                    foreach (var m in saved) await ctx.MemoryStore.SaveAsync(m, ctx.Cwd, sessionId: ctx.SessionId);
                     AnsiConsole.MarkupLine(parseFailed
                         ? "[dim](extraction returned unparseable output — memories may not have been saved)[/]"
-                        : saved.Count > 0
-                            ? $"[dim]{saved.Count} memor{(saved.Count == 1 ? "y" : "ies")} saved.[/]"
+                        : saved > 0
+                            ? $"[dim]{saved} memor{(saved == 1 ? "y" : "ies")} saved.[/]"
                             : "[dim]Nothing worth saving found.[/]");
-                    ctx.LastExtractedTurnIndex = ctx.TurnIndex;
                     await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new
-                        { command = "/memory save", saved = saved.Count, parseFailed });
+                        { command = "/memory save", saved, parseFailed });
                 }
                 catch (Exception ex)
                 {

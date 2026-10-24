@@ -162,6 +162,9 @@ internal static partial class ReplCommands
             return CommandResult.Continue;
         }
 
+        // Switching away discards this session's history from the REPL, so save its memories first.
+        await ReplTurn.SaveMemoriesBeforeDiscardAsync(ctx, ct: cancellationToken);
+
         var prevId    = ctx.SessionId;
         var prevModel = ctx.ModelId;
 
@@ -205,7 +208,7 @@ internal static partial class ReplCommands
         ctx.PrevTurnTokenEstimate  = 0;
         ctx.PrevCtxEstimate        = 0;
         ctx.TurnTokenDeltas.Clear();
-        ctx.LastExtractedTurnIndex = -1;
+        ctx.LastExtractedTurnIndex = snapshot.LastExtractedTurnIndex ?? -1;
         ctx.ContextWarningShown    = false;
         ctx.ResetPlanState();
         ctx.LastGoal = GoalRecord.FromSaved(snapshot.Goal);
