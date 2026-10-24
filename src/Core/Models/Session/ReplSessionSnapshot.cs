@@ -65,6 +65,11 @@ public sealed record ReplSessionSnapshot
     public DateTime LastUpdatedAt { get; set;  } = DateTime.UtcNow;
     public int      TurnIndex     { get; set;  }
 
+    // The TurnIndex memories were last extracted at, so resuming and exiting without a new
+    // turn doesn't re-run extraction over history that was already extracted. Null (older
+    // snapshots) means never.
+    public int?     LastExtractedTurnIndex { get; init; }
+
     public List<ReplSerializedMessage> History { get; init; } = [];
 
     // Plan execution state — persisted so a crash mid-plan can be recovered on --resume.
@@ -93,7 +98,8 @@ public sealed record ReplSessionSnapshot
         string[]?        haltedToolCalls = null,
         string?          recoveryHint    = null,
         TodoItem[]?      todoItems       = null,
-        SavedGoal?       goal            = null) => new()
+        SavedGoal?       goal            = null,
+        int?             lastExtractedTurnIndex = null) => new()
     {
         SessionId       = sessionId,
         ModelId         = modelId,
@@ -109,6 +115,7 @@ public sealed record ReplSessionSnapshot
         RecoveryHint    = recoveryHint,
         TodoItems       = todoItems,
         Goal            = goal,
+        LastExtractedTurnIndex = lastExtractedTurnIndex,
     };
 
     /// <summary>Restores the serialized history as live ChatMessage objects.</summary>

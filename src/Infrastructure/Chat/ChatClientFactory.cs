@@ -297,7 +297,7 @@ public sealed class ChatClientFactory(
                 var anthropicClient = new AnthropicClient(apiKey, _components.Client);
                 if (!string.IsNullOrEmpty(config.Endpoint) && config.Endpoint != AnthropicDefaultEndpoint)
                     anthropicClient.ApiUrlFormat = config.Endpoint.TrimEnd('/') + "/{0}/{1}";
-                return new AnthropicPromptCachingChatClient(anthropicClient);
+                return new AnthropicPromptCachingChatClient(anthropicClient, config.ModelId);
 
             default: // "openai", "google", "mistral" + every other OpenAI-compatible endpoint
                 if (string.IsNullOrEmpty(config.Endpoint))

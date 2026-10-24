@@ -63,4 +63,27 @@ public sealed class ReplSessionSnapshotTests
         Assert.Equal("Map request flow", restored.TodoItems![1].Content);
         Assert.Equal("in_progress", restored.TodoItems![1].Status);
     }
+
+    [Fact]
+    public void LastExtractedTurnIndex_SurvivesJsonRoundTrip()
+    {
+        var snap = ReplSessionSnapshot.Capture(
+            "session-1", "gpt-4o-mini", "/tmp",
+            turnIndex: 4, history: SampleHistory, startedAt: DateTime.UtcNow,
+            lastExtractedTurnIndex: 4);
+
+        var restored = JsonSerializer.Deserialize<ReplSessionSnapshot>(JsonSerializer.Serialize(snap));
+
+        Assert.Equal(4, restored!.LastExtractedTurnIndex);
+    }
+
+    [Fact]
+    public void LastExtractedTurnIndex_MissingFromOlderSnapshot_IsNull()
+    {
+        const string json = """{"SessionId":"s","ModelId":"m","Cwd":"/tmp","TurnIndex":3,"History":[]}""";
+
+        var restored = JsonSerializer.Deserialize<ReplSessionSnapshot>(json);
+
+        Assert.Null(restored!.LastExtractedTurnIndex);
+    }
 }

@@ -22,10 +22,10 @@ namespace fuseraft.Infrastructure.Memory;
 ///
 /// <para>
 /// When a <c>localCwd</c> is supplied to load/save methods, memories are scoped to
-/// that directory via <c>.fuseraft/memory/sessions/{session_id}/memory_refs.json</c>, which records the GUIDs of
-/// entries saved there. Directories that contain a <c>.fuseraft/</c> folder but no
-/// refs file start with an empty memory set; directories without <c>.fuseraft/</c>
-/// fall back to loading all globals (legacy behaviour).
+/// that directory's workspace: each session records the GUIDs it saved in
+/// <c>~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json</c>, and a load
+/// returns the union of every session's refs for the workspace. Names are unique within a
+/// workspace, not across the store, so two projects can each keep a memory with the same name.
 /// </para>
 /// </summary>
 public sealed class MemoryStore
@@ -77,12 +77,10 @@ public sealed class MemoryStore
     }
 
     /// <summary>
-    /// Loads only the memories whose GUIDs are listed in
-    /// <c>{localCwd}/.fuseraft/memory/sessions/{session_id}/memory_refs.json</c>. Falls back to loading all
-    /// globals when <c>.fuseraft/</c> does not exist in <paramref name="localCwd"/>.
+    /// Loads the memories saved by any session in <paramref name="localCwd"/>'s workspace.
     /// </summary>
-    public Task<List<MemoryEntry>> LoadAllAsync(string localCwd, string? sessionId = null, CancellationToken ct = default)
-        => LoadByCwdAsync(localCwd, sessionId, ct);
+    public Task<List<MemoryEntry>> LoadAllAsync(string localCwd, CancellationToken ct = default)
+        => LoadFromWorkspaceSessionsAsync(localCwd, ct);
 
     /// <summary>
     /// Synchronous variant for callers that cannot await (e.g. synchronous factory methods).
@@ -115,13 +113,12 @@ public sealed class MemoryStore
     }
 
     /// <summary>
-    /// Loads memories scoped to <paramref name="localCwd"/> (via its
-    /// <c>.fuseraft/memory/sessions/{session_id}/memory_refs.json</c>) and formats them as a prompt block.
+    /// Loads the memories of <paramref name="localCwd"/>'s workspace and formats them as a prompt block.
     /// </summary>
-    public async Task<string?> BuildPromptBlockAsync(string localCwd, string? sessionId = null, CancellationToken ct = default)
+    public async Task<string?> BuildPromptBlockAsync(string localCwd, CancellationToken ct = default)
     {
         const int MaxChars = 8_000;
-        var entries = await LoadAllAsync(localCwd, sessionId, ct);
+        var entries = await LoadAllAsync(localCwd, ct);
         return entries.Count == 0 ? null : FormatPromptBlock(entries, MaxChars, []);
     }
 
@@ -194,10 +191,12 @@ public sealed class MemoryStore
     {
         // Reuse an existing GUID when a same-named entry is already stored so that
         // repeated saves of the same memory update the file in-place rather than
-        // creating orphaned files and duplicate refs.
+        // creating orphaned files and duplicate refs. With a localCwd, only that workspace's
+        // entries count: a same-named memory of another project must not be overwritten.
         if (string.IsNullOrEmpty(entry.Guid))
         {
-            var prior = (await LoadAllAsync(ct))
+            var candidates = localCwd is not null ? await LoadAllAsync(localCwd, ct) : await LoadAllAsync(ct);
+            var prior = candidates
                 .FirstOrDefault(e => e.Name.Equals(entry.Name, StringComparison.OrdinalIgnoreCase));
             if (prior is not null && !string.IsNullOrEmpty(prior.Guid))
                 entry = entry with { Guid = prior.Guid };
@@ -212,7 +211,7 @@ public sealed class MemoryStore
             Directory.CreateDirectory(_dir);
             var fileName = $"memory_{guid}.md";
             var path     = Path.Combine(_dir, fileName);
-            await File.WriteAllTextAsync(path, FormatFile(entry), ct);
+            await WriteAtomicAsync(path, FormatFile(entry), ct);
             await UpsertIndexLineAsync(entry, fileName, ct);
         }
         finally { _lock.Release(); }
@@ -223,13 +222,13 @@ public sealed class MemoryStore
         return guid;
     }
 
-    public async Task<bool> DeleteAsync(string name, string? localCwd = null, string? sessionId = null, CancellationToken ct = default)
+    public async Task<bool> DeleteAsync(string name, string? localCwd = null, CancellationToken ct = default)
     {
         // Look up by stored Name (case-insensitive) so the caller doesn't need
         // to know the exact casing or SafeFileName transformation that was used.
         // Load before acquiring the lock to avoid holding it during directory enumeration.
         var entries = localCwd is not null
-            ? await LoadAllAsync(localCwd, sessionId, ct)
+            ? await LoadAllAsync(localCwd, ct)
             : await LoadAllAsync(ct);
         var entry = entries.FirstOrDefault(e => e.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
         if (entry is null) return false;
@@ -239,61 +238,33 @@ public sealed class MemoryStore
         {
             var path = Path.Combine(_dir, entry.FilePath);
             if (File.Exists(path)) File.Delete(path);
-            await RemoveIndexLineAsync(entry.Name, ct);
+            await RemoveIndexLineAsync(entry.FilePath, ct);
         }
         finally { _lock.Release(); }
 
         if (localCwd is not null && !string.IsNullOrEmpty(entry.Guid))
-            await RemoveLocalRefAsync(localCwd, sessionId, entry.Guid, ct);
+            await RemoveWorkspaceRefsAsync(localCwd, entry.Guid, ct);
 
         return true;
     }
 
     // Helpers — local-refs (cwd scoping)
 
-    private async Task<List<MemoryEntry>> LoadByCwdAsync(string cwd, string? sessionId, CancellationToken ct)
-    {
-        var fuseraftDir = Path.Combine(cwd, ".fuseraft");
-        var refsPath    = RefsFilePath(cwd, sessionId);
-
-        if (!Directory.Exists(fuseraftDir))
-            return await LoadFromWorkspaceSessionsAsync(cwd, ct);
-
-        if (!File.Exists(refsPath))
-            return await LoadFromWorkspaceSessionsAsync(cwd, ct);
-
-        var json  = await File.ReadAllTextAsync(refsPath, ct);
-        var guids = JsonSerializer.Deserialize<string[]>(json) ?? [];
-
-        var entries = new List<MemoryEntry>();
-        foreach (var guid in guids)
-        {
-            var filePath = Path.Combine(_dir, $"memory_{guid}.md");
-            if (!File.Exists(filePath)) continue;
-            var entry = await ParseFileAsync(filePath, ct);
-            if (entry is not null) entries.Add(entry);
-        }
-        return entries;
-    }
-
     // Collects all GUIDs from every session refs file under ~/.fuseraft/sessions/{slug}/
-    // so that a new REPL session in the same workspace sees memories saved by prior sessions.
+    // (plus the session-less workspace refs file) so that a session sees memories saved by
+    // every other session in the same workspace.
     private async Task<List<MemoryEntry>> LoadFromWorkspaceSessionsAsync(string cwd, CancellationToken ct)
     {
-        var slug        = FuseraftPaths.ProjectSlug(cwd);
-        var sessionsDir = FuseraftPaths.GlobalProjectSessions(slug);
-        if (!Directory.Exists(sessionsDir)) return [];
-
-        var guids = new HashSet<string>();
-        foreach (var sessionDir in Directory.GetDirectories(sessionsDir))
+        var guids = new List<string>();
+        var seen  = new HashSet<string>();
+        foreach (var refsFile in WorkspaceRefsFiles(cwd))
         {
-            var refsFile = Path.Combine(sessionDir, "memory_refs.json");
-            if (!File.Exists(refsFile)) continue;
             try
             {
                 var json      = await File.ReadAllTextAsync(refsFile, ct);
                 var sessionGuids = JsonSerializer.Deserialize<string[]>(json) ?? [];
-                foreach (var g in sessionGuids) guids.Add(g);
+                foreach (var g in sessionGuids)
+                    if (seen.Add(g)) guids.Add(g);
             }
             catch { /* corrupt refs — skip */ }
         }
@@ -327,15 +298,37 @@ public sealed class MemoryStore
         await WriteAtomicAsync(refsPath, JsonSerializer.Serialize(updated) + '\n', ct);
     }
 
-    private static async Task RemoveLocalRefAsync(string cwd, string? sessionId, string guid, CancellationToken ct)
+    // Every refs file of the workspace that exists: one per session, plus the session-less one.
+    private static List<string> WorkspaceRefsFiles(string cwd)
     {
-        var refsPath = RefsFilePath(cwd, sessionId);
-        if (!File.Exists(refsPath)) return;
+        var files       = new List<string>();
+        var sessionsDir = FuseraftPaths.GlobalProjectSessions(FuseraftPaths.ProjectSlug(cwd));
+        if (Directory.Exists(sessionsDir))
+            foreach (var sessionDir in Directory.GetDirectories(sessionsDir).Order(StringComparer.Ordinal))
+            {
+                var refsFile = Path.Combine(sessionDir, "memory_refs.json");
+                if (File.Exists(refsFile)) files.Add(refsFile);
+            }
 
-        var json    = await File.ReadAllTextAsync(refsPath, ct);
-        var guids   = JsonSerializer.Deserialize<string[]>(json) ?? [];
-        var updated = guids.Where(g => g != guid).ToArray();
-        await WriteAtomicAsync(refsPath, JsonSerializer.Serialize(updated) + '\n', ct);
+        var workspaceRefs = RefsFilePath(cwd, sessionId: null);
+        if (File.Exists(workspaceRefs)) files.Add(workspaceRefs);
+        return files;
+    }
+
+    // Drops the GUID from every refs file of the workspace, since any session may have saved it.
+    private static async Task RemoveWorkspaceRefsAsync(string cwd, string guid, CancellationToken ct)
+    {
+        foreach (var refsPath in WorkspaceRefsFiles(cwd))
+        {
+            try
+            {
+                var guids = JsonSerializer.Deserialize<string[]>(await File.ReadAllTextAsync(refsPath, ct)) ?? [];
+                if (Array.IndexOf(guids, guid) < 0) continue;
+                var updated = guids.Where(g => g != guid).ToArray();
+                await WriteAtomicAsync(refsPath, JsonSerializer.Serialize(updated) + '\n', ct);
+            }
+            catch (JsonException) { /* corrupt refs — skip */ }
+        }
     }
 
     // Helpers — index
@@ -349,20 +342,21 @@ public sealed class MemoryStore
         else
             lines = [IndexHeader, string.Empty];
 
+        // Keyed by file name, not entry name: names are only unique within a workspace.
         var newLine  = $"- [{entry.Name}]({fileName}) — {entry.Description}";
-        var existing = lines.FindIndex(l => Regex.IsMatch(l, $@"\[{Regex.Escape(entry.Name)}\]\("));
+        var existing = lines.FindIndex(l => l.Contains($"]({fileName})", StringComparison.Ordinal));
         if (existing >= 0) lines[existing] = newLine;
         else lines.Add(newLine);
 
         await WriteAtomicAsync(indexPath, string.Join('\n', lines) + '\n', ct);
     }
 
-    private async Task RemoveIndexLineAsync(string name, CancellationToken ct)
+    private async Task RemoveIndexLineAsync(string fileName, CancellationToken ct)
     {
         var indexPath = Path.Combine(_dir, IndexFile);
         if (!File.Exists(indexPath)) return;
         var lines = (await File.ReadAllLinesAsync(indexPath, ct))
-            .Where(l => !Regex.IsMatch(l, $@"\[{Regex.Escape(name)}\]\("))
+            .Where(l => !l.Contains($"]({fileName})", StringComparison.Ordinal))
             .ToList();
         await WriteAtomicAsync(indexPath, string.Join('\n', lines) + '\n', ct);
     }

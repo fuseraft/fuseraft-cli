@@ -723,9 +723,9 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         });
 
         var memoryStore   = MemoryStore.ForRepl();
-        var memoryEntries = await memoryStore.LoadAllAsync(cwd, sessionId);
+        var memoryEntries = await memoryStore.LoadAllAsync(cwd);
         var memoryBlock   = memoryEntries.Count > 0
-            ? await memoryStore.BuildPromptBlockAsync(cwd, sessionId)
+            ? await memoryStore.BuildPromptBlockAsync(cwd)
             : null;
         var systemPrompt = new SystemPromptBuilder()
             .AddIdentity(modelId, initialTools.Count, settings.SystemPrompt)
@@ -835,6 +835,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             ctx.History.AddRange(restored);
             ReplTurn.RepairDanglingToolCalls(ctx.History);
             ctx.TurnIndex = snapshot.TurnIndex;
+            ctx.LastExtractedTurnIndex = snapshot.LastExtractedTurnIndex ?? -1;
 
             if (snapshot.TodoItems is { Length: > 0 } restoredTodoItems)
                 todoPlugin?.Restore(restoredTodoItems);
