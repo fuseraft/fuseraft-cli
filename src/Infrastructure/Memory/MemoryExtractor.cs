@@ -26,25 +26,35 @@ public sealed class MemoryExtractor(IChatClient client)
 
     /// <returns>
     /// <c>Entries</c>: memories to save (may be empty when nothing was found).
+    /// <c>Removals</c>: names of existing memories to remove — merged into another entry,
+    /// shown wrong by the conversation, or tracking work that is finished. Only names in
+    /// <paramref name="existingMemories"/> and not saved again in <c>Entries</c>.
     /// <c>ParseFailed</c>: true when the model returned non-empty text that was not
     /// a valid JSON array — a signal the caller can use to show a warning.
     /// </returns>
-    public async Task<(List<MemoryEntry> Entries, bool ParseFailed)> ExtractAsync(
+    public async Task<(List<MemoryEntry> Entries, List<string> Removals, bool ParseFailed)> ExtractAsync(
         IReadOnlyList<ChatMessage> history,
         IReadOnlyList<MemoryEntry> existingMemories,
         CancellationToken ct = default)
     {
         var excerpt = BuildExcerpt(history);
-        if (string.IsNullOrWhiteSpace(excerpt)) return ([], false);
+        if (string.IsNullOrWhiteSpace(excerpt)) return ([], [], false);
 
         var prompt = BuildPrompt(excerpt, BuildIndex(existingMemories));
         var response = await client.GetResponseAsync(
             [new ChatMessage(ChatRole.User, prompt)],
             cancellationToken: ct);
-        var raw     = response.Text ?? string.Empty;
-        var entries = Parse(raw);
-        var parseFailed = entries is null && !string.IsNullOrWhiteSpace(raw);
-        return (entries ?? [], parseFailed);
+        var raw    = response.Text ?? string.Empty;
+        var parsed = ParseResponse(raw);
+        if (parsed is null) return ([], [], !string.IsNullOrWhiteSpace(raw));
+
+        var (entries, removals) = parsed.Value;
+        var removable = removals
+            .Where(r => existingMemories.Any(m => m.Name.Equals(r, StringComparison.OrdinalIgnoreCase))
+                     && !entries.Any(e => e.Name.Equals(r, StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return (entries, removable, false);
     }
 
     internal static string BuildExcerpt(IReadOnlyList<ChatMessage> history)
@@ -133,41 +143,50 @@ public sealed class MemoryExtractor(IChatClient client)
         RECENT CONVERSATION:
         {{excerpt}}
 
-        Extract facts that are genuinely useful in a future session. Focus on:
-        - user: preferences, expertise, working style
-        - feedback: what approaches worked or did not (include why)
-        - project: goals, decisions, constraints
+        Extract facts that will still be true and useful in a future session. Every memory is loaded into
+        every later session in this project, so a wrong or stale one does harm; saving nothing is often right.
+        Focus on:
+        - user: standing preferences, expertise, working style
+        - feedback: what approaches worked or did not, and why
+        - project: goals, decisions and constraints that the code does not show
         - reference: where to find important information
 
-        Rules:
-        - Only extract non-obvious facts a future assistant would benefit from knowing
-        - Never save data the assistant read or retrieved with tools: query results, records, file contents, logs.
-          What a database or file holds can be read again, and it may be private
-        - Never save personal information about anyone other than the user (names with salaries, contact details,
-          account data), or secrets (passwords, tokens, keys, connection strings)
-        - Don't save what a future session can look up cheaply, such as a table's columns or a file's layout,
-          unless the user asked for it to be remembered
-        - Update an existing memory (same name) only when there is new or corrected information. An update
-          replaces the stored memory, so its body must keep everything still true from the existing body
-        - Use a new name for a new fact; reusing an existing name overwrites that memory
-        - Return an empty array if nothing worth saving was found
-        - Output ONLY valid JSON — no prose, no markdown fences
+        Never save:
+        - Task progress or status: what was done this session, what is left, review findings, a to-do list.
+          It is out of date by the next session
+        - How the code works or how the project is laid out: components, commands, file locations, conventions
+          visible in the source. A future session can read the code, and the code changes
+        - An instruction meant for one reply or one task ("answer in two sentences", "use this format"). Save a
+          preference only when the user states it as a general rule or repeats it across tasks, and quote them
+        - A guess about why something failed, or a workaround for a one-time glitch
+        - Data the assistant read or retrieved with tools: query results, records, file contents, logs. It can
+          be read again, and it may be private
+        - Personal information about anyone other than the user (names with salaries, contact details, account
+          data), or secrets (passwords, tokens, keys, connection strings)
 
-        JSON format:
-        [
-          {
-            "name": "short_snake_case_id",
-            "description": "one-line summary under 100 chars",
-            "type": "user | feedback | project | reference",
-            "body": "full memory text"
-          }
-        ]
+        Keep the set small:
+        - Before adding a memory, check the existing ones. If one covers the same topic, update it (same name)
+          instead of adding a near-duplicate. An update replaces the stored memory, so its body must keep
+          everything still true from the existing body
+        - Use a new name only for a new topic; reusing an existing name overwrites that memory
+        - Remove an existing memory when you merged it into another one in this response, when the conversation
+          shows it is wrong, or when it only tracks work that is finished. Do not remove a memory just because
+          this conversation did not mention it
+
+        Output ONLY a JSON array, no prose and no markdown fences. Return [] when nothing is worth saving.
+        To save or update a memory:
+          {"name": "short_snake_case_id", "description": "one-line summary under 100 chars",
+           "type": "user | feedback | project | reference", "body": "full memory text"}
+        To remove an existing memory:
+          {"name": "existing_name", "remove": true}
         """;
     }
 
     // Returns null when no JSON array could be parsed (malformed JSON, or prose with no array),
     // distinguishing a parse failure from a successful extraction that found nothing ([]).
-    internal static List<MemoryEntry>? Parse(string text)
+    internal static List<MemoryEntry>? Parse(string text) => ParseResponse(text)?.Entries;
+
+    internal static (List<MemoryEntry> Entries, List<string> Removals)? ParseResponse(string text)
     {
         var t = StripCodeFences(text.Trim());
 
@@ -190,8 +209,13 @@ public sealed class MemoryExtractor(IChatClient client)
         }
         if (items is null) return null;
 
-        return items
-            .Where(i => !string.IsNullOrWhiteSpace(i.Body))
+        var removals = items
+            .Where(i => i.Remove)
+            .Select(i => SingleLine(i.Name))
+            .Where(n => n.Length > 0)
+            .ToList();
+        var entries = items
+            .Where(i => !i.Remove && !string.IsNullOrWhiteSpace(i.Body))
             .Select(i => new MemoryEntry
             {
                 // Name and description are written as frontmatter lines and as the index's
@@ -209,6 +233,7 @@ public sealed class MemoryExtractor(IChatClient client)
             })
             .Where(m => m.Name.Length > 0)
             .ToList();
+        return (entries, removals);
     }
 
     private static string SingleLine(string s) =>
@@ -231,5 +256,6 @@ public sealed class MemoryExtractor(IChatClient client)
         [JsonPropertyName("description")] public string? Description { get; init; }
         [JsonPropertyName("type")]        public string? Type        { get; init; }
         [JsonPropertyName("body")]        public string  Body        { get; init; } = string.Empty;
+        [JsonPropertyName("remove")]      public bool    Remove      { get; init; }
     }
 }

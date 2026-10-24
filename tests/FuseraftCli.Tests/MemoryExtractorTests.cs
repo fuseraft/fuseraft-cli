@@ -282,8 +282,69 @@ public sealed class MemoryExtractorTests
             extractor.ExtractAsync([new(ChatRole.User, "remember I like tabs")], []));
     }
 
+    [Fact]
+    public void ParseResponse_SeparatesRemovalsFromEntries()
+    {
+        var json = """
+            [
+              {"name": "merged", "description": "d", "type": "project", "body": "a and b"},
+              {"name": "old_a", "remove": true},
+              {"name": "old_b", "remove": true, "body": "ignored"}
+            ]
+            """;
+
+        var (entries, removals) = MemoryExtractor.ParseResponse(json)!.Value;
+
+        Assert.Equal("merged", Assert.Single(entries).Name);
+        Assert.Equal(["old_a", "old_b"], removals);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_KeepsOnlyRemovalsOfExistingMemoriesNotSavedAgain()
+    {
+        var reply = """
+            [
+              {"name": "kept", "description": "d", "type": "project", "body": "updated"},
+              {"name": "kept", "remove": true},
+              {"name": "stale", "remove": true},
+              {"name": "STALE", "remove": true},
+              {"name": "never_existed", "remove": true}
+            ]
+            """;
+        var extractor = new MemoryExtractor(new ReplyClient(reply));
+
+        var (entries, removals, parseFailed) = await extractor.ExtractAsync(
+            [new(ChatRole.User, "hello")], [Memory("kept", "old"), Memory("stale", "done")]);
+
+        Assert.False(parseFailed);
+        Assert.Equal("kept", Assert.Single(entries).Name);
+        Assert.Equal(["stale"], removals);
+    }
+
+    [Fact]
+    public void BuildPrompt_DescribesRemovalFormat()
+    {
+        var prompt = MemoryExtractor.BuildPrompt("[user]: hi", "(none)");
+        Assert.Contains("\"remove\": true", prompt);
+        Assert.Contains("Task progress or status", prompt);
+    }
+
     private static MemoryEntry Memory(string name, string body) =>
         new() { Name = name, Description = $"{name} description", Type = "user", Body = body };
+
+    private sealed class ReplyClient(string reply) : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, reply)));
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? key = null) => null;
+        public void Dispose() { }
+    }
 
     private sealed class ThrowingClient : IChatClient
     {

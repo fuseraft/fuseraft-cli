@@ -1016,6 +1016,8 @@ At session start, the directory's memories are injected into the system prompt. 
 - when the session ends (via `/exit` or Ctrl+C), giving up after 60 seconds;
 - before the conversation is discarded: `/clear`, `/switch`, `/provider setup`, and compaction (`/compact` or automatic), which extracts from the older turns while it summarizes them.
 
+The extractor is told to save only what will still be true later: standing preferences you state as general rules, lessons about what worked, and decisions or constraints the code doesn't show. It skips task progress, descriptions of the code, and instructions meant for one reply. It also keeps the set small: it updates an existing memory on the same topic rather than adding a near-duplicate, and removes memories it merged into another, that the conversation showed wrong, or that only tracked finished work. Saves and removals are both reported, e.g. `Memory: 2 entries saved, 1 removed.`
+
 Extraction runs only when there are turns it hasn't seen, so resuming a session and exiting without a new turn doesn't extract it again. When the extraction call fails, the REPL says so and tries again at the next of these points.
 
 This extraction call uses the REPL's main chat model by default. Set `memory.model` (see [`fuseraft settings`](#fuseraft-settings)) to run it on a different — e.g. cheaper — model instead:

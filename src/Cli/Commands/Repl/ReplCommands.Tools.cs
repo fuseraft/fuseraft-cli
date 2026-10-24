@@ -472,15 +472,15 @@ internal static partial class ReplCommands
                 if (!ctx.JsonMode) AnsiConsole.Markup("[dim]extracting memories…[/]");
                 try
                 {
-                    var (saved, parseFailed) = await ReplTurn.ExtractMemoriesAsync(ctx, cancellationToken);
+                    var (saved, removed, parseFailed) = await ReplTurn.ExtractMemoriesAsync(ctx, cancellationToken);
                     if (!ctx.JsonMode) ReplConsole.ClearLine(30);
                     AnsiConsole.MarkupLine(parseFailed
                         ? "[dim](extraction returned unparseable output — memories may not have been saved)[/]"
-                        : saved > 0
-                            ? $"[dim]{saved} memor{(saved == 1 ? "y" : "ies")} saved.[/]"
+                        : ReplTurn.DescribeMemoryChanges(saved, removed) is { } changes
+                            ? $"[dim]Memory: {changes}[/]"
                             : "[dim]Nothing worth saving found.[/]");
                     await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new
-                        { command = "/memory save", saved, parseFailed });
+                        { command = "/memory save", saved, removed, parseFailed });
                 }
                 catch (Exception ex)
                 {

@@ -2050,12 +2050,13 @@ internal static class ReplTurn
     }
 
     /// <summary>
-    /// Extracts memories from the current history and saves them to the workspace. On success
+    /// Extracts memories from the current history, saves them to the workspace, and removes the
+    /// ones the extractor marked as merged, wrong or finished. On success
     /// (anything but unparseable output) records the turn as extracted and checkpoints the
     /// session, so neither the exit save nor a later resume re-extracts the same history.
     /// Throws when the model call fails, so callers can say so.
     /// </summary>
-    internal static async Task<(int Saved, bool ParseFailed)> ExtractMemoriesAsync(
+    internal static async Task<(int Saved, int Removed, bool ParseFailed)> ExtractMemoriesAsync(
         ReplSessionContext ctx, CancellationToken ct = default)
     {
         var history   = ctx.History.ToList();
@@ -2066,16 +2067,28 @@ internal static class ReplTurn
         var mc = ctx.Factory.Create(memoryModelCfg);
         using var _ = mc as IDisposable;
         var existing             = await ctx.MemoryStore.LoadAllAsync(ctx.Cwd, ct);
-        var (saved, parseFailed) = await new MemoryExtractor(mc).ExtractAsync(history, existing, ct);
+        var (saved, removals, parseFailed) = await new MemoryExtractor(mc).ExtractAsync(history, existing, ct);
         foreach (var m in saved) await ctx.MemoryStore.SaveAsync(m, ctx.Cwd, sessionId: ctx.SessionId, ct: ct);
-        if (saved.Count > 0)
+        var removed = 0;
+        foreach (var name in removals)
+            if (await ctx.MemoryStore.DeleteAsync(name, ctx.Cwd, ct)) removed++;
+        if (saved.Count > 0 || removed > 0)
             ctx.MemoryCount = (await ctx.MemoryStore.LoadAllAsync(ctx.Cwd, ct)).Count;
         if (!parseFailed)
         {
             ctx.LastExtractedTurnIndex = turnIndex;
             await SaveSnapshotAsync(ctx);
         }
-        return (saved.Count, parseFailed);
+        return (saved.Count, removed, parseFailed);
+    }
+
+    /// <summary>"2 entries saved, 1 removed." — or null when nothing changed.</summary>
+    internal static string? DescribeMemoryChanges(int saved, int removed)
+    {
+        var parts = new List<string>();
+        if (saved > 0)   parts.Add($"{saved} entr{(saved == 1 ? "y" : "ies")} saved");
+        if (removed > 0) parts.Add($"{removed} removed");
+        return parts.Count == 0 ? null : string.Join(", ", parts) + ".";
     }
 
     /// <summary>True when the history holds turns whose memories haven't been extracted yet.</summary>
@@ -2096,14 +2109,14 @@ internal static class ReplTurn
         try
         {
             if (show) AnsiConsole.Markup("[dim]saving memory…[/]");
-            var (saved, parseFailed) = await ExtractMemoriesAsync(ctx, ct);
+            var (saved, removed, parseFailed) = await ExtractMemoriesAsync(ctx, ct);
             if (show)
             {
                 ReplConsole.ClearLine(30);
                 if (parseFailed)
                     AnsiConsole.MarkupLine("[dim](memory extraction returned unparseable output)[/]");
-                else if (saved > 0)
-                    AnsiConsole.MarkupLine($"[dim]Memory: {saved} entr{(saved == 1 ? "y" : "ies")} saved.[/]");
+                else if (DescribeMemoryChanges(saved, removed) is { } changes)
+                    AnsiConsole.MarkupLine($"[dim]Memory: {changes}[/]");
             }
         }
         catch (Exception ex)
