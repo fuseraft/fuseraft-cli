@@ -15,6 +15,8 @@ internal static partial class ReplCommands
 
     private static async Task<CommandResult> CmdClearAsync(ReplSessionContext ctx)
     {
+        await ReplTurn.SaveMemoriesBeforeDiscardAsync(ctx);
+
         var sys = ctx.History.FirstOrDefault(m => m.Role == ChatRole.System);
         ctx.History.Clear();
         if (sys is not null) ctx.History.Add(sys);

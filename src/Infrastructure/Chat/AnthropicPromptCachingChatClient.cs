@@ -28,7 +28,11 @@ namespace fuseraft.Infrastructure.Chat;
 /// allows up to 4 breakpoints per request; this uses 3 (system, tools, tail).
 /// </para>
 /// </summary>
-internal sealed class AnthropicPromptCachingChatClient(AnthropicClient client) : IChatClient
+/// <param name="client">The native Anthropic client.</param>
+/// <param name="defaultModelId">The model to call when a request's <see cref="ChatOptions.ModelId"/> is
+/// unset. The Messages API requires one, and most callers never set it, relying (as every other
+/// provider's client allows) on the model the client was built for.</param>
+internal sealed class AnthropicPromptCachingChatClient(AnthropicClient client, string defaultModelId) : IChatClient
 {
     private ChatClientMetadata? _metadata;
 
@@ -121,7 +125,8 @@ internal sealed class AnthropicPromptCachingChatClient(AnthropicClient client) :
     // conversation so the growing history prefix gets cached too.
     private MessageParameters BuildParameters(IEnumerable<ChatMessage> messages, ChatOptions? options)
     {
-        var parameters = ChatClientHelper.CreateMessageParameters(client.Messages, messages, options);
+        var parameters = AnthropicMessageParameters.Create(client.Messages, messages, options);
+        if (string.IsNullOrEmpty(parameters.Model)) parameters.Model = defaultModelId;
         parameters.PromptCaching = PromptCacheType.AutomaticToolsAndSystem;
 
         var lastContent = parameters.Messages?.LastOrDefault(m => m.Content is { Count: > 0 })?.Content?[^1];
@@ -135,7 +140,7 @@ internal sealed class AnthropicPromptCachingChatClient(AnthropicClient client) :
 
     public object? GetService(Type serviceType, object? serviceKey) =>
         serviceKey is not null ? null :
-        serviceType == typeof(ChatClientMetadata) ? (_metadata ??= new(nameof(AnthropicClient))) :
+        serviceType == typeof(ChatClientMetadata) ? (_metadata ??= new(nameof(AnthropicClient), defaultModelId: defaultModelId)) :
         serviceType?.IsInstanceOfType(this) is true ? this :
         null;
 }
