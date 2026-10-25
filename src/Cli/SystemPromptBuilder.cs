@@ -25,6 +25,13 @@ internal static class SystemPromptBuilder
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
+        // A remote agent has its own prompt and tools on another machine: the local base prompt,
+        // paths and environment below are useless to it and must not leave this one. Only its own
+        // Instructions and the user's spec are sent.
+        var remoteInstructions = config.Agents
+            .Where(a => a.RemoteAgent is not null)
+            .ToDictionary(a => a.Name, a => a.Instructions, StringComparer.OrdinalIgnoreCase);
+
         // Prepend the base system prompt to every agent's instructions.
         // Source priority: SystemPromptPath > SystemPrompt > embedded FUSERAFT.md.
         var basePrompt = ResolveBasePrompt(config, configPath);
@@ -43,9 +50,10 @@ internal static class SystemPromptBuilder
 
         // Inject the user-supplied spec into every agent's system prompt so all agents
         // remain anchored to it even after context compaction (spec-anchored SDD).
+        string? specBlock = null;
         if (!string.IsNullOrWhiteSpace(specContent))
         {
-            var specBlock =
+            specBlock =
                 "## Project Spec (authoritative)\n\n" +
                 "The following specification is the single source of truth for this session. " +
                 "All plans, brief.json, and implementation decisions must conform to it.\n\n" +
@@ -203,6 +211,18 @@ internal static class SystemPromptBuilder
             loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
                 "Security.FileSystemPermissions is configured but Security.FileSystemSandboxPath is not set. " +
                 "Filesystem permission globs will not be enforced. Add a FileSystemSandboxPath to enable them.");
+        }
+
+        if (remoteInstructions.Count > 0)
+        {
+            config = config with
+            {
+                Agents = config.Agents
+                    .Select(a => remoteInstructions.TryGetValue(a.Name, out var own)
+                        ? a with { Instructions = specBlock is null ? own : own.TrimEnd() + "\n\n" + specBlock }
+                        : a)
+                    .ToList()
+            };
         }
 
         return config;

@@ -247,6 +247,9 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                     else if (!Uri.TryCreate(agent.RemoteAgent.Url, UriKind.Absolute, out _))
                         issues.Add(("error", $"Agent '{agent.Name}': RemoteAgent.Url '{agent.RemoteAgent.Url}' is not a valid absolute URL."));
 
+                    foreach (var (header, variable) in RemoteAgentHttpClient.UnsetEnvTokens(agent.RemoteAgent))
+                        issues.Add(("warning", $"Agent '{agent.Name}': RemoteAgent header '{header}' uses ${{{variable}}}, which is not set; it will be sent empty."));
+
                     if (!string.IsNullOrWhiteSpace(agent.Model.ModelId))
                         issues.Add(("warning", $"Agent '{agent.Name}': Model.ModelId is ignored when RemoteAgent is set."));
 

@@ -1,6 +1,8 @@
+using System.Text.Json;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Plugins;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace FuseraftCli.Tests;
@@ -107,6 +109,84 @@ public sealed class AgentFactoryTests : IDisposable
 
         Assert.NotNull(agent);
     }
+
+    // Remote (A2A) agents
+
+    // Orchestrators look up Instructions, Isolation and routes by agent name; under the card's
+    // name every lookup missed and the remote agent ran with no instructions at all.
+    [Fact]
+    public async Task Create_RemoteAgent_IsNamedAfterTheConfigNotTheCard_AndSendsHeadersAndSystemText()
+    {
+        LoopbackHttpServer? self = null;
+        await using var remote = new LoopbackHttpServer(async (req, res) =>
+        {
+            res.ContentType = "application/json";
+            if (req.HttpMethod == "GET")
+            {
+                await LoopbackHttpServer.Respond(res, 200, CardJson(req.Url!.GetLeftPart(UriPartial.Authority)));
+                return;
+            }
+            var id = JsonDocument.Parse(self!.Snapshot()[^1].Body).RootElement.GetProperty("id").GetRawText();
+            await LoopbackHttpServer.Respond(res, 200,
+                """{"jsonrpc":"2.0","id":""" + id + ""","result":{"message":{"role":"ROLE_AGENT","parts":[{"text":"remote reply"}],"messageId":"m2","contextId":"c1"}}}""");
+        });
+        self = remote;
+        var config = ValidConfig() with
+        {
+            Name        = "Reviewer",
+            RemoteAgent = new RemoteAgentConfig
+            {
+                Url     = remote.BaseUrl,
+                Headers = new() { ["Authorization"] = "Bearer t0ken" },
+            },
+        };
+
+        var agent = _factory.Create(config);
+        var response = await agent.RunAsync(
+            [new ChatMessage(ChatRole.System, "You review code."), new ChatMessage(ChatRole.User, "Review this.")]);
+
+        Assert.Equal("Reviewer", agent.Name);
+        Assert.Equal("remote reply", response.Text);
+        var requests = remote.Snapshot();
+        Assert.All(requests, r => Assert.Equal("Bearer t0ken", r.Headers["Authorization"]));
+        var send = Assert.Single(requests, r => r.Method == "POST");
+        Assert.Contains("You review code.", send.Body);
+        Assert.Contains("Review this.", send.Body);
+    }
+
+    [Fact]
+    public async Task Create_RemoteAgent_CardRejected_ReportsTheStatus()
+    {
+        await using var remote = new LoopbackHttpServer((_, res) => LoopbackHttpServer.Respond(res, 401, "{}"));
+        var config = ValidConfig() with { Name = "Reviewer", RemoteAgent = new RemoteAgentConfig { Url = remote.BaseUrl } };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => _factory.Create(config));
+
+        Assert.Contains("Agent 'Reviewer'", ex.Message);
+        Assert.Contains("401 (Unauthorized)", ex.Message);
+    }
+
+    [Fact]
+    public void Create_RemoteAgent_Unreachable_ReportsTheConnectionError()
+    {
+        var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        var config = ValidConfig() with { Name = "Reviewer", RemoteAgent = new RemoteAgentConfig { Url = $"http://127.0.0.1:{port}" } };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => _factory.Create(config));
+
+        Assert.Contains("Agent 'Reviewer'", ex.Message);
+        Assert.DoesNotContain("HTTP request failed", ex.Message);
+    }
+
+    private static string CardJson(string url) => $$"""
+        {"name":"CardName","description":"d","version":"1.0.0",
+         "supportedInterfaces":[{"url":"{{url}}","protocolBinding":"JSONRPC","protocolVersion":"1.0"}],
+         "capabilities":{"streaming":false,"pushNotifications":false},
+         "skills":[],"defaultInputModes":["text/plain"],"defaultOutputModes":["text/plain"]}
+        """;
 
     // Helpers
 
