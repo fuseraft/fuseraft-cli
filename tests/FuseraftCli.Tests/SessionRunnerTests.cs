@@ -99,6 +99,25 @@ public sealed class SessionRunnerTests : IDisposable
     }
 
     [Fact]
+    public void FaultResumeLine_NoCompletedTurns_DoesNotClaimProgressWasSaved()
+    {
+        var line = SessionRunner.FaultResumeLine("abc123", completedTurns: 0, "fuseraft run --resume abc123");
+
+        Assert.DoesNotContain("saved", line);
+        Assert.Contains("No agent turns ran", line);
+        Assert.Contains("fuseraft run --resume abc123", line);
+    }
+
+    [Fact]
+    public void FaultResumeLine_AfterCompletedTurns_SaysTheSessionWasSaved()
+    {
+        var line = SessionRunner.FaultResumeLine("abc123", completedTurns: 2, "fuseraft run --resume abc123");
+
+        Assert.Contains("saved — resume with", line);
+        Assert.Contains("fuseraft run --resume abc123", line);
+    }
+
+    [Fact]
     public async Task RunAsync_UnexpectedException_ReturnsFailureWithMessage()
     {
         const string message = "something broke";
