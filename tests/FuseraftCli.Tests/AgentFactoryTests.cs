@@ -1,4 +1,5 @@
 using System.Text.Json;
+using fuseraft.Core.Exceptions;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Plugins;
@@ -154,13 +155,29 @@ public sealed class AgentFactoryTests : IDisposable
         Assert.Contains("Review this.", send.Body);
     }
 
+    // The SDK resolves the card path relative to the URL, so without a trailing slash a URL with a
+    // path (one agent of several on a host, as `fuseraft serve --a2a` serves them) lost its last segment.
+    [Fact]
+    public async Task Create_RemoteAgent_UrlWithAPath_FetchesThatAgentsCard()
+    {
+        await using var remote = new LoopbackHttpServer((req, res) =>
+            req.Url!.AbsolutePath == "/agents/Dev/.well-known/agent-card.json"
+                ? LoopbackHttpServer.Respond(res, 200, CardJson(req.Url.GetLeftPart(UriPartial.Authority) + "/agents/Dev"))
+                : LoopbackHttpServer.Respond(res, 404, "{}"));
+        var config = ValidConfig() with { Name = "Dev", RemoteAgent = new RemoteAgentConfig { Url = remote.BaseUrl + "/agents/Dev" } };
+
+        var agent = _factory.Create(config);
+
+        Assert.Equal("Dev", agent.Name);
+    }
+
     [Fact]
     public async Task Create_RemoteAgent_CardRejected_ReportsTheStatus()
     {
         await using var remote = new LoopbackHttpServer((_, res) => LoopbackHttpServer.Respond(res, 401, "{}"));
         var config = ValidConfig() with { Name = "Reviewer", RemoteAgent = new RemoteAgentConfig { Url = remote.BaseUrl } };
 
-        var ex = Assert.Throws<InvalidOperationException>(() => _factory.Create(config));
+        var ex = Assert.Throws<AgentSetupException>(() => _factory.Create(config));
 
         Assert.Contains("Agent 'Reviewer'", ex.Message);
         Assert.Contains("401 (Unauthorized)", ex.Message);
@@ -175,7 +192,7 @@ public sealed class AgentFactoryTests : IDisposable
         probe.Stop();
         var config = ValidConfig() with { Name = "Reviewer", RemoteAgent = new RemoteAgentConfig { Url = $"http://127.0.0.1:{port}" } };
 
-        var ex = Assert.Throws<InvalidOperationException>(() => _factory.Create(config));
+        var ex = Assert.Throws<AgentSetupException>(() => _factory.Create(config));
 
         Assert.Contains("Agent 'Reviewer'", ex.Message);
         Assert.DoesNotContain("HTTP request failed", ex.Message);

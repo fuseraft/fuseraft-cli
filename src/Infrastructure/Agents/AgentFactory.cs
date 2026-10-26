@@ -11,6 +11,7 @@ using Microsoft.Agents.AI.Compaction;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using fuseraft.Core;
+using fuseraft.Core.Exceptions;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure.Plugins;
 
@@ -164,7 +165,7 @@ public sealed class AgentFactory(
                     config.Name, header, variable);
 
             var httpClient = RemoteAgentHttpClient.Create(remoteCfg);
-            var resolver   = new A2ACardResolver(new Uri(remoteUrl), httpClient);
+            var resolver   = new A2ACardResolver(RemoteAgentHttpClient.CardBaseUri(remoteUrl), httpClient);
             // Named after the config, not the card: orchestrators look up Instructions, Isolation,
             // ContextWindow and routes by agent name, and miss all of them under the card's name.
             AIAgent remoteAgent;
@@ -177,7 +178,7 @@ public sealed class AgentFactory(
             }
             catch (A2AException ex)
             {
-                throw new InvalidOperationException(
+                throw new AgentSetupException(
                     RemoteAgentHttpClient.DescribeCardFailure(config.Name, remoteUrl, ex), ex);
             }
 

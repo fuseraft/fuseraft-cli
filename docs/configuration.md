@@ -282,7 +282,7 @@ Delegates an agent slot to a remote process that implements the [A2A protocol](h
 
 | Field | Type | Default | Required | Description |
 |-------|------|---------|----------|-------------|
-| `Url` | string | — | yes | Base URL of the remote A2A agent. Card is resolved from `{Url}/.well-known/agent-card.json`. |
+| `Url` | string | — | yes | Base URL of the remote A2A agent. Card is resolved from `{Url}/.well-known/agent-card.json`, with or without a trailing slash on `Url` — so `http://host:24602/Tester` fetches `/Tester/.well-known/agent-card.json`. |
 | `TimeoutSeconds` | int | `120` | no | HTTP timeout for card resolution and per-turn calls. |
 | `Headers` | map | — | no | HTTP headers sent with every request, e.g. a bearer token. Values support `${ENV_VAR}` tokens. Sent only to `Url`'s origin (scheme, host, port) — never to a different origin the agent card names or a redirect leads to. |
 
@@ -291,6 +291,8 @@ Delegates an agent slot to a remote process that implements the [A2A protocol](h
 A remote agent is sent only its own `Instructions` (plus the `--spec` block, when given). fuseraft's base system prompt and the local environment blocks — paths, OS, `.gitignore`, project root — are added to local agents only, so they never leave this machine.
 
 **Fields that are ignored when `RemoteAgent` is set:** `Model`, `Plugins`, `FunctionChoice`, `Capabilities`, `SubagentModel`, `SubagentPlugins` — those are properties of the remote agent.
+
+If the card can't be fetched (wrong token, nothing listening), the session stops before the first turn with the status or connection error, and no crash dump is written — it's a setup problem, not a fuseraft bug.
 
 ### FunctionChoice
 
