@@ -199,7 +199,7 @@ Every session is driven by a single JSON or YAML file under the top-level `Orche
 
 **Steps:**
 
-0. **Remote agent short-circuit** — When `AgentConfig.RemoteAgent` is set, `AgentFactory` resolves the remote agent card from `{Url}/.well-known/agent.json` via `A2ACardResolver`, wraps it as an `AIAgent`, and returns immediately. Steps 1–5 below are skipped; `Model`, `Plugins`, `FunctionChoice`, and `Capabilities` are ignored. `Instructions`, `ContextWindow`, and `ChangeTracker` wrapping all continue to apply. `TrustScore` is recorded in the governance audit-emit call for observability, but does **not** govern an execution ring for remote agents — `BuildGovernanceMiddleware` (the only code path that computes a ring via `ComputeRing`) is never reached from this short-circuit, since `SandboxEnforcementFilter` has no local tool surface to enforce against for a remote agent's tool calls (those happen inside the remote A2A service, invisible to this process). `GetAIAgentAsync` is dispatched via `Task.Run` so the blocking `.GetAwaiter().GetResult()` call runs on the thread pool rather than the caller's `SynchronizationContext`, avoiding potential deadlocks in hosted environments.
+0. **Remote agent short-circuit** — When `AgentConfig.RemoteAgent` is set, `AgentFactory` resolves the remote agent card from `{Url}/.well-known/agent-card.json` via `A2ACardResolver`, wraps it as an `AIAgent`, and returns immediately. Steps 1–5 below are skipped; `Model`, `Plugins`, `FunctionChoice`, and `Capabilities` are ignored. `Instructions`, `ContextWindow`, and `ChangeTracker` wrapping all continue to apply. `TrustScore` is recorded in the governance audit-emit call for observability, but does **not** govern an execution ring for remote agents — `BuildGovernanceMiddleware` (the only code path that computes a ring via `ComputeRing`) is never reached from this short-circuit, since `SandboxEnforcementFilter` has no local tool surface to enforce against for a remote agent's tool calls (those happen inside the remote A2A service, invisible to this process). `GetAIAgentAsync` is dispatched via `Task.Run` so the blocking `.GetAwaiter().GetResult()` call runs on the thread pool rather than the caller's `SynchronizationContext`, avoiding potential deadlocks in hosted environments.
 
 1. **Identity** — An `AgentIdentity` (DID: `did:fuseraft:<name>`) is created and registered with the `IdentityRegistry`. The governance audit log uses the DID as the actor identifier.
 
@@ -930,7 +930,7 @@ Fuseraft-cli is built on MAF (`Microsoft.Agents.AI`, `Microsoft.Agents.AI.Workfl
 |---|---|
 | `AIAgent` / `ChatClientAgent` | Base agent type; `RunAsync(context, null, null, ct)` drives each LLM turn |
 | `AIAgentExtensions` / `ChatClientFactory` | Agent builder helpers |
-| `A2ACardResolver` | Resolves remote agent cards from `{Url}/.well-known/agent.json` and wraps them as `AIAgent` instances (remote agent short-circuit in `AgentFactory`) |
+| `A2ACardResolver` | Resolves remote agent cards from `{Url}/.well-known/agent-card.json` and wraps them as `AIAgent` instances (remote agent short-circuit in `AgentFactory`) |
 | `WorkflowBuilder` | Builds phase workflows for `GraphOrchestrator` and `WorkflowOrchestrator` (§6.8) |
 | `FunctionExecutor<T>` | Wraps per-agent logic in MAF's executor model |
 | `InProcessExecution.RunStreamingAsync` | Drives the workflow graph; returns an async stream of events |

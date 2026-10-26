@@ -158,10 +158,28 @@ public sealed class AgentFactory(
                 "For production-critical workflows, verify compatibility before upgrading.",
                 config.Name);
 
-            var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(remoteCfg.TimeoutSeconds) };
+            foreach (var (header, variable) in RemoteAgentHttpClient.UnsetEnvTokens(remoteCfg))
+                loggerFactory?.CreateLogger(nameof(AgentFactory)).LogWarning(
+                    "Agent '{AgentName}': RemoteAgent header '{Header}' uses ${{{Variable}}}, which is not set; it is sent empty.",
+                    config.Name, header, variable);
+
+            var httpClient = RemoteAgentHttpClient.Create(remoteCfg);
             var resolver   = new A2ACardResolver(new Uri(remoteUrl), httpClient);
-            var remoteAgent = Task.Run(() => resolver.GetAIAgentAsync(httpClient, loggerFactory: loggerFactory))
-                                      .GetAwaiter().GetResult();
+            // Named after the config, not the card: orchestrators look up Instructions, Isolation,
+            // ContextWindow and routes by agent name, and miss all of them under the card's name.
+            AIAgent remoteAgent;
+            try
+            {
+                remoteAgent = Task.Run(() => resolver.GetAIAgentAsync(
+                                  new Microsoft.Agents.AI.A2A.A2AAgentOptions { Name = config.Name },
+                                  httpClient, loggerFactory: loggerFactory))
+                              .GetAwaiter().GetResult();
+            }
+            catch (A2AException ex)
+            {
+                throw new InvalidOperationException(
+                    RemoteAgentHttpClient.DescribeCardFailure(config.Name, remoteUrl, ex), ex);
+            }
 
             // ChangeTracker wraps at the turn level (BeginTurn / ApplyAsync), so remote
             // agents still appear in the session change log for observability.

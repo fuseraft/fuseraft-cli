@@ -938,7 +938,7 @@ Orchestration:
 Two local agents collaborate with a third agent hosted at a remote A2A endpoint. The remote agent participates identically to local agents — it receives conversation history, is selected by the routing strategy, and its replies are added to the shared history.
 
 **Key features:**
-- `RemoteAgent.Url` points to the base URL of the remote A2A service; the agent card is fetched from `{Url}/.well-known/agent.json` at session startup
+- `RemoteAgent.Url` points to the base URL of the remote A2A service; the agent card is fetched from `{Url}/.well-known/agent-card.json` at session startup
 - `Model`, `Plugins`, `FunctionChoice`, and `Capabilities` are ignored for remote agents — those are properties of the remote service
 - `Instructions`, `TrustScore`, and `ContextWindow` still apply: instructions are prepended to each call, trust score governs the governance ring assignment, and the context window filter controls what history the remote agent sees
 - `TimeoutSeconds` defaults to 120; increase it for remote agents with long turn times

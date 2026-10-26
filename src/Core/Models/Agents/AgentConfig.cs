@@ -270,7 +270,7 @@ public record AgentConfig
     /// <summary>
     /// When set, this agent is hosted remotely and accessed via the A2A protocol.
     /// <see cref="RemoteAgentConfig.Url"/> is the base URL of the remote agent;
-    /// its agent card is fetched from <c>{Url}/.well-known/agent.json</c> at session startup.
+    /// its agent card is fetched from <c>{Url}/.well-known/agent-card.json</c> at session startup.
     ///
     /// <para>
     /// When <see cref="RemoteAgent"/> is set, <see cref="Model"/>, <see cref="Plugins"/>,

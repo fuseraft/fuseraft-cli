@@ -265,7 +265,7 @@ Both tools inject the current working directory into the subagent's system promp
 
 ### RemoteAgent
 
-Delegates an agent slot to a remote process that implements the [A2A protocol](https://a2a-protocol.org/). The agent card is fetched from `{Url}/.well-known/agent.json` at session startup and the agent participates in orchestration identically to locally-hosted agents.
+Delegates an agent slot to a remote process that implements the [A2A protocol](https://a2a-protocol.org/). The agent card is fetched from `{Url}/.well-known/agent-card.json` at session startup and the agent participates in orchestration identically to locally-hosted agents.
 
 > **Preview:** The A2A protocol integration depends on a pre-release SDK package (`1.0.0-preview2`). A `LogWarning` is emitted at session startup for every agent that uses `RemoteAgent`. The API may change in future releases — verify compatibility before upgrading in production-critical workflows.
 
@@ -276,14 +276,19 @@ Delegates an agent slot to a remote process that implements the [A2A protocol](h
   RemoteAgent:
     Url: https://reviewer.internal
     TimeoutSeconds: 60
+    Headers:
+      Authorization: Bearer ${REVIEWER_TOKEN}
 ```
 
 | Field | Type | Default | Required | Description |
 |-------|------|---------|----------|-------------|
-| `Url` | string | — | yes | Base URL of the remote A2A agent. Card is resolved from `{Url}/.well-known/agent.json`. |
+| `Url` | string | — | yes | Base URL of the remote A2A agent. Card is resolved from `{Url}/.well-known/agent-card.json`. |
 | `TimeoutSeconds` | int | `120` | no | HTTP timeout for card resolution and per-turn calls. |
+| `Headers` | map | — | no | HTTP headers sent with every request, e.g. a bearer token. Values support `${ENV_VAR}` tokens. Sent only to `Url`'s origin (scheme, host, port) — never to a different origin the agent card names or a redirect leads to. |
 
 **Fields that apply when `RemoteAgent` is set:** `Name`, `Instructions`, `TrustScore`, `ContextWindow`, `MaxToolCallsPerTurn`.
+
+A remote agent is sent only its own `Instructions` (plus the `--spec` block, when given). fuseraft's base system prompt and the local environment blocks — paths, OS, `.gitignore`, project root — are added to local agents only, so they never leave this machine.
 
 **Fields that are ignored when `RemoteAgent` is set:** `Model`, `Plugins`, `FunctionChoice`, `Capabilities`, `SubagentModel`, `SubagentPlugins` — those are properties of the remote agent.
 

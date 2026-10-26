@@ -553,12 +553,17 @@ public sealed class SessionRunner(
             $"\n[red]✗ Unexpected error:[/] {Markup.Escape(TrimTo(ex.Message, 300))}");
         if (dumpPath is not null)
             AnsiConsole.MarkupLine($"  [dim]Crash dump: {Markup.Escape(dumpPath)}[/]");
-        AnsiConsole.MarkupLine(
-            $"\n[yellow]Session [bold]{checkpoint.SessionId}[/] saved — resume with:[/] " +
-            $"[dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
+        AnsiConsole.MarkupLine(FaultResumeLine(checkpoint.SessionId, _totalAssistantTurnCount, ResumeHint(checkpoint.SessionId)));
         return Task.FromResult(new HandlerOutcome(ShouldBreak: true, ShouldContinue: false, CompactionNeeded: false,
             Succeeded: false, ErrorMessage: ex.Message));
     }
+
+    // With no completed turn the checkpoint holds only the task, so "saved" would promise
+    // progress that doesn't exist; resuming then just reruns the task from the start.
+    internal static string FaultResumeLine(string sessionId, int completedTurns, string resumeHint) =>
+        completedTurns == 0
+            ? $"\n[yellow]No agent turns ran. Fix the error above, then rerun the task with:[/] [dim]{Markup.Escape(resumeHint)}[/]"
+            : $"\n[yellow]Session [bold]{sessionId}[/] saved — resume with:[/] [dim]{Markup.Escape(resumeHint)}[/]";
 
     // Captures the state machine's current state name and failure counters into the
     // checkpoint and persists it. Called before aborting so --resume can restore the
