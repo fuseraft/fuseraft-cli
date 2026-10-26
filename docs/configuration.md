@@ -292,6 +292,8 @@ A remote agent is sent only its own `Instructions` (plus the `--spec` block, whe
 
 **Fields that are ignored when `RemoteAgent` is set:** `Model`, `Plugins`, `FunctionChoice`, `Capabilities`, `SubagentModel`, `SubagentPlugins` — those are properties of the remote agent.
 
+The remote side can be another fuseraft team: `fuseraft serve --a2a` hosts each of its agents at `{host}:{port}/{AgentName}`. See [Serve — Hosting agents over A2A](serve.md#hosting-agents-over-a2a).
+
 If the card can't be fetched (wrong token, nothing listening), the session stops before the first turn with the status or connection error, and no crash dump is written — it's a setup problem, not a fuseraft bug.
 
 ### FunctionChoice

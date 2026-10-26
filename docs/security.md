@@ -640,9 +640,15 @@ If `fuseraft run --work-dir` points at a directory you did not author, any skill
 
 ## `fuseraft serve` trust model
 
-`fuseraft serve` (see [CLI Reference](cli-reference.md#fuseraft-serve)) starts a resident daemon with two front doors: an MCP server over HTTP for other agents, and a Unix domain socket for a human (`fuseraft attach`).
+`fuseraft serve` (see [CLI Reference](cli-reference.md#fuseraft-serve)) starts a resident daemon with two front doors: an MCP server over HTTP for other agents, and a Unix domain socket for a human (`fuseraft attach`). With `--a2a` it adds a third: one A2A endpoint per agent.
 
-**The MCP endpoint is unauthenticated and localhost-only** — the same trust model as `--devui`. Any process on the same machine that can reach `localhost:<port>` can call `dispatch_task` and enqueue work; there is no token, API key, or additional access control layer. This is a deliberate scope decision for a local development tool, not an oversight, but it means `fuseraft serve` is not currently suitable for exposure beyond one machine's own local processes — do not put it behind a reverse proxy or port-forward it without adding your own authentication in front of it.
+**The MCP endpoint is unauthenticated and localhost-only** — the same trust model as `--devui`. Any process on the same machine that can reach `localhost:<port>` can call `dispatch_task` and enqueue work; there is no token, API key, or additional access control layer. This is a deliberate scope decision for a local development tool, not an oversight, but it means the MCP endpoint is not suitable for exposure beyond one machine's own local processes — do not put it behind a reverse proxy or port-forward it without adding your own authentication in front of it. To reach a daemon's agents from another machine, use the A2A endpoints below instead.
+
+**The A2A endpoints (`--a2a`) can leave the machine, so they can require a token.** They listen on `localhost` by default. With `--a2a-bind` set to anything else, `fuseraft serve` refuses to start unless `FUSERAFT_A2A_TOKEN` is set, and then every request — agent cards included — must send `Authorization: Bearer <token>` (compared in constant time). What the token doesn't do:
+
+- **It isn't encryption.** The endpoints speak plain HTTP, so the token and every message cross the network readable. Use them on a network you trust, behind a TLS proxy, or through an SSH tunnel.
+- **It isn't per-caller.** Everyone with the token is the same caller. A2A context IDs aren't secrets, so one token holder can continue another's conversation with a hosted agent. Give the token only to callers you'd let share a session.
+- **It doesn't widen what an agent may do.** A call has no attached dispatcher, so its mutating tool calls follow `--unattended-policy` exactly like an MCP-dispatched task.
 
 **Unattended mutating actions deny by default.** A task with no attached human (dispatched over MCP, or self-picked via `--auto-objective`) has any shell/write/git-push tool call denied unless `--unattended-policy allow` is set — the same default-deny posture as `.env` file access and the REPL's `--yolo`-gated sandbox elsewhere in this document. Self-initiated work (`--auto-objective`) gets no special trust either: it is gated identically to an MCP-dispatched task, not a separate, more-permissive tier.
 

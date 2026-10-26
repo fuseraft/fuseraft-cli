@@ -19,6 +19,7 @@ fuseraft serve
 fuseraft serve — MyProject
   MCP (dispatch_task/get_status/get_result) → http://localhost:24601/mcp
   Attach socket → /home/user/.fuseraft/run/1f92641edb0442bd.sock  (fuseraft attach)
+  A2A: off (--a2a)
   Unattended mutating actions: denied (--unattended-policy)
   Auto-dispatch: off (--auto-objective)
   Idle — waiting for a task. Ctrl+C to stop.
@@ -128,16 +129,57 @@ An objective never runs on its own just because it exists, either — an old one
 
 ---
 
+## Hosting agents over A2A
+
+MCP and attach hand the daemon a whole task. `--a2a` adds a third front door: each agent in the config gets its own [A2A](https://a2a-protocol.org) endpoint, so a fuseraft team on another machine can add it as a team member with `RemoteAgent`:
+
+```bash
+export FUSERAFT_A2A_TOKEN=$(openssl rand -hex 32)
+fuseraft serve --a2a --a2a-bind 0.0.0.0
+```
+
+```
+  A2A (RemoteAgent.Url) on 0.0.0.0, bearer token from FUSERAFT_A2A_TOKEN:
+    → http://localhost:24602/Developer
+    → http://localhost:24602/Tester
+```
+
+On the other machine, use this machine's address in place of `localhost`:
+
+```yaml
+Agents:
+  - Name: Tester
+    Instructions: Run the test suite and report failures.
+    RemoteAgent:
+      Url: http://build-box.lan:24602/Tester
+      Headers:
+        Authorization: Bearer ${BUILD_BOX_A2A_TOKEN}
+```
+
+What a call does and doesn't include:
+
+- **Just that agent.** A call runs the hosted agent with its own instructions and tools, in this daemon's working directory, and returns its reply. The calling team's routing, validators and termination run on the caller's side; this team's don't run at all.
+- **The same approval rules.** A call has no attached dispatcher, so its mutating tool calls follow `--unattended-policy` like an MCP-dispatched task: denied by default, allowed with `--unattended-policy allow`.
+- **One thing at a time.** A call waits for a running task to finish, and a task waits for a running call, because both use the same agents and working directory. Set the caller's `RemoteAgent.TimeoutSeconds` (default 120) high enough to cover a queued task.
+- **Its own session.** Each call gets a fresh `a2a-xxxxxxxx` session ID for the change log and events. Anyone attached sees an `a2a_call` event when one starts.
+
+The endpoints listen on `localhost` unless `--a2a-bind` says otherwise. Binding beyond loopback requires `FUSERAFT_A2A_TOKEN`; every request, including the agent card, must then carry `Authorization: Bearer <token>`. The endpoints speak plain HTTP, so across an untrusted network put a TLS proxy in front (cards then name the address the proxy forwards, via `X-Forwarded-Proto`/`X-Forwarded-Host` from a proxy on the same machine) or use an SSH tunnel. `--a2a-agent <name>` (repeatable) hosts only the named agents, and `--a2a-port` changes the port (default: the MCP port + 1).
+
+See [Security — `fuseraft serve` trust model](security.md#fuseraft-serve-trust-model) for what the token does and doesn't protect.
+
+---
+
 ## Not yet supported
 
-One daemon serves one working directory — there's no multi-tenant mode for several projects behind a single process. There's no A2A agent-card front door (MCP is the only agent-facing protocol today). `--socket` is Unix-domain only; there's no Windows named-pipe equivalent yet.
+One daemon serves one working directory — there's no multi-tenant mode for several projects behind a single process. The A2A endpoints host individual agents, not the whole team as one agent, and don't stream. `--socket` is Unix-domain only; there's no Windows named-pipe equivalent yet.
 
 ---
 
 ## See also
 
 - [CLI Reference — `fuseraft serve`](cli-reference.md#fuseraft-serve) and [`fuseraft attach`](cli-reference.md#fuseraft-attach) — every flag and the full MCP tool signatures
-- [Security — `fuseraft serve` trust model](security.md#fuseraft-serve-trust-model) — the unauthenticated MCP endpoint, unattended policy, approval routing
+- [Security — `fuseraft serve` trust model](security.md#fuseraft-serve-trust-model) — the unauthenticated MCP endpoint, the A2A token, unattended policy, approval routing
+- [Configuration — `RemoteAgent`](configuration.md) — the caller's side of an A2A agent
 - [Scripting & Automation — dispatch into a resident daemon](scripting.md#or-dispatch-into-a-resident-fuseraft-serve-daemon) — using `serve` instead of shelling out to `fuseraft run` per event
 - [Knowledge Layer](knowledge.md) — objectives, ADRs, and the repository graph
 - [MCP Integration](mcp.md) — connecting fuseraft *out* to other MCP servers (the other direction from this page)

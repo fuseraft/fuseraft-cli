@@ -2299,6 +2299,10 @@ fuseraft serve [options]
 | `--socket <path>` | `~/.fuseraft/run/<project-hash>.sock` | Unix domain socket `fuseraft attach` connects to. Lives in a short, flat directory (not under the per-project state tree) because AF_UNIX socket paths are capped at 108 bytes on Linux. |
 | `--unattended-policy <deny\|allow>` | `deny` | What happens to a mutating tool call (shell/write/git-push/etc.) when nobody is attached. `deny` — a task dispatched by another agent with no human watching is denied by default. `allow` — auto-approve, for trusted unattended pipelines. |
 | `--auto-objective <id>` | — | Objective ID (e.g. `OBJ-0001`, from `fuseraft objective list`) whose `RemainingTasks` the daemon pulls from and runs on its own whenever idle, instead of only running tasks it's explicitly dispatched. Repeatable. |
+| `--a2a` | off | Also host the config's agents over A2A, one endpoint per agent at `/{AgentName}`, so another fuseraft team can add them as `RemoteAgent` members. A call runs only that agent, under `--unattended-policy`. See [Serve — Hosting agents over A2A](serve.md#hosting-agents-over-a2a). |
+| `--a2a-port <port>` | MCP port + 1 | Port for the A2A endpoints. |
+| `--a2a-bind <address>` | `localhost` | Address the A2A endpoints listen on: `localhost`, an interface IP, or `0.0.0.0` for every interface. Anything but loopback requires the `FUSERAFT_A2A_TOKEN` environment variable; every request must then send `Authorization: Bearer <token>`. |
+| `--a2a-agent <name>` | every local agent | Agent to host over A2A. Repeatable. An agent that is itself a `RemoteAgent` can't be hosted. |
 
 Only one daemon may run per project at a time, enforced by a pidfile at `~/.fuseraft/state/{project}/serve.pid`; a second `fuseraft serve` in the same working directory refuses to start while the first is alive. `Ctrl+C` shuts the daemon down gracefully — it finishes the in-flight task (if any), then removes the pidfile and socket.
 
@@ -2324,6 +2328,9 @@ fuseraft serve
 
 # Point at a specific config, allow trusted unattended pipelines to skip approval
 fuseraft serve --config .fuseraft/config/devops-team.yaml --unattended-policy allow
+
+# Host the Tester agent for teams on other machines
+FUSERAFT_A2A_TOKEN=... fuseraft serve --a2a --a2a-bind 0.0.0.0 --a2a-agent Tester
 ```
 
 ```bash
@@ -2335,7 +2342,7 @@ get_result(sessionId: "58440fde")
 # → { "status": "completed", "succeeded": true, "messages": [...] }
 ```
 
-**Not yet supported:** multiple concurrent working directories behind one daemon, an A2A agent-card front door, and a Windows named-pipe equivalent for `--socket` (Unix domain sockets only).
+**Not yet supported:** multiple concurrent working directories behind one daemon, hosting the whole team as one A2A agent, A2A streaming, and a Windows named-pipe equivalent for `--socket` (Unix domain sockets only).
 
 ---
 

@@ -40,9 +40,14 @@ public sealed class ServeHost(
     int httpPort,
     string? socketPathOverride,
     bool unattendedAllow,
-    IReadOnlyList<string> autoObjectiveIds)
+    IReadOnlyList<string> autoObjectiveIds,
+    ServeA2AOptions? a2aOptions = null)
 {
     private const int AutoDispatchFailureThreshold = 3;
+
+    // Dispatched tasks and A2A calls share the agents, the working directory and the
+    // session-scoped state RebindSessionScopedState swaps, so only one runs at a time.
+    private readonly SemaphoreSlim _runGate = new(1, 1);
 
     private readonly ILogger<ServeHost> _logger = loggerFactory.CreateLogger<ServeHost>();
 
@@ -61,6 +66,7 @@ public sealed class ServeHost(
 
         OrchestratorBuildResult? built = null;
         WebApplication? mcpApp = null;
+        WebApplication? a2aApp = null;
         ServeSocketListener? socketListener = null;
         fuseraft.Cli.Telemetry.FuseraftTelemetry? telemetry = null;
         using var shutdownCts = new CancellationTokenSource();
@@ -104,6 +110,20 @@ public sealed class ServeHost(
             await mcpApp.StartAsync(shutdownCts.Token);
             var boundPort = new Uri(mcpApp.Urls.First()).Port;
 
+            string[] a2aUrls = [];
+            if (a2aOptions is not null)
+            {
+                var hosted = ServeA2AHost.SelectAgents(built.Config.Agents, a2aOptions.AgentNames)
+                    .Select(cfg => (cfg, built.AgentFactory!.Create(cfg, built.Config.ContextBudget)))
+                    .ToList();
+                var buildResult = built;
+                a2aApp = ServeA2AHost.Build(a2aOptions, hosted,
+                    (agent, ct) => EnterA2ACallAsync(agent, buildResult, approvalService, ct));
+                await a2aApp.StartAsync(shutdownCts.Token);
+                var a2aPort = new Uri(a2aApp.Urls.First()).Port;
+                a2aUrls = [.. hosted.Select(h => ServeA2AHost.AgentUrl(a2aOptions, h.cfg.Name, a2aPort))];
+            }
+
             socketListener = new ServeSocketListener(socketPath, queue, approvalService,
                 loggerFactory.CreateLogger<ServeSocketListener>());
             socketListener.Start(shutdownCts.Token);
@@ -111,6 +131,15 @@ public sealed class ServeHost(
             AnsiConsole.MarkupLine($"[dim]fuseraft serve[/] — [bold]{Markup.Escape(built.Config.Name)}[/]");
             AnsiConsole.MarkupLine($"[dim]  MCP (dispatch_task/get_status/get_result) → http://localhost:{boundPort}/mcp[/]");
             AnsiConsole.MarkupLine($"[dim]  Attach socket → {Markup.Escape(socketPath)}  (fuseraft attach)[/]");
+            if (a2aOptions is null)
+                AnsiConsole.MarkupLine("[dim]  A2A: off (--a2a)[/]");
+            else
+            {
+                AnsiConsole.MarkupLine($"[dim]  A2A (RemoteAgent.Url) on {Markup.Escape(a2aOptions.Bind)}, " +
+                    $"{(string.IsNullOrEmpty(a2aOptions.Token) ? "no token" : $"bearer token from {ServeA2AHost.TokenVariable}")}:[/]");
+                foreach (var url in a2aUrls)
+                    AnsiConsole.MarkupLine($"[dim]    → {Markup.Escape(url)}[/]");
+            }
             AnsiConsole.MarkupLine($"[dim]  Unattended mutating actions: {(unattendedAllow ? "allowed" : "denied")} (--unattended-policy)[/]");
             AnsiConsole.MarkupLine(autoObjectiveIds.Count > 0
                 ? $"[dim]  Auto-dispatch → {Markup.Escape(string.Join(", ", autoObjectiveIds))} (picks its own next task when idle)[/]"
@@ -130,6 +159,7 @@ public sealed class ServeHost(
             // `fuseraft serve` invocation for this project.
             TryCleanup(() => socketListener?.Stop());
             if (mcpApp is not null) await TryCleanupAsync(() => mcpApp.DisposeAsync().AsTask());
+            if (a2aApp is not null) await TryCleanupAsync(() => a2aApp.DisposeAsync().AsTask());
             if (built is not null)
             {
                 await TryCleanupAsync(() => built.McpManager.DisposeAsync().AsTask());
@@ -179,7 +209,9 @@ public sealed class ServeHost(
 
                 try
                 {
-                    await ProcessTaskAsync(request, queue, built, approvalService, objectiveManager, telemetry, modelIdByAgent, cancellationToken);
+                    await _runGate.WaitAsync(cancellationToken);
+                    try { await ProcessTaskAsync(request, queue, built, approvalService, objectiveManager, telemetry, modelIdByAgent, cancellationToken); }
+                    finally { _runGate.Release(); }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -350,16 +382,9 @@ public sealed class ServeHost(
         // killed before the first turn completes — mirrors RunCommand's own seed save.
         await sessionStore.SaveAsync(checkpoint, cancellationToken);
 
-        if (built.ChangeTracker is not null)
-            await built.ChangeTracker.SetSessionIdAsync(request.SessionId, cancellationToken);
-        built.EventEmitter?.SetSessionId(request.SessionId);
+        await BindSessionAsync(built, request.SessionId, cancellationToken);
         built.Orchestrator.SetSessionId(request.SessionId);
         built.Compactor?.SetSessionId(request.SessionId);
-        // Re-scopes SessionReadCache/ToolResultArtifactStore/SessionContextPlugin to this task's
-        // session — they were all built once, bound to whatever sessionId (none) was in scope at
-        // daemon startup, and would otherwise stay frozen there for every task the daemon ever
-        // runs. See OrchestratorBuilder's RebindSessionScopedState doc comment.
-        built.RebindSessionScopedState?.Invoke(request.SessionId);
         built.Orchestrator.SetStructuredTask(TaskModel.FromGoal(request.Task));
 
         var runner = new SessionRunner(
@@ -492,6 +517,49 @@ public sealed class ServeHost(
         }
 
         record.Done.TrySetResult(true);
+    }
+
+    private static async Task BindSessionAsync(OrchestratorBuildResult built, string sessionId, CancellationToken cancellationToken)
+    {
+        if (built.ChangeTracker is not null)
+            await built.ChangeTracker.SetSessionIdAsync(sessionId, cancellationToken);
+        built.EventEmitter?.SetSessionId(sessionId);
+        // Re-scopes SessionReadCache/ToolResultArtifactStore/SessionContextPlugin to this session —
+        // they were all built once, bound to whatever sessionId (none) was in scope at daemon
+        // startup, and would otherwise stay frozen there for every task the daemon ever runs.
+        // See OrchestratorBuilder's RebindSessionScopedState doc comment.
+        built.RebindSessionScopedState?.Invoke(sessionId);
+    }
+
+    // Each call gets its own session ID, so its tool calls aren't logged under the last task's.
+    private async Task<IAsyncDisposable> EnterA2ACallAsync(
+        string agent, OrchestratorBuildResult built, ServeHumanApprovalService approvalService, CancellationToken cancellationToken)
+    {
+        await _runGate.WaitAsync(cancellationToken);
+        try
+        {
+            var sessionId = "a2a-" + Guid.NewGuid().ToString("N")[..8];
+            await BindSessionAsync(built, sessionId, cancellationToken);
+            approvalService.BroadcastEvent(new { type = "a2a_call", agent, sessionId });
+            AnsiConsole.MarkupLine($"[dim]  A2A call → {Markup.Escape(agent)} ({sessionId})[/]");
+            return new GateRelease(_runGate);
+        }
+        catch
+        {
+            _runGate.Release();
+            throw;
+        }
+    }
+
+    private sealed class GateRelease(SemaphoreSlim gate) : IAsyncDisposable
+    {
+        private int _released;
+
+        public ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0) gate.Release();
+            return ValueTask.CompletedTask;
+        }
     }
 
     private static string? Truncate(string? content) =>
