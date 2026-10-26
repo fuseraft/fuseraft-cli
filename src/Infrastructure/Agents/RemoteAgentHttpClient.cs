@@ -31,12 +31,18 @@ internal static class RemoteAgentHttpClient
             .Distinct()];
 
     /// <summary>
+    /// The base the card path resolves against. The SDK resolves it relative to the URL, so without
+    /// a trailing slash <c>http://h/agents/Dev</c> would fetch <c>/agents/.well-known/…</c>.
+    /// </summary>
+    public static Uri CardBaseUri(string url) => new(url.TrimEnd('/') + "/");
+
+    /// <summary>
     /// A startup error for a card fetch that failed. The A2A SDK reports every HTTP failure as
     /// "HTTP request failed"; the status or connection error is on the inner exception.
     /// </summary>
     public static string DescribeCardFailure(string agentName, string url, Exception ex)
     {
-        var cardUrl = url.TrimEnd('/') + "/.well-known/agent-card.json";
+        var cardUrl = new Uri(CardBaseUri(url), ".well-known/agent-card.json").ToString();
         var http = Unwrap(ex).OfType<HttpRequestException>().FirstOrDefault();
         var cause = http switch
         {

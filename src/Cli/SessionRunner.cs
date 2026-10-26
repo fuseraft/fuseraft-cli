@@ -547,10 +547,14 @@ public sealed class SessionRunner(
     /// </summary>
     private Task<HandlerOutcome> HandleSessionFaultAsync(Exception ex, SessionCheckpoint checkpoint)
     {
+        // A crash dump is for fuseraft bugs; a setup error is the user's to fix and its message says how.
+        var setupError = AgentSetupException.FindIn(ex);
         string? dumpPath = null;
-        try { dumpPath = CrashDumper.Write(ex, []); } catch { }
-        AnsiConsole.MarkupLine(
-            $"\n[red]✗ Unexpected error:[/] {Markup.Escape(TrimTo(ex.Message, 300))}");
+        if (setupError is null)
+            try { dumpPath = CrashDumper.Write(ex, []); } catch { }
+        AnsiConsole.MarkupLine(setupError is null
+            ? $"\n[red]✗ Unexpected error:[/] {Markup.Escape(TrimTo(ex.Message, 300))}"
+            : $"\n[red]✗ Agent setup failed:[/] {Markup.Escape(TrimTo(setupError.Message, 300))}");
         if (dumpPath is not null)
             AnsiConsole.MarkupLine($"  [dim]Crash dump: {Markup.Escape(dumpPath)}[/]");
         AnsiConsole.MarkupLine(FaultResumeLine(checkpoint.SessionId, _totalAssistantTurnCount, ResumeHint(checkpoint.SessionId)));

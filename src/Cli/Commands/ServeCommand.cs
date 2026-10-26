@@ -35,6 +35,23 @@ public sealed class ServeSettings : CommandSettings
     [CommandOption("--auto-objective")]
     [Description("Objective ID (e.g. OBJ-0001, from `fuseraft objective list`) whose RemainingTasks the daemon pulls from and runs on its own whenever idle, instead of only running tasks it's explicitly dispatched. Repeatable. Off by default — an objective is never worked automatically just because it exists.")]
     public string[]? AutoObjective { get; set; }
+
+    [CommandOption("--a2a")]
+    [Description("Also host the config's agents over A2A, one endpoint per agent, so a fuseraft team on another machine can add them as RemoteAgent members. Each call runs only that agent (its instructions and tools, under --unattended-policy), not this team's routing or validators.")]
+    public bool A2A { get; set; }
+
+    [CommandOption("--a2a-port")]
+    [Description("Port for the A2A endpoints. Defaults to the MCP port + 1.")]
+    public int? A2APort { get; set; }
+
+    [CommandOption("--a2a-bind")]
+    [Description("Address the A2A endpoints listen on: 'localhost' (default), an interface IP, or 0.0.0.0 for every interface. Anything but loopback requires FUSERAFT_A2A_TOKEN; callers send it as 'Authorization: Bearer <token>'.")]
+    [DefaultValue("localhost")]
+    public string A2ABind { get; set; } = "localhost";
+
+    [CommandOption("--a2a-agent")]
+    [Description("Agent to host over A2A. Repeatable. Defaults to every agent in the config that isn't itself a RemoteAgent.")]
+    public string[]? A2AAgent { get; set; }
 }
 
 /// <summary>
@@ -80,9 +97,10 @@ public sealed class ServeCommand(ILoggerFactory loggerFactory, PluginRegistry pl
         // Fail fast on a missing/invalid provider key — the same check `fuseraft run` makes —
         // rather than letting the daemon report "Idle, ready" and only discovering the problem
         // deep inside the first dispatched task.
+        OrchestrationConfig config;
         try
         {
-            var config = OrchestratorConfigLoader.LoadConfig(configPath);
+            config = OrchestratorConfigLoader.LoadConfig(configPath);
             await ApiKeyValidator.ValidateApiKeysAsync(config);
         }
         catch (Exception ex)
@@ -99,10 +117,33 @@ public sealed class ServeCommand(ILoggerFactory loggerFactory, PluginRegistry pl
         var projectSlug = FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory());
         var httpPort    = settings.HttpPort ?? FuseraftPaths.DefaultDaemonHttpPort(projectSlug);
 
+        ServeA2AOptions? a2a = null;
+        if (settings.A2A)
+        {
+            a2a = new ServeA2AOptions(
+                settings.A2ABind, settings.A2APort ?? httpPort + 1,
+                Environment.GetEnvironmentVariable(ServeA2AHost.TokenVariable),
+                settings.A2AAgent ?? []);
+            // Checked before the team is built, which can take a while and start MCP servers.
+            string? problem;
+            try
+            {
+                problem = ServeA2AHost.Validate(a2a)
+                    ?? (ServeA2AHost.SelectAgents(config.Agents, a2a.AgentNames).Count == 0
+                        ? "--a2a: the config has no local agents to host." : null);
+            }
+            catch (InvalidOperationException ex) { problem = ex.Message; }
+            if (problem is not null)
+            {
+                AnsiConsole.MarkupLine($"[red]✗[/] {Markup.Escape(problem)}");
+                return 1;
+            }
+        }
+
         var host = new ServeHost(
             loggerFactory, pluginRegistry, activeStore,
             configPath, httpPort, settings.Socket, unattendedAllow,
-            settings.AutoObjective ?? []);
+            settings.AutoObjective ?? [], a2a);
 
         try
         {

@@ -44,7 +44,11 @@ public sealed record OrchestratorBuildResult(
     fuseraft.Orchestration.DependencyPlanner? DependencyPlanner = null,
     fuseraft.Cli.Telemetry.SessionMetrics?    SessionMetrics    = null,
     AdaptiveTrimTracker?          AdaptiveTrimTracker = null,
-    Action<string?>?              RebindSessionScopedState = null);
+    Action<string?>?              RebindSessionScopedState = null)
+{
+    /// <summary>Builds the config's agents outside the orchestrator, e.g. for <c>fuseraft serve --a2a</c>.</summary>
+    public AgentFactory? AgentFactory { get; init; }
+}
 
 /// <summary>
 /// Which orchestrator kind <c>Selection.Type</c> resolved to, bundled so
@@ -203,10 +207,13 @@ public static class OrchestratorBuilder
         var sessionPaths = new OrchestratorSessionPaths(
             projectSlug, sessionId, infra.ExecutionStatePath, infra.InvestigationLogPath);
 
-        var (orchestrator, repoMemoryExtractor) = CreateOrchestrator(
+        var (orchestrator, repoMemoryExtractor, agentFactory) = CreateOrchestrator(
             config, kindFlags, infraServices, knowledgeServices, sessionPaths, humanApprovalService);
 
-        return new OrchestratorBuildResult(orchestrator, config, infra.McpManager, compactor, infra.ChangeTracker, infra.EventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, dependencyPlanner, infra.SessionMetrics, adaptiveTrimTracker, infra.RebindSessionScopedState);
+        return new OrchestratorBuildResult(orchestrator, config, infra.McpManager, compactor, infra.ChangeTracker, infra.EventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, dependencyPlanner, infra.SessionMetrics, adaptiveTrimTracker, infra.RebindSessionScopedState)
+        {
+            AgentFactory = agentFactory,
+        };
     }
 
     // -------------------------------------------------------------------------
@@ -1427,7 +1434,7 @@ public static class OrchestratorBuilder
     // CreateOrchestrator
     // -------------------------------------------------------------------------
 
-    private static (IOrchestrator Orchestrator, fuseraft.Infrastructure.Repository.RepositoryMemoryExtractor? RepoMemoryExtractor) CreateOrchestrator(
+    private static (IOrchestrator Orchestrator, fuseraft.Infrastructure.Repository.RepositoryMemoryExtractor? RepoMemoryExtractor, AgentFactory AgentFactory) CreateOrchestrator(
         OrchestrationConfig config,
         OrchestratorKindFlags flags,
         OrchestratorInfraServices infra,
@@ -1596,7 +1603,7 @@ public static class OrchestratorBuilder
         if (config.Saga?.Enabled == true)
             orchestrator = new SagaOrchestrator(orchestrator, config.Saga, compensators: null, eventEmitter);
 
-        return (orchestrator, repoMemoryExtractor);
+        return (orchestrator, repoMemoryExtractor, agentFactory);
     }
 
     private static AgentSkillsProvider? BuildSkillsProvider(ILoggerFactory loggerFactory)

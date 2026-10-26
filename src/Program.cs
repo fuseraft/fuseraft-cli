@@ -200,6 +200,12 @@ app.Configure(cfg =>
             return 1;
         }
 
+        if (fuseraft.Core.Exceptions.AgentSetupException.FindIn(ex) is { } setupError)
+        {
+            AnsiConsole.MarkupLine($"[red]Error:[/] {Markup.Escape(setupError.Message)}");
+            return 1;
+        }
+
         // Write crash dump before printing the exception so the path is visible even
         // if the terminal scrolls away from the stack trace.
         string? dumpPath = null;

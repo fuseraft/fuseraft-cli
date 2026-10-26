@@ -34,9 +34,10 @@
          which Anthropic's OpenAI-compatible endpoint does not support. -->
     <PackageReference Include="Anthropic.SDK" Version="5.10.0" />
 
-    <!-- A2A protocol — client-side agent federation -->
+    <!-- A2A protocol — the RemoteAgent client, and the server that serve hosts with its a2a option -->
     <PackageReference Include="A2A" Version="1.0.0-preview2" />
     <PackageReference Include="Microsoft.Agents.AI.A2A" Version="1.22.0-preview.260918.1" />
+    <PackageReference Include="Microsoft.Agents.AI.Hosting.A2A.AspNetCore" Version="1.22.0-preview.260918.1" />
 
     <!-- Azure OpenAI SDK + identity -->
     <PackageReference Include="Azure.AI.OpenAI" Version="2.1.0" />
