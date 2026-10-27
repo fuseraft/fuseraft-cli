@@ -52,6 +52,15 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         return retried.Succeeded ? retried : primary;
     }
 
+    private const string TimeoutParamDescription =
+        "Timeout in seconds; 0 or less uses the default. The command is killed when it runs out, so " +
+        "never use shell_run for a server or anything else that runs until stopped: start it with " +
+        "shell_run_background instead.";
+
+    // A model that passes 0 usually means "don't wait" or "no limit". Neither is safe here: no
+    // limit lets a server (dotnet run, npm start) block the turn forever, so take the default.
+    internal static int EffectiveTimeout(int requested, int fallback) => requested > 0 ? requested : fallback;
+
     private const string ShellParamDescription =
         "Windows only. 'powershell' runs the command in PowerShell exactly as written: no cmd.exe quoting " +
         "or escaping to work around, so use it for anything with nested quotes (connection strings, JSON). " +
@@ -80,12 +89,12 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
 
     // Runs `script` in PowerShell with no command-line parsing in between: as -EncodedCommand, or
     // from a temp .ps1 file when it's too long for a command line.
-    private static async Task<ProcessResult> RunPowerShellAsync(string script, string? workingDirectory, int timeoutSeconds) =>
+    private static async Task<ProcessResult> RunPowerShellAsync(string script, string? workingDirectory, int timeoutSeconds, CancellationToken cancellationToken = default) =>
         WindowsShellRouting.EncodedCommandArgs(script) is { } args
-            ? await ProcessHelper.RunAsync(ProcessHelper.WindowsPowerShellPath.Value, args, workingDirectory, timeoutSeconds)
-            : await RunPowerShellFileAsync(script, workingDirectory, timeoutSeconds);
+            ? await ProcessHelper.RunAsync(ProcessHelper.WindowsPowerShellPath.Value, args, workingDirectory, timeoutSeconds, cancellationToken: cancellationToken)
+            : await RunPowerShellFileAsync(script, workingDirectory, timeoutSeconds, cancellationToken);
 
-    private static async Task<ProcessResult> RunPowerShellFileAsync(string script, string? workingDirectory, int timeoutSeconds)
+    private static async Task<ProcessResult> RunPowerShellFileAsync(string script, string? workingDirectory, int timeoutSeconds, CancellationToken cancellationToken = default)
     {
         // .ps1, not the .cmd a script would otherwise get: PowerShell applies script-file policy
         // (execution policy, etc.) by extension.
@@ -96,7 +105,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
             await File.WriteAllTextAsync(psFile, text, encoding);
             return await ProcessHelper.RunAsync(
                 ProcessHelper.WindowsPowerShellPath.Value, WindowsShellRouting.FileArgs(psFile),
-                workingDirectory, timeoutSeconds);
+                workingDirectory, timeoutSeconds, cancellationToken: cancellationToken);
         }
         finally
         {
@@ -374,10 +383,13 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     public async Task<string> RunAsync(
         [Description("Shell command to execute.")] string command,
         [Description("Working directory.")] string? workingDirectory = null,
-        [Description("Timeout in seconds.")] int timeoutSeconds = 60,
+        [Description(TimeoutParamDescription)] int timeoutSeconds = 60,
         [Description("Return 'OK' instead of full output when the command succeeds.")] bool quiet = false,
-        [Description(ShellParamDescription)] string? shell = null)
+        [Description(ShellParamDescription)] string? shell = null,
+        CancellationToken cancellationToken = default)
     {
+        timeoutSeconds = EffectiveTimeout(timeoutSeconds, 60);
+
         // LLM outputs sometimes carry HTML entity encoding (e.g. &amp;&amp; instead of &&).
         // Decode before passing to the shell so commands execute as intended — outside quoted
         // strings only, where a filename may genuinely contain "&gt;".
@@ -418,7 +430,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         ProcessResult result;
         if (OperatingSystem.IsWindows() && PowerShellScriptFor(command, shellChoice) is { } script)
         {
-            result = await RunPowerShellAsync(script, resolvedDir, timeoutSeconds);
+            result = await RunPowerShellAsync(script, resolvedDir, timeoutSeconds, cancellationToken);
         }
         else if (OperatingSystem.IsWindows())
         {
@@ -428,12 +440,12 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
             // before cmd.exe ever sees them.
             result = await ProcessHelper.RunAsync(
                 Shell, $"{ShellFlag} {command}",
-                resolvedDir, timeoutSeconds);
+                resolvedDir, timeoutSeconds, cancellationToken: cancellationToken);
 
             // Last resort for PowerShell the routing didn't recognize — not when cmd was asked for.
             if (shellChoice is null)
                 result = await WithWindowsPowerShellFallbackAsync(result, () =>
-                    RunPowerShellAsync(command, resolvedDir, timeoutSeconds));
+                    RunPowerShellAsync(command, resolvedDir, timeoutSeconds, cancellationToken));
         }
         else
         {
@@ -442,7 +454,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
             // re-parse hazard here, so there's no reason to bypass .NET's own quoting.
             result = await ProcessHelper.RunAsync(
                 Shell, [ShellFlag, command],
-                resolvedDir, timeoutSeconds);
+                resolvedDir, timeoutSeconds, cancellationToken: cancellationToken);
         }
 
         var output = Present(result, resolvedDir);
@@ -535,9 +547,12 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     public async Task<string> RunScriptAsync(
         [Description("Script body.")] string script,
         [Description("Working directory.")] string? workingDirectory = null,
-        [Description("Timeout in seconds.")] int timeoutSeconds = 120,
-        [Description(ShellParamDescription)] string? shell = null)
+        [Description(TimeoutParamDescription)] int timeoutSeconds = 120,
+        [Description(ShellParamDescription)] string? shell = null,
+        CancellationToken cancellationToken = default)
     {
+        timeoutSeconds = EffectiveTimeout(timeoutSeconds, 120);
+
         var shellDenial = ResolveShellArg(shell, out var shellChoice);
         if (shellDenial is not null) return shellDenial;
 
@@ -562,7 +577,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         if (OperatingSystem.IsWindows() &&
             (shellChoice == WindowsShell.PowerShell ||
              (shellChoice is null && WindowsShellRouting.LooksLikePowerShell(script))))
-            return Present(await RunPowerShellFileAsync(script, resolvedDir, timeoutSeconds), resolvedDir);
+            return Present(await RunPowerShellFileAsync(script, resolvedDir, timeoutSeconds, cancellationToken), resolvedDir);
 
         var ext     = OperatingSystem.IsWindows() ? ".cmd" : ".sh";
         var tmpFile = FuseraftPaths.NewTempFile("script", ext);
@@ -579,11 +594,11 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
                     return PluginResult.Error($"Failed to make script executable: {chmod.Stderr.Trim()}");
             }
 
-            var result = await ProcessHelper.RunAsync(Shell, [ShellFlag, tmpFile], resolvedDir, timeoutSeconds);
+            var result = await ProcessHelper.RunAsync(Shell, [ShellFlag, tmpFile], resolvedDir, timeoutSeconds, cancellationToken: cancellationToken);
 
             if (shellChoice is null)
                 result = await WithWindowsPowerShellFallbackAsync(result, () =>
-                    RunPowerShellFileAsync(script, resolvedDir, timeoutSeconds));
+                    RunPowerShellFileAsync(script, resolvedDir, timeoutSeconds, cancellationToken));
 
             return Present(result, resolvedDir);
         }

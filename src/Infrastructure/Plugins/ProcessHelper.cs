@@ -141,9 +141,12 @@ internal static class ProcessHelper
 
             return new ProcessResult(await stdoutTask, await stderrTask, process.ExitCode);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
             await KillAndDrainAsync(process, stdoutTask, stderrTask, timeoutSeconds);
+            // The caller cancelled (Ctrl+C in the REPL): the process tree is gone, so the
+            // cancellation can go on up. Before, it left the child running and the turn stuck.
+            cancellationToken.ThrowIfCancellationRequested();
             return new ProcessResult(string.Empty, PluginResult.Timeout($"Process exceeded {timeoutSeconds}s limit."), -1);
         }
     }
