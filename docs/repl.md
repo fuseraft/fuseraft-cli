@@ -277,7 +277,7 @@ This is covered in full in [Sessions — REPL sessions](sessions.md#repl-session
 
 ## VS Code
 
-The [Fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) hosts the same REPL in a chat panel over a JSON bridge protocol — same commands, same safety model, streamed into the editor instead of a terminal. (The `!` shell escape above is terminal-only for now — piping raw shell output into the webview's JSON stream would corrupt the protocol.)
+The [Fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) hosts the same REPL in a chat panel over a JSON bridge protocol — same commands, same safety model, streamed into the editor instead of a terminal. It draws a turn the way the full-screen REPL does: thinking that folds into one line, a line per tool call that turns ✓ or ✗ (click it for the arguments and output, or press Ctrl+O for the viewer), a subagent's calls nested under it, and `✎ path +added -removed` for each changed file, with the same status line underneath. You can type while a turn runs: a message joins the turn, and a `/command` waits for it to end. `@` suggests paths, ↑/↓ and Ctrl+R recall what you've sent, Ctrl+F finds text in the conversation, `!` commands stream their output into the panel, and `/copy` puts the reply on the VS Code clipboard. `/theme` and `/dock` don't apply there: the panel follows your VS Code theme.
 
 ---
 

@@ -451,13 +451,14 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // (see IHumanApprovalService.PromptFileWriteAsync) so the approval prompt can render
         // the actual before/after content instead of just the resolved path.
         //
-        // The full-screen REPL also notes how many lines each write adds and removes, for the ✎ line it shows once the
-        // write has gone through (see ReplTurn) — this is the one place that sees both versions whether HITL asks or not.
+        // The full-screen REPL and the VS Code panel also note how many lines each write adds and removes, for the ✎ line
+        // they show once the write has gone through (see ReplTurn) — this is the one place that sees both versions whether
+        // HITL asks or not.
         var fileWriteStats = new System.Collections.Concurrent.ConcurrentDictionary<string, (int Added, int Removed)>(StringComparer.Ordinal);
         Func<string, string, string, string, Task<bool>> approveFileWrite =
             ApprovalScope.Guard((action, path, oldContent, newContent) =>
             {
-                if (tui is not null)
+                if (tui is not null || jsonMode)
                 {
                     var diff = UnifiedDiff.Build(oldContent, newContent);
                     fileWriteStats[Path.GetFullPath(path)] = (diff.Added, diff.Removed);
@@ -783,6 +784,11 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             var denyMatcher = fsPluginForCategory?.DenyMatcher;
             tui.Files = new FileIndex(cwd, path => FileSystemSandbox.MatchesDenyRule(denyMatcher, Path.Combine(cwd, path), cwd)).Warm();
             emitter.RegisterHook(new SubagentEventHook(tui));
+        }
+        else if (jsonMode)
+        {
+            emitter.RegisterHook(new SubagentBridgeHook());
+            ReplInput.Bridge = stdinPump;
         }
 
         // Subagents (built-in and user-defined) may only use what the session itself currently allows,

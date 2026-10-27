@@ -428,7 +428,7 @@ Use `/tools` to see the full list at runtime.
 
 **Shell escape**
 
-Prefix any line with `!` to run it as a real shell command without leaving the REPL for another terminal — e.g. `!git status`, `!npm test`. The child process inherits the console's stdio directly, so interactive programs (`less`, `vim`, `ssh`, an installer prompt) and live-streaming output work exactly as they would in a real terminal, and a Ctrl+C during the command interrupts it without ending the REPL session. The command and its output are never added to conversation history — the model never sees it.
+Prefix any line with `!` to run it as a real shell command without leaving the REPL for another terminal — e.g. `!git status`, `!npm test`. The child process inherits the console's stdio directly, so interactive programs (`less`, `vim`, `ssh`, an installer prompt) and live-streaming output work exactly as they would in a real terminal, and a Ctrl+C during the command interrupts it without ending the REPL session. The command and its output are never added to conversation history — the model never sees it. In the full-screen REPL and the VS Code panel the output is written into the conversation as it arrives instead, and the command gets no input, so run interactive programs from a terminal (`fuseraft --plain`); the panel's Stop button interrupts it.
 
 | Command | Description |
 |---------|-------------|

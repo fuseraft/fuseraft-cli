@@ -38,6 +38,14 @@ public sealed class ReplStdinPump
     /// <summary>Idempotent — a second call is a no-op.</summary>
     internal void Start() => _pumpTask ??= Task.Run(PumpLoopAsync);
 
+    /// <summary>
+    /// Takes a message the user sends while a turn runs, as the full-screen REPL's prompt does; set by <c>ReplTurn</c>
+    /// for the length of a free-form turn. Only plain text joins: a <c>/command</c>, <c>!command</c> or <c>$skill</c>
+    /// waits for the turn to end, a message with images starts the next turn, and approval and question answers
+    /// keep their place in line.
+    /// </summary>
+    internal volatile Func<string, bool>? Interject;
+
     private async Task PumpLoopAsync()
     {
         while (true)
@@ -62,8 +70,30 @@ public sealed class ReplStdinPump
                 continue; // handled here — never queued for ReadInputAsync/ReadApprovalResponseAsync
             }
 
+            if (Interject is { } interject && InterjectionText(line) is { } text && interject(text))
+                continue;
+
             _lines.Writer.TryWrite(line);
         }
+    }
+
+    /// <summary>The text of a <c>user_input</c> line that may join a running turn, or null.</summary>
+    internal static string? InterjectionText(string line)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("type", out var type) || type.GetString() != "user_input" ||
+                !root.TryGetProperty("text", out var t) || t.ValueKind != JsonValueKind.String)
+                return null;
+            if (root.TryGetProperty("images", out var images) && images.ValueKind == JsonValueKind.Array && images.GetArrayLength() > 0)
+                return null;
+            var text = t.GetString()!.Trim();
+            return text.Length == 0 || text[0] is '/' or '!' or '$' ? null : text;
+        }
+        catch (JsonException) { return null; }
     }
 
     internal static bool IsInterruptLine(string line)

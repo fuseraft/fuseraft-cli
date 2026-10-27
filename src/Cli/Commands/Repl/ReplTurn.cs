@@ -508,12 +508,24 @@ internal static class ReplTurn
                 }
                 else if (ctx.JsonMode)
                 {
-                    var msg = await ctx.StdinPump!.ReadMessageAsync();
-                    raw = msg?.Text;
-                    if (msg is not null)
+                    if (ctx.CarriedInput is { } carried)
                     {
-                        ReplImages.ReportErrors(ctx, msg.Errors);
-                        bridgeImages = msg.Images;
+                        // The panel already shows what was sent; it only needs to know a turn is starting.
+                        ctx.CarriedInput = null;
+                        ReplJsonBridge.Emit(new { type = "turn_start", text = carried });
+                        raw = carried;
+                    }
+                    else
+                    {
+                        // The panel takes this as the REPL being ready for its next message.
+                        ReplJsonBridge.Emit(StatusEvent(BuildStatus(ctx, modeTags)));
+                        var msg = await ctx.StdinPump!.ReadMessageAsync();
+                        raw = msg?.Text;
+                        if (msg is not null)
+                        {
+                            ReplImages.ReportErrors(ctx, msg.Errors);
+                            bridgeImages = msg.Images;
+                        }
                     }
                 }
                 else raw = ctx.LineReader.ReadLine();
@@ -592,8 +604,12 @@ internal static class ReplTurn
 
             if (ReplShellEscape.IsShellEscape(raw))
             {
-                await ReplShellEscape.RunAsync(ctx, raw, cancellationToken);
-                if (!ctx.JsonMode) AnsiConsole.WriteLine();
+                if (ctx.JsonMode) await ReplShellEscape.RunBridgedAsync(ctx, raw, cancellationToken);
+                else
+                {
+                    await ReplShellEscape.RunAsync(ctx, raw, cancellationToken);
+                    AnsiConsole.WriteLine();
+                }
                 continue;
             }
 
@@ -664,6 +680,8 @@ internal static class ReplTurn
         var texts = new List<string>();
         while (ctx.Interjections.TryDequeue(out var text)) texts.Add(text);
         if (texts.Count == 0) return null;
+        if (ctx.JsonMode)
+            ReplJsonBridge.Emit(new { type = "interjection", status = "joined", count = texts.Count });
         var typed = string.Join("\n\n", texts);
         await ctx.Emitter.EmitAsync(EventTypes.UserInput, turn: ctx.TurnIndex, payload: new { content = typed, images = 0, interjection = true });
         return await AttachMentionsAsync(ctx, typed, ct) is { } mentioned ? typed + "\n\n" + mentioned : typed;
@@ -676,6 +694,17 @@ internal static class ReplTurn
             if (ctx.JsonMode) return;
             AnsiConsole.MarkupLine(ok ? $"[dim]  + attached {Markup.Escape(what)}[/]" : $"[yellow]  {Markup.Escape(what)}[/]");
         }, ct);
+
+    // The VS Code panel's status line, from the same numbers as the TUI's.
+    internal static object StatusEvent(ReplStatus status) => new
+    {
+        type    = "status",
+        model   = status.Model,
+        turn    = status.Turn,
+        context = Math.Round(status.Context, 4),
+        level   = status.Level.ToString().ToLowerInvariant(),
+        modes   = status.Modes,
+    };
 
     // The TUI's status line: the model, the turn, how full the context is (and how near auto-compaction), and the modes.
     internal static ReplStatus BuildStatus(ReplSessionContext ctx, IReadOnlyList<string> modeTags)
@@ -1644,18 +1673,23 @@ internal static class ReplTurn
         var callsAtStart   = callCounter?.Calls ?? 0;
 
         // The full-screen REPL draws the turn as it happens: the reply as it streams, its thinking, each tool call.
+        // The VS Code panel gets the same as bridge events.
         var screen         = ctx.JsonMode ? null : ReplInput.Screen;
+        var bridge         = ctx.JsonMode;
+        var pump           = bridge ? ctx.StdinPump : null;
         var callNames      = new Dictionary<string, string>();
         // There, what the user sends while a free-form turn runs joins it after its next tool results.
-        var interjector    = screen is null || isStepRequest ? null : activeClient.GetService<ReplInterjectingChatClient>();
+        var interjector    = (screen is null && pump is null) || isStepRequest ? null : activeClient.GetService<ReplInterjectingChatClient>();
         if (interjector is not null)
         {
             interjector.Take = ct => TakeInterjectionsAsync(ctx, ct);
-            screen!.Interject = text =>
+            Func<string, bool> interject = text =>
             {
                 ctx.Interjections.Enqueue(text);
                 return true;
             };
+            if (screen is not null) screen.Interject = interject;
+            else pump!.Interject = interject;
         }
 
         // Whatever the turn didn't read starts the next one, unless the turn was cancelled, which drops it.
@@ -1664,13 +1698,16 @@ internal static class ReplTurn
             screen?.EndMessage(turn: false);
             if (interjector is null) return;
             interjector.Take = null;
-            screen!.Interject = null;
+            if (screen is not null) screen.Interject = null;
+            else pump!.Interject = null;
             var unread = new List<string>();
             while (ctx.Interjections.TryDequeue(out var text)) unread.Add(text);
             if (unread.Count == 0) return;
-            if (cancelled)
+            if (bridge)
+                ReplJsonBridge.Emit(new { type = "interjection", status = cancelled ? "dropped" : "carried", count = unread.Count });
+            else if (cancelled)
                 AnsiConsole.MarkupLine("[dim]  (what you sent during the turn was dropped)[/]");
-            else
+            if (!cancelled)
                 ctx.CarriedInput = string.Join("\n\n", unread);
         }
         var requestOptions = toolsOff ? WithoutToolCalls(ctx.ChatOptions) : BuildRequestOptions(ctx.ChatOptions, input);
@@ -1725,10 +1762,13 @@ internal static class ReplTurn
                 }
                 if (sawUsageThisChunk) usageRounds++;
 
-                if (screen is not null && !capturePlan)
+                if ((screen is not null || bridge) && !capturePlan)
                     foreach (var reasoning in chunk.Contents.OfType<TextReasoningContent>())
                         if (reasoning.Text.Length > 0)
-                            screen.Thinking(reasoning.Text);
+                        {
+                            if (screen is not null) screen.Thinking(reasoning.Text);
+                            else ReplJsonBridge.Emit(new { type = "thinking", text = reasoning.Text });
+                        }
                 if (turnUncachedInputTokens >= limits.MaxTurnInputTokens) turnTokenBudgetReached = true;
                 if (chunk.FinishReason is not null) finishRounds++;
                 toolRounds = usageRounds > 0 ? usageRounds : finishRounds;
@@ -1747,25 +1787,29 @@ internal static class ReplTurn
                 // mistaken for the start of the next round.
                 var isRoundBoundary = sawUsageThisChunk || chunk.FinishReason is not null;
 
-                if (screen is not null)
+                if (screen is not null || bridge)
                     foreach (var call in chunk.Contents.OfType<FunctionCallContent>())
                     {
                         callNames[call.CallId ?? string.Empty] = call.Name;
-                        screen.ToolStarted(call.CallId ?? string.Empty, call.Name, TuiRenderer.Summarize(call.Arguments),
+                        screen?.ToolStarted(call.CallId ?? string.Empty, call.Name, TuiRenderer.Summarize(call.Arguments),
                             arguments: TuiRenderer.FormatArguments(call.Arguments));
                     }
 
-                if (screen is not null)
+                if (screen is not null || bridge)
                     foreach (var result in chunk.Contents.OfType<FunctionResultContent>())
                     {
                         var callId = result.CallId ?? string.Empty;
                         var ok     = !IsToolFailure(result);
-                        screen.ToolFinished(callId, callNames.GetValueOrDefault(callId, "tool"), ok,
-                            result.Exception?.Message ?? McpToolResult.Display(result.Result, indentJson: true));
+                        var name   = callNames.GetValueOrDefault(callId, "tool");
+                        var output = result.Exception?.Message ?? McpToolResult.Display(result.Result, indentJson: true);
+                        if (screen is not null) screen.ToolFinished(callId, name, ok, output);
+                        else ReplJsonBridge.Emit(new { type = "tool_result", id = callId, name, ok, output = ReplJsonBridge.Cap(output) });
                         if (ok && pendingFileChanges.TryGetValue(callId, out var change))
                         {
                             var known = ctx.FileWriteStats.TryRemove(Path.GetFullPath(change.Path, ctx.Cwd), out var stats);
-                            screen.FileChanged(change.Path, known ? stats.Added : null, known ? stats.Removed : null);
+                            int? added = known ? stats.Added : null, removed = known ? stats.Removed : null;
+                            if (screen is not null) screen.FileChanged(change.Path, added, removed);
+                            else ReplJsonBridge.Emit(new { type = "file_changed", path = change.Path, sigil = change.Sigil.ToString(), added, removed });
                         }
                     }
 
@@ -1798,7 +1842,14 @@ internal static class ReplTurn
                             var args = funcCall.Arguments is { Count: > 0 }
                                 ? (object)funcCall.Arguments
                                 : null;
-                            ReplJsonBridge.Emit(new { type = "tool_call", name = funcCall.Name, args });
+                            ReplJsonBridge.Emit(new
+                            {
+                                type    = "tool_call",
+                                id      = funcCall.CallId,
+                                name    = funcCall.Name,
+                                summary = TuiRenderer.Summarize(funcCall.Arguments),
+                                args,
+                            });
                         }
 
                         if (consecutiveIdenticalToolCalls >= limits.MaxIdenticalToolCalls)

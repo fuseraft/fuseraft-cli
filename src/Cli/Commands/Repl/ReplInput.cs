@@ -82,6 +82,9 @@ internal static class ReplInput
     /// <summary>The running TUI, or null on a plain terminal.</summary>
     internal static IReplScreen? Screen { get; set; }
 
+    /// <summary>The VS Code panel's stdin, when the REPL runs behind it; picks are asked there as questions.</summary>
+    internal static ReplStdinPump? Bridge { get; set; }
+
     /// <summary>A line of text after <paramref name="prompt"/>; null when stdin closes or the TUI's panel is dismissed.</summary>
     internal static string? ReadLine(string prompt)
     {
@@ -174,6 +177,12 @@ internal static class ReplInput
     /// <summary>One of <paramref name="choices"/>; null when the TUI's panel is dismissed. The caller reports what was chosen.</summary>
     internal static async Task<string?> SelectAsync(string title, IReadOnlyList<string> choices, CancellationToken ct = default)
     {
+        if (Screen is null && Bridge is { } bridge)
+        {
+            ReplJsonBridge.Emit(new { type = "question", question = Plain(title), options = choices, allowOther = false });
+            var picked = await bridge.ReadQuestionResponseAsync(ct);
+            return picked is not null && choices.Contains(picked) ? picked : null;
+        }
         if (Screen is not { } screen)
             return await new SelectionPrompt<string>()
                 .Title(title)
