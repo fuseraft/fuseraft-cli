@@ -54,8 +54,11 @@ public sealed class ReplStdinPump
 
             if (IsInterruptLine(line))
             {
+                // Stop pressed again on a turn that's still stopping: kill the commands its tools
+                // are waiting on, as a second Ctrl+C does.
                 var c = _getActiveCts();
                 if (c is not null && !c.IsCancellationRequested) c.Cancel();
+                else if (c is not null) fuseraft.Infrastructure.Plugins.ProcessHelper.KillRunning();
                 continue; // handled here — never queued for ReadInputAsync/ReadApprovalResponseAsync
             }
 
