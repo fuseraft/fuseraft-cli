@@ -6,6 +6,26 @@ namespace fuseraft.Infrastructure.Plugins;
 /// </summary>
 internal static class ProcessHelper
 {
+    // Every process RunAsync is waiting on, so an interrupt can stop the ones whose tool
+    // ignores cancellation (see KillRunning).
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<System.Diagnostics.Process, byte> Running = new();
+
+    /// <summary>
+    /// Kills the process tree of every command a tool is waiting on and returns how many there
+    /// were. The REPL's second Ctrl+C on a turn calls this: the first cancels the turn, but a tool
+    /// that doesn't take the cancellation keeps waiting on its child, and on Windows the child
+    /// never sees Ctrl+C itself because it has no console. Killing it lets that tool return.
+    /// </summary>
+    internal static int KillRunning()
+    {
+        var killed = 0;
+        foreach (var process in Running.Keys)
+        {
+            try { process.Kill(entireProcessTree: true); killed++; } catch { /* exited or disposed */ }
+        }
+        return killed;
+    }
+
     private static readonly System.Text.Encoding Utf8NoBom = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
     /// <summary>
@@ -102,6 +122,20 @@ internal static class ProcessHelper
             return new ProcessResult(string.Empty, PluginResult.Error($"Failed to start process '{executable}': {ex.Message}"), -1);
         }
 
+        Running.TryAdd(process, 0);
+        try
+        {
+            return await WaitAsync(process, timeoutSeconds, cancellationToken);
+        }
+        finally
+        {
+            Running.TryRemove(process, out _);
+        }
+    }
+
+    private static async Task<ProcessResult> WaitAsync(
+        System.Diagnostics.Process process, int timeoutSeconds, CancellationToken cancellationToken)
+    {
         // Close stdin immediately. Children that try to read from it get EOF instead of
         // inheriting the terminal and blocking indefinitely (git credential helpers, pagers).
         process.StandardInput.Close();
@@ -141,9 +175,12 @@ internal static class ProcessHelper
 
             return new ProcessResult(await stdoutTask, await stderrTask, process.ExitCode);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
             await KillAndDrainAsync(process, stdoutTask, stderrTask, timeoutSeconds);
+            // The caller cancelled (Ctrl+C in the REPL): the process tree is gone, so the
+            // cancellation can go on up. Before, it left the child running and the turn stuck.
+            cancellationToken.ThrowIfCancellationRequested();
             return new ProcessResult(string.Empty, PluginResult.Timeout($"Process exceeded {timeoutSeconds}s limit."), -1);
         }
     }

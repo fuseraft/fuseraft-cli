@@ -563,11 +563,27 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
 
         // Cancellation
         using var cts = new CancellationTokenSource();
+        // First Ctrl+C cancels; the next kills the commands a stuck tool is waiting on (see
+        // ProcessHelper.KillRunning); one after that quits.
+        var interrupts = 0;
         Console.CancelKeyPress += (_, e) =>
         {
-            e.Cancel = true;
-            cts.Cancel();
-            AnsiConsole.MarkupLine("\n[dim]Cancellation requested...[/]");
+            switch (++interrupts)
+            {
+                case 1:
+                    e.Cancel = true;
+                    cts.Cancel();
+                    AnsiConsole.MarkupLine("\n[dim]Cancellation requested...[/]");
+                    break;
+                case 2:
+                    e.Cancel = true;
+                    ProcessHelper.KillRunning();
+                    AnsiConsole.MarkupLine("\n[dim]Stopping running commands. Press Ctrl+C again to quit.[/]");
+                    break;
+                default:
+                    ProcessHelper.KillRunning();
+                    break;
+            }
         };
 
         // DevUI — start before the main loop so the browser can connect early.

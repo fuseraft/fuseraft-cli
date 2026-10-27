@@ -726,7 +726,7 @@ Naming a file or directory with `@` hands it to the model with your message (`wh
 | Ctrl+R | Search earlier messages; the chosen one replaces the draft |
 | Ctrl+O | Show the latest tool output (with the arguments the call was made with; an MCP server's JSON answer is indented), approval diff, or thinking in full, in place of the conversation: ←/→ for older and newer (the last 100 are kept), ↑/↓ and PgUp/PgDn to scroll, Esc to close |
 | Ctrl+U | Delete from the cursor to the start of the line |
-| Ctrl+C | Cancel the running turn (denying an open approval), else close or clear what's open; twice on an empty prompt exits |
+| Ctrl+C | Cancel the running turn (denying an open approval), else close or clear what's open; twice on an empty prompt exits. Pressed again on a turn that hasn't stopped, it kills the commands the turn's tools are waiting on |
 | Ctrl+D | Exit, on an empty prompt |
 
 The terminal bell rings when a turn finishes or a question waits after you've been away from the keyboard for 10 seconds; `fuseraft settings set repl.bell false` turns it off.
@@ -1156,7 +1156,7 @@ fuseraft repl --model grok-code-fast-1 --system "You are a Rust expert."
 fuseraft repl --model claude-sonnet-4-6 --save
 ```
 
-Press Ctrl+C during a streaming response to cancel that request and return to the prompt. Press Ctrl+C at the prompt or type `/exit` to end the session. The readline layer intercepts Ctrl+C at the prompt so the process exits cleanly rather than abruptly.
+Press Ctrl+C during a streaming response to cancel that request and return to the prompt. If the turn doesn't stop because a tool is still waiting on a command (common on Windows, where commands a tool runs never see Ctrl+C themselves), press Ctrl+C again to kill the commands it's waiting on; if even that doesn't free it, a third press quits. Press Ctrl+C at the prompt or type `/exit` to end the session. The readline layer intercepts Ctrl+C at the prompt so the process exits cleanly rather than abruptly.
 
 ---
 

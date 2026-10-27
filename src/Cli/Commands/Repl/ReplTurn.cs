@@ -349,14 +349,18 @@ internal static class ReplTurn
 
     internal static async Task RunAsync(ReplSessionContext ctx, CancellationToken cancellationToken)
     {
+        // The turn whose stuck commands a Ctrl+C has already killed; one more press on it quits.
+        CancellationTokenSource? killedFor = null;
+
         Console.CancelKeyPress += OnCancelKeyPress;
         // The TUI reads Ctrl+C as a key, so it asks here instead of raising CancelKeyPress.
         if (ReplInput.Screen is { } screen)
             screen.Interrupt = () =>
             {
                 var c = ctx.ActiveCts;
-                if (c is null || c.IsCancellationRequested) return false;
-                c.Cancel();
+                if (c is null) return false;
+                if (c.IsCancellationRequested) ProcessHelper.KillRunning();
+                else c.Cancel();
                 return true;
             };
         try   { await RunLoopAsync(ctx, cancellationToken); }
@@ -373,6 +377,25 @@ internal static class ReplTurn
             {
                 e.Cancel = true;
                 c.Cancel();
+            }
+            else if (c is not null && (killedFor != c || ctx.JsonMode))
+            {
+                // Cancelled, but the turn hasn't ended: a tool that ignores cancellation is still
+                // waiting on a command (on Windows, a child never sees Ctrl+C itself). Kill those
+                // commands so the tool returns and the turn can end.
+                e.Cancel  = true;
+                killedFor = c;
+                var killed = ProcessHelper.KillRunning();
+                if (!ctx.JsonMode)
+                    AnsiConsole.MarkupLine(killed > 0
+                        ? $"\n[dim]Stopped {killed} running command{(killed == 1 ? "" : "s")}. Press Ctrl+C again to quit.[/]"
+                        : "\n[dim]Still stopping. Press Ctrl+C again to quit.[/]");
+            }
+            else if (c is not null)
+            {
+                // Killing its commands didn't free the turn, so whatever holds it isn't one of
+                // ours to stop. Leave e.Cancel false: Ctrl+C quits, as it would anywhere else.
+                ProcessHelper.KillRunning();
             }
             else if (ctx.JsonMode)
             {
