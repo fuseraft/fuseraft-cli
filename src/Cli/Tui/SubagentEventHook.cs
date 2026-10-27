@@ -11,13 +11,18 @@ internal sealed class SubagentEventHook(IReplScreen screen) : IOrchestrationHook
 {
     public Task OnEventAsync(OrchestrationEvent evt, CancellationToken cancellationToken = default)
     {
-        if (evt.EventType == EventTypes.SubagentToolCall && Get(evt.Payload, "tool") is { } tool)
-        {
-            var agent = Get(evt.Payload, "label") ?? evt.Agent ?? "subagent";
-            var args = (Get(evt.Payload, "args") ?? "").ReplaceLineEndings(" ").Trim();
-            screen.ToolStarted(Guid.NewGuid().ToString("N"), tool, args.Length > 100 ? args[..97] + "..." : args, agent);
-        }
+        if (TryRead(evt) is { } call)
+            screen.ToolStarted(Guid.NewGuid().ToString("N"), call.Tool, call.Summary, call.Agent);
         return Task.CompletedTask;
+    }
+
+    /// <summary>The tool a subagent called, a one-line summary of its arguments, and the subagent's name; null for any other event.</summary>
+    internal static (string Tool, string Summary, string Agent)? TryRead(OrchestrationEvent evt)
+    {
+        if (evt.EventType != EventTypes.SubagentToolCall || Get(evt.Payload, "tool") is not { } tool) return null;
+        var agent = Get(evt.Payload, "label") ?? evt.Agent ?? "subagent";
+        var args = (Get(evt.Payload, "args") ?? "").ReplaceLineEndings(" ").Trim();
+        return (tool, args.Length > 100 ? args[..97] + "..." : args, agent);
     }
 
     // A payload is an anonymous object, or a JSON object when the subagent runs in a parallel batch.

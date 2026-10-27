@@ -27,6 +27,63 @@ internal static class ReplShellEscape
     private static readonly Regex CdPattern =
         new(@"^cd(?:\s+(.*))?$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    /// <summary>
+    /// <see cref="RunAsync"/> behind the VS Code panel: everything the command and the escape print arrives as one
+    /// <c>shell_output</c> event a line, as it's written, between <c>shell_start</c> and <c>shell_end</c>.
+    /// </summary>
+    internal static async Task RunBridgedAsync(ReplSessionContext ctx, string raw, CancellationToken cancellationToken)
+    {
+        ReplJsonBridge.Emit(new { type = "shell_start", command = raw });
+        var lines = new LineEmitter(line => ReplJsonBridge.Emit(new { type = "shell_output", text = ReplConsole.StripAnsi(line) }));
+        var saved = AnsiConsole.Console;
+        AnsiConsole.Console = AnsiConsole.Create(new AnsiConsoleSettings
+        {
+            Out         = new AnsiConsoleOutput(lines),
+            ColorSystem = ColorSystemSupport.NoColors,
+            Ansi        = AnsiSupport.No,
+        });
+        // The panel wraps lines itself; Spectre's default 80 columns would split one message into several events.
+        AnsiConsole.Console.Profile.Width = 4096;
+        try { await RunAsync(ctx, raw, cancellationToken); }
+        finally
+        {
+            AnsiConsole.Console = saved;
+            lines.Flush();
+            ReplJsonBridge.Emit(new { type = "shell_end" });
+        }
+    }
+
+    // Hands each complete line to the callback; Flush sends a last partial one.
+    private sealed class LineEmitter(Action<string> emit) : TextWriter
+    {
+        private readonly System.Text.StringBuilder _line = new();
+
+        public override System.Text.Encoding Encoding => System.Text.Encoding.UTF8;
+
+        public override void Write(char value)
+        {
+            lock (_line)
+            {
+                if (value == '\n')
+                {
+                    emit(_line.ToString().TrimEnd('\r'));
+                    _line.Clear();
+                }
+                else _line.Append(value);
+            }
+        }
+
+        public override void Flush()
+        {
+            lock (_line)
+            {
+                if (_line.Length == 0) return;
+                emit(_line.ToString());
+                _line.Clear();
+            }
+        }
+    }
+
     internal static async Task RunAsync(ReplSessionContext ctx, string raw, CancellationToken cancellationToken)
     {
         var commandText = raw.Length > 1 ? raw[1..].Trim() : string.Empty;
@@ -54,19 +111,6 @@ internal static class ReplShellEscape
 
         if (TryHandleCd(ctx, commandText))
             return;
-
-        if (ctx.JsonMode)
-        {
-            // The child would inherit this process's stdio directly (see below), which in
-            // the VS Code webview bridge is a JSONL pipe, not a real terminal — piping raw
-            // shell output into it would corrupt the protocol. Not supported there yet.
-            ReplJsonBridge.Emit(new
-            {
-                type = "error",
-                text = "Shell escape (!<command>) isn't supported in VS Code webview mode yet — use the integrated terminal.",
-            });
-            return;
-        }
 
         await RunInheritedAsync(ctx, commandText, cancellationToken);
     }
@@ -131,8 +175,9 @@ internal static class ReplShellEscape
         };
 
         // The TUI owns the terminal, so there the command's output is read and written to the transcript instead,
-        // and it gets no input: an interactive program would wait for keys the TUI keeps.
-        var captured = ReplInput.Screen is not null;
+        // and it gets no input: an interactive program would wait for keys the TUI keeps. Behind the VS Code panel,
+        // stdout is the JSONL pipe, so it's read the same way (see RunBridgedAsync).
+        var captured = ReplInput.Screen is not null || ctx.JsonMode;
         if (captured)
             psi.RedirectStandardOutput = psi.RedirectStandardError = psi.RedirectStandardInput = true;
 

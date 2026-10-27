@@ -18,11 +18,21 @@ internal static class ReplJsonBridge
     // capture buffer (see ReplTurn's slash-command output capture). Emitted
     // events must always reach the real stdout, never a redirected one, or
     // they get swallowed into another event's captured text instead of
-    // arriving as their own JSONL line.
-    private static readonly TextWriter _stdout = Console.Out;
+    // arriving as their own JSONL line. Settable only so tests can read the events.
+    internal static TextWriter Writer { get; set; } = Console.Out;
+
+    // Subagents running in parallel emit from their own threads; one line must never split another.
+    private static readonly Lock _gate = new();
 
     internal static void Emit(object payload)
     {
-        _stdout.WriteLine(JsonSerializer.Serialize(payload, _opts));
+        var line = JsonSerializer.Serialize(payload, _opts);
+        lock (_gate) Writer.WriteLine(line);
     }
+
+    // Tool output and thinking can be huge; the panel keeps them for its viewer, so cap what crosses the pipe.
+    internal const int MaxToolOutputChars = 100_000;
+
+    internal static string Cap(string text) =>
+        text.Length <= MaxToolOutputChars ? text : text[..MaxToolOutputChars] + $"\n… ({text.Length - MaxToolOutputChars:N0} more characters not shown)";
 }

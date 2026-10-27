@@ -43,6 +43,12 @@ internal static partial class ReplCommands
         string? tool;
         if (ReplInput.Screen is { } screen)
             tool = screen.Copy(text);
+        else if (ctx.JsonMode)
+        {
+            // Bridge events bypass the command's captured output, so the panel gets this one directly.
+            ReplJsonBridge.Emit(new { type = "copy", text });
+            tool = "VS Code";
+        }
         else
         {
             if (!Console.IsOutputRedirected)
@@ -61,7 +67,9 @@ internal static partial class ReplCommands
     {
         if (ReplInput.Screen is not { } screen)
         {
-            AnsiConsole.MarkupLine("[dim]Themes color the full-screen REPL; this one is running with --plain or piped input.[/]");
+            AnsiConsole.MarkupLine(ReplInput.Bridge is not null
+                ? "[dim]The VS Code panel follows your VS Code color theme.[/]"
+                : "[dim]Themes color the full-screen REPL; this one is running with --plain or piped input.[/]");
             return CommandResult.Continue;
         }
         var parts = arg.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -106,7 +114,9 @@ internal static partial class ReplCommands
     {
         if (ReplInput.Screen is not { } screen)
         {
-            AnsiConsole.MarkupLine("[dim]Only the full-screen REPL has a prompt to move; this one is running with --plain or piped input.[/]");
+            AnsiConsole.MarkupLine(ReplInput.Bridge is not null
+                ? "[dim]The VS Code panel's prompt stays at the bottom.[/]"
+                : "[dim]Only the full-screen REPL has a prompt to move; this one is running with --plain or piped input.[/]");
             return CommandResult.Continue;
         }
         if (arg.Length == 0)

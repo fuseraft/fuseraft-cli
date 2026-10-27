@@ -170,4 +170,48 @@ public sealed class ReplShellEscapeTests : IDisposable
 
         Assert.Null(ctx.LastShellCommand);
     }
+
+    // Behind the VS Code panel stdout is the JSONL pipe, so a ! command's output must arrive as events, never raw.
+    [Fact]
+    public async Task Bridged_StreamsEachOutputLineAsAnEvent_BetweenStartAndEnd()
+    {
+        Directory.CreateDirectory(_tempHome);
+        var ctx = NewContext(_tempHome);
+        var saved = ReplJsonBridge.Writer;
+        var events = new StringWriter();
+        ReplJsonBridge.Writer = events;
+        try   { await ReplShellEscape.RunBridgedAsync(ctx, "!echo first && echo second", CancellationToken.None); }
+        finally { ReplJsonBridge.Writer = saved; }
+
+        // Only this command's events: a test outside the collection may emit others meanwhile.
+        var lines = events.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => System.Text.Json.JsonDocument.Parse(l).RootElement.Clone())
+            .Where(e => e.GetProperty("type").GetString()!.StartsWith("shell_")).ToList();
+        Assert.Equal("shell_start", lines[0].GetProperty("type").GetString());
+        var end = lines.FindIndex(e => e.GetProperty("type").GetString() == "shell_end");
+        Assert.True(end > 0);
+        // AnsiConsole is global, so a test in another collection may print into this capture meanwhile.
+        var output = lines.Where(e => e.GetProperty("type").GetString() == "shell_output")
+            .Select(e => e.GetProperty("text").GetString()!.Trim()).ToList();
+        Assert.Equal(["first", "second"], output.Where(l => l is "first" or "second"));
+        Assert.True(output.IndexOf("first") < output.IndexOf("second"));
+        var second = lines.FindIndex(e => e.GetProperty("type").GetString() == "shell_output" && e.GetProperty("text").GetString()!.Trim() == "second");
+        Assert.True(second < end);
+    }
+
+    [Fact]
+    public async Task Bridged_CdMessage_IsOneEvent_HoweverLong()
+    {
+        var ctx = NewContext(_tempHome);
+        var saved = ReplJsonBridge.Writer;
+        var events = new StringWriter();
+        ReplJsonBridge.Writer = events;
+        try   { await ReplShellEscape.RunBridgedAsync(ctx, "!cd does-not-exist", CancellationToken.None); }
+        finally { ReplJsonBridge.Writer = saved; }
+
+        var lines = events.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        // A narrow console would wrap the path onto a line of its own.
+        var output = Assert.Single(lines, l => l.Contains("\"shell_output\"") && l.Contains("no such directory"));
+        Assert.Contains("does-not-exist", output);
+    }
 }
